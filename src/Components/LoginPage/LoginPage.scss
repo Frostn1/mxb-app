@@ -1,0 +1,31 @@
+#login-page {
+    height: 100%;
+    position: relative;
+
+    display: grid;
+    grid-template-columns: 20% 1% auto;
+
+    .background {
+        position: absolute;
+        z-index: -1;
+        height: 100%;
+        width: 100%;
+        background-image: radial-gradient(
+            rgba(255, 255, 255, 0.1) 1px,
+            transparent 1px
+        );
+        background-position: 50% 50%;
+        background-size: 1.1rem 1.1rem;
+        padding: 4rem;
+        border-radius: 1.25rem;
+    }
+
+    .author {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        writing-mode: vertical-lr;
+        font-size: 900%;
+        background: linear-gradient(white 0 0) right / 3px 50% no-repeat;
+    }
+}
