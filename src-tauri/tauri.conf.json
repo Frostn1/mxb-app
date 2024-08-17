@@ -29,7 +29,9 @@
         "title": "MXB App",
         "width": 1400,
         "height": 800,
-        "decorations": false
+        "decorations": false,
+        "minWidth": 1000,
+        "minHeight": 700
       }
     ],
     "security": {
