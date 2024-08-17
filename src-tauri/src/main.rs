@@ -36,7 +36,11 @@ fn create_config(config: &str) -> bool {
 }
 #[tauri::command]
 fn get_config() -> Value {
-    let contents = fs::read_to_string(CONFIG_FILE).expect("{}");
+    let mut contents = "{}".to_string();
+    if is_configured() {
+        contents = fs::read_to_string(CONFIG_FILE).expect("{}");
+    }
+
     return serde_json::from_str(contents.as_str()).unwrap();
 }
 
