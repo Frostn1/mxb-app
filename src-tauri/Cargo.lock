@@ -1521,6 +1521,7 @@ dependencies = [
 name = "mxb-app"
 version = "0.1.0"
 dependencies = [
+ "dirs-next",
  "serde",
  "serde_json",
  "tauri",
