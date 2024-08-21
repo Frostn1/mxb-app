@@ -1,17 +1,23 @@
 import PropTypes from "prop-types";
 import "./Dashboard.scss";
-import LoginPage from "../LoginPage/LoginPage";
+import Header from "../Header/Header";
+import Library from "../Library/Library";
 
-const Dashboard = ({ isConfigured }) => {
+const Dashboard = ({ config }) => {
   return (
     <div id={"dashboard"}>
-      {!isConfigured ? <LoginPage /> : <div>Hello from configured</div>}
+      <Header />
+      Hello from configured
+      <br />
+      You config is {JSON.stringify(config)}
+      <br />
+      <Library />
     </div>
   );
 };
 
 Dashboard.propTypes = {
-  isConfigured: PropTypes.bool.isRequired,
+  config: PropTypes.object.isRequired,
 };
 
 export default Dashboard;

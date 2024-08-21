@@ -16,6 +16,7 @@ const darkTheme = createTheme({
     background: {
       default: "#121212",
       paper: "#121212",
+      secondary: "#323232",
     },
     icon: {
       color: "#90DEF1",
@@ -42,6 +43,7 @@ const lightTheme = createTheme({
     background: {
       default: "#dee4e7",
       paper: "#dee4e7",
+      secondary: "#bec4c7",
     },
     icon: {
       color: "#90DEF1",
