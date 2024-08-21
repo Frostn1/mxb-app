@@ -4,6 +4,7 @@
 
     display: grid;
     grid-template-columns: 20% 1% auto;
+    overflow: hidden;
 
     .background {
         position: absolute;
@@ -27,5 +28,139 @@
         writing-mode: vertical-lr;
         font-size: 900%;
         background: linear-gradient(white 0 0) right / 3px 50% no-repeat;
+    }
+    .glow {
+        grid-column: 3;
+        position: relative;
+        min-width: 600px;
+        width: 50%;
+        max-width: 800px;
+        margin: auto;
+    }
+    .login-section::after,
+    .login-section::before {
+        content: "";
+        position: absolute;
+        height: 100%;
+        width: 100%;
+        top: 50%;
+        left: 50%;
+        translate: -50% -50%;
+        z-index: -1;
+        padding: 7.5px;
+        border-radius: 17.5px;
+        background-image: conic-gradient(
+            from var(--angle),
+            lightblue,
+            blue,
+            lightblue
+        );
+        display: block;
+        animation: 3s spin linear infinite;
+        box-sizing: content-box;
+    }
+
+    .login-section::before {
+        filter: blur(1.5rem);
+        opacity: 0.5;
+    }
+
+    .login-section {
+        grid-column: 3;
+        margin: auto;
+        min-width: 600px;
+        width: 50%;
+        max-width: 800px;
+        /* min-height: 600px;
+        height: 60%;
+        max-height: 800px; */
+        aspect-ratio: 1;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        /* overflow: hidden; */
+    }
+}
+
+#custom-setup {
+    height: 100%;
+    display: grid;
+    grid-template-rows: 20% 60% auto;
+
+    .title {
+        display: flex;
+        align-items: end;
+        justify-content: center;
+
+        font-size: 60px;
+        font-weight: 1000;
+    }
+
+    .input-container {
+        padding: 15px;
+        height: fit-content;
+    }
+
+    .actions {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        .button {
+            margin: 5px;
+            border-radius: 10px;
+            font-size: 22px;
+            text-transform: none;
+            height: fit-content;
+        }
+    }
+}
+
+#default {
+    height: 100%;
+    display: grid;
+    grid-template-rows: 20% 50% 10% auto;
+
+    .title {
+        display: flex;
+        align-items: end;
+        justify-content: center;
+
+        font-size: 60px;
+        font-weight: 1000;
+    }
+
+    .description {
+        width: 100%;
+        padding: 0 20%;
+        display: flex;
+        justify-content: center;
+        box-sizing: border-box;
+    }
+
+    .actions {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        .button {
+            border-radius: 10px;
+            font-size: 22px;
+            text-transform: none;
+            height: fit-content;
+        }
+    }
+}
+
+@property --angle {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+}
+
+@keyframes spin {
+    from {
+        --angle: 0deg;
+    }
+    to {
+        --angle: 360deg;
     }
 }
