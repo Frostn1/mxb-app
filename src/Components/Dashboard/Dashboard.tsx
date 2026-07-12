@@ -23,14 +23,11 @@ const Dashboard = () => {
   useEffect(() => {
     let cancelled = false;
     getInstalledMods(modType.installSubpath)
-      .then((folders) => {
+      .then((installed) => {
         if (cancelled) return;
-        const names = new Set<string>();
-        for (const f of folders) {
-          names.add(normalizeModName(f.name));
-          for (const m of f.mods) names.add(normalizeModName(m.name));
-        }
-        setInstalledNames(names);
+        setInstalledNames(
+          new Set(installed.map((m) => normalizeModName(m.name))),
+        );
       })
       .catch(() => !cancelled && setInstalledNames(new Set()));
     return () => {

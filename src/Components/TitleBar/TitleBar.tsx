@@ -25,7 +25,9 @@ const TitleBar = ({ isDark, onToggleTheme }: TitleBarProps) => {
 
   return (
     <Paper data-tauri-drag-region id={"title-bar"}>
-      <div className={"title"}>{import.meta.env.VITE_APP_NAME ?? "Frost"}</div>
+      <div className={"title"}>
+        {import.meta.env.VITE_APP_NAME ?? "MXB App by Frost"}
+      </div>
       <ButtonGroup className={"buttons"}>
         <IconButton disableRipple size={"small"} onClick={onToggleTheme}>
           {isDark ? <DarkModeIcon /> : <LightModeIcon />}

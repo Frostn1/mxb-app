@@ -11,8 +11,9 @@ import {
 } from "@mui/material";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import TwoWheelerRoundedIcon from "@mui/icons-material/TwoWheelerRounded";
+import FolderRoundedIcon from "@mui/icons-material/FolderRounded";
 import { getInstalledMods, type ModType } from "../../api/mods";
-import type { InstalledModFolder } from "../../types";
+import type { InstalledMod } from "../../types";
 import "./Library.scss";
 
 interface LibraryProps {
@@ -21,8 +22,11 @@ interface LibraryProps {
   refreshKey: number;
 }
 
+/** Drop the archive-style extension for display. */
+const displayName = (name: string) => name.replace(/\.(pkz|zip|rar|7z)$/i, "");
+
 const Library = ({ modType, refreshKey }: LibraryProps) => {
-  const [folders, setFolders] = useState<InstalledModFolder[]>([]);
+  const [items, setItems] = useState<InstalledMod[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +34,7 @@ const Library = ({ modType, refreshKey }: LibraryProps) => {
     setLoading(true);
     setError(null);
     try {
-      setFolders(await getInstalledMods(modType.installSubpath));
+      setItems(await getInstalledMods(modType.installSubpath));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -52,6 +56,12 @@ const Library = ({ modType, refreshKey }: LibraryProps) => {
       >
         <Typography variant={"h6"}>
           Installed {modType.label.toLowerCase()}
+          {items.length > 0 && (
+            <Typography component={"span"} color={"text.secondary"}>
+              {" "}
+              ({items.length})
+            </Typography>
+          )}
         </Typography>
         <Button
           size={"small"}
@@ -71,27 +81,35 @@ const Library = ({ modType, refreshKey }: LibraryProps) => {
         <Box className={"state"}>
           <CircularProgress />
         </Box>
-      ) : folders.length === 0 && !error ? (
+      ) : items.length === 0 && !error ? (
         <Typography className={"state"} color={"text.secondary"}>
           No {modType.label.toLowerCase()} installed yet — head to Browse and add
           one.
         </Typography>
       ) : (
         <Box className={"grid"}>
-          {folders.map((folder) => (
-            <Card key={folder.path} className={"folder-card"}>
+          {items.map((item) => (
+            <Card key={item.path} className={"folder-card"}>
               <CardContent>
                 <Stack direction={"row"} spacing={1} alignItems={"center"}>
                   <TwoWheelerRoundedIcon color={"primary"} />
-                  <Typography variant={"subtitle1"} noWrap title={folder.name}>
-                    {folder.name}
+                  <Typography
+                    variant={"subtitle1"}
+                    noWrap
+                    title={item.name}
+                  >
+                    {displayName(item.name)}
                   </Typography>
                 </Stack>
-                {folder.mods.length > 0 && (
+                {item.folder && (
                   <Chip
+                    className={"folder-chip"}
                     size={"small"}
-                    sx={{ mt: 1 }}
-                    label={`${folder.mods.length} file${folder.mods.length === 1 ? "" : "s"}`}
+                    variant={"outlined"}
+                    icon={<FolderRoundedIcon />}
+                    label={item.folder}
+                    title={item.folder}
+                    sx={{ mt: 1, maxWidth: "100%" }}
                   />
                 )}
               </CardContent>
