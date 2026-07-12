@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-12
+
+### Fixed
+- Installs failing with "error sending request for url …" on MediaFire/CDN
+  downloads: switched to the OS-native TLS stack (SChannel on Windows,
+  SecureTransport on macOS) instead of rustls, added download retries, and now
+  surface the underlying error cause instead of a generic message.
+
+### Changed
+- Renamed the app to **MXB App by Frost** (window title, title bar, header).
+- The Library now scans **recursively** and lists every installed `.pkz` with
+  its sub-folder, so tracks/bikes nested inside folders show up.
+
 ## 2026-07-06
 
 ### Added

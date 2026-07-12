@@ -7,7 +7,7 @@ mod library;
 mod mods;
 
 use config::AppConfig;
-use library::InstalledModFolder;
+use library::InstalledMod;
 use mods::mxb::MxbModsSource;
 use mods::{ModDetail, ModSource, ModSummary};
 
@@ -24,7 +24,7 @@ fn get_config(app: tauri::AppHandle) -> AppConfig {
 #[tauri::command]
 fn create_config(app: tauri::AppHandle, config: AppConfig) -> Result<bool, String> {
     let cfg = config::finalize(config);
-    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
     Ok(true)
 }
 
@@ -37,21 +37,21 @@ async fn search_mods(
     MxbModsSource
         .search(&query, category_id, page)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
 async fn get_mod_detail(slug: String) -> Result<ModDetail, String> {
-    MxbModsSource.detail(&slug).await.map_err(|e| e.to_string())
+    MxbModsSource.detail(&slug).await.map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
 fn get_installed_mods(
     app: tauri::AppHandle,
     subpath: String,
-) -> Result<Vec<InstalledModFolder>, String> {
-    let cfg = config::load(&app).map_err(|e| e.to_string())?;
-    library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| e.to_string())
+) -> Result<Vec<InstalledMod>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -62,10 +62,10 @@ async fn add_to_library(
     host: String,
     subpath: String,
 ) -> Result<(), String> {
-    let cfg = config::load(&app).map_err(|e| e.to_string())?;
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| format!("{e:#}"))
 }
 
 fn main() {
