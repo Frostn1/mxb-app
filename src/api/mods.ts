@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Config,
-  InstalledModFolder,
+  InstalledMod,
   InstallProgress,
   ModDetail,
   ModSummary,
@@ -94,8 +94,8 @@ export function getModDetail(slug: string): Promise<ModDetail> {
   return invoke<ModDetail>("get_mod_detail", { slug });
 }
 
-export function getInstalledMods(subpath: string): Promise<InstalledModFolder[]> {
-  return invoke<InstalledModFolder[]>("get_installed_mods", { subpath });
+export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {
+  return invoke<InstalledMod[]>("get_installed_mods", { subpath });
 }
 
 /** Kick off download → extract → place. Progress arrives via `onInstallProgress`. */

@@ -142,6 +142,25 @@ fn resolve_gdrive(url: &str) -> String {
 
 // --- download --------------------------------------------------------------
 
+/// GET with a few retries for transient transport errors (flaky CDNs, resets).
+async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::Response> {
+    const ATTEMPTS: u32 = 3;
+    let mut last: Option<reqwest::Error> = None;
+    for attempt in 1..=ATTEMPTS {
+        match client.get(url).send().await {
+            Ok(resp) => return Ok(resp.error_for_status()?),
+            Err(e) => {
+                last = Some(e);
+                if attempt < ATTEMPTS {
+                    tokio::time::sleep(Duration::from_millis(600 * attempt as u64)).await;
+                }
+            }
+        }
+    }
+    Err(anyhow::Error::new(last.expect("had an error"))
+        .context("could not reach the download host after 3 attempts"))
+}
+
 async fn download(
     app: &AppHandle,
     client: &Client,
@@ -149,7 +168,7 @@ async fn download(
     url: &str,
     dir: &Path,
 ) -> anyhow::Result<PathBuf> {
-    let mut resp = client.get(url).send().await?.error_for_status()?;
+    let mut resp = get_with_retry(client, url).await?;
 
     // Large Google Drive files answer with a "virus scan warning" HTML page that
     // carries a confirm form; submit it to get the actual bytes.

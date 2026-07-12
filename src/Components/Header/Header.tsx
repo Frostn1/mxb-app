@@ -22,7 +22,9 @@ interface HeaderProps {
 const Header = ({ view, onNavigate, modType, onChangeType }: HeaderProps) => {
   return (
     <Paper id={"header"} elevation={0}>
-      <div className={"brand"}>Frost</div>
+      <div className={"brand"}>
+        MXB App <span className={"by"}>by Frost</span>
+      </div>
       <Tabs
         value={view}
         onChange={(_e, v: DashboardView) => onNavigate(v)}

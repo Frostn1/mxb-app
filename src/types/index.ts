@@ -43,17 +43,14 @@ export interface ModDetail {
   downloads: DownloadOption[];
 }
 
-/** A single mod file on disk inside an installed folder. */
+/** An installed `.pkz` mod file found under the type's folder (at any depth). */
 export interface InstalledMod {
-  path: string;
+  /** File name, e.g. `Mosctesting.pkz`. */
   name: string;
-}
-
-/** A folder under `<MX Bikes>/<subpath>` containing mod files. */
-export interface InstalledModFolder {
+  /** Absolute path on disk. */
   path: string;
-  name: string;
-  mods: InstalledMod[];
+  /** Relative parent folder under the subpath (`""` if top-level). */
+  folder: string;
 }
 
 export type InstallStage =
