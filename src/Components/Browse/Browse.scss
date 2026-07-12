@@ -1,0 +1,49 @@
+#browse {
+  .controls {
+    max-width: 900px;
+    margin: 0 auto 24px;
+  }
+
+  .state {
+    display: flex;
+    justify-content: center;
+    padding: 60px 0;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 20px;
+  }
+
+  .load-more {
+    display: flex;
+    justify-content: center;
+    padding: 28px 0 8px;
+  }
+
+  .mod-card {
+    .media {
+      position: relative;
+    }
+
+    .no-image {
+      height: 140px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(128, 128, 128, 0.15);
+      opacity: 0.5;
+    }
+
+    .installed-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+    }
+
+    .body {
+      padding: 12px 14px;
+    }
+  }
+}
