@@ -1,46 +1,38 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Frost",
+  "version": "0.1.0",
+  "identifier": "com.frost.mxbikes",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist"
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
   },
-  "package": {
-    "productName": "mxb-app",
-    "version": "0.0.1"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "shell": {
-        "all": false,
-        "open": true
-      },
-      "window": {
-        "startDragging": true,
-        "maximize": true,
-        "unmaximize": true,
-        "minimize": true,
-        "close": true
-      }
-    },
+  "app": {
     "windows": [
       {
-        "title": "MXB App",
+        "title": "Frost",
         "width": 1400,
         "height": 800,
-        "decorations": false,
         "minWidth": 1000,
-        "minHeight": 700
+        "minHeight": 700,
+        "decorations": false
       }
     ],
     "security": {
       "csp": null
-    },
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "mxb-app"
     }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }

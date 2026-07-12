@@ -1,28 +1,37 @@
 [package]
-name = "mxb-app"
+name = "frost"
 version = "0.1.0"
-description = "Mx Bikes App"
-authors = ["you"]
+description = "Frost — MX Bikes mod manager"
+authors = ["Frost"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-tauri-build = { version = "1", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "1", features = [
-    "window-unmaximize",
-    "window-start-dragging",
-    "window-minimize",
-    "window-close",
-    "window-maximize",
-    "shell-open",
-] }
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs-next = "2.0.0"
 walkdir = "2"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "stream",
+    "json",
+    "cookies",
+] }
+futures-util = "0.3"
+scraper = "0.20"
+regex = "1"
+html-escape = "0.2"
+zip = "2"
+sevenz-rust = "0.6"
+unrar = "0.5"
+anyhow = "1"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
