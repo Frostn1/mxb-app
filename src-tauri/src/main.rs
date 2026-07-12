@@ -1,127 +1,85 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+// Prevents an additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use serde::{Deserialize, Serialize};
-use serde_json::to_string_pretty;
-use serde_json::*;
-use std::fs::{self, ReadDir};
-use std::path::{Path, PathBuf};
-use walkdir::{DirEntry, WalkDir};
+mod config;
+mod install;
+mod library;
+mod mods;
 
-static CONFIG_FILE: &str = ".config.json";
+use config::AppConfig;
+use library::InstalledModFolder;
+use mods::mxb::MxbModsSource;
+use mods::{ModDetail, ModSource, ModSummary};
 
-pub(crate) fn is_config_file_exist() -> bool {
-    Path::new(CONFIG_FILE).exists()
-}
-
-pub(crate) fn configure_new(config: &mut serde_json::Value) -> std::io::Result<()> {
-    println!("{}", config);
-    if config["modsPath"].as_str().unwrap().len() == 0 {
-        let mut new_path: PathBuf = dirs_next::document_dir().unwrap();
-        new_path.push("PiBoSo\\MX Bikes");
-        println!("{}", new_path.clone().into_os_string().to_str().unwrap());
-
-        config["modsPath"] = json!(new_path.clone().into_os_string().to_str().unwrap());
-    }
-    fs::write(CONFIG_FILE, to_string_pretty(config).unwrap()).expect("Unable to write file");
-    Ok(())
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub(crate) struct Track {
-    pub path: String,
-    pub name: String,
-    pub image: Vec<u8>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub(crate) struct TrackFolder {
-    pub path: String,
-    pub name: String,
-    pub tracks: Vec<Track>,
-}
-
-fn map_track_file(track_path: std::fs::DirEntry) -> Track {
-    let entry_path = track_path.path();
-
-    let file_name = entry_path.file_name().unwrap();
-    println!("Track path is {}", entry_path.display());
-    return Track {
-        path: entry_path.to_str().unwrap().to_string().to_owned(),
-        name: file_name.to_str().unwrap().to_string().to_owned(),
-        image: vec![],
-    };
-}
-
-fn map_track_folder(dir_path: std::fs::DirEntry) -> TrackFolder {
-    println!("Folder Path is {}", dir_path.path().display());
-    let tracks: Vec<Track> = fs::read_dir(dir_path.path().to_owned())
-        .unwrap()
-        .map(|track| map_track_file(track.unwrap()))
-        .collect();
-    return TrackFolder {
-        path: dir_path.path().to_str().unwrap().to_string().to_owned(),
-        name: dir_path
-            .path()
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string()
-            .to_owned(),
-        tracks,
-    };
+#[tauri::command]
+fn is_configured(app: tauri::AppHandle) -> bool {
+    config::exists(&app)
 }
 
 #[tauri::command]
-fn get_library_mods(library_path: &str) -> Value {
-    println!("Library path {}", library_path);
-    let matching_files: Vec<TrackFolder> = fs::read_dir(library_path)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|x| map_track_folder(x))
-        .collect();
-
-    // println!("Files {}", matching_files);
-
-    return serde_json::json!(matching_files);
-
-    // for entry in WalkDir::new(library_path)
-    //     .into_iter()
-    //     .filter_map(|e| e.ok())
-    // {
-    //     println!("{}", entry.path().display());
-    // }
-    // return true;
+fn get_config(app: tauri::AppHandle) -> AppConfig {
+    config::load(&app).unwrap_or_default()
 }
 
 #[tauri::command]
-fn is_configured() -> bool {
-    return is_config_file_exist();
+fn create_config(app: tauri::AppHandle, config: AppConfig) -> Result<bool, String> {
+    let cfg = config::finalize(config);
+    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]
-fn create_config(config: &str) -> bool {
-    let _ = configure_new(&mut serde_json::from_str(config).unwrap());
-    true
+async fn search_mods(
+    query: String,
+    category_id: u32,
+    page: u32,
+) -> Result<Vec<ModSummary>, String> {
+    MxbModsSource
+        .search(&query, category_id, page)
+        .await
+        .map_err(|e| e.to_string())
 }
-#[tauri::command]
-fn get_config() -> Value {
-    let mut contents = "{}".to_string();
-    if is_configured() {
-        contents = fs::read_to_string(CONFIG_FILE).expect("{}");
-    }
 
-    return serde_json::from_str(contents.as_str()).unwrap();
+#[tauri::command]
+async fn get_mod_detail(slug: String) -> Result<ModDetail, String> {
+    MxbModsSource.detail(&slug).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_installed_mods(
+    app: tauri::AppHandle,
+    subpath: String,
+) -> Result<Vec<InstalledModFolder>, String> {
+    let cfg = config::load(&app).map_err(|e| e.to_string())?;
+    library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn add_to_library(
+    app: tauri::AppHandle,
+    slug: String,
+    url: String,
+    host: String,
+    subpath: String,
+) -> Result<(), String> {
+    let cfg = config::load(&app).map_err(|e| e.to_string())?;
+    install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             is_configured,
-            create_config,
             get_config,
-            get_library_mods
+            create_config,
+            search_mods,
+            get_mod_detail,
+            get_installed_mods,
+            add_to_library
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
