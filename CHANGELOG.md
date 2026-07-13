@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-13
+
+### Fixed
+- MediaFire mods were mis-detected as auto-installable because the host label is
+  written "Media Fire" (with a space) — downloads are now classified by **URL**,
+  so blocked hosts correctly open in the browser instead of failing.
+
+### Changed
+- Clearer download UI: one **official one-click** option; other links are labeled
+  (a dedicated-**server** build is called out as "not needed for normal play"
+  rather than "mirror"); the **Import** step only appears when a blocked host is
+  used.
+- Enabled **text selection** and added a **Copy** button on error messages.
+
 ## 2026-07-12
 
 ### Added

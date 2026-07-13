@@ -21,10 +21,12 @@ export interface ModSummary {
 /** One download choice on a mod page (hosts vary: Google Drive, MediaFire, …). */
 export interface DownloadOption {
   url: string;
-  /** Host label shown on the page, e.g. "drive.google.com". */
+  /** Host label shown on the page, e.g. "drive.google.com" or "Media Fire". */
   host: string;
   /** The "Default" file the author marks as the one to grab. */
   isDefault: boolean;
+  /** A dedicated-server build — not needed for normal play. */
+  isServer: boolean;
   label: string;
 }
 
