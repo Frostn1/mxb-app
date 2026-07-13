@@ -1,5 +1,7 @@
 # Frost
 
+[![Release](https://github.com/Frostn1/mxb-app/actions/workflows/release.yml/badge.svg)](https://github.com/Frostn1/mxb-app/actions/workflows/release.yml)
+
 **Frost** is a desktop mod manager for [MX Bikes](https://mx-bikes.com/). It
 replaces the tedious manual install dance — open mxb-mods.com, follow the link,
 download from MediaFire, unzip, and move files into the right folder — with a
@@ -11,6 +13,17 @@ Frost downloads the mod, extracts it, and drops the track files into your MX
 Bikes `mods/tracks` folder automatically.
 
 Track mods are supported today; more mod types are planned.
+
+## Download
+
+Grab the latest installer from the
+[**Releases**](https://github.com/Frostn1/mxb-app/releases) page:
+
+- **Windows** — `.msi` or `.exe` (recommended; MX Bikes runs on Windows).
+- **macOS** (Apple Silicon) — `.dmg`, for working on the download/extract UI.
+
+Builds are unsigned, so Windows SmartScreen / macOS Gatekeeper will warn on
+first launch — choose _Run anyway_ / right-click _Open_.
 
 ## How it works
 
@@ -60,6 +73,24 @@ cargo test           # unit tests (REST/HTML parsing, download resolution)
 > MX Bikes is Windows-only, so downloading into a real game install is a
 > Windows workflow. The cross-platform download/extract logic can be built and
 > tested on any OS.
+
+## Releases
+
+Releases are built in CI by
+[`.github/workflows/release.yml`](.github/workflows/release.yml) — it compiles
+Windows and macOS bundles and attaches them to a GitHub Release.
+
+To cut a release, bump the version in `package.json`, `src-tauri/tauri.conf.json`
+and `src-tauri/Cargo.toml`, then push a matching tag:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow produces a **draft** release with the installers attached — review
+it in the Releases tab and publish when ready. You can also trigger a build
+without tagging via **Actions → Release → Run workflow**.
 
 ## Roadmap
 
