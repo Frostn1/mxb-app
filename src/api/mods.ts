@@ -2,10 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Config,
+  FrostmodReload,
   InstalledMod,
   InstallProgress,
   ModDetail,
   ModSummary,
+  ReloadOutcome,
 } from "../types";
 
 /** Results per page (mirrors `PER_PAGE` in the Rust backend). */
@@ -132,4 +134,26 @@ export function onInstallProgress(
   return listen<InstallProgress>("install-progress", (event) =>
     cb(event.payload),
   );
+}
+
+// --- FrostMod live-reload --------------------------------------------------
+// FrostMod (github.com/Frostn1/frostmod) live-reloads MX Bikes' content when
+// it's running. Installs signal it automatically; these expose a manual trigger
+// and a status probe for the UI.
+
+/** Manually ask a running FrostMod to reload the mods folder now. */
+export function reloadFrostmod(): Promise<ReloadOutcome> {
+  return invoke<ReloadOutcome>("frostmod_reload");
+}
+
+/** Is FrostMod currently running on this PC? */
+export function isFrostmodRunning(): Promise<boolean> {
+  return invoke<boolean>("frostmod_running");
+}
+
+/** Fires after each install with whether FrostMod picked the new mod up live. */
+export function onFrostmodReload(
+  cb: (payload: FrostmodReload) => void,
+): Promise<UnlistenFn> {
+  return listen<FrostmodReload>("frostmod-reload", (event) => cb(event.payload));
 }

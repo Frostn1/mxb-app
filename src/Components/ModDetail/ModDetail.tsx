@@ -28,10 +28,16 @@ import {
   importFile,
   isBlockedDownload,
   normalizeModName,
+  onFrostmodReload,
   onInstallProgress,
   type ModType,
 } from "../../api/mods";
-import type { DownloadOption, InstallProgress, ModDetail as Detail } from "../../types";
+import type {
+  DownloadOption,
+  InstallProgress,
+  ModDetail as Detail,
+  ReloadOutcome,
+} from "../../types";
 import "./ModDetail.scss";
 
 interface ModDetailProps {
@@ -62,6 +68,7 @@ const ModDetail = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<InstallProgress | null>(null);
+  const [frostmod, setFrostmod] = useState<ReloadOutcome | null>(null);
   const [manualHint, setManualHint] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -99,8 +106,14 @@ const ModDetail = ({
   const runInstall = async (fn: () => Promise<void>) => {
     setInstalling(true);
     setProgress({ slug, stage: "resolving" });
+    setFrostmod(null);
     const unlisten = await onInstallProgress((p) => {
       if (p.slug === slug) setProgress(p);
+    });
+    // The backend signals FrostMod after placing the files; capture whether the
+    // new mod went live in-game so we can tell the user.
+    const unlistenFrostmod = await onFrostmodReload((p) => {
+      if (p.slug === slug) setFrostmod(p.outcome);
     });
     try {
       await fn();
@@ -110,6 +123,7 @@ const ModDetail = ({
       setProgress({ slug, stage: "error", message: String(e) });
     } finally {
       unlisten();
+      unlistenFrostmod();
       setInstalling(false);
     }
   };
@@ -310,9 +324,23 @@ const ModDetail = ({
         {progress && (
           <Box className={"progress"} sx={{ mt: 2 }}>
             {progress.stage === "done" ? (
-              <Alert icon={<CheckCircleRoundedIcon />} severity={"success"}>
-                {STAGE_LABEL.done}
-              </Alert>
+              <Stack spacing={1}>
+                <Alert icon={<CheckCircleRoundedIcon />} severity={"success"}>
+                  {STAGE_LABEL.done}
+                </Alert>
+                {frostmod === "signaled" && (
+                  <Alert severity={"success"} variant={"outlined"}>
+                    FrostMod reloaded the game — this mod is live now.
+                  </Alert>
+                )}
+                {frostmod === "not_running" && (
+                  <Alert severity={"info"} variant={"outlined"}>
+                    Start FrostMod to load new mods without restarting, or press{" "}
+                    R in its console / F8 in‑game. Otherwise it'll be there next
+                    time you launch MX Bikes.
+                  </Alert>
+                )}
+              </Stack>
             ) : progress.stage === "error" ? (
               <Alert
                 severity={"error"}
