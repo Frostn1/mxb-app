@@ -63,17 +63,23 @@ async fn add_to_library(
     url: String,
     host: String,
     subpath: String,
+    dest_folder: String,
 ) -> Result<(), String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath)
+    install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
         .await
         .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
-fn import_file(app: tauri::AppHandle, path: String, subpath: String) -> Result<(), String> {
+fn import_file(
+    app: tauri::AppHandle,
+    path: String,
+    subpath: String,
+    dest_folder: String,
+) -> Result<(), String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    install::import_file(&app, &cfg, &path, &subpath).map_err(|e| format!("{e:#}"))
+    install::import_file(&app, &cfg, &path, &subpath, &dest_folder).map_err(|e| format!("{e:#}"))
 }
 
 /// Move an installed mod file into a different folder under its type dir.

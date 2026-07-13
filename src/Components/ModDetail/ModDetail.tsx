@@ -5,9 +5,14 @@ import {
   Button,
   Chip,
   CircularProgress,
+  FormControl,
+  InputLabel,
   LinearProgress,
   Link,
+  MenuItem,
+  Select,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import ArrowBackIosNewRoundedIcon from "@mui/icons-material/ArrowBackIosNewRounded";
@@ -24,12 +29,15 @@ import "swiper/css/navigation";
 import "swiper/css/pagination";
 import {
   addToLibrary,
+  buildDestinations,
+  getInstalledMods,
   getModDetail,
   importFile,
   isBlockedDownload,
   normalizeModName,
   onFrostmodReload,
   onInstallProgress,
+  type DestOption,
   type ModType,
 } from "../../api/mods";
 import type {
@@ -71,6 +79,10 @@ const ModDetail = ({
   const [frostmod, setFrostmod] = useState<ReloadOutcome | null>(null);
   const [manualHint, setManualHint] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Destination folder the mod installs into (auto-guessed, user-editable).
+  const [destOptions, setDestOptions] = useState<DestOption[]>([]);
+  const [destFolder, setDestFolder] = useState("");
+  const [customFolder, setCustomFolder] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,13 +90,29 @@ const ModDetail = ({
     setLoadError(null);
     setProgress(null);
     setManualHint(false);
+    setCustomFolder(false);
+    setDestFolder("");
+    setDestOptions([]);
     getModDetail(slug)
-      .then((d) => !cancelled && setDetail(d))
+      .then(async (d) => {
+        if (cancelled) return;
+        setDetail(d);
+        // Compute install destinations from what's already installed.
+        try {
+          const installed = await getInstalledMods(modType.installSubpath);
+          if (cancelled) return;
+          const { options, guess } = buildDestinations(modType, d.title, installed);
+          setDestOptions(options);
+          setDestFolder(guess);
+        } catch {
+          setDestOptions([]);
+        }
+      })
       .catch((e) => !cancelled && setLoadError(String(e)));
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, modType]);
 
   // The "official" download to feature: prefer a one-click (auto) host among the
   // author's default files; servers are never primary.
@@ -130,7 +158,7 @@ const ModDetail = ({
 
   const install = (opt: DownloadOption) =>
     runInstall(() =>
-      addToLibrary(slug, opt.url, opt.host, modType.installSubpath),
+      addToLibrary(slug, opt.url, opt.host, modType.installSubpath, destFolder),
     );
 
   // Blocked hosts (MediaFire/Mega) can't be fetched in-app — open in the browser,
@@ -146,7 +174,7 @@ const ModDetail = ({
       filters: [{ name: "Mod files", extensions: ["pkz", "zip", "rar", "7z"] }],
     });
     if (typeof picked !== "string") return;
-    await runInstall(() => importFile(picked, modType.installSubpath));
+    await runInstall(() => importFile(picked, modType.installSubpath, destFolder));
   };
 
   const clickDownload = (opt: DownloadOption) =>
@@ -244,6 +272,56 @@ const ModDetail = ({
           <Alert severity={"info"}>
             No download link was found on this page — open it on mxb-mods.com.
           </Alert>
+        )}
+
+        {primary && (
+          <Stack
+            direction={"row"}
+            spacing={1}
+            alignItems={"center"}
+            flexWrap={"wrap"}
+            useFlexGap
+            sx={{ mb: 1.5 }}
+          >
+            <FormControl size={"small"} sx={{ minWidth: 240 }}>
+              <InputLabel>Install into</InputLabel>
+              <Select
+                label={"Install into"}
+                disabled={installing}
+                value={customFolder ? "__new__" : destFolder}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__new__") {
+                    setCustomFolder(true);
+                    setDestFolder("");
+                  } else {
+                    setCustomFolder(false);
+                    setDestFolder(v);
+                  }
+                }}
+              >
+                {destOptions.map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+                <MenuItem value={"__new__"}>＋ New folder…</MenuItem>
+              </Select>
+            </FormControl>
+            {customFolder && (
+              <TextField
+                size={"small"}
+                label={"New folder"}
+                placeholder={
+                  modType.id === "bikes" ? "e.g. KTM450/paints" : "e.g. Supercross"
+                }
+                value={destFolder}
+                onChange={(e) => setDestFolder(e.target.value)}
+                disabled={installing}
+                sx={{ minWidth: 200 }}
+              />
+            )}
+          </Stack>
         )}
 
         {primary &&
