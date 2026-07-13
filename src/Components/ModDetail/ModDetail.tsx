@@ -6,6 +6,7 @@ import {
   Chip,
   CircularProgress,
   LinearProgress,
+  Link,
   Stack,
   Typography,
 } from "@mui/material";
@@ -13,7 +14,7 @@ import ArrowBackIosNewRoundedIcon from "@mui/icons-material/ArrowBackIosNewRound
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
-import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
+import ContentCopyRoundedIcon from "@mui/icons-material/ContentCopyRounded";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Navigation, Pagination } from "swiper/modules";
 import { open } from "@tauri-apps/plugin-shell";
@@ -25,7 +26,7 @@ import {
   addToLibrary,
   getModDetail,
   importFile,
-  isManualHost,
+  isBlockedDownload,
   normalizeModName,
   onInstallProgress,
   type ModType,
@@ -62,6 +63,7 @@ const ModDetail = ({
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<InstallProgress | null>(null);
   const [manualHint, setManualHint] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,25 +79,31 @@ const ModDetail = ({
     };
   }, [slug]);
 
-  // Auto-installable hosts first, so the primary button is a one-click install.
-  const downloads = useMemo(
-    () =>
-      detail
-        ? [...detail.downloads].sort(
-            (a, b) => Number(isManualHost(a.host)) - Number(isManualHost(b.host)),
-          )
-        : [],
-    [detail],
-  );
+  // The "official" download to feature: prefer a one-click (auto) host among the
+  // author's default files; servers are never primary.
+  const { primary, others } = useMemo(() => {
+    const all = detail?.downloads ?? [];
+    if (all.length === 0) return { primary: null, others: [] as DownloadOption[] };
+    const playable = all.filter((d) => !d.isServer);
+    const pool = playable.length ? playable : all;
+    const auto = pool.filter((d) => !isBlockedDownload(d));
+    const pick =
+      auto.find((d) => d.isDefault) ??
+      auto[0] ??
+      pool.find((d) => d.isDefault) ??
+      pool[0] ??
+      null;
+    return { primary: pick, others: all.filter((d) => d !== pick) };
+  }, [detail]);
 
-  const handleInstall = async (opt: DownloadOption) => {
+  const runInstall = async (fn: () => Promise<void>) => {
     setInstalling(true);
     setProgress({ slug, stage: "resolving" });
     const unlisten = await onInstallProgress((p) => {
       if (p.slug === slug) setProgress(p);
     });
     try {
-      await addToLibrary(slug, opt.url, opt.host, modType.installSubpath);
+      await fn();
       setProgress({ slug, stage: "done" });
       onInstalled();
     } catch (e) {
@@ -106,34 +114,35 @@ const ModDetail = ({
     }
   };
 
-  // MediaFire/Mega block in-app downloads — open in the browser to grab the
-  // file, then the user imports it below.
-  const handleDownload = (opt: DownloadOption) => {
-    if (isManualHost(opt.host)) {
-      setManualHint(true);
-      open(opt.url);
-      return;
-    }
-    handleInstall(opt);
+  const install = (opt: DownloadOption) =>
+    runInstall(() =>
+      addToLibrary(slug, opt.url, opt.host, modType.installSubpath),
+    );
+
+  // Blocked hosts (MediaFire/Mega) can't be fetched in-app — open in the browser,
+  // then reveal the import step.
+  const openInBrowser = (opt: DownloadOption) => {
+    setManualHint(true);
+    open(opt.url);
   };
 
-  const handleImport = async () => {
+  const chooseAndImport = async () => {
     const picked = await pickFile({
       multiple: false,
       filters: [{ name: "Mod files", extensions: ["pkz", "zip", "rar", "7z"] }],
     });
     if (typeof picked !== "string") return;
-    setInstalling(true);
-    setProgress({ slug, stage: "placing" });
-    try {
-      await importFile(picked, modType.installSubpath);
-      setProgress({ slug, stage: "done" });
-      onInstalled();
-    } catch (e) {
-      setProgress({ slug, stage: "error", message: String(e) });
-    } finally {
-      setInstalling(false);
-    }
+    await runInstall(() => importFile(picked, modType.installSubpath));
+  };
+
+  const clickDownload = (opt: DownloadOption) =>
+    isBlockedDownload(opt) ? openInBrowser(opt) : install(opt);
+
+  const copyError = () => {
+    if (!progress?.message) return;
+    navigator.clipboard.writeText(progress.message);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   if (loadError) {
@@ -180,12 +189,7 @@ const ModDetail = ({
         </Button>
       </Stack>
 
-      <Stack
-        direction={"row"}
-        spacing={1.5}
-        alignItems={"center"}
-        sx={{ mt: 1 }}
-      >
+      <Stack direction={"row"} spacing={1.5} alignItems={"center"} sx={{ mt: 1 }}>
         <Typography variant={"h5"}>{detail.title}</Typography>
         {detail.version && <Chip size={"small"} label={detail.version} />}
         {installedNames.has(normalizeModName(detail.title)) && (
@@ -221,48 +225,86 @@ const ModDetail = ({
         <Typography variant={"subtitle2"} gutterBottom>
           Add to library
         </Typography>
-        {detail.downloads.length === 0 && (
+
+        {!primary && (
           <Alert severity={"info"}>
             No download link was found on this page — open it on mxb-mods.com.
           </Alert>
         )}
-        <Stack direction={"row"} spacing={1.5} flexWrap={"wrap"} useFlexGap>
-          {downloads.map((opt, i) => {
-            const manual = isManualHost(opt.host);
-            return (
+
+        {primary &&
+          (isBlockedDownload(primary) ? (
+            <Stack spacing={0.75} alignItems={"flex-start"}>
               <Button
-                key={`${opt.url}-${i}`}
-                variant={i === 0 ? "contained" : "outlined"}
-                startIcon={
-                  manual ? <OpenInNewRoundedIcon /> : <DownloadRoundedIcon />
-                }
+                variant={"contained"}
+                startIcon={<OpenInNewRoundedIcon />}
                 disabled={installing}
-                onClick={() => handleDownload(opt)}
+                onClick={() => openInBrowser(primary)}
               >
-                {manual
-                  ? `Download · ${opt.host}`
-                  : i === 0
-                    ? "Add to Library"
-                    : `Mirror · ${opt.host}`}
+                Download from {primary.host}
               </Button>
-            );
-          })}
-          <Button
-            variant={"text"}
-            startIcon={<UploadFileRoundedIcon />}
-            disabled={installing}
-            onClick={handleImport}
-          >
-            Import a file
-          </Button>
-        </Stack>
+              <Typography variant={"caption"} color={"text.secondary"}>
+                {primary.host} blocks in-app downloads, so it opens in your
+                browser.
+              </Typography>
+            </Stack>
+          ) : (
+            <Button
+              variant={"contained"}
+              startIcon={<DownloadRoundedIcon />}
+              disabled={installing}
+              onClick={() => install(primary)}
+            >
+              Add to Library
+            </Button>
+          ))}
 
         {manualHint && (
-          <Alert severity={"info"} sx={{ mt: 2 }}>
-            This host blocks in-app downloads, so it opened in your browser.
-            Once it&apos;s downloaded, click <b>Import a file</b> and pick it —
-            it&apos;ll be added to your {modType.label.toLowerCase()}.
+          <Alert
+            severity={"info"}
+            sx={{ mt: 2 }}
+            action={
+              <Button color={"inherit"} size={"small"} onClick={chooseAndImport}>
+                Select file
+              </Button>
+            }
+          >
+            Downloaded it? Click <b>Select file</b> and pick it — it&apos;ll be
+            added to your {modType.label.toLowerCase()}.
           </Alert>
+        )}
+
+        {others.length > 0 && (
+          <Box className={"other-downloads"}>
+            <Typography variant={"caption"} color={"text.secondary"}>
+              Other downloads
+            </Typography>
+            <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+              {others.map((opt, i) => (
+                <Typography key={`${opt.url}-${i}`} variant={"body2"}>
+                  <Link
+                    component={"button"}
+                    type={"button"}
+                    disabled={installing}
+                    onClick={() => clickDownload(opt)}
+                  >
+                    {opt.host}
+                  </Link>
+                  <Typography
+                    component={"span"}
+                    variant={"caption"}
+                    color={"text.secondary"}
+                  >
+                    {opt.isServer
+                      ? " — server version, not needed for normal play"
+                      : isBlockedDownload(opt)
+                        ? " — opens in your browser"
+                        : ""}
+                  </Typography>
+                </Typography>
+              ))}
+            </Stack>
+          </Box>
         )}
 
         {progress && (
@@ -272,8 +314,22 @@ const ModDetail = ({
                 {STAGE_LABEL.done}
               </Alert>
             ) : progress.stage === "error" ? (
-              <Alert severity={"error"}>
-                {progress.message ?? STAGE_LABEL.error}
+              <Alert
+                severity={"error"}
+                action={
+                  <Button
+                    color={"inherit"}
+                    size={"small"}
+                    startIcon={<ContentCopyRoundedIcon />}
+                    onClick={copyError}
+                  >
+                    {copied ? "Copied" : "Copy"}
+                  </Button>
+                }
+              >
+                <span className={"selectable"}>
+                  {progress.message ?? STAGE_LABEL.error}
+                </span>
               </Alert>
             ) : (
               <>

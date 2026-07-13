@@ -21,7 +21,10 @@ pub struct ModSummary {
 pub struct DownloadOption {
     pub url: String,
     pub host: String,
+    /// The author's recommended file ("Default" flag on the page).
     pub is_default: bool,
+    /// A dedicated-server build — not needed for normal play.
+    pub is_server: bool,
     pub label: String,
 }
 

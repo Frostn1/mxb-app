@@ -231,6 +231,8 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
             .value()
             .classes()
             .any(|c| c.eq_ignore_ascii_case("container-default"));
+        // Dedicated-server builds are labelled "server" somewhere in the block.
+        let is_server = el.text().collect::<String>().to_lowercase().contains("server");
         let href = el.select(&a_sel).next().and_then(|a| a.value().attr("href"));
         let Some(url) = href else { continue };
 
@@ -245,6 +247,7 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
             url: url.to_string(),
             host: host.clone(),
             is_default,
+            is_server,
             label: host,
         });
     }
