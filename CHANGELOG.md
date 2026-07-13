@@ -26,6 +26,9 @@
 ## 2026-07-12
 
 ### Added
+- **Release CI** (`.github/workflows/release.yml`): tagging `v*` (or a manual
+  dispatch) builds Windows + macOS bundles with `tauri-action` and attaches the
+  installers to a draft GitHub Release.
 - **Import a file**: for hosts that block in-app downloads, open the download in
   the browser then import the downloaded file — the app extracts and places it
   into the right folder just like a normal install (`import_file` command).
@@ -40,6 +43,8 @@
   links) are shown first as the one-click option.
 
 ### Changed
+- README: added Download, build-status badge, and Releases (how to cut one)
+  sections.
 - Renamed the app to **MXB App by Frost** (window title, title bar, header).
 - Replaced the macOS traffic-light window buttons with **clean Windows-style
   controls** (minimize / maximize / close, red close hover).
