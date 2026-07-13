@@ -44,6 +44,28 @@ fn emit(app: &AppHandle, slug: &str, stage: &'static str, received: Option<u64>,
     );
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrostmodReload {
+    slug: String,
+    outcome: crate::frostmod::ReloadOutcome,
+}
+
+/// Best-effort: ask a running FrostMod to live-reload the game's content now that
+/// a new mod has landed, and tell the UI whether it worked. Never fails the
+/// install — if FrostMod isn't running the game just picks the mod up on its
+/// next launch.
+fn notify_frostmod(app: &AppHandle, slug: &str) {
+    let outcome = crate::frostmod::signal_reload();
+    let _ = app.emit(
+        "frostmod-reload",
+        FrostmodReload {
+            slug: slug.to_string(),
+            outcome,
+        },
+    );
+}
+
 pub async fn add_to_library(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -83,13 +105,21 @@ pub async fn add_to_library(
 
     let _ = std::fs::remove_dir_all(&work);
     emit(app, slug, "done", None, None);
+
+    // New mod is in place — nudge FrostMod to reload it live if it's running.
+    notify_frostmod(app, slug);
     Ok(())
 }
 
 /// Import an already-downloaded archive or `.pkz` from disk. Used for hosts that
 /// block in-app downloads (e.g. MediaFire): the user downloads via the browser,
 /// then imports the file here and it's extracted/placed like a normal install.
-pub fn import_file(cfg: &AppConfig, file_path: &str, subpath: &str) -> anyhow::Result<()> {
+pub fn import_file(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    file_path: &str,
+    subpath: &str,
+) -> anyhow::Result<()> {
     let src = Path::new(file_path);
     if !src.is_file() {
         anyhow::bail!("file not found: {file_path}");
@@ -109,6 +139,9 @@ pub fn import_file(cfg: &AppConfig, file_path: &str, subpath: &str) -> anyhow::R
     place_mod_files(&extracted, &dest, &slug)?;
 
     let _ = std::fs::remove_dir_all(&work);
+
+    // Imported mod is in place — nudge FrostMod to reload it live if it's running.
+    notify_frostmod(app, &slug);
     Ok(())
 }
 

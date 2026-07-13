@@ -2,6 +2,15 @@
 
 ## 2026-07-13
 
+### Added
+- **FrostMod live-reload integration**: when you add a mod, the app now signals a
+  running [FrostMod](https://github.com/Frostn1/frostmod) to re-scan the mods
+  folder so new tracks/bikes appear in-game without a restart. Works by setting
+  FrostMod's own `Local\FrostModReload` Windows event (the same trigger as
+  pressing **R** in its console) — no changes to FrostMod required. The mod
+  detail view shows whether FrostMod picked it up live or isn't running, and new
+  `frostmod_reload` / `frostmod_running` commands back a manual trigger + status.
+
 ### Fixed
 - MediaFire mods were mis-detected as auto-installable because the host label is
   written "Media Fire" (with a space) — downloads are now classified by **URL**,

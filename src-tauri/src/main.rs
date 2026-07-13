@@ -2,11 +2,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
+mod frostmod;
 mod install;
 mod library;
 mod mods;
 
 use config::AppConfig;
+use frostmod::ReloadOutcome;
 use library::InstalledMod;
 use mods::mxb::MxbModsSource;
 use mods::{ModDetail, ModSource, ModSummary};
@@ -71,7 +73,19 @@ async fn add_to_library(
 #[tauri::command]
 fn import_file(app: tauri::AppHandle, path: String, subpath: String) -> Result<(), String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    install::import_file(&cfg, &path, &subpath).map_err(|e| format!("{e:#}"))
+    install::import_file(&app, &cfg, &path, &subpath).map_err(|e| format!("{e:#}"))
+}
+
+/// Ask a running FrostMod to live-reload the mods folder (manual button).
+#[tauri::command]
+fn frostmod_reload() -> ReloadOutcome {
+    frostmod::signal_reload()
+}
+
+/// Is FrostMod currently running? (drives the status indicator)
+#[tauri::command]
+fn frostmod_running() -> bool {
+    frostmod::is_running()
 }
 
 fn main() {
@@ -86,7 +100,9 @@ fn main() {
             get_mod_detail,
             get_installed_mods,
             add_to_library,
-            import_file
+            import_file,
+            frostmod_reload,
+            frostmod_running
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
