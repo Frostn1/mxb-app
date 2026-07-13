@@ -115,13 +115,78 @@ export function addToLibrary(
   url: string,
   host: string,
   subpath: string,
+  destFolder: string,
 ): Promise<void> {
-  return invoke<void>("add_to_library", { slug, url, host, subpath });
+  return invoke<void>("add_to_library", { slug, url, host, subpath, destFolder });
 }
 
 /** Import a file the user downloaded manually (extract + place into `subpath`). */
-export function importFile(path: string, subpath: string): Promise<void> {
-  return invoke<void>("import_file", { path, subpath });
+export function importFile(
+  path: string,
+  subpath: string,
+  destFolder: string,
+): Promise<void> {
+  return invoke<void>("import_file", { path, subpath, destFolder });
+}
+
+export interface DestOption {
+  value: string;
+  label: string;
+}
+
+const stripExt = (s: string) => s.replace(/\.(pkz|zip|rar|7z)$/i, "");
+const tokens = (s: string) =>
+  new Set(
+    s
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 2),
+  );
+
+/**
+ * Build the "install into" destination options for a mod, plus an educated-guess
+ * default. Tracks get their existing sub-folders; bikes get each installed
+ * bike's `paints` folder, with the guess matched from the mod title.
+ */
+export function buildDestinations(
+  modType: ModType,
+  title: string,
+  installed: InstalledMod[],
+): { options: DestOption[]; guess: string } {
+  const seen = new Set<string>([""]);
+  const options: DestOption[] = [
+    { value: "", label: modType.id === "bikes" ? "Bikes (root)" : "Tracks (root)" },
+  ];
+  const add = (value: string, label: string) => {
+    if (!seen.has(value)) {
+      options.push({ value, label });
+      seen.add(value);
+    }
+  };
+
+  let guess = "";
+  if (modType.id === "bikes") {
+    const bikes = installed.filter((i) => i.folder === "");
+    for (const b of bikes) add(`${stripExt(b.name)}/paints`, `${stripExt(b.name)} — paints`);
+
+    const tt = tokens(title);
+    let best: InstalledMod | null = null;
+    let bestScore = 0;
+    for (const b of bikes) {
+      let score = 0;
+      for (const t of tokens(b.name)) if (tt.has(t)) score++;
+      if (score > bestScore) {
+        bestScore = score;
+        best = b;
+      }
+    }
+    if (best && bestScore >= 2) guess = `${stripExt(best.name)}/paints`;
+  }
+
+  for (const f of [...new Set(installed.map((i) => i.folder))].sort((a, b) => a.localeCompare(b))) {
+    if (f) add(f, f);
+  }
+  return { options, guess };
 }
 
 /**

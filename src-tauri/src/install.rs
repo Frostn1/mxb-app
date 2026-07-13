@@ -65,6 +65,7 @@ fn notify_frostmod(app: &AppHandle, slug: &str) {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn add_to_library(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -72,6 +73,7 @@ pub async fn add_to_library(
     url: &str,
     host: &str,
     subpath: &str,
+    dest_folder: &str,
 ) -> anyhow::Result<()> {
     let client = Client::builder()
         .user_agent(UA)
@@ -101,7 +103,7 @@ pub async fn add_to_library(
     emit(app, slug, "placing", None, None);
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
-    place_mod(&extracted, &mods_dir, type_folder, slug)?;
+    place_mod(&extracted, &mods_dir, type_folder, dest_folder, slug)?;
 
     let _ = std::fs::remove_dir_all(&work);
     emit(app, slug, "done", None, None);
@@ -119,6 +121,7 @@ pub fn import_file(
     cfg: &AppConfig,
     file_path: &str,
     subpath: &str,
+    dest_folder: &str,
 ) -> anyhow::Result<()> {
     let src = Path::new(file_path);
     if !src.is_file() {
@@ -137,7 +140,7 @@ pub fn import_file(
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "import".to_string());
-    place_mod(&extracted, &mods_dir, type_folder, &slug)?;
+    place_mod(&extracted, &mods_dir, type_folder, dest_folder, &slug)?;
 
     let _ = std::fs::remove_dir_all(&work);
 
@@ -426,6 +429,7 @@ fn place_mod(
     extracted: &Path,
     mods_dir: &Path,
     type_folder: &str,
+    dest_folder: &str,
     slug: &str,
 ) -> anyhow::Result<usize> {
     // Look for recognized structure at the extracted root AND one wrapper level
@@ -470,8 +474,16 @@ fn place_mod(
         }
     }
 
-    // 4. Plain placement into the mod type's folder.
-    place_plain(&unwrapped, &mods_dir.join(type_folder), slug)
+    // 4. Plain placement into the mod type's folder, honoring the user's chosen
+    //    destination sub-folder (e.g. a track folder, or `<Bike>/paints` for a
+    //    loose livery). Self-structured archives above ignore it.
+    let mut type_dir = mods_dir.join(type_folder);
+    for seg in dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()) {
+        type_dir.push(sanitize(seg));
+    }
+    // Extracted tracks need their own folder; loose bike paints don't.
+    let wrap_loose = type_folder.eq_ignore_ascii_case("tracks");
+    place_plain(&unwrapped, &type_dir, slug, wrap_loose)
 }
 
 /// Descend through redundant single-folder wrappers (e.g. `archive/ModName/...`).
@@ -521,9 +533,16 @@ fn contains_paints_bundle(base: &Path) -> bool {
 }
 
 /// Place content that carries no MX Bikes structure into `type_dir`, preserving
-/// any sub-folders. Loose track files (no `.pkz`, no sub-folders) are wrapped in
-/// their own `<slug>` folder since an extracted track needs one.
-fn place_plain(base: &Path, type_dir: &Path, slug: &str) -> anyhow::Result<usize> {
+/// any sub-folders. When `wrap_loose` is set, loose files (no `.pkz`, no
+/// sub-folders) are wrapped in their own `<slug>` folder (an extracted track
+/// needs one); when unset they go straight into `type_dir` (e.g. a loose livery
+/// dropped into a chosen `paints` folder).
+fn place_plain(
+    base: &Path,
+    type_dir: &Path,
+    slug: &str,
+    wrap_loose: bool,
+) -> anyhow::Result<usize> {
     std::fs::create_dir_all(type_dir)?;
     let entries: Vec<_> = std::fs::read_dir(base)?.filter_map(|e| e.ok()).collect();
     let dirs: Vec<PathBuf> = entries
@@ -543,9 +562,15 @@ fn place_plain(base: &Path, type_dir: &Path, slug: &str) -> anyhow::Result<usize
         .filter(|p| !is_junk(&p.file_name().unwrap_or_default().to_string_lossy()))
         .count();
 
-    // Loose extracted-track files -> wrap in their own folder.
+    // Loose files with no sub-folders: wrap in their own folder (extracted track)
+    // or drop straight in (a livery placed into a chosen paints folder).
     if !has_pkz && dirs.is_empty() && non_junk_files > 0 {
-        return merge_tree(base, &type_dir.join(sanitize(slug)));
+        let target = if wrap_loose {
+            type_dir.join(sanitize(slug))
+        } else {
+            type_dir.to_path_buf()
+        };
+        return merge_tree(base, &target);
     }
 
     // Otherwise copy top-level files (skipping junk) and merge sub-folders as-is.
@@ -796,7 +821,7 @@ mod tests {
         extract_archive(&zip_path, &extracted)?;
 
         let mods = base.join("mods");
-        let placed = place_mod(&extracted, &mods, "tracks", "some-track")?;
+        let placed = place_mod(&extracted, &mods, "tracks", "", "some-track")?;
 
         assert_eq!(placed, 1);
         assert!(mods.join("tracks/track.pkz").exists());
@@ -811,7 +836,7 @@ mod tests {
         let ex = root.join("ex");
         touch(&ex.join("track.pkz"));
         let mods = root.join("mods");
-        place_mod(&ex, &mods, "tracks", "slug").unwrap();
+        place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
         assert!(mods.join("tracks/track.pkz").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -822,7 +847,7 @@ mod tests {
         let ex = root.join("ex");
         touch(&ex.join("MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt"));
         let mods = root.join("mods");
-        place_mod(&ex, &mods, "bikes", "slug").unwrap();
+        place_mod(&ex, &mods, "bikes", "", "slug").unwrap();
         assert!(mods
             .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
             .exists());
@@ -836,7 +861,7 @@ mod tests {
         touch(&ex.join("mods/bikes/KTM.pkz"));
         touch(&ex.join("mods/tracks/T.pkz"));
         let mods = root.join("mods");
-        place_mod(&ex, &mods, "tracks", "slug").unwrap();
+        place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
         assert!(mods.join("bikes/KTM.pkz").exists());
         assert!(mods.join("tracks/T.pkz").exists());
         let _ = std::fs::remove_dir_all(&root);
@@ -849,7 +874,7 @@ mod tests {
         touch(&ex.join("bikes/Y.pkz"));
         touch(&ex.join("tracks/X.pkz"));
         let mods = root.join("mods");
-        place_mod(&ex, &mods, "tracks", "slug").unwrap();
+        place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
         assert!(mods.join("bikes/Y.pkz").exists());
         assert!(mods.join("tracks/X.pkz").exists());
         let _ = std::fs::remove_dir_all(&root);
@@ -862,9 +887,40 @@ mod tests {
         touch(&ex.join("round3.cfg"));
         touch(&ex.join("round3.map"));
         let mods = root.join("mods");
-        place_mod(&ex, &mods, "tracks", "MyTrack").unwrap();
+        place_mod(&ex, &mods, "tracks", "", "MyTrack").unwrap();
         assert!(mods.join("tracks/MyTrack/round3.cfg").exists());
         assert!(mods.join("tracks/MyTrack/round3.map").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn plain_pkz_honors_chosen_dest_folder() {
+        let root = place_tmp("dest");
+        let ex = root.join("ex");
+        touch(&ex.join("track.pkz"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "tracks", "Supercross/Round 1", "slug").unwrap();
+        assert!(mods.join("tracks/Supercross/Round 1/track.pkz").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn loose_livery_goes_into_chosen_bike_paints() {
+        let root = place_tmp("loose-livery");
+        let ex = root.join("ex");
+        touch(&ex.join("cool.pnt")); // loose paint, no bike folder
+        let mods = root.join("mods");
+        place_mod(
+            &ex,
+            &mods,
+            "bikes",
+            "MX1OEM_2023_KTM_450_SX-F/paints",
+            "cool-livery",
+        )
+        .unwrap();
+        assert!(mods
+            .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
+            .exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -874,7 +930,7 @@ mod tests {
         let ex = root.join("ex");
         touch(&ex.join("Downloaded Mod/track.pkz"));
         let mods = root.join("mods");
-        place_mod(&ex, &mods, "tracks", "slug").unwrap();
+        place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
         assert!(mods.join("tracks/track.pkz").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
