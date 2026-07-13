@@ -116,12 +116,14 @@ export function importFile(path: string, subpath: string): Promise<void> {
 /**
  * Hosts that block in-app downloads (TLS fingerprinting) — the app opens these
  * in the browser and lets the user import the downloaded file instead.
+ * Matched against the URL (reliable) as well as the host label (which the site
+ * writes inconsistently, e.g. "Media Fire" with a space).
  */
-const MANUAL_DOWNLOAD_HOSTS = ["mediafire", "mega"];
+const BLOCKED_HOST_PATTERNS = ["mediafire", "media fire", "mega.nz", "mega.co", "mega."];
 
-export function isManualHost(host: string): boolean {
-  const h = host.toLowerCase();
-  return MANUAL_DOWNLOAD_HOSTS.some((m) => h.includes(m));
+export function isBlockedDownload(opt: { url: string; host: string }): boolean {
+  const s = `${opt.url} ${opt.host}`.toLowerCase();
+  return BLOCKED_HOST_PATTERNS.some((p) => s.includes(p));
 }
 
 export function onInstallProgress(
