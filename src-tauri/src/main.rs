@@ -68,6 +68,12 @@ async fn add_to_library(
         .map_err(|e| format!("{e:#}"))
 }
 
+#[tauri::command]
+fn import_file(app: tauri::AppHandle, path: String, subpath: String) -> Result<(), String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    install::import_file(&cfg, &path, &subpath).map_err(|e| format!("{e:#}"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -79,7 +85,8 @@ fn main() {
             search_mods,
             get_mod_detail,
             get_installed_mods,
-            add_to_library
+            add_to_library,
+            import_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
