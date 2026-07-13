@@ -1,4 +1,4 @@
-# Frost
+# MXB App
 
 [![Release](https://github.com/Frostn1/mxb-app/actions/workflows/release.yml/badge.svg)](https://github.com/Frostn1/mxb-app/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/Frostn1/mxb-app?sort=semver&label=release)](https://github.com/Frostn1/mxb-app/releases)
@@ -7,14 +7,14 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6)](#development)
 
-**Frost** is a desktop mod manager for [MX Bikes](https://mx-bikes.com/). It
+**MXB App** is a desktop mod manager for [MX Bikes](https://mx-bikes.com/). It
 replaces the tedious manual install dance — open mxb-mods.com, follow the link,
 download from MediaFire, unzip, and move files into the right folder — with a
 single flow:
 
 > **Search a mod → open its page → click _Add to Library_ → done.**
 
-Frost downloads the mod, extracts it, and drops the track files into your MX
+MXB App downloads the mod, extracts it, and drops the track files into your MX
 Bikes `mods/tracks` folder automatically.
 
 Track mods are supported today; more mod types are planned.
