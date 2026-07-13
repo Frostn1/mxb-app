@@ -2,16 +2,27 @@
 
 ## 2026-07-12
 
+### Added
+- **Import a file**: for hosts that block in-app downloads, open the download in
+  the browser then import the downloaded file — the app extracts and places it
+  into the right folder just like a normal install (`import_file` command).
+- Download retries and full error-cause reporting on failed installs.
+
 ### Fixed
-- Installs failing with "error sending request for url …" on MediaFire/CDN
-  downloads: switched to the OS-native TLS stack (SChannel on Windows,
-  SecureTransport on macOS) instead of rustls, added download retries, and now
-  surface the underlying error cause instead of a generic message.
+- Diagnosed installs failing with "error sending request for url …":
+  **MediaFire's download CDN blocks all non-browser TLS clients** (verified
+  across rustls, native-tls/SChannel, curl and Python — only real browsers get
+  through). No TLS backend can bypass it, so MediaFire/Mega now fall back to
+  browser download + Import. Auto-installable hosts (**Google Drive**, direct
+  links) are shown first as the one-click option.
 
 ### Changed
 - Renamed the app to **MXB App by Frost** (window title, title bar, header).
+- Replaced the macOS traffic-light window buttons with **clean Windows-style
+  controls** (minimize / maximize / close, red close hover).
 - The Library now scans **recursively** and lists every installed `.pkz` with
   its sub-folder, so tracks/bikes nested inside folders show up.
+- Kept **rustls** TLS (native-tls's SChannel failed the handshake on Windows).
 
 ## 2026-07-06
 

@@ -1,15 +1,9 @@
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
-import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import RemoveRoundedIcon from "@mui/icons-material/RemoveRounded";
+import CropSquareRoundedIcon from "@mui/icons-material/CropSquareRounded";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
-import {
-  ButtonGroup,
-  Divider,
-  IconButton,
-  Paper,
-  useTheme,
-} from "@mui/material";
+import { Paper } from "@mui/material";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./TitleBar.scss";
 
@@ -21,40 +15,41 @@ interface TitleBarProps {
 }
 
 const TitleBar = ({ isDark, onToggleTheme }: TitleBarProps) => {
-  const theme = useTheme();
-
   return (
-    <Paper data-tauri-drag-region id={"title-bar"}>
-      <div className={"title"}>
+    <Paper data-tauri-drag-region id={"title-bar"} elevation={0} square>
+      <div className={"title"} data-tauri-drag-region>
         {import.meta.env.VITE_APP_NAME ?? "MXB App by Frost"}
       </div>
-      <ButtonGroup className={"buttons"}>
-        <IconButton disableRipple size={"small"} onClick={onToggleTheme}>
+      <div className={"win-controls"}>
+        <button
+          className={"win-btn"}
+          onClick={onToggleTheme}
+          title={"Toggle theme"}
+        >
           {isDark ? <DarkModeIcon /> : <LightModeIcon />}
-        </IconButton>
-        <Divider orientation={"vertical"} />
-        <div
-          onClick={() => appWindow.toggleMaximize()}
-          className={"traffic-light-icon"}
-          style={{ background: theme.palette.success.main }}
-        >
-          <OpenInFullIcon className={"inner-icon"} />
-        </div>
-        <div
+        </button>
+        <button
+          className={"win-btn"}
           onClick={() => appWindow.minimize()}
-          className={"traffic-light-icon"}
-          style={{ background: theme.palette.warning.main }}
+          title={"Minimize"}
         >
-          <RemoveRoundedIcon className={"inner-icon"} />
-        </div>
-        <div
+          <RemoveRoundedIcon />
+        </button>
+        <button
+          className={"win-btn"}
+          onClick={() => appWindow.toggleMaximize()}
+          title={"Maximize"}
+        >
+          <CropSquareRoundedIcon />
+        </button>
+        <button
+          className={"win-btn close"}
           onClick={() => appWindow.close()}
-          className={"traffic-light-icon"}
-          style={{ background: theme.palette.error.main }}
+          title={"Close"}
         >
-          <CloseRoundedIcon className={"inner-icon"} />
-        </div>
-      </ButtonGroup>
+          <CloseRoundedIcon />
+        </button>
+      </div>
     </Paper>
   );
 };
