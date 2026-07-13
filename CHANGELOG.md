@@ -3,6 +3,9 @@
 ## 2026-07-13
 
 ### Added
+- README release badges: latest release, release date, and total download count
+  (dynamic via shields.io, GitHub-backed), plus MIT license and Windows x64
+  platform badges. Added a root `LICENSE` file (MIT).
 - **FrostMod live-reload integration**: when you add a mod, the app now signals a
   running [FrostMod](https://github.com/Frostn1/frostmod) to re-scan the mods
   folder so new tracks/bikes appear in-game without a restart. Works by setting
