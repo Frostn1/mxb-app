@@ -100,6 +100,15 @@ export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {
   return invoke<InstalledMod[]>("get_installed_mods", { subpath });
 }
 
+/** Move an installed mod file into a different folder (relative to the type dir). */
+export function moveMod(
+  fromPath: string,
+  toFolder: string,
+  subpath: string,
+): Promise<void> {
+  return invoke<void>("move_mod", { fromPath, toFolder, subpath });
+}
+
 /** Kick off download → extract → place. Progress arrives via `onInstallProgress`. */
 export function addToLibrary(
   slug: string,
