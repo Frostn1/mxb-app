@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -13,15 +13,19 @@ import ArrowBackIosNewRoundedIcon from "@mui/icons-material/ArrowBackIosNewRound
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Navigation, Pagination } from "swiper/modules";
 import { open } from "@tauri-apps/plugin-shell";
+import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import "swiper/css";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
 import {
   addToLibrary,
   getModDetail,
+  importFile,
+  isManualHost,
   normalizeModName,
   onInstallProgress,
   type ModType,
@@ -57,11 +61,14 @@ const ModDetail = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<InstallProgress | null>(null);
+  const [manualHint, setManualHint] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setDetail(null);
     setLoadError(null);
+    setProgress(null);
+    setManualHint(false);
     getModDetail(slug)
       .then((d) => !cancelled && setDetail(d))
       .catch((e) => !cancelled && setLoadError(String(e)));
@@ -69,6 +76,17 @@ const ModDetail = ({
       cancelled = true;
     };
   }, [slug]);
+
+  // Auto-installable hosts first, so the primary button is a one-click install.
+  const downloads = useMemo(
+    () =>
+      detail
+        ? [...detail.downloads].sort(
+            (a, b) => Number(isManualHost(a.host)) - Number(isManualHost(b.host)),
+          )
+        : [],
+    [detail],
+  );
 
   const handleInstall = async (opt: DownloadOption) => {
     setInstalling(true);
@@ -84,6 +102,36 @@ const ModDetail = ({
       setProgress({ slug, stage: "error", message: String(e) });
     } finally {
       unlisten();
+      setInstalling(false);
+    }
+  };
+
+  // MediaFire/Mega block in-app downloads — open in the browser to grab the
+  // file, then the user imports it below.
+  const handleDownload = (opt: DownloadOption) => {
+    if (isManualHost(opt.host)) {
+      setManualHint(true);
+      open(opt.url);
+      return;
+    }
+    handleInstall(opt);
+  };
+
+  const handleImport = async () => {
+    const picked = await pickFile({
+      multiple: false,
+      filters: [{ name: "Mod files", extensions: ["pkz", "zip", "rar", "7z"] }],
+    });
+    if (typeof picked !== "string") return;
+    setInstalling(true);
+    setProgress({ slug, stage: "placing" });
+    try {
+      await importFile(picked, modType.installSubpath);
+      setProgress({ slug, stage: "done" });
+      onInstalled();
+    } catch (e) {
+      setProgress({ slug, stage: "error", message: String(e) });
+    } finally {
       setInstalling(false);
     }
   };
@@ -179,18 +227,43 @@ const ModDetail = ({
           </Alert>
         )}
         <Stack direction={"row"} spacing={1.5} flexWrap={"wrap"} useFlexGap>
-          {detail.downloads.map((opt, i) => (
-            <Button
-              key={`${opt.url}-${i}`}
-              variant={i === 0 ? "contained" : "outlined"}
-              startIcon={<DownloadRoundedIcon />}
-              disabled={installing}
-              onClick={() => handleInstall(opt)}
-            >
-              {i === 0 ? "Add to Library" : `Mirror · ${opt.host}`}
-            </Button>
-          ))}
+          {downloads.map((opt, i) => {
+            const manual = isManualHost(opt.host);
+            return (
+              <Button
+                key={`${opt.url}-${i}`}
+                variant={i === 0 ? "contained" : "outlined"}
+                startIcon={
+                  manual ? <OpenInNewRoundedIcon /> : <DownloadRoundedIcon />
+                }
+                disabled={installing}
+                onClick={() => handleDownload(opt)}
+              >
+                {manual
+                  ? `Download · ${opt.host}`
+                  : i === 0
+                    ? "Add to Library"
+                    : `Mirror · ${opt.host}`}
+              </Button>
+            );
+          })}
+          <Button
+            variant={"text"}
+            startIcon={<UploadFileRoundedIcon />}
+            disabled={installing}
+            onClick={handleImport}
+          >
+            Import a file
+          </Button>
         </Stack>
+
+        {manualHint && (
+          <Alert severity={"info"} sx={{ mt: 2 }}>
+            This host blocks in-app downloads, so it opened in your browser.
+            Once it&apos;s downloaded, click <b>Import a file</b> and pick it —
+            it&apos;ll be added to your {modType.label.toLowerCase()}.
+          </Alert>
+        )}
 
         {progress && (
           <Box className={"progress"} sx={{ mt: 2 }}>

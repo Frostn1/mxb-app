@@ -86,6 +86,32 @@ pub async fn add_to_library(
     Ok(())
 }
 
+/// Import an already-downloaded archive or `.pkz` from disk. Used for hosts that
+/// block in-app downloads (e.g. MediaFire): the user downloads via the browser,
+/// then imports the file here and it's extracted/placed like a normal install.
+pub fn import_file(cfg: &AppConfig, file_path: &str, subpath: &str) -> anyhow::Result<()> {
+    let src = Path::new(file_path);
+    if !src.is_file() {
+        anyhow::bail!("file not found: {file_path}");
+    }
+
+    let work = std::env::temp_dir().join(format!("frost-import-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    let extracted = work.join("extracted");
+    std::fs::create_dir_all(&extracted)?;
+
+    extract_archive(src, &extracted)?;
+    let dest = crate::library::mods_subdir(&cfg.mods_path, subpath);
+    let slug = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "import".to_string());
+    place_mod_files(&extracted, &dest, &slug)?;
+
+    let _ = std::fs::remove_dir_all(&work);
+    Ok(())
+}
+
 // --- host resolution -------------------------------------------------------
 
 async fn resolve_direct_url(client: &Client, url: &str, host: &str) -> anyhow::Result<String> {
@@ -482,6 +508,58 @@ mod tests {
                 resp.content_length()
             );
             assert!(!ct.starts_with("text/html"), "expected a file, got HTML");
+        });
+    }
+
+    /// Live test: can we actually fetch a real MediaFire-hosted track? Tries
+    /// both TLS backends against the CDN. Ignored by default.
+    #[test]
+    #[ignore = "hits live MediaFire CDN"]
+    fn live_mediafire_download() {
+        tauri::async_runtime::block_on(async {
+            let page_client = Client::builder().user_agent(UA).build().unwrap();
+            let page = page_client
+                .get("https://mxb-mods.com/mosca-mx/")
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap();
+            let mf = Regex::new(r#"https://www\.mediafire\.com/file/[^"']+"#)
+                .unwrap()
+                .find(&page)
+                .map(|m| m.as_str().to_string())
+                .expect("mediafire link on page");
+            let direct = resolve_mediafire(&page_client, &mf)
+                .await
+                .expect("resolve mediafire");
+            println!("direct host: {}", &direct[..48.min(direct.len())]);
+
+            let client = Client::builder()
+                .user_agent(UA)
+                .use_rustls_tls()
+                .build()
+                .unwrap();
+            match client
+                .get(&direct)
+                .header("Range", "bytes=0-102399")
+                .send()
+                .await
+            {
+                Ok(r) => {
+                    let status = r.status();
+                    match r.bytes().await {
+                        Ok(b) => println!(
+                            "[rustls] status={status} bytes={} magic={:?}",
+                            b.len(),
+                            &b[..4.min(b.len())]
+                        ),
+                        Err(e) => println!("[rustls] body error: {e}"),
+                    }
+                }
+                Err(e) => println!("[rustls] send error: {e:#}"),
+            }
         });
     }
 

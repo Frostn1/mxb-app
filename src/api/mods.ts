@@ -108,6 +108,22 @@ export function addToLibrary(
   return invoke<void>("add_to_library", { slug, url, host, subpath });
 }
 
+/** Import a file the user downloaded manually (extract + place into `subpath`). */
+export function importFile(path: string, subpath: string): Promise<void> {
+  return invoke<void>("import_file", { path, subpath });
+}
+
+/**
+ * Hosts that block in-app downloads (TLS fingerprinting) — the app opens these
+ * in the browser and lets the user import the downloaded file instead.
+ */
+const MANUAL_DOWNLOAD_HOSTS = ["mediafire", "mega"];
+
+export function isManualHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return MANUAL_DOWNLOAD_HOSTS.some((m) => h.includes(m));
+}
+
 export function onInstallProgress(
   cb: (progress: InstallProgress) => void,
 ): Promise<UnlistenFn> {
