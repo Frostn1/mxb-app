@@ -73,3 +73,17 @@ export interface InstallProgress {
   total?: number;
   message?: string;
 }
+
+/**
+ * Result of asking FrostMod (the in-game live-reload tool) to refresh:
+ * - `signaled`    — FrostMod was running and reloaded the mods folder live.
+ * - `not_running` — FrostMod isn't running; the mod loads on the game's next launch.
+ * - `unsupported` — not a Windows build (dev only).
+ */
+export type ReloadOutcome = "signaled" | "not_running" | "unsupported";
+
+/** Emitted on `frostmod-reload` after a mod is placed. */
+export interface FrostmodReload {
+  slug: string;
+  outcome: ReloadOutcome;
+}
