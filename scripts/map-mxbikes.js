@@ -2,9 +2,9 @@
 // Maps your MX Bikes folder structure (read-only) so we can see exactly how
 // tracks, bikes and liveries/paints are organized on disk.
 //
-// Usage (from anywhere, no install needed):
-//   node map-mxbikes.mjs
-//   node map-mxbikes.mjs "C:\Users\you\Documents\PiBoSo\MX Bikes"
+// Run from the repo folder (needs no install):
+//   node scripts/map-mxbikes.js
+//   node scripts/map-mxbikes.js "C:\Users\you\Documents\PiBoSo\MX Bikes"
 //
 // It prints a summary and writes the full map to `mxbikes-structure.txt` in the
 // current folder. Send me that file (or paste it).
@@ -25,7 +25,7 @@ if (!fs.existsSync(root)) {
   console.error(`\nCouldn't find MX Bikes at:\n  ${root}\n`);
   console.error("Pass the path explicitly, e.g.:");
   console.error(
-    `  node map-mxbikes.mjs "C:\\Users\\you\\Documents\\PiBoSo\\MX Bikes"\n`,
+    `  node scripts/map-mxbikes.js "C:\\Users\\you\\Documents\\PiBoSo\\MX Bikes"\n`,
   );
   process.exit(1);
 }
