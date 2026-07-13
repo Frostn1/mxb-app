@@ -76,6 +76,19 @@ fn import_file(app: tauri::AppHandle, path: String, subpath: String) -> Result<(
     install::import_file(&app, &cfg, &path, &subpath).map_err(|e| format!("{e:#}"))
 }
 
+/// Move an installed mod file into a different folder under its type dir.
+#[tauri::command]
+fn move_mod(
+    app: tauri::AppHandle,
+    from_path: String,
+    to_folder: String,
+    subpath: String,
+) -> Result<(), String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    library::move_mod(&cfg.mods_path, &from_path, &to_folder, &subpath)
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// Ask a running FrostMod to live-reload the mods folder (manual button).
 #[tauri::command]
 fn frostmod_reload() -> ReloadOutcome {
@@ -101,6 +114,7 @@ fn main() {
             get_installed_mods,
             add_to_library,
             import_file,
+            move_mod,
             frostmod_reload,
             frostmod_running
         ])
