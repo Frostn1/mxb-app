@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-07-14
+
+### Added
+- **App icon**: a snowflake mark on an icy gradient badge, generated into
+  `src-tauri/icons/*` (`.ico`, `.icns`, PNGs) — this is what shows on the
+  taskbar/dock and the `.exe`. The in-app UI is unchanged.
+- **Platform-adaptive title bar**: on macOS the window now uses native
+  decorations with `titleBarStyle: "Overlay"` (new `tauri.macos.conf.json`), so
+  it gets real traffic-lights, rounded corners and the native shadow, and our
+  custom window buttons are hidden. Windows keeps the frameless custom title bar
+  and its Windows-style controls, unchanged.
+- README: roadmap entries for **bike + rider liveries** and **auto-update**.
+
+### Fixed
+- The product name still read "MXB App by Frost" in `productName` (the name shown
+  on the taskbar and the installed `.exe`) and in the window title — both are now
+  **MXB App**. Remaining in-app copy that called the app "Frost" (title bar,
+  Setup, install/blocked-host text) now says **MXB App**. (FrostMod, the separate
+  live-reload tool, keeps its name.)
+
+### Changed
+- README tech stack updated to Tailwind + shadcn/ui + lucide + Sonner (was MUI).
+
 ## 2026-07-13
 
 ### Added
