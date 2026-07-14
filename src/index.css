@@ -1,0 +1,240 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------------------------------------------ *
+ * mxb-app design tokens — dark is the primary theme (from the redesign) *
+ * ------------------------------------------------------------------ */
+:root {
+  --radius: 0.7rem;
+
+  /* Chrome + surfaces */
+  --window: #0d0f12; /* titlebar + sidebar */
+  --background: #121417; /* main content area */
+  --foreground: #eef2f5;
+  --card: #1a1d22;
+  --card-foreground: #eef2f5;
+  --popover: #22262c; /* menus, toasts */
+  --popover-foreground: #eef2f5;
+
+  /* Accent (icy frost) */
+  --primary: #9ccfec;
+  --primary-foreground: #0d1216;
+
+  /* Segmented / neutral fills */
+  --secondary: #2a2f36;
+  --secondary-foreground: #eef2f5;
+  --muted: #1a1d22;
+  --muted-foreground: #8a949c;
+  --faint: #5f6a73;
+
+  /* Sidebar active tint */
+  --accent: rgba(156, 207, 236, 0.12);
+  --accent-foreground: #c3e3f7;
+
+  /* Status */
+  --destructive: #e88f8f;
+  --destructive-foreground: #1c0f0f;
+  --success: #7fd6a4;
+  --warning: #e8c07f;
+
+  /* Lines + controls */
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #9ccfec;
+}
+
+.dark {
+  --window: #0d0f12;
+  --background: #121417;
+  --foreground: #eef2f5;
+  --card: #1a1d22;
+  --card-foreground: #eef2f5;
+  --popover: #22262c;
+  --popover-foreground: #eef2f5;
+  --primary: #9ccfec;
+  --primary-foreground: #0d1216;
+  --secondary: #2a2f36;
+  --secondary-foreground: #eef2f5;
+  --muted: #1a1d22;
+  --muted-foreground: #8a949c;
+  --faint: #5f6a73;
+  --accent: rgba(156, 207, 236, 0.12);
+  --accent-foreground: #c3e3f7;
+  --destructive: #e88f8f;
+  --destructive-foreground: #1c0f0f;
+  --success: #7fd6a4;
+  --warning: #e8c07f;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #9ccfec;
+}
+
+/* Light theme — adapted from the app's previous light palette */
+.light {
+  --window: #cfd6da;
+  --background: #dee4e7;
+  --foreground: #0a0b0d;
+  --card: #eef2f4;
+  --card-foreground: #0a0b0d;
+  --popover: #ffffff;
+  --popover-foreground: #0a0b0d;
+  --primary: #2081a3;
+  --primary-foreground: #ffffff;
+  --secondary: #cbd3d7;
+  --secondary-foreground: #0a0b0d;
+  --muted: #e4e9eb;
+  --muted-foreground: rgba(0, 0, 0, 0.55);
+  --faint: rgba(0, 0, 0, 0.42);
+  --accent: rgba(32, 129, 163, 0.12);
+  --accent-foreground: #17627d;
+  --destructive: #c4453c;
+  --destructive-foreground: #ffffff;
+  --success: #2e9e6b;
+  --warning: #b7861f;
+  --border: rgba(0, 0, 0, 0.1);
+  --input: rgba(0, 0, 0, 0.12);
+  --ring: #2081a3;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-window: var(--window);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-sans: "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: ui-monospace, Menlo, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Allow selecting text (e.g. to copy an error); the title bar opts back out. */
+    user-select: text;
+    overflow: hidden;
+  }
+
+  /* Custom scrollbars to match the dark chrome */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--foreground) 14%, transparent);
+    border-radius: 99px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--foreground) 24%, transparent);
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@keyframes frost-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+/* Authored HTML from mxb-mods.com's REST API (Mod Detail description). */
+.mod-description {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--foreground) 80%, transparent);
+  text-wrap: pretty;
+}
+.mod-description :is(h1, h2, h3, h4) {
+  color: var(--foreground);
+  font-weight: 700;
+  margin: 1.1em 0 0.4em;
+  line-height: 1.25;
+}
+.mod-description h1 { font-size: 1.35em; }
+.mod-description h2 { font-size: 1.2em; }
+.mod-description h3 { font-size: 1.08em; }
+.mod-description p { margin: 0 0 0.85em; }
+.mod-description a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.mod-description a:hover { text-decoration: underline; }
+.mod-description :is(ul, ol) { margin: 0 0 0.85em; padding-left: 1.3em; }
+.mod-description li { margin: 0.2em 0; }
+.mod-description img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin: 0.5em 0;
+}
+.mod-description :is(strong, b) { color: var(--foreground); font-weight: 700; }
+.mod-description hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+
+/* Swiper overrides to match the frost palette */
+.frost-gallery {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.frost-gallery .swiper-button-next,
+.frost-gallery .swiper-button-prev {
+  color: #fff;
+  --swiper-navigation-size: 24px;
+}
+.frost-gallery .swiper-pagination-bullet {
+  background: rgba(255, 255, 255, 0.5);
+  opacity: 1;
+}
+.frost-gallery .swiper-pagination-bullet-active {
+  background: #fff;
+  width: 16px;
+  border-radius: 99px;
+}
