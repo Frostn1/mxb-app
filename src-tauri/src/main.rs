@@ -95,6 +95,19 @@ fn move_mod(
         .map_err(|e| format!("{e:#}"))
 }
 
+/// Move an installed mod file to the OS Recycle Bin / Trash.
+#[tauri::command]
+fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String) -> Result<(), String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    library::uninstall_mod(&cfg.mods_path, &from_path, &subpath).map_err(|e| format!("{e:#}"))
+}
+
+/// Reveal an installed mod file in the OS file manager.
+#[tauri::command]
+fn reveal_in_explorer(path: String) -> Result<(), String> {
+    library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
+}
+
 /// Ask a running FrostMod to live-reload the mods folder (manual button).
 #[tauri::command]
 fn frostmod_reload() -> ReloadOutcome {
@@ -121,6 +134,8 @@ fn main() {
             add_to_library,
             import_file,
             move_mod,
+            uninstall_mod,
+            reveal_in_explorer,
             frostmod_reload,
             frostmod_running
         ])

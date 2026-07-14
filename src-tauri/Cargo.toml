@@ -36,6 +36,8 @@ zip = "2"
 sevenz-rust = "0.6"
 unrar = "0.5"
 anyhow = "1"
+# Move uninstalled mods to the OS Recycle Bin / Trash rather than deleting outright.
+trash = "5"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

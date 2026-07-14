@@ -1,13 +1,12 @@
-import { CssBaseline, useMediaQuery } from "@mui/material";
-import { ThemeProvider } from "@mui/material/styles";
-import { useEffect, useMemo, useState } from "react";
-import LoginPage from "./Components/LoginPage/LoginPage";
-import "./App.scss";
-import Footer from "./Components/Footer/Footer";
+import { useCallback, useEffect, useState } from "react";
 import TitleBar from "./Components/TitleBar/TitleBar";
-import { darkTheme, lightTheme } from "./theme";
 import Dashboard from "./Components/Dashboard/Dashboard";
+import Setup from "./Components/Setup/Setup";
+import { ThemeProvider } from "./Context/Theme";
+import { FrostmodProvider } from "./Context/Frostmod";
 import { ConfigContext } from "./Context/Config";
+import { Toaster } from "@/Components/ui/sonner";
+import { TooltipProvider } from "@/Components/ui/tooltip";
 import { getConfig, isConfigured } from "./api/mods";
 import type { Config } from "./types";
 
@@ -15,38 +14,21 @@ const App = () => {
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<Config | null>(null);
 
-  const loadConfig = async () => {
+  const reloadConfig = useCallback(async () => {
     setConfig(await getConfig());
-  };
+  }, []);
 
   useEffect(() => {
     (async () => {
       try {
-        if (await isConfigured()) await loadConfig();
+        if (await isConfigured()) await reloadConfig();
       } catch (err) {
         console.error("Startup failed", err);
       } finally {
         setReady(true);
       }
     })();
-  }, []);
-
-  const prefersDark = useMediaQuery("(prefers-color-scheme: dark)");
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const stored = localStorage.getItem("frost-theme");
-    return stored ? stored === "dark" : prefersDark;
-  });
-  const theme = useMemo(
-    () => (isDarkMode ? darkTheme : lightTheme),
-    [isDarkMode],
-  );
-
-  const toggleTheme = () =>
-    setIsDarkMode((v) => {
-      const next = !v;
-      localStorage.setItem("frost-theme", next ? "dark" : "light");
-      return next;
-    });
+  }, [reloadConfig]);
 
   // Block the webview's browser refresh/find shortcuts.
   useEffect(() => {
@@ -63,18 +45,25 @@ const App = () => {
   }, []);
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <TitleBar isDark={isDarkMode} onToggleTheme={toggleTheme} />
-      {ready &&
-        (config ? (
-          <ConfigContext.Provider value={config}>
-            <Dashboard />
-          </ConfigContext.Provider>
-        ) : (
-          <LoginPage onComplete={loadConfig} />
-        ))}
-      <Footer />
+    <ThemeProvider>
+      <FrostmodProvider>
+        <TooltipProvider delayDuration={300}>
+          <div className="grid h-screen grid-rows-[42px_1fr] overflow-hidden">
+            <TitleBar />
+            <main className="min-h-0 overflow-hidden bg-background text-foreground">
+              {ready &&
+                (config ? (
+                  <ConfigContext.Provider value={{ config, reloadConfig }}>
+                    <Dashboard />
+                  </ConfigContext.Provider>
+                ) : (
+                  <Setup onComplete={reloadConfig} />
+                ))}
+            </main>
+          </div>
+          <Toaster />
+        </TooltipProvider>
+      </FrostmodProvider>
     </ThemeProvider>
   );
 };
