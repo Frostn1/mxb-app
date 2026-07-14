@@ -45,7 +45,10 @@ first launch — choose _Run anyway_ / right-click _Open_.
 - [Tauri 2](https://tauri.app/) (Rust backend)
 - [React 18](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
   + [Vite](https://vitejs.dev/)
-- [MUI](https://mui.com/) for UI, [Swiper](https://swiperjs.com/) for galleries
+- [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
+  (Radix primitives) for UI, [lucide](https://lucide.dev/) icons,
+  [Sonner](https://sonner.emilkowal.ski/) toasts, and
+  [Swiper](https://swiperjs.com/) for galleries
 
 ## Development
 
@@ -99,7 +102,15 @@ without tagging via **Actions → Release → Run workflow**.
 
 ## Roadmap
 
-- More mod types (bikes, assets, …) — the `ModSource` trait and category ids
-  already generalize beyond tracks.
+Features coming next:
+
+- **Liveries** — browse and install **bike liveries** and **rider gear/kit**
+  (helmet, jersey, pants, boots), installed into each bike's `paints` folder and
+  the rider folders, with previews so you can see a livery before installing it.
+- **Auto-update** — the app updates itself in the background: it checks for a new
+  release on launch, downloads it, and installs on restart, so you're always on
+  the latest version without re-downloading the installer.
+- More mod types (assets, sounds, wheels, …) — the `ModSource` trait and category
+  ids already generalize beyond tracks.
 - An injected DLL that reads your in-game track list and one-click-installs the
   tracks you're missing, then refreshes the game library.
