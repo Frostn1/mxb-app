@@ -76,6 +76,48 @@ pub fn move_mod(
     Ok(())
 }
 
+/// Move an installed mod file to the OS Recycle Bin / Trash. The file must live
+/// under the type dir (same guard as `move_mod`) so a stray path can't be trashed.
+pub fn uninstall_mod(mods_path: &str, from_path: &str, subpath: &str) -> anyhow::Result<()> {
+    let from = PathBuf::from(from_path);
+    if !from.is_file() {
+        anyhow::bail!("file not found: {from_path}");
+    }
+    let type_dir = mods_subdir(mods_path, subpath);
+    if !from.starts_with(&type_dir) {
+        anyhow::bail!("refusing to uninstall a file outside the {subpath} folder");
+    }
+    trash::delete(&from)?;
+    Ok(())
+}
+
+/// Reveal a file in the OS file manager, selecting it when supported.
+pub fn reveal_in_explorer(path: &str) -> anyhow::Result<()> {
+    let p = PathBuf::from(path);
+    if !p.exists() {
+        anyhow::bail!("path not found: {path}");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg("/select,")
+            .arg(&p)
+            .spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg("-R").arg(&p).spawn()?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // No portable "select the file" on Linux — open its parent folder.
+        let target = p.parent().unwrap_or(&p);
+        std::process::Command::new("xdg-open").arg(target).spawn()?;
+    }
+    Ok(())
+}
+
 /// Recursively find installed `.pkz` mod files under `<mods_path>/<subpath>` at
 /// any depth (tracks/bikes are frequently nested inside sub-folders).
 pub fn scan_mods(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<InstalledMod>> {

@@ -3,6 +3,23 @@
 ## 2026-07-13
 
 ### Added
+- **UI redesign**: a dark, Apple-clean rebuild of the whole UI on Tailwind +
+  shadcn/ui, replacing MUI. A permanent **left sidebar** (Browse / Library /
+  Settings) with a live install badge, a persistent **global install indicator**
+  and **FrostMod status pill** that survive navigation, and the game path.
+- **Settings screen** (new): game folder (change / auto-detect + re-scan),
+  appearance (Light / Dark / System theme), FrostMod status + reload, and about.
+- **Install popup** on "Add to Library": pick the destination folder (with mod
+  counts, remembered per category) and choose a download mirror (default
+  pre-selected, browser-only hosts flagged) before installing.
+- **Toast notifications** (bottom-right) for install success/failure and
+  uninstall, replacing inline alerts.
+- **Library actions**: per-mod context menu with Move to folder, **Show in
+  Explorer**, and **Uninstall** (moves the file to the Recycle Bin via new
+  `reveal_in_explorer` / `uninstall_mod` Tauri commands + the `trash` crate).
+- **Mod Detail** right-rail install surface with a live stage chain
+  (Resolve → Download → Extract → Place → Reload) and a guided 2-step
+  blocked-host flow for browser-only mirrors.
 - README release badges: latest release, release date, and total download count
   (dynamic via shields.io, GitHub-backed), plus MIT license and Windows x64
   platform badges. Added a root `LICENSE` file (MIT).
@@ -14,17 +31,45 @@
   detail view shows whether FrostMod picked it up live or isn't running, and new
   `frostmod_reload` / `frostmod_running` commands back a manual trigger + status.
 
+- **Right-click actions**: right-clicking a mod in **Browse** offers *Quick
+  install*, *Open details*, and *Select*; right-clicking a row in **Library**
+  opens the same Move / Show in Explorer / Uninstall menu as the 3-dot button.
+- **Quick install**: installs a mod straight from Browse with no detail page and
+  no dialog — it resolves the best direct mirror and reuses the remembered (or
+  auto-guessed) destination folder, then reports where it landed via a toast.
+  Browser-only hosts (MediaFire/Mega) can't install silently and are skipped
+  with an explanation.
+- **Multi-select + bulk install** in Browse: select mods via the card checkbox or
+  the right-click menu, then *Quick install N* from the selection bar
+  (with *Select all* / *Clear*).
+- **Install queue**: installs still run strictly one at a time, but extra
+  requests now queue and drain in order, with a "+N queued" line on the sidebar's
+  install card.
+
 ### Fixed
+- Mod Detail screenshots rendered squashed: the gallery and thumbnail strip are
+  flex children of a scrolling column, so they were being **shrunk** instead of
+  scrolled and lost their 16:9 height. Pinned them with `flex-none`.
+- The **GitHub / Changelog links in Settings** pointed at a non-existent
+  `Frostn1/frost` repo — corrected to `Frostn1/mxb-app`, and the About line now
+  reads "mxb-app" rather than the old product name.
 - MediaFire mods were mis-detected as auto-installable because the host label is
   written "Media Fire" (with a space) — downloads are now classified by **URL**,
   so blocked hosts correctly open in the browser instead of failing.
 
 ### Changed
+- Navigation moved from top tabs to the left **sidebar**; the theme toggle moved
+  from the title bar into Settings → Appearance. **Setup** is now a single step.
 - Clearer download UI: one **official one-click** option; other links are labeled
   (a dedicated-**server** build is called out as "not needed for normal play"
   rather than "mirror"); the **Import** step only appears when a blocked host is
   used.
 - Enabled **text selection** and added a **Copy** button on error messages.
+
+### Removed
+- MUI, Emotion, and all per-component SCSS; the top-tab `Header`, the `Footer`,
+  and the old `LoginPage`/theme are replaced by the sidebar shell, Settings, and
+  a token-based Tailwind theme.
 
 ## 2026-07-12
 

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Config,
+  DownloadOption,
   FrostmodReload,
   InstalledMod,
   InstallProgress,
@@ -109,6 +110,16 @@ export function moveMod(
   return invoke<void>("move_mod", { fromPath, toFolder, subpath });
 }
 
+/** Move an installed mod file to the OS Recycle Bin / Trash. */
+export function uninstallMod(fromPath: string, subpath: string): Promise<void> {
+  return invoke<void>("uninstall_mod", { fromPath, subpath });
+}
+
+/** Reveal an installed mod file in the OS file manager. */
+export function revealInExplorer(path: string): Promise<void> {
+  return invoke<void>("reveal_in_explorer", { path });
+}
+
 /** Kick off download → extract → place. Progress arrives via `onInstallProgress`. */
 export function addToLibrary(
   slug: string,
@@ -200,6 +211,94 @@ const BLOCKED_HOST_PATTERNS = ["mediafire", "media fire", "mega.nz", "mega.co", 
 export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   const s = `${opt.url} ${opt.host}`.toLowerCase();
   return BLOCKED_HOST_PATTERNS.some((p) => s.includes(p));
+}
+
+/**
+ * Ordered, de-duped playable mirrors: direct (non-blocked) hosts first, and the
+ * author's "Default" first within each group. Server-only builds are dropped
+ * unless they're all that's on offer. Shared by the detail view, the install
+ * dialog, and quick-install so the "primary" mirror is chosen identically.
+ */
+export function sortMirrors(detail: ModDetail): DownloadOption[] {
+  const all = detail.downloads ?? [];
+  const playable = all.filter((d) => !d.isServer);
+  const pool = playable.length ? playable : all;
+  return [...pool].sort((a, b) => {
+    const ab = isBlockedDownload(a) ? 1 : 0;
+    const bb = isBlockedDownload(b) ? 1 : 0;
+    if (ab !== bb) return ab - bb;
+    return Number(b.isDefault) - Number(a.isDefault);
+  });
+}
+
+/** localStorage key for the remembered install folder of a mod type. */
+export function destStorageKey(modType: ModType): string {
+  return `frost-dest-${modType.id}`;
+}
+
+/** Remembered folder (if still a valid option) else the educated guess. */
+export function resolveInitialFolder(
+  modType: ModType,
+  destOptions: DestOption[],
+  guess: string,
+): string {
+  const remembered = localStorage.getItem(destStorageKey(modType)) ?? "";
+  if (destOptions.some((o) => o.value === remembered)) return remembered;
+  return guess;
+}
+
+/** Fully-resolved input for a one-click install (matches `startInstall`). */
+export interface QuickInstallParams {
+  slug: string;
+  title: string;
+  subpath: string;
+  destFolder: string;
+  url: string;
+  host: string;
+}
+
+export type QuickInstallResult =
+  | { ok: true; params: QuickInstallParams }
+  | { ok: false; reason: "blocked" | "none"; title: string; host?: string };
+
+/**
+ * Resolve everything a silent quick-install needs from a mod slug: fetch the
+ * page detail, pick the primary direct mirror, and compute the destination
+ * folder the same way the install dialog would. Hosts that block in-app
+ * downloads (MediaFire/Mega) can't be installed silently — reported as
+ * `blocked` so the caller can route the user to the browser flow.
+ */
+export async function resolveQuickInstall(
+  slug: string,
+  modType: ModType,
+): Promise<QuickInstallResult> {
+  const detail = await getModDetail(slug);
+  const mirrors = sortMirrors(detail);
+  const primary = mirrors[0];
+  if (!primary) return { ok: false, reason: "none", title: detail.title };
+  if (isBlockedDownload(primary))
+    return { ok: false, reason: "blocked", title: detail.title, host: primary.host };
+
+  let installed: InstalledMod[] = [];
+  try {
+    installed = await getInstalledMods(modType.installSubpath);
+  } catch {
+    installed = [];
+  }
+  const { options, guess } = buildDestinations(modType, detail.title, installed);
+  const destFolder = resolveInitialFolder(modType, options, guess);
+
+  return {
+    ok: true,
+    params: {
+      slug,
+      title: detail.title,
+      subpath: modType.installSubpath,
+      destFolder,
+      url: primary.url,
+      host: primary.host,
+    },
+  };
 }
 
 export function onInstallProgress(

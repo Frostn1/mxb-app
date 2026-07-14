@@ -1,0 +1,246 @@
+import { useEffect, useRef, useState } from "react";
+import { Check, RefreshCw, ExternalLink } from "lucide-react";
+import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { getVersion } from "@tauri-apps/api/app";
+import { toast } from "sonner";
+import { createConfig } from "../../api/mods";
+import { useConfig } from "../../Context/Config";
+import { useTheme, type ThemeMode } from "../../Context/Theme";
+import { useFrostmod } from "../../Context/Frostmod";
+import { Button } from "@/Components/ui/button";
+import { Segmented } from "@/Components/ui/segmented";
+import { cn } from "@/lib/utils";
+
+const REPO_URL = "https://github.com/Frostn1/mxb-app";
+
+type SectionId = "folder" | "appearance" | "frostmod" | "about";
+const SECTIONS: { id: SectionId; label: string }[] = [
+  { id: "folder", label: "Game folder" },
+  { id: "appearance", label: "Appearance" },
+  { id: "frostmod", label: "FrostMod" },
+  { id: "about", label: "About & updates" },
+];
+
+export default function Settings() {
+  const { config, reloadConfig } = useConfig();
+  const { theme, setTheme } = useTheme();
+  const { running, reload } = useFrostmod();
+  const [version, setVersion] = useState("");
+  const [active, setActive] = useState<SectionId>("folder");
+  const [busy, setBusy] = useState(false);
+  const refs = useRef<Record<SectionId, HTMLDivElement | null>>({
+    folder: null,
+    appearance: null,
+    frostmod: null,
+    about: null,
+  });
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => setVersion(""));
+  }, []);
+
+  const goto = (id: SectionId) => {
+    setActive(id);
+    refs.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const changeFolder = async () => {
+    const picked = await pickFolder({
+      directory: true,
+      multiple: false,
+      title: "Select your MX Bikes folder",
+    });
+    if (typeof picked !== "string") return;
+    setBusy(true);
+    try {
+      await createConfig({ modsPath: picked });
+      await reloadConfig();
+      toast.success("Game folder updated", { description: "Your library will re-scan." });
+    } catch (e) {
+      toast.error("Couldn't set folder", { description: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const detectAgain = async () => {
+    setBusy(true);
+    try {
+      await createConfig({ modsPath: "" });
+      await reloadConfig();
+      toast.success("Re-detected your MX Bikes folder");
+    } catch (e) {
+      toast.error("Couldn't detect folder", { description: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reloadGame = async () => {
+    const outcome = await reload();
+    if (outcome === "signaled") toast.success("FrostMod reloaded the game.");
+    else if (outcome === "not_running")
+      toast.info("FrostMod isn't running — start it to hot-reload mods.");
+    else toast.info("Reload isn't available on this platform.");
+  };
+
+  return (
+    <div className="flex h-full">
+      <nav className="flex w-[170px] flex-none flex-col gap-0.5 px-4 pt-[70px]">
+        {SECTIONS.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => goto(s.id)}
+            className={cn(
+              "cursor-default rounded-md px-3 py-1.5 text-left text-[12.5px] transition-colors",
+              active === s.id
+                ? "bg-foreground/[0.07] font-semibold text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-5">
+        <div className="flex max-w-[640px] flex-col gap-[18px]">
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Settings</h1>
+
+          {/* game folder */}
+          <Section
+            title="MX Bikes folder"
+            desc="Where mods are installed. Changing it re-scans your library."
+            innerRef={(el) => (refs.current.folder = el)}
+          >
+            <div className="flex gap-2">
+              <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+                <span className="flex-1 truncate" title={config.modsPath}>
+                  {config.modsPath || "Not set"}
+                </span>
+                {config.modsPath && (
+                  <span className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-success">
+                    <Check className="size-3" strokeWidth={3} /> Set
+                  </span>
+                )}
+              </div>
+              <Button variant="outline" size="sm" onClick={changeFolder} disabled={busy}>
+                Change…
+              </Button>
+            </div>
+            <button
+              onClick={detectAgain}
+              disabled={busy}
+              className="cursor-default self-start text-[11.5px] font-semibold text-primary hover:brightness-110 disabled:opacity-50"
+            >
+              Detect automatically
+            </button>
+          </Section>
+
+          {/* appearance */}
+          <Section
+            title="Appearance"
+            innerRef={(el) => (refs.current.appearance = el)}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[12.5px] text-foreground/85">Theme</span>
+              <Segmented
+                size="sm"
+                value={theme}
+                onChange={(v) => setTheme(v as ThemeMode)}
+                options={[
+                  { value: "light", label: "Light" },
+                  { value: "dark", label: "Dark" },
+                  { value: "system", label: "System" },
+                ]}
+              />
+            </div>
+          </Section>
+
+          {/* frostmod */}
+          <Section
+            title="FrostMod"
+            innerRef={(el) => (refs.current.frostmod = el)}
+            titleRight={
+              <span
+                className={cn(
+                  "flex items-center gap-1.5 text-[11.5px]",
+                  running ? "text-success" : "text-muted-foreground",
+                )}
+              >
+                <span
+                  className={cn(
+                    "size-[7px] rounded-full",
+                    running ? "bg-success" : "bg-muted-foreground/50",
+                  )}
+                />
+                {running === null
+                  ? "Checking…"
+                  : running
+                    ? "Running · game connected"
+                    : "Not running"}
+              </span>
+            }
+          >
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              Live-reloads MX Bikes when mods change, so you don&apos;t restart the game.
+            </p>
+            <div>
+              <Button variant="outline" size="sm" onClick={reloadGame} disabled={!running}>
+                <RefreshCw className="size-3.5" /> Reload game now
+              </Button>
+            </div>
+          </Section>
+
+          {/* about */}
+          <Section title="About & updates" innerRef={(el) => (refs.current.about = el)}>
+            <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
+              <span>mxb-app {version && `v${version}`}</span>
+              <button
+                onClick={() => openUrl(REPO_URL)}
+                className="flex cursor-default items-center gap-1 font-semibold text-primary hover:brightness-110"
+              >
+                GitHub <ExternalLink className="size-3" />
+              </button>
+              <button
+                onClick={() => openUrl(`${REPO_URL}/blob/main/CHANGELOG.md`)}
+                className="cursor-default hover:text-foreground"
+              >
+                Changelog
+              </button>
+            </div>
+          </Section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  desc,
+  titleRight,
+  innerRef,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  titleRight?: React.ReactNode;
+  innerRef: (el: HTMLDivElement | null) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      ref={innerRef}
+      className="flex scroll-mt-4 flex-col gap-3 rounded-xl border border-input bg-card p-[18px]"
+    >
+      <div className="flex items-center gap-2">
+        <span className="flex-1 text-[14px] font-bold">{title}</span>
+        {titleRight}
+      </div>
+      {desc && <span className="-mt-1.5 text-[12px] text-muted-foreground">{desc}</span>}
+      {children}
+    </div>
+  );
+}

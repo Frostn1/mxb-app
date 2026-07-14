@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import "./Dashboard.scss";
-import Header, { type DashboardView } from "../Header/Header";
+import Sidebar, { type DashboardView } from "../Shell/Sidebar";
 import Library from "../Library/Library";
 import Browse from "../Browse/Browse";
 import ModDetail from "../ModDetail/ModDetail";
+import Settings from "../Settings/Settings";
+import { InstallProvider } from "../../Context/Install";
 import {
   DEFAULT_MOD_TYPE,
   getInstalledMods,
@@ -42,34 +43,47 @@ const Dashboard = () => {
     setSelectedSlug(null);
   }, []);
 
+  const navigate = useCallback((v: DashboardView) => {
+    setView(v);
+    setSelectedSlug(null);
+  }, []);
+
   return (
-    <div id={"dashboard"}>
-      <Header
-        view={view}
-        onNavigate={setView}
-        modType={modType}
-        onChangeType={changeType}
-      />
-      <div className={"dashboard-content"}>
-        {selectedSlug ? (
-          <ModDetail
-            slug={selectedSlug}
-            modType={modType}
-            installedNames={installedNames}
-            onBack={() => setSelectedSlug(null)}
-            onInstalled={onInstalled}
-          />
-        ) : view === "browse" ? (
-          <Browse
-            modType={modType}
-            installedNames={installedNames}
-            onOpenMod={setSelectedSlug}
-          />
-        ) : (
-          <Library modType={modType} refreshKey={libraryVersion} />
-        )}
+    <InstallProvider onInstalled={onInstalled}>
+      <div className="flex h-full min-h-0">
+        <Sidebar
+          view={view}
+          onNavigate={navigate}
+          libraryCount={installedNames.size}
+        />
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          {view === "browse" && selectedSlug ? (
+            <ModDetail
+              slug={selectedSlug}
+              modType={modType}
+              installedNames={installedNames}
+              onBack={() => setSelectedSlug(null)}
+            />
+          ) : view === "browse" ? (
+            <Browse
+              modType={modType}
+              installedNames={installedNames}
+              onOpenMod={setSelectedSlug}
+              onChangeType={changeType}
+            />
+          ) : view === "library" ? (
+            <Library
+              modType={modType}
+              onChangeType={changeType}
+              refreshKey={libraryVersion}
+              onChanged={onInstalled}
+            />
+          ) : (
+            <Settings />
+          )}
+        </div>
       </div>
-    </div>
+    </InstallProvider>
   );
 };
 

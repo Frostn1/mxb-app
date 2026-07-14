@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MXB App by Frost",
+  "productName": "MXB App",
   "version": "0.1.0",
   "identifier": "com.frost.mxbikes",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "MXB App by Frost",
+        "title": "MXB App",
         "width": 1400,
         "height": 800,
         "minWidth": 1000,
