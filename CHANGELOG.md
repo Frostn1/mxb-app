@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-07-15
+
+### Added
+- **Runs in the background like Discord**: closing the window now hides MXB App to
+  a **system-tray icon** (Show / Quit menu) instead of quitting, so it keeps running
+  and FrostMod stays connected. **Launches at login** by default. Both are
+  toggleable in Settings → **General** ("Keep running in the background", "Launch at
+  startup"). Backed by a tray icon + `WindowEvent::CloseRequested` intercept and the
+  `tauri-plugin-autostart` plugin; prefs persist in the app config (default ON).
+- **"Made with ❄ by Frost"** credit in Settings → About, linking to the author.
+
+### Changed
+- **Release assets get clean names**: a CI finalize step renames the ugly
+  `MXB.App_0.1.0_x64-setup.exe` to `MXB-App-0.1.0-x64.exe` (and the `.dmg`
+  likewise) and repoints `latest.json`, so downloads look trustworthy. Signatures
+  are over file content, so self-update still verifies.
+
 ## 2026-07-14
 
 ### Added
