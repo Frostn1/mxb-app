@@ -46,6 +46,80 @@ fn version_path(app: &AppHandle) -> PathBuf {
     frostmod_dir(app).join("version.txt")
 }
 
+/// FrostMod reads its server-browser filter from this file in its own folder,
+/// auto-generating a default on first run. That stock default *hides Kaizo*
+/// community servers — it carries a `kaizo` name rule plus a `k[a4][il1]z[o0]`
+/// regex meant to catch cheat-shop spam, which also matches the legit Kaizo
+/// servers. We drop in a curated copy that keeps the spam rules but no longer
+/// matches Kaizo, so those servers stay visible in the browser.
+const SERVERFILTER_FILE: &str = "frostmod_serverfilter.yaml";
+
+/// Our curated filter. Same `# frostmod-filter v4` sentinel FrostMod expects on
+/// line 1 (so it treats the config as current and won't rewrite ours), spam
+/// regex kept, all Kaizo rules removed.
+const CURATED_SERVERFILTER: &str = "# frostmod-filter v4
+# FrostMod server filter - hide spam/ad servers from the online browser.
+# Hidden if the name contains any 'names' entry or matches any 'regex'.
+hideUnjoinable: false   # ping '---' - unreliable at list time, keep off
+hideEmpty: false        # hide 0-player servers (many legit ones are just empty)
+hideLocked: false       # hide password-locked servers
+maxPerIP: 0             # 0 = off; else hide servers past N from one IP per refresh
+names:                  # case-insensitive substrings
+  - che4ts
+regex:                  # ECMAScript regex; single-quote to keep backslashes literal
+  - '(che[a4]ts|\\.pr0\\b)'
+";
+
+/// FrostMod's stock v4 default — the one that hides Kaizo. We only replace an
+/// on-disk filter that still matches this exactly (ignoring line endings), so a
+/// user's own edits to the filter are never clobbered.
+const STOCK_SERVERFILTER: &str = "# frostmod-filter v4
+# FrostMod server filter - hide spam/ad servers from the online browser.
+# Hidden if the name contains any 'names' entry or matches any 'regex'.
+hideUnjoinable: false   # ping '---' - unreliable at list time, keep off
+hideEmpty: false        # hide 0-player servers (many legit ones are just empty)
+hideLocked: false       # hide password-locked servers
+maxPerIP: 0             # 0 = off; else hide servers past N from one IP per refresh
+names:                  # case-insensitive substrings
+  - che4ts
+  - kaizo
+  - kalz0
+regex:                  # ECMAScript regex; single-quote to keep backslashes literal
+  - '(che[a4]ts|k[a4][il1]z[o0]|\\.pr0\\b)'
+";
+
+fn serverfilter_path(app: &AppHandle) -> PathBuf {
+    frostmod_dir(app).join(SERVERFILTER_FILE)
+}
+
+/// Compare filter text ignoring line endings (FrostMod writes CRLF on Windows)
+/// and trailing blank space, so those alone don't read as a user edit.
+fn filter_eq(a: &str, b: &str) -> bool {
+    a.replace('\r', "").trim_end() == b.replace('\r', "").trim_end()
+}
+
+/// Drop our curated server filter into FrostMod's folder so Kaizo servers stay
+/// visible. Writes only when the file is missing or still holds FrostMod's stock
+/// Kaizo-blocking default — a filter the user has edited is left untouched.
+/// Best-effort: failures are logged, never fatal to install/launch.
+pub fn ensure_serverfilter(app: &AppHandle) {
+    let path = serverfilter_path(app);
+    let should_write = match std::fs::read_to_string(&path) {
+        Ok(cur) => filter_eq(&cur, STOCK_SERVERFILTER),
+        Err(_) => true, // missing / unreadable -> lay down our copy
+    };
+    if !should_write {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(&path, CURATED_SERVERFILTER) {
+        Ok(()) => log::info!("wrote curated FrostMod server filter (Kaizo unhidden): {}", path.display()),
+        Err(e) => log::warn!("could not write FrostMod server filter {}: {e}", path.display()),
+    }
+}
+
 fn installed_version(app: &AppHandle) -> Option<String> {
     std::fs::read_to_string(version_path(app))
         .ok()
@@ -119,6 +193,9 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<String> {
         anyhow::bail!("the latest FrostMod release has no frostmod.exe/.dll");
     }
     std::fs::write(version_path(app), &rel.tag_name)?;
+    // Ship our curated server filter so Kaizo servers aren't hidden by FrostMod's
+    // stock default. Best-effort; never fails the install.
+    ensure_serverfilter(app);
     Ok(rel.tag_name)
 }
 
@@ -137,6 +214,9 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     if !exe.exists() {
         anyhow::bail!("FrostMod isn't installed yet");
     }
+    // Refresh the curated filter before FrostMod loads it, so existing installs
+    // (whose stock default hides Kaizo) get corrected on the next launch too.
+    ensure_serverfilter(app);
     let child = std::process::Command::new(&exe)
         .current_dir(frostmod_dir(app))
         .creation_flags(CREATE_NO_WINDOW)
@@ -154,5 +234,40 @@ pub fn start(_app: &AppHandle, _state: &FrostmodProcess) -> anyhow::Result<bool>
 pub fn stop(state: &FrostmodProcess) {
     if let Some(mut child) = state.0.lock().unwrap().take() {
         let _ = child.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn curated_filter_unhides_kaizo_but_keeps_sentinel() {
+        // FrostMod only respects a config whose first line is the v4 sentinel.
+        assert!(CURATED_SERVERFILTER.starts_with("# frostmod-filter v4"));
+        // Kaizo must no longer be matched, by name or the spam regex.
+        let lc = CURATED_SERVERFILTER.to_lowercase();
+        assert!(!lc.contains("kaizo"));
+        assert!(!lc.contains("kalz0"));
+        assert!(!CURATED_SERVERFILTER.contains("k[a4][il1]z[o0]"));
+        // Spam rules we keep.
+        assert!(CURATED_SERVERFILTER.contains("che4ts"));
+        assert!(CURATED_SERVERFILTER.contains(r"\.pr0\b"));
+    }
+
+    #[test]
+    fn stock_default_is_the_kaizo_blocking_one() {
+        // Guards our overwrite trigger: the stock text must actually block Kaizo.
+        assert!(STOCK_SERVERFILTER.contains("- kaizo"));
+        assert!(STOCK_SERVERFILTER.contains("k[a4][il1]z[o0]"));
+    }
+
+    #[test]
+    fn filter_eq_ignores_line_endings_and_trailing_space() {
+        let crlf = STOCK_SERVERFILTER.replace('\n', "\r\n");
+        assert!(filter_eq(&crlf, STOCK_SERVERFILTER));
+        assert!(filter_eq(&format!("{STOCK_SERVERFILTER}\n\n"), STOCK_SERVERFILTER));
+        // A real edit (curated vs stock) must NOT compare equal.
+        assert!(!filter_eq(CURATED_SERVERFILTER, STOCK_SERVERFILTER));
     }
 }

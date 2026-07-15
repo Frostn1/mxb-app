@@ -26,3 +26,6 @@ dist-ssr
 # Tauri updater signing keys — never commit
 *.key
 *.key.pub
+
+# Vite transient config-reload artifacts
+vite.config.ts.timestamp-*.mjs
