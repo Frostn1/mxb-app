@@ -6,6 +6,7 @@ mod frostmod;
 mod frostmod_manage;
 mod install;
 mod library;
+mod modelswap;
 mod mods;
 mod pkz;
 mod shop_session;
@@ -84,6 +85,25 @@ fn scan_library(
 fn scan_rider_targets(app: tauri::AppHandle) -> Result<library::RiderTargets, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     Ok(library::scan_rider_targets(&cfg.mods_path))
+}
+
+/// Per-bike model-swap view: each extracted bike, its active model, and the
+/// variants it can switch between (the app-side twin of FrostMod's F8 swapper).
+#[tauri::command]
+fn scan_model_swaps(app: tauri::AppHandle) -> Result<Vec<modelswap::BikeModels>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    Ok(modelswap::scan_model_swaps(&cfg.mods_path))
+}
+
+/// Switch a bike to a different model set (backs up the current one, moves the
+/// chosen one in). Signals a running FrostMod to live-reload afterward.
+#[tauri::command]
+fn apply_model_swap(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    modelswap::apply_model_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
+    // Best-effort: nudge the game to reload so the swap shows without a restart.
+    frostmod::signal_reload();
+    Ok(())
 }
 
 /// Read the structure of one installed `.pkz` (name/author/length/preview) for
@@ -330,13 +350,17 @@ async fn shop_install(
         .client()
         .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    // Route by mod type: a structured archive self-routes by its folders in
+    // `place_mod`; for locked/structure-less content this picks the fallback
+    // bucket from the item's title instead of always assuming tracks.
+    let subpath = format!("mods/{}", mods::mxbshop::guess_mod_type(&item.title));
     install::download_and_place(
         &app,
         &cfg,
         &client,
         &item.slug,
         &item.download_url,
-        "mods/tracks",
+        &subpath,
         &dest_folder,
     )
     .await
@@ -453,6 +477,8 @@ fn main() {
             get_pkz_meta,
             get_pkz_preview,
             scan_rider_targets,
+            scan_model_swaps,
+            apply_model_swap,
             add_to_library,
             import_file,
             move_mod,

@@ -102,6 +102,30 @@ export interface LibraryEntry {
 }
 
 /**
+ * One selectable model for a bike (Locker / model swap). The `active` one is the
+ * bike's live loose file set; the rest are folders under `FrostMod Models/`.
+ */
+export interface ModelVariant {
+  /** Variant name (folder name, or "Original" for the un-captured default). */
+  name: string;
+  /** Whether this is the currently-active model. */
+  active: boolean;
+  /** Whether the set has a `model.edf` (an invalid variant can't be applied). */
+  valid: boolean;
+  /** Number of top-level files in the set. */
+  fileCount: number;
+}
+
+/** A bike and every model it can be swapped between (active first). */
+export interface BikeModels {
+  /** Bike folder name under `mods/bikes`. */
+  bike: string;
+  /** The active variant's name ("Original" if never swapped). */
+  active: string;
+  variants: ModelVariant[];
+}
+
+/**
  * Parsed structure of an installed `.pkz`, loaded lazily per library card.
  * `locked` marks a GUID-locked/encrypted archive that can't be inspected
  * (only its name + size are known).

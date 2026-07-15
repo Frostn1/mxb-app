@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  BikeModels,
   Config,
   DownloadOption,
   FrostmodReload,
@@ -155,6 +156,21 @@ export interface RiderTargets {
 
 export function scanRiderTargets(): Promise<RiderTargets> {
   return invoke<RiderTargets>("scan_rider_targets");
+}
+
+/**
+ * Per-bike model-swap view (the Locker): each extracted bike, its active model,
+ * and the variants it can switch between. The app-side twin of FrostMod's in-game
+ * swapper — same `FrostMod Models/` + `_active.txt` on-disk scheme.
+ */
+export function scanModelSwaps(): Promise<BikeModels[]> {
+  return invoke<BikeModels[]>("scan_model_swaps");
+}
+
+/** Switch a bike to a different model set (backs up the current one). Nudges a
+ * running FrostMod to live-reload after. */
+export function applyModelSwap(bike: string, target: string): Promise<void> {
+  return invoke<void>("apply_model_swap", { bike, target });
 }
 
 /**
