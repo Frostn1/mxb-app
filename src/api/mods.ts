@@ -357,12 +357,15 @@ export function buildRiderDestinations(
 }
 
 /**
- * Hosts that block in-app downloads (TLS fingerprinting) — the app opens these
- * in the browser and lets the user import the downloaded file instead.
- * Matched against the URL (reliable) as well as the host label (which the site
- * writes inconsistently, e.g. "Media Fire" with a space).
+ * Hosts that block in-app downloads — the app opens these in the browser and
+ * lets the user import the downloaded file instead. Only Mega remains here: its
+ * files are client-side encrypted, so a plain download can't produce usable
+ * bytes. MediaFire now downloads directly in-app again (its CDN no longer
+ * blocks the rustls client, so `resolve_mediafire` + the normal download path
+ * handle it). Matched against the URL (reliable) as well as the host label
+ * (which the site writes inconsistently, e.g. "Mega .nz" with a space).
  */
-const BLOCKED_HOST_PATTERNS = ["mediafire", "media fire", "mega.nz", "mega.co", "mega."];
+const BLOCKED_HOST_PATTERNS = ["mega.nz", "mega.co", "mega."];
 
 export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   const s = `${opt.url} ${opt.host}`.toLowerCase();
