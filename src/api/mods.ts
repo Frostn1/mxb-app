@@ -4,6 +4,7 @@ import type {
   Config,
   DownloadOption,
   FrostmodReload,
+  FrostmodStatus,
   InstalledMod,
   InstallProgress,
   ModDetail,
@@ -332,6 +333,31 @@ export function reloadFrostmod(): Promise<ReloadOutcome> {
 /** Is FrostMod currently running on this PC? */
 export function isFrostmodRunning(): Promise<boolean> {
   return invoke<boolean>("frostmod_running");
+}
+
+/** Install/version/running snapshot (hits GitHub for the latest tag). */
+export function frostmodStatus(): Promise<FrostmodStatus> {
+  return invoke<FrostmodStatus>("frostmod_status");
+}
+
+/** Download (or update to) the latest FrostMod release. Returns the version tag. */
+export function frostmodInstall(): Promise<string> {
+  return invoke<string>("frostmod_install");
+}
+
+/** Launch the managed FrostMod process if it isn't already running. */
+export function frostmodStart(): Promise<boolean> {
+  return invoke<boolean>("frostmod_start");
+}
+
+/** Stop the managed FrostMod process. */
+export function frostmodStop(): Promise<void> {
+  return invoke<void>("frostmod_stop");
+}
+
+/** Toggle auto-running FrostMod when the app opens. */
+export function setAutoRunFrostmod(enabled: boolean): Promise<void> {
+  return invoke<void>("set_auto_run_frostmod", { enabled });
 }
 
 /** Fires after each install with whether FrostMod picked the new mod up live. */

@@ -93,3 +93,15 @@ export interface FrostmodReload {
   slug: string;
   outcome: ReloadOutcome;
 }
+
+/** Install/version/running snapshot for the FrostMod settings panel. */
+export interface FrostmodStatus {
+  /** `frostmod.exe` present in the app-managed folder. */
+  installed: boolean;
+  /** Installed release tag, if known. */
+  version: string | null;
+  /** Latest release tag on GitHub (null if the check failed / offline). */
+  latest: string | null;
+  /** FrostMod currently running (its reload event exists). */
+  running: boolean;
+}

@@ -3,19 +3,21 @@
 
 mod config;
 mod frostmod;
+mod frostmod_manage;
 mod install;
 mod library;
 mod mods;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
+use frostmod_manage::{FrostmodProcess, FrostmodStatus};
 use library::InstalledMod;
 use mods::mxb::MxbModsSource;
 use mods::{ModDetail, ModSource, ModSummary};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Manager, State, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
@@ -158,6 +160,38 @@ fn frostmod_running() -> bool {
     frostmod::is_running()
 }
 
+/// Install/version/running snapshot for the FrostMod settings panel.
+#[tauri::command]
+async fn frostmod_status(app: tauri::AppHandle) -> FrostmodStatus {
+    frostmod_manage::status(&app).await
+}
+
+/// Download (or update to) the latest FrostMod release. Returns the version tag.
+#[tauri::command]
+async fn frostmod_install(app: tauri::AppHandle) -> Result<String, String> {
+    frostmod_manage::install(&app).await.map_err(|e| format!("{e:#}"))
+}
+
+/// Launch the managed FrostMod process if it isn't already running.
+#[tauri::command]
+fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Result<bool, String> {
+    frostmod_manage::start(&app, &state).map_err(|e| format!("{e:#}"))
+}
+
+/// Stop the managed FrostMod process.
+#[tauri::command]
+fn frostmod_stop(state: State<FrostmodProcess>) {
+    frostmod_manage::stop(&state);
+}
+
+/// Toggle auto-running FrostMod when the app opens.
+#[tauri::command]
+fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.auto_run_frostmod = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -168,6 +202,7 @@ fn main() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .manage(FrostmodProcess::default())
         .setup(|app| {
             // System-tray icon so the app can keep running when the window closes.
             let show = MenuItem::with_id(app, "show", "Show MXB App", true, None::<&str>)?;
@@ -180,7 +215,11 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => show_main(app),
-                    "quit" => app.exit(0),
+                    "quit" => {
+                        // Stop the FrostMod process we started before exiting.
+                        frostmod_manage::stop(&app.state::<FrostmodProcess>());
+                        app.exit(0);
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -195,16 +234,22 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Sync launch-at-login to the saved preference (default ON) once set up.
+            // Apply saved preferences on boot (both default ON).
             let handle = app.handle();
             if config::exists(handle) {
                 if let Ok(cfg) = config::load(handle) {
+                    // Launch-at-login: sync the OS entry to the pref.
                     let manager = handle.autolaunch();
                     let enabled = manager.is_enabled().unwrap_or(false);
                     if cfg.launch_at_startup && !enabled {
                         let _ = manager.enable();
                     } else if !cfg.launch_at_startup && enabled {
                         let _ = manager.disable();
+                    }
+                    // Auto-run FrostMod so it's connected as soon as the app opens.
+                    if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
+                        let state = handle.state::<FrostmodProcess>();
+                        let _ = frostmod_manage::start(handle, &state);
                     }
                 }
             }
@@ -235,8 +280,13 @@ fn main() {
             reveal_in_explorer,
             set_run_in_background,
             set_launch_at_startup,
+            set_auto_run_frostmod,
             frostmod_reload,
-            frostmod_running
+            frostmod_running,
+            frostmod_status,
+            frostmod_install,
+            frostmod_start,
+            frostmod_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
