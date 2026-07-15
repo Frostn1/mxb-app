@@ -150,10 +150,10 @@ export default function InstallDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showClose={false}
-        className="max-w-[460px] gap-0 overflow-hidden rounded-2xl p-0"
+        className="flex max-h-[85vh] max-w-[460px] flex-col gap-0 overflow-hidden rounded-2xl p-0"
       >
         {/* header */}
-        <div className="flex items-center gap-3 border-b border-white/[0.07] px-[18px] pb-3.5 pt-4">
+        <div className="flex flex-none items-center gap-3 border-b border-white/[0.07] px-[18px] pb-3.5 pt-4">
           <div
             className="h-[34px] w-[52px] flex-none rounded-md bg-gradient-to-br from-[#3a3f45] to-[#20242a] bg-cover bg-center"
             style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}
@@ -174,7 +174,7 @@ export default function InstallDialog({
         </div>
 
         {/* body */}
-        <div className="flex flex-col gap-4 px-[18px] py-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[18px] py-4">
           {/* destination */}
           <section className="flex flex-col gap-2">
             <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
@@ -341,7 +341,7 @@ export default function InstallDialog({
         </div>
 
         {/* footer */}
-        <div className="flex gap-2.5 border-t border-white/[0.07] px-[18px] py-3.5">
+        <div className="flex flex-none gap-2.5 border-t border-white/[0.07] px-[18px] py-3.5">
           <Button
             className="min-w-0 flex-1"
             onClick={confirm}

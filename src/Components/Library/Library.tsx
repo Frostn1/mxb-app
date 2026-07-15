@@ -4,8 +4,6 @@ import {
   Search,
   RefreshCw,
   MoreHorizontal,
-  Mountain,
-  Bike,
   FolderInput,
   FolderOpen,
   Trash2,
@@ -17,15 +15,22 @@ import {
 import { toast } from "sonner";
 import {
   MOD_TYPES,
-  getInstalledMods,
+  scanLibrary,
   getPkzMeta,
   moveMod,
   revealInExplorer,
   uninstallMod,
   type ModType,
 } from "../../api/mods";
-import type { InstalledMod, PkzMeta } from "../../types";
+import type { LibraryEntry, PkzMeta } from "../../types";
 import { displayName, folderLabel, formatBytes, formatLength } from "../../lib/mods";
+import {
+  CATEGORY_LABEL,
+  SECTION_LABEL,
+  RIDER_SECTION_ORDER,
+  categoryIcon,
+} from "./categories";
+import LibraryDetail from "./LibraryDetail";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
 import {
@@ -72,24 +77,23 @@ interface RowAction {
 }
 
 /**
- * Session cache of parsed `.pkz` metadata, keyed by path + size so a changed
- * file (re-downloaded, different size) re-reads. Avoids re-invoking the backend
- * when cards remount on search/folder/tab switches. The backend also caches to
- * disk across sessions.
+ * Session cache of parsed metadata, keyed by path + size so a changed file
+ * re-reads. Avoids re-invoking the backend when cards remount on search/tab
+ * switches. The backend also caches to disk across sessions.
  */
 const metaCache = new Map<string, PkzMeta>();
 
 /**
- * The tile + title/subtitle of a library card. Lazily reads the archive's
+ * The tile + title/subtitle of a library card. Lazily reads the item's
  * structure (name/author/length/preview) so the list paints instantly and each
- * card enriches as its metadata arrives. GUID-locked archives show a lock badge
- * and fall back to filename + size.
+ * card enriches as its metadata arrives. Locked/loose items fall back to a
+ * category icon + name.
  */
 function LibraryCardBody({
   item,
   typeIcon: TypeIcon,
 }: {
-  item: InstalledMod;
+  item: LibraryEntry;
   typeIcon: LucideIcon;
 }) {
   const cacheKey = `${item.path}:${item.size}`;
@@ -123,7 +127,7 @@ function LibraryCardBody({
   if (meta?.author) parts.push(`by ${meta.author}`);
   if (meta?.length) parts.push(formatLength(meta.length));
   if (item.size) parts.push(formatBytes(item.size));
-  const subtitle = parts.join(" · ") || folderLabel(item.folder);
+  const subtitle = parts.join(" · ") || CATEGORY_LABEL[item.category] || folderLabel(item.folder);
 
   return (
     <>
@@ -157,6 +161,71 @@ function LibraryCardBody({
   );
 }
 
+interface Section {
+  key: string;
+  label: string;
+  items: LibraryEntry[];
+}
+
+/**
+ * Group entries into display sections: the Rider tab groups by *category*
+ * (Helmets, Helmet Paints, Goggles, Boots, Gloves, Outfit…) so every gear kind
+ * is visible; tracks/bikes group by folder. Bike liveries + model-swaps are
+ * hidden from the grid — they live inside their model's detail view.
+ */
+function buildSections(
+  modType: ModType,
+  entries: LibraryEntry[],
+  search: string,
+): Section[] {
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? entries.filter(
+        (e) =>
+          e.name.toLowerCase().includes(q) ||
+          e.folder.toLowerCase().includes(q) ||
+          (e.parent ?? "").toLowerCase().includes(q),
+      )
+    : entries;
+
+  if (modType.id === "rider") {
+    const byCat = new Map<string, LibraryEntry[]>();
+    for (const e of filtered) {
+      const list = byCat.get(e.category) ?? [];
+      list.push(e);
+      byCat.set(e.category, list);
+    }
+    const order = RIDER_SECTION_ORDER as string[];
+    return [...byCat.keys()]
+      .sort((a, b) => {
+        const ia = order.indexOf(a);
+        const ib = order.indexOf(b);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      })
+      .map((cat) => ({
+        key: cat,
+        label: SECTION_LABEL[cat] ?? cat,
+        items: byCat.get(cat)!,
+      }));
+  }
+
+  // Tracks & bikes: group by folder. For bikes, only models are top-level —
+  // paints/model-swaps belong to a model's detail.
+  const shown =
+    modType.id === "bikes"
+      ? filtered.filter((e) => e.category !== "bikePaint" && e.category !== "bikeModelSwap")
+      : filtered;
+  const byFolder = new Map<string, LibraryEntry[]>();
+  for (const e of shown) {
+    const list = byFolder.get(e.folder) ?? [];
+    list.push(e);
+    byFolder.set(e.folder, list);
+  }
+  return [...byFolder.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([folder, items]) => ({ key: folder || "__root__", label: folderLabel(folder), items }));
+}
+
 interface LibraryProps {
   modType: ModType;
   onChangeType: (type: ModType) => void;
@@ -171,19 +240,20 @@ export default function Library({
   refreshKey,
   onChanged,
 }: LibraryProps) {
-  const [items, setItems] = useState<InstalledMod[]>([]);
+  const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
-  const [moveTarget, setMoveTarget] = useState<InstalledMod | null>(null);
-  const [uninstallTarget, setUninstallTarget] = useState<InstalledMod | null>(null);
+  const [detail, setDetail] = useState<LibraryEntry | null>(null);
+  const [moveTarget, setMoveTarget] = useState<LibraryEntry | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<LibraryEntry | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setItems(await getInstalledMods(modType.installSubpath));
+      setEntries(await scanLibrary(modType.installSubpath));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -195,29 +265,25 @@ export default function Library({
     load();
   }, [load, refreshKey]);
 
+  // Leave the detail view when switching tabs.
+  useEffect(() => setDetail(null), [modType]);
+
   const allFolders = useMemo(
-    () => [...new Set(items.map((i) => i.folder))].sort((a, b) => a.localeCompare(b)),
-    [items],
+    () => [...new Set(entries.map((e) => e.folder))].sort((a, b) => a.localeCompare(b)),
+    [entries],
   );
 
-  const groups = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const filtered = q
-      ? items.filter(
-          (i) =>
-            i.name.toLowerCase().includes(q) || i.folder.toLowerCase().includes(q),
-        )
-      : items;
-    const map = new Map<string, InstalledMod[]>();
-    for (const it of filtered) {
-      const list = map.get(it.folder) ?? [];
-      list.push(it);
-      map.set(it.folder, list);
-    }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [items, search]);
+  const sections = useMemo(
+    () => buildSections(modType, entries, search),
+    [modType, entries, search],
+  );
 
-  const doMove = async (item: InstalledMod, toFolder: string) => {
+  const visibleCount = useMemo(
+    () => sections.reduce((n, s) => n + s.items.length, 0),
+    [sections],
+  );
+
+  const doMove = async (item: LibraryEntry, toFolder: string) => {
     setBusy(true);
     setMoveTarget(null);
     try {
@@ -231,11 +297,12 @@ export default function Library({
     }
   };
 
-  const doUninstall = async (item: InstalledMod) => {
+  const doUninstall = async (item: LibraryEntry) => {
     setBusy(true);
     setUninstallTarget(null);
     try {
       await uninstallMod(item.path, modType.installSubpath);
+      if (detail?.path === item.path) setDetail(null);
       await load();
       onChanged();
       toast.success(`${displayName(item.name)} uninstalled`, {
@@ -248,23 +315,30 @@ export default function Library({
     }
   };
 
-  // Single source of truth for a row's actions — rendered in both the 3-dot
-  // dropdown and the right-click context menu so they can't drift apart.
-  const rowActions = (item: InstalledMod): RowAction[] => [
-    {
-      key: "move",
-      icon: FolderInput,
-      label: "Move to folder…",
-      onSelect: () => setMoveTarget(item),
-    },
+  const reveal = (item: LibraryEntry) =>
+    revealInExplorer(item.path).catch((e) =>
+      toast.error("Couldn't open", { description: String(e) }),
+    );
+
+  // Single source of truth for a row's actions — rendered in the 3-dot dropdown
+  // and the right-click context menu so they can't drift apart. Move only makes
+  // sense for a packaged `.pkz` (a real file under the type dir).
+  const rowActions = (item: LibraryEntry): RowAction[] => [
+    ...(item.kind === "pkz"
+      ? [
+          {
+            key: "move",
+            icon: FolderInput,
+            label: "Move to folder…",
+            onSelect: () => setMoveTarget(item),
+          },
+        ]
+      : []),
     {
       key: "reveal",
       icon: FolderOpen,
       label: "Show in Explorer",
-      onSelect: () =>
-        revealInExplorer(item.path).catch((e) =>
-          toast.error("Couldn't open", { description: String(e) }),
-        ),
+      onSelect: () => reveal(item),
     },
     {
       key: "uninstall",
@@ -276,10 +350,21 @@ export default function Library({
     },
   ];
 
-  const TypeIcon = modType.id === "bikes" ? Bike : Mountain;
-
   return (
     <div className="flex h-full flex-col">
+      {detail ? (
+        <LibraryDetail
+          entry={detail}
+          entries={entries}
+          modType={modType}
+          onClose={() => setDetail(null)}
+          onReveal={reveal}
+          onUninstall={setUninstallTarget}
+          onMove={setMoveTarget}
+          onOpenEntry={setDetail}
+        />
+      ) : (
+        <>
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
         <h1 className="text-[21px] font-bold tracking-[-0.2px]">Library</h1>
         <Segmented
@@ -294,7 +379,7 @@ export default function Library({
               <span className="flex items-center gap-1.5">
                 {t.label}
                 {t.id === modType.id && (
-                  <span className="text-muted-foreground">{items.length}</span>
+                  <span className="text-muted-foreground">{visibleCount}</span>
                 )}
               </span>
             ),
@@ -323,34 +408,42 @@ export default function Library({
           <p className="py-16 text-center text-[13px] text-muted-foreground">
             Scanning your library…
           </p>
-        ) : groups.length === 0 ? (
+        ) : sections.length === 0 ? (
           <p className="py-16 text-center text-[13px] text-muted-foreground">
-            {items.length === 0
+            {entries.length === 0
               ? `No ${modType.label.toLowerCase()} installed yet — head to Browse and add one.`
               : "No matches."}
           </p>
         ) : (
           <div className="flex flex-col gap-6">
-            {groups.map(([folder, mods]) => (
-              <section key={folder} className="flex flex-col gap-2.5">
+            {sections.map((section) => (
+              <section key={section.key} className="flex flex-col gap-2.5">
                 <div className="flex items-baseline gap-2">
                   <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
-                    ▸ {folderLabel(folder)}
+                    ▸ {section.label}
                   </span>
-                  <span className="text-[11px] text-faint">{mods.length}</span>
+                  <span className="text-[11px] text-faint">{section.items.length}</span>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  {mods.map((item) => {
+                  {section.items.map((item) => {
                     const actions = rowActions(item);
+                    const Icon = categoryIcon(item.category);
                     return (
                       <ContextMenu key={item.path}>
                         <ContextMenuTrigger asChild>
-                          <div className="flex items-center gap-3 rounded-xl border border-white/[0.07] bg-card p-3 transition-colors hover:border-white/15">
-                            <LibraryCardBody item={item} typeIcon={TypeIcon} />
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setDetail(item)}
+                            onKeyDown={(e) => e.key === "Enter" && setDetail(item)}
+                            className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/[0.07] bg-card p-3 transition-colors hover:border-white/15"
+                          >
+                            <LibraryCardBody item={item} typeIcon={Icon} />
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
                                   disabled={busy}
+                                  onClick={(e) => e.stopPropagation()}
                                   className="flex-none cursor-default rounded-md px-1 text-faint transition-colors hover:text-foreground"
                                 >
                                   <MoreHorizontal className="size-4" />
@@ -394,6 +487,8 @@ export default function Library({
           </div>
         )}
       </div>
+        </>
+      )}
 
       <MoveDialog
         target={moveTarget}
@@ -413,7 +508,7 @@ export default function Library({
               Uninstall {uninstallTarget && displayName(uninstallTarget.name)}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              The file is moved to the Recycle Bin — you can restore it from there.
+              The item is moved to the Recycle Bin — you can restore it from there.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -438,11 +533,11 @@ function MoveDialog({
   onClose,
   onMove,
 }: {
-  target: InstalledMod | null;
+  target: LibraryEntry | null;
   folders: string[];
   modType: ModType;
   onClose: () => void;
-  onMove: (item: InstalledMod, folder: string) => void;
+  onMove: (item: LibraryEntry, folder: string) => void;
 }) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");

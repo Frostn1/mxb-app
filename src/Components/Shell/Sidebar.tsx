@@ -2,6 +2,7 @@ import {
   Home,
   Store,
   Library as LibraryIcon,
+  Bike,
   Settings,
   RefreshCw,
   Play,
@@ -13,18 +14,18 @@ import { useFrostmod } from "../../Context/Frostmod";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 
-export type DashboardView = "browse" | "shop" | "library" | "settings";
+export type DashboardView = "browse" | "shop" | "library" | "locker" | "settings";
 
 interface SidebarProps {
   view: DashboardView;
   onNavigate: (view: DashboardView) => void;
-  libraryCount: number;
 }
 
 const NAV: { id: DashboardView; label: string; icon: typeof Home }[] = [
   { id: "browse", label: "Browse", icon: Home },
   { id: "shop", label: "Shop", icon: Store },
   { id: "library", label: "Library", icon: LibraryIcon },
+  { id: "locker", label: "Locker", icon: Bike },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -38,7 +39,7 @@ function shortPath(p: string): string {
   return parts.length > 2 ? `…\\${tail}` : tail;
 }
 
-export default function Sidebar({ view, onNavigate, libraryCount }: SidebarProps) {
+export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const { config } = useConfig();
   const { running, reload, status, start } = useFrostmod();
   const { active, queueLength } = useInstall();
@@ -73,18 +74,6 @@ export default function Sidebar({ view, onNavigate, libraryCount }: SidebarProps
             >
               <Icon className="size-4" />
               <span>{label}</span>
-              {id === "library" && libraryCount > 0 && (
-                <span
-                  className={cn(
-                    "ml-auto rounded-full px-[7px] py-px text-[11px] font-semibold",
-                    activeNav
-                      ? "bg-primary/20 text-accent-foreground"
-                      : "bg-foreground/[0.08] text-muted-foreground",
-                  )}
-                >
-                  {libraryCount}
-                </span>
-              )}
             </button>
           );
         })}

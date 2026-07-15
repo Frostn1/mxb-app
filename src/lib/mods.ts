@@ -1,10 +1,10 @@
 /** Shared display helpers for mod names, dates, and folders. */
 
-const ARCHIVE_EXT = /\.(pkz|zip|rar|7z)$/i;
+const MOD_EXT = /\.(pkz|zip|rar|7z|pnt)$/i;
 
-/** Drop a `.pkz`/`.zip`/… extension for display. */
+/** Drop a `.pkz`/`.zip`/`.pnt`/… extension for display. */
 export function displayName(name: string): string {
-  return name.replace(ARCHIVE_EXT, "");
+  return name.replace(MOD_EXT, "");
 }
 
 /** Human folder label; the type root shows as "(root)". */

@@ -7,6 +7,7 @@ import type {
   FrostmodStatus,
   InstalledMod,
   InstallProgress,
+  LibraryEntry,
   ModDetail,
   ModSummary,
   PkzMeta,
@@ -60,7 +61,6 @@ export const MOD_TYPES: ModType[] = [
       { id: 45, label: "New Bikes" },
       { id: 37, label: "Liveries" },
       { id: 46, label: "Sounds" },
-      { id: 95, label: "Wheels" },
     ],
   },
   {
@@ -122,6 +122,29 @@ export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {
   return invoke<InstalledMod[]>("get_installed_mods", { subpath });
 }
 
+/**
+ * Rich Library scan: packaged `.pkz`, **extracted** mod folders, and **loose
+ * paint files**, each tagged with kind/category/parent so the Library can group
+ * and detail them. (Install pickers keep using {@link getInstalledMods}.)
+ */
+export function scanLibrary(subpath: string): Promise<LibraryEntry[]> {
+  return invoke<LibraryEntry[]>("scan_library", { subpath });
+}
+
+/** WP category id for bike liveries — the only bike content that routes into a
+ * bike's `paints` folder. */
+export const LIVERY_CATEGORY_ID = 37;
+
+/** Whether we're installing a bike **livery** (→ `<Bike>/paints`) vs a new bike
+ * / sound / unknown (→ Bikes root). Drives the destination default so a new bike
+ * never inherits a previous livery's `paints` folder. */
+export function isLiveryContext(
+  modType: ModType,
+  categoryId: number | null | undefined,
+): boolean {
+  return modType.id === "bikes" && categoryId === LIVERY_CATEGORY_ID;
+}
+
 /** Installed rider models + profiles, for building rider paint destinations. */
 export interface RiderTargets {
   helmets: string[];
@@ -141,6 +164,13 @@ export function scanRiderTargets(): Promise<RiderTargets> {
  */
 export function getPkzMeta(path: string): Promise<PkzMeta> {
   return invoke<PkzMeta>("get_pkz_meta", { path });
+}
+
+/** Full-resolution preview image (a `data:` URI) for the library detail
+ * lightbox, or `null` if the archive is locked / has no image. Loaded on demand
+ * when a detail view opens — not per card. */
+export function getPkzPreview(path: string): Promise<string | null> {
+  return invoke<string | null>("get_pkz_preview", { path });
 }
 
 /** Move an installed mod file into a different folder (relative to the type dir). */
@@ -215,6 +245,7 @@ export function buildDestinations(
   modType: ModType,
   title: string,
   installed: InstalledMod[],
+  livery = false,
 ): { options: DestOption[]; guess: string; suggestions: string[] } {
   const seen = new Set<string>([""]);
   const options: DestOption[] = [
@@ -232,19 +263,24 @@ export function buildDestinations(
   const suggestions: string[] = [];
   if (modType.id === "bikes") {
     const bikes = installed.filter((i) => i.folder === "");
+    // Each bike's `paints` folder is always pickable in the dialog…
     for (const b of bikes) add(`${stripExt(b.name)}/paints`, `${stripExt(b.name)} — paints`);
 
-    const tt = tokens(title);
-    const scored = bikes
-      .map((b) => {
-        let score = 0;
-        for (const t of tokens(b.name)) if (tt.has(t)) score++;
-        return { value: `${stripExt(b.name)}/paints`, score };
-      })
-      .filter((s) => s.score >= 1)
-      .sort((a, b) => b.score - a.score);
-    suggestions.push(...scored.slice(0, 5).map((s) => s.value));
-    if (scored[0] && scored[0].score >= 2) guess = scored[0].value;
+    // …but only *default*/*suggest* a paints folder for actual liveries. A new
+    // bike / sound must land in Bikes (root), not some bike's paints.
+    if (livery) {
+      const tt = tokens(title);
+      const scored = bikes
+        .map((b) => {
+          let score = 0;
+          for (const t of tokens(b.name)) if (tt.has(t)) score++;
+          return { value: `${stripExt(b.name)}/paints`, score };
+        })
+        .filter((s) => s.score >= 1)
+        .sort((a, b) => b.score - a.score);
+      suggestions.push(...scored.slice(0, 5).map((s) => s.value));
+      if (scored[0] && scored[0].score >= 2) guess = scored[0].value;
+    }
   }
 
   for (const f of [...new Set(installed.map((i) => i.folder))].sort((a, b) => a.localeCompare(b))) {
@@ -356,13 +392,18 @@ export function destStorageKey(modType: ModType): string {
   return `frost-dest-${modType.id}`;
 }
 
-/** Remembered folder (if still a valid option) else the educated guess. */
+/** Remembered folder (if still a valid option) else the educated guess. For
+ * bikes, a remembered `…/paints` folder is only reused for a livery — so a new
+ * bike/sound install doesn't inherit the last livery's paints destination. */
 export function resolveInitialFolder(
   modType: ModType,
   destOptions: DestOption[],
   guess: string,
+  livery = false,
 ): string {
   const remembered = localStorage.getItem(destStorageKey(modType)) ?? "";
+  const rememberedIsPaints = /\/paints$/i.test(remembered);
+  if (modType.id === "bikes" && rememberedIsPaints && !livery) return guess;
   if (destOptions.some((o) => o.value === remembered)) return remembered;
   return guess;
 }
@@ -391,6 +432,7 @@ export type QuickInstallResult =
 export async function resolveQuickInstall(
   slug: string,
   modType: ModType,
+  livery = false,
 ): Promise<QuickInstallResult> {
   const detail = await getModDetail(slug);
   const mirrors = sortMirrors(detail);
@@ -405,8 +447,8 @@ export async function resolveQuickInstall(
   } catch {
     installed = [];
   }
-  const { options, guess } = buildDestinations(modType, detail.title, installed);
-  const destFolder = resolveInitialFolder(modType, options, guess);
+  const { options, guess } = buildDestinations(modType, detail.title, installed, livery);
+  const destFolder = resolveInitialFolder(modType, options, guess, livery);
 
   return {
     ok: true,
