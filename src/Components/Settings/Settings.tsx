@@ -334,11 +334,7 @@ export default function Settings() {
                 >
                   Frost
                 </button>
-                <span>&amp; Blarne</span>
               </div>
-              <span className="font-semibold text-foreground/70">
-                Long live MXBMM
-              </span>
             </div>
           </Section>
         </div>

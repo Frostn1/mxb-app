@@ -3,6 +3,10 @@
 ## 2026-07-15
 
 ### Changed
+- **v0.1.2 release** — bumped version across `package.json`, `tauri.conf.json`
+  and `Cargo.{toml,lock}`.
+- **About credits trimmed** to a single "Frost" credit (links to
+  github.com/Frostn1); removed the Blarne / "Long live MXBMM" lines.
 - **All app state now lives in one Local AppData folder**: config, shop session,
   and the FrostMod install moved from Roaming to
   `%LOCALAPPDATA%\com.frost.mxbikes\` (joining the existing cache), so everything
