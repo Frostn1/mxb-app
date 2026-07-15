@@ -3,6 +3,11 @@
 ## 2026-07-15
 
 ### Added
+- **Start FrostMod without restarting the app**: if FrostMod isn't running, a play
+  button appears on the sidebar status pill and in Settings → FrostMod to launch it
+  on the spot.
+
+### Added
 - **FrostMod is managed in-app**: MXB App now **downloads FrostMod** from its GitHub
   releases, **runs `frostmod.exe`** hidden in the background so it's connected as
   soon as the app opens, and **updates** it — no manual setup. Settings → FrostMod

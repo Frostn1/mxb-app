@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, RefreshCw, ExternalLink } from "lucide-react";
+import { Check, RefreshCw, ExternalLink, Play } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
@@ -33,7 +33,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
 export default function Settings() {
   const { config, reloadConfig } = useConfig();
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, install } = useFrostmod();
+  const { running, reload, status, installing, install, start } = useFrostmod();
   const [version, setVersion] = useState("");
   const [active, setActive] = useState<SectionId>("folder");
   const [busy, setBusy] = useState(false);
@@ -289,7 +289,12 @@ export default function Settings() {
               onChange={toggleAutoRun}
             />
 
-            <div>
+            <div className="flex gap-2">
+              {status?.installed && !running && (
+                <Button variant="default" size="sm" onClick={start}>
+                  <Play className="size-3.5" /> Start FrostMod
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={reloadGame} disabled={!running}>
                 <RefreshCw className="size-3.5" /> Reload game now
               </Button>
@@ -318,16 +323,22 @@ export default function Settings() {
                 <RefreshCw className="size-3.5" /> Check for updates
               </Button>
             </div>
-            <div className="flex items-center gap-1.5 pt-1 text-[11.5px] text-faint">
-              <span>Made with</span>
-              <span className="text-primary">❄</span>
-              <span>by</span>
-              <button
-                onClick={() => openUrl("https://github.com/Frostn1")}
-                className="cursor-default font-semibold text-primary hover:brightness-110"
-              >
-                Frost
-              </button>
+            <div className="flex flex-col gap-1 pt-1 text-[11.5px] text-faint">
+              <div className="flex items-center gap-1.5">
+                <span>Made with</span>
+                <span className="text-primary">❄</span>
+                <span>by</span>
+                <button
+                  onClick={() => openUrl("https://github.com/Frostn1")}
+                  className="cursor-default font-semibold text-primary hover:brightness-110"
+                >
+                  Frost
+                </button>
+                <span>&amp; Blarne</span>
+              </div>
+              <span className="font-semibold text-foreground/70">
+                Long live MXBMM
+              </span>
             </div>
           </Section>
         </div>

@@ -33,6 +33,8 @@ interface FrostmodContextValue {
   refreshStatus: () => Promise<void>;
   /** Download the latest FrostMod, then start it. */
   install: () => Promise<void>;
+  /** Launch FrostMod now if it isn't already running. */
+  start: () => Promise<void>;
 }
 
 const FrostmodContext = createContext<FrostmodContextValue | null>(null);
@@ -83,6 +85,17 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     return outcome;
   }, [probe]);
 
+  const start = useCallback(async () => {
+    try {
+      const started = await frostmodStart();
+      await probe();
+      if (started) toast.success("FrostMod started");
+      else toast.info("FrostMod is already running");
+    } catch (e) {
+      toast.error("Couldn't start FrostMod", { description: String(e) });
+    }
+  }, [probe]);
+
   const install = useCallback(async () => {
     setInstalling(true);
     try {
@@ -110,8 +123,9 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       refresh: probe,
       refreshStatus,
       install,
+      start,
     }),
-    [running, status, installing, reload, probe, refreshStatus, install],
+    [running, status, installing, reload, probe, refreshStatus, install, start],
   );
 
   return (
