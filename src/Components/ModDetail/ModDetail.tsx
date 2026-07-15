@@ -83,6 +83,7 @@ export default function ModDetail({
   const [installed, setInstalled] = useState<InstalledMod[]>([]);
   const [destOptions, setDestOptions] = useState<DestOption[]>([]);
   const [guess, setGuess] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [blocked, setBlocked] = useState<{
     mirror: DownloadOption;
@@ -102,6 +103,7 @@ export default function ModDetail({
     setBlocked(null);
     setDestOptions([]);
     setGuess("");
+    setSuggestions([]);
     setActiveImg(0);
     getModDetail(slug)
       .then(async (d) => {
@@ -111,9 +113,14 @@ export default function ModDetail({
           const inst = await getInstalledMods(modType.installSubpath);
           if (cancelled) return;
           setInstalled(inst);
-          const { options, guess } = buildDestinations(modType, d.title, inst);
+          const { options, guess, suggestions } = buildDestinations(
+            modType,
+            d.title,
+            inst,
+          );
           setDestOptions(options);
           setGuess(guess);
+          setSuggestions(suggestions);
         } catch {
           setInstalled([]);
           setDestOptions([]);
@@ -395,6 +402,7 @@ export default function ModDetail({
           detail={detail}
           modType={modType}
           destOptions={destOptions}
+          suggestions={suggestions}
           folderCounts={folderCounts}
           initialFolder={initialFolder}
           onConfirm={handleConfirm}
