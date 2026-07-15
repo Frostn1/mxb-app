@@ -9,6 +9,7 @@ import type {
   InstallProgress,
   ModDetail,
   ModSummary,
+  PkzMeta,
   ReloadOutcome,
 } from "../types";
 
@@ -100,6 +101,15 @@ export function getModDetail(slug: string): Promise<ModDetail> {
 
 export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {
   return invoke<InstalledMod[]>("get_installed_mods", { subpath });
+}
+
+/**
+ * Read one installed `.pkz`'s structure (name/author/length/preview) for its
+ * library card. Parsed lazily per card and cached in the backend. non-plain
+ * archives come back with `locked: true` and no thumbnail.
+ */
+export function getPkzMeta(path: string): Promise<PkzMeta> {
+  return invoke<PkzMeta>("get_pkz_meta", { path });
 }
 
 /** Move an installed mod file into a different folder (relative to the type dir). */
@@ -319,6 +329,47 @@ export function onInstallProgress(
   return listen<InstallProgress>("install-progress", (event) =>
     cb(event.payload),
   );
+}
+
+// --- MX Bikes Shop (paid, authenticated) -----------------------------------
+// The shop (mxbikes-shop.com) is a WordPress + Easy Digital Downloads store
+// behind Cloudflare. The user signs in through a real WebView window; we reuse
+// the captured session to list and download the tracks they've purchased.
+
+/** A purchased shop download — a `ModSummary` plus its authenticated file URL. */
+export interface ShopItem extends ModSummary {
+  downloadUrl: string;
+}
+
+/** Open the shop sign-in WebView. Resolves once the window is opened; the
+ * `shop-auth` event fires when login completes. */
+export function shopLogin(): Promise<void> {
+  return invoke<void>("shop_login");
+}
+
+/** Whether a shop session is currently held. */
+export function shopStatus(): Promise<boolean> {
+  return invoke<boolean>("shop_status");
+}
+
+/** Sign out of the shop and forget the stored session. */
+export function shopLogout(): Promise<void> {
+  return invoke<void>("shop_logout");
+}
+
+/** The signed-in user's purchased downloads ("All My Downloads"). */
+export function shopMyDownloads(): Promise<ShopItem[]> {
+  return invoke<ShopItem[]>("shop_my_downloads");
+}
+
+/** Download + install a purchased item. Progress arrives via `onInstallProgress`. */
+export function shopInstall(item: ShopItem, destFolder: string): Promise<void> {
+  return invoke<void>("shop_install", { item, destFolder });
+}
+
+/** Fires after a WebView sign-in completes; payload is whether it succeeded. */
+export function onShopAuth(cb: (ok: boolean) => void): Promise<UnlistenFn> {
+  return listen<boolean>("shop-auth", (event) => cb(event.payload));
 }
 
 // --- FrostMod live-reload --------------------------------------------------

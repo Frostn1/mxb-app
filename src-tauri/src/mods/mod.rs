@@ -1,4 +1,5 @@
 pub mod mxb;
+pub mod mxbshop;
 
 use serde::Serialize;
 

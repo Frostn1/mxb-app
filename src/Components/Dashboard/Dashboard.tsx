@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import Sidebar, { type DashboardView } from "../Shell/Sidebar";
 import Library from "../Library/Library";
 import Browse from "../Browse/Browse";
+import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
 import Settings from "../Settings/Settings";
 import { InstallProvider } from "../../Context/Install";
@@ -88,6 +89,8 @@ const Dashboard = () => {
               onOpenMod={setSelectedSlug}
               onChangeType={changeType}
             />
+          ) : view === "shop" ? (
+            <Shop refreshKey={libraryVersion} />
           ) : view === "library" ? (
             <Library
               modType={modType}

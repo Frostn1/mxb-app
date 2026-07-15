@@ -59,6 +59,27 @@ export interface InstalledMod {
   path: string;
   /** Relative parent folder under the subpath (`""` if top-level). */
   folder: string;
+  /** File size on disk, in bytes. */
+  size: number;
+}
+
+/**
+ * Parsed structure of an installed `.pkz`, loaded lazily per library card.
+ * `locked` marks a non-plain archive that can't be inspected
+ * (only its name + size are known).
+ */
+export interface PkzMeta {
+  locked: boolean;
+  /** Display name from the archive's `.ini`, if readable. */
+  name: string | null;
+  author: string | null;
+  location: string | null;
+  /** Track length in metres. */
+  length: number | null;
+  /** Reference altitude in metres. */
+  altitude: number | null;
+  /** Preview image as a `data:image/png;base64,…` URI, if one was found. */
+  thumbnail: string | null;
 }
 
 export type InstallStage =

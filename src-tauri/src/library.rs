@@ -13,6 +13,9 @@ pub struct InstalledMod {
     /// Relative parent folder under the subpath (`""` if top-level). Tracks are
     /// often nested a few folders deep, so this preserves where they live.
     pub folder: String,
+    /// File size on disk, in bytes (shown on the library card immediately;
+    /// available even for non-plain archives we can't open).
+    pub size: u64,
 }
 
 /// `<mods_path>/<subpath>`, where `subpath` is like `mods/tracks` or `mods/bikes`.
@@ -147,10 +150,12 @@ pub fn scan_mods(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<Installed
             .map(|rel| rel.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
 
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
         items.push(InstalledMod {
             name: entry.file_name().to_string_lossy().into_owned(),
             path: path.to_string_lossy().into_owned(),
             folder,
+            size,
         });
     }
 

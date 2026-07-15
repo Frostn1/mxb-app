@@ -35,3 +35,23 @@ export function fileFormat(url: string): string | null {
   const m = url.match(/\.(pkz|zip|rar|7z)(?:[?#]|$)/i);
   return m ? `.${m[1].toLowerCase()}` : null;
 }
+
+/** Human-readable file size, e.g. "45 MB" or "1.2 GB". */
+export function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 0) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = value >= 10 || unit === 0 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${rounded} ${units[unit]}`;
+}
+
+/** Human-readable track length from metres, e.g. "1.24 km" or "820 m". */
+export function formatLength(metres: number): string {
+  if (!metres || metres <= 0) return "";
+  return metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : `${Math.round(metres)} m`;
+}
