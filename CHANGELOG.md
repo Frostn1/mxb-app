@@ -2,6 +2,13 @@
 
 ## 2026-07-15
 
+### Fixed
+- **Install destination picker for bike liveries**: the folder list is now
+  **scrollable** and no longer overflows the popup, long bike names **truncate**
+  instead of cutting off, and it's a **command-style search** — probable bikes
+  (matched from the mod name) show under "Probably" at the top, with a search box
+  to find any bike.
+
 ### Added
 - **Start FrostMod without restarting the app**: if FrostMod isn't running, a play
   button appears on the sidebar status pill and in Settings → FrostMod to launch it
