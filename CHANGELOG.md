@@ -2,7 +2,47 @@
 
 ## 2026-07-15
 
+### Changed
+- **All app state now lives in one Local AppData folder**: config, shop session,
+  and the FrostMod install moved from Roaming to
+  `%LOCALAPPDATA%\com.frost.mxbikes\` (joining the existing cache), so everything
+  is in one per-machine place. No migration (pre-release) — old Roaming files are
+  simply re-created on next launch.
+
 ### Added
+- **Rider content**: a new **Rider** browse section (Rider Kit, Helmets, Helmet
+  Paints, Gloves, Boots, Protection) installing into `mods/rider`. Paints route to
+  the right place automatically — helmet/boot/protection paints into their model's
+  `paints`/`goggles` (pick the installed model, name-matched like bike liveries),
+  and rider outfit + gloves into the rider **profile** you choose
+  (`riders/<profile>/{paints,gloves}`, scanned from your install via a new
+  `scan_rider_targets` command).
+- **File logging**: added `tauri-plugin-log`, writing to
+  `%LOCALAPPDATA%\com.frost.mxbikes\logs\`. Startup logs the app version and the
+  data/log dir paths, and shop session/login/download failures are now logged.
+
+### Added
+- **First-launch welcome tour**: a 3-slide intro overlay (what MXB App is →
+  browse & install → FrostMod) shown once on first launch before folder setup,
+  tracked via a `mxb:welcomeSeen:v1` localStorage flag. New
+  `Components/Welcome/Welcome.tsx`.
+- **Windows executable publisher & metadata**: the installer and the `.exe`
+  version info now carry a publisher ("Frost"), copyright, homepage and
+  description so Windows shows a proper publisher/details instead of blanks.
+  Set via `bundle.publisher`/`copyright`/`homepage`/`shortDescription`/
+  `longDescription` in `tauri.conf.json`. (Does not replace Authenticode code
+  signing — SmartScreen may still warn until the exe is signed.)
+
+- **Rich library cards from inside the `.pkz`**: plain-zip tracks and
+  bikes now show their **real name, author, length and a preview thumbnail** read
+  straight from the archive's `.ini` and preview image, plus the **file size** on
+  every card. Preview images (often TGA, which browsers can't render) are decoded
+  and downscaled to a small JPEG in Rust. **non-plain `.pkz` are
+  detected and skipped gracefully** — they show a lock badge with just name + size.
+  Parsing is lazy per card (list paints instantly) and cached to disk. Backed by a
+  new `get_pkz_meta` Tauri command + `pkz` module (`image`/`base64` crates), with
+  `size` added to the `InstalledMod` model.
+
 - **MX Bikes Shop downloads**: a new **Shop** tab lets you sign in to
   mxbikes-shop.com and install the tracks you've **already purchased**
   ("All My Downloads") with the same one-click download → extract → place flow and

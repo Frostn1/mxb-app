@@ -66,6 +66,14 @@ fn get_installed_mods(
     library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
 }
 
+/// Installed rider models (helmet/boot/protection folders) + rider profiles, used
+/// to build install destinations for rider paints and per-profile kit/gloves.
+#[tauri::command]
+fn scan_rider_targets(app: tauri::AppHandle) -> Result<library::RiderTargets, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    Ok(library::scan_rider_targets(&cfg.mods_path))
+}
+
 /// Read the structure of one installed `.pkz` (name/author/length/preview) for
 /// its library card. Plain-zip archives are parsed; non-plain ones report
 /// `locked`. Called lazily per card and cached on disk.
@@ -239,7 +247,16 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
             };
             let cookies = shop_session::cookies_from_window(&win);
             if shop_session::is_authenticated(&cookies) {
-                let ok = shop_session::set_session(&app, cookies).is_ok();
+                let ok = match shop_session::set_session(&app, cookies) {
+                    Ok(()) => {
+                        log::info!("captured MX Bikes Shop session");
+                        true
+                    }
+                    Err(e) => {
+                        log::error!("failed to save shop session: {e:#}");
+                        false
+                    }
+                };
                 let _ = app.emit("shop-auth", ok);
                 let _ = win.close();
                 break;
@@ -302,6 +319,19 @@ async fn shop_install(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(
+            // File log in the app log dir + stdout in dev. Rotates when large,
+            // keeping the newest file (see the log dir printed at startup).
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: None,
+                    }),
+                ])
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -313,6 +343,15 @@ fn main() {
         .manage(FrostmodProcess::default())
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
+            // Record where app state lands so the log itself answers "where?".
+            log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+            if let Ok(dir) = app.path().app_local_data_dir() {
+                log::info!("data dir (config/session/frostmod): {}", dir.display());
+            }
+            if let Ok(dir) = app.path().app_log_dir() {
+                log::info!("log dir: {}", dir.display());
+            }
+
             // System-tray icon so the app can keep running when the window closes.
             let show = MenuItem::with_id(app, "show", "Show MXB App", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -385,6 +424,7 @@ fn main() {
             get_mod_detail,
             get_installed_mods,
             get_pkz_meta,
+            scan_rider_targets,
             add_to_library,
             import_file,
             move_mod,

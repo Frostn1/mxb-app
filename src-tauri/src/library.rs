@@ -163,6 +163,44 @@ pub fn scan_mods(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<Installed
     Ok(items)
 }
 
+/// Installed rider "models" and profiles, for building rider paint destinations:
+/// helmet/boot/protection paints drop into `<model>/paints`, and rider kit /
+/// glove paints live per rider profile under `riders/<profile>/{paints,gloves}`.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RiderTargets {
+    pub helmets: Vec<String>,
+    pub boots: Vec<String>,
+    pub protection: Vec<String>,
+    pub profiles: Vec<String>,
+}
+
+/// List immediate sub-folder names under `<mods_path>/mods/rider/<sub>` for each
+/// rider area. Missing folders just yield empty lists (best-effort).
+pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
+    let base = mods_subdir(mods_path, "mods/rider");
+    let dirs_in = |sub: &str| -> Vec<String> {
+        let mut out = Vec::new();
+        if let Ok(rd) = fs::read_dir(base.join(sub)) {
+            for e in rd.flatten() {
+                if e.path().is_dir() {
+                    if let Some(n) = e.file_name().to_str() {
+                        out.push(n.to_string());
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+        out
+    };
+    RiderTargets {
+        helmets: dirs_in("helmets"),
+        boots: dirs_in("boots"),
+        protection: dirs_in("protection"),
+        profiles: dirs_in("riders"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

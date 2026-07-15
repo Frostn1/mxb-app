@@ -63,6 +63,25 @@ export const MOD_TYPES: ModType[] = [
       { id: 95, label: "Wheels" },
     ],
   },
+  {
+    // Rider content: outfit/kit + gear (helmets, gloves, boots, protection).
+    // Helmets/boots/protection are model + paints (a paint needs its model),
+    // while rider kit + gloves paints live per rider profile. Category ids
+    // verified against the live WP API (parent "Rider" = 30).
+    id: "rider",
+    label: "Rider",
+    categoryId: 30,
+    installSubpath: "mods/rider",
+    categories: [
+      { id: 30, label: "All" },
+      { id: 35, label: "Rider Kit" },
+      { id: 33, label: "Helmets" },
+      { id: 127, label: "Helmet Paints" },
+      { id: 32, label: "Gloves" },
+      { id: 31, label: "Boots" },
+      { id: 36, label: "Protection" },
+    ],
+  },
 ];
 
 export const DEFAULT_MOD_TYPE = MOD_TYPES[0];
@@ -101,6 +120,18 @@ export function getModDetail(slug: string): Promise<ModDetail> {
 
 export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {
   return invoke<InstalledMod[]>("get_installed_mods", { subpath });
+}
+
+/** Installed rider models + profiles, for building rider paint destinations. */
+export interface RiderTargets {
+  helmets: string[];
+  boots: string[];
+  protection: string[];
+  profiles: string[];
+}
+
+export function scanRiderTargets(): Promise<RiderTargets> {
+  return invoke<RiderTargets>("scan_rider_targets");
 }
 
 /**
@@ -219,6 +250,73 @@ export function buildDestinations(
   for (const f of [...new Set(installed.map((i) => i.folder))].sort((a, b) => a.localeCompare(b))) {
     if (f) add(f, f);
   }
+  return { options, guess, suggestions };
+}
+
+/**
+ * Destinations for **rider** content. Helmet/boot/protection paints drop into
+ * their model's `paints` (and helmets also `goggles`); rider kit + gloves live
+ * per rider profile under `riders/<profile>/{paints,gloves}`. New models install
+ * to their type root. Suggestions rank name-matched model paints first, then the
+ * rider profiles (for kit/gloves).
+ */
+export function buildRiderDestinations(
+  targets: RiderTargets,
+  title: string,
+): { options: DestOption[]; guess: string; suggestions: string[] } {
+  const seen = new Set<string>();
+  const options: DestOption[] = [];
+  const add = (value: string, label: string) => {
+    if (!seen.has(value)) {
+      options.push({ value, label });
+      seen.add(value);
+    }
+  };
+
+  const tt = tokens(title);
+  const score = (name: string) => {
+    let s = 0;
+    for (const t of tokens(name)) if (tt.has(t)) s++;
+    return s;
+  };
+
+  // New-model roots first.
+  add("helmets", "Helmets (new model)");
+  add("boots", "Boots (new model)");
+  add("protection", "Protection (new model)");
+
+  // Model paints, scored for suggestions.
+  const scoredPaints: { value: string; score: number }[] = [];
+  for (const h of targets.helmets) {
+    add(`helmets/${h}/paints`, `${h} · helmet paints`);
+    add(`helmets/${h}/goggles`, `${h} · goggles`);
+    scoredPaints.push({ value: `helmets/${h}/paints`, score: score(h) });
+  }
+  for (const b of targets.boots) {
+    add(`boots/${b}/paints`, `${b} · boot paints`);
+    scoredPaints.push({ value: `boots/${b}/paints`, score: score(b) });
+  }
+  for (const p of targets.protection) {
+    add(`protection/${p}/paints`, `${p} · protection paints`);
+    scoredPaints.push({ value: `protection/${p}/paints`, score: score(p) });
+  }
+
+  // Per-profile outfit (rider kit) + gloves.
+  for (const prof of targets.profiles) {
+    add(`riders/${prof}/paints`, `${prof} · outfit / kit`);
+    add(`riders/${prof}/gloves`, `${prof} · gloves`);
+  }
+
+  const topPaints = scoredPaints
+    .filter((s) => s.score >= 1)
+    .sort((a, b) => b.score - a.score);
+  const suggestions = [
+    ...topPaints.slice(0, 4).map((s) => s.value),
+    // Rider kit / gloves can't be name-matched — surface the profiles too.
+    ...targets.profiles.map((p) => `riders/${p}/paints`),
+  ];
+  const guess = topPaints[0] && topPaints[0].score >= 2 ? topPaints[0].value : "";
+
   return { options, guess, suggestions };
 }
 
