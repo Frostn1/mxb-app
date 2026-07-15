@@ -66,6 +66,18 @@ fn get_installed_mods(
     library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
 }
 
+/// Rich Library scan: packaged `.pkz`, extracted mod folders, and loose paint
+/// files, each tagged with kind/category/parent for grouping + detail in the UI.
+/// (Install pickers keep using the leaner `get_installed_mods`.)
+#[tauri::command]
+fn scan_library(
+    app: tauri::AppHandle,
+    subpath: String,
+) -> Result<Vec<library::LibraryEntry>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    library::scan_library(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
+}
+
 /// Installed rider models (helmet/boot/protection folders) + rider profiles, used
 /// to build install destinations for rider paints and per-profile kit/gloves.
 #[tauri::command]
@@ -80,6 +92,14 @@ fn scan_rider_targets(app: tauri::AppHandle) -> Result<library::RiderTargets, St
 #[tauri::command]
 fn get_pkz_meta(app: tauri::AppHandle, path: String) -> Result<pkz::PkzMeta, String> {
     pkz::read_meta_cached(&app, &path).map_err(|e| format!("{e:#}"))
+}
+
+/// Full-resolution preview image for the library detail lightbox (a `data:`
+/// URI), or `None` when the archive is locked / has no image. Loaded on demand
+/// (one item at a time), not per card.
+#[tauri::command]
+fn get_pkz_preview(path: String) -> Result<Option<String>, String> {
+    pkz::read_preview(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -423,7 +443,9 @@ fn main() {
             search_mods,
             get_mod_detail,
             get_installed_mods,
+            scan_library,
             get_pkz_meta,
+            get_pkz_preview,
             scan_rider_targets,
             add_to_library,
             import_file,

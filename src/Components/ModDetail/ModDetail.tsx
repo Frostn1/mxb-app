@@ -22,6 +22,7 @@ import {
   getInstalledMods,
   getModDetail,
   isBlockedDownload,
+  isLiveryContext,
   normalizeModName,
   resolveInitialFolder,
   scanRiderTargets,
@@ -40,11 +41,23 @@ import { useInstall } from "../../Context/Install";
 import { fileFormat, formatDate } from "../../lib/mods";
 import { Badge } from "@/Components/ui/badge";
 import { Button } from "@/Components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/Components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
 interface ModDetailProps {
   slug: string;
   modType: ModType;
+  /** Browse category the mod was opened under — drives bike-livery routing. */
+  categoryId: number;
   installedNames: Set<string>;
   onBack: () => void;
 }
@@ -77,9 +90,11 @@ function stageIndex(stage: InstallStage): number {
 export default function ModDetail({
   slug,
   modType,
+  categoryId,
   installedNames,
   onBack,
 }: ModDetailProps) {
+  const livery = isLiveryContext(modType, categoryId);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<InstalledMod[]>([]);
@@ -92,6 +107,7 @@ export default function ModDetail({
     step1: boolean;
   } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [confirmReinstall, setConfirmReinstall] = useState(false);
   const [activeImg, setActiveImg] = useState(0);
   const swiperRef = useRef<SwiperClass | null>(null);
 
@@ -120,7 +136,7 @@ export default function ModDetail({
           const dest =
             modType.id === "rider"
               ? buildRiderDestinations(await scanRiderTargets(), d.title)
-              : buildDestinations(modType, d.title, inst);
+              : buildDestinations(modType, d.title, inst, livery);
           if (cancelled) return;
           setDestOptions(dest.options);
           setGuess(dest.guess);
@@ -134,7 +150,7 @@ export default function ModDetail({
     return () => {
       cancelled = true;
     };
-  }, [slug, modType]);
+  }, [slug, modType, livery]);
 
   const folderCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -151,12 +167,18 @@ export default function ModDetail({
 
   const destKey = destStorageKey(modType);
   const initialFolder = useMemo(
-    () => resolveInitialFolder(modType, destOptions, guess),
-    [modType, destOptions, guess],
+    () => resolveInitialFolder(modType, destOptions, guess, livery),
+    [modType, destOptions, guess, livery],
   );
 
   const isInstalled =
     detail !== null && installedNames.has(normalizeModName(detail.title));
+
+  // Already have it? Confirm before overwriting; otherwise open the dialog.
+  const openInstall = () => {
+    if (isInstalled) setConfirmReinstall(true);
+    else setDialogOpen(true);
+  };
 
   const handleConfirm = ({ destFolder, mirror }: InstallChoice) => {
     localStorage.setItem(destKey, destFolder);
@@ -361,8 +383,8 @@ export default function ModDetail({
               />
             ) : primary ? (
               <>
-                <Button className="h-11 w-full text-[14px]" onClick={() => setDialogOpen(true)}>
-                  Add to Library
+                <Button className="h-11 w-full text-[14px]" onClick={openInstall}>
+                  {isInstalled ? "Reinstall" : "Add to Library"}
                 </Button>
                 <Row label="Host" value={primary.host} />
                 <Row
@@ -412,6 +434,29 @@ export default function ModDetail({
           onConfirm={handleConfirm}
         />
       )}
+
+      <AlertDialog open={confirmReinstall} onOpenChange={setConfirmReinstall}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reinstall “{detail.title}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This mod is already in your library. Reinstalling downloads it again
+              and overwrites the installed files.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmReinstall(false);
+                setDialogOpen(true);
+              }}
+            >
+              Reinstall
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

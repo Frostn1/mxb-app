@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import Sidebar, { type DashboardView } from "../Shell/Sidebar";
 import Library from "../Library/Library";
@@ -6,6 +6,9 @@ import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
 import Settings from "../Settings/Settings";
+
+// The Locker pulls in three.js / R3F; load it only when the tab is opened.
+const Locker = lazy(() => import("../Locker/Locker"));
 import { InstallProvider } from "../../Context/Install";
 import { useFrostmod } from "../../Context/Frostmod";
 import {
@@ -19,6 +22,8 @@ const Dashboard = () => {
   const [view, setView] = useState<DashboardView>("browse");
   const [modType, setModType] = useState<ModType>(DEFAULT_MOD_TYPE);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  // The browse category the opened mod was found under (drives livery routing).
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   // Bumped after an install so the library re-scans.
   const [libraryVersion, setLibraryVersion] = useState(0);
   // Normalized names of installed mods for the active type (for "in library" badges).
@@ -56,6 +61,11 @@ const Dashboard = () => {
 
   const onInstalled = useCallback(() => setLibraryVersion((v) => v + 1), []);
 
+  const openMod = useCallback((slug: string, categoryId: number) => {
+    setSelectedSlug(slug);
+    setSelectedCategoryId(categoryId);
+  }, []);
+
   const changeType = useCallback((t: ModType) => {
     setModType(t);
     setSelectedSlug(null);
@@ -69,16 +79,13 @@ const Dashboard = () => {
   return (
     <InstallProvider onInstalled={onInstalled}>
       <div className="flex h-full min-h-0">
-        <Sidebar
-          view={view}
-          onNavigate={navigate}
-          libraryCount={installedNames.size}
-        />
+        <Sidebar view={view} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {view === "browse" && selectedSlug ? (
             <ModDetail
               slug={selectedSlug}
               modType={modType}
+              categoryId={selectedCategoryId ?? modType.categoryId}
               installedNames={installedNames}
               onBack={() => setSelectedSlug(null)}
             />
@@ -86,7 +93,7 @@ const Dashboard = () => {
             <Browse
               modType={modType}
               installedNames={installedNames}
-              onOpenMod={setSelectedSlug}
+              onOpenMod={openMod}
               onChangeType={changeType}
             />
           ) : view === "shop" ? (
@@ -98,6 +105,16 @@ const Dashboard = () => {
               refreshKey={libraryVersion}
               onChanged={onInstalled}
             />
+          ) : view === "locker" ? (
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">
+                  Loading 3D viewer…
+                </div>
+              }
+            >
+              <Locker />
+            </Suspense>
           ) : (
             <Settings />
           )}

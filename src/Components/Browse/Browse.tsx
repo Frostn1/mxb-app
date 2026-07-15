@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   MOD_TYPES,
   SEARCH_PAGE_SIZE,
+  isLiveryContext,
   normalizeModName,
   resolveQuickInstall,
   searchMods,
@@ -15,12 +16,22 @@ import ModCard from "./ModCard";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/Components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
 interface BrowseProps {
   modType: ModType;
   installedNames: Set<string>;
-  onOpenMod: (slug: string) => void;
+  onOpenMod: (slug: string, categoryId: number) => void;
   onChangeType: (type: ModType) => void;
 }
 
@@ -42,9 +53,18 @@ export default function Browse({
   const [reloadKey, setReloadKey] = useState(0);
   const [selected, setSelected] = useState<Map<string, ModSummary>>(new Map());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // A pending reinstall the user must confirm (they already have these mods).
+  const [reinstall, setReinstall] = useState<
+    { kind: "single"; mod: ModSummary } | { kind: "bulk"; mods: ModSummary[] } | null
+  >(null);
 
   const { startInstall } = useInstall();
   const selectionActive = selected.size > 0;
+
+  const isInstalled = useCallback(
+    (mod: ModSummary) => installedNames.has(normalizeModName(mod.title)),
+    [installedNames],
+  );
 
   // Reset the category filter (and any selection) when the mod type changes —
   // selection + quick-install resolve against the current type's folders.
@@ -65,10 +85,14 @@ export default function Browse({
   const clearSelection = useCallback(() => setSelected(new Map()), []);
 
   // Silent quick-install: resolve the mirror + folder, then enqueue.
-  const quickInstall = useCallback(
+  const doQuickInstall = useCallback(
     async (mod: ModSummary) => {
       try {
-        const res = await resolveQuickInstall(mod.slug, modType);
+        const res = await resolveQuickInstall(
+          mod.slug,
+          modType,
+          isLiveryContext(modType, categoryId),
+        );
         if (res.ok) {
           startInstall(res.params);
           toast.success(`Queued “${res.params.title}”`, {
@@ -87,41 +111,71 @@ export default function Browse({
         });
       }
     },
-    [modType, startInstall],
+    [modType, categoryId, startInstall],
   );
 
-  const bulkInstall = useCallback(async () => {
-    const list = [...selected.values()];
-    setBulkBusy(true);
-    let queued = 0;
-    const skipped: string[] = [];
-    for (const mod of list) {
-      try {
-        const res = await resolveQuickInstall(mod.slug, modType);
-        if (res.ok) {
-          startInstall(res.params);
-          queued++;
-        } else {
-          skipped.push(res.title);
+  // Guard: if the mod is already installed, confirm before overwriting.
+  const quickInstall = useCallback(
+    (mod: ModSummary) => {
+      if (isInstalled(mod)) setReinstall({ kind: "single", mod });
+      else void doQuickInstall(mod);
+    },
+    [isInstalled, doQuickInstall],
+  );
+
+  const doBulkInstall = useCallback(
+    async (list: ModSummary[]) => {
+      setBulkBusy(true);
+      let queued = 0;
+      const skipped: string[] = [];
+      for (const mod of list) {
+        try {
+          const res = await resolveQuickInstall(
+            mod.slug,
+            modType,
+            isLiveryContext(modType, categoryId),
+          );
+          if (res.ok) {
+            startInstall(res.params);
+            queued++;
+          } else {
+            skipped.push(res.title);
+          }
+        } catch {
+          skipped.push(mod.title);
         }
-      } catch {
-        skipped.push(mod.title);
       }
-    }
-    setBulkBusy(false);
-    clearSelection();
-    if (queued > 0) {
-      toast.success(`Queued ${queued} mod${queued > 1 ? "s" : ""}`, {
-        description: skipped.length
-          ? `${skipped.length} skipped — browser-only host.`
-          : "They'll install one after another.",
-      });
-    } else if (skipped.length) {
-      toast.error("Couldn't quick-install the selection", {
-        description: `All ${skipped.length} need a browser download.`,
-      });
-    }
-  }, [selected, modType, startInstall, clearSelection]);
+      setBulkBusy(false);
+      clearSelection();
+      if (queued > 0) {
+        toast.success(`Queued ${queued} mod${queued > 1 ? "s" : ""}`, {
+          description: skipped.length
+            ? `${skipped.length} skipped — browser-only host.`
+            : "They'll install one after another.",
+        });
+      } else if (skipped.length) {
+        toast.error("Couldn't quick-install the selection", {
+          description: `All ${skipped.length} need a browser download.`,
+        });
+      }
+    },
+    [modType, categoryId, startInstall, clearSelection],
+  );
+
+  const bulkInstall = useCallback(() => {
+    const list = [...selected.values()];
+    const already = list.filter(isInstalled);
+    if (already.length) setReinstall({ kind: "bulk", mods: list });
+    else void doBulkInstall(list);
+  }, [selected, isInstalled, doBulkInstall]);
+
+  const confirmReinstall = useCallback(() => {
+    const pending = reinstall;
+    setReinstall(null);
+    if (!pending) return;
+    if (pending.kind === "single") void doQuickInstall(pending.mod);
+    else void doBulkInstall(pending.mods);
+  }, [reinstall, doQuickInstall, doBulkInstall]);
 
   const selectAll = useCallback(() => {
     setSelected((prev) => {
@@ -248,10 +302,10 @@ export default function Browse({
                   key={m.id}
                   mod={m}
                   isBike={isBike}
-                  installed={installedNames.has(normalizeModName(m.title))}
+                  installed={isInstalled(m)}
                   selected={selected.has(m.slug)}
                   selectionActive={selectionActive}
-                  onOpen={() => onOpenMod(m.slug)}
+                  onOpen={() => onOpenMod(m.slug, categoryId)}
                   onToggleSelect={() => toggleSelect(m)}
                   onQuickInstall={() => quickInstall(m)}
                 />
@@ -291,6 +345,31 @@ export default function Browse({
           </Button>
         </div>
       )}
+
+      <AlertDialog open={Boolean(reinstall)} onOpenChange={(o) => !o && setReinstall(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {reinstall?.kind === "single"
+                ? `Reinstall “${reinstall.mod.title}”?`
+                : "Reinstall mods you already have?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {reinstall?.kind === "single"
+                ? "This mod is already in your library. Reinstalling downloads it again and overwrites the installed files."
+                : `${reinstall?.mods.filter(isInstalled).length ?? 0} of the ${
+                    reinstall?.mods.length ?? 0
+                  } selected are already installed. Continuing reinstalls and overwrites them.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmReinstall}>
+              {reinstall?.kind === "single" ? "Reinstall" : "Reinstall all"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
