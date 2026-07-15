@@ -33,7 +33,8 @@ const SECTIONS: { id: SectionId; label: string }[] = [
 export default function Settings() {
   const { config, reloadConfig } = useConfig();
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, install, start } = useFrostmod();
+  const { running, reload, status, installing, checking, statusError, install, start, refreshStatus } =
+    useFrostmod();
   const [version, setVersion] = useState("");
   const [active, setActive] = useState<SectionId>("folder");
   const [busy, setBusy] = useState(false);
@@ -78,7 +79,10 @@ export default function Settings() {
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(""));
-  }, []);
+    // Re-check FrostMod against GitHub whenever Settings opens — the provider
+    // only fetches once at launch, so this catches releases cut since then.
+    void refreshStatus();
+  }, [refreshStatus]);
 
   const goto = (id: SectionId) => {
     setActive(id);
@@ -252,34 +256,56 @@ export default function Settings() {
                     ? `Installed${status.version ? ` · ${status.version}` : ""}`
                     : "Not installed"}
                 </span>
-                {status?.latest && (
-                  <span className="text-[11px] text-muted-foreground">
-                    Latest: {status.latest}
-                  </span>
-                )}
+                <span className="text-[11px] text-muted-foreground">
+                  {checking
+                    ? "Checking GitHub for the latest release…"
+                    : statusError
+                      ? "Couldn't check for updates — offline or GitHub unavailable."
+                      : status?.latest
+                        ? `Latest: ${status.latest}`
+                        : null}
+                </span>
               </div>
-              {(() => {
-                const updatable =
-                  status?.installed &&
-                  status.latest &&
-                  status.version !== status.latest;
-                return (
+              <div className="flex items-center gap-1.5">
+                {status?.installed && (
                   <Button
-                    variant={status?.installed && !updatable ? "outline" : "default"}
-                    size="sm"
-                    onClick={install}
-                    disabled={installing || (status?.installed && !updatable)}
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => refreshStatus()}
+                    disabled={checking || installing}
+                    title="Check for a newer FrostMod"
                   >
-                    {installing
-                      ? "Working…"
-                      : !status?.installed
-                        ? "Install FrostMod"
-                        : updatable
-                          ? `Update to ${status.latest}`
-                          : "Up to date"}
+                    <RefreshCw className={cn("size-3.5", checking && "animate-spin")} />
                   </Button>
-                );
-              })()}
+                )}
+                {(() => {
+                  const updatable =
+                    status?.installed &&
+                    status.latest &&
+                    status.version !== status.latest;
+                  // "Up to date" only when we actually confirmed the latest tag.
+                  const confirmedCurrent =
+                    status?.installed && !updatable && !statusError && status?.latest;
+                  return (
+                    <Button
+                      variant={confirmedCurrent ? "outline" : "default"}
+                      size="sm"
+                      onClick={install}
+                      disabled={installing || checking || Boolean(confirmedCurrent)}
+                    >
+                      {installing
+                        ? "Working…"
+                        : !status?.installed
+                          ? "Install FrostMod"
+                          : updatable
+                            ? `Update to ${status.latest}`
+                            : statusError || !status?.latest
+                              ? "Reinstall latest"
+                              : "Up to date"}
+                    </Button>
+                  );
+                })()}
+              </div>
             </div>
 
             <ToggleRow
@@ -319,7 +345,14 @@ export default function Settings() {
               </button>
             </div>
             <div>
-              <Button variant="outline" size="sm" onClick={() => checkForUpdates()}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void checkForUpdates();
+                  void refreshStatus();
+                }}
+              >
                 <RefreshCw className="size-3.5" /> Check for updates
               </Button>
             </div>
