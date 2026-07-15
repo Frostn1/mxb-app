@@ -3,6 +3,9 @@
 ## 2026-07-15
 
 ### Added
+- **Silent FrostMod setup**: FrostMod now installs and starts automatically on
+  first run instead of showing a "Set up FrostMod?" prompt. Added a manual
+  re-check button next to the FrostMod row in Settings.
 - **In-app MEGA downloads**: MEGA public file links now install directly in the
   app (fetch + decrypt via the pure-Rust `mega` crate on the existing reqwest
   client) with the same progress stages as other hosts — no browser round-trip
@@ -14,11 +17,18 @@
   handle them — the old "CDN blocks non-browser TLS" workaround no longer applies.
 
 ### Changed
+- **FrostMod update check**: Settings now re-checks FrostMod against GitHub when
+  it opens (and when the About "Check for updates" button is pressed), so a newer
+  release surfaces an "Update to vX" button instead of a stale "Up to date".
 - MEGA and MediaFire are no longer treated as "blocked" hosts in the install UI,
   so their mirrors get the in-app install button instead of the
   download-and-import fallback (`BLOCKED_HOST_PATTERNS` is now empty).
 
 ### Fixed
+- **FrostMod "up to date" false positive**: a failed or offline GitHub check no
+  longer displays as "Up to date". The panel now distinguishes *Checking…*,
+  *Couldn't check* (offering "Reinstall latest"), and a confirmed-current install,
+  so users aren't told they're current when the check simply didn't run.
 - **MediaFire link resolution**: replaced the stale `id="downloadButton"` fallback
   regex (which matched nothing on today's pages) with the current
   `aria-label="Download file"` link inside `#download_link`.
