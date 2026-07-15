@@ -8,6 +8,7 @@ import { ConfigContext } from "./Context/Config";
 import { Toaster } from "@/Components/ui/sonner";
 import { TooltipProvider } from "@/Components/ui/tooltip";
 import { getConfig, isConfigured } from "./api/mods";
+import { checkForUpdates } from "./lib/updater";
 import type { Config } from "./types";
 
 const App = () => {
@@ -29,6 +30,11 @@ const App = () => {
       }
     })();
   }, [reloadConfig]);
+
+  // Check for a new release once on launch (quiet unless an update exists).
+  useEffect(() => {
+    void checkForUpdates({ silent: true });
+  }, []);
 
   // Block the webview's browser refresh/find shortcuts.
   useEffect(() => {

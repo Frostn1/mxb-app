@@ -5,6 +5,7 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import { createConfig } from "../../api/mods";
+import { checkForUpdates } from "../../lib/updater";
 import { useConfig } from "../../Context/Config";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { useFrostmod } from "../../Context/Frostmod";
@@ -209,6 +210,11 @@ export default function Settings() {
               >
                 Changelog
               </button>
+            </div>
+            <div>
+              <Button variant="outline" size="sm" onClick={() => checkForUpdates()}>
+                <RefreshCw className="size-3.5" /> Check for updates
+              </Button>
             </div>
           </Section>
         </div>
