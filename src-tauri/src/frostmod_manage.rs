@@ -30,9 +30,11 @@ pub struct FrostmodStatus {
 }
 
 fn frostmod_dir(app: &AppHandle) -> PathBuf {
+    // Local app-data dir (Windows: `%LOCALAPPDATA%\com.frost.mxbikes\frostmod`),
+    // alongside config/cache/logs — see `config::config_path`.
     app.path()
-        .app_data_dir()
-        .expect("could not resolve app data dir")
+        .app_local_data_dir()
+        .expect("could not resolve app local data dir")
         .join("frostmod")
 }
 

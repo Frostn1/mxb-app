@@ -29,12 +29,14 @@ impl Default for AppConfig {
     }
 }
 
-/// Location of the config file inside the OS app-config dir (survives bundling,
-/// unlike the previous cwd-relative `.config.json`).
+/// Location of the config file inside the OS local app-data dir — on Windows
+/// `%LOCALAPPDATA%\com.frost.mxbikes\config.json`. Local (not Roaming) keeps all
+/// app state — config, shop session, FrostMod, cache, logs — in one per-machine
+/// folder rather than syncing settings across domain machines.
 pub fn config_path(app: &AppHandle) -> PathBuf {
     app.path()
-        .app_config_dir()
-        .expect("could not resolve app config dir")
+        .app_local_data_dir()
+        .expect("could not resolve app local data dir")
         .join("config.json")
 }
 

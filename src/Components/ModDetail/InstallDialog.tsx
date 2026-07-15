@@ -97,7 +97,8 @@ export default function InstallDialog({
 
   const selectedMirror = mirrors[mirrorIdx];
   const thumb = detail.images[0];
-  const subtitleType = modType.id === "bikes" ? "Bike" : "Track";
+  const subtitleType =
+    modType.id === "bikes" ? "Bike" : modType.id === "rider" ? "Rider" : "Track";
 
   const commitNewFolder = () => {
     const v = newFolder.trim();
