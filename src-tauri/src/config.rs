@@ -3,11 +3,30 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 /// Persisted app configuration. `mods_path` is the MX Bikes root folder,
-/// e.g. `…/Documents/PiBoSo/MX Bikes`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// e.g. `…/Documents/PiBoSo/MX Bikes`. The behaviour flags default ON
+/// (Discord-style always-on companion) and `#[serde(default)]` keeps older
+/// config files (which only had `mods_path`) loading without losing it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
     pub mods_path: String,
+    /// Hide to the tray on window close and keep running.
+    pub run_in_background: bool,
+    /// Start MXB App automatically on login.
+    pub launch_at_startup: bool,
+    /// Launch FrostMod automatically when the app opens.
+    pub auto_run_frostmod: bool,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            mods_path: String::new(),
+            run_in_background: true,
+            launch_at_startup: true,
+            auto_run_frostmod: true,
+        }
+    }
 }
 
 /// Location of the config file inside the OS app-config dir (survives bundling,

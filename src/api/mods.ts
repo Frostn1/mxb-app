@@ -120,6 +120,16 @@ export function revealInExplorer(path: string): Promise<void> {
   return invoke<void>("reveal_in_explorer", { path });
 }
 
+/** Hide-to-tray + keep-running toggle. */
+export function setRunInBackground(enabled: boolean): Promise<void> {
+  return invoke<void>("set_run_in_background", { enabled });
+}
+
+/** Launch-at-login toggle (also flips the OS autostart entry). */
+export function setLaunchAtStartup(enabled: boolean): Promise<void> {
+  return invoke<void>("set_launch_at_startup", { enabled });
+}
+
 /** Kick off download → extract → place. Progress arrives via `onInstallProgress`. */
 export function addToLibrary(
   slug: string,
