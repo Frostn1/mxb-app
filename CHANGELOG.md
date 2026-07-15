@@ -3,6 +3,16 @@
 ## 2026-07-15
 
 ### Added
+- **Locker — in-app bike model swaps**: new Locker tab that mirrors FrostMod's
+  in-game model swapper (F8 > 3) from the app. Lists each swappable bike (a folder
+  with a loose `model.edf` **or** a `FrostMod Models/` library — so a bike whose
+  active Original is `.pkz`-packed still shows and stays reachable), its active
+  model, and every alternate set under `<Bike>/FrostMod Models/`, and lets you
+  switch between them — the same backup-current / move-in-chosen file dance (whole
+  loose set, `paints/` left put, with rollback) and `_active.txt` marker FrostMod
+  uses, so the two stay interchangeable. Signals a running FrostMod to live-reload
+  after a swap. New `scan_model_swaps` / `apply_model_swap` Tauri commands (Rust
+  `modelswap` module).
 - **Silent FrostMod setup**: FrostMod now installs and starts automatically on
   first run instead of showing a "Set up FrostMod?" prompt. Added a manual
   re-check button next to the FrostMod row in Settings.
