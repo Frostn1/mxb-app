@@ -8,12 +8,20 @@
   client) with the same progress stages as other hosts — no browser round-trip
   and no external megatools/MEGAcmd binary required. Folder links still fall back
   to manual browser download.
+- **In-app MediaFire downloads**: MediaFire file links install directly in the app
+  again. Verified empirically (full 427 MB `.pkz`) that MediaFire's CDN no longer
+  blocks the rustls client, so `resolve_mediafire` + the normal download path
+  handle them — the old "CDN blocks non-browser TLS" workaround no longer applies.
 
 ### Changed
-- MEGA is no longer treated as a "blocked" host in the install UI, so its mirrors
-  get the in-app install button instead of the download-and-import fallback.
+- MEGA and MediaFire are no longer treated as "blocked" hosts in the install UI,
+  so their mirrors get the in-app install button instead of the
+  download-and-import fallback (`BLOCKED_HOST_PATTERNS` is now empty).
 
 ### Fixed
+- **MediaFire link resolution**: replaced the stale `id="downloadButton"` fallback
+  regex (which matched nothing on today's pages) with the current
+  `aria-label="Download file"` link inside `#download_link`.
 - **Bare `.pnt` paints install**: mods shipped as a loose `.pnt` file (not zipped)
   now pass through extraction like `.pkz` does, instead of failing with
   "Unsupported archive type". More common now that MEGA links install in-app.
