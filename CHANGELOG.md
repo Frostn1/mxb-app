@@ -3,6 +3,17 @@
 ## 2026-07-14
 
 ### Added
+- **Windows install wizard**: the Windows build now ships a branded **NSIS**
+  installer (welcome → license → install → finish) instead of a bare bundle.
+  Installs **per-user with no admin/UAC** prompt, uses the snowflake app icon, and
+  shows the MIT license. Configured in `tauri.conf.json` (`bundle.windows.nsis`);
+  MSI dropped from the targets.
+- **Auto-update**: the app checks GitHub Releases on launch (quietly) and offers
+  **"Restart & update"** via a toast when a newer signed build exists; a manual
+  **Check for updates** button lives in Settings → About. Backed by the Tauri
+  `updater` + `process` plugins, signed release artifacts (`createUpdaterArtifacts`),
+  and a `latest.json` published by CI. Requires the `TAURI_SIGNING_PRIVATE_KEY`
+  secret and a published release to take effect.
 - **App icon**: a snowflake mark on an icy gradient badge, generated into
   `src-tauri/icons/*` (`.ico`, `.icns`, PNGs) — this is what shows on the
   taskbar/dock and the `.exe`. The in-app UI is unchanged.
