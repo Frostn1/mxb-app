@@ -11,18 +11,21 @@ import {
   Trash2,
   Plus,
   ChevronRight,
+  Lock,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   MOD_TYPES,
   getInstalledMods,
+  getPkzMeta,
   moveMod,
   revealInExplorer,
   uninstallMod,
   type ModType,
 } from "../../api/mods";
-import type { InstalledMod } from "../../types";
-import { displayName, folderLabel } from "../../lib/mods";
+import type { InstalledMod, PkzMeta } from "../../types";
+import { displayName, folderLabel, formatBytes, formatLength } from "../../lib/mods";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
 import {
@@ -66,6 +69,92 @@ interface RowAction {
   onSelect: () => void;
   destructive?: boolean;
   separatorBefore?: boolean;
+}
+
+/**
+ * Session cache of parsed `.pkz` metadata, keyed by path + size so a changed
+ * file (re-downloaded, different size) re-reads. Avoids re-invoking the backend
+ * when cards remount on search/folder/tab switches. The backend also caches to
+ * disk across sessions.
+ */
+const metaCache = new Map<string, PkzMeta>();
+
+/**
+ * The tile + title/subtitle of a library card. Lazily reads the archive's
+ * structure (name/author/length/preview) so the list paints instantly and each
+ * card enriches as its metadata arrives. GUID-locked archives show a lock badge
+ * and fall back to filename + size.
+ */
+function LibraryCardBody({
+  item,
+  typeIcon: TypeIcon,
+}: {
+  item: InstalledMod;
+  typeIcon: LucideIcon;
+}) {
+  const cacheKey = `${item.path}:${item.size}`;
+  const [meta, setMeta] = useState<PkzMeta | null>(
+    () => metaCache.get(cacheKey) ?? null,
+  );
+
+  useEffect(() => {
+    const cached = metaCache.get(cacheKey);
+    if (cached) {
+      setMeta(cached);
+      return;
+    }
+    let alive = true;
+    setMeta(null);
+    getPkzMeta(item.path)
+      .then((m) => {
+        metaCache.set(cacheKey, m);
+        if (alive) setMeta(m);
+      })
+      .catch(() => {
+        /* leave the icon/size fallback in place */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [item.path, cacheKey]);
+
+  const title = meta?.name?.trim() || displayName(item.name);
+  const parts: string[] = [];
+  if (meta?.author) parts.push(`by ${meta.author}`);
+  if (meta?.length) parts.push(formatLength(meta.length));
+  if (item.size) parts.push(formatBytes(item.size));
+  const subtitle = parts.join(" · ") || folderLabel(item.folder);
+
+  return (
+    <>
+      <div className="relative grid h-12 w-[76px] flex-none place-items-center overflow-hidden rounded-md bg-gradient-to-br from-[#3a3f45] to-[#20242a] text-foreground/25">
+        {meta?.thumbnail ? (
+          <img src={meta.thumbnail} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <TypeIcon className="size-5" strokeWidth={1.5} />
+        )}
+        {meta?.locked && (
+          <span
+            className="absolute bottom-0.5 right-0.5 rounded bg-black/60 p-0.5 text-white/75"
+            title="GUID-locked — encrypted, contents can't be read"
+          >
+            <Lock className="size-3" />
+          </span>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          className="truncate text-[13px] font-semibold"
+          title={meta?.location?.trim() || item.name}
+        >
+          {title}
+        </span>
+        <span className="truncate text-[11px] text-muted-foreground" title={subtitle}>
+          {subtitle}
+        </span>
+      </div>
+    </>
+  );
 }
 
 interface LibraryProps {
@@ -257,20 +346,7 @@ export default function Library({
                       <ContextMenu key={item.path}>
                         <ContextMenuTrigger asChild>
                           <div className="flex items-center gap-3 rounded-xl border border-white/[0.07] bg-card p-3 transition-colors hover:border-white/15">
-                            <div className="grid h-12 w-[76px] flex-none place-items-center rounded-md bg-gradient-to-br from-[#3a3f45] to-[#20242a] text-foreground/25">
-                              <TypeIcon className="size-5" strokeWidth={1.5} />
-                            </div>
-                            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                              <span
-                                className="truncate text-[13px] font-semibold"
-                                title={item.name}
-                              >
-                                {displayName(item.name)}
-                              </span>
-                              <span className="truncate text-[11px] text-muted-foreground">
-                                {folderLabel(item.folder)}
-                              </span>
-                            </div>
+                            <LibraryCardBody item={item} typeIcon={TypeIcon} />
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
