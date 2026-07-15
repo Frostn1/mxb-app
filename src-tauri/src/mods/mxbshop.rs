@@ -54,8 +54,12 @@ pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Res
         // verified/adjusted against the real logged-in markup during review.
         if let Ok(dir) = app.path().app_cache_dir() {
             let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(dir.join("shop-downloads.html"), &html);
+            let dump = dir.join("shop-downloads.html");
+            let _ = std::fs::write(&dump, &html);
+            log::warn!("parsed 0 shop downloads; dumped page to {}", dump.display());
         }
+    } else {
+        log::info!("fetched {} shop downloads", items.len());
     }
     Ok(items)
 }

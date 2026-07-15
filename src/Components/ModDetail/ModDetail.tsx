@@ -17,12 +17,14 @@ import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import {
   buildDestinations,
+  buildRiderDestinations,
   destStorageKey,
   getInstalledMods,
   getModDetail,
   isBlockedDownload,
   normalizeModName,
   resolveInitialFolder,
+  scanRiderTargets,
   sortMirrors,
   type DestOption,
   type ModType,
@@ -113,14 +115,16 @@ export default function ModDetail({
           const inst = await getInstalledMods(modType.installSubpath);
           if (cancelled) return;
           setInstalled(inst);
-          const { options, guess, suggestions } = buildDestinations(
-            modType,
-            d.title,
-            inst,
-          );
-          setDestOptions(options);
-          setGuess(guess);
-          setSuggestions(suggestions);
+          // Rider paints route into a model's/profile's folder; everything else
+          // uses the generic (track/bike) destination logic.
+          const dest =
+            modType.id === "rider"
+              ? buildRiderDestinations(await scanRiderTargets(), d.title)
+              : buildDestinations(modType, d.title, inst);
+          if (cancelled) return;
+          setDestOptions(dest.options);
+          setGuess(dest.guess);
+          setSuggestions(dest.suggestions);
         } catch {
           setInstalled([]);
           setDestOptions([]);
@@ -283,7 +287,7 @@ export default function ModDetail({
 
           <div className="flex flex-col gap-2 pt-1">
             <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
-              About this {modType.id === "bikes" ? "bike" : "track"}
+              About this {modType.id === "bikes" ? "bike" : modType.id === "rider" ? "rider gear" : "track"}
             </span>
             <div
               className="mod-description"
@@ -378,7 +382,7 @@ export default function ModDetail({
           <div className="flex items-center gap-2.5 rounded-[10px] border border-success/25 bg-success/[0.06] px-3 py-2.5">
             <span className="size-[7px] flex-none rounded-full bg-success" />
             <span className="text-[12px] text-success/90">
-              FrostMod will hot-reload the {modType.id === "bikes" ? "bike" : "track"} list
+              FrostMod will hot-reload the {modType.id === "rider" ? "rider" : modType.id === "bikes" ? "bike" : "track"} list
               when this finishes.
             </span>
           </div>

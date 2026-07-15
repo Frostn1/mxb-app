@@ -71,8 +71,8 @@ fn build_client(cookies: &[(String, String)]) -> anyhow::Result<Client> {
 
 fn session_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
-        .app_config_dir()
-        .expect("could not resolve app config dir")
+        .app_local_data_dir()
+        .expect("could not resolve app local data dir")
         .join("shop_session.json")
 }
 
@@ -100,8 +100,12 @@ pub fn load_session(app: &AppHandle) {
     if stored.cookies.is_empty() {
         return;
     }
-    if let Ok(client) = build_client(&stored.cookies) {
-        app.state::<ShopSession>().set_client(Some(client));
+    match build_client(&stored.cookies) {
+        Ok(client) => {
+            app.state::<ShopSession>().set_client(Some(client));
+            log::info!("restored MX Bikes Shop session ({} cookies)", stored.cookies.len());
+        }
+        Err(e) => log::warn!("failed to restore shop session: {e:#}"),
     }
 }
 

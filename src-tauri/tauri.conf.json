@@ -37,6 +37,11 @@
     "targets": ["nsis", "app", "dmg"],
     "createUpdaterArtifacts": true,
     "licenseFile": "../LICENSE",
+    "publisher": "Frost",
+    "copyright": "Copyright © 2026 Frost",
+    "homepage": "https://github.com/Frostn1/mxb-app",
+    "shortDescription": "MX Bikes mod manager",
+    "longDescription": "MXB App is a mod manager for MX Bikes — browse mxb-mods.com, install tracks, bikes and paints with one click, and let FrostMod reload the game for you.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
