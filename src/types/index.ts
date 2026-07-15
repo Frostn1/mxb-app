@@ -2,6 +2,12 @@
 
 export interface Config {
   modsPath: string;
+  /** Hide to the tray on close and keep running (default true). */
+  runInBackground?: boolean;
+  /** Launch on login (default true). */
+  launchAtStartup?: boolean;
+  /** Auto-run FrostMod when the app opens (default true). */
+  autoRunFrostmod?: boolean;
 }
 
 /** A track-mod as it appears in search results / browse grid. */

@@ -67,3 +67,39 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # Tauri names bundles like `MXB.App_0.1.0_x64-setup.exe`, which reads as ugly/
+  # fishy. Rename the user-facing installers to `MXB-App-<ver>-<arch>.<ext>` and
+  # repoint latest.json at them. Signatures live inside latest.json and are over
+  # file *content* (unchanged by a rename), so self-update keeps verifying.
+  finalize:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Rename installers + patch latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"; cd "$work"
+          gh release download "$TAG" -R "$REPO" -p latest.json -O latest.json --clobber || true
+          for name in $(gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[].name'); do
+            case "$name" in
+              MXB.App_*.exe|MXB.App_*.dmg|MXB.App_*.exe.sig|MXB.App_*.dmg.sig)
+                new="$(printf '%s' "$name" | sed -e 's/MXB\.App/MXB-App/' -e 's/_/-/g' -e 's/-setup//')"
+                [ "$name" = "$new" ] && continue
+                echo "rename: $name -> $new"
+                gh release download "$TAG" -R "$REPO" -p "$name" -O "$new" --clobber
+                gh release delete-asset "$TAG" "$name" -R "$REPO" -y
+                gh release upload "$TAG" "$new" -R "$REPO" --clobber
+                [ -f latest.json ] && sed -i "s#${name}#${new}#g" latest.json
+                ;;
+            esac
+          done
+          if [ -f latest.json ]; then
+            gh release upload "$TAG" latest.json -R "$REPO" --clobber
+          fi

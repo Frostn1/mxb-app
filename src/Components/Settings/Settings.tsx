@@ -4,20 +4,26 @@ import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
-import { createConfig } from "../../api/mods";
+import {
+  createConfig,
+  setLaunchAtStartup,
+  setRunInBackground,
+} from "../../api/mods";
 import { checkForUpdates } from "../../lib/updater";
 import { useConfig } from "../../Context/Config";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { useFrostmod } from "../../Context/Frostmod";
 import { Button } from "@/Components/ui/button";
 import { Segmented } from "@/Components/ui/segmented";
+import { Switch } from "@/Components/ui/switch";
 import { cn } from "@/lib/utils";
 
 const REPO_URL = "https://github.com/Frostn1/mxb-app";
 
-type SectionId = "folder" | "appearance" | "frostmod" | "about";
+type SectionId = "folder" | "general" | "appearance" | "frostmod" | "about";
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "folder", label: "Game folder" },
+  { id: "general", label: "General" },
   { id: "appearance", label: "Appearance" },
   { id: "frostmod", label: "FrostMod" },
   { id: "about", label: "About & updates" },
@@ -32,10 +38,32 @@ export default function Settings() {
   const [busy, setBusy] = useState(false);
   const refs = useRef<Record<SectionId, HTMLDivElement | null>>({
     folder: null,
+    general: null,
     appearance: null,
     frostmod: null,
     about: null,
   });
+
+  const runInBackground = config.runInBackground ?? true;
+  const launchAtStartup = config.launchAtStartup ?? true;
+
+  const toggleBackground = async (v: boolean) => {
+    try {
+      await setRunInBackground(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error("Couldn't update setting", { description: String(e) });
+    }
+  };
+
+  const toggleStartup = async (v: boolean) => {
+    try {
+      await setLaunchAtStartup(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error("Couldn't update startup setting", { description: String(e) });
+    }
+  };
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(""));
@@ -139,6 +167,23 @@ export default function Settings() {
             </button>
           </Section>
 
+          {/* general / background */}
+          <Section title="General" innerRef={(el) => (refs.current.general = el)}>
+            <ToggleRow
+              label="Keep running in the background"
+              desc="Closing the window hides MXB App to the tray so FrostMod stays connected. Quit from the tray icon."
+              checked={runInBackground}
+              onChange={toggleBackground}
+            />
+            <div className="h-px bg-border" />
+            <ToggleRow
+              label="Launch at startup"
+              desc="Start MXB App automatically when you log in."
+              checked={launchAtStartup}
+              onChange={toggleStartup}
+            />
+          </Section>
+
           {/* appearance */}
           <Section
             title="Appearance"
@@ -216,8 +261,45 @@ export default function Settings() {
                 <RefreshCw className="size-3.5" /> Check for updates
               </Button>
             </div>
+            <div className="flex items-center gap-1.5 pt-1 text-[11.5px] text-faint">
+              <span>Made with</span>
+              <span className="text-primary">❄</span>
+              <span>by</span>
+              <button
+                onClick={() => openUrl("https://github.com/Frostn1")}
+                className="cursor-default font-semibold text-primary hover:brightness-110"
+              >
+                Frost
+              </button>
+            </div>
           </Section>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  desc,
+  checked,
+  onChange,
+}: {
+  label: string;
+  desc: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[12.5px] text-foreground/85">{label}</span>
+        <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+          {desc}
+        </span>
+      </div>
+      <div className="pt-0.5">
+        <Switch checked={checked} onCheckedChange={onChange} />
       </div>
     </div>
   );
