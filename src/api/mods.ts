@@ -358,14 +358,15 @@ export function buildRiderDestinations(
 
 /**
  * Hosts that block in-app downloads — the app opens these in the browser and
- * lets the user import the downloaded file instead. Only Mega remains here: its
- * files are client-side encrypted, so a plain download can't produce usable
- * bytes. MediaFire now downloads directly in-app again (its CDN no longer
- * blocks the rustls client, so `resolve_mediafire` + the normal download path
- * handle it). Matched against the URL (reliable) as well as the host label
- * (which the site writes inconsistently, e.g. "Mega .nz" with a space).
+ * lets the user import the downloaded file instead. Now empty: every supported
+ * host installs in-app. MediaFire downloads directly (its CDN no longer blocks
+ * the rustls client, so `resolve_mediafire` + the normal download path handle
+ * it) and Mega is fetched + decrypted in-app via the `mega` crate
+ * (`download_mega_and_place`). The browser-import flow below remains only as a
+ * manual escape hatch. Matched against the URL (reliable) as well as the host
+ * label (which the site writes inconsistently, e.g. "Media Fire" with a space).
  */
-const BLOCKED_HOST_PATTERNS = ["mega.nz", "mega.co", "mega."];
+const BLOCKED_HOST_PATTERNS: string[] = [];
 
 export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   const s = `${opt.url} ${opt.host}`.toLowerCase();
@@ -428,9 +429,9 @@ export type QuickInstallResult =
 /**
  * Resolve everything a silent quick-install needs from a mod slug: fetch the
  * page detail, pick the primary direct mirror, and compute the destination
- * folder the same way the install dialog would. Hosts that block in-app
- * downloads (MediaFire/Mega) can't be installed silently — reported as
- * `blocked` so the caller can route the user to the browser flow.
+ * folder the same way the install dialog would. Any host in
+ * `BLOCKED_HOST_PATTERNS` (currently none) can't be installed silently and is
+ * reported as `blocked` so the caller can route the user to the browser flow.
  */
 export async function resolveQuickInstall(
   slug: string,
