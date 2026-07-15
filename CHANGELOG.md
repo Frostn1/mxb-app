@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-07-15
+
+### Added
+- **In-app MEGA downloads**: MEGA public file links now install directly in the
+  app (fetch + decrypt via the pure-Rust `mega` crate on the existing reqwest
+  client) with the same progress stages as other hosts — no browser round-trip
+  and no external megatools/MEGAcmd binary required. Folder links still fall back
+  to manual browser download.
+
+### Changed
+- MEGA is no longer treated as a "blocked" host in the install UI, so its mirrors
+  get the in-app install button instead of the download-and-import fallback.
+
+## 2026-07-15 — v0.1.3
+
+### Fixed
+- **Kaizo servers no longer hidden from the browser**: the app now manages
+  FrostMod's `frostmod_serverfilter.yaml` in the FrostMod folder. FrostMod's stock
+  default filter blocked Kaizo (a `kaizo` name rule + a `k[a4][il1]z[o0]` spam
+  regex); we now write a curated `# frostmod-filter v4` config that keeps the
+  ad/cheat-shop spam rules but drops the Kaizo matches. Written on FrostMod
+  install/update and refreshed before each managed launch, so existing installs
+  get corrected automatically; a filter the user has hand-edited is left untouched.
+
+### Removed
+- **Locker (experimental 3D bike-livery viewer)**: removed the Locker scene and its
+  sidebar/dashboard entries; the feature is dropped for this release.
+
 ## 2026-07-15 — testing feedback pass
 
 ### Added

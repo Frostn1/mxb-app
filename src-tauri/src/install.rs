@@ -81,6 +81,14 @@ pub async fn add_to_library(
         .cookie_store(true)
         .build()?;
 
+    // MEGA is end-to-end encrypted: there's no plain "direct URL" to hand to the
+    // generic downloader, so it gets its own fetch-and-decrypt path.
+    let h = host.to_lowercase();
+    let u = url.to_lowercase();
+    if h.contains("mega") || u.contains("mega.nz") || u.contains("mega.co") {
+        return download_mega_and_place(app, cfg, &client, slug, url, subpath, dest_folder).await;
+    }
+
     // 1. Resolve a directly-downloadable URL for the host.
     emit(app, slug, "resolving", None, None);
     let direct = resolve_direct_url(&client, url, host).await?;
@@ -110,11 +118,27 @@ pub async fn download_and_place(
     // Download the archive.
     let archive = download(app, client, slug, direct_url, &work).await?;
 
+    // Extract + place (shared with the MEGA path).
+    extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
+}
+
+/// Extract a downloaded archive and place its mod files into the game folder,
+/// then clean up the work dir and nudge FrostMod. Shared by every download
+/// source (public hosts, the paid shop, and MEGA) so the tail is identical.
+fn extract_and_place(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    slug: &str,
+    archive: &Path,
+    work: &Path,
+    subpath: &str,
+    dest_folder: &str,
+) -> anyhow::Result<()> {
     // Extract it.
     emit(app, slug, "extracting", None, None);
     let extracted = work.join("extracted");
     std::fs::create_dir_all(&extracted)?;
-    extract_archive(&archive, &extracted)?;
+    extract_archive(archive, &extracted)?;
 
     // Place mod files into the game's folder for this mod type.
     emit(app, slug, "placing", None, None);
@@ -122,12 +146,123 @@ pub async fn download_and_place(
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
     place_mod(&extracted, &mods_dir, type_folder, dest_folder, slug)?;
 
-    let _ = std::fs::remove_dir_all(&work);
+    let _ = std::fs::remove_dir_all(work);
     emit(app, slug, "done", None, None);
 
     // New mod is in place — nudge FrostMod to reload it live if it's running.
     notify_frostmod(app, slug);
     Ok(())
+}
+
+/// Download a MEGA public file link (fetch node metadata, decrypt the stream)
+/// and place it like any other install. MEGA is end-to-end encrypted, so the
+/// generic `resolve_direct_url` → `download` path can't be used — this fetches
+/// and decrypts in-app via the pure-Rust `mega` crate.
+async fn download_mega_and_place(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    client: &Client,
+    slug: &str,
+    url: &str,
+    subpath: &str,
+    dest_folder: &str,
+) -> anyhow::Result<()> {
+    let work = std::env::temp_dir().join(format!("frost-{}", sanitize(slug)));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work)?;
+
+    let archive = download_mega(app, client, slug, url, &work).await?;
+    extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
+}
+
+/// Fetch + decrypt a MEGA public file link into `dir`, emitting the same
+/// `downloading` progress stages as the generic HTTP downloader.
+async fn download_mega(
+    app: &AppHandle,
+    http_client: &Client,
+    slug: &str,
+    url: &str,
+    dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    emit(app, slug, "resolving", None, None);
+
+    let mega = mega::Client::builder()
+        .build(http_client.clone())
+        .map_err(|e| anyhow::anyhow!("MEGA client init failed: {e}"))?;
+
+    let nodes = mega.fetch_public_nodes(url).await.map_err(|e| {
+        anyhow::anyhow!("Couldn't read the MEGA link — it may be invalid or removed ({e}).")
+    })?;
+
+    // We only install single-file links; folder links fall back to the browser.
+    let node = nodes
+        .roots()
+        .find(|n| n.kind().is_file())
+        .ok_or_else(|| {
+            anyhow::anyhow!("This MEGA link is a folder — open the mod page to download it manually.")
+        })?;
+
+    let total = Some(node.size());
+    let path = dir.join(sanitize(node.name()));
+    let file = File::create(&path)?;
+
+    emit(app, slug, "downloading", Some(0), total);
+    let writer = MegaProgressWriter {
+        file,
+        app,
+        slug,
+        total,
+        received: 0,
+        last_emit: 0,
+    };
+    mega.download_node(node, writer)
+        .await
+        .map_err(|e| anyhow::anyhow!("MEGA download failed: {e}"))?;
+    emit(app, slug, "downloading", total, total);
+
+    Ok(path)
+}
+
+/// A `futures` async writer that streams decrypted MEGA bytes to a file while
+/// emitting throttled `downloading` progress events (mirrors the HTTP path).
+struct MegaProgressWriter<'a> {
+    file: File,
+    app: &'a AppHandle,
+    slug: &'a str,
+    total: Option<u64>,
+    received: u64,
+    last_emit: u64,
+}
+
+impl futures_util::io::AsyncWrite for MegaProgressWriter<'_> {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let this = self.get_mut();
+        let n = this.file.write(buf)?;
+        this.received += n as u64;
+        if this.received - this.last_emit >= EMIT_EVERY_BYTES {
+            this.last_emit = this.received;
+            emit(this.app, this.slug, "downloading", Some(this.received), this.total);
+        }
+        std::task::Poll::Ready(Ok(n))
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(self.get_mut().file.flush())
+    }
+
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        self.poll_flush(cx)
+    }
 }
 
 /// Import an already-downloaded archive or `.pkz` from disk. Used for hosts that
@@ -175,8 +310,6 @@ async fn resolve_direct_url(client: &Client, url: &str, host: &str) -> anyhow::R
         resolve_mediafire(client, url).await
     } else if h.contains("drive.google") || u.contains("drive.google") {
         Ok(resolve_gdrive(url))
-    } else if h.contains("mega") || u.contains("mega.nz") {
-        anyhow::bail!("Mega links aren't supported yet — open the mod page to download it manually.")
     } else {
         // Assume a direct file link.
         Ok(url.to_string())
@@ -192,11 +325,15 @@ async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String>
         .text()
         .await?;
 
+    // The direct CDN link is usually present verbatim in the page.
     let direct = Regex::new(r#"https?://download[0-9]+\.mediafire\.com/[^"'<>\\ ]+"#).unwrap();
     if let Some(m) = direct.find(&html) {
         return Ok(m.as_str().to_string());
     }
-    let button = Regex::new(r#"id="downloadButton"[^>]*href="([^"]+)""#).unwrap();
+    // Fallback: the download button. MediaFire's current markup is a
+    // `<a aria-label="Download file" href="…">` inside `#download_link` (the
+    // old `id="downloadButton"` no longer exists), so match the aria-label.
+    let button = Regex::new(r#"aria-label="Download file"[^>]*href="([^"]+)""#).unwrap();
     if let Some(c) = button.captures(&html) {
         return Ok(c[1].to_string());
     }
