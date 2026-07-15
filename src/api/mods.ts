@@ -174,7 +174,7 @@ export function buildDestinations(
   modType: ModType,
   title: string,
   installed: InstalledMod[],
-): { options: DestOption[]; guess: string } {
+): { options: DestOption[]; guess: string; suggestions: string[] } {
   const seen = new Set<string>([""]);
   const options: DestOption[] = [
     { value: "", label: modType.id === "bikes" ? "Bikes (root)" : "Tracks (root)" },
@@ -187,28 +187,29 @@ export function buildDestinations(
   };
 
   let guess = "";
+  // Ranked "probable" destinations (best first) — bike liveries matched by name.
+  const suggestions: string[] = [];
   if (modType.id === "bikes") {
     const bikes = installed.filter((i) => i.folder === "");
     for (const b of bikes) add(`${stripExt(b.name)}/paints`, `${stripExt(b.name)} — paints`);
 
     const tt = tokens(title);
-    let best: InstalledMod | null = null;
-    let bestScore = 0;
-    for (const b of bikes) {
-      let score = 0;
-      for (const t of tokens(b.name)) if (tt.has(t)) score++;
-      if (score > bestScore) {
-        bestScore = score;
-        best = b;
-      }
-    }
-    if (best && bestScore >= 2) guess = `${stripExt(best.name)}/paints`;
+    const scored = bikes
+      .map((b) => {
+        let score = 0;
+        for (const t of tokens(b.name)) if (tt.has(t)) score++;
+        return { value: `${stripExt(b.name)}/paints`, score };
+      })
+      .filter((s) => s.score >= 1)
+      .sort((a, b) => b.score - a.score);
+    suggestions.push(...scored.slice(0, 5).map((s) => s.value));
+    if (scored[0] && scored[0].score >= 2) guess = scored[0].value;
   }
 
   for (const f of [...new Set(installed.map((i) => i.folder))].sort((a, b) => a.localeCompare(b))) {
     if (f) add(f, f);
   }
-  return { options, guess };
+  return { options, guess, suggestions };
 }
 
 /**
