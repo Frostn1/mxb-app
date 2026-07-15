@@ -1,4 +1,10 @@
-import { Home, Library as LibraryIcon, Settings, RefreshCw } from "lucide-react";
+import {
+  Home,
+  Library as LibraryIcon,
+  Settings,
+  RefreshCw,
+  Play,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useConfig } from "../../Context/Config";
@@ -32,7 +38,7 @@ function shortPath(p: string): string {
 
 export default function Sidebar({ view, onNavigate, libraryCount }: SidebarProps) {
   const { config } = useConfig();
-  const { running, reload } = useFrostmod();
+  const { running, reload, status, start } = useFrostmod();
   const { active, queueLength } = useInstall();
 
   const installing = active && IN_PROGRESS.has(active.stage);
@@ -127,7 +133,7 @@ export default function Sidebar({ view, onNavigate, libraryCount }: SidebarProps
                 ? "FrostMod running"
                 : "FrostMod not running"}
           </span>
-          {running && (
+          {running ? (
             <button
               onClick={onReload}
               title="Reload game"
@@ -135,6 +141,16 @@ export default function Sidebar({ view, onNavigate, libraryCount }: SidebarProps
             >
               <RefreshCw className="size-3.5" />
             </button>
+          ) : (
+            status?.installed && (
+              <button
+                onClick={start}
+                title="Start FrostMod"
+                className="cursor-default text-primary transition-colors hover:brightness-110"
+              >
+                <Play className="size-3.5" />
+              </button>
+            )
           )}
         </div>
 
