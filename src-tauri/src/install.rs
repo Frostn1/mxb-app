@@ -506,8 +506,9 @@ fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("7z extraction failed: {e}"))?;
         }
         "rar" => extract_rar(archive, dest)?,
-        "pkz" => {
-            // Already a track file; carry it through to the place step.
+        "pkz" | "pnt" => {
+            // Already an installable mod file (a packaged track/bike `.pkz` or a
+            // loose `.pnt` paint) — carry it through unchanged to the place step.
             let name = archive.file_name().unwrap_or_default();
             std::fs::copy(archive, dest.join(name))?;
         }
@@ -545,7 +546,7 @@ fn detect_ext(archive: &Path) -> anyhow::Result<String> {
         .and_then(|e| e.to_str())
         .map(str::to_lowercase)
     {
-        if ["zip", "7z", "rar", "pkz"].contains(&ext.as_str()) {
+        if ["zip", "7z", "rar", "pkz", "pnt"].contains(&ext.as_str()) {
             return Ok(ext);
         }
     }
@@ -820,6 +821,23 @@ mod tests {
     #[test]
     fn sanitize_strips_separators() {
         assert_eq!(sanitize("a/b\\c:d"), "a_b_c_d");
+    }
+
+    /// A bare `.pnt` paint (some mods ship un-zipped) passes through extraction
+    /// unchanged instead of hitting "Unsupported archive type".
+    #[test]
+    fn extract_passes_through_bare_pnt() {
+        let dir = std::env::temp_dir().join(format!("frost-test-pnt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let src = dir.join("Cool Livery.pnt");
+        let dest = dir.join("extracted");
+        std::fs::create_dir_all(&dest).unwrap();
+        // Real .pnt files start with the "PNT\0" magic — anything but a known archive.
+        std::fs::write(&src, b"PNT\0some paint bytes").unwrap();
+
+        extract_archive(&src, &dest).expect("bare .pnt should extract (copy) through");
+        assert!(dest.join("Cool Livery.pnt").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Live check that the Google Drive large-file confirm flow resolves to an

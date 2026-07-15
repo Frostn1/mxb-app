@@ -13,6 +13,11 @@
 - MEGA is no longer treated as a "blocked" host in the install UI, so its mirrors
   get the in-app install button instead of the download-and-import fallback.
 
+### Fixed
+- **Bare `.pnt` paints install**: mods shipped as a loose `.pnt` file (not zipped)
+  now pass through extraction like `.pkz` does, instead of failing with
+  "Unsupported archive type". More common now that MEGA links install in-app.
+
 ## 2026-07-15 — v0.1.3
 
 ### Fixed
