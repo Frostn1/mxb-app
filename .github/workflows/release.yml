@@ -56,10 +56,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Frontend reads this at build time (see .env.production).
-          VITE_APP_NAME: "MXB App by Frost"
+          VITE_APP_NAME: "MXB App"
+          # Sign the updater artifacts so the app can verify self-updates.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
-          releaseName: "Frost ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
+          releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
           releaseBody: "See the assets below to download and install."
           releaseDraft: true
           prerelease: false
