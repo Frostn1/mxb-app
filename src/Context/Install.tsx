@@ -14,13 +14,17 @@ import {
   importFile,
   onFrostmodReload,
   onInstallProgress,
+  shopInstall,
+  type ShopItem,
 } from "../api/mods";
 import type { InstallStage, ReloadOutcome } from "../types";
 
-/** Where the bytes come from — a resolvable host, or a file the user picked. */
+/** Where the bytes come from — a resolvable host, a file the user picked, or a
+ * purchased item from the authenticated MX Bikes Shop. */
 export type InstallSource =
   | { kind: "download"; url: string; host: string }
-  | { kind: "import"; path: string };
+  | { kind: "import"; path: string }
+  | { kind: "shop"; item: ShopItem };
 
 interface StartParams {
   slug: string;
@@ -47,6 +51,8 @@ interface InstallContextValue {
     p: Omit<StartParams, "source"> & { url: string; host: string },
   ) => void;
   startImport: (p: Omit<StartParams, "source"> & { path: string }) => void;
+  /** Install a purchased MX Bikes Shop track (to the tracks root). */
+  startShopInstall: (item: ShopItem) => void;
   /** Clear a finished (done/error) install card. */
   clear: () => void;
 }
@@ -111,6 +117,8 @@ export function InstallProvider({
     try {
       if (source.kind === "download") {
         await addToLibrary(slug, source.url, source.host, subpath, destFolder);
+      } else if (source.kind === "shop") {
+        await shopInstall(source.item, destFolder);
       } else {
         await importFile(source.path, subpath, destFolder);
       }
@@ -183,11 +191,30 @@ export function InstallProvider({
     [enqueue],
   );
 
+  const startShopInstall: InstallContextValue["startShopInstall"] = useCallback(
+    (item) =>
+      enqueue({
+        slug: item.slug,
+        title: item.title,
+        subpath: "mods/tracks",
+        destFolder: "",
+        source: { kind: "shop", item },
+      }),
+    [enqueue],
+  );
+
   const clear = useCallback(() => setActive(null), []);
 
   const value = useMemo(
-    () => ({ active, queueLength, startInstall, startImport, clear }),
-    [active, queueLength, startInstall, startImport, clear],
+    () => ({
+      active,
+      queueLength,
+      startInstall,
+      startImport,
+      startShopInstall,
+      clear,
+    }),
+    [active, queueLength, startInstall, startImport, startShopInstall, clear],
   );
 
   return (

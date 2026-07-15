@@ -2,6 +2,16 @@
 
 ## 2026-07-15
 
+### Added
+- **MX Bikes Shop downloads**: a new **Shop** tab lets you sign in to
+  mxbikes-shop.com and install the tracks you've **already purchased**
+  ("All My Downloads") with the same one-click download → extract → place flow and
+  "Installed" badge as Browse. Sign-in happens in a real WebView window (your
+  password never touches the app); the captured session is persisted so you stay
+  logged in across restarts, with a Log out button. Backed by new `shop_*` Tauri
+  commands, an authenticated shared `reqwest` client, and a reusable
+  `download_and_place` install helper shared with the free catalog.
+
 ### Fixed
 - **Install destination picker for bike liveries**: the folder list is now
   **scrollable** and no longer overflows the popup, long bike names **truncate**

@@ -85,21 +85,38 @@ pub async fn add_to_library(
     emit(app, slug, "resolving", None, None);
     let direct = resolve_direct_url(&client, url, host).await?;
 
+    // 2-4. Download, extract, and place (shared with the paid shop source).
+    download_and_place(app, cfg, &client, slug, &direct, subpath, dest_folder).await
+}
+
+/// Download an already-resolved direct URL, extract the archive, and place the
+/// mod into the game folder. Shared by the free catalog (public hosts) and the
+/// paid shop, which supplies its own authenticated client and a direct EDD file
+/// URL. Emits the same `install-progress` stages so the UI is source-agnostic.
+pub async fn download_and_place(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    client: &Client,
+    slug: &str,
+    direct_url: &str,
+    subpath: &str,
+    dest_folder: &str,
+) -> anyhow::Result<()> {
     // Fresh working dir under the OS temp dir.
     let work = std::env::temp_dir().join(format!("frost-{}", sanitize(slug)));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work)?;
 
-    // 2. Download the archive.
-    let archive = download(app, &client, slug, &direct, &work).await?;
+    // Download the archive.
+    let archive = download(app, client, slug, direct_url, &work).await?;
 
-    // 3. Extract it.
+    // Extract it.
     emit(app, slug, "extracting", None, None);
     let extracted = work.join("extracted");
     std::fs::create_dir_all(&extracted)?;
     extract_archive(&archive, &extracted)?;
 
-    // 4. Place mod files into the game's folder for this mod type.
+    // Place mod files into the game's folder for this mod type.
     emit(app, slug, "placing", None, None);
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");

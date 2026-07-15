@@ -40,6 +40,16 @@ html-escape = "0.2"
 zip = "2"
 sevenz-rust = "0.6"
 unrar = "0.5"
+# Decode + downscale in-archive track/bike preview images (TGA/PNG/JPEG/BMP)
+# into small PNG thumbnails for the library cards.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "tga",
+    "bmp",
+] }
+# Encode PNG thumbnails as `data:` URIs (no asset-protocol wiring needed).
+base64 = "0.22"
 anyhow = "1"
 # Move uninstalled mods to the OS Recycle Bin / Trash rather than deleting outright.
 trash = "5"

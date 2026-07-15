@@ -7,6 +7,8 @@ mod frostmod_manage;
 mod install;
 mod library;
 mod mods;
+mod pkz;
+mod shop_session;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
@@ -17,7 +19,7 @@ use mods::{ModDetail, ModSource, ModSummary};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State, WindowEvent,
+    Emitter, Manager, State, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
@@ -62,6 +64,14 @@ fn get_installed_mods(
 ) -> Result<Vec<InstalledMod>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     library::scan_mods(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
+}
+
+/// Read the structure of one installed `.pkz` (name/author/length/preview) for
+/// its library card. Plain-zip archives are parsed; GUID-locked ones report
+/// `locked`. Called lazily per card and cached on disk.
+#[tauri::command]
+fn get_pkz_meta(app: tauri::AppHandle, path: String) -> Result<pkz::PkzMeta, String> {
+    pkz::read_meta_cached(&app, &path).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -192,6 +202,104 @@ fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+// --- MX Bikes Shop (paid, authenticated downloads) -------------------------
+
+/// Open the shop sign-in page in a real WebView window and, once the user is
+/// logged in, capture the session cookies and emit `shop-auth`. We never see the
+/// password — the login happens on the actual site.
+#[tauri::command]
+async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
+    // Re-focus an existing login window if the user clicks again.
+    if let Some(w) = app.get_webview_window("shop-login") {
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    let url = tauri::WebviewUrl::External(
+        format!("{}/all-my-downloads/", shop_session::SHOP_BASE)
+            .parse()
+            .map_err(|e| format!("{e}"))?,
+    );
+    let window = tauri::WebviewWindowBuilder::new(&app, "shop-login", url)
+        .title("Sign in to MX Bikes Shop")
+        .user_agent(shop_session::UA)
+        .inner_size(520.0, 760.0)
+        .build()
+        .map_err(|e| format!("{e:#}"))?;
+    let _ = window;
+
+    // Poll for the WordPress session cookie, then capture + persist and close.
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // ~5 minutes at 500ms intervals, then give up (user can retry).
+        for _ in 0..600u32 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let Some(win) = app.get_webview_window("shop-login") else {
+                break; // user closed the window before finishing
+            };
+            let cookies = shop_session::cookies_from_window(&win);
+            if shop_session::is_authenticated(&cookies) {
+                let ok = shop_session::set_session(&app, cookies).is_ok();
+                let _ = app.emit("shop-auth", ok);
+                let _ = win.close();
+                break;
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Whether we currently hold a shop session.
+#[tauri::command]
+fn shop_status(state: State<shop_session::ShopSession>) -> bool {
+    state.logged_in()
+}
+
+/// Sign out of the shop (drop + delete the stored session).
+#[tauri::command]
+fn shop_logout(app: tauri::AppHandle) {
+    shop_session::clear_session(&app);
+}
+
+/// List the signed-in user's purchased downloads ("All My Downloads").
+#[tauri::command]
+async fn shop_my_downloads(
+    app: tauri::AppHandle,
+    state: State<'_, shop_session::ShopSession>,
+) -> Result<Vec<mods::mxbshop::ShopItem>, String> {
+    let client = state
+        .client()
+        .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
+    mods::mxbshop::fetch_my_downloads(&app, &client)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Download + install a purchased shop item through the shared install pipeline.
+#[tauri::command]
+async fn shop_install(
+    app: tauri::AppHandle,
+    state: State<'_, shop_session::ShopSession>,
+    item: mods::mxbshop::ShopItem,
+    dest_folder: String,
+) -> Result<(), String> {
+    let client = state
+        .client()
+        .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    install::download_and_place(
+        &app,
+        &cfg,
+        &client,
+        &item.slug,
+        &item.download_url,
+        "mods/tracks",
+        &dest_folder,
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -203,6 +311,7 @@ fn main() {
             None,
         ))
         .manage(FrostmodProcess::default())
+        .manage(shop_session::ShopSession::default())
         .setup(|app| {
             // System-tray icon so the app can keep running when the window closes.
             let show = MenuItem::with_id(app, "show", "Show MXB App", true, None::<&str>)?;
@@ -253,6 +362,8 @@ fn main() {
                     }
                 }
             }
+            // Restore a saved MX Bikes Shop session, if any.
+            shop_session::load_session(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -273,6 +384,7 @@ fn main() {
             search_mods,
             get_mod_detail,
             get_installed_mods,
+            get_pkz_meta,
             add_to_library,
             import_file,
             move_mod,
@@ -286,7 +398,12 @@ fn main() {
             frostmod_status,
             frostmod_install,
             frostmod_start,
-            frostmod_stop
+            frostmod_stop,
+            shop_login,
+            shop_status,
+            shop_logout,
+            shop_my_downloads,
+            shop_install
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
