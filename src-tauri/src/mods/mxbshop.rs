@@ -37,6 +37,19 @@ pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Res
     let status = resp.status();
     let html = resp.text().await?;
 
+    // Cloudflare sits in front of the shop and binds its `cf_clearance` cookie to
+    // the browser's IP + TLS fingerprint. When the replayed session no longer
+    // satisfies it, Cloudflare serves a "Just a moment…" interstitial (usually
+    // 403/503) rather than the real page. Treat it like an expired session so the
+    // UI prompts a fresh sign-in (which mints a new clearance) — the wording must
+    // contain "sign in" for `Shop.tsx` to drop back to the signed-out screen.
+    let looks_like_challenge = html.contains("Just a moment")
+        || html.contains("challenge-platform")
+        || html.contains("cf-browser-verification");
+    if looks_like_challenge {
+        anyhow::bail!("MX Bikes Shop is blocking the app (Cloudflare). Please sign in again.");
+    }
+
     // EDD bounces an unauthenticated user to the WordPress login form.
     let looks_like_login = final_url.contains("wp-login")
         || final_url.contains("/login")
@@ -66,12 +79,81 @@ pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Res
 
 /// Extract purchased items from the "All My Downloads" HTML.
 ///
-/// The shop is WordPress + Easy Digital Downloads. Rather than pin to one theme
-/// layout, we scan every anchor that looks like a file/EDD download link and pull
-/// a title + thumbnail from its surrounding card/row. If the live markup differs,
-/// `fetch_my_downloads` dumps the page to the cache dir so selectors can be tuned.
+/// The shop is WordPress + Easy Digital Downloads, and the page renders with the
+/// EDD "user downloads" block: a table of product rows, each holding the product
+/// title in a `--product` column and one or more file-download links in a
+/// `--files` column (e.g. PRO / AMS / low-quality variants). We parse that
+/// structure directly. If a future theme change breaks it, we fall back to the
+/// generic anchor scan; if *that* also yields nothing, `fetch_my_downloads` dumps
+/// the page to the cache dir so selectors can be re-tuned.
 pub fn parse_my_downloads(html: &str) -> Vec<ShopItem> {
     let doc = Html::parse_document(html);
+    let items = parse_edd_blocks(&doc);
+    if !items.is_empty() {
+        return items;
+    }
+    parse_generic_anchors(&doc)
+}
+
+/// Parse the EDD "user downloads" block: one card per file link, titled by its
+/// product. Products with multiple files disambiguate with the file's label.
+fn parse_edd_blocks(doc: &Html) -> Vec<ShopItem> {
+    let product_sel = Selector::parse("div.edd-order-item__product").unwrap();
+    let title_sel = Selector::parse(".edd-blocks__row-column--product").unwrap();
+    let file_sel = Selector::parse("a.edd-order-item__file-link[href]").unwrap();
+
+    let mut items = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut id: u64 = 0;
+
+    for row in doc.select(&product_sel) {
+        let product = row
+            .select(&title_sel)
+            .next()
+            .map(|t| clean(&t.text().collect::<String>()))
+            .unwrap_or_default();
+
+        let files: Vec<ElementRef> = row.select(&file_sel).collect();
+        let multi = files.len() > 1;
+
+        for a in files {
+            let href = a.value().attr("href").unwrap_or("");
+            let download_url = absolute(href);
+            if !seen.insert(download_url.clone()) {
+                continue;
+            }
+
+            let label = clean(&a.text().collect::<String>());
+            let title = match (product.is_empty(), multi) {
+                // Single file: the product name is the cleanest label.
+                (false, false) => product.clone(),
+                // Multiple files: keep the variant (PRO/AMS/…) distinct.
+                (false, true) => format!("{product} — {label}"),
+                // No product heading: fall back to the file's own label.
+                (true, _) if !label.is_empty() => label,
+                (true, _) => "Untitled".to_string(),
+            };
+
+            id += 1;
+            items.push(ShopItem {
+                id,
+                slug: format!("shop-{id}"),
+                title,
+                link: download_url.clone(),
+                date: String::new(),
+                image: None,
+                category_id: 0,
+                download_url,
+            });
+        }
+    }
+
+    items
+}
+
+/// Theme-agnostic fallback: scan every anchor that looks like a file/EDD download
+/// link and pull a title + thumbnail from its surrounding card/row.
+fn parse_generic_anchors(doc: &Html) -> Vec<ShopItem> {
     let a_sel = Selector::parse("a[href]").unwrap();
 
     let mut items = Vec::new();
@@ -181,6 +263,55 @@ fn is_generic_label(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_edd_blocks_user_downloads() {
+        // Mirrors the live "All My Downloads" markup (EDD user-downloads block):
+        // product rows whose title lives in a sibling `--product` column, with one
+        // or more file links per product and no thumbnails.
+        let html = r#"
+            <div class="wp-block-edd-user-downloads edd-blocks__user-downloads">
+              <div class="edd-blocks__row edd-blocks__row-header edd-order-items__header">
+                <div class="edd-blocks__row-label edd-blocks__row-label--product">Product</div>
+                <div class="edd-blocks__row-label edd-blocks__row-label--files">Files</div>
+              </div>
+              <div class="edd-blocks__row edd-order-item__product edd-pro-search__product">
+                <div class="edd-blocks__row-column edd-blocks__row-column--product edd-blocks__row-label">
+                  2022 ARL MX RD1 &#8211; Fox Raceway
+                </div>
+                <div class="edd-blocks__row-column edd-blocks__row-column--files edd-order-item__files">
+                  <div class="edd-order-item__file">
+                    <a href="https://mxbikes-shop.com/index.php?eddfile=1257454%3A11356%3A0&#038;ttl=1&#038;token=aaa" class="edd-order-item__file-link">2022.ARL_.MX_.RD01-1.pkz</a>
+                  </div>
+                </div>
+              </div>
+              <div class="edd-blocks__row edd-order-item__product edd-pro-search__product">
+                <div class="edd-blocks__row-column edd-blocks__row-column--product edd-blocks__row-label">
+                  2024 ARLMX RD10 &#8211; MARYLAND
+                </div>
+                <div class="edd-blocks__row-column edd-blocks__row-column--files edd-order-item__files">
+                  <div class="edd-order-item__file">
+                    <a href="https://mxbikes-shop.com/index.php?eddfile=1&#038;token=b" class="edd-order-item__file-link">2024_ARLMX_RD10_MARYLAND PRO</a>
+                  </div>
+                  <div class="edd-order-item__file">
+                    <a href="https://mxbikes-shop.com/index.php?eddfile=2&#038;token=c" class="edd-order-item__file-link">2024_ARLMX_RD10_MARYLAND AMS</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+        "#;
+
+        let items = parse_my_downloads(html);
+        // 1 file from the first product + 2 from the second.
+        assert_eq!(items.len(), 3);
+        // Single-file product uses the product name verbatim (entities decoded).
+        assert_eq!(items[0].title, "2022 ARL MX RD1 – Fox Raceway");
+        assert!(items[0].download_url.contains("eddfile="));
+        assert!(items[0].image.is_none());
+        // Multi-file product keeps each variant distinct.
+        assert_eq!(items[1].title, "2024 ARLMX RD10 – MARYLAND — 2024_ARLMX_RD10_MARYLAND PRO");
+        assert_eq!(items[2].title, "2024 ARLMX RD10 – MARYLAND — 2024_ARLMX_RD10_MARYLAND AMS");
+    }
 
     #[test]
     fn parses_edd_style_cards() {

@@ -1,5 +1,10 @@
-@import "tailwindcss";
+/* Disable Tailwind v4's automatic filesystem source-detection (its native oxide
+   scanner deadlocks here — it walks the repo and hangs the dev server/build) and
+   declare our source globs explicitly instead. Paths are relative to this file. */
+@import "tailwindcss" source(none);
 @import "tw-animate-css";
+@source "./**/*.{ts,tsx}";
+@source "../index.html";
 
 @custom-variant dark (&:is(.dark *));
 

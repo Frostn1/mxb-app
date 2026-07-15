@@ -243,10 +243,16 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    // Open the WordPress login form directly (not the downloads page, which only
+    // shows a "log in" prompt). `redirect_to` sends the user to their downloads
+    // once authenticated; the cookie poller below captures the session either way.
     let url = tauri::WebviewUrl::External(
-        format!("{}/all-my-downloads/", shop_session::SHOP_BASE)
-            .parse()
-            .map_err(|e| format!("{e}"))?,
+        format!(
+            "{base}/wp-login.php?redirect_to={base}%2Fall-my-downloads%2F",
+            base = shop_session::SHOP_BASE
+        )
+        .parse()
+        .map_err(|e| format!("{e}"))?,
     );
     let window = tauri::WebviewWindowBuilder::new(&app, "shop-login", url)
         .title("Sign in to MX Bikes Shop")
