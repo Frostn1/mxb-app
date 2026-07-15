@@ -6,6 +6,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import {
   createConfig,
+  setAutoRunFrostmod,
   setLaunchAtStartup,
   setRunInBackground,
 } from "../../api/mods";
@@ -32,7 +33,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
 export default function Settings() {
   const { config, reloadConfig } = useConfig();
   const { theme, setTheme } = useTheme();
-  const { running, reload } = useFrostmod();
+  const { running, reload, status, installing, install } = useFrostmod();
   const [version, setVersion] = useState("");
   const [active, setActive] = useState<SectionId>("folder");
   const [busy, setBusy] = useState(false);
@@ -46,6 +47,16 @@ export default function Settings() {
 
   const runInBackground = config.runInBackground ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
+  const autoRunFrostmod = config.autoRunFrostmod ?? true;
+
+  const toggleAutoRun = async (v: boolean) => {
+    try {
+      await setAutoRunFrostmod(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error("Couldn't update setting", { description: String(e) });
+    }
+  };
 
   const toggleBackground = async (v: boolean) => {
     try {
@@ -231,7 +242,53 @@ export default function Settings() {
           >
             <p className="text-[12px] leading-relaxed text-muted-foreground">
               Live-reloads MX Bikes when mods change, so you don&apos;t restart the game.
+              MXB App installs it, keeps it updated, and runs it for you.
             </p>
+
+            <div className="flex items-center justify-between rounded-lg border border-input bg-background px-3 py-2.5">
+              <div className="flex flex-col">
+                <span className="text-[12.5px] text-foreground/85">
+                  {status?.installed
+                    ? `Installed${status.version ? ` · ${status.version}` : ""}`
+                    : "Not installed"}
+                </span>
+                {status?.latest && (
+                  <span className="text-[11px] text-muted-foreground">
+                    Latest: {status.latest}
+                  </span>
+                )}
+              </div>
+              {(() => {
+                const updatable =
+                  status?.installed &&
+                  status.latest &&
+                  status.version !== status.latest;
+                return (
+                  <Button
+                    variant={status?.installed && !updatable ? "outline" : "default"}
+                    size="sm"
+                    onClick={install}
+                    disabled={installing || (status?.installed && !updatable)}
+                  >
+                    {installing
+                      ? "Working…"
+                      : !status?.installed
+                        ? "Install FrostMod"
+                        : updatable
+                          ? `Update to ${status.latest}`
+                          : "Up to date"}
+                  </Button>
+                );
+              })()}
+            </div>
+
+            <ToggleRow
+              label="Run FrostMod automatically"
+              desc="Start FrostMod in the background whenever MXB App opens."
+              checked={autoRunFrostmod}
+              onChange={toggleAutoRun}
+            />
+
             <div>
               <Button variant="outline" size="sm" onClick={reloadGame} disabled={!running}>
                 <RefreshCw className="size-3.5" /> Reload game now

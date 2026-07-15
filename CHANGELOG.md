@@ -3,6 +3,13 @@
 ## 2026-07-15
 
 ### Added
+- **FrostMod is managed in-app**: MXB App now **downloads FrostMod** from its GitHub
+  releases, **runs `frostmod.exe`** hidden in the background so it's connected as
+  soon as the app opens, and **updates** it — no manual setup. Settings → FrostMod
+  shows the installed vs latest version with an Install / Update button and a
+  "Run FrostMod automatically" toggle, and a first-run prompt offers to set it up.
+  The managed process is stopped on a real Quit. (Injector is Windows-only; the
+  manager no-ops elsewhere.)
 - **Runs in the background like Discord**: closing the window now hides MXB App to
   a **system-tray icon** (Show / Quit menu) instead of quitting, so it keeps running
   and FrostMod stays connected. **Launches at login** by default. Both are

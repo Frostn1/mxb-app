@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import Sidebar, { type DashboardView } from "../Shell/Sidebar";
 import Library from "../Library/Library";
 import Browse from "../Browse/Browse";
 import ModDetail from "../ModDetail/ModDetail";
 import Settings from "../Settings/Settings";
 import { InstallProvider } from "../../Context/Install";
+import { useFrostmod } from "../../Context/Frostmod";
 import {
   DEFAULT_MOD_TYPE,
   getInstalledMods,
@@ -35,6 +37,21 @@ const Dashboard = () => {
       cancelled = true;
     };
   }, [modType, libraryVersion]);
+
+  // First-run nudge: if FrostMod isn't installed yet, offer to set it up once.
+  const { status, install } = useFrostmod();
+  const promptedFrostmod = useRef(false);
+  useEffect(() => {
+    if (status && !status.installed && !promptedFrostmod.current) {
+      promptedFrostmod.current = true;
+      toast("Set up FrostMod?", {
+        description:
+          "Install FrostMod so new mods live-reload into the game — no restart.",
+        duration: Infinity,
+        action: { label: "Install", onClick: () => void install() },
+      });
+    }
+  }, [status, install]);
 
   const onInstalled = useCallback(() => setLibraryVersion((v) => v + 1), []);
 
