@@ -64,7 +64,9 @@ jobs:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
           releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
           releaseBody: "See the assets below to download and install."
-          releaseDraft: true
+          # Publish straight away (not a draft) so the updater's `latest.json`
+          # endpoint (releases/latest) resolves without a manual publish step.
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
 
