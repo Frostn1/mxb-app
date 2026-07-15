@@ -1,16 +1,11 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { useCallback, useEffect, useState } from "react";
 import Sidebar, { type DashboardView } from "../Shell/Sidebar";
 import Library from "../Library/Library";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
 import Settings from "../Settings/Settings";
-
-// The Locker pulls in three.js / R3F; load it only when the tab is opened.
-const Locker = lazy(() => import("../Locker/Locker"));
 import { InstallProvider } from "../../Context/Install";
-import { useFrostmod } from "../../Context/Frostmod";
 import {
   DEFAULT_MOD_TYPE,
   getInstalledMods,
@@ -44,20 +39,8 @@ const Dashboard = () => {
     };
   }, [modType, libraryVersion]);
 
-  // First-run nudge: if FrostMod isn't installed yet, offer to set it up once.
-  const { status, install } = useFrostmod();
-  const promptedFrostmod = useRef(false);
-  useEffect(() => {
-    if (status && !status.installed && !promptedFrostmod.current) {
-      promptedFrostmod.current = true;
-      toast("Set up FrostMod?", {
-        description:
-          "Install FrostMod so new mods live-reload into the game — no restart.",
-        duration: Infinity,
-        action: { label: "Install", onClick: () => void install() },
-      });
-    }
-  }, [status, install]);
+  // FrostMod installs itself silently on first run (see FrostmodProvider) —
+  // no prompt here.
 
   const onInstalled = useCallback(() => setLibraryVersion((v) => v + 1), []);
 
@@ -105,16 +88,6 @@ const Dashboard = () => {
               refreshKey={libraryVersion}
               onChanged={onInstalled}
             />
-          ) : view === "locker" ? (
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">
-                  Loading 3D viewer…
-                </div>
-              }
-            >
-              <Locker />
-            </Suspense>
           ) : (
             <Settings />
           )}
