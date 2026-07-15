@@ -1,6 +1,7 @@
 use serde::Serialize;
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,8 +84,10 @@ pub fn move_mod(
 /// under the type dir (same guard as `move_mod`) so a stray path can't be trashed.
 pub fn uninstall_mod(mods_path: &str, from_path: &str, subpath: &str) -> anyhow::Result<()> {
     let from = PathBuf::from(from_path);
-    if !from.is_file() {
-        anyhow::bail!("file not found: {from_path}");
+    // A file (`.pkz`/paint) OR a directory (an extracted-folder track) — both
+    // are valid library items and can be trashed.
+    if !from.exists() {
+        anyhow::bail!("path not found: {from_path}");
     }
     let type_dir = mods_subdir(mods_path, subpath);
     if !from.starts_with(&type_dir) {
@@ -201,6 +204,331 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
     }
 }
 
+/// A richer library entry than [`InstalledMod`]: it also covers **extracted**
+/// mods (a folder of loose files, not a single `.pkz`) and **loose paint
+/// files**, each tagged with a `kind` + `category` (+ owning `parent`) so the
+/// Library UI can group and detail them. Install-destination logic still uses
+/// the leaner [`scan_mods`] (packaged `.pkz` only), so this can't skew it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryEntry {
+    /// File or folder name, e.g. `FLRMX.pkz` or an extracted `FLRMX` folder.
+    pub name: String,
+    /// Absolute path on disk (a file for `pkz`/`loose`, a directory for `folder`).
+    pub path: String,
+    /// Relative parent folder under the type dir (`""` if top-level).
+    pub folder: String,
+    /// Size in bytes (a directory reports the sum of its immediate files).
+    pub size: u64,
+    /// `pkz` (packaged archive) · `folder` (extracted mod) · `loose` (a paint file).
+    pub kind: String,
+    /// Type-specific tag: `track` · `bike` · `bikePaint` · `bikeModelSwap` ·
+    /// `helmet` · `helmetPaint` · `goggles` · `boots` · `bootPaint` ·
+    /// `protection` · `protectionPaint` · `gloves` · `outfit` · `misc`.
+    pub category: String,
+    /// For paints / model-swaps: the owning bike / gear model / rider profile.
+    pub parent: Option<String>,
+}
+
+fn has_ext(p: &Path, ext: &str) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case(ext))
+        .unwrap_or(false)
+}
+
+/// Drop a trailing archive/paint extension from a mod file name.
+fn strip_ext(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    for ext in [".pkz", ".pnt", ".zip"] {
+        if lower.ends_with(ext) {
+            return name[..name.len() - ext.len()].to_string();
+        }
+    }
+    name.to_string()
+}
+
+/// Relative parent folder of `path` under `base` (`""` if directly inside it).
+fn rel_folder(base: &Path, path: &Path) -> String {
+    path.parent()
+        .and_then(|p| p.strip_prefix(base).ok())
+        .map(|r| r.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default()
+}
+
+/// Sum of a directory's *immediate* files (cheap; good enough for a card).
+fn dir_size(dir: &Path) -> u64 {
+    let mut total = 0;
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if let Ok(m) = e.metadata() {
+                if m.is_file() {
+                    total += m.len();
+                }
+            }
+        }
+    }
+    total
+}
+
+/// Immediate sub-folder names of `base`, sorted case-insensitively.
+fn immediate_dirs(base: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(base) {
+        for e in rd.flatten() {
+            if e.path().is_dir() {
+                if let Some(n) = e.file_name().to_str() {
+                    out.push(n.to_string());
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    out
+}
+
+/// Build a [`LibraryEntry`], inferring `kind` from the path (dir vs `.pkz` vs loose).
+fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> LibraryEntry {
+    let is_dir = p.is_dir();
+    let kind = if is_dir {
+        "folder"
+    } else if has_ext(p, "pkz") {
+        "pkz"
+    } else {
+        "loose"
+    };
+    let size = if is_dir {
+        dir_size(p)
+    } else {
+        fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+    };
+    LibraryEntry {
+        name: p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        path: p.to_string_lossy().into_owned(),
+        folder: rel_folder(base, p),
+        size,
+        kind: kind.to_string(),
+        category: category.to_string(),
+        parent,
+    }
+}
+
+/// File extensions that mark a folder as an *extracted track* (vs a bike, which
+/// carries `.cfg` but none of these).
+const TRACK_MARKERS: [&str; 5] = ["map", "trh", "tsc", "rdf", "ssc"];
+
+fn dir_has_track_markers(dir: &Path) -> bool {
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_file() {
+                if let Some(ext) = p.extension().and_then(|x| x.to_str()) {
+                    if TRACK_MARKERS.contains(&ext.to_ascii_lowercase().as_str()) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Collect the loose paint files (`.pnt`/`.pkz`) directly inside `dir`.
+fn collect_loose(
+    base: &Path,
+    dir: &Path,
+    category: &str,
+    parent: Option<&str>,
+    out: &mut Vec<LibraryEntry>,
+) {
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_file() && (has_ext(&p, "pnt") || has_ext(&p, "pkz")) {
+                out.push(make_entry(base, &p, category, parent.map(str::to_string)));
+            }
+        }
+    }
+}
+
+/// Collect `.pkz` files directly inside `dir` (a model packaged as an archive).
+fn collect_pkz_shallow(base: &Path, dir: &Path, category: &str, out: &mut Vec<LibraryEntry>) {
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_file() && has_ext(&p, "pkz") {
+                out.push(make_entry(base, &p, category, None));
+            }
+        }
+    }
+}
+
+fn sort_entries(v: &mut [LibraryEntry]) {
+    v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+}
+
+/// Tracks: packaged `.pkz` **and** extracted-folder tracks (loose `.map`/`.rdf`
+/// etc.), the latter surfaced as a single `folder` entry (not one per asset).
+fn scan_tracks(dir: &Path) -> Vec<LibraryEntry> {
+    let mut out = Vec::new();
+    let mut track_dirs: Vec<PathBuf> = Vec::new();
+
+    // Extracted-track folders first. Once a folder is a track, its subtree *is*
+    // that track — don't descend into it looking for more.
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_dir() {
+            continue;
+        }
+        let p = entry.path();
+        if p == dir || track_dirs.iter().any(|t| p.starts_with(t)) {
+            continue;
+        }
+        if dir_has_track_markers(p) {
+            track_dirs.push(p.to_path_buf());
+            out.push(make_entry(dir, p, "track", None));
+        }
+    }
+
+    // Packaged `.pkz`, skipping any that live inside an extracted-track folder.
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let p = entry.path();
+        if has_ext(p, "pkz") && !track_dirs.iter().any(|t| p.starts_with(t)) {
+            out.push(make_entry(dir, p, "track", None));
+        }
+    }
+
+    sort_entries(&mut out);
+    out
+}
+
+/// Bikes: top-level bike models, their `paints` liveries, and model-swap `.pkz`
+/// nested inside a bike's own folder.
+fn scan_bikes(dir: &Path) -> Vec<LibraryEntry> {
+    let mut out = Vec::new();
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let p = entry.path();
+        let is_pnt = has_ext(p, "pnt");
+        let is_pkz = has_ext(p, "pkz");
+        if !is_pnt && !is_pkz {
+            continue;
+        }
+        let folder = rel_folder(dir, p);
+        let segs: Vec<&str> = folder.split('/').filter(|s| !s.is_empty()).collect();
+        let paints_pos = segs.iter().position(|s| s.eq_ignore_ascii_case("paints"));
+
+        if let Some(pos) = paints_pos {
+            // `<Bike>/paints/…` livery — owner is the segment before `paints`.
+            let parent = if pos > 0 { Some(segs[pos - 1].to_string()) } else { None };
+            out.push(make_entry(dir, p, "bikePaint", parent));
+        } else if is_pkz {
+            // A bike model (top-level, or nested in a user sub-folder). Model-swap
+            // reclassification happens in the pass below.
+            out.push(make_entry(dir, p, "bike", None));
+        }
+        // A loose `.pnt` outside any `paints` folder is a stray — ignore it.
+    }
+
+    // Model swaps: a bike `.pkz` sitting *inside another bike's own folder*
+    // (`mods/bikes/<Bike>/<swap>.pkz`) is an alternate model for that bike.
+    let bike_names: HashSet<String> = out
+        .iter()
+        .filter(|e| e.category == "bike" && e.folder.is_empty())
+        .map(|e| strip_ext(&e.name).to_lowercase())
+        .collect();
+    for e in out.iter_mut() {
+        if e.category != "bike" || e.folder.is_empty() {
+            continue;
+        }
+        if let Some(last) = e.folder.rsplit('/').next() {
+            if bike_names.contains(&last.to_lowercase()) {
+                e.category = "bikeModelSwap".to_string();
+                e.parent = Some(last.to_string());
+            }
+        }
+    }
+
+    sort_entries(&mut out);
+    out
+}
+
+/// Rider: every gear category — helmet/boot/protection models + their paints
+/// (and helmet goggles), gloves, and per-profile outfit/kit + gloves + goggles.
+/// This is why loose paints/gloves/goggles/outfit now surface where the old
+/// `.pkz`-only scan showed nothing.
+fn scan_rider(dir: &Path) -> Vec<LibraryEntry> {
+    let mut out = Vec::new();
+
+    for (area, model_cat, paint_cat) in [
+        ("helmets", "helmet", "helmetPaint"),
+        ("boots", "boots", "bootPaint"),
+        ("protection", "protection", "protectionPaint"),
+    ] {
+        let abase = dir.join(area);
+        for model in immediate_dirs(&abase) {
+            let mpath = abase.join(&model);
+            out.push(make_entry(dir, &mpath, model_cat, None));
+            collect_loose(dir, &mpath.join("paints"), paint_cat, Some(&model), &mut out);
+            if area == "helmets" {
+                collect_loose(dir, &mpath.join("goggles"), "goggles", Some(&model), &mut out);
+            }
+        }
+        // A model packaged as a bare `.pkz` directly under the area folder.
+        collect_pkz_shallow(dir, &abase, model_cat, &mut out);
+    }
+
+    // Gloves installed directly under rider/gloves.
+    collect_loose(dir, &dir.join("gloves"), "gloves", None, &mut out);
+    collect_pkz_shallow(dir, &dir.join("gloves"), "gloves", &mut out);
+
+    // Rider profiles: outfit/kit paints, gloves, and goggles live per profile.
+    for profile in immediate_dirs(&dir.join("riders")) {
+        let pbase = dir.join("riders").join(&profile);
+        collect_loose(dir, &pbase.join("paints"), "outfit", Some(&profile), &mut out);
+        collect_loose(dir, &pbase.join("gloves"), "gloves", Some(&profile), &mut out);
+        collect_loose(dir, &pbase.join("goggles"), "goggles", Some(&profile), &mut out);
+    }
+
+    sort_entries(&mut out);
+    out
+}
+
+/// Fallback for any other type dir (e.g. `mods/tyres`): packaged `.pkz` only.
+fn scan_generic(dir: &Path) -> Vec<LibraryEntry> {
+    let mut out = Vec::new();
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() && has_ext(entry.path(), "pkz") {
+            out.push(make_entry(dir, entry.path(), "misc", None));
+        }
+    }
+    sort_entries(&mut out);
+    out
+}
+
+/// Rich Library scan: surfaces packaged, extracted, and loose content per type,
+/// tagged for grouping/detail in the UI. Dispatches on the type dir name.
+pub fn scan_library(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<LibraryEntry>> {
+    let dir = mods_subdir(mods_path, subpath);
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+    let kind = subpath.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or("");
+    Ok(match kind {
+        "tracks" => scan_tracks(&dir),
+        "bikes" => scan_bikes(&dir),
+        "rider" => scan_rider(&dir),
+        _ => scan_generic(&dir),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +557,79 @@ mod tests {
 
         assert!(!file.exists());
         assert!(root.join("mods/tracks/New Folder/t.pkz").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn touch(p: &Path) {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, b"x").unwrap();
+    }
+
+    fn cat<'a>(v: &'a [LibraryEntry], name: &str) -> Option<&'a LibraryEntry> {
+        v.iter().find(|e| e.name.eq_ignore_ascii_case(name))
+    }
+
+    #[test]
+    fn scans_extracted_tracks_and_pkz() {
+        let root = tmp("lib-tracks");
+        let base = root.join("mods/tracks");
+        touch(&base.join("Packed.pkz"));
+        // Extracted track folder (has a .map) — the folder is one entry, its
+        // assets are not surfaced separately.
+        touch(&base.join("Loose Track/Loose.map"));
+        touch(&base.join("Loose Track/Loose.cfg"));
+        touch(&base.join("Loose Track/Loose.pkz")); // inside a track folder → skipped
+
+        let v = scan_library(root.to_str().unwrap(), "mods/tracks").unwrap();
+        assert!(cat(&v, "Packed.pkz").is_some());
+        let lt = cat(&v, "Loose Track").expect("extracted track surfaced");
+        assert_eq!(lt.kind, "folder");
+        assert_eq!(lt.category, "track");
+        // The .pkz inside the extracted track must not double-count.
+        assert!(cat(&v, "Loose.pkz").is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn classifies_bike_paints_and_model_swaps() {
+        let root = tmp("lib-bikes");
+        let base = root.join("mods/bikes");
+        touch(&base.join("KTM450.pkz")); // top-level bike
+        touch(&base.join("KTM450/paints/Red.pnt")); // livery for it
+        touch(&base.join("KTM450/OEM2024.pkz")); // model swap for it
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes").unwrap();
+        assert_eq!(cat(&v, "KTM450.pkz").unwrap().category, "bike");
+        let paint = cat(&v, "Red.pnt").unwrap();
+        assert_eq!(paint.category, "bikePaint");
+        assert_eq!(paint.parent.as_deref(), Some("KTM450"));
+        let swap = cat(&v, "OEM2024.pkz").unwrap();
+        assert_eq!(swap.category, "bikeModelSwap");
+        assert_eq!(swap.parent.as_deref(), Some("KTM450"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn surfaces_all_rider_categories() {
+        let root = tmp("lib-rider");
+        let base = root.join("mods/rider");
+        touch(&base.join("helmets/AGV/AGV.pkz"));
+        touch(&base.join("helmets/AGV/paints/Blue.pnt"));
+        touch(&base.join("helmets/AGV/goggles/Smoke.pnt"));
+        touch(&base.join("boots/Tech10/paints/Wht.pnt"));
+        touch(&base.join("gloves/Flexair.pnt"));
+        touch(&base.join("riders/default_mx/paints/Kit.pnt"));
+        touch(&base.join("riders/default_mx/gloves/G.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/rider").unwrap();
+        let has = |c: &str| v.iter().any(|e| e.category == c);
+        assert!(has("helmet"), "helmet model");
+        assert!(has("helmetPaint"), "helmet paint");
+        assert!(has("goggles"), "goggles");
+        assert!(has("bootPaint"), "boot paint");
+        assert!(has("gloves"), "gloves");
+        assert!(has("outfit"), "outfit/kit");
+        assert_eq!(cat(&v, "Kit.pnt").unwrap().parent.as_deref(), Some("default_mx"));
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -63,6 +63,44 @@ export interface InstalledMod {
   size: number;
 }
 
+/** How an installed item exists on disk. */
+export type LibraryKind = "pkz" | "folder" | "loose";
+
+/**
+ * Type-specific classification the Library uses to group and label items.
+ * (Kept as a loose union of known values; unknown strings fall back to "misc".)
+ */
+export type LibraryCategory =
+  | "track"
+  | "bike"
+  | "bikePaint"
+  | "bikeModelSwap"
+  | "helmet"
+  | "helmetPaint"
+  | "goggles"
+  | "boots"
+  | "bootPaint"
+  | "protection"
+  | "protectionPaint"
+  | "gloves"
+  | "outfit"
+  | "misc";
+
+/**
+ * A richer installed item than {@link InstalledMod}: also covers extracted mod
+ * folders and loose paint files, tagged for grouping + detail in the Library.
+ */
+export interface LibraryEntry {
+  name: string;
+  path: string;
+  folder: string;
+  size: number;
+  kind: LibraryKind;
+  category: LibraryCategory;
+  /** For paints / model-swaps: the owning bike / gear model / rider profile. */
+  parent: string | null;
+}
+
 /**
  * Parsed structure of an installed `.pkz`, loaded lazily per library card.
  * `locked` marks a non-plain archive that can't be inspected

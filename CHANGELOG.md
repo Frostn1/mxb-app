@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-07-15 — testing feedback pass
+
+### Added
+- **Full library detail view**: clicking any installed track/bike/gear card opens
+  a dedicated detail page — large preview (**click to enlarge in a lightbox**),
+  all parsed metadata (name, author, length, altitude, location), format, size and
+  on-disk path, plus quick actions (Move / Show in Explorer / Uninstall). Backed by
+  a new `get_pkz_preview` command that returns a full-resolution preview (the card
+  thumbnail stays small); `pkz` internals refactored into a shared `inspect` used
+  by both.
+- **Extracted-folder tracks now appear in the library**: tracks installed as loose
+  files (not a single `.pkz`) are detected by their track markers (`.map`/`.trh`/…)
+  and shown as one item with name/author/preview read from their loose `.ini` — the
+  old scan only listed `.pkz` and silently dropped these.
+- **Every rider category is now visible**: the Rider (player) library groups by
+  category — Helmets, Helmet Paints, Goggles, Boots, Boot Paints, Protection,
+  Gloves and Outfit/Kit — surfacing loose paints/gloves/goggles/outfit that the old
+  `.pkz`-only scan hid (only helmets/boots showed before). Each item carries its
+  info/thumbnail where readable.
+- **Bike detail shows its liveries + model swaps**: a bike's detail view lists the
+  paints in `<Bike>/paints` and any model-swap `.pkz` inside the bike's folder;
+  gear models likewise list their paints/goggles. Backed by a richer
+  `scan_library` command (kind/category/parent per item) used by the library while
+  install pickers keep the leaner `get_installed_mods`.
+
+### Fixed
+- **New bikes no longer install into a bike's `paints` folder**: only actual bike
+  **liveries** (WP category 37) default/route into `<Bike>/paints`; new bikes,
+  sounds and unknown bike content default to `mods/bikes` root, and a remembered
+  livery `paints` folder is no longer inherited by a subsequent new-bike install.
+- **Install dialog no longer clips its own header/X**: the dialog is capped at
+  `85vh` with a scrolling body, so expanding the folder picker can’t push the modal
+  past the viewport and hide the close button.
+- **Guard against accidental reinstalls**: quick-install, bulk-install and "Add to
+  Library" now show an "are you sure — this overwrites the installed files" confirm
+  when the mod is already in your library.
+
+### Changed
+- **Removed the retired "Wheels" bike browse category** (id 95) — it no longer
+  maps to real content.
+- **Uninstall works on extracted-folder mods**, not just `.pkz` files (moves the
+  whole folder to the Recycle Bin).
+
 ## 2026-07-15
 
 ### Changed

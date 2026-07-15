@@ -19,6 +19,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use tauri::Manager;
+use walkdir::WalkDir;
 
 /// Local-file-header magic that begins every real ZIP (and thus every
 /// plain `.pkz`).
@@ -27,6 +28,9 @@ const ZIP_MAGIC: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
 /// Longest edge of the generated preview thumbnail, in pixels. The card tile is
 /// ~76px wide, so 192 stays crisp at 2× DPI while keeping the `data:` URI light.
 const THUMB_MAX: u32 = 192;
+
+/// Longest edge for the full-size preview shown in the library detail lightbox.
+const PREVIEW_MAX: u32 = 1100;
 
 /// Parsed structure of an installed `.pkz`, surfaced on the library card.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -105,36 +109,67 @@ fn cache_path(app: &tauri::AppHandle, source: &str) -> Option<PathBuf> {
     Some(dir.join(format!("{:016x}.json", hasher.finish())))
 }
 
-/// Open (if it's a real zip) and parse a single `.pkz`. Never returns an error
-/// for a *locked* file — that's a normal, expected result.
+/// Parse a single `.pkz` (or extracted folder) into its [`PkzMeta`]. Never
+/// errors for a *locked* file — that's a normal, expected result.
 pub fn read_meta(path: &Path) -> Result<PkzMeta> {
+    Ok(inspect(path)?.0)
+}
+
+/// Full-resolution preview image (a `data:` URI, larger than the card
+/// thumbnail) for the library detail view's lightbox. `None` when the archive
+/// is locked or carries no image.
+pub fn read_preview(path: &Path) -> Result<Option<String>> {
+    let (_, image) = inspect(path)?;
+    Ok(image.and_then(|(name, bytes)| make_thumbnail(&name, &bytes, PREVIEW_MAX)))
+}
+
+/// The top-level `.ini` entry (fewest path segments, then shortest) — the mod's
+/// own; deeper ones belong to sub-variants.
+fn top_ini_index(names: &[String]) -> Option<usize> {
+    names
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.to_ascii_lowercase().ends_with(".ini"))
+        .min_by_key(|(_, n)| (n.matches('/').count(), n.len()))
+        .map(|(i, _)| i)
+}
+
+fn dir_of(name: &str) -> String {
+    name.rsplit_once('/')
+        .map(|(d, _)| d.to_string())
+        .unwrap_or_default()
+}
+
+/// Parse a `.pkz` (zip) or extracted mod folder into its [`PkzMeta`] (with a
+/// small card thumbnail) and hand back the chosen preview image's raw bytes so
+/// a caller (e.g. the detail lightbox) can render it at a different size.
+/// Dispatches on whether `path` is a directory; both arms reuse `parse_ini` /
+/// `pick_image` so cards look identical either way.
+fn inspect(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
+    if path.is_dir() {
+        inspect_dir(path)
+    } else {
+        inspect_zip(path)
+    }
+}
+
+fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     let mut file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
 
     // A real (plain) `.pkz` is a ZIP and starts with the local-file magic.
     // Anything else is non-plain — inspectable only by the game.
     let mut magic = [0u8; 4];
     if file.read(&mut magic).unwrap_or(0) < 4 || magic != ZIP_MAGIC {
-        return Ok(PkzMeta {
-            locked: true,
-            ..Default::default()
-        });
+        return Ok((locked(), None));
     }
     file.seek(SeekFrom::Start(0))?;
 
     let mut archive = match zip::ZipArchive::new(file) {
         Ok(a) => a,
-        // Had the magic but won't open (truncated/odd) — treat like locked so
-        // the card still renders with name + size.
-        Err(_) => {
-            return Ok(PkzMeta {
-                locked: true,
-                ..Default::default()
-            })
-        }
+        // Had the magic but won't open (truncated/odd) — treat like locked.
+        Err(_) => return Ok((locked(), None)),
     };
 
-    // Snapshot entry names once so we can pick the ini / image without fighting
-    // the archive's mutable borrow.
     let names: Vec<String> = (0..archive.len())
         .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
         .collect();
@@ -143,19 +178,8 @@ pub fn read_meta(path: &Path) -> Result<PkzMeta> {
     let mut pic: Option<String> = None;
     let mut ini_dir = String::new();
 
-    // The top-level `.ini` (fewest path segments, then shortest) is the track's;
-    // deeper ones belong to sub-variants.
-    if let Some(idx) = names
-        .iter()
-        .enumerate()
-        .filter(|(_, n)| n.to_ascii_lowercase().ends_with(".ini"))
-        .min_by_key(|(_, n)| (n.matches('/').count(), n.len()))
-        .map(|(i, _)| i)
-    {
-        ini_dir = names[idx]
-            .rsplit_once('/')
-            .map(|(d, _)| d.to_string())
-            .unwrap_or_default();
+    if let Some(idx) = top_ini_index(&names) {
+        ini_dir = dir_of(&names[idx]);
         if let Ok(mut f) = archive.by_index(idx) {
             let mut bytes = Vec::new();
             if f.read_to_end(&mut bytes).is_ok() {
@@ -164,16 +188,70 @@ pub fn read_meta(path: &Path) -> Result<PkzMeta> {
         }
     }
 
+    let mut image = None;
     if let Some(img_idx) = pick_image(&names, &ini_dir, pic.as_deref()) {
         if let Ok(mut f) = archive.by_index(img_idx) {
             let mut bytes = Vec::new();
             if f.read_to_end(&mut bytes).is_ok() {
-                meta.thumbnail = make_thumbnail(&names[img_idx], &bytes);
+                meta.thumbnail = make_thumbnail(&names[img_idx], &bytes, THUMB_MAX);
+                image = Some((names[img_idx].clone(), bytes));
             }
         }
     }
 
-    Ok(meta)
+    Ok((meta, image))
+}
+
+/// Directory equivalent of [`inspect_zip`] for extracted tracks/bikes that
+/// aren't packed into a single `.pkz`.
+fn inspect_dir(dir: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
+    // Loose files, relative to the folder. A few levels deep is plenty to find
+    // the `.ini` and a preview without walking a whole track's asset tree.
+    let mut rels: Vec<(String, PathBuf)> = Vec::new();
+    for entry in WalkDir::new(dir)
+        .max_depth(3)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if let Ok(r) = entry.path().strip_prefix(dir) {
+            rels.push((
+                r.to_string_lossy().replace('\\', "/"),
+                entry.path().to_path_buf(),
+            ));
+        }
+    }
+    let names: Vec<String> = rels.iter().map(|(n, _)| n.clone()).collect();
+
+    let mut meta = PkzMeta::default();
+    let mut pic: Option<String> = None;
+    let mut ini_dir = String::new();
+
+    if let Some(idx) = top_ini_index(&names) {
+        ini_dir = dir_of(&names[idx]);
+        if let Ok(bytes) = std::fs::read(&rels[idx].1) {
+            parse_ini(&String::from_utf8_lossy(&bytes), &mut meta, &mut pic);
+        }
+    }
+
+    let mut image = None;
+    if let Some(img_idx) = pick_image(&names, &ini_dir, pic.as_deref()) {
+        if let Ok(bytes) = std::fs::read(&rels[img_idx].1) {
+            meta.thumbnail = make_thumbnail(&names[img_idx], &bytes, THUMB_MAX);
+            image = Some((names[img_idx].clone(), bytes));
+        }
+    }
+
+    Ok((meta, image))
+}
+
+fn locked() -> PkzMeta {
+    PkzMeta {
+        locked: true,
+        ..Default::default()
+    }
 }
 
 /// Parse the INI text, filling `[info]`/`[ui]` fields we care about.
@@ -276,7 +354,7 @@ fn image_score(name: &str) -> i32 {
 
 /// Decode `bytes` (handling TGA, which has no magic so it needs the explicit
 /// decoder), downscale to a small PNG, and return a `data:` URI.
-fn make_thumbnail(name: &str, bytes: &[u8]) -> Option<String> {
+fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
     let img = if name.to_ascii_lowercase().ends_with(".tga") {
         let dec = image::codecs::tga::TgaDecoder::new(Cursor::new(bytes)).ok()?;
         image::DynamicImage::from_decoder(dec).ok()?
@@ -286,7 +364,7 @@ fn make_thumbnail(name: &str, bytes: &[u8]) -> Option<String> {
 
     // Track previews are photographic, so JPEG is far smaller than PNG. Drop to
     // RGB first (JPEG can't hold the alpha a TGA may decode to).
-    let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(THUMB_MAX, THUMB_MAX).to_rgb8());
+    let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(max, max).to_rgb8());
     let mut jpg = Vec::new();
     thumb
         .write_to(&mut Cursor::new(&mut jpg), image::ImageFormat::Jpeg)
