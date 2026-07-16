@@ -43,7 +43,7 @@ import {
   presetsDecode,
   presetsImport,
 } from "../../api/mods";
-import type { Loadout, Preset, ReloadOutcome } from "../../types";
+import type { Loadout, Preset, PresetApplyOutcome } from "../../types";
 import {
   SLOTS,
   SLOT_GROUPS,
@@ -98,10 +98,27 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Turn a FrostMod reload outcome into a user-facing "how it took effect" note. */
-function reloadNote(outcome: ReloadOutcome): { ok: boolean; msg: string } {
-  if (outcome === "signaled") return { ok: true, msg: "reloaded live in-game." };
-  return { ok: true, msg: "saved — it loads next time the game opens." };
+/**
+ * Turn an apply outcome into a user-facing "how it took effect" note.
+ *
+ * The *selected* look lives in the game's memory (read from `profile.ini` only
+ * when a profile is selected), so a FrostMod content reload alone doesn't show
+ * it. Priority: an experimental in-place refresh > "reselect your profile" while
+ * the game runs > "loads next launch".
+ */
+function applyNote(outcome: PresetApplyOutcome): string {
+  switch (outcome.live_refresh) {
+    case "refreshed":
+      return "refreshed live in-game.";
+    case "failed":
+      return "saved — instant refresh failed, so reselect your profile in-game to load it.";
+    default:
+      break;
+  }
+  if (outcome.game_running) {
+    return "saved — reselect your profile in MX Bikes (Profile menu) to load the new look.";
+  }
+  return "saved — it loads next time the game opens.";
 }
 
 /**
@@ -121,6 +138,9 @@ export default function Presets() {
   const [loadout, setLoadout] = useState<Loadout>(EMPTY);
   const [saved, setSaved] = useState<Preset[]>([]);
   const [makeActive, setMakeActive] = useState(true);
+  // Experimental: re-run the game's profile loader in the live process so the
+  // look refreshes without a restart/reselect. Windows-only, off by default.
+  const [liveRefresh, setLiveRefresh] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -220,16 +240,21 @@ export default function Presets() {
       }
       setApplyingId(id);
       try {
-        const outcome = await presetsApply(profile, bike, lo, makeActive);
-        const { msg } = reloadNote(outcome);
-        toast.success(`Applied “${label}” to ${bike} — ${msg}`);
+        const outcome = await presetsApply(
+          profile,
+          bike,
+          lo,
+          makeActive,
+          liveRefresh,
+        );
+        toast.success(`Applied “${label}” to ${bike} — ${applyNote(outcome)}`);
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
       } finally {
         setApplyingId(null);
       }
     },
-    [profile, bike, makeActive],
+    [profile, bike, makeActive, liveRefresh],
   );
 
   const onShare = useCallback(async (preset: Preset) => {
@@ -376,6 +401,24 @@ export default function Presets() {
                   Make this the active bike
                 </label>
               </div>
+              <label className="flex items-start gap-2 text-[12px] text-muted-foreground">
+                <Switch
+                  checked={liveRefresh}
+                  onCheckedChange={setLiveRefresh}
+                  className="mt-0.5"
+                />
+                <span>
+                  Instant refresh{" "}
+                  <span className="rounded bg-amber-500/15 px-1 text-[10px] font-medium uppercase tracking-wide text-amber-500">
+                    experimental
+                  </span>
+                  <span className="block text-[11px] text-muted-foreground/80">
+                    Re-runs the game's profile loader while it's open so the look
+                    changes without reselecting your profile. Windows only; if it
+                    doesn't take, just reselect your profile in-game.
+                  </span>
+                </span>
+              </label>
               {builderMissing > 0 && (
                 <p className="flex items-center gap-1.5 text-[11.5px] text-amber-500">
                   <AlertTriangle className="size-3.5" />
