@@ -3,7 +3,7 @@
 ## 2026-07-15
 
 ### Added
-- **Locker — in-app bike model swaps**: new Locker tab that mirrors FrostMod's
+- **Model Swaps — in-app bike model swaps**: new Model Swaps tab that mirrors FrostMod's
   in-game model swapper (F8 > 3) from the app. Lists each swappable bike (a folder
   with a loose `model.edf` **or** a `FrostMod Models/` library — so a bike whose
   active Original is `.pkz`-packed still shows and stays reachable), its active

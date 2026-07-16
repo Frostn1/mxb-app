@@ -52,7 +52,7 @@ export default function Locker() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <h1 className="text-[21px] font-bold tracking-[-0.2px]">Locker</h1>
+        <h1 className="text-[21px] font-bold tracking-[-0.2px]">Model Swaps</h1>
         <p className="text-[12.5px] text-muted-foreground">
           Swap each bike’s model between the sets you’ve installed.
         </p>
