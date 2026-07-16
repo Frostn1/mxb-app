@@ -196,6 +196,38 @@ fn parse_generic_anchors(doc: &Html) -> Vec<ShopItem> {
     items
 }
 
+/// Best-effort mod-type guess for a purchased item, used to choose the install
+/// destination for content we can't otherwise classify — a non-plain `.pkz`,
+/// which isn't a readable archive. Structured downloads (zip/rar/7z that carry a
+/// `mods/` tree, top-level `bikes/tracks/rider/…`, or a `<Bike>/paints/` bundle)
+/// still self-route by their folders in `install::place_mod`; this only sets the
+/// fallback bucket for the rest. Defaults to `tracks`, the shop's dominant
+/// content. Returns a `mods/` subfolder name (a `CATEGORY_DIRS` value).
+pub fn guess_mod_type(title: &str) -> &'static str {
+    let t = title.to_lowercase();
+
+    // Rider gear/paints read off the title clearly.
+    const RIDER: [&str; 10] = [
+        "helmet", "boots", "glove", "goggle", "jersey", "gear set", "gearset",
+        "neck brace", "rider paint", "rider kit",
+    ];
+    // Bike content: manufacturers + model families, plus explicit livery/bike words.
+    // (`replica` is intentionally excluded — the shop tags tracks with it too.)
+    const BIKE: [&str; 18] = [
+        "ktm", "husqvarna", "husky", "gasgas", "gas gas", "yamaha", "honda",
+        "kawasaki", "suzuki", "fantic", "sherco", "sx-f", "sxf", "crf", "livery",
+        "oem bike", " bike ", "bike paint",
+    ];
+
+    if RIDER.iter().any(|k| t.contains(k)) {
+        "rider"
+    } else if BIKE.iter().any(|k| t.contains(k)) {
+        "bikes"
+    } else {
+        "tracks"
+    }
+}
+
 /// Does this href point at a downloadable file (EDD action or archive)?
 fn is_download_link(href: &str) -> bool {
     let h = href.to_lowercase();
@@ -352,5 +384,18 @@ mod tests {
             <a href="/files/x.zip">Download again</a>
         "#;
         assert_eq!(parse_my_downloads(html).len(), 1);
+    }
+
+    #[test]
+    fn guesses_mod_type_from_title() {
+        // Tracks are the default (real product titles from the shop).
+        assert_eq!(guess_mod_type("2022 ARL MX RD1 – Fox Raceway"), "tracks");
+        assert_eq!(guess_mod_type("2024 ARLMX RD10 – MARYLAND"), "tracks");
+        // Bike content by manufacturer/model or explicit livery wording.
+        assert_eq!(guess_mod_type("2023 KTM 450 SX-F"), "bikes");
+        assert_eq!(guess_mod_type("Factory Yamaha Livery Pack"), "bikes");
+        // Rider gear/paints.
+        assert_eq!(guess_mod_type("Fox V3 Helmet Paint"), "rider");
+        assert_eq!(guess_mod_type("Alpinestars Boots + Gloves"), "rider");
     }
 }
