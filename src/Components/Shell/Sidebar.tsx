@@ -3,6 +3,7 @@ import {
   Store,
   Library as LibraryIcon,
   Bike,
+  Shirt,
   Settings,
   RefreshCw,
   Play,
@@ -14,7 +15,13 @@ import { useFrostmod } from "../../Context/Frostmod";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 
-export type DashboardView = "browse" | "shop" | "library" | "locker" | "settings";
+export type DashboardView =
+  | "browse"
+  | "shop"
+  | "library"
+  | "locker"
+  | "presets"
+  | "settings";
 
 interface SidebarProps {
   view: DashboardView;
@@ -26,6 +33,7 @@ const NAV: { id: DashboardView; label: string; icon: typeof Home }[] = [
   { id: "shop", label: "Shop", icon: Store },
   { id: "library", label: "Library", icon: LibraryIcon },
   { id: "locker", label: "Model Swaps", icon: Bike },
+  { id: "presets", label: "Presets", icon: Shirt },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 

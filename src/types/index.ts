@@ -188,3 +188,56 @@ export interface FrostmodStatus {
   /** FrostMod currently running (its reload event exists). */
   running: boolean;
 }
+
+/**
+ * A full cosmetic **loadout** — one value per customization slot (empty string =
+ * stock/none). Field names mirror MX Bikes' `profile.ini` slot sections; each is
+ * a plain reference to an installed mod/paint folder name. `raceNumber` is the
+ * active rider number carried alongside so a preset can also set it.
+ */
+export interface Loadout {
+  paint: string;
+  bikeFont: string;
+  rider: string;
+  helmet: string;
+  helmetPaint: string;
+  gogglesPaint: string;
+  suitPaint: string;
+  suitFont: string;
+  boots: string;
+  bootsPaint: string;
+  glovesPaint: string;
+  protection: string;
+  protectionPaint: string;
+  ridingStyle: string;
+  tyres: string;
+  raceNumber: string;
+  /** Bike model-swap variant (Locker / `FrostMod Models/`) to apply. Not a
+   * `profile.ini` value — a filesystem swap done at apply time. Empty = leave the
+   * bike's current model untouched. */
+  modelSwap: string;
+}
+
+/** A saved, named, bike-agnostic preset (a loadout you can apply to any bike). */
+export interface Preset {
+  name: string;
+  loadout: Loadout;
+}
+
+/** One editable slot in the preset builder: which `Loadout` field it maps to, its
+ * label, and how its options are sourced. */
+export type SlotSource =
+  | "bikePaint" // liveries for the selected bike
+  | "helmet" // helmet models
+  | "helmetPaint" // paints for the selected helmet
+  | "goggles" // goggles for the selected helmet (+ per-profile)
+  | "boots" // boot models
+  | "bootPaint" // paints for the selected boots
+  | "outfit" // rider kit/suit paints (per rider profile)
+  | "gloves" // glove paints
+  | "protection" // protection models
+  | "protectionPaint" // paints for the selected protection
+  | "rider" // rider profile (default_mx / default_sm)
+  | "ridingStyle" // mx / sm
+  | "tyres" // tyre models
+  | "font"; // number-plate / suit fonts (free text)
