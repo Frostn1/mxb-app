@@ -3,6 +3,20 @@
 ## 2026-07-15
 
 ### Added
+- **Presets — customization loadouts**: new Presets tab that saves a full look
+  (bike livery, number/suit fonts, tyres, rider kit, helmet + paint, goggles,
+  gloves, boots + paint, protection + paint, riding style, race number) and applies
+  it to a bike on command. MX Bikes keeps the selected look **per bike** in
+  `profiles/<profile>/profile.ini` (one section per slot, keyed by bikeid); a preset
+  is a bike-agnostic bundle of those values. Capture a bike's current look or build
+  one from installed mods (dependent pickers — helmet paints follow the chosen
+  helmet, etc.), save it named, and quick-apply — writing only the target bike's
+  rows (with a `profile.ini.bak` backup) and nudging a running FrostMod to reload.
+  A preset can also carry a **model swap** (applied via the Locker's model-swap
+  machinery). **Share** presets as portable `MXBP1-…` codes (copy/paste) that others
+  **Import**, with a missing-mod warning for anything they haven't installed. New
+  line-oriented profile.ini editor (`presets` Rust module) that rewrites only the
+  targeted `<bikeid>=` lines, `presets_*` Tauri commands, and a `presets.json` store.
 - **Model Swaps — in-app bike model swaps**: new Model Swaps tab that mirrors FrostMod's
   in-game model swapper (F8 > 3) from the app. Lists each swappable bike (a folder
   with a loose `model.edf` **or** a `FrostMod Models/` library — so a bike whose

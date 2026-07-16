@@ -9,6 +9,7 @@ mod library;
 mod modelswap;
 mod mods;
 mod pkz;
+mod presets;
 mod shop_session;
 
 use config::AppConfig;
@@ -367,6 +368,110 @@ async fn shop_install(
     .map_err(|e| format!("{e:#}"))
 }
 
+// --- Customization presets (per-bike loadouts) -----------------------------
+
+/// App-local dir where `presets.json` lives (next to `config.json`).
+fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_local_data_dir()
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Rider/game profiles that have a `profile.ini` (each keeps its own per-bike look).
+#[tauri::command]
+fn presets_list_profiles(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    Ok(presets::list_profiles(&cfg.mods_path))
+}
+
+/// Bike ids present in a profile (the targets a loadout can be applied to).
+#[tauri::command]
+fn presets_list_bikes(app: tauri::AppHandle, profile: String) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    presets::list_bikes(&cfg.mods_path, &profile).map_err(|e| format!("{e:#}"))
+}
+
+/// Read a bike's current cosmetic column (for "capture current look"), including
+/// its active model swap when it's a real captured variant (not the untouched
+/// Original) — so a preset can carry the bike's current model too.
+#[tauri::command]
+fn presets_read_loadout(
+    app: tauri::AppHandle,
+    profile: String,
+    bikeid: String,
+) -> Result<presets::Loadout, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let mut loadout =
+        presets::read_loadout(&cfg.mods_path, &profile, &bikeid).map_err(|e| format!("{e:#}"))?;
+    let active = modelswap::current_active(&cfg.mods_path, &bikeid);
+    if !active.eq_ignore_ascii_case(modelswap::ORIGINAL_LABEL) {
+        loadout.model_swap = active;
+    }
+    Ok(loadout)
+}
+
+/// Apply a loadout to a bike (writes its row across all slot sections; optionally
+/// makes it the active bike) and nudge a running FrostMod to reload. The returned
+/// outcome tells the UI whether the swap is live or applies on next launch.
+#[tauri::command]
+fn presets_apply(
+    app: tauri::AppHandle,
+    profile: String,
+    bikeid: String,
+    loadout: presets::Loadout,
+    make_active: bool,
+) -> Result<ReloadOutcome, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    presets::apply_loadout(&cfg.mods_path, &profile, &bikeid, &loadout, make_active)
+        .map_err(|e| format!("{e:#}"))?;
+    // A model swap (Locker) is a filesystem move, not a profile.ini value — apply
+    // it when the preset carries one and it isn't already the bike's active model.
+    let want = loadout.model_swap.trim();
+    if !want.is_empty() && !want.eq_ignore_ascii_case(&modelswap::current_active(&cfg.mods_path, &bikeid))
+    {
+        modelswap::apply_model_swap(&cfg.mods_path, &bikeid, want)
+            .map_err(|e| format!("Cosmetics applied, but the model swap failed: {e:#}"))?;
+    }
+    Ok(frostmod::signal_reload())
+}
+
+/// All saved presets.
+#[tauri::command]
+fn presets_list(app: tauri::AppHandle) -> Result<Vec<presets::Preset>, String> {
+    Ok(presets::load_presets(&presets_dir(&app)?))
+}
+
+/// Save (or overwrite by name) a preset.
+#[tauri::command]
+fn presets_save(app: tauri::AppHandle, preset: presets::Preset) -> Result<(), String> {
+    presets::save_preset(&presets_dir(&app)?, preset).map_err(|e| format!("{e:#}"))
+}
+
+/// Delete a preset by name.
+#[tauri::command]
+fn presets_delete(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    presets::delete_preset(&presets_dir(&app)?, &name).map_err(|e| format!("{e:#}"))
+}
+
+/// Export a saved preset as a portable share code (`MXBP1-…`).
+#[tauri::command]
+fn presets_export(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    presets::export_code(&presets_dir(&app)?, &name).map_err(|e| format!("{e:#}"))
+}
+
+/// Decode a share code *without* saving it — lets the UI preview a shared preset
+/// (name + slots) and check for missing mods before importing.
+#[tauri::command]
+fn presets_decode(text: String) -> Result<presets::Preset, String> {
+    presets::decode_code(&text).map_err(|e| format!("{e:#}"))
+}
+
+/// Import a share code: decode + save + return the stored preset.
+#[tauri::command]
+fn presets_import(app: tauri::AppHandle, text: String) -> Result<presets::Preset, String> {
+    presets::import_code(&presets_dir(&app)?, &text).map_err(|e| format!("{e:#}"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(
@@ -497,7 +602,17 @@ fn main() {
             shop_status,
             shop_logout,
             shop_my_downloads,
-            shop_install
+            shop_install,
+            presets_list_profiles,
+            presets_list_bikes,
+            presets_read_loadout,
+            presets_apply,
+            presets_list,
+            presets_save,
+            presets_delete,
+            presets_export,
+            presets_decode,
+            presets_import
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
