@@ -6,6 +6,7 @@ import { Badge } from "@/Components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
   isBlockedDownload,
+  pickDownloadForBike,
   sortMirrors,
   type DestOption,
   type ModType,
@@ -29,6 +30,9 @@ interface InstallDialogProps {
   folderCounts: Map<string, number>;
   /** Preselected destination (remembered per category). */
   initialFolder: string;
+  /** Bike **sound** mod: downloads are per-bike (not mirrors), so the picked
+   * bike drives which link we grab. */
+  sound?: boolean;
   onConfirm: (choice: InstallChoice) => void;
 }
 
@@ -46,6 +50,7 @@ export default function InstallDialog({
   suggestions,
   folderCounts,
   initialFolder,
+  sound = false,
   onConfirm,
 }: InstallDialogProps) {
   const mirrors = useMirrors(detail);
@@ -69,6 +74,16 @@ export default function InstallDialog({
       setMirrorsOpen(false);
     }
   }, [open, initialFolder]);
+
+  // Sound mods: the chosen bike (the folder value, minus any `/paints`) decides
+  // which *download* to grab — the links are per-bike, not mirrors of one file.
+  const bikeName = sound ? folder.replace(/[/\\]paints$/i, "") : "";
+  useEffect(() => {
+    if (!sound || !bikeName) return;
+    const picked = pickDownloadForBike(mirrors, bikeName);
+    const idx = picked ? mirrors.indexOf(picked) : -1;
+    if (idx >= 0) setMirrorIdx(idx);
+  }, [sound, bikeName, mirrors]);
 
   const folderLabel = useMemo(() => {
     if (creating && newFolder.trim()) return newFolder.trim();
@@ -144,7 +159,9 @@ export default function InstallDialog({
     onConfirm({ destFolder, mirror: selectedMirror });
   };
 
-  const shownMirrors = mirrorsOpen ? mirrors : mirrors.slice(0, 1);
+  // Show every option for sound mods (each is a different bike, not a mirror);
+  // otherwise collapse to the primary until expanded.
+  const shownMirrors = mirrorsOpen || sound ? mirrors : mirrors.slice(0, 1);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -275,7 +292,7 @@ export default function InstallDialog({
           {mirrors.length > 0 && (
             <section className="flex flex-col gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
-                Download from
+                {sound ? "Download (per bike)" : "Download from"}
               </span>
               <div className="flex flex-col gap-1.5">
                 {shownMirrors.map((m) => {
@@ -304,9 +321,13 @@ export default function InstallDialog({
                         <span className="text-[11px] text-muted-foreground">
                           {blocked
                             ? "Opens in browser — MXB App finishes the install"
-                            : m.isDefault
-                              ? "Direct · fastest"
-                              : "Direct"}
+                            : sound
+                              ? on
+                                ? "Matched to your bike"
+                                : "Different bike / pack"
+                              : m.isDefault
+                                ? "Direct · fastest"
+                                : "Direct"}
                         </span>
                       </span>
                       {blocked ? (
@@ -321,7 +342,7 @@ export default function InstallDialog({
                     </button>
                   );
                 })}
-                {!mirrorsOpen && mirrors.length > 1 && (
+                {!sound && !mirrorsOpen && mirrors.length > 1 && (
                   <button
                     onClick={() => setMirrorsOpen(true)}
                     className="flex cursor-default items-center gap-1 self-start px-1 text-[11px] text-muted-foreground hover:text-foreground"
@@ -333,7 +354,9 @@ export default function InstallDialog({
               </div>
               {mirrors.length > 1 && (
                 <span className="text-[11px] text-faint">
-                  All mirrors contain the same file. If one fails, try the next.
+                  {sound
+                    ? "Each download is a different bike — auto-selected to match your pick. Choose the “all bikes” pack for every bike at once."
+                    : "All mirrors contain the same file. If one fails, try the next."}
                 </span>
               )}
             </section>
