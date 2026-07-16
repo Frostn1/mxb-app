@@ -1290,6 +1290,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "dirs-next",
+ "flate2",
  "futures-util",
  "html-escape",
  "image",
