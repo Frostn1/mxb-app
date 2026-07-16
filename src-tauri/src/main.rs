@@ -4,10 +4,12 @@
 mod config;
 mod frostmod;
 mod frostmod_manage;
+mod gameproc;
 mod install;
 mod library;
 mod modelswap;
 mod mods;
+mod paint;
 mod pkz;
 mod presets;
 mod shop_session;
@@ -128,6 +130,13 @@ fn get_pkz_meta(app: tauri::AppHandle, path: String) -> Result<pkz::PkzMeta, Str
 #[tauri::command]
 fn get_pkz_preview(path: String) -> Result<Option<String>, String> {
     pkz::read_preview(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+}
+
+/// Decode a `.pnt` paint file at `path` into its textures (PNG `data:` URIs),
+/// for the 3D viewer to map onto a model. Native — no PaintEd needed.
+#[tauri::command]
+fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> {
+    paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -417,9 +426,24 @@ fn presets_read_loadout(
     Ok(loadout)
 }
 
+/// What happened when a preset was applied, so the UI can say precisely how it
+/// took effect. `content_reload` is FrostMod re-scanning the mods folder (makes
+/// new paint *files* available); it does **not** refresh the *selected* look,
+/// which the game holds in memory. `game_running` drives the "reselect your
+/// profile to load it" hint, and `live_refresh` reports the experimental attempt
+/// to re-run the game's profile loader in place.
+#[derive(serde::Serialize)]
+struct PresetApplyOutcome {
+    content_reload: ReloadOutcome,
+    game_running: bool,
+    live_refresh: gameproc::LiveRefresh,
+}
+
 /// Apply a loadout to a bike (writes its row across all slot sections; optionally
-/// makes it the active bike) and nudge a running FrostMod to reload. The returned
-/// outcome tells the UI whether the swap is live or applies on next launch.
+/// makes it the active bike), nudge a running FrostMod to reload the mods folder,
+/// and — when `live_refresh` is set (experimental) — re-run the game's profile
+/// loader in the live process so the new look shows without a restart or manual
+/// reselect. The returned outcome tells the UI exactly how it took effect.
 #[tauri::command]
 fn presets_apply(
     app: tauri::AppHandle,
@@ -427,7 +451,8 @@ fn presets_apply(
     bikeid: String,
     loadout: presets::Loadout,
     make_active: bool,
-) -> Result<ReloadOutcome, String> {
+    live_refresh: bool,
+) -> Result<PresetApplyOutcome, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     presets::apply_loadout(&cfg.mods_path, &profile, &bikeid, &loadout, make_active)
         .map_err(|e| format!("{e:#}"))?;
@@ -439,7 +464,20 @@ fn presets_apply(
         modelswap::apply_model_swap(&cfg.mods_path, &bikeid, want)
             .map_err(|e| format!("Cosmetics applied, but the model swap failed: {e:#}"))?;
     }
-    Ok(frostmod::signal_reload())
+    // FrostMod reload only refreshes mods *content*, not the in-memory look. The
+    // look re-reads from profile.ini only when the game (re)selects a profile —
+    // so we detect the game and, if asked, re-run its loader in place.
+    let content_reload = frostmod::signal_reload();
+    let live = if live_refresh {
+        gameproc::refresh_look()
+    } else {
+        gameproc::LiveRefresh::Disabled
+    };
+    Ok(PresetApplyOutcome {
+        content_reload,
+        game_running: gameproc::is_game_running(),
+        live_refresh: live,
+    })
 }
 
 /// All saved presets.
@@ -588,6 +626,7 @@ fn main() {
             scan_library,
             get_pkz_meta,
             get_pkz_preview,
+            unpack_paint,
             scan_rider_targets,
             scan_model_swaps,
             apply_model_swap,

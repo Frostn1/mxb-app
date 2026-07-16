@@ -14,6 +14,7 @@ import type {
   ModSummary,
   PkzMeta,
   Preset,
+  PresetApplyOutcome,
   ReloadOutcome,
 } from "../types";
 
@@ -658,20 +659,24 @@ export function presetsReadLoadout(
 /**
  * Apply a loadout to a bike: writes its row across every `profile.ini` slot
  * section and (when `makeActive`) points the game at that bike. Nudges a running
- * FrostMod to reload — the outcome says whether it's live or applies next launch.
- * A one-shot `profile.ini.bak` is written before the change.
+ * FrostMod to reload the mods folder, and — when `liveRefresh` is set
+ * (experimental) — re-runs the game's profile loader in place so the new look
+ * shows without a restart or manual reselect. The outcome says exactly how it
+ * took effect. A one-shot `profile.ini.bak` is written before the change.
  */
 export function presetsApply(
   profile: string,
   bikeid: string,
   loadout: Loadout,
   makeActive: boolean,
-): Promise<ReloadOutcome> {
-  return invoke<ReloadOutcome>("presets_apply", {
+  liveRefresh = false,
+): Promise<PresetApplyOutcome> {
+  return invoke<PresetApplyOutcome>("presets_apply", {
     profile,
     bikeid,
     loadout,
     makeActive,
+    liveRefresh,
   });
 }
 
