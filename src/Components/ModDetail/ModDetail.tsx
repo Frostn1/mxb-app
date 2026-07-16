@@ -23,6 +23,7 @@ import {
   getModDetail,
   isBlockedDownload,
   isLiveryContext,
+  isSoundContext,
   normalizeModName,
   resolveInitialFolder,
   scanRiderTargets,
@@ -95,6 +96,7 @@ export default function ModDetail({
   onBack,
 }: ModDetailProps) {
   const livery = isLiveryContext(modType, categoryId);
+  const sound = isSoundContext(modType, categoryId);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<InstalledMod[]>([]);
@@ -136,7 +138,7 @@ export default function ModDetail({
           const dest =
             modType.id === "rider"
               ? buildRiderDestinations(await scanRiderTargets(), d.title)
-              : buildDestinations(modType, d.title, inst, livery);
+              : buildDestinations(modType, d.title, inst, livery, sound);
           if (cancelled) return;
           setDestOptions(dest.options);
           setGuess(dest.guess);
@@ -150,7 +152,7 @@ export default function ModDetail({
     return () => {
       cancelled = true;
     };
-  }, [slug, modType, livery]);
+  }, [slug, modType, livery, sound]);
 
   const folderCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -167,8 +169,8 @@ export default function ModDetail({
 
   const destKey = destStorageKey(modType);
   const initialFolder = useMemo(
-    () => resolveInitialFolder(modType, destOptions, guess, livery),
-    [modType, destOptions, guess, livery],
+    () => resolveInitialFolder(modType, destOptions, guess, livery, sound),
+    [modType, destOptions, guess, livery, sound],
   );
 
   const isInstalled =
@@ -431,6 +433,7 @@ export default function ModDetail({
           suggestions={suggestions}
           folderCounts={folderCounts}
           initialFolder={initialFolder}
+          sound={sound}
           onConfirm={handleConfirm}
         />
       )}

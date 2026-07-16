@@ -12,7 +12,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const EMIT_EVERY_BYTES: u64 = 512 * 1024;
@@ -145,6 +145,18 @@ fn extract_and_place(
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
     place_mod(&extracted, &mods_dir, type_folder, dest_folder, slug)?;
+
+    // Record which bike folders got a sound (a sound merges into an OEM bike, so
+    // the Library can't otherwise tell it from stock). Best-effort — never fail
+    // an otherwise-successful install over provenance bookkeeping.
+    if type_folder.eq_ignore_ascii_case("bikes") {
+        let bikes = sound_bikes_in(&extracted);
+        if !bikes.is_empty() {
+            if let Ok(dir) = app.path().app_local_data_dir() {
+                let _ = crate::soundmods::record(&dir, &bikes, slug);
+            }
+        }
+    }
 
     let _ = std::fs::remove_dir_all(work);
     emit(app, slug, "done", None, None);
@@ -629,6 +641,29 @@ fn place_mod(
         }
     }
 
+    // 3b. Sound bundle: `engine.scl` + `sfx.cfg` (a bike's sound files) with no
+    //     `mods/`/category wrapper. This is bike content that belongs at a bike's
+    //     *root* (next to `paints/`), NEVER inside `paints/`. So route it to
+    //     `mods/bikes` and, for loose files, drop a trailing `paints` segment the
+    //     picker may have supplied so a sound can't be misfiled as a livery.
+    for base in &candidates {
+        if contains_sound_bundle(base) {
+            // `<Bike>/{engine.scl,sfx.cfg}` — merge the bike folder(s) as-is.
+            return merge_tree(base, &mods_dir.join("bikes"));
+        }
+        if dir_has_sound_markers(base) {
+            // Loose `engine.scl`+`sfx.cfg` — drop into the chosen bike's root.
+            let mut dir = mods_dir.join("bikes");
+            for seg in dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()) {
+                if seg.eq_ignore_ascii_case("paints") {
+                    continue;
+                }
+                dir.push(sanitize(seg));
+            }
+            return place_plain(base, &dir, slug, false);
+        }
+    }
+
     // 4. Plain placement into the mod type's folder, honoring the user's chosen
     //    destination sub-folder (e.g. a track folder, or `<Bike>/paints` for a
     //    loose livery). Self-structured archives above ignore it.
@@ -674,6 +709,69 @@ fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
                 && e.file_name().to_string_lossy().eq_ignore_ascii_case(name)
         })
         .map(|e| e.path())
+}
+
+/// Sound files that define a bike's sound. Both present in a folder = a sound mod.
+const SOUND_MARKERS: [&str; 2] = ["engine.scl", "sfx.cfg"];
+
+/// True when `dir` directly holds both sound-marker files (`engine.scl`+`sfx.cfg`).
+fn dir_has_sound_markers(dir: &Path) -> bool {
+    let mut found = [false; SOUND_MARKERS.len()];
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.filter_map(|e| e.ok()) {
+            if e.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                for (i, m) in SOUND_MARKERS.iter().enumerate() {
+                    if name.eq_ignore_ascii_case(m) {
+                        found[i] = true;
+                    }
+                }
+            }
+        }
+    }
+    found.iter().all(|&f| f)
+}
+
+/// True when a child folder is a sound mod (i.e. `<Bike>/{engine.scl,sfx.cfg}`).
+fn contains_sound_bundle(base: &Path) -> bool {
+    std::fs::read_dir(base)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .any(|d| dir_has_sound_markers(&d.path()))
+        })
+        .unwrap_or(false)
+}
+
+/// Bike folder names in an extracted archive that carry a sound mod (a folder
+/// directly holding `engine.scl`+`sfx.cfg`). Used to record provenance so the
+/// Library can surface sound-modded bikes it otherwise couldn't tell from stock.
+/// The shared `sounds` sample folder is skipped.
+pub fn sound_bikes_in(extracted: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in walkdir::WalkDir::new(extracted)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_dir() {
+            continue;
+        }
+        let p = entry.path();
+        if !dir_has_sound_markers(p) {
+            continue;
+        }
+        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+            if name.eq_ignore_ascii_case("sounds") {
+                continue;
+            }
+            let name = name.to_string();
+            if !out.iter().any(|n: &String| n.eq_ignore_ascii_case(&name)) {
+                out.push(name);
+            }
+        }
+    }
+    out
 }
 
 /// True when a child folder itself holds a `paints` folder (i.e. `<Bike>/paints`).
@@ -1121,6 +1219,64 @@ mod tests {
         let mods = root.join("mods");
         place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
         assert!(mods.join("tracks/track.pkz").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn packaged_sound_mod_merges_to_bike_root() {
+        // ASS-style archive: a wrapper folder carrying the full `mods/bikes/…`
+        // tree, sound configs at the bike root + shared samples in `bikes/sounds`.
+        let root = place_tmp("sound-packaged");
+        let ex = root.join("ex");
+        let bike = "ASS KTM250-0.1/mods/bikes/MX2OEM_2023_KTM_250_SX-F";
+        touch(&ex.join(format!("{bike}/engine.scl")));
+        touch(&ex.join(format!("{bike}/sfx.cfg")));
+        touch(&ex.join("ASS KTM250-0.1/mods/bikes/sounds/idle.wav"));
+        let mods = root.join("mods");
+        // Picker may pass `<Bike>/paints`; a self-structured archive ignores it.
+        place_mod(&ex, &mods, "bikes", "MX2OEM_2023_KTM_250_SX-F/paints", "slug").unwrap();
+        assert!(mods
+            .join("bikes/MX2OEM_2023_KTM_250_SX-F/engine.scl")
+            .exists());
+        assert!(mods.join("bikes/MX2OEM_2023_KTM_250_SX-F/sfx.cfg").exists());
+        assert!(mods.join("bikes/sounds/idle.wav").exists());
+        // Never inside a paints folder.
+        assert!(!mods.join("bikes/MX2OEM_2023_KTM_250_SX-F/paints").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn nested_sound_bundle_routes_to_bikes() {
+        // `<Bike>/{engine.scl,sfx.cfg}` with no `mods/` wrapper.
+        let root = place_tmp("sound-nested");
+        let ex = root.join("ex");
+        touch(&ex.join("MX2OEM_2023_KTM_250_SX-F/engine.scl"));
+        touch(&ex.join("MX2OEM_2023_KTM_250_SX-F/sfx.cfg"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "bikes", "", "slug").unwrap();
+        assert!(mods
+            .join("bikes/MX2OEM_2023_KTM_250_SX-F/engine.scl")
+            .exists());
+        assert!(mods.join("bikes/MX2OEM_2023_KTM_250_SX-F/sfx.cfg").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn loose_sound_files_never_land_in_paints() {
+        // Loose `engine.scl`+`sfx.cfg`; even if the picker hands us `<Bike>/paints`
+        // the paints segment is dropped and the sound lands at the bike root.
+        let root = place_tmp("sound-loose");
+        let ex = root.join("ex");
+        touch(&ex.join("engine.scl"));
+        touch(&ex.join("sfx.cfg"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "bikes", "MX2OEM_2023_KTM_250_SX-F/paints", "slug").unwrap();
+        assert!(mods
+            .join("bikes/MX2OEM_2023_KTM_250_SX-F/engine.scl")
+            .exists());
+        assert!(!mods
+            .join("bikes/MX2OEM_2023_KTM_250_SX-F/paints/engine.scl")
+            .exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 }
