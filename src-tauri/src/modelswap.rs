@@ -87,6 +87,21 @@ fn read_active(mods_path: &str, bike: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Public label for the un-captured default model set (what `current_active`
+/// reports when a bike has never been swapped).
+pub const ORIGINAL_LABEL: &str = ORIGINAL;
+
+/// The currently active model variant for a bike (`"Original"` if never swapped).
+/// Public so presets can capture/compare a bike's model without a full scan.
+pub fn current_active(mods_path: &str, bike: &str) -> String {
+    let a = read_active(mods_path, bike);
+    if a.is_empty() {
+        ORIGINAL.to_string()
+    } else {
+        a
+    }
+}
+
 /// Write the active-variant marker (creates the library folder if needed).
 fn write_active(mods_path: &str, bike: &str, name: &str) -> anyhow::Result<()> {
     let lib = lib_dir(mods_path, bike);

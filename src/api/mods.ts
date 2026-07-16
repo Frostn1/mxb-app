@@ -9,9 +9,11 @@ import type {
   InstalledMod,
   InstallProgress,
   LibraryEntry,
+  Loadout,
   ModDetail,
   ModSummary,
   PkzMeta,
+  Preset,
   ReloadOutcome,
 } from "../types";
 
@@ -577,4 +579,76 @@ export function onFrostmodReload(
   cb: (payload: FrostmodReload) => void,
 ): Promise<UnlistenFn> {
   return listen<FrostmodReload>("frostmod-reload", (event) => cb(event.payload));
+}
+
+// --- Customization presets (per-bike loadouts) -----------------------------
+// MX Bikes stores the selected look per-bike in `profile.ini`. A preset is a
+// bike-agnostic bundle of every slot value; applying it writes that bike's row.
+
+/** Game/rider profiles that have a `profile.ini` (each keeps its own per-bike look). */
+export function presetsListProfiles(): Promise<string[]> {
+  return invoke<string[]>("presets_list_profiles");
+}
+
+/** Bike ids present in a profile — the targets a loadout can be applied to. */
+export function presetsListBikes(profile: string): Promise<string[]> {
+  return invoke<string[]>("presets_list_bikes", { profile });
+}
+
+/** Read a bike's current cosmetic column (for "capture current look"). */
+export function presetsReadLoadout(
+  profile: string,
+  bikeid: string,
+): Promise<Loadout> {
+  return invoke<Loadout>("presets_read_loadout", { profile, bikeid });
+}
+
+/**
+ * Apply a loadout to a bike: writes its row across every `profile.ini` slot
+ * section and (when `makeActive`) points the game at that bike. Nudges a running
+ * FrostMod to reload — the outcome says whether it's live or applies next launch.
+ * A one-shot `profile.ini.bak` is written before the change.
+ */
+export function presetsApply(
+  profile: string,
+  bikeid: string,
+  loadout: Loadout,
+  makeActive: boolean,
+): Promise<ReloadOutcome> {
+  return invoke<ReloadOutcome>("presets_apply", {
+    profile,
+    bikeid,
+    loadout,
+    makeActive,
+  });
+}
+
+/** All saved presets. */
+export function presetsList(): Promise<Preset[]> {
+  return invoke<Preset[]>("presets_list");
+}
+
+/** Save (or overwrite by name) a preset. */
+export function presetsSave(preset: Preset): Promise<void> {
+  return invoke<void>("presets_save", { preset });
+}
+
+/** Delete a preset by name. */
+export function presetsDelete(name: string): Promise<void> {
+  return invoke<void>("presets_delete", { name });
+}
+
+/** Export a saved preset as a portable one-line share code (`MXBP1-…`). */
+export function presetsExport(name: string): Promise<string> {
+  return invoke<string>("presets_export", { name });
+}
+
+/** Decode a share code *without* saving — preview a shared preset + check mods. */
+export function presetsDecode(text: string): Promise<Preset> {
+  return invoke<Preset>("presets_decode", { text });
+}
+
+/** Import a share code: decode + save + return the stored preset. */
+export function presetsImport(text: string): Promise<Preset> {
+  return invoke<Preset>("presets_import", { text });
 }
