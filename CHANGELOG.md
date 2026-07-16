@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-07-15 — Unreleased
+
+### Added
+- **Presets tell you how to load them**: applying a preset now detects whether
+  MX Bikes is running and reports it precisely — the *selected* look lives in the
+  game's memory (read from `profile.ini` only on profile select), so the toast
+  now says "reselect your profile in-game to load the new look" while the game is
+  open, instead of implying a FrostMod content reload already applied it.
+- **Instant refresh (experimental, Windows-only)**: an opt-in toggle in the
+  Presets builder that re-runs MX Bikes' profile loader in the live process
+  (`CreateRemoteThread` at the reverse-engineered loader offset) so a new look
+  can show without a restart or manual reselect. Off by default; falls back to
+  the reselect hint if it can't attach.
+
+### Changed
+- `presets_apply` now takes a `live_refresh` flag and returns a richer
+  `PresetApplyOutcome` (`content_reload`, `game_running`, `live_refresh`) so the
+  UI can describe exactly how the apply took effect. New `gameproc` module owns
+  game-process detection and the in-place loader call.
+
 ## 2026-07-15 — v0.1.4
 
 ### Added

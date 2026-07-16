@@ -178,6 +178,34 @@ export interface FrostmodReload {
   outcome: ReloadOutcome;
 }
 
+/**
+ * Result of the experimental "instant refresh" — re-running MX Bikes' profile
+ * loader in the live process so a new look shows without a restart/reselect:
+ * - `refreshed`        — the loader was re-run; the look should be live.
+ * - `failed`           — attempted but couldn't attach/spawn (see logs).
+ * - `game_not_running` — MX Bikes wasn't running.
+ * - `disabled`         — the experimental toggle was off; not attempted.
+ * - `unsupported`      — not a Windows build (dev only).
+ */
+export type LiveRefresh =
+  | "refreshed"
+  | "failed"
+  | "game_not_running"
+  | "disabled"
+  | "unsupported";
+
+/**
+ * How applying a preset took effect. `content_reload` is FrostMod re-scanning
+ * the mods folder (new paint *files*); `game_running` says whether a profile
+ * reselect is needed to load the *selected* look; `live_refresh` reports the
+ * experimental in-place refresh.
+ */
+export interface PresetApplyOutcome {
+  content_reload: ReloadOutcome;
+  game_running: boolean;
+  live_refresh: LiveRefresh;
+}
+
 /** Install/version/running snapshot for the FrostMod settings panel. */
 export interface FrostmodStatus {
   /** `frostmod.exe` present in the app-managed folder. */
