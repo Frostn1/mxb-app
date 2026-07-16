@@ -16,6 +16,10 @@ pub struct AppConfig {
     pub launch_at_startup: bool,
     /// Launch FrostMod automatically when the app opens.
     pub auto_run_frostmod: bool,
+    /// After applying a preset while MX Bikes is running, re-run the game's
+    /// profile loader in place so the new look shows without a restart or manual
+    /// profile reselect. Windows-only; a no-op elsewhere.
+    pub instant_refresh: bool,
 }
 
 impl Default for AppConfig {
@@ -25,6 +29,7 @@ impl Default for AppConfig {
             run_in_background: true,
             launch_at_startup: true,
             auto_run_frostmod: true,
+            instant_refresh: true,
         }
     }
 }

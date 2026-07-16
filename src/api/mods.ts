@@ -206,6 +206,8 @@ export function getPkzPreview(path: string): Promise<string | null> {
   return invoke<string | null>("get_pkz_preview", { path });
 }
 
+
+
 /** Move an installed mod file into a different folder (relative to the type dir). */
 export function moveMod(
   fromPath: string,
@@ -627,6 +629,12 @@ export function setAutoRunFrostmod(enabled: boolean): Promise<void> {
   return invoke<void>("set_auto_run_frostmod", { enabled });
 }
 
+/** Toggle instant-refresh (re-run the game's profile loader after applying a
+ * preset so the look updates live, Windows-only). */
+export function setInstantRefresh(enabled: boolean): Promise<void> {
+  return invoke<void>("set_instant_refresh", { enabled });
+}
+
 /** Fires after each install with whether FrostMod picked the new mod up live. */
 export function onFrostmodReload(
   cb: (payload: FrostmodReload) => void,
@@ -659,24 +667,22 @@ export function presetsReadLoadout(
 /**
  * Apply a loadout to a bike: writes its row across every `profile.ini` slot
  * section and (when `makeActive`) points the game at that bike. Nudges a running
- * FrostMod to reload the mods folder, and — when `liveRefresh` is set
- * (experimental) — re-runs the game's profile loader in place so the new look
- * shows without a restart or manual reselect. The outcome says exactly how it
- * took effect. A one-shot `profile.ini.bak` is written before the change.
+ * FrostMod to reload the mods folder, and — when the `instantRefresh` setting is
+ * on — re-runs the game's profile loader in place so the new look shows without a
+ * restart or manual reselect. The outcome says exactly how it took effect. A
+ * one-shot `profile.ini.bak` is written before the change.
  */
 export function presetsApply(
   profile: string,
   bikeid: string,
   loadout: Loadout,
   makeActive: boolean,
-  liveRefresh = false,
 ): Promise<PresetApplyOutcome> {
   return invoke<PresetApplyOutcome>("presets_apply", {
     profile,
     bikeid,
     loadout,
     makeActive,
-    liveRefresh,
   });
 }
 

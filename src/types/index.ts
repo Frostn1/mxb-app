@@ -8,6 +8,9 @@ export interface Config {
   launchAtStartup?: boolean;
   /** Auto-run FrostMod when the app opens (default true). */
   autoRunFrostmod?: boolean;
+  /** After applying a preset, re-run the game's profile loader so the look
+   * refreshes live — no restart/reselect (Windows-only, default true). */
+  instantRefresh?: boolean;
 }
 
 /** A track-mod as it appears in search results / browse grid. */
@@ -126,6 +129,7 @@ export interface BikeModels {
   variants: ModelVariant[];
 }
 
+
 /**
  * Parsed structure of an installed `.pkz`, loaded lazily per library card.
  * `locked` marks a non-plain archive that can't be inspected
@@ -179,12 +183,12 @@ export interface FrostmodReload {
 }
 
 /**
- * Result of the experimental "instant refresh" — re-running MX Bikes' profile
- * loader in the live process so a new look shows without a restart/reselect:
+ * Result of "instant refresh" — re-running MX Bikes' profile loader in the live
+ * process so a new look shows without a restart/reselect:
  * - `refreshed`        — the loader was re-run; the look should be live.
  * - `failed`           — attempted but couldn't attach/spawn (see logs).
  * - `game_not_running` — MX Bikes wasn't running.
- * - `disabled`         — the experimental toggle was off; not attempted.
+ * - `disabled`         — the instant-refresh setting was off; not attempted.
  * - `unsupported`      — not a Windows build (dev only).
  */
 export type LiveRefresh =
@@ -198,7 +202,7 @@ export type LiveRefresh =
  * How applying a preset took effect. `content_reload` is FrostMod re-scanning
  * the mods folder (new paint *files*); `game_running` says whether a profile
  * reselect is needed to load the *selected* look; `live_refresh` reports the
- * experimental in-place refresh.
+ * in-place refresh.
  */
 export interface PresetApplyOutcome {
   content_reload: ReloadOutcome;

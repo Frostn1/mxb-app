@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 /// FrostMod's GitHub repo — releases carry `frostmod.exe` + `frostmod.dll`.
@@ -167,8 +168,27 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
     }
 }
 
+/// Overwrite a file, retrying briefly if it's still locked. Right after we stop
+/// FrostMod, Windows can take a moment to release the handles on the running
+/// `frostmod.exe`/`.dll`, so a plain write would fail with a sharing violation.
+fn write_with_retry(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut last = None;
+    for _ in 0..15 {
+        match std::fs::write(path, bytes) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = Some(e);
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+    Err(last.expect("loop runs at least once"))
+}
+
 /// Download `frostmod.exe` + `frostmod.dll` from the latest release into our
 /// managed folder and record the version. Also used for updates. Returns the tag.
+/// Callers must stop a running FrostMod first (see `frostmod_install`), or the
+/// overwrite hits a locked file.
 pub async fn install(app: &AppHandle) -> anyhow::Result<String> {
     let rel = latest_release().await?;
     let dir = frostmod_dir(app);
@@ -185,7 +205,7 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<String> {
                 .error_for_status()?
                 .bytes()
                 .await?;
-            std::fs::write(dir.join(want), &bytes)?;
+            write_with_retry(&dir.join(want), &bytes)?;
             got += 1;
         }
     }
@@ -236,6 +256,23 @@ pub fn stop(state: &FrostmodProcess) {
         let _ = child.kill();
     }
 }
+
+/// Force-terminate any running `frostmod.exe` — including an instance this app
+/// didn't spawn (e.g. one left from a previous session) — so its files can be
+/// overwritten during an update. Best-effort; a no-op when none is running.
+#[cfg(windows)]
+pub fn force_stop_exe() {
+    use std::os::windows::process::CommandExt;
+    /// Don't flash a console window for the kill.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", "frostmod.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+#[cfg(not(windows))]
+pub fn force_stop_exe() {}
 
 #[cfg(test)]
 mod tests {
