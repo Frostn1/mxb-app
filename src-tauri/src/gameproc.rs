@@ -49,7 +49,7 @@ pub enum LiveRefresh {
     Failed,
     /// MX Bikes isn't running, so there was nothing to refresh.
     GameNotRunning,
-    /// The experimental flag was off — we didn't try.
+    /// The instant-refresh setting was off — we didn't try.
     Disabled,
     /// This platform can't do it (non-Windows dev builds).
     Unsupported,

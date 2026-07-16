@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   createConfig,
   setAutoRunFrostmod,
+  setInstantRefresh,
   setLaunchAtStartup,
   setRunInBackground,
 } from "../../api/mods";
@@ -49,6 +50,16 @@ export default function Settings() {
   const runInBackground = config.runInBackground ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
+  const instantRefresh = config.instantRefresh ?? true;
+
+  const toggleInstantRefresh = async (v: boolean) => {
+    try {
+      await setInstantRefresh(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error("Couldn't update setting", { description: String(e) });
+    }
+  };
 
   const toggleAutoRun = async (v: boolean) => {
     try {
@@ -196,6 +207,13 @@ export default function Settings() {
               desc="Start MXB App automatically when you log in."
               checked={launchAtStartup}
               onChange={toggleStartup}
+            />
+            <div className="h-px bg-border" />
+            <ToggleRow
+              label="Instant preset refresh"
+              desc="When you apply a preset while MX Bikes is running, refresh the look in-game instantly — no restart or profile reselect. Windows only; if it can't, you'll be told to reselect your profile."
+              checked={instantRefresh}
+              onChange={toggleInstantRefresh}
             />
           </Section>
 
