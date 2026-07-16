@@ -620,12 +620,12 @@ fn place_mod(
         }
     }
 
-    // 3. Bike-livery bundle: a `<BikeName>/paints/…` structure -> mods/bikes.
-    if type_folder.eq_ignore_ascii_case("bikes") {
-        for base in &candidates {
-            if contains_paints_bundle(base) {
-                return merge_tree(base, &mods_dir.join("bikes"));
-            }
+    // 3. Bike-livery bundle: a `<BikeName>/paints/…` structure is unambiguously
+    //    bike content, so route it to `mods/bikes` regardless of the caller's
+    //    default type_folder (the paid shop can't know the type up front).
+    for base in &candidates {
+        if contains_paints_bundle(base) {
+            return merge_tree(base, &mods_dir.join("bikes"));
         }
     }
 
@@ -1023,6 +1023,23 @@ mod tests {
         assert!(mods
             .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
             .exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A `<Bike>/paints/…` livery bundle routes to `mods/bikes` from its own
+    /// structure even when the caller's default type is `tracks` (the paid shop
+    /// can't know the type up front).
+    #[test]
+    fn livery_bundle_routes_to_bikes_even_with_tracks_default() {
+        let root = place_tmp("livery-tracks-default");
+        let ex = root.join("ex");
+        touch(&ex.join("MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
+        assert!(mods
+            .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
+            .exists());
+        assert!(!mods.join("tracks/MX1OEM_2023_KTM_450_SX-F").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

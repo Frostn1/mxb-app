@@ -27,6 +27,12 @@
   handle them — the old "CDN blocks non-browser TLS" workaround no longer applies.
 
 ### Changed
+- **MX Bikes Shop installs route by mod type**: a purchased download no longer
+  always lands in `mods/tracks`. A structured archive (a `mods/` tree, top-level
+  `bikes/tracks/rider/…`, or a `<Bike>/paints/` livery bundle) now self-routes by
+  its own folders — the livery-bundle case works regardless of the caller's
+  default type — and content that can't be inspected (a GUID-locked `.pkz`) picks
+  its bucket from the item's title (`guess_mod_type`) instead of assuming tracks.
 - **FrostMod update check**: Settings now re-checks FrostMod against GitHub when
   it opens (and when the About "Check for updates" button is pressed), so a newer
   release surfaces an "Update to vX" button instead of a stale "Up to date".
