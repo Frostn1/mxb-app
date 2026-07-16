@@ -75,6 +75,7 @@ export type LibraryCategory =
   | "bike"
   | "bikePaint"
   | "bikeModelSwap"
+  | "sound"
   | "helmet"
   | "helmetPaint"
   | "goggles"

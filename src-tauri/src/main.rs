@@ -11,6 +11,7 @@ mod mods;
 mod pkz;
 mod presets;
 mod shop_session;
+mod soundmods;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
@@ -77,7 +78,13 @@ fn scan_library(
     subpath: String,
 ) -> Result<Vec<library::LibraryEntry>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    library::scan_library(&cfg.mods_path, &subpath).map_err(|e| format!("{e:#}"))
+    // Provenance for sound mods (empty if the store/dir isn't there yet).
+    let sound_bikes = app
+        .path()
+        .app_local_data_dir()
+        .map(|d| soundmods::known_bikes(&d))
+        .unwrap_or_default();
+    library::scan_library(&cfg.mods_path, &subpath, &sound_bikes).map_err(|e| format!("{e:#}"))
 }
 
 /// Installed rider models (helmet/boot/protection folders) + rider profiles, used

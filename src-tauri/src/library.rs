@@ -223,7 +223,7 @@ pub struct LibraryEntry {
     /// `pkz` (packaged archive) · `folder` (extracted mod) · `loose` (a paint file).
     pub kind: String,
     /// Type-specific tag: `track` · `bike` · `bikePaint` · `bikeModelSwap` ·
-    /// `helmet` · `helmetPaint` · `goggles` · `boots` · `bootPaint` ·
+    /// `sound` · `helmet` · `helmetPaint` · `goggles` · `boots` · `bootPaint` ·
     /// `protection` · `protectionPaint` · `gloves` · `outfit` · `misc`.
     pub category: String,
     /// For paints / model-swaps: the owning bike / gear model / rider profile.
@@ -407,10 +407,45 @@ fn scan_tracks(dir: &Path) -> Vec<LibraryEntry> {
     out
 }
 
-/// Bikes: top-level bike models, their `paints` liveries, and model-swap `.pkz`
-/// nested inside a bike's own folder.
-fn scan_bikes(dir: &Path) -> Vec<LibraryEntry> {
+/// Files that mark a bike folder as sound-modded (both present). Kept in sync
+/// with the installer's `SOUND_MARKERS`.
+const SOUND_MARKERS: [&str; 2] = ["engine.scl", "sfx.cfg"];
+
+/// True when `dir` directly holds both sound-marker files (`engine.scl`+`sfx.cfg`).
+fn dir_has_sound_markers(dir: &Path) -> bool {
+    let mut found = [false; SOUND_MARKERS.len()];
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.path().is_file() {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                for (i, m) in SOUND_MARKERS.iter().enumerate() {
+                    if name.eq_ignore_ascii_case(m) {
+                        found[i] = true;
+                    }
+                }
+            }
+        }
+    }
+    found.iter().all(|&f| f)
+}
+
+/// Bikes: top-level bike models, their `paints` liveries, model-swap `.pkz`
+/// nested inside a bike's own folder, and provenance-recorded `sound` mods.
+fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
+
+    // Sound mods: surface each recorded bike folder that still exists and still
+    // carries the sound-marker files (self-healing against a removed bike). A
+    // sound merges into an OEM bike folder, so provenance — not inspection —
+    // tells us which extracted bikes are sound-modded.
+    for name in sound_bikes {
+        let folder = dir.join(name);
+        if folder.is_dir() && dir_has_sound_markers(&folder) {
+            out.push(make_entry(dir, &folder, "sound", None));
+        }
+    }
+
     for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
             continue;
@@ -515,7 +550,16 @@ fn scan_generic(dir: &Path) -> Vec<LibraryEntry> {
 
 /// Rich Library scan: surfaces packaged, extracted, and loose content per type,
 /// tagged for grouping/detail in the UI. Dispatches on the type dir name.
-pub fn scan_library(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<LibraryEntry>> {
+///
+/// `sound_bikes` are bike folder names recorded as carrying an installed sound
+/// mod (see the `soundmods` provenance store): the bikes scan surfaces those that
+/// still exist as `sound` entries — a sound merges into an OEM bike folder, so it
+/// can't be told from stock by inspection alone.
+pub fn scan_library(
+    mods_path: &str,
+    subpath: &str,
+    sound_bikes: &[String],
+) -> anyhow::Result<Vec<LibraryEntry>> {
     let dir = mods_subdir(mods_path, subpath);
     if !dir.exists() {
         return Ok(vec![]);
@@ -523,7 +567,7 @@ pub fn scan_library(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<Librar
     let kind = subpath.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or("");
     Ok(match kind {
         "tracks" => scan_tracks(&dir),
-        "bikes" => scan_bikes(&dir),
+        "bikes" => scan_bikes(&dir, sound_bikes),
         "rider" => scan_rider(&dir),
         _ => scan_generic(&dir),
     })
@@ -580,7 +624,7 @@ mod tests {
         touch(&base.join("Loose Track/Loose.cfg"));
         touch(&base.join("Loose Track/Loose.pkz")); // inside a track folder → skipped
 
-        let v = scan_library(root.to_str().unwrap(), "mods/tracks").unwrap();
+        let v = scan_library(root.to_str().unwrap(), "mods/tracks", &[]).unwrap();
         assert!(cat(&v, "Packed.pkz").is_some());
         let lt = cat(&v, "Loose Track").expect("extracted track surfaced");
         assert_eq!(lt.kind, "folder");
@@ -598,7 +642,7 @@ mod tests {
         touch(&base.join("KTM450/paints/Red.pnt")); // livery for it
         touch(&base.join("KTM450/OEM2024.pkz")); // model swap for it
 
-        let v = scan_library(root.to_str().unwrap(), "mods/bikes").unwrap();
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[]).unwrap();
         assert_eq!(cat(&v, "KTM450.pkz").unwrap().category, "bike");
         let paint = cat(&v, "Red.pnt").unwrap();
         assert_eq!(paint.category, "bikePaint");
@@ -606,6 +650,34 @@ mod tests {
         let swap = cat(&v, "OEM2024.pkz").unwrap();
         assert_eq!(swap.category, "bikeModelSwap");
         assert_eq!(swap.parent.as_deref(), Some("KTM450"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn surfaces_recorded_sound_mods() {
+        let root = tmp("lib-sound");
+        let base = root.join("mods/bikes");
+        // A sound-modded OEM bike folder (loose configs, no .pkz).
+        touch(&base.join("MX2OEM_2023_KTM_250_SX-F/engine.scl"));
+        touch(&base.join("MX2OEM_2023_KTM_250_SX-F/sfx.cfg"));
+        // Recorded but no longer on disk → pruned. And one recorded-but-stock
+        // bike folder without markers → not surfaced.
+        touch(&base.join("Stock/model.edf"));
+
+        let recorded = vec![
+            "MX2OEM_2023_KTM_250_SX-F".to_string(),
+            "Gone".to_string(),
+            "Stock".to_string(),
+        ];
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &recorded).unwrap();
+        let s = cat(&v, "MX2OEM_2023_KTM_250_SX-F").expect("sound bike surfaced");
+        assert_eq!(s.category, "sound");
+        assert_eq!(s.kind, "folder");
+        assert!(cat(&v, "Gone").is_none(), "removed bike pruned");
+        assert!(
+            v.iter().all(|e| e.name != "Stock" || e.category != "sound"),
+            "a recorded folder without sound markers isn't a sound entry",
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -621,7 +693,7 @@ mod tests {
         touch(&base.join("riders/default_mx/paints/Kit.pnt"));
         touch(&base.join("riders/default_mx/gloves/G.pnt"));
 
-        let v = scan_library(root.to_str().unwrap(), "mods/rider").unwrap();
+        let v = scan_library(root.to_str().unwrap(), "mods/rider", &[]).unwrap();
         let has = |c: &str| v.iter().any(|e| e.category == c);
         assert!(has("helmet"), "helmet model");
         assert!(has("helmetPaint"), "helmet paint");

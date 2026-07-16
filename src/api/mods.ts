@@ -138,6 +138,10 @@ export function scanLibrary(subpath: string): Promise<LibraryEntry[]> {
  * bike's `paints` folder. */
 export const LIVERY_CATEGORY_ID = 37;
 
+/** WP category id for bike **sounds** — `engine.scl`/`sfx.cfg` (+ samples) that
+ * live at a bike's *root* (next to `paints/`), never inside it. */
+export const SOUND_CATEGORY_ID = 46;
+
 /** Whether we're installing a bike **livery** (→ `<Bike>/paints`) vs a new bike
  * / sound / unknown (→ Bikes root). Drives the destination default so a new bike
  * never inherits a previous livery's `paints` folder. */
@@ -146,6 +150,16 @@ export function isLiveryContext(
   categoryId: number | null | undefined,
 ): boolean {
   return modType.id === "bikes" && categoryId === LIVERY_CATEGORY_ID;
+}
+
+/** Whether we're installing a bike **sound** (→ `<Bike>` root). A sound targets a
+ * bike folder itself, so we default to the matched bike's root — never `paints`
+ * — and the mod page usually offers a *different* download link per bike. */
+export function isSoundContext(
+  modType: ModType,
+  categoryId: number | null | undefined,
+): boolean {
+  return modType.id === "bikes" && categoryId === SOUND_CATEGORY_ID;
 }
 
 /** Installed rider models + profiles, for building rider paint destinations. */
@@ -264,6 +278,7 @@ export function buildDestinations(
   title: string,
   installed: InstalledMod[],
   livery = false,
+  sound = false,
 ): { options: DestOption[]; guess: string; suggestions: string[] } {
   const seen = new Set<string>([""]);
   const options: DestOption[] = [
@@ -281,18 +296,23 @@ export function buildDestinations(
   const suggestions: string[] = [];
   if (modType.id === "bikes") {
     const bikes = installed.filter((i) => i.folder === "");
-    // Each bike's `paints` folder is always pickable in the dialog…
-    for (const b of bikes) add(`${stripExt(b.name)}/paints`, `${stripExt(b.name)} — paints`);
+    // A sound targets the bike *folder itself*; a livery targets its `paints`.
+    // Offer the bike **root** first (for sounds/new bikes), then its `paints`.
+    for (const b of bikes) {
+      add(stripExt(b.name), `${stripExt(b.name)} — bike folder`);
+      add(`${stripExt(b.name)}/paints`, `${stripExt(b.name)} — paints`);
+    }
 
-    // …but only *default*/*suggest* a paints folder for actual liveries. A new
-    // bike / sound must land in Bikes (root), not some bike's paints.
-    if (livery) {
+    // Suggest/guess a specific bike only when we know the intent (livery →
+    // paints, sound → bike root). A new bike / unknown stays at Bikes (root).
+    if (livery || sound) {
       const tt = tokens(title);
       const scored = bikes
         .map((b) => {
           let score = 0;
           for (const t of tokens(b.name)) if (tt.has(t)) score++;
-          return { value: `${stripExt(b.name)}/paints`, score };
+          const value = sound ? stripExt(b.name) : `${stripExt(b.name)}/paints`;
+          return { value, score };
         })
         .filter((s) => s.score >= 1)
         .sort((a, b) => b.score - a.score);
@@ -409,6 +429,32 @@ export function sortMirrors(detail: ModDetail): DownloadOption[] {
   });
 }
 
+/**
+ * Sound-mod pages list a *different* download per bike ("Just KTM 250SX-F") plus
+ * a "Main pack with all bikes" default — these are NOT mirrors of one file. Pick
+ * the link whose label / filename best matches the chosen bike; fall back to the
+ * author's default (usually the all-bikes pack), else the first mirror.
+ */
+export function pickDownloadForBike(
+  mirrors: DownloadOption[],
+  bikeName: string,
+): DownloadOption | null {
+  if (mirrors.length === 0) return null;
+  const fallback = () => mirrors.find((m) => m.isDefault) ?? mirrors[0];
+  const want = tokens(bikeName);
+  if (want.size === 0) return fallback();
+
+  let best: { m: DownloadOption; score: number } | null = null;
+  for (const m of mirrors) {
+    const fname = m.url.split(/[/\\]/).pop() ?? "";
+    const hay = tokens(`${m.label} ${m.host} ${fname}`);
+    let score = 0;
+    for (const t of want) if (hay.has(t)) score++;
+    if (!best || score > best.score) best = { m, score };
+  }
+  return best && best.score > 0 ? best.m : fallback();
+}
+
 /** localStorage key for the remembered install folder of a mod type. */
 export function destStorageKey(modType: ModType): string {
   return `frost-dest-${modType.id}`;
@@ -422,10 +468,16 @@ export function resolveInitialFolder(
   destOptions: DestOption[],
   guess: string,
   livery = false,
+  sound = false,
 ): string {
   const remembered = localStorage.getItem(destStorageKey(modType)) ?? "";
   const rememberedIsPaints = /\/paints$/i.test(remembered);
+  // A remembered `…/paints` folder is only meaningful for a livery. A sound
+  // targets a bike root and a new bike targets Bikes (root) — use the guess.
   if (modType.id === "bikes" && rememberedIsPaints && !livery) return guess;
+  // A sound should never inherit some other remembered bike-root either; prefer
+  // the name-matched guess when we have one.
+  if (modType.id === "bikes" && sound && guess) return guess;
   if (destOptions.some((o) => o.value === remembered)) return remembered;
   return guess;
 }

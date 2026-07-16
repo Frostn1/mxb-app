@@ -3,6 +3,18 @@
 ## 2026-07-15
 
 ### Added
+- **Sound mods visible in the Library**: installed bike sounds now appear as
+  their own **Sound** entries. Because a sound merges into an OEM bike folder
+  (indistinguishable from stock on disk), the app records provenance at install
+  time (`soundmods` store → `sound-mods.json`) and the Library surfaces exactly
+  those bike folders that still carry the sound files — no guessing, no
+  mislabeling stock bikes. New `sound` library category (label/icon).
+- **Auto-pick the right sound download per bike**: sound-mod pages list a
+  *different* download per bike ("Just KTM 250SX-F") plus a "Main pack with all
+  bikes" default — these are **not** mirrors. The install dialog now treats them
+  as per-bike options, auto-selecting the link that matches the chosen bike (and
+  falling back to the all-bikes pack), instead of claiming "all mirrors contain
+  the same file". New `pickDownloadForBike` + `isSoundContext`/`SOUND_CATEGORY_ID`.
 - **Presets — customization loadouts**: new Presets tab that saves a full look
   (bike livery, number/suit fonts, tyres, rider kit, helmet + paint, goggles,
   gloves, boots + paint, protection + paint, riding style, race number) and applies
@@ -55,6 +67,14 @@
   download-and-import fallback (`BLOCKED_HOST_PATTERNS` is now empty).
 
 ### Fixed
+- **Sound mods no longer routed into a bike's `paints/`**: bike **sound** mods
+  (`engine.scl` + `sfx.cfg`, plus audio samples) install to the bike-folder
+  **root** (next to `paints/`), never inside it. The install picker now offers a
+  per-bike **root** destination and defaults sounds to the name-matched bike; the
+  Rust placer gained a sound-bundle guard that strips a stray `paints` segment so
+  loose sound files can't be misfiled (with new placement tests). Well-packaged
+  mods that carry a full `mods/bikes/…` tree already merged correctly — this also
+  removes the misleading "install to paints" the dialog used to suggest.
 - **FrostMod "up to date" false positive**: a failed or offline GitHub check no
   longer displays as "Up to date". The panel now distinguishes *Checking…*,
   *Couldn't check* (offering "Reinstall latest"), and a confirmed-current install,
