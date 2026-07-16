@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-07-15
+## 2026-07-15 — v0.1.4
 
 ### Added
 - **Sound mods visible in the Library**: installed bike sounds now appear as
