@@ -46,6 +46,9 @@ html-escape = "0.2"
 zip = "2"
 sevenz-rust = "0.6"
 unrar = "0.5"
+# Raw DEFLATE (wbits -15) for MX Bikes `.pnt` paint textures and the encrypted
+# `.pkz` entry payloads — both store zlib-less deflate streams.
+flate2 = "1"
 # Decode + downscale in-archive track/bike preview images (TGA/PNG/JPEG/BMP)
 # into small PNG thumbnails for the library cards.
 image = { version = "0.25", default-features = false, features = [
