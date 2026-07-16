@@ -139,6 +139,7 @@ fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
+
 #[tauri::command]
 async fn add_to_library(
     app: tauri::AppHandle,
@@ -242,9 +243,31 @@ async fn frostmod_status(app: tauri::AppHandle) -> FrostmodStatus {
 }
 
 /// Download (or update to) the latest FrostMod release. Returns the version tag.
+///
+/// FrostMod's `.exe`/`.dll` are locked by Windows while it runs, so an in-place
+/// update would fail with "file in use". We stop any running FrostMod first
+/// (including an instance from a previous session), overwrite, then restart it if
+/// it was running so the update is seamless.
 #[tauri::command]
-async fn frostmod_install(app: tauri::AppHandle) -> Result<String, String> {
-    frostmod_manage::install(&app).await.map_err(|e| format!("{e:#}"))
+async fn frostmod_install(
+    app: tauri::AppHandle,
+    state: State<'_, FrostmodProcess>,
+) -> Result<String, String> {
+    let was_running = frostmod::is_running();
+    let was_installed = frostmod_manage::is_installed(&app);
+    // Release the file locks before overwriting.
+    frostmod_manage::stop(&state);
+    frostmod_manage::force_stop_exe();
+
+    let tag = frostmod_manage::install(&app).await.map_err(|e| format!("{e:#}"))?;
+
+    // Bring FrostMod back up if we just took it down for an update, or start it
+    // for a first-time install. (The frontend no longer starts it, so this is the
+    // single place that does — avoids a double-spawn race.)
+    if was_running || !was_installed {
+        let _ = frostmod_manage::start(&app, &state);
+    }
+    Ok(tag)
 }
 
 /// Launch the managed FrostMod process if it isn't already running.
@@ -264,6 +287,15 @@ fn frostmod_stop(state: State<FrostmodProcess>) {
 fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.auto_run_frostmod = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Toggle instant-refresh: re-run the game's profile loader in place after
+/// applying a preset so the look updates live (Windows-only).
+#[tauri::command]
+fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.instant_refresh = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
@@ -441,7 +473,7 @@ struct PresetApplyOutcome {
 
 /// Apply a loadout to a bike (writes its row across all slot sections; optionally
 /// makes it the active bike), nudge a running FrostMod to reload the mods folder,
-/// and — when `live_refresh` is set (experimental) — re-run the game's profile
+/// and — when the `instant_refresh` setting is on — re-run the game's profile
 /// loader in the live process so the new look shows without a restart or manual
 /// reselect. The returned outcome tells the UI exactly how it took effect.
 #[tauri::command]
@@ -451,7 +483,6 @@ fn presets_apply(
     bikeid: String,
     loadout: presets::Loadout,
     make_active: bool,
-    live_refresh: bool,
 ) -> Result<PresetApplyOutcome, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     presets::apply_loadout(&cfg.mods_path, &profile, &bikeid, &loadout, make_active)
@@ -468,7 +499,7 @@ fn presets_apply(
     // look re-reads from profile.ini only when the game (re)selects a profile —
     // so we detect the game and, if asked, re-run its loader in place.
     let content_reload = frostmod::signal_reload();
-    let live = if live_refresh {
+    let live = if cfg.instant_refresh {
         gameproc::refresh_look()
     } else {
         gameproc::LiveRefresh::Disabled
@@ -626,8 +657,7 @@ fn main() {
             scan_library,
             get_pkz_meta,
             get_pkz_preview,
-            unpack_paint,
-            scan_rider_targets,
+            unpack_paint,            scan_rider_targets,
             scan_model_swaps,
             apply_model_swap,
             add_to_library,
@@ -638,6 +668,7 @@ fn main() {
             set_run_in_background,
             set_launch_at_startup,
             set_auto_run_frostmod,
+            set_instant_refresh,
             frostmod_reload,
             frostmod_running,
             frostmod_status,

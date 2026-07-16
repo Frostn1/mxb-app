@@ -103,8 +103,8 @@ async function copyText(text: string): Promise<boolean> {
  *
  * The *selected* look lives in the game's memory (read from `profile.ini` only
  * when a profile is selected), so a FrostMod content reload alone doesn't show
- * it. Priority: an experimental in-place refresh > "reselect your profile" while
- * the game runs > "loads next launch".
+ * it. Priority: a live in-place refresh > "reselect your profile" while the game
+ * runs > "loads next launch".
  */
 function applyNote(outcome: PresetApplyOutcome): string {
   switch (outcome.live_refresh) {
@@ -138,9 +138,6 @@ export default function Presets() {
   const [loadout, setLoadout] = useState<Loadout>(EMPTY);
   const [saved, setSaved] = useState<Preset[]>([]);
   const [makeActive, setMakeActive] = useState(true);
-  // Experimental: re-run the game's profile loader in the live process so the
-  // look refreshes without a restart/reselect. Windows-only, off by default.
-  const [liveRefresh, setLiveRefresh] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -240,13 +237,7 @@ export default function Presets() {
       }
       setApplyingId(id);
       try {
-        const outcome = await presetsApply(
-          profile,
-          bike,
-          lo,
-          makeActive,
-          liveRefresh,
-        );
+        const outcome = await presetsApply(profile, bike, lo, makeActive);
         toast.success(`Applied “${label}” to ${bike} — ${applyNote(outcome)}`);
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
@@ -254,7 +245,7 @@ export default function Presets() {
         setApplyingId(null);
       }
     },
-    [profile, bike, makeActive, liveRefresh],
+    [profile, bike, makeActive],
   );
 
   const onShare = useCallback(async (preset: Preset) => {
@@ -401,24 +392,6 @@ export default function Presets() {
                   Make this the active bike
                 </label>
               </div>
-              <label className="flex items-start gap-2 text-[12px] text-muted-foreground">
-                <Switch
-                  checked={liveRefresh}
-                  onCheckedChange={setLiveRefresh}
-                  className="mt-0.5"
-                />
-                <span>
-                  Instant refresh{" "}
-                  <span className="rounded bg-amber-500/15 px-1 text-[10px] font-medium uppercase tracking-wide text-amber-500">
-                    experimental
-                  </span>
-                  <span className="block text-[11px] text-muted-foreground/80">
-                    Re-runs the game's profile loader while it's open so the look
-                    changes without reselecting your profile. Windows only; if it
-                    doesn't take, just reselect your profile in-game.
-                  </span>
-                </span>
-              </label>
               {builderMissing > 0 && (
                 <p className="flex items-center gap-1.5 text-[11.5px] text-amber-500">
                   <AlertTriangle className="size-3.5" />
@@ -454,6 +427,8 @@ export default function Presets() {
               </div>
             </div>
           </section>
+
+          {/* Live 3D preview of the current loadout */}
 
           {/* Saved presets */}
           <aside className="flex w-[300px] flex-none flex-col gap-2 overflow-y-auto border-l border-white/[0.06] pl-5">

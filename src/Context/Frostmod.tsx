@@ -112,10 +112,10 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const install = useCallback(async () => {
     setInstalling(true);
     try {
+      // The backend stops a running FrostMod before overwriting (its exe/dll are
+      // locked while running) and restarts it after — so we don't start it here,
+      // which would race that restart and spawn a second instance.
       const version = await frostmodInstall();
-      await frostmodStart().catch(() => {
-        /* start is Windows-only; the download still succeeded */
-      });
       await refreshStatus();
       toast.success(`FrostMod ${version} installed`, {
         description: "It'll live-reload the game when you add mods.",
