@@ -10,6 +10,8 @@ import {
   Trash2,
   Copy,
   Check,
+  Package,
+  UploadCloud,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -42,8 +44,18 @@ import {
   presetsExport,
   presetsDecode,
   presetsImport,
+  presetBundleStats,
+  presetBundleCreate,
+  presetBundleImport,
+  onPresetBundleProgress,
 } from "../../api/mods";
-import type { Loadout, Preset, PresetApplyOutcome } from "../../types";
+import type {
+  BundlePhase,
+  BundlePlan,
+  Loadout,
+  Preset,
+  PresetApplyOutcome,
+} from "../../types";
 import {
   SLOTS,
   SLOT_GROUPS,
@@ -75,6 +87,29 @@ const EMPTY: Loadout = {
   raceNumber: "",
   modelSwap: "",
 };
+
+/** Human-readable byte size for bundle previews. */
+function humanSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+/** Human label for a bundle progress phase. */
+function phaseLabel(phase: BundlePhase): string {
+  switch (phase) {
+    case "bundling":
+      return "Packaging assets…";
+    case "uploading":
+      return "Uploading bundle…";
+    case "downloading":
+      return "Downloading bundle…";
+    case "installing":
+      return "Installing assets…";
+    case "done":
+      return "Done";
+  }
+}
 
 /** Copy text to the clipboard, best-effort (webview clipboard, then execCommand). */
 async function copyText(text: string): Promise<boolean> {
@@ -143,7 +178,7 @@ export default function Presets() {
   const [busy, setBusy] = useState(false);
   const [applyingId, setApplyingId] = useState<string | null>(null);
 
-  const [shareCode, setShareCode] = useState<string | null>(null);
+  const [sharePreset, setSharePreset] = useState<Preset | null>(null);
   const [importOpen, setImportOpen] = useState(false);
 
   const setSlot = useCallback((key: keyof Loadout, value: string) => {
@@ -248,12 +283,8 @@ export default function Presets() {
     [profile, bike, makeActive],
   );
 
-  const onShare = useCallback(async (preset: Preset) => {
-    try {
-      setShareCode(await presetsExport(preset.name));
-    } catch (e) {
-      toast.error(String(e).replace(/^Error:\s*/, ""));
-    }
+  const onShare = useCallback((preset: Preset) => {
+    setSharePreset(preset);
   }, []);
 
   const onDelete = useCallback(
@@ -448,7 +479,7 @@ export default function Presets() {
                   disabled={applyingId !== null}
                   onApply={() => void applyLoadout(p.loadout, p.name, p.name)}
                   onLoad={() => setLoadout(p.loadout)}
-                  onShare={() => void onShare(p)}
+                  onShare={() => onShare(p)}
                   onDelete={() => void onDelete(p)}
                 />
               ))
@@ -457,7 +488,7 @@ export default function Presets() {
         </div>
       )}
 
-      <ShareDialog code={shareCode} onClose={() => setShareCode(null)} />
+      <ShareDialog preset={sharePreset} onClose={() => setSharePreset(null)} />
       <ImportDialog
         open={importOpen}
         scans={scans}
@@ -587,42 +618,137 @@ function IconBtn({
   );
 }
 
-/** Shows a preset's share code with a copy button. */
-function ShareDialog({ code, onClose }: { code: string | null; onClose: () => void }) {
+/**
+ * Share a preset two ways: the instant **config code** (recipient needs the mods),
+ * or a **full bundle** — package every asset the look references, upload it, and
+ * hand back a code with the download link baked in so a recipient who owns nothing
+ * still gets the complete look.
+ */
+function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [configCode, setConfigCode] = useState<string | null>(null);
+  const [fullCode, setFullCode] = useState<string | null>(null);
+  const [plan, setPlan] = useState<BundlePlan | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [phase, setPhase] = useState<BundlePhase | null>(null);
+
+  // On open, fetch the plain config code and preview what a full bundle carries.
   useEffect(() => {
-    if (code) setCopied(false);
-  }, [code]);
+    if (!preset) return;
+    setCopied(false);
+    setConfigCode(null);
+    setFullCode(null);
+    setPlan(null);
+    setPhase(null);
+    let cancelled = false;
+    presetsExport(preset.name)
+      .then((c) => !cancelled && setConfigCode(c))
+      .catch((e) => !cancelled && toast.error(String(e).replace(/^Error:\s*/, "")));
+    presetBundleStats(preset.loadout)
+      .then((p) => !cancelled && setPlan(p))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [preset]);
+
+  const isFull = fullCode !== null;
+  const code = fullCode ?? configCode;
+
+  const createBundle = useCallback(async () => {
+    if (!preset) return;
+    setCreating(true);
+    setPhase("bundling");
+    const unlisten = await onPresetBundleProgress((p) => setPhase(p.phase));
+    try {
+      const c = await presetBundleCreate(preset.name);
+      setFullCode(c);
+      setCopied(false);
+      toast.success("Full bundle uploaded — the code now includes the assets.");
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      unlisten();
+      setCreating(false);
+      setPhase(null);
+    }
+  }, [preset]);
 
   return (
-    <Dialog open={!!code} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={!!preset} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Share preset</DialogTitle>
+          <DialogTitle>Share “{preset?.name}”</DialogTitle>
           <DialogDescription>
-            Send this code to anyone. They import it under Presets → Import. They'll
-            need the same mods installed for every part to show.
+            {isFull
+              ? "This code includes a downloadable asset bundle — the recipient picks Full import and gets everything, even with no mods installed."
+              : "Send this code to anyone. They import it under Presets → Import. They'll need the same mods installed for every part to show."}
           </DialogDescription>
         </DialogHeader>
+
         <textarea
           readOnly
           value={code ?? ""}
           onFocus={(e) => e.currentTarget.select()}
+          placeholder="Generating code…"
           className="h-24 w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono text-[11px] leading-snug"
         />
+
+        {/* Full-bundle section */}
+        {!isFull && (
+          <div className="rounded-lg border border-white/[0.07] bg-card/40 p-3 text-[12px]">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <Package className="size-3.5" />
+              Full bundle
+            </div>
+            {plan && (
+              <p className="mt-1 text-muted-foreground">
+                {plan.assets.length === 0
+                  ? "No installed assets to bundle — this look is all stock/fonts."
+                  : `Packages ${plan.assets.length} asset${plan.assets.length > 1 ? "s" : ""} (~${humanSize(plan.totalSize)}) so a recipient needs nothing installed.`}
+                {plan.unresolved.length > 0 && plan.assets.length > 0 && (
+                  <>
+                    {" "}
+                    Excludes: {plan.unresolved.map((u) => u.value).join(", ")}.
+                  </>
+                )}
+              </p>
+            )}
+            <p className="mt-1.5 text-[11px] text-faint">
+              Uploads to a public, temporary link — it redistributes mod files
+              made by others, so share responsibly.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              disabled={creating || !plan || plan.assets.length === 0}
+              onClick={() => void createBundle()}
+            >
+              {creating ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <UploadCloud className="size-3.5" />
+              )}
+              {creating ? (phase ? phaseLabel(phase) : "Working…") : "Create full bundle"}
+            </Button>
+          </div>
+        )}
+
         <DialogFooter>
           <Button
+            disabled={!code}
             onClick={async () => {
               if (code && (await copyText(code))) {
                 setCopied(true);
-                toast.success("Copied share code.");
+                toast.success(isFull ? "Copied full-bundle code." : "Copied share code.");
               } else {
                 toast.error("Couldn't copy — select the code and copy manually.");
               }
             }}
           >
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-            {copied ? "Copied" : "Copy code"}
+            {copied ? "Copied" : isFull ? "Copy full code" : "Copy code"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -648,12 +774,14 @@ function ImportDialog({
   const [preview, setPreview] = useState<Preset | null>(null);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<BundlePhase | null>(null);
 
   useEffect(() => {
     if (!open) {
       setText("");
       setPreview(null);
       setPreviewErr(null);
+      setPhase(null);
     }
   }, [open]);
 
@@ -701,6 +829,26 @@ function ImportDialog({
     }
   }, [preview, text, onImported]);
 
+  const onFullImport = useCallback(async () => {
+    if (!preview) return;
+    setBusy(true);
+    setPhase("downloading");
+    const unlisten = await onPresetBundleProgress((p) => setPhase(p.phase));
+    try {
+      await presetBundleImport(text.trim());
+      toast.success(`Imported “${preview.name}” with all assets installed.`);
+      onImported();
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      unlisten();
+      setBusy(false);
+      setPhase(null);
+    }
+  }, [preview, text, onImported]);
+
+  const hasBundle = !!preview?.bundle;
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
@@ -724,7 +872,17 @@ function ImportDialog({
           <div className="rounded-lg border border-white/[0.07] bg-card/40 p-2.5 text-[12px]">
             <div className="font-semibold">{preview.name}</div>
             <div className="text-muted-foreground">{loadoutSummary(preview.loadout)}</div>
-            {missing.length > 0 && (
+            {hasBundle && (
+              <p className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-emerald-500">
+                <Package className="mt-px size-3.5 flex-none" />
+                <span>
+                  Includes a full asset bundle (~{humanSize(preview.bundle!.size)} from{" "}
+                  {preview.bundle!.host}). Use <strong>Full import</strong> to download
+                  and install everything — no mods needed first.
+                </span>
+              </p>
+            )}
+            {missing.length > 0 && !hasBundle && (
               <p className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-amber-500">
                 <AlertTriangle className="mt-px size-3.5 flex-none" />
                 <span>
@@ -736,13 +894,31 @@ function ImportDialog({
           </div>
         )}
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={() => void onImport()} disabled={!preview || busy}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-            Import
+          <Button
+            variant={hasBundle ? "outline" : "default"}
+            onClick={() => void onImport()}
+            disabled={!preview || busy}
+          >
+            {busy && !phase ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Download className="size-4" />
+            )}
+            {hasBundle ? "Config only" : "Import"}
           </Button>
+          {hasBundle && (
+            <Button onClick={() => void onFullImport()} disabled={!preview || busy}>
+              {busy && phase ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Package className="size-4" />
+              )}
+              {busy && phase ? phaseLabel(phase) : "Full import"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

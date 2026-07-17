@@ -251,10 +251,63 @@ export interface Loadout {
   modelSwap: string;
 }
 
+/** A link to an uploaded asset bundle for a preset (the "full share"). Present
+ * only on a full-share code — never persisted locally. */
+export interface BundleRef {
+  /** Direct-download URL of the uploaded `.zip`. */
+  url: string;
+  /** Host label (e.g. `pixeldrain`), shown in the import dialog. */
+  host: string;
+  /** Bundle size in bytes. */
+  size: number;
+}
+
 /** A saved, named, bike-agnostic preset (a loadout you can apply to any bike). */
 export interface Preset {
   name: string;
   loadout: Loadout;
+  /** Uploaded asset bundle, set only on a full-share code. */
+  bundle?: BundleRef | null;
+}
+
+/** One asset a preset references, resolved to its source + `mods/` destination. */
+export interface BundleAsset {
+  slot: string;
+  value: string;
+  name: string;
+  /** Destination path relative to `<MX Bikes>/mods`. */
+  relDest: string;
+  absPath: string;
+  size: number;
+  isDir: boolean;
+}
+
+/** A slot whose value can't be bundled (free-text font, stock, or not installed). */
+export interface UnresolvedSlot {
+  slot: string;
+  value: string;
+  reason: string;
+}
+
+/** Preview of what a preset's full bundle would carry. */
+export interface BundlePlan {
+  assets: BundleAsset[];
+  unresolved: UnresolvedSlot[];
+  totalSize: number;
+}
+
+/** Phases emitted on `preset-bundle-progress` while a bundle is created/imported. */
+export type BundlePhase =
+  | "bundling"
+  | "uploading"
+  | "downloading"
+  | "installing"
+  | "done";
+
+/** Emitted on `preset-bundle-progress`. */
+export interface BundleProgress {
+  phase: BundlePhase;
+  message?: string;
 }
 
 /** One editable slot in the preset builder: which `Loadout` field it maps to, its
