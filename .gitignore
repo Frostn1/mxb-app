@@ -29,3 +29,11 @@ dist-ssr
 
 # Vite transient config-reload artifacts
 vite.config.ts.timestamp-*.mjs
+
+# Local agent workspace (todo/lessons/plans) — never commit
+tasks/
+
+# npm is the canonical package manager (CI uses `npm ci` + package-lock.json).
+# A stray bun.lock makes tauri-action run `bun tauri build`, which the CI
+# runners can't (no bun) — keep it out of the repo.
+bun.lock

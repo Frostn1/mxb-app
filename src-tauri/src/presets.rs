@@ -120,6 +120,21 @@ impl Loadout {
     }
 }
 
+/// A link to an uploaded **asset bundle** for a preset (the "full share"). Present
+/// only on a share code produced by the bundle flow — never persisted to the local
+/// store (the URL is transient host content). Optional + defaulted so legacy
+/// `MXBP1-` codes (no bundle) still decode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleRef {
+    /// Direct-download URL of the uploaded bundle (`.zip`).
+    pub url: String,
+    /// Human label for the host (e.g. `pixeldrain`), shown in the import dialog.
+    pub host: String,
+    /// Bundle size in bytes, for the import preview.
+    pub size: u64,
+}
+
 /// A saved, named, bike-agnostic preset. Serialized to `presets.json` and to the
 /// portable share code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,6 +142,10 @@ impl Loadout {
 pub struct Preset {
     pub name: String,
     pub loadout: Loadout,
+    /// Uploaded asset bundle (full share). Only set on a full-share code; stripped
+    /// before the preset is written to the local store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<BundleRef>,
 }
 
 // --- profile.ini line editor ------------------------------------------------
@@ -363,7 +382,10 @@ fn write_presets(dir: &Path, presets: &[Preset]) -> anyhow::Result<()> {
 }
 
 /// Save a preset, replacing any existing one with the same name (case-insensitive).
-pub fn save_preset(dir: &Path, preset: Preset) -> anyhow::Result<()> {
+/// The transient bundle link is never persisted — it only rides along on a share
+/// code.
+pub fn save_preset(dir: &Path, mut preset: Preset) -> anyhow::Result<()> {
+    preset.bundle = None;
     let mut all = load_presets(dir);
     all.retain(|p| !p.name.eq_ignore_ascii_case(&preset.name));
     all.push(preset);
@@ -378,7 +400,9 @@ pub fn delete_preset(dir: &Path, name: &str) -> anyhow::Result<()> {
     write_presets(dir, &all)
 }
 
-fn find_preset(dir: &Path, name: &str) -> Option<Preset> {
+/// Look up a saved preset by name (case-insensitive). Public so the bundle flow
+/// can load the preset it's about to package.
+pub fn find_preset(dir: &Path, name: &str) -> Option<Preset> {
     load_presets(dir)
         .into_iter()
         .find(|p| p.name.eq_ignore_ascii_case(name))
@@ -400,6 +424,12 @@ pub fn export_code(dir: &Path, name: &str) -> anyhow::Result<String> {
 fn encode_code(preset: &Preset) -> String {
     let json = serde_json::to_vec(preset).unwrap_or_default();
     format!("{CODE_PREFIX}{}", STANDARD.encode(json))
+}
+
+/// Encode an in-memory preset (e.g. one carrying a freshly-uploaded `bundle`) as a
+/// share code. Public counterpart to [`export_code`], which loads by name first.
+pub fn encode_code_public(preset: &Preset) -> String {
+    encode_code(preset)
 }
 
 /// Parse a share code (prefixed base64, bare base64, or raw JSON) into a preset.
@@ -537,6 +567,7 @@ KTM250=p_mx
                 l.helmet_paint = "CLUTCH Deeg F REDB".into();
                 l
             },
+            bundle: None,
         };
         let code = encode_code(&preset);
         assert!(code.starts_with(CODE_PREFIX));

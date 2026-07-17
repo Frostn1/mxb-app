@@ -16,6 +16,8 @@ import type {
   Preset,
   PresetApplyOutcome,
   ReloadOutcome,
+  BundlePlan,
+  BundleProgress,
 } from "../types";
 
 /** Results per page (mirrors `PER_PAGE` in the Rust backend). */
@@ -714,4 +716,35 @@ export function presetsDecode(text: string): Promise<Preset> {
 /** Import a share code: decode + save + return the stored preset. */
 export function presetsImport(text: string): Promise<Preset> {
   return invoke<Preset>("presets_import", { text });
+}
+
+// --- Preset full-share bundles (assets uploaded/downloaded) -----------------
+// A "full share" packages every asset a preset references into a .zip, uploads
+// it to an anonymous host, and embeds the link in the share code. The recipient's
+// "Full import" downloads it and installs every file into `mods/`.
+
+/** Preview what a preset's full bundle would carry (assets, what won't travel,
+ * total size). Read-only — nothing is uploaded. */
+export function presetBundleStats(loadout: Loadout): Promise<BundlePlan> {
+  return invoke<BundlePlan>("preset_bundle_stats", { loadout });
+}
+
+/** Build + upload a preset's asset bundle; returns the full share code (with the
+ * bundle link embedded). Progress arrives via {@link onPresetBundleProgress}. */
+export function presetBundleCreate(name: string): Promise<string> {
+  return invoke<string>("preset_bundle_create", { name });
+}
+
+/** Import a full-share code: download the bundle, install every asset, save the
+ * preset. Progress via {@link onPresetBundleProgress} (+ download bytes on
+ * {@link onInstallProgress}). */
+export function presetBundleImport(text: string): Promise<Preset> {
+  return invoke<Preset>("preset_bundle_import", { text });
+}
+
+/** Subscribe to bundle create/import phase updates. */
+export function onPresetBundleProgress(
+  cb: (p: BundleProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<BundleProgress>("preset-bundle-progress", (event) => cb(event.payload));
 }
