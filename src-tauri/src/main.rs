@@ -1,6 +1,7 @@
 // Prevents an additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bundle;
 mod config;
 mod frostmod;
 mod frostmod_manage;
@@ -14,6 +15,7 @@ mod pkz;
 mod presets;
 mod shop_session;
 mod soundmods;
+mod upload;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
@@ -548,6 +550,46 @@ fn presets_import(app: tauri::AppHandle, text: String) -> Result<presets::Preset
     presets::import_code(&presets_dir(&app)?, &text).map_err(|e| format!("{e:#}"))
 }
 
+// --- Preset full-share bundles (assets + config uploaded/downloaded) --------
+
+/// Preview what a preset's full bundle would carry: the resolved assets, the slots
+/// that can't travel, and the (estimated) total size. Read-only — nothing uploads.
+#[tauri::command]
+fn preset_bundle_stats(
+    app: tauri::AppHandle,
+    loadout: presets::Loadout,
+) -> Result<bundle::BundlePlan, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    bundle::plan(&cfg, &loadout).map_err(|e| format!("{e:#}"))
+}
+
+/// Create a full-share code for a saved preset: package every asset it references,
+/// upload the bundle to an anonymous host, and return the share code (with the
+/// bundle link embedded). Progress arrives via `preset-bundle-progress`.
+#[tauri::command]
+async fn preset_bundle_create(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let dir = presets_dir(&app)?;
+    bundle::create(&app, &cfg, &dir, &name)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Import a full-share code: download its asset bundle, install every file into the
+/// game's `mods/`, and save the preset. Progress via `preset-bundle-progress` (+
+/// byte-level `install-progress` for the download).
+#[tauri::command]
+async fn preset_bundle_import(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<presets::Preset, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let dir = presets_dir(&app)?;
+    bundle::import(&app, &cfg, &dir, &text)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(
@@ -689,7 +731,10 @@ fn main() {
             presets_delete,
             presets_export,
             presets_decode,
-            presets_import
+            presets_import,
+            preset_bundle_stats,
+            preset_bundle_create,
+            preset_bundle_import
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

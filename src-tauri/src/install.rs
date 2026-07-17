@@ -54,7 +54,7 @@ struct FrostmodReload {
 /// a new mod has landed, and tell the UI whether it worked. Never fails the
 /// install — if FrostMod isn't running the game just picks the mod up on its
 /// next launch.
-fn notify_frostmod(app: &AppHandle, slug: &str) {
+pub(crate) fn notify_frostmod(app: &AppHandle, slug: &str) {
     let outcome = crate::frostmod::signal_reload();
     let _ = app.emit(
         "frostmod-reload",
@@ -63,6 +63,16 @@ fn notify_frostmod(app: &AppHandle, slug: &str) {
             outcome,
         },
     );
+}
+
+/// The shared rustls HTTP client used across the install pipeline (browser UA,
+/// cookie jar for host redirects). Also reused by the preset-bundle flow.
+pub(crate) fn build_client() -> anyhow::Result<Client> {
+    Ok(Client::builder()
+        .user_agent(UA)
+        .connect_timeout(Duration::from_secs(15))
+        .cookie_store(true)
+        .build()?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -75,11 +85,7 @@ pub async fn add_to_library(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<()> {
-    let client = Client::builder()
-        .user_agent(UA)
-        .connect_timeout(Duration::from_secs(15))
-        .cookie_store(true)
-        .build()?;
+    let client = build_client()?;
 
     // MEGA is end-to-end encrypted: there's no plain "direct URL" to hand to the
     // generic downloader, so it gets its own fetch-and-decrypt path.
@@ -189,7 +195,7 @@ async fn download_mega_and_place(
 
 /// Fetch + decrypt a MEGA public file link into `dir`, emitting the same
 /// `downloading` progress stages as the generic HTTP downloader.
-async fn download_mega(
+pub(crate) async fn download_mega(
     app: &AppHandle,
     http_client: &Client,
     slug: &str,
@@ -315,7 +321,11 @@ pub fn import_file(
 
 // --- host resolution -------------------------------------------------------
 
-async fn resolve_direct_url(client: &Client, url: &str, host: &str) -> anyhow::Result<String> {
+pub(crate) async fn resolve_direct_url(
+    client: &Client,
+    url: &str,
+    host: &str,
+) -> anyhow::Result<String> {
     let h = host.to_lowercase();
     let u = url.to_lowercase();
     if h.contains("mediafire") || u.contains("mediafire.com") {
@@ -390,7 +400,7 @@ async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::R
         .context("could not reach the download host after 3 attempts"))
 }
 
-async fn download(
+pub(crate) async fn download(
     app: &AppHandle,
     client: &Client,
     slug: &str,
@@ -507,7 +517,7 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
 
 // --- extraction ------------------------------------------------------------
 
-fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
+pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
     match detect_ext(archive)?.as_str() {
         "zip" => {
             let file = File::open(archive)?;
@@ -592,7 +602,7 @@ const CATEGORY_DIRS: [&str; 5] = ["bikes", "tracks", "rider", "tyres", "misc"];
 ///   when the archive doesn't carry its own structure.
 ///
 /// Returns the number of files placed.
-fn place_mod(
+pub(crate) fn place_mod(
     extracted: &Path,
     mods_dir: &Path,
     type_folder: &str,

@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-07-16 — v0.1.6
+
+### Added
+- **Full-bundle preset sharing ("they have nothing" import)**: a preset can now be
+  shared as a complete asset bundle, not just a config code. **Create full bundle**
+  in the Share dialog resolves every asset the loadout references (liveries, gear
+  models + paints, gloves, outfit, tyres, model-swap variants) via `scan_library`,
+  zips them into a `mods/`-mirrored tree plus `preset.json`, uploads it to an
+  anonymous host (pixeldrain), and returns a share code with the download link
+  embedded. **Full import** on the other end downloads the bundle (reusing the
+  Google Drive / MediaFire / Mega / direct download + `place_mod` pipeline) and
+  installs every file into the correct `mods/` subfolder — so a recipient who owns
+  none of the mods still gets the complete look. New Rust modules `bundle.rs`
+  (resolve/build/import) and `upload.rs` (swappable host); new commands
+  `preset_bundle_stats` / `preset_bundle_create` / `preset_bundle_import`. The
+  share code stays one backward-compatible format — an optional `bundle` field on
+  `Preset`, so legacy `MXBP1-` codes still decode. The Share dialog previews bundle
+  size + which slots can't travel and notes the link is public/temporary; free-text
+  fonts and stock/uninstalled slots aren't bundled.
+
+### Changed
+- `bun.lock` is now gitignored — npm is the canonical package manager (CI runs
+  `npm ci`). A committed `bun.lock` makes `tauri-action` build with bun, which the
+  release runners don't have.
+
 ## 2026-07-15 — v0.1.5
 
 ### Added
