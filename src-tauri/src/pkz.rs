@@ -11,7 +11,7 @@
 //! Parsing is cached to the app cache dir (keyed by path + mtime + size) so the
 //! library stays snappy after the first look at each file.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -373,6 +373,183 @@ fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
     Some(format!("data:image/jpeg;base64,{b64}"))
 }
 
+// ── Extraction ──────────────────────────────────────────────────────────────
+//
+// Pull the loose files (`model.edf`, `*.tga`, `*.cfg`) out of a plain-ZIP `.pkz`
+// so the 3D viewer can load a bike's geometry + textures. Locked archives that
+// aren't plain ZIPs are reported as unsupported.
+
+/// Whether a `.pkz` is a plain ZIP we can extract (vs locked).
+pub fn is_plain_zip(path: &Path) -> bool {
+    let mut magic = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read(&mut magic).map(|n| n))
+        .map(|n| n >= 4 && magic == ZIP_MAGIC)
+        .unwrap_or(false)
+}
+
+/// Extract a `.pkz` into `out_dir`, returning the written relative paths
+/// (forward-slashed).
+pub fn extract(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
+    if is_plain_zip(path) {
+        return extract_plain(path, out_dir);
+    }
+    #[cfg(pkz_ext)]
+    {
+        if let Some(written) = crate::pkz_ext::try_extract(path, out_dir)? {
+            return Ok(written);
+        }
+    }
+    bail!("unsupported .pkz (can't extract) for {path:?}");
+}
+
+/// If `bytes` is a creator-**locked** container we can open, return its decrypted
+/// plaintext; otherwise `None`. A locked paint is a single encrypted blob whose
+/// plaintext is a normal `PNT\0` file, so the paint decoder can open it
+/// transparently. `None` on the public build (no ext module) or plain files.
+pub fn decrypt_locked_blob(bytes: &[u8]) -> Option<Vec<u8>> {
+    #[cfg(pkz_ext)]
+    {
+        if crate::pkz_ext::is_kcol_bytes(bytes) {
+            return crate::pkz_ext::decrypt_kcol_blob(bytes).ok();
+        }
+    }
+    let _ = bytes;
+    None
+}
+
+/// Read every entry of a `.pkz` (decompressed) as `(relative_name, bytes)` — one
+/// decrypt/inflate pass. Used to pull a bike's `model.edf` + its textures for the
+/// 3D viewer in a single shot.
+pub fn read_all(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+    if is_plain_zip(path) {
+        let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
+        let mut archive =
+            zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
+        let mut out = Vec::new();
+        for idx in 0..archive.len() {
+            let mut e = archive.by_index(idx)?;
+            if !e.is_file() {
+                continue;
+            }
+            let name = e.name().replace('\\', "/");
+            let mut buf = Vec::with_capacity(e.size() as usize);
+            e.read_to_end(&mut buf)?;
+            out.push((name, buf));
+        }
+        return Ok(out);
+    }
+    #[cfg(pkz_ext)]
+    {
+        return crate::pkz_ext::read_all(path);
+    }
+    #[cfg(not(pkz_ext))]
+    bail!("unsupported .pkz (can't read) for {path:?}");
+}
+
+/// Read only the entries of a `.pkz` whose name passes `keep`, decompressed —
+/// skipping the (costly) decompression of everything else (e.g. a bike's sounds).
+pub fn read_selected(
+    path: &Path,
+    keep: impl Fn(&str) -> bool + Copy,
+) -> Result<Vec<(String, Vec<u8>)>> {
+    if is_plain_zip(path) {
+        let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
+        let mut archive =
+            zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
+        let mut out = Vec::new();
+        for idx in 0..archive.len() {
+            let mut e = archive.by_index(idx)?;
+            if !e.is_file() || !keep(e.name()) {
+                continue;
+            }
+            let name = e.name().replace('\\', "/");
+            let mut buf = Vec::with_capacity(e.size() as usize);
+            e.read_to_end(&mut buf)?;
+            out.push((name, buf));
+        }
+        return Ok(out);
+    }
+    #[cfg(pkz_ext)]
+    {
+        return crate::pkz_ext::read_selected(path, keep);
+    }
+    #[cfg(not(pkz_ext))]
+    bail!("unsupported .pkz (can't read) for {path:?}");
+}
+
+/// Read a single entry (matched by file-name, case-insensitive) out of a `.pkz`,
+/// decompressed — without unpacking the whole archive. Used to pull just a bike's
+/// `model.edf` for the 3D viewer. `None` if the archive has no such entry.
+pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
+    if is_plain_zip(path) {
+        let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
+        let mut archive =
+            zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
+        for idx in 0..archive.len() {
+            let mut e = archive.by_index(idx)?;
+            let base = e.name().replace('\\', "/");
+            let base = base.rsplit('/').next().unwrap_or(&base);
+            if base.eq_ignore_ascii_case(file_name) {
+                let mut buf = Vec::with_capacity(e.size() as usize);
+                e.read_to_end(&mut buf)?;
+                return Ok(Some(buf));
+            }
+        }
+        return Ok(None);
+    }
+    #[cfg(pkz_ext)]
+    {
+        if let Some(bytes) = crate::pkz_ext::read_entry(path, file_name)? {
+            return Ok(Some(bytes));
+        }
+        return Ok(None);
+    }
+    #[cfg(not(pkz_ext))]
+    bail!("unsupported .pkz (can't read {file_name}) for {path:?}");
+}
+
+/// Resolve an archive entry name to a destination under `out_dir`, dropping any
+/// `..`/absolute components (zip-slip guard). Returns `None` for empty names.
+pub(crate) fn safe_dest(out_dir: &Path, name: &str) -> Option<PathBuf> {
+    let safe: PathBuf = name
+        .replace('\\', "/")
+        .split('/')
+        .filter(|c| !c.is_empty() && *c != "." && *c != "..")
+        .collect();
+    if safe.as_os_str().is_empty() {
+        None
+    } else {
+        Some(out_dir.join(safe))
+    }
+}
+
+fn extract_plain(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
+    let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
+    let mut archive = zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
+    std::fs::create_dir_all(out_dir).with_context(|| format!("mkdir {out_dir:?}"))?;
+
+    let mut written = Vec::new();
+    for idx in 0..archive.len() {
+        let mut entry = archive.by_index(idx)?;
+        if !entry.is_file() {
+            continue;
+        }
+        let rel = entry.name().replace('\\', "/");
+        let Some(dest) = safe_dest(out_dir, &rel) else {
+            continue;
+        };
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).with_context(|| format!("mkdir {parent:?}"))?;
+        }
+        let mut buf = Vec::with_capacity(entry.size() as usize);
+        entry.read_to_end(&mut buf)?;
+        std::fs::write(&dest, &buf).with_context(|| format!("write {dest:?}"))?;
+        written.push(rel);
+    }
+    Ok(written)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,5 +615,21 @@ mod tests {
     fn no_image_returns_none() {
         let names = vec!["T/T.ini".to_string(), "T/T.map".to_string()];
         assert_eq!(pick_image(&names, "T", None), None);
+    }
+
+    /// Local tool: unpack a real `.pkz` so its contents can be inspected.
+    /// `MXB_REAL_PKZ=<file> MXB_OUT=<dir> cargo test extract_pkz_to_env -- --ignored`
+    #[test]
+    #[ignore]
+    fn extract_pkz_to_env() {
+        let (Ok(src), Ok(out)) = (std::env::var("MXB_REAL_PKZ"), std::env::var("MXB_OUT")) else {
+            eprintln!("set MXB_REAL_PKZ and MXB_OUT to run");
+            return;
+        };
+        let written = extract(Path::new(&src), Path::new(&out)).expect("extract");
+        eprintln!("wrote {} files to {out}", written.len());
+        for w in written.iter().take(40) {
+            eprintln!("  {w}");
+        }
     }
 }

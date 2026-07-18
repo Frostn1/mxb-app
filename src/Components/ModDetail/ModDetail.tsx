@@ -24,6 +24,8 @@ import {
   isBlockedDownload,
   isLiveryContext,
   isSoundContext,
+  riderProfileSub,
+  riderPaintKind,
   normalizeModName,
   resolveInitialFolder,
   scanRiderTargets,
@@ -97,6 +99,10 @@ export default function ModDetail({
 }: ModDetailProps) {
   const livery = isLiveryContext(modType, categoryId);
   const sound = isSoundContext(modType, categoryId);
+  // For rider kit/gloves, which profile sub-folder to target (`null` for gear paints).
+  const profileSub = riderProfileSub(modType, categoryId);
+  // For a gear paint (Boot/Helmet/Protection Paints), which model kind it targets.
+  const paintKind = riderPaintKind(modType, categoryId);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<InstalledMod[]>([]);
@@ -137,7 +143,7 @@ export default function ModDetail({
           // uses the generic (track/bike) destination logic.
           const dest =
             modType.id === "rider"
-              ? buildRiderDestinations(await scanRiderTargets(), d.title)
+              ? buildRiderDestinations(await scanRiderTargets(), d.title, profileSub, paintKind)
               : buildDestinations(modType, d.title, inst, livery, sound);
           if (cancelled) return;
           setDestOptions(dest.options);
@@ -169,8 +175,8 @@ export default function ModDetail({
 
   const destKey = destStorageKey(modType);
   const initialFolder = useMemo(
-    () => resolveInitialFolder(modType, destOptions, guess, livery, sound),
-    [modType, destOptions, guess, livery, sound],
+    () => resolveInitialFolder(modType, destOptions, guess, livery, sound, paintKind),
+    [modType, destOptions, guess, livery, sound, paintKind],
   );
 
   const isInstalled =

@@ -2,6 +2,8 @@
 
 export interface Config {
   modsPath: string;
+  /** MX Bikes **install** dir (holds core `rider.pkz`) for the 3D rider body. */
+  gamePath?: string;
   /** Hide to the tray on close and keep running (default true). */
   runInBackground?: boolean;
   /** Launch on login (default true). */
@@ -129,6 +131,97 @@ export interface BikeModels {
   variants: ModelVariant[];
 }
 
+/** A material group over a node's kept triangles (for per-part texturing). */
+export interface Submesh {
+  /** Mesh-group name from the `.edf` (e.g. `frame.005`, `chain`). */
+  name: string;
+  /** Start triangle in the KEPT triangle list. */
+  triStart: number;
+  triCount: number;
+  /** Texture this group binds to, resolved in Rust from the bike's `gfx.cfg` +
+   * the model's own packed texture names. `null` → render it in a neutral colour;
+   * never guess a texture from `name`. */
+  texture: string | null;
+  /** Which UV tile the group samples (`floor(u)`); `null` if it straddles tiles.
+   * Tile ≥ 1 means it binds to a further texture and samples at `u - tile`, which
+   * the viewer gets from `RepeatWrapping`. */
+  uvTile: number | null;
+}
+
+/** One decoded mesh node from a bike's `.edf`, ready for a three.js geometry. */
+export interface EdfNode {
+  name: string;
+  /** `3 * vertexCount` — positions (local space). */
+  positions: number[];
+  /** `2 * vertexCount` — uv0 per vertex (empty if none). */
+  uvs: number[];
+  /** `3 * vertexCount` — normals per vertex (empty if none). */
+  normals: number[];
+  /** `3 * triangleCount` — u32 indices, a plain triangle list. */
+  indices: number[];
+  /** Material groups over the kept triangle list (empty if not resolved). */
+  submeshes: Submesh[];
+  /** Texture for the node as a whole — used when `submeshes` is empty (the submesh
+   * table didn't resolve, so there are no groups to bind individually). */
+  texture: string | null;
+}
+
+/** One texture decoded from a `.pnt` paint, ready for the 3D viewer. */
+export interface PaintTexture {
+  /** Internal texture name without extension (`livery`, `helmet`, `rider`…). */
+  name: string;
+  width: number;
+  height: number;
+  /** `data:image/png;base64,…` — bind straight into a three.js texture loader. */
+  png: string;
+}
+
+/** One selectable paint (livery) for a bike: a name + its textures. */
+export interface BikePaint {
+  name: string;
+  textures: PaintTexture[];
+  /** Whether selecting this paint changes anything *in the preview*.
+   *
+   * A `.pnt` replaces a model texture by NAME, and the viewer shows only the
+   * chassis/steer/fork/swingarm — not the wheels or chain, which are separate
+   * models the bike doesn't even ship. So a paint can be perfectly valid for the
+   * bike and still change nothing here (the Honda's stock paint carries only
+   * chain/wheel textures), and a paint for a different model changes nothing
+   * either. This flag doesn't tell those apart — it only says the preview won't
+   * move — so the label must not claim the paint is "not for this model". */
+  changesPreview: boolean;
+}
+
+/** A bike's real 3D model: decoded mesh nodes + selectable paints (stock +
+ * installed liveries). */
+export interface BikeModel {
+  nodes: EdfNode[];
+  paints: BikePaint[];
+}
+
+/**
+ * One part of the rider preview. A **gear** part (`helmet`/`boots`/`protection`)
+ * carries real `.edf` geometry + its paint; a **paint-only** part (`suit`/`gloves`)
+ * has no mesh and just tints the stand-in body. `part` is the slot the viewer maps
+ * it onto.
+ */
+export interface RiderPart {
+  part: "body" | "helmet" | "boots" | "protection" | "suit" | "gloves";
+  nodes: EdfNode[];
+  textures: PaintTexture[];
+}
+
+/** The rider's real 3D preview, assembled from a loadout's installed gear + paints. */
+export interface RiderModel {
+  parts: RiderPart[];
+}
+
+/** The paint sets a gear item ships: its main `paints/` liveries, plus a helmet's
+ * separate `goggles/` lens/strap paints (empty for boots/protection). */
+export interface GearPaints {
+  paints: string[];
+  goggles: string[];
+}
 
 /**
  * Parsed structure of an installed `.pkz`, loaded lazily per library card.

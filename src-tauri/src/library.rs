@@ -518,6 +518,18 @@ fn scan_rider(dir: &Path) -> Vec<LibraryEntry> {
         }
         // A model packaged as a bare `.pkz` directly under the area folder.
         collect_pkz_shallow(dir, &abase, model_cat, &mut out);
+        // Loose paints dropped straight under the area folder — a paint whose own
+        // model isn't installed (e.g. `boots/Purple White Alpinestar Boots.pnt`).
+        // These previously surfaced nowhere. `.pnt` only: a bare `.pkz` here is a
+        // packaged model, collected just above.
+        if let Ok(rd) = fs::read_dir(&abase) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_file() && has_ext(&p, "pnt") {
+                    out.push(make_entry(dir, &p, paint_cat, None));
+                }
+            }
+        }
     }
 
     // Gloves installed directly under rider/gloves.
@@ -689,6 +701,9 @@ mod tests {
         touch(&base.join("helmets/AGV/paints/Blue.pnt"));
         touch(&base.join("helmets/AGV/goggles/Smoke.pnt"));
         touch(&base.join("boots/Tech10/paints/Wht.pnt"));
+        // A boot paint dropped straight under `boots/` — no model folder (how the
+        // user's Alpinestars/GBootz paints installed).
+        touch(&base.join("boots/Purple White Alpinestar Boots.pnt"));
         touch(&base.join("gloves/Flexair.pnt"));
         touch(&base.join("riders/default_mx/paints/Kit.pnt"));
         touch(&base.join("riders/default_mx/gloves/G.pnt"));
@@ -699,6 +714,13 @@ mod tests {
         assert!(has("helmetPaint"), "helmet paint");
         assert!(has("goggles"), "goggles");
         assert!(has("bootPaint"), "boot paint");
+        // The loose-under-`boots/` paint surfaces (parentless), not just the one in
+        // a model's `paints/` folder.
+        assert!(
+            cat(&v, "Purple White Alpinestar Boots.pnt")
+                .is_some_and(|e| e.category == "bootPaint" && e.parent.is_none()),
+            "loose boot paint under boots/ surfaces as a parentless bootPaint",
+        );
         assert!(has("gloves"), "gloves");
         assert!(has("outfit"), "outfit/kit");
         assert_eq!(cat(&v, "Kit.pnt").unwrap().parent.as_deref(), Some("default_mx"));

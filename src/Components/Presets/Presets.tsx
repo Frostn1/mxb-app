@@ -14,7 +14,6 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
@@ -56,37 +55,19 @@ import type {
   Preset,
   PresetApplyOutcome,
 } from "../../types";
+import { ViewerPanel } from "../Viewer/ViewerPanel";
+import { SlotField } from "./SlotField";
 import {
   SLOTS,
   SLOT_GROUPS,
+  EMPTY_LOADOUT,
   loadScans,
   slotOptions,
   isMissing,
   missingSlots,
   loadoutSummary,
   type Scans,
-  type SlotDef,
 } from "../../lib/presets";
-
-const EMPTY: Loadout = {
-  paint: "",
-  bikeFont: "",
-  rider: "",
-  helmet: "",
-  helmetPaint: "",
-  gogglesPaint: "",
-  suitPaint: "",
-  suitFont: "",
-  boots: "",
-  bootsPaint: "",
-  glovesPaint: "",
-  protection: "",
-  protectionPaint: "",
-  ridingStyle: "",
-  tyres: "",
-  raceNumber: "",
-  modelSwap: "",
-};
 
 /** Human-readable byte size for bundle previews. */
 function humanSize(bytes: number): string {
@@ -170,7 +151,7 @@ export default function Presets() {
   const [bikes, setBikes] = useState<string[]>([]);
   const [bike, setBike] = useState<string>("");
   const [scans, setScans] = useState<Scans | null>(null);
-  const [loadout, setLoadout] = useState<Loadout>(EMPTY);
+  const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
   const [saved, setSaved] = useState<Preset[]>([]);
   const [makeActive, setMakeActive] = useState(true);
   const [name, setName] = useState("");
@@ -460,6 +441,7 @@ export default function Presets() {
           </section>
 
           {/* Live 3D preview of the current loadout */}
+          <ViewerPanel loadout={loadout} className="w-[360px] flex-none" />
 
           {/* Saved presets */}
           <aside className="flex w-[300px] flex-none flex-col gap-2 overflow-y-auto border-l border-white/[0.06] pl-5">
@@ -500,53 +482,6 @@ export default function Presets() {
         }}
       />
     </div>
-  );
-}
-
-/** One editable slot: an input with a datalist of installed options (so unknown /
- * captured values and free-text fonts still work), plus a "missing mod" badge. */
-function SlotField({
-  slot,
-  value,
-  options,
-  missing,
-  onChange,
-}: {
-  slot: SlotDef;
-  value: string;
-  options: string[];
-  missing: boolean;
-  onChange: (v: string) => void;
-}) {
-  const listId = `slot-${slot.key}`;
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-        {slot.label}
-        {missing && (
-          <span
-            title="This mod isn't installed — shows as stock in-game"
-            className="rounded bg-amber-500/15 px-1 text-[9.5px] font-semibold uppercase text-amber-500"
-          >
-            missing
-          </span>
-        )}
-      </span>
-      <Input
-        list={options.length ? listId : undefined}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Stock"
-        className={cn("h-8 text-[12.5px]", missing && "border-amber-500/40")}
-      />
-      {options.length > 0 && (
-        <datalist id={listId}>
-          {options.map((o) => (
-            <option key={o} value={o} />
-          ))}
-        </datalist>
-      )}
-    </label>
   );
 }
 

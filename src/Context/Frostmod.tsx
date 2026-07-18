@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -16,32 +14,8 @@ import {
   isFrostmodRunning,
   reloadFrostmod,
 } from "../api/mods";
-import type { FrostmodStatus, ReloadOutcome } from "../types";
-
-interface FrostmodContextValue {
-  /** Whether FrostMod is currently running (polled). `null` until first probe. */
-  running: boolean | null;
-  /** Install/version snapshot (`null` until first fetched). */
-  status: FrostmodStatus | null;
-  /** True while an install/update download is in flight. */
-  installing: boolean;
-  /** True while a `refreshStatus` GitHub check is in flight. */
-  checking: boolean;
-  /** True when the last `refreshStatus` failed (offline / GitHub error). */
-  statusError: boolean;
-  /** Manually ask FrostMod to live-reload the game now. */
-  reload: () => Promise<ReloadOutcome>;
-  /** Re-probe running status immediately. */
-  refresh: () => void;
-  /** Re-fetch the full install/version status (hits GitHub). */
-  refreshStatus: () => Promise<void>;
-  /** Download the latest FrostMod, then start it. */
-  install: () => Promise<void>;
-  /** Launch FrostMod now if it isn't already running. */
-  start: () => Promise<void>;
-}
-
-const FrostmodContext = createContext<FrostmodContextValue | null>(null);
+import type { FrostmodStatus } from "../types";
+import { FrostmodContext } from "./FrostmodContext";
 
 const POLL_MS = 5000;
 
@@ -166,10 +140,4 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       {children}
     </FrostmodContext.Provider>
   );
-}
-
-export function useFrostmod() {
-  const ctx = useContext(FrostmodContext);
-  if (!ctx) throw new Error("useFrostmod must be used within FrostmodProvider");
-  return ctx;
 }

@@ -6,10 +6,12 @@ import {
   FolderInput,
   Lock,
   Maximize2,
+  Box,
   type LucideIcon,
 } from "lucide-react";
 import { getPkzMeta, getPkzPreview, type ModType } from "../../api/mods";
-import type { LibraryEntry, PkzMeta } from "../../types";
+import type { LibraryEntry, LibraryCategory, PkzMeta } from "../../types";
+import { ViewerDialog } from "../Viewer/ViewerDialog";
 import {
   displayName,
   folderLabel,
@@ -54,6 +56,7 @@ export default function LibraryDetail({
   const [meta, setMeta] = useState<PkzMeta | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState(false);
+  const [view3d, setView3d] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -86,6 +89,61 @@ export default function LibraryDetail({
     }
     return [...byCat.entries()];
   }, [entries, entry]);
+
+  // Rider-side gear categories (the rest default to the bike model).
+  const RIDER_CATS = new Set<LibraryCategory>([
+    "helmet",
+    "helmetPaint",
+    "goggles",
+    "boots",
+    "bootPaint",
+    "protection",
+    "protectionPaint",
+    "gloves",
+    "outfit",
+  ]);
+  // Whether this item can be shown in the 3D viewer, which paints to offer, and
+  // which model to start on. A paint entry previews itself; a model gathers the
+  // paints that belong to it.
+  const isPaint = entry.kind === "loose" && /\.pnt$/i.test(entry.name);
+  const viewable =
+    entry.category === "bike" || RIDER_CATS.has(entry.category) || isPaint;
+  const viewerMode: "bike" | "rider" = RIDER_CATS.has(entry.category)
+    ? "rider"
+    : "bike";
+  // A gear *model* entry (not a paint) previews on the rider in its own slot.
+  const gearPart: "helmet" | "boots" | "protection" | undefined = isPaint
+    ? undefined
+    : entry.category === "helmet"
+      ? "helmet"
+      : entry.category === "boots"
+        ? "boots"
+        : entry.category === "protection"
+          ? "protection"
+          : undefined;
+  // A loose gear *paint* (its model not necessarily installed) previews on the
+  // game's stock model for that slot — the gear analogue of a rider-outfit paint
+  // rendering on the stock body. Outfit/glove paints keep the rider-body path.
+  const stockGearPart: "helmet" | "boots" | "protection" | undefined =
+    entry.category === "helmetPaint"
+      ? "helmet"
+      : entry.category === "bootPaint"
+        ? "boots"
+        : entry.category === "protectionPaint"
+          ? "protection"
+          : undefined;
+  const paintPaths = useMemo(() => {
+    if (isPaint) return [entry.path];
+    const owner = ownerKey(entry);
+    return entries
+      .filter(
+        (e) =>
+          e.parent === owner &&
+          e.kind === "loose" &&
+          /\.pnt$/i.test(e.name),
+      )
+      .map((e) => e.path);
+  }, [entries, entry, isPaint]);
 
   const rows: [string, string][] = [];
   if (meta?.author) rows.push(["Author", meta.author]);
@@ -150,6 +208,11 @@ export default function LibraryDetail({
             )}
 
             <div className="flex flex-wrap gap-2">
+              {viewable && (
+                <Button variant="outline" size="sm" onClick={() => setView3d(true)}>
+                  <Box className="size-3.5" /> View in 3D
+                </Button>
+              )}
               {canMove && (
                 <Button variant="outline" size="sm" onClick={() => onMove(entry)}>
                   <FolderInput className="size-3.5" /> Move
@@ -271,6 +334,18 @@ export default function LibraryDetail({
           />
         </div>
       )}
+
+      <ViewerDialog
+        open={view3d}
+        onOpenChange={setView3d}
+        title={title}
+        initialMode={viewerMode}
+        paintPaths={paintPaths}
+        modelSource={entry.category === "bike" ? entry.path : undefined}
+        gearSource={gearPart ? entry.path : undefined}
+        gearPart={gearPart}
+        stockGearPart={stockGearPart}
+      />
     </div>
   );
 }

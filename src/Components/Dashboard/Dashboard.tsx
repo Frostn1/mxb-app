@@ -3,6 +3,7 @@ import Sidebar, { type DashboardView } from "../Shell/Sidebar";
 import Library from "../Library/Library";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
+import RiderStudio from "../Rider/RiderStudio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
@@ -94,6 +95,8 @@ const Dashboard = () => {
             <Locker />
           ) : view === "presets" ? (
             <Presets />
+          ) : view === "rider" ? (
+            <RiderStudio />
           ) : (
             <Settings />
           )}
