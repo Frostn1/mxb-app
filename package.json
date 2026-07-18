@@ -4,6 +4,7 @@
   "version": "0.1.6",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/free-dev-port.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

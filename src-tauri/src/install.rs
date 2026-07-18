@@ -645,9 +645,14 @@ pub(crate) fn place_mod(
     // 3. Bike-livery bundle: a `<BikeName>/paints/…` structure is unambiguously
     //    bike content, so route it to `mods/bikes` regardless of the caller's
     //    default type_folder (the paid shop can't know the type up front).
-    for base in &candidates {
-        if contains_paints_bundle(base) {
-            return merge_tree(base, &mods_dir.join("bikes"));
+    //    **Rider content is exempt**: a `<helmet>/paints` or `<profile>/paints`
+    //    bundle is a rider paint that must stay under `mods/rider` — step 4 places
+    //    it via the chosen `riders/<profile>/paints` / `<model>/paints` destination.
+    if !type_folder.eq_ignore_ascii_case("rider") {
+        for base in &candidates {
+            if contains_paints_bundle(base) {
+                return merge_tree(base, &mods_dir.join("bikes"));
+            }
         }
     }
 
@@ -1148,6 +1153,50 @@ mod tests {
             .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
             .exists());
         assert!(!mods.join("tracks/MX1OEM_2023_KTM_450_SX-F").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A rider **outfit/kit** paint (loose `.pnt`) installs into the chosen rider
+    /// profile's `paints` — the `riders/<profile>/paints` level must be preserved.
+    #[test]
+    fn places_rider_kit_into_profile_paints() {
+        let root = place_tmp("rider-kit");
+        let ex = root.join("ex");
+        touch(&ex.join("2026 ASTARS TECHSTAR UNITY.pnt")); // loose outfit paint
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "riders/default_mx/paints", "kit").unwrap();
+        assert!(mods
+            .join("rider/riders/default_mx/paints/2026 ASTARS TECHSTAR UNITY.pnt")
+            .exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A rider paint packaged as a `<name>/paints/…` bundle must NOT be hijacked to
+    /// `mods/bikes` by the bike-livery heuristic — it stays under `mods/rider` at
+    /// the chosen destination.
+    #[test]
+    fn rider_paint_bundle_not_routed_to_bikes() {
+        let root = place_tmp("rider-bundle");
+        let ex = root.join("ex");
+        touch(&ex.join("default_mx/paints/kit.pnt")); // <profile>/paints bundle
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "riders/default_mx/paints", "kit").unwrap();
+        assert!(mods.join("rider/riders/default_mx/paints/kit.pnt").exists());
+        assert!(!mods.join("bikes/default_mx").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A helmet **paint** (`<helmet>/paints`) routes into that helmet's `paints`
+    /// under `mods/rider`, never to `mods/bikes`.
+    #[test]
+    fn helmet_paint_bundle_stays_in_rider() {
+        let root = place_tmp("helmet-paint");
+        let ex = root.join("ex");
+        touch(&ex.join("Fox V3/paints/red.pnt"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "helmets/Fox V3/paints", "paint").unwrap();
+        assert!(mods.join("rider/helmets/Fox V3/paints/red.pnt").exists());
+        assert!(!mods.join("bikes/Fox V3").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

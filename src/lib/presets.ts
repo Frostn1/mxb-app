@@ -53,6 +53,28 @@ export const SLOT_GROUPS: { id: SlotDef["group"]; label: string }[] = [
   { id: "body", label: "Body" },
 ];
 
+/** A blank loadout — every slot stock/empty. The zero value both the Presets
+ * builder and the Rider studio start from. */
+export const EMPTY_LOADOUT: Loadout = {
+  paint: "",
+  bikeFont: "",
+  rider: "",
+  helmet: "",
+  helmetPaint: "",
+  gogglesPaint: "",
+  suitPaint: "",
+  suitFont: "",
+  boots: "",
+  bootsPaint: "",
+  glovesPaint: "",
+  protection: "",
+  protectionPaint: "",
+  ridingStyle: "",
+  tyres: "",
+  raceNumber: "",
+  modelSwap: "",
+};
+
 /** Built-in values the game always accepts even with no installed mod. */
 const BUILTINS: Partial<Record<keyof Loadout, string[]>> = {
   helmet: ["default"],

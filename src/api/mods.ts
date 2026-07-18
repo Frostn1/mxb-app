@@ -13,6 +13,12 @@ import type {
   ModDetail,
   ModSummary,
   PkzMeta,
+  PaintTexture,
+  BikeModel,
+  EdfNode,
+  RiderModel,
+  RiderPart,
+  GearPaints,
   Preset,
   PresetApplyOutcome,
   ReloadOutcome,
@@ -85,7 +91,9 @@ export const MOD_TYPES: ModType[] = [
       { id: 127, label: "Helmet Paints" },
       { id: 32, label: "Gloves" },
       { id: 31, label: "Boots" },
+      { id: 126, label: "Boot Paints" },
       { id: 36, label: "Protection" },
+      { id: 135, label: "Protection Paints" },
     ],
   },
 ];
@@ -208,7 +216,67 @@ export function getPkzPreview(path: string): Promise<string | null> {
   return invoke<string | null>("get_pkz_preview", { path });
 }
 
+/** Decode a `.pnt` paint file into its textures (PNG `data:` URIs) for the 3D
+ * viewer to map onto a model. Native — no external tools needed. */
+export function unpackPaint(path: string): Promise<PaintTexture[]> {
+  return invoke<PaintTexture[]>("unpack_paint", { path });
+}
 
+/** Extract a `.pkz` to `outDir`, returning the written relative paths — lets the
+ * viewer pull a bike's `model.edf` + textures out of a packaged bike. */
+export function unpackPkz(path: string, outDir: string): Promise<string[]> {
+  return invoke<string[]>("unpack_pkz", { path, outDir });
+}
+
+/** Load a bike's real 3D geometry + textures for the viewer. `source` may be the
+ * bike's extracted folder, its packaged `.pkz`, or a loose `.edf`. */
+export function loadBikeModel(source: string): Promise<BikeModel> {
+  return invoke<BikeModel>("load_bike_model", { source });
+}
+
+/** Load the rider's real 3D preview for a loadout: the installed gear meshes
+ * (helmet/boots/protection) decoded from `.edf`, plus the suit/gloves paints that
+ * tint the stand-in body. Unset/missing slots are omitted. */
+export function loadRiderModel(loadout: Loadout): Promise<RiderModel> {
+  return invoke<RiderModel>("load_rider_model", { loadout });
+}
+
+/** Just the rider body mesh nodes for a profile (from the game's `rider.pkz`), for
+ * the Library outfit viewer — which supplies its own paint. Empty when the game
+ * folder isn't set. */
+export function loadRiderBodyModel(profile: string): Promise<EdfNode[]> {
+  return invoke<EdfNode[]>("load_rider_body_model", { profile });
+}
+
+/** Load an installed gear item (helmet/boots/protection) from its Library path —
+ * an extracted folder or a packaged `.pkz` — so it can be previewed on the rider.
+ * `part` is the viewer slot to fill. */
+export function loadGearModel(
+  path: string,
+  part: RiderPart["part"],
+  paint?: string,
+  goggles?: string,
+): Promise<RiderPart> {
+  return invoke<RiderPart>("load_gear_model", { path, part, paint, goggles });
+}
+
+/** The paint sets a gear item ships. Gear installs packaged, so its paints aren't
+ * loose files the Library can list — this reads them out of the archive. `goggles`
+ * is a helmet's separate lens/strap paints (empty for boots/protection). */
+export function listGearPaints(path: string): Promise<GearPaints> {
+  return invoke<GearPaints>("list_gear_paints", { path });
+}
+
+/** Preview a loose gear paint on the game's **stock** model for that slot (boots /
+ * helmet / protection) — for paints whose own model isn't installed. `paintPath` is
+ * the loose `.pnt`; omit for the stock paint. Mesh comes from the game's `rider.pkz`,
+ * so it needs the game path set. */
+export function loadStockGearModel(
+  part: RiderPart["part"],
+  paintPath?: string,
+): Promise<RiderPart> {
+  return invoke<RiderPart>("load_stock_gear_model", { part, paintPath });
+}
 
 /** Move an installed mod file into a different folder (relative to the type dir). */
 export function moveMod(
@@ -232,6 +300,12 @@ export function revealInExplorer(path: string): Promise<void> {
 /** Hide-to-tray + keep-running toggle. */
 export function setRunInBackground(enabled: boolean): Promise<void> {
   return invoke<void>("set_run_in_background", { enabled });
+}
+
+/** Set the MX Bikes **install** directory (holds core `rider.pkz`), so the 3D
+ * viewer can load the real rider body model. */
+export function setGamePath(path: string): Promise<void> {
+  return invoke<void>("set_game_path", { path });
 }
 
 /** Launch-at-login toggle (also flips the OS autostart entry). */
@@ -332,16 +406,77 @@ export function buildDestinations(
   return { options, guess, suggestions };
 }
 
+/** Stock MX Bikes rider profiles — always present in-game even when the app sees
+ * no `riders/` folder on disk yet. Seeded so kit/gloves always have a valid
+ * `riders/<profile>/…` destination (a missing target is what misfiles outfits into
+ * `mods/rider` root, where nothing scans them). */
+export const STOCK_RIDER_PROFILES = ["default_mx", "default_sm"];
+
+/** WP category ids for rider content that installs per rider **profile** (not per
+ * gear model): the outfit / Rider Kit (35 + children Retro 129, Virtual Team 52)
+ * and gloves (32). These route to `riders/<profile>/{paints,gloves}`. */
+const RIDER_KIT_CATEGORY_IDS = [35, 129, 52];
+const RIDER_GLOVES_CATEGORY_ID = 32;
+
+/** The gear kinds whose paints install into a model's `paints` folder. */
+export type GearPaintKind = "helmets" | "boots" | "protection";
+
+/** WP category id → gear kind for the model-paint categories. mxb-mods separates
+ * each gear type into a model category and a *paints* child (Helmets 33 / Helmet
+ * Paints 127, Boots 31 / Boot Paints 126, Protection 36 / Protection Paints 135).
+ * Knowing the kind lets an install target the right model's `paints`. */
+const RIDER_PAINT_CATEGORY_KIND: Record<number, GearPaintKind> = {
+  127: "helmets",
+  126: "boots",
+  135: "protection",
+};
+
+/**
+ * For rider content, which gear kind a **paint** belongs to (helmet/boot/
+ * protection), derived from its mxb-mods paints category. `null` when the mod
+ * isn't a gear paint (a model, kit, gloves, or an unfiltered "All" browse).
+ * Lets {@link buildRiderDestinations} bias the target to that kind's installed
+ * models instead of name-matching across every gear type.
+ */
+export function riderPaintKind(
+  modType: ModType,
+  categoryId: number | null | undefined,
+): GearPaintKind | null {
+  if (modType.id !== "rider" || categoryId == null) return null;
+  return RIDER_PAINT_CATEGORY_KIND[categoryId] ?? null;
+}
+
+/**
+ * For rider content, whether the mod is per-**profile** content and which
+ * sub-folder it targets: `"paints"` for the outfit/Rider Kit, `"gloves"` for
+ * gloves. `null` for gear-model paints (helmet/boot/protection) and new models,
+ * which target a model folder instead. Mirrors {@link isLiveryContext} /
+ * {@link isSoundContext}.
+ */
+export function riderProfileSub(
+  modType: ModType,
+  categoryId: number | null | undefined,
+): "paints" | "gloves" | null {
+  if (modType.id !== "rider") return null;
+  if (categoryId === RIDER_GLOVES_CATEGORY_ID) return "gloves";
+  if (categoryId != null && RIDER_KIT_CATEGORY_IDS.includes(categoryId)) return "paints";
+  return null;
+}
+
 /**
  * Destinations for **rider** content. Helmet/boot/protection paints drop into
  * their model's `paints` (and helmets also `goggles`); rider kit + gloves live
  * per rider profile under `riders/<profile>/{paints,gloves}`. New models install
- * to their type root. Suggestions rank name-matched model paints first, then the
- * rider profiles (for kit/gloves).
+ * to their type root. The stock profiles are always offered so kit/gloves have a
+ * valid target even on a fresh install. When `profileSub` is set (kit → `paints`,
+ * gloves → `gloves`), the guess defaults to the first stock profile's folder so
+ * the content can't fall into `mods/rider` root.
  */
 export function buildRiderDestinations(
   targets: RiderTargets,
   title: string,
+  profileSub: "paints" | "gloves" | null = null,
+  paintKind: GearPaintKind | null = null,
 ): { options: DestOption[]; guess: string; suggestions: string[] } {
   const seen = new Set<string>();
   const options: DestOption[] = [];
@@ -364,37 +499,58 @@ export function buildRiderDestinations(
   add("boots", "Boots (new model)");
   add("protection", "Protection (new model)");
 
-  // Model paints, scored for suggestions.
-  const scoredPaints: { value: string; score: number }[] = [];
+  // Model paints, scored for suggestions and tagged with their gear kind so a
+  // known paint category can bias the target to just that kind's models.
+  const scoredPaints: { value: string; score: number; kind: GearPaintKind }[] = [];
   for (const h of targets.helmets) {
     add(`helmets/${h}/paints`, `${h} · helmet paints`);
     add(`helmets/${h}/goggles`, `${h} · goggles`);
-    scoredPaints.push({ value: `helmets/${h}/paints`, score: score(h) });
+    scoredPaints.push({ value: `helmets/${h}/paints`, score: score(h), kind: "helmets" });
   }
   for (const b of targets.boots) {
     add(`boots/${b}/paints`, `${b} · boot paints`);
-    scoredPaints.push({ value: `boots/${b}/paints`, score: score(b) });
+    scoredPaints.push({ value: `boots/${b}/paints`, score: score(b), kind: "boots" });
   }
   for (const p of targets.protection) {
     add(`protection/${p}/paints`, `${p} · protection paints`);
-    scoredPaints.push({ value: `protection/${p}/paints`, score: score(p) });
+    scoredPaints.push({ value: `protection/${p}/paints`, score: score(p), kind: "protection" });
   }
 
-  // Per-profile outfit (rider kit) + gloves.
-  for (const prof of targets.profiles) {
+  // Per-profile outfit (rider kit) + gloves — installed profiles plus the stock
+  // ones (so a fresh install still has a valid `riders/<profile>/…` target).
+  const profiles = [...new Set([...targets.profiles, ...STOCK_RIDER_PROFILES])].sort(
+    (a, b) => a.toLowerCase().localeCompare(b.toLowerCase()),
+  );
+  for (const prof of profiles) {
     add(`riders/${prof}/paints`, `${prof} · outfit / kit`);
     add(`riders/${prof}/gloves`, `${prof} · gloves`);
   }
 
-  const topPaints = scoredPaints
+  // When the paint's gear kind is known (Boot/Helmet/Protection Paints category),
+  // only that kind's models are candidates — a boot paint never lands on a helmet.
+  const kindPaints = paintKind
+    ? scoredPaints.filter((s) => s.kind === paintKind)
+    : scoredPaints;
+  const topPaints = kindPaints
     .filter((s) => s.score >= 1)
     .sort((a, b) => b.score - a.score);
   const suggestions = [
     ...topPaints.slice(0, 4).map((s) => s.value),
     // Rider kit / gloves can't be name-matched — surface the profiles too.
-    ...targets.profiles.map((p) => `riders/${p}/paints`),
+    ...profiles.map((p) => `riders/${p}/${profileSub ?? "paints"}`),
   ];
-  const guess = topPaints[0] && topPaints[0].score >= 2 ? topPaints[0].value : "";
+
+  // Per-profile content (kit/gloves) defaults to the first stock profile's folder.
+  // Model paints keep the name-matched guess — but with a known gear kind we're
+  // confident enough to accept a single name-token match, and to fall back to the
+  // sole installed model of that kind (the "just installed a new model" case).
+  const guess = profileSub
+    ? `riders/${STOCK_RIDER_PROFILES[0]}/${profileSub}`
+    : paintKind
+      ? topPaints[0]?.value ?? (kindPaints.length === 1 ? kindPaints[0].value : "")
+      : topPaints[0] && topPaints[0].score >= 2
+        ? topPaints[0].value
+        : "";
 
   return { options, guess, suggestions };
 }
@@ -474,6 +630,7 @@ export function resolveInitialFolder(
   guess: string,
   livery = false,
   sound = false,
+  paintKind: GearPaintKind | null = null,
 ): string {
   const remembered = localStorage.getItem(destStorageKey(modType)) ?? "";
   const rememberedIsPaints = /\/paints$/i.test(remembered);
@@ -483,6 +640,11 @@ export function resolveInitialFolder(
   // A sound should never inherit some other remembered bike-root either; prefer
   // the name-matched guess when we have one.
   if (modType.id === "bikes" && sound && guess) return guess;
+  // Rider gear paints share one remembered key across helmets/boots/protection.
+  // When the paint's kind is known, don't inherit a folder from a different kind
+  // (a boot paint must not default into the last helmet's `paints`) — use the
+  // kind-matched guess instead.
+  if (paintKind && remembered && !remembered.startsWith(`${paintKind}/`)) return guess;
   if (destOptions.some((o) => o.value === remembered)) return remembered;
   return guess;
 }

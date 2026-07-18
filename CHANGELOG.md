@@ -1,6 +1,248 @@
 # Changelog
 
+## 2026-07-18 — viewer: boots preview orientation & framing
+
+### Fixed
+- **Boots preview now renders correctly.** Four separate defects in the gear
+  preview's boot handling:
+  - *Upside down.* Boots share the gear frame but their worn-up axis is the
+    **opposite** of the helmet's — after `to_right_handed` negates gear X, a boot's
+    leg-opening sits at ≈-0.07 and its sole at ≈-0.50 (measured from the real Fox
+    Instinct mesh), so "up" is +X, the reverse of the helmet's -X crown. Boots now
+    take a dedicated `BOOT_ROT` (+90° roll) instead of the helmet's `GEAR_ROT` (-90°).
+  - *Boots overlapping ("smooshed").* A boots `.edf` ships both feet as separate
+    nodes (`boot_l`/`boot_r`) authored coincident at the ankle; they were rendered
+    stacked. New `bootSides` splits them onto left/right feet (on-body), and the
+    Library solo preview separates the pair by half a boot width.
+  - *Toe-in splay.* Each foot now yaws so its heel→toe axis points straight forward
+    (`straightenYaw`, from the front/back 20% of the mesh), cancelling the mould's
+    built-in angle.
+  - *Framing.* The solo boots pair is recentred on the origin explicitly (the
+    up-righted bbox sits well below its own origin), so the camera frames it instead
+    of leaving it under view.
+
+## 2026-07-18 — viewer: un-mirror gear/rider
+
+### Fixed
+- **Rider gear/helmet artwork no longer renders mirrored.** MX Bikes is a DirectX
+  (left-handed) engine; bikes were already converted to three.js' right-handed frame
+  (`to_right_handed`) but gear/rider meshes deliberately were not — on the assumption
+  a mirror is "invisible on a helmet shell." It isn't: decal text ("Red Bull",
+  "Oakley", "Troy Lee Designs") read backwards on every gear part. Gear/rider now goes
+  through `to_right_handed` too, and `GEAR_ROT` flips to a −90° roll to keep the helmet
+  upright under the flipped up-axis (front-back and the left-right→−X mapping are
+  unchanged, so the boot mirror and seating anchors still hold). Removed the now-unused
+  `orient_windings_nodes`/`orient_windings` lighting-only path.
+
+## 2026-07-17 — viewer: preview gear paints on the stock model
+
+### Added
+- **Loose gear paints (boots / helmet / protection) preview on the game's stock
+  model** (`load_stock_gear_model`). A boot paint installs as a bare `.pnt` with no
+  model — the boot *model* is stock, in `rider.pkz` — so previewing one now loads
+  the stock boots mesh and applies the paint, the same way a rider-outfit paint
+  renders on the stock body. Wired for the `bootPaint`/`helmetPaint`/`protectionPaint`
+  Library categories; outfit/glove paints keep the rider-body preview.
+- A caption notes when a paint is shown on the stock model, since a `.pnt` painted
+  for a *different* model (its texture name won't match the stock one) is
+  force-applied and may not line up — e.g. the installed `Purple White Alpinestar
+  Boots.pnt` (texture `aboots`) and `RDS Leopard GBootz W.pnt` are for boot models
+  not installed, so they render on the stock boots but with mismatched UVs. Stock
+  boots + a stock-named paint line up perfectly.
+
+### Fixed
+- **Rider gear LODs no longer render stacked.** Gear packs its LODs as repeated node
+  names in one `.edf` (the stock boots ship `boot_l`/`boot_r` three times);
+  `keep_lod0` keeps only the highest-detail node of each name wherever rider-side
+  meshes are decoded.
+
+## 2026-07-17 — browse: separate boot/protection paints from models
+
+### Added
+- **Boot Paints and Protection Paints browse filters.** mxb-mods splits each gear
+  type into a model category and a paints child (Boots 31 / Boot Paints 126,
+  Protection 36 / Protection Paints 135) — the same split the site's search uses.
+  The Rider tab already surfaced Helmet Paints; it now surfaces all three, so a
+  paint can be found without wading through models.
+
+### Changed
+- **Gear paints install onto the right model kind.** When a paint comes from a
+  known paints category (`riderPaintKind`), the install destination is biased to
+  that kind's installed models only — a boot paint targets a boot model (and
+  falls back to the sole installed boot model, the "just installed a new model"
+  case), never a helmet/protection folder. The shared per-type remembered folder
+  is also ignored when it belongs to a different gear kind.
+
+### Added
+- **Goggles are textured and paint-selectable.** A helmet's `.edf` carries a
+  separate `goggles` submesh, and the mod ships a `goggles/` paint folder (its own
+  texture, e.g. `TLDSE4goggle`) distinct from the shell's `paints/` (`TLDSE4`). The
+  viewer now binds each submesh to its own paint and adds a **Goggles** dropdown
+  next to the Paint one, so the lens/strap colour can be picked independently. Six
+  goggle paints + fourteen helmet paints listed for the TLD SE4, verified.
+
+### Fixed
+- **Goggles wore the helmet skin.** Gear was drawn with one material per `.edf`
+  node, so the goggles submesh sampled the helmet atlas at its own UVs and rendered
+  dark/garbled. Gear now builds **per-submesh** materials (the path bikes already
+  use), binding `goggles`→goggle texture and everything else→the shell texture. The
+  binding is by submesh name, so it holds across mods without hard-coded texture
+  names.
+
+## 2026-07-17 — viewer: the model is left-handed (mirrored bike + inside-out lighting)
+
+### Fixed
+- **`.edf` models are authored left-handed (DirectX); three.js is right-handed**
+  (`edf.rs::to_right_handed`, applied in `main.rs` after `assemble_bike`). Feeding
+  those coordinates straight in mirrored the model, which caused two bugs that
+  looked unrelated:
+  - **Mirrored artwork** — "HONDA" on the seat and "CRF"/"450R" on the shrouds
+    rendered back-to-front (the reported "seat is flipped").
+  - **"Holes" / dark facets** — a mirror inverts triangle orientation, so against
+    the model's own normals **100.0%** of the Honda's `chassis`/`fsusp` triangles
+    read as back-facing. Backface culling was never involved (the viewer renders
+    `DoubleSide`, so nothing ever vanished): `DoubleSide` lighting does
+    `normal *= gl_FrontFacing ? 1 : -1`, so every normal was negated and the whole
+    bike was lit from the inside. The geometry was complete the entire time.
+
+  Negating X on positions + normals fixes both at once, and the winding then agrees
+  with the normals with no re-winding. Applied *after* assembly deliberately — the
+  `.geom` mounts and rake rotations are authored in the game's frame, and mirroring
+  X inverts a rotation about X. Proven by software-rendering the real Honda: the
+  text reads correctly and the black facets resolve into solid red bodywork.
+- **Rider/gear lighting** (`edf.rs::orient_windings_nodes`). Gear shares the same
+  left-handed convention (boots 100.0%, TLD SE4 helmet 99.9% back-facing) and was
+  lit inside-out too, but it's authored X-up and the viewer bbox-fits it with
+  anchors tuned to the un-converted frame — so its winding is corrected for
+  lighting while its geometry is left alone.
+- Confirmed **`flipY = false` is correct** and left unchanged. Both `.pnt` and
+  embedded `model.edf` textures are stored bottom-row-first, and `flipY = true`
+  drags the atlas's engine-metals region onto the bodywork. The mirrored text came
+  from the mesh, not the texture.
+
+### Added
+- **Paints that don't fit the model are now labelled** instead of silently doing
+  nothing (`BikePaint.appliesToModel`; dropdown shows "— not for this model" plus a
+  note on the canvas). A `.pnt` replaces a model texture *by name*, which is the
+  whole mechanism: the Honda binds `2021crf`/`w_plate`/`chain`, so its own
+  `stock.pnt` (ships `chain`, `wheel`…) applies, while `#96_CR450F'26.2HRC_TRD.pnt`
+  ships only `plastics`/`plastics_n` — it's painted for a '26 HRC model-swap body
+  kit that isn't installed, binds nothing, and the game wouldn't apply it either.
+
+## 2026-07-17 — viewer: `.edf` indices start at `ic+4` (the root of every mesh artifact)
+
+### Fixed
+- **`.edf` index buffers are read from `ic+4`, not `ic+8`** (`edf.rs`). There is no
+  flag word after `tri_count`: the zero read there is `idx0`, which is 0 because
+  every node's first triangle is `(0,1,2)`. The off-by-one validated itself —
+  skipping `idx0` at the front and eating the trailing `submesh_count` at the back
+  landed the name anchor exactly — so blocks "checked out" while every triangle was
+  built from a shifted index window. This was the single root cause behind the
+  shattered/faceted gear, the streaks, the holes and the half-rendered rider.
+  Proof: the decode now yields exactly `tri_count` triangles with zero degenerates
+  (stock helmet 4120/4120, TLD SE4 6318/6318, boots 1950, armour 2922), and the
+  rider body renders as a clean, complete figure.
+
+### Removed
+- **The strip decoder, the degenerate-ratio heuristic and the UV-span streak
+  filter** — all three existed only to compensate for the bad offset. There is no
+  strip encoding in this format; bikes, gear and the rider body are all plain
+  triangle lists. `parse_rider` is gone (callers use `parse`), and the UV-span rule
+  is gone with it — it was deleting real geometry.
+
+## 2026-07-16 — viewer: read the bike's configs instead of guessing
+
+### Added
+- **`gfx.cfg` + `.hrc` are now loaded** from a bike (`cfg.rs`). They ship as plain
+  text inside the `.pkz` and state outright what the viewer used to infer: which
+  node is a part's full-detail mesh, and which mesh group binds to which texture.
+- **Every texture packed in a `model.edf` is extracted under the model's own name**
+  (`2021crf`, `exhaust_22`, `w_plate`; `plastics`, `450f_metals` on the KTM) instead
+  of keeping only the largest and renaming it `albedo`. Those names are the whole
+  binding mechanism, and collapsing them threw them away.
+
+### Changed
+- **LOD selection is `.hrc`-driven.** A `.hrc` names `level0` and its LOD variants
+  outright, so the old heuristic (strip a `b`/`c` before the first digit, tiebreak on
+  triangle count — which once silently flipped the KTM 450 onto its un-placeable
+  LOD-B chassis) is now only a fallback for a loose `.edf` with no configs.
+- **Texture binding moved to Rust and is driven by the bike's files**, not by regex
+  over mesh-group names in the viewer. `gfx.cfg`'s `texture = …` overrides win
+  (`plate → w_plate`, `chain → chain`); everything else takes the model's primary
+  diffuse; a paint replaces a model texture of the **same name**. The viewer now just
+  looks the resolved name up.
+- Bike textures use `RepeatWrapping` — the number plates' UV islands run outside
+  0–1, and the Honda's exhaust is authored on UV tile 1.
+
+### Fixed
+- **Bike paints smeared across the whole bike** (rider number in the wrong place, the
+  paint map dragged over the rear fender). The viewer forced *every* mesh group to
+  the paint's `plastics`, so a paint authored for a different model was stretched
+  over parts it was never drawn for — engine, forks, swingarm and all. A paint only
+  applies where the model names a texture the paint carries; a stock Honda's body
+  texture is `2021crf`, so its `'26 HRC` paints (drawn for a swapped model) correctly
+  leave it alone now, rather than being smeared over it.
+- **The exhaust wore body graphics.** The Honda's exhaust is authored wholly on UV
+  tile 1 (u ∈ [1.001, 2.000]), which selects a second texture (`exhaust_22`) sampled
+  at `u - 1`. Verified by rendering: it now reads as brushed metal.
+
 ## 2026-07-16 — v0.1.6
+
+### Fixed
+- **Gear mods rendered as shattered polygons**: a mesh's index buffer is either a
+  stitched triangle *strip* or a plain triangle *list*, and content exports both —
+  PiBoSo's own gear/rider are strips (~50% of their triples are degenerate
+  stitches), while e.g. the `TLD SE4` helmet mod is a list (6%). Decoding a list as
+  a strip invents ~3.7 triangles per vertex of garbage (a closed mesh is ~2), which
+  is exactly the shattered surface and streaks. Each node now picks from its own
+  degenerate ratio instead of being told by the caller.
+- **Gear rendered lying on its face**: helmets/boots/protection are authored
+  **X-up** (a helmet extends up from an origin at the neck), not Z-up like bikes or
+  Y-up like the rider body — so they need a roll about Z, not the bike's X flip.
+  Verified by rendering the mesh down each axis.
+- **Gear previewed at a top-down angle**: the viewer's camera sits high to look over
+  a bike; a single gear item is small and centred, so it now gets a level view.
+  (The move also has to go through OrbitControls, which owns the camera and was
+  silently reverting it.)
+- **Packaged `.pkz` mods extracted as empty files**: an archive written *streaming*
+  leaves its per-entry sizes zero in the local file header (they live only in the
+  central directory), so every entry came out 0 bytes — a packaged gear mod looked
+  like it simply had no model. Sizes are now read from the central directory, with
+  the local header as fallback. Verified on a real 30 MB helmet mod (`helmet.edf`
+  0 → 9.1 MB) with no change to OEM bike/track archives.
+- **Installed gear mods never rendered**: the gear loader only looked for an
+  *extracted folder*, but gear installs as a packaged `.pkz` — and the Library only
+  passed bikes to the 3D viewer, so opening a helmet showed the rider body wearing
+  that helmet's paint. Gear now loads from a folder **or** a `.pkz`, and a
+  helmet/boots/protection item opens as a standalone 3D preview of that piece.
+- **Paint colours were channel-swapped everywhere**: `.pnt` pixels are stored
+  **RGBA**, but the decoder swapped them as if they were BGRA — turning every
+  paint's navy into brown and red into blue, on bike liveries as well as rider
+  kits. Proven against PiBoSo's own stock `white_navy.pnt`, whose navy only reads
+  as navy unswapped. Pixels are now returned verbatim; added an `#[ignore]`
+  real-file guard (`stock_white_navy_decodes_navy_not_brown`) so it can't regress.
+  (The old `libpnt` fixture uses the opposite order to the real game files, so it's
+  no longer treated as ground truth for channel order.)
+- **Rider body rendered as a shredded half-mesh**: skinned models store their
+  indices as stitched triangle **strips**, not lists — reading them as a list
+  recovered only ~1/3 of the surface, wrongly grouped. New `edf::parse_rider`
+  strip-decodes them (rider body: 2,840 → 11,701 triangles, a solid figure), while
+  bikes/gear keep the list decode (`edf::parse`) their non-submesh parts need.
+- **Rider paint mapped as noise**: the `.edf` UV block is a single 2-float set
+  (**stride 8**), not two sets at stride 16 — the old read sampled every *other*
+  vertex's UV. Per-triangle UV span dropped 0.44 → 0.053.
+- **Paints were mapped upside-down**: MX Bikes is a DirectX game, so its textures
+  use a **top-left UV origin**; three.js's default `flipY` mirrored them, making
+  the torso sample the pants region ("the rotation is off"). Now `flipY = false`.
+  Proven on stock `white_navy.pnt`: flipped it renders an asymmetric kit (one leg
+  yellow, one navy), unflipped a correct symmetric one. Affects bike liveries too.
+- **Streaky "lines" across the rider**: strip-transition triangles whose vertices
+  straddle different UV islands smear the atlas across the model. They're often
+  short in 3D, so the existing long-and-thin sliver test missed them; they're now
+  dropped by a UV-span test (a real triangle covers ~0.03 of the sheet, these span
+  0.85–1.0). Strip decode only, so bikes are untouched.
+- **Rider preview was slow**: the body was re-read from the 105 MB `rider.pkz` and
+  re-parsed (28 MB `.edf`) on every open; now cached per profile.
 
 ### Added
 - **Full-bundle preset sharing ("they have nothing" import)**: a preset can now be
@@ -13,17 +255,38 @@
   Google Drive / MediaFire / Mega / direct download + `place_mod` pipeline) and
   installs every file into the correct `mods/` subfolder — so a recipient who owns
   none of the mods still gets the complete look. New Rust modules `bundle.rs`
-  (resolve/build/import) and `upload.rs` (swappable host); new commands
-  `preset_bundle_stats` / `preset_bundle_create` / `preset_bundle_import`. The
-  share code stays one backward-compatible format — an optional `bundle` field on
-  `Preset`, so legacy `MXBP1-` codes still decode. The Share dialog previews bundle
-  size + which slots can't travel and notes the link is public/temporary; free-text
-  fonts and stock/uninstalled slots aren't bundled.
+  (resolve/build/import) and `upload.rs`; `preset_bundle_stats` /
+  `preset_bundle_create` / `preset_bundle_import` commands. Backward-compatible: an
+  optional `bundle` field on `Preset`, so legacy `MXBP1-` codes still decode. The
+  Share dialog previews bundle size + which slots can't travel and notes the link
+  is public/temporary; free-text fonts and stock/uninstalled slots aren't bundled.
+- **3D preview in Presets (bike + rider)**: a live 3D panel renders the current
+  loadout — the real bike model decoded from its `.edf`/`.pkz`, its livery, and the
+  rider's installed gear (helmet/boots/protection meshes + suit/gloves paints) — and
+  updates as you change slots. Native decoders (`edf`, `paint`) mean no external
+  tools. Optional **game install folder** setting (Settings → MX Bikes folder) points
+  at the MX Bikes install so the real rider **body** (`rider.pkz`) can load.
 
 ### Changed
-- `bun.lock` is now gitignored — npm is the canonical package manager (CI runs
-  `npm ci`). A committed `bun.lock` makes `tauri-action` build with bun, which the
-  release runners don't have.
+- Heavy backend commands (model/paint/library loads, `.pkz` decode) now run **off
+  the UI thread** (`async` + `spawn_blocking`), so opening the viewer or library no
+  longer freezes the window and a malformed asset returns an error instead of
+  crashing.
+
+### Fixed
+- **Non-plain paints render in the 3D viewer**: a non-plain paint container is
+  a non-plain container, not a plain `PNT\0` file. The paint decoder now transparently
+  handles a non-plain paint (`paint::decode_any`), used everywhere paints are read.
+- **Much faster 3D bike-model load**: textures encode with fast deflate and in
+  parallel (`rayon`) instead of serial max-compression PNG — big bikes load quickly.
+- **No more freezes / blank white screens**: added a global + canvas `ErrorBoundary`
+  with a WebGL context-loss handler, so a render error shows a recoverable panel
+  instead of an unrecoverable white screen.
+- **Rider body no longer see-through**: rider meshes render double-sided
+  (`THREE.DoubleSide`), so the body reads as solid.
+- **Reliable `tauri dev` startup**: a `predev` step frees the Vite port, and dev
+  builds fully quit on window close (release builds still hide to tray) so the port
+  isn't orphaned.
 
 ## 2026-07-15 — v0.1.5
 

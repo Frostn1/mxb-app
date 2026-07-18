@@ -59,6 +59,9 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 # Encode PNG thumbnails as `data:` URIs (no asset-protocol wiring needed).
 base64 = "0.22"
+# Parallelize the (CPU-bound) per-texture PNG encode when loading a bike/rider
+# model — a bike with several paints would otherwise encode them one at a time.
+rayon = "1"
 anyhow = "1"
 # Move uninstalled mods to the OS Recycle Bin / Trash rather than deleting outright.
 trash = "5"

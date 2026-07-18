@@ -10,6 +10,11 @@ use tauri::{AppHandle, Manager};
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
     pub mods_path: String,
+    /// MX Bikes **install** directory (where `mxbikes.exe` + core `rider.pkz` live),
+    /// e.g. a Steam `…/steamapps/common/MX Bikes`. Distinct from `mods_path` (the
+    /// Documents data folder). Empty until set; used to load the core rider body
+    /// model for the 3D viewer. Best-effort auto-detected on first run.
+    pub game_path: String,
     /// Hide to the tray on window close and keep running.
     pub run_in_background: bool,
     /// Start MXB App automatically on login.
@@ -26,6 +31,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             mods_path: String::new(),
+            game_path: String::new(),
             run_in_background: true,
             launch_at_startup: true,
             auto_run_frostmod: true,

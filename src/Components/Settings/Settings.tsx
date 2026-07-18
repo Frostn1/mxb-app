@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   createConfig,
   setAutoRunFrostmod,
+  setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
   setRunInBackground,
@@ -14,7 +15,7 @@ import {
 import { checkForUpdates } from "../../lib/updater";
 import { useConfig } from "../../Context/Config";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
-import { useFrostmod } from "../../Context/Frostmod";
+import { useFrostmod } from "../../Context/FrostmodContext";
 import { Button } from "@/Components/ui/button";
 import { Segmented } from "@/Components/ui/segmented";
 import { Switch } from "@/Components/ui/switch";
@@ -132,6 +133,27 @@ export default function Settings() {
     }
   };
 
+  const changeGameFolder = async () => {
+    const picked = await pickFolder({
+      directory: true,
+      multiple: false,
+      title: "Select your MX Bikes install folder (contains rider.pkz)",
+    });
+    if (typeof picked !== "string") return;
+    setBusy(true);
+    try {
+      await setGamePath(picked);
+      await reloadConfig();
+      toast.success("Game install set", {
+        description: "The 3D rider preview can now load the real body model.",
+      });
+    } catch (e) {
+      toast.error("Couldn't set install folder", { description: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const reloadGame = async () => {
     const outcome = await reload();
     if (outcome === "signaled") toast.success("FrostMod reloaded the game.");
@@ -191,6 +213,31 @@ export default function Settings() {
             >
               Detect automatically
             </button>
+
+            <div className="mt-1 h-px bg-border" />
+
+            {/* Optional game *install* folder (holds core rider.pkz) — powers the
+                real 3D rider body in the preset preview. */}
+            <p className="text-[12px] text-muted-foreground">
+              Game install folder (optional) — where MX Bikes is installed (holds{" "}
+              <span className="font-mono">rider.pkz</span>). Set it to load the real
+              rider body in the 3D preview.
+            </p>
+            <div className="flex gap-2">
+              <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+                <span className="flex-1 truncate" title={config.gamePath}>
+                  {config.gamePath || "Not set"}
+                </span>
+                {config.gamePath && (
+                  <span className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-success">
+                    <Check className="size-3" strokeWidth={3} /> Set
+                  </span>
+                )}
+              </div>
+              <Button variant="outline" size="sm" onClick={changeGameFolder} disabled={busy}>
+                {config.gamePath ? "Change…" : "Set…"}
+              </Button>
+            </div>
           </Section>
 
           {/* general / background */}
