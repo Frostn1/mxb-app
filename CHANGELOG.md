@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-18 — rider gear paints from extracted folders + goggles
+
+### Fixed
+- **Extracted (loose-folder) gear now shows its paints instead of rendering grey.**
+  The paint-name match only accepted `.pkz`-style internal paths (`/paints/…`), so a
+  paint in an *extracted* gear folder (`paints/…`, no leading slash) was skipped.
+- **Folder helmets now load their goggle paints.** The gear-folder reader only scanned
+  `paints/`; it now also reads `goggles/`, and the loadout's goggle-paint choice is
+  threaded through `load_gear` so the selected goggles render.
+
 ## 2026-07-18 — helmet/boot browse shows models only
 
 ### Fixed

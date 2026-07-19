@@ -757,12 +757,16 @@ fn load_rider_model_blocking(
     // Gear: the installed model the loadout names, else the game's stock set, each
     // with its selected (or stock) paint.
     for spec in &GEAR {
-        let (model, paint) = match spec.part {
-            "helmet" => (&loadout.helmet, &loadout.helmet_paint),
-            "boots" => (&loadout.boots, &loadout.boots_paint),
-            _ => (&loadout.protection, &loadout.protection_paint),
+        let (model, paint, goggles) = match spec.part {
+            "helmet" => (
+                loadout.helmet.as_str(),
+                loadout.helmet_paint.as_str(),
+                loadout.goggles_paint.as_str(),
+            ),
+            "boots" => (loadout.boots.as_str(), loadout.boots_paint.as_str(), ""),
+            _ => (loadout.protection.as_str(), loadout.protection_paint.as_str(), ""),
         };
-        if let Some(p) = load_gear(&cfg, &base, spec, model, paint) {
+        if let Some(p) = load_gear(&cfg, &base, spec, model, paint, goggles) {
             parts.push(p);
         }
     }
@@ -1082,7 +1086,11 @@ async fn list_installed_gear_paints(
 /// subfolder. Used for both the helmet skin (`paints`) and its goggles (`goggles`).
 fn gear_folder_paint_name(entry: &str, folder: &str) -> Option<String> {
     let n = entry.replace('\\', "/").to_ascii_lowercase();
-    if !n.contains(&format!("/{folder}/")) {
+    // Match the `<folder>/` path segment whether the entry is a `.pkz` internal path
+    // (`helmet/paints/x.pnt`, has a leading slash) or a loose folder read
+    // (`paints/x.pnt`, no leading slash). The old `/{folder}/`-only check silently
+    // skipped every paint in an *extracted* gear folder, so its shell rendered grey.
+    if !n.contains(&format!("/{folder}/")) && !n.starts_with(&format!("{folder}/")) {
         return None;
     }
     let base = entry.replace('\\', "/");
@@ -1171,7 +1179,9 @@ fn load_gear_model_blocking(
     // submesh is conventionally named `goggles`).
     for node in &mut nodes {
         for sm in &mut node.submeshes {
-            let is_goggle = sm.name.to_ascii_lowercase().contains("goggle");
+            // The goggles skin covers the goggle band AND its lens submesh.
+            let n = sm.name.to_ascii_lowercase();
+            let is_goggle = n.contains("goggle") || n.contains("lens");
             sm.texture = if is_goggle {
                 goggle_tex.clone().or_else(|| main_tex.clone())
             } else {
@@ -1198,14 +1208,18 @@ fn read_gear_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>
                 }
             }
         }
-        // A gear folder keeps its paints in `paints/`.
-        if let Ok(rd) = std::fs::read_dir(p.join("paints")) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                if let (Some(name), Ok(bytes)) =
-                    (path.file_name().and_then(|n| n.to_str()), std::fs::read(&path))
-                {
-                    out.push((format!("paints/{name}"), bytes));
+        // A gear folder keeps its skins in `paints/` and a helmet's lens/strap skins
+        // in `goggles/` — read both (the goggles one was missing, so folder helmets
+        // had no goggle paints).
+        for sub in ["paints", "goggles"] {
+            if let Ok(rd) = std::fs::read_dir(p.join(sub)) {
+                for entry in rd.flatten() {
+                    let path = entry.path();
+                    if let (Some(name), Ok(bytes)) =
+                        (path.file_name().and_then(|n| n.to_str()), std::fs::read(&path))
+                    {
+                        out.push((format!("{sub}/{name}"), bytes));
+                    }
                 }
             }
         }
@@ -1245,6 +1259,7 @@ fn load_gear(
     spec: &GearSpec,
     model: &str,
     paint: &str,
+    goggles: &str,
 ) -> Option<RiderPart> {
     // 1. An installed gear mod — either an extracted folder or a packaged `.pkz`
     //    sitting in the kind folder (which is how most gear actually installs).
@@ -1255,13 +1270,13 @@ fn load_gear(
             if !src.exists() {
                 continue;
             }
-            // The loadout's chosen paint is resolved inside (it may live in the
-            // packaged `.pkz` rather than as a loose file).
+            // The loadout's chosen paint + goggle paint are resolved inside (they may
+            // live in the packaged `.pkz` rather than as loose files).
             if let Ok(part) = load_gear_model_blocking(
                 src.to_string_lossy().into_owned(),
                 spec.part.to_string(),
                 Some(paint.to_string()),
-                None, // loadout has no goggle choice → default goggle paint
+                Some(goggles.to_string()),
             ) {
                 return Some(part);
             }
