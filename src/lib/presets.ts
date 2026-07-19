@@ -6,17 +6,6 @@ import {
   type RiderTargets,
 } from "../api/mods";
 
-/**
- * Builder metadata + option sourcing for customization presets.
- *
- * MX Bikes' `profile.ini` stores each slot's value as a plain reference to an
- * installed mod/paint folder name (empty = stock). Here we enumerate what's
- * installed so the builder can offer real choices per slot, resolve which options
- * depend on another slot (helmet paints depend on the helmet, etc.), and flag a
- * value whose mod isn't installed (useful when loading a shared preset).
- */
-
-/** Slot fields in the order the builder shows them, grouped for layout. */
 export interface SlotDef {
   key: keyof Loadout;
   label: string;
@@ -53,8 +42,6 @@ export const SLOT_GROUPS: { id: SlotDef["group"]; label: string }[] = [
   { id: "body", label: "Body" },
 ];
 
-/** A blank loadout — every slot stock/empty. The zero value both the Presets
- * builder and the Rider studio start from. */
 export const EMPTY_LOADOUT: Loadout = {
   paint: "",
   bikeFont: "",
@@ -86,7 +73,6 @@ const BUILTINS: Partial<Record<keyof Loadout, string[]>> = {
   tyres: ["p_mx"],
 };
 
-/** Everything installed that the builder can offer, indexed for quick lookup. */
 export interface Scans {
   bikePaints: Record<string, string[]>; // bikeid → livery names
   modelSwaps: Record<string, string[]>; // bikeid → model-swap variant names
@@ -103,7 +89,6 @@ export interface Scans {
   tyres: string[];
 }
 
-/** Drop a trailing `.pnt`/`.pkz`/`.zip` from a paint/model file name. */
 function stripExt(name: string): string {
   return name.replace(/\.(pnt|pkz|zip)$/i, "");
 }
@@ -112,7 +97,6 @@ function push(map: Record<string, string[]>, key: string, val: string) {
   (map[key] ??= []).push(val);
 }
 
-/** Load + index everything installed that the preset builder needs. */
 export async function loadScans(): Promise<Scans> {
   const [bikes, rider, tyres, targets, swaps] = await Promise.all([
     scanLibrary("mods/bikes").catch(() => [] as LibraryEntry[]),
@@ -143,7 +127,6 @@ export async function loadScans(): Promise<Scans> {
   for (const e of bikes) {
     if (e.category === "bikePaint" && e.parent) push(s.bikePaints, e.parent, stripExt(e.name));
   }
-  // Model-swap variants per bike (only bikes that actually have alternate models).
   for (const b of swaps) {
     if (b.variants.length) s.modelSwaps[b.bike] = b.variants.map((v) => v.name);
   }
@@ -172,7 +155,6 @@ export async function loadScans(): Promise<Scans> {
   }
   for (const e of tyres) s.tyres.push(stripExt(e.name));
 
-  // De-dupe + sort every list for stable, tidy dropdowns.
   const tidy = (a: string[]) => [...new Set(a)].sort((x, y) => x.localeCompare(y));
   s.helmets = tidy(s.helmets);
   s.boots = tidy(s.boots);
@@ -186,12 +168,6 @@ export async function loadScans(): Promise<Scans> {
   return s;
 }
 
-/**
- * The installed option values for a slot, given the current bike + loadout (so
- * dependent slots resolve against the selected helmet/boots/etc.). Builtins are
- * appended. Does NOT include the current value or the empty "stock" option — the
- * UI adds those.
- */
 export function slotOptions(
   slot: SlotDef,
   bikeid: string,
@@ -246,8 +222,6 @@ export function slotOptions(
   return [...new Set([...opts, ...builtins])];
 }
 
-/** Whether a slot's chosen value references a mod that isn't installed (empty and
- * built-in/free-text values are never "missing"). Used to warn on shared presets. */
 export function isMissing(
   slot: SlotDef,
   bikeid: string,
@@ -260,12 +234,10 @@ export function isMissing(
   return !slotOptions(slot, bikeid, loadout, scans).includes(val);
 }
 
-/** All slots in a loadout whose referenced mod is missing (for a preset preview). */
 export function missingSlots(bikeid: string, loadout: Loadout, scans: Scans): SlotDef[] {
   return SLOTS.filter((s) => isMissing(s, bikeid, loadout, scans));
 }
 
-/** A short human summary of the non-stock slots in a loadout (for preset cards). */
 export function loadoutSummary(loadout: Loadout): string {
   const parts: string[] = [];
   if (loadout.helmet && loadout.helmet !== "default") parts.push(loadout.helmet);

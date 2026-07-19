@@ -69,14 +69,12 @@ import {
   type Scans,
 } from "../../lib/presets";
 
-/** Human-readable byte size for bundle previews. */
 function humanSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} B`;
 }
 
-/** Human label for a bundle progress phase. */
 function phaseLabel(phase: BundlePhase): string {
   switch (phase) {
     case "bundling":
@@ -92,7 +90,6 @@ function phaseLabel(phase: BundlePhase): string {
   }
 }
 
-/** Copy text to the clipboard, best-effort (webview clipboard, then execCommand). */
 async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
@@ -114,14 +111,6 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/**
- * Turn an apply outcome into a user-facing "how it took effect" note.
- *
- * The *selected* look lives in the game's memory (read from `profile.ini` only
- * when a profile is selected), so a FrostMod content reload alone doesn't show
- * it. Priority: a live in-place refresh > "reselect your profile" while the game
- * runs > "loads next launch".
- */
 function applyNote(outcome: PresetApplyOutcome): string {
   switch (outcome.live_refresh) {
     case "refreshed":
@@ -137,16 +126,7 @@ function applyNote(outcome: PresetApplyOutcome): string {
   return "saved — it loads next time the game opens.";
 }
 
-/**
- * Presets — build a full customization **loadout** (helmet, paints, boots, gloves,
- * suit, protection, tyres…) and apply it to a bike on command. MX Bikes stores the
- * selected look per-bike in `profile.ini`; a preset is a bike-agnostic bundle of
- * every slot value. You can capture the look a bike currently wears, edit any slot
- * from what you've installed, save it named, quick-apply it later, and share it as
- * a code others can import. Applying nudges a running FrostMod to reload.
- */
 interface PresetsProps {
-  /** Open a preset in the Rider tab to view it on the player model. */
   onOpenInRider?: (loadout: Loadout) => void;
 }
 
@@ -171,7 +151,6 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
     setLoadout((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  // Initial load: profiles, saved presets, installed-mod index.
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -193,7 +172,6 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
     void load();
   }, [load]);
 
-  // When the profile changes, refresh its bike list.
   useEffect(() => {
     if (!profile) {
       setBikes([]);
@@ -212,8 +190,6 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
     };
   }, [profile]);
 
-  // Capture the current look whenever the target bike changes, so the builder
-  // starts from what's actually on that bike (the "capture current" default).
   const capture = useCallback(async () => {
     if (!profile || !bike) return;
     try {
@@ -378,7 +354,6 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
                   <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                     {g.label}
                   </h2>
-                  {/* First rider group: jump to the Rider tab to preview this look. */}
                   {g.id === "rider" && onOpenInRider && (
                     <Button
                       variant="ghost"
@@ -504,7 +479,6 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
   );
 }
 
-/** A saved preset row with load-into-builder, apply, share, and delete actions. */
 function PresetCard({
   preset,
   applying,
@@ -579,12 +553,6 @@ function IconBtn({
   );
 }
 
-/**
- * Share a preset two ways: the instant **config code** (recipient needs the mods),
- * or a **full bundle** — package every asset the look references, upload it, and
- * hand back a code with the download link baked in so a recipient who owns nothing
- * still gets the complete look.
- */
 function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const [configCode, setConfigCode] = useState<string | null>(null);
@@ -593,7 +561,6 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
   const [creating, setCreating] = useState(false);
   const [phase, setPhase] = useState<BundlePhase | null>(null);
 
-  // On open, fetch the plain config code and preview what a full bundle carries.
   useEffect(() => {
     if (!preset) return;
     setCopied(false);
@@ -717,7 +684,6 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
   );
 }
 
-/** Paste a share code, preview it (name + missing mods), then import. */
 function ImportDialog({
   open,
   scans,
@@ -746,7 +712,6 @@ function ImportDialog({
     }
   }, [open]);
 
-  // Decode as the user pastes/edits, to preview the preset and its missing mods.
   useEffect(() => {
     const t = text.trim();
     if (!t) {

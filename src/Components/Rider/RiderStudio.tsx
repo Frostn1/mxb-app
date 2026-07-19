@@ -20,11 +20,8 @@ import {
 
 const EMPTY_GEAR_PAINTS: GearPaints = { paints: [], goggles: [] };
 
-/** The studio dresses the player model only — the bike livery / model-swap / tyres
- * group belongs to the Presets builder. */
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
 
-/** Gear meshes that can be toggled on/off in the render. */
 const TOGGLES: { part: RiderPart["part"]; label: string }[] = [
   { part: "helmet", label: "Helmet" },
   { part: "protection", label: "Protection" },
@@ -32,30 +29,17 @@ const TOGGLES: { part: RiderPart["part"]; label: string }[] = [
 ];
 
 interface RiderStudioProps {
-  /** A preset loadout handed off from the Presets tab to view here (or `null`). */
   initialLoadout?: Loadout | null;
-  /** Called once `initialLoadout` has been loaded, so the parent can clear it. */
   onLoaded?: () => void;
 }
 
-/**
- * Rider render studio — pick a helmet, goggles, outfit and boots (plus their
- * paints), see them composed on the player model, and **save the rider look with a
- * name** (a preset you can then apply from the Presets tab). Reuses the preset
- * builder's installed-mod index, slot fields and rider preview.
- */
 export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioProps) {
   const [scans, setScans] = useState<Scans | null>(null);
   const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  // Protection starts hidden: the stock `armour.edf` doesn't seat cleanly on the
-  // preview body yet (it reads as rings around the torso), so it's off until the
-  // gear-rig fit is improved. Helmet/boots seat well and stay on.
   const [hidden, setHidden] = useState<RiderPart["part"][]>(["protection"]);
   const [error, setError] = useState<string | null>(null);
-  // A gear model's paints/goggles are packed inside its `.pkz`, so the loose-file
-  // scan can't see them — fetch them per selected model to fill the paint pickers.
   const [gearPaints, setGearPaints] = useState<Record<"helmet" | "boots" | "protection", GearPaints>>({
     helmet: EMPTY_GEAR_PAINTS,
     boots: EMPTY_GEAR_PAINTS,
@@ -72,7 +56,6 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
     );
   }, []);
 
-  // A preset opened from the Presets tab loads straight into the builder here.
   useEffect(() => {
     if (initialLoadout) {
       setLoadout(initialLoadout);
@@ -98,8 +81,6 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
     }
   }, [name, loadout]);
 
-  // The installed-mod index that feeds the pickers. No profiles/bikes needed —
-  // this view never writes to the game, so it works even with none set up.
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -113,9 +94,6 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
     void load();
   }, [load]);
 
-  // Pull the packed paints/goggles for each selected gear model (helmet/boots/
-  // protection) so their paint pickers have options. Stock/built-in gear returns
-  // nothing, which is fine.
   useEffect(() => {
     let alive = true;
     const grab = (part: RiderPart["part"], model: string) =>
@@ -132,8 +110,6 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
     };
   }, [loadout.helmet, loadout.boots, loadout.protection]);
 
-  // Options for a slot: the loose-file scan, plus a gear model's packed paints for
-  // its dependent paint/goggle slots.
   const packedFor = useCallback(
     (key: keyof Loadout): string[] => {
       switch (key) {

@@ -24,7 +24,6 @@ import { Button } from "@/Components/ui/button";
 
 interface LibraryDetailProps {
   entry: LibraryEntry;
-  /** All entries of the current type, for listing a model's paints / swaps. */
   entries: LibraryEntry[];
   modType: ModType;
   onClose: () => void;
@@ -34,16 +33,10 @@ interface LibraryDetailProps {
   onOpenEntry: (e: LibraryEntry) => void;
 }
 
-/** The owner key a model's paints/swaps point back to (their `parent`). */
 function ownerKey(entry: LibraryEntry): string {
   return entry.kind === "folder" ? entry.name : displayName(entry.name);
 }
 
-/**
- * Full detail view for one installed item: large preview (click to enlarge),
- * parsed metadata, on-disk location, and — for a bike/gear model — the paints,
- * goggles and model-swaps that belong to it.
- */
 export default function LibraryDetail({
   entry,
   entries,
@@ -78,7 +71,6 @@ export default function LibraryDetail({
   const Icon: LucideIcon = categoryIcon(entry.category);
   const image = preview || meta?.thumbnail || null;
 
-  // A model's contents: paints / goggles / model-swaps pointing back to it.
   const related = useMemo(() => {
     const owner = ownerKey(entry);
     const kids = entries.filter((e) => e.parent && e.parent === owner && e.path !== entry.path);
@@ -91,8 +83,6 @@ export default function LibraryDetail({
     return [...byCat.entries()];
   }, [entries, entry]);
 
-  // Whether this item can be shown in the 3D viewer and how — shared with the
-  // library list's quick-view button so the two never drift. `null` → not viewable.
   const view = useMemo(() => entryViewerProps(entry, entries), [entry, entries]);
 
   const rows: [string, string][] = [];
@@ -126,8 +116,6 @@ export default function LibraryDetail({
           {/* left: preview */}
           <div className="flex w-[420px] flex-none flex-col gap-3">
             {image ? (
-              // Fill the column at the image's own aspect ratio — as large as
-              // possible without cropping (only tall images are capped).
               <button
                 onClick={() => setLightbox(true)}
                 className="group relative block w-full cursor-pointer overflow-hidden rounded-xl border border-white/[0.07] bg-black/25"
@@ -142,7 +130,7 @@ export default function LibraryDetail({
                 </span>
                 {meta?.locked && (
                   <span className="absolute bottom-2 left-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white/80">
-                    <Lock className="size-3" /> non-plain
+                    <Lock className="size-3" /> Locked
                   </span>
                 )}
               </button>
@@ -151,7 +139,7 @@ export default function LibraryDetail({
                 <Icon className="size-10" strokeWidth={1.25} />
                 {meta?.locked && (
                   <span className="absolute bottom-2 left-2 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white/80">
-                    <Lock className="size-3" /> non-plain
+                    <Lock className="size-3" /> Locked
                   </span>
                 )}
               </div>
@@ -197,9 +185,9 @@ export default function LibraryDetail({
               <div className="flex items-start gap-2.5 rounded-lg border border-white/[0.08] bg-foreground/[0.03] px-3.5 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
                 <Lock className="mt-0.5 size-3.5 flex-none text-faint" />
                 <span>
-                  This track is <b className="text-foreground/80">non-plain</b>{" "}
-                  (encrypted copy-protection), so its name, length and preview
-                  can’t be read from the file — only its filename and size.
+                  This track is <b className="text-foreground/80">locked</b>, so
+                  its name, length and preview can’t be read from the file —
+                  only its filename and size.
                 </span>
               </div>
             )}

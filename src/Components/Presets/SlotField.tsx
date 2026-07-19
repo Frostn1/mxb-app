@@ -1,11 +1,11 @@
-import { cn } from "@/lib/utils";
-import { Input } from "../ui/input";
+import { Combobox } from "../ui/combobox";
 import type { SlotDef } from "../../lib/presets";
 
 /**
- * One editable customization slot: an input with a datalist of installed options
- * (so unknown / captured values and free-text fonts still work), plus a "missing
- * mod" badge. Shared by the Presets builder and the Rider render studio.
+ * One editable customization slot: a searchable **creatable** combobox over the
+ * installed options — click to see them all, type to filter, or commit a free-text
+ * value (fonts, a captured mod name not currently installed) — plus a "missing mod"
+ * badge. Shared by the Presets builder and the Rider render studio.
  */
 export function SlotField({
   slot,
@@ -20,9 +20,8 @@ export function SlotField({
   missing: boolean;
   onChange: (v: string) => void;
 }) {
-  const listId = `slot-${slot.key}`;
   return (
-    <label className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1">
       <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
         {slot.label}
         {missing && (
@@ -34,20 +33,7 @@ export function SlotField({
           </span>
         )}
       </span>
-      <Input
-        list={options.length ? listId : undefined}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Stock"
-        className={cn("h-8 text-[12.5px]", missing && "border-amber-500/40")}
-      />
-      {options.length > 0 && (
-        <datalist id={listId}>
-          {options.map((o) => (
-            <option key={o} value={o} />
-          ))}
-        </datalist>
-      )}
-    </label>
+      <Combobox value={value} options={options} onChange={onChange} invalid={missing} />
+    </div>
   );
 }

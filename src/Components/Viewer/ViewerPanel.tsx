@@ -8,20 +8,13 @@ import { loadRiderModel } from "../../api/mods";
 import type { Loadout, RiderPart } from "../../types";
 
 interface ViewerPanelProps {
-  /** Paint texture (`data:` URI) to map onto the model, once resolved. */
   texture?: string | null;
-  /** Current loadout — its rider slots drive the live rider gear preview. */
   loadout?: Loadout;
-  /** Lock the panel to the rider view (the Rider studio has no bike): starts in
-   * rider mode and hides the Bike/Rider toggle. */
   riderOnly?: boolean;
-  /** Gear slots to leave OUT of the render (the Rider studio's per-piece "show on
-   * model" toggles). The body is never hidden. */
   hiddenParts?: RiderPart["part"][];
   className?: string;
 }
 
-/** Bike / Rider segmented toggle. */
 function ModeToggle({
   mode,
   onChange,
@@ -56,10 +49,6 @@ function ModeToggle({
   );
 }
 
-/**
- * Live 3D preview of the current loadout — a panel that sits beside the preset
- * builder, with an expand button that opens the same viewer full-screen.
- */
 export function ViewerPanel({
   texture,
   loadout,
@@ -71,8 +60,7 @@ export function ViewerPanel({
   const [expanded, setExpanded] = useState(false);
   const [riderParts, setRiderParts] = useState<RiderPart[] | null>(null);
   const [loading, setLoading] = useState(false);
-  // The first resolve loads immediately (snappy first demo); later slot edits are
-  // debounced so rapid picks don't thrash the decoder.
+  // First resolve loads immediately; later slot edits are debounced so picks don't thrash the decoder.
   const firstLoad = useRef(true);
 
   // Drop any toggled-off gear before rendering (keep the body + everything else).
@@ -80,9 +68,7 @@ export function ViewerPanel({
     ? riderParts?.filter((p) => !hiddenParts.includes(p.part)) ?? null
     : riderParts;
 
-  // Re-resolve the rider gear whenever a rider-affecting slot changes (a plain
-  // key so bike-only edits don't trigger a reload). Debounced — the loadout
-  // updates on every keystroke/slot pick.
+  // Re-resolve rider gear when a rider-affecting slot changes (debounced; loadout updates per keystroke).
   const riderKey = loadout
     ? [
         loadout.rider,
@@ -109,8 +95,7 @@ export function ViewerPanel({
     firstLoad.current = false;
     const t = setTimeout(() => {
       loadRiderModel(loadout)
-        // Swap in the new model once it's ready; keep the previous one on screen
-        // until then (and on failure) so the preview never blanks out.
+        // Keep the previous model on screen until the new one is ready (and on failure) so it never blanks.
         .then((m) => alive && setRiderParts(m.parts))
         .catch(() => {})
         .finally(() => alive && setLoading(false));
@@ -122,8 +107,7 @@ export function ViewerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riderKey]);
 
-  // A small non-blocking spinner shown over the canvas while a model resolves —
-  // the current/stand-in model stays visible underneath.
+  // Non-blocking spinner over the canvas while a model resolves; the current model stays visible.
   const spinner = loading && (
     <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-[11px] text-white/85">
       <Loader2 className="h-3.5 w-3.5 animate-spin" />

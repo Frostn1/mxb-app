@@ -79,19 +79,8 @@ interface RowAction {
   separatorBefore?: boolean;
 }
 
-/**
- * Session cache of parsed metadata, keyed by path + size so a changed file
- * re-reads. Avoids re-invoking the backend when cards remount on search/tab
- * switches. The backend also caches to disk across sessions.
- */
 const metaCache = new Map<string, PkzMeta>();
 
-/**
- * The tile + title/subtitle of a library card. Lazily reads the item's
- * structure (name/author/length/preview) so the list paints instantly and each
- * card enriches as its metadata arrives. Locked/loose items fall back to a
- * category icon + name.
- */
 function LibraryCardBody({
   item,
   typeIcon: TypeIcon,
@@ -143,7 +132,7 @@ function LibraryCardBody({
         {meta?.locked && (
           <span
             className="absolute bottom-0.5 right-0.5 rounded bg-black/60 p-0.5 text-white/75"
-            title="non-plain — encrypted, contents can't be read"
+            title="Locked — contents can't be read"
           >
             <Lock className="size-3" />
           </span>
@@ -170,12 +159,6 @@ interface Section {
   items: LibraryEntry[];
 }
 
-/**
- * Group entries into display sections: the Rider tab groups by *category*
- * (Helmets, Helmet Paints, Goggles, Boots, Gloves, Outfit…) so every gear kind
- * is visible; tracks/bikes group by folder. Bike liveries + model-swaps are
- * hidden from the grid — they live inside their model's detail view.
- */
 function buildSections(
   modType: ModType,
   entries: LibraryEntry[],
@@ -212,8 +195,6 @@ function buildSections(
       }));
   }
 
-  // Tracks & bikes: group by folder. For bikes, only models are top-level —
-  // paints/model-swaps belong to a model's detail.
   const shown =
     modType.id === "bikes"
       ? filtered.filter((e) => e.category !== "bikePaint" && e.category !== "bikeModelSwap")
@@ -233,7 +214,6 @@ interface LibraryProps {
   modType: ModType;
   onChangeType: (type: ModType) => void;
   refreshKey: number;
-  /** Bump the dashboard's install version after a change (uninstall/move). */
   onChanged: () => void;
 }
 
@@ -269,7 +249,6 @@ export default function Library({
     load();
   }, [load, refreshKey]);
 
-  // Leave the detail view when switching tabs.
   useEffect(() => setDetail(null), [modType]);
 
   const allFolders = useMemo(
@@ -287,7 +266,6 @@ export default function Library({
     [sections],
   );
 
-  // Props for the quick 3D-view dialog (opened straight from a list card).
   const view3dProps = view3d ? entryViewerProps(view3d, entries) : null;
 
   const doMove = async (item: LibraryEntry, toFolder: string) => {
@@ -327,9 +305,6 @@ export default function Library({
       toast.error("Couldn't open", { description: String(e) }),
     );
 
-  // Single source of truth for a row's actions — rendered in the 3-dot dropdown
-  // and the right-click context menu so they can't drift apart. Move only makes
-  // sense for a packaged `.pkz` (a real file under the type dir).
   const rowActions = (item: LibraryEntry): RowAction[] => [
     ...(item.kind === "pkz"
       ? [

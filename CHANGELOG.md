@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-18 — internal cleanup
+
+### Changed
+- Trimmed verbose source comments across the codebase, keeping only short notes
+  that clarify non-obvious parameters, byte offsets and invariants.
+
 ## 2026-07-18 — rider gear paints from extracted folders + goggles
 
 ### Fixed
@@ -318,9 +324,9 @@
   crashing.
 
 ### Fixed
-- **Non-plain paints render in the 3D viewer**: a non-plain paint container is
-  a non-plain container, not a plain `PNT\0` file. The paint decoder now transparently
-  handles a non-plain paint (`paint::decode_any`), used everywhere paints are read.
+- **More paints render in the 3D viewer**: some `.pnt` paints are packaged in a
+  non-plain container rather than a plain `PNT\0` file. The paint decoder now
+  handles both transparently (`paint::decode_any`), used everywhere paints are read.
 - **Much faster 3D bike-model load**: textures encode with fast deflate and in
   parallel (`rayon`) instead of serial max-compression PNG — big bikes load quickly.
 - **No more freezes / blank white screens**: added a global + canvas `ErrorBoundary`
@@ -415,7 +421,7 @@
   always lands in `mods/tracks`. A structured archive (a `mods/` tree, top-level
   `bikes/tracks/rider/…`, or a `<Bike>/paints/` livery bundle) now self-routes by
   its own folders — the livery-bundle case works regardless of the caller's
-  default type — and content that can't be inspected (a non-plain `.pkz`) picks
+  default type — and content that can't be inspected (a locked `.pkz`) picks
   its bucket from the item's title (`guess_mod_type`) instead of assuming tracks.
 - **FrostMod update check**: Settings now re-checks FrostMod against GitHub when
   it opens (and when the About "Check for updates" button is pressed), so a newer
@@ -543,7 +549,7 @@
   bikes now show their **real name, author, length and a preview thumbnail** read
   straight from the archive's `.ini` and preview image, plus the **file size** on
   every card. Preview images (often TGA, which browsers can't render) are decoded
-  and downscaled to a small JPEG in Rust. **non-plain `.pkz` are
+  and downscaled to a small JPEG in Rust. **Locked `.pkz` are
   detected and skipped gracefully** — they show a lock badge with just name + size.
   Parsing is lazy per card (list paints instantly) and cached to disk. Backed by a
   new `get_pkz_meta` Tauri command + `pkz` module (`image`/`base64` crates), with

@@ -1,5 +1,3 @@
-// Shared types mirroring the Rust command structs (serde `rename_all = "camelCase"`).
-
 export interface Config {
   modsPath: string;
   /** MX Bikes **install** dir (holds core `rider.pkz`) for the 3D rider body. */
@@ -10,8 +8,6 @@ export interface Config {
   launchAtStartup?: boolean;
   /** Auto-run FrostMod when the app opens (default true). */
   autoRunFrostmod?: boolean;
-  /** After applying a preset, re-run the game's profile loader so the look
-   * refreshes live — no restart/reselect (Windows-only, default true). */
   instantRefresh?: boolean;
 }
 
@@ -71,10 +67,6 @@ export interface InstalledMod {
 /** How an installed item exists on disk. */
 export type LibraryKind = "pkz" | "folder" | "loose";
 
-/**
- * Type-specific classification the Library uses to group and label items.
- * (Kept as a loose union of known values; unknown strings fall back to "misc".)
- */
 export type LibraryCategory =
   | "track"
   | "bike"
@@ -92,10 +84,6 @@ export type LibraryCategory =
   | "outfit"
   | "misc";
 
-/**
- * A richer installed item than {@link InstalledMod}: also covers extracted mod
- * folders and loose paint files, tagged for grouping + detail in the Library.
- */
 export interface LibraryEntry {
   name: string;
   path: string;
@@ -107,10 +95,6 @@ export interface LibraryEntry {
   parent: string | null;
 }
 
-/**
- * One selectable model for a bike (Locker / model swap). The `active` one is the
- * bike's live loose file set; the rest are folders under `FrostMod Models/`.
- */
 export interface ModelVariant {
   /** Variant name (folder name, or "Original" for the un-captured default). */
   name: string;
@@ -138,13 +122,7 @@ export interface Submesh {
   /** Start triangle in the KEPT triangle list. */
   triStart: number;
   triCount: number;
-  /** Texture this group binds to, resolved in Rust from the bike's `gfx.cfg` +
-   * the model's own packed texture names. `null` → render it in a neutral colour;
-   * never guess a texture from `name`. */
   texture: string | null;
-  /** Which UV tile the group samples (`floor(u)`); `null` if it straddles tiles.
-   * Tile ≥ 1 means it binds to a further texture and samples at `u - tile`, which
-   * the viewer gets from `RepeatWrapping`. */
   uvTile: number | null;
 }
 
@@ -161,8 +139,6 @@ export interface EdfNode {
   indices: number[];
   /** Material groups over the kept triangle list (empty if not resolved). */
   submeshes: Submesh[];
-  /** Texture for the node as a whole — used when `submeshes` is empty (the submesh
-   * table didn't resolve, so there are no groups to bind individually). */
   texture: string | null;
 }
 
@@ -180,31 +156,14 @@ export interface PaintTexture {
 export interface BikePaint {
   name: string;
   textures: PaintTexture[];
-  /** Whether selecting this paint changes anything *in the preview*.
-   *
-   * A `.pnt` replaces a model texture by NAME, and the viewer shows only the
-   * chassis/steer/fork/swingarm — not the wheels or chain, which are separate
-   * models the bike doesn't even ship. So a paint can be perfectly valid for the
-   * bike and still change nothing here (the Honda's stock paint carries only
-   * chain/wheel textures), and a paint for a different model changes nothing
-   * either. This flag doesn't tell those apart — it only says the preview won't
-   * move — so the label must not claim the paint is "not for this model". */
   changesPreview: boolean;
 }
 
-/** A bike's real 3D model: decoded mesh nodes + selectable paints (stock +
- * installed liveries). */
 export interface BikeModel {
   nodes: EdfNode[];
   paints: BikePaint[];
 }
 
-/**
- * One part of the rider preview. A **gear** part (`helmet`/`boots`/`protection`)
- * carries real `.edf` geometry + its paint; a **paint-only** part (`suit`/`gloves`)
- * has no mesh and just tints the stand-in body. `part` is the slot the viewer maps
- * it onto.
- */
 export interface RiderPart {
   part: "body" | "helmet" | "boots" | "protection" | "suit" | "gloves";
   nodes: EdfNode[];
@@ -216,18 +175,11 @@ export interface RiderModel {
   parts: RiderPart[];
 }
 
-/** The paint sets a gear item ships: its main `paints/` liveries, plus a helmet's
- * separate `goggles/` lens/strap paints (empty for boots/protection). */
 export interface GearPaints {
   paints: string[];
   goggles: string[];
 }
 
-/**
- * Parsed structure of an installed `.pkz`, loaded lazily per library card.
- * `locked` marks a non-plain archive that can't be inspected
- * (only its name + size are known).
- */
 export interface PkzMeta {
   locked: boolean;
   /** Display name from the archive's `.ini`, if readable. */
@@ -261,12 +213,6 @@ export interface InstallProgress {
   message?: string;
 }
 
-/**
- * Result of asking FrostMod (the in-game live-reload tool) to refresh:
- * - `signaled`    — FrostMod was running and reloaded the mods folder live.
- * - `not_running` — FrostMod isn't running; the mod loads on the game's next launch.
- * - `unsupported` — not a Windows build (dev only).
- */
 export type ReloadOutcome = "signaled" | "not_running" | "unsupported";
 
 /** Emitted on `frostmod-reload` after a mod is placed. */
@@ -275,15 +221,6 @@ export interface FrostmodReload {
   outcome: ReloadOutcome;
 }
 
-/**
- * Result of "instant refresh" — re-running MX Bikes' profile loader in the live
- * process so a new look shows without a restart/reselect:
- * - `refreshed`        — the loader was re-run; the look should be live.
- * - `failed`           — attempted but couldn't attach/spawn (see logs).
- * - `game_not_running` — MX Bikes wasn't running.
- * - `disabled`         — the instant-refresh setting was off; not attempted.
- * - `unsupported`      — not a Windows build (dev only).
- */
 export type LiveRefresh =
   | "refreshed"
   | "failed"
@@ -291,12 +228,6 @@ export type LiveRefresh =
   | "disabled"
   | "unsupported";
 
-/**
- * How applying a preset took effect. `content_reload` is FrostMod re-scanning
- * the mods folder (new paint *files*); `game_running` says whether a profile
- * reselect is needed to load the *selected* look; `live_refresh` reports the
- * in-place refresh.
- */
 export interface PresetApplyOutcome {
   content_reload: ReloadOutcome;
   game_running: boolean;
@@ -315,12 +246,6 @@ export interface FrostmodStatus {
   running: boolean;
 }
 
-/**
- * A full cosmetic **loadout** — one value per customization slot (empty string =
- * stock/none). Field names mirror MX Bikes' `profile.ini` slot sections; each is
- * a plain reference to an installed mod/paint folder name. `raceNumber` is the
- * active rider number carried alongside so a preset can also set it.
- */
 export interface Loadout {
   paint: string;
   bikeFont: string;
@@ -338,14 +263,9 @@ export interface Loadout {
   ridingStyle: string;
   tyres: string;
   raceNumber: string;
-  /** Bike model-swap variant (Locker / `FrostMod Models/`) to apply. Not a
-   * `profile.ini` value — a filesystem swap done at apply time. Empty = leave the
-   * bike's current model untouched. */
   modelSwap: string;
 }
 
-/** A link to an uploaded asset bundle for a preset (the "full share"). Present
- * only on a full-share code — never persisted locally. */
 export interface BundleRef {
   /** Direct-download URL of the uploaded `.zip`. */
   url: string;
@@ -403,8 +323,6 @@ export interface BundleProgress {
   message?: string;
 }
 
-/** One editable slot in the preset builder: which `Loadout` field it maps to, its
- * label, and how its options are sourced. */
 export type SlotSource =
   | "bikePaint" // liveries for the selected bike
   | "helmet" // helmet models

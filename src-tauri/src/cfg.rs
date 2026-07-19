@@ -1,38 +1,6 @@
-//! Parser for MX Bikes' plain-text config files — a bike's **`gfx.cfg`** and its
-//! per-part **`.hrc`** files. Both ship *unencrypted* inside the bike's `.pkz`, and
-//! they state outright what the viewer used to guess from mesh-group names:
-//! which node is a part's level0 (vs. its LOD variants), and which texture a named
-//! mesh group binds to.
-//!
-//! The format is `key = value` lines plus nested `name { … }` blocks; `;` starts a
-//! comment. Real `gfx.cfg`:
-//!
-//! ```text
-//! chassis
-//! {
-//!     model { file = chassis.hrc }
-//!     chain { name = chain  texture = chain  axis = u-  ratio = 0.035 }
-//!     plate { texture = w_plate }
-//! }
-//! tyres = oem_mx
-//! ```
-//!
-//! and a `.hrc`, which names the LODs explicitly:
-//!
-//! ```text
-//! level0 { scene = model.edf              switch = 0  }
-//! level1 { scene = model.edf  name = chassisb  switch = 10 }
-//! ```
-//!
-//! `level0` is the renderable detail level. Its node name is the block's `name` if
-//! present, else the `.hrc`'s own stem (`chassis.hrc` → node `chassis`) — verified
-//! against the real Honda CRF450R, whose `chassis.hrc` omits `name` on level0 but
-//! whose `fsusp.hrc` states `name = fsusp`.
-
 use std::collections::HashMap;
 
-/// A parsed config node: scalar `key = value` entries plus nested blocks. Keys are
-/// lowercased; a repeated key keeps the last value (the format has no arrays).
+/// Keys are lowercased; a repeated key keeps the last value (the format has no arrays).
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct CfgNode {
     pub values: HashMap<String, String>,
@@ -40,22 +8,14 @@ pub struct CfgNode {
 }
 
 impl CfgNode {
-    /// Scalar value of `key`, if present.
     pub fn get(&self, key: &str) -> Option<&str> {
         self.values.get(key).map(String::as_str)
     }
-    /// Nested block named `key`, if present.
     pub fn block(&self, key: &str) -> Option<&CfgNode> {
         self.blocks.get(key)
     }
 }
 
-/// Parse a `.cfg` / `.hrc` byte buffer into a tree.
-///
-/// Tolerant by design — these files are hand-authored by mod makers, so an
-/// unparseable line is skipped rather than failing the whole bike. An opening
-/// brace may sit on the key's line or the next one; both appear in the wild
-/// (`gfx.cfg`'s `cockpit` block indents inconsistently).
 pub fn parse(bytes: &[u8]) -> CfgNode {
     let text = String::from_utf8_lossy(bytes);
     let mut toks: Vec<&str> = Vec::new();
@@ -70,7 +30,6 @@ pub fn parse(bytes: &[u8]) -> CfgNode {
     parse_block(&toks, &mut i)
 }
 
-/// Parse tokens into a node, consuming up to (and including) the matching `}`.
 fn parse_block(toks: &[&str], i: &mut usize) -> CfgNode {
     let mut node = CfgNode::default();
     // A key seen with no `=` yet — its `{` may be on the following line.
@@ -103,8 +62,6 @@ fn parse_block(toks: &[&str], i: &mut usize) -> CfgNode {
                     let child = parse_block(toks, i);
                     node.blocks.insert(name, child);
                 } else {
-                    // One-line block: split on whitespace-separated `k = v` pairs is
-                    // ambiguous, so only handle the common `k { key = value }` form.
                     let mut j = 0;
                     let child = parse_block(&inner, &mut j);
                     node.blocks.insert(name, child);
@@ -125,18 +82,11 @@ fn parse_block(toks: &[&str], i: &mut usize) -> CfgNode {
     node
 }
 
-/// The node name a `.hrc` declares as **level0** — the full-detail mesh.
-///
-/// `stem` is the `.hrc`'s file stem (`chassis.hrc` → `"chassis"`), which level0
-/// falls back to when its block omits `name`. Returns `None` if the file declares
-/// no `level0`.
 pub fn hrc_level0(cfg: &CfgNode, stem: &str) -> Option<String> {
     let lvl = cfg.block("level0")?;
     Some(lvl.get("name").unwrap_or(stem).to_string())
 }
 
-/// Every node name a `.hrc` mentions (level0 **and** its LOD variants), so the
-/// caller can tell "an LOD we should drop" from "a node this `.hrc` never claims".
 pub fn hrc_all_levels(cfg: &CfgNode, stem: &str) -> Vec<String> {
     let mut out = Vec::new();
     for (name, blk) in &cfg.blocks {
@@ -148,26 +98,16 @@ pub fn hrc_all_levels(cfg: &CfgNode, stem: &str) -> Vec<String> {
     out
 }
 
-/// A bike's `gfx.cfg` reduced to what the viewer needs: for each top-level part
-/// (`chassis`, `steer`, `front_susp`, `rear_susp`), its `.hrc` file and the
-/// `group -> texture` overrides it declares.
 #[derive(Debug, Default, Clone)]
 pub struct GfxPart {
     /// `model { file = chassis.hrc }`.
     pub hrc: Option<String>,
-    /// Mesh-group name (lowercased) → texture name, from blocks carrying
-    /// `texture = X` (`chain { texture = chain }`, `plate { texture = w_plate }`).
-    /// The group is the block's `name` if it has one, else the block's own name —
-    /// `chain { name = chain … }` states both; `plate { texture = w_plate }` only
-    /// the latter.
+    /// Mesh-group name (lowercased) → texture name; group is the block's `name`, else the block's own name.
     pub textures: HashMap<String, String>,
 }
 
-/// The four top-level part sections a bike's `gfx.cfg` declares. The `cockpit`
-/// block repeats them for the first-person view and is ignored.
 pub const GFX_PARTS: [&str; 4] = ["chassis", "steer", "front_susp", "rear_susp"];
 
-/// Read a bike's `gfx.cfg` into its per-part `.hrc` + texture overrides.
 pub fn parse_gfx(bytes: &[u8]) -> HashMap<String, GfxPart> {
     let root = parse(bytes);
     let mut out = HashMap::new();
@@ -191,8 +131,6 @@ pub fn parse_gfx(bytes: &[u8]) -> HashMap<String, GfxPart> {
 mod tests {
     use super::*;
 
-    /// The real Honda CRF450R `gfx.cfg`, verbatim from the shipped `.pkz` (trimmed
-    /// to the sections under test — braces, tabs and all).
     const HONDA_GFX: &[u8] = br#"chassis
 {
 	model
@@ -332,8 +270,6 @@ level1
             .and_then(|c| c.block("pos"))
             .expect("chain pos");
         assert_eq!(pos.get("x"), Some("-0.65"));
-        // The grip position is an independent check on the parse — `gfx.cfg` puts
-        // the left grip at exactly (-0.335, 0.270, -0.050).
         let grip = root
             .block("steer")
             .and_then(|s| s.block("leftgrip"))

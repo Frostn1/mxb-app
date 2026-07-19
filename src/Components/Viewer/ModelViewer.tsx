@@ -7,8 +7,6 @@ import { ErrorBoundary } from "../ErrorBoundary";
 
 export type ViewerMode = "bike" | "rider";
 
-/** Load a set of paint/bike textures into three.js textures keyed by lowercase
- * name (e.g. `livery`, `bike_parts`, `chain`). Disposed on change/unmount. */
 function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
   const [map, setMap] = useState<Map<string, THREE.Texture>>(new Map());
   useEffect(() => {
@@ -23,15 +21,9 @@ function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
     textures.forEach((t) =>
       loader.load(t.png, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
-        // MX Bikes is a DirectX game: its paints use a TOP-left UV origin, so the
-        // three.js default (flipY = bottom-left) mirrors them vertically — which
-        // made the torso sample the pants region and vice versa.
+        // MX Bikes paints use a top-left UV origin, so disable three.js' default flipY.
         tex.flipY = false;
-        // UV **wrapping**, not clamping. Two real cases need it: groups whose island
-        // runs slightly outside 0–1 (the number plates reach u -0.60…1.15), and the
-        // Honda exhaust, authored wholly on tile 1 (u 1.001…2.000) so that it
-        // selects a second texture — sampling it needs u-1, which is what repeat
-        // gives for free. Clamping instead smears the texture's edge pixels.
+        // Wrap (not clamp): some islands run outside 0–1 (plates, tiled exhaust) and need it.
         tex.wrapS = THREE.RepeatWrapping;
         tex.wrapT = THREE.RepeatWrapping;
         tex.anisotropy = 4;
@@ -48,21 +40,6 @@ function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
   return map;
 }
 
-/**
- * The texture a bike submesh binds to. Rust resolved this from the bike's OWN
- * files — `gfx.cfg`'s `texture = …` overrides, the model's packed texture names,
- * and the group's UV tile — so `sm.texture` is a real texture name and all this
- * has to do is look it up.
- *
- * There is deliberately **no** name-based fallback chain here. The old one guessed
- * from the mesh-group name (`chain`→chain, `plate`→w_plate, everything
- * else→`plastics`), which cannot work: the Honda CRF450R's entire body — frame,
- * engine, fenders, exhaust — is one group named `Frame`. Worse, forcing every
- * group to the paint's `plastics` smears a paint's map over parts it was never
- * drawn for, which is exactly the mis-placed-livery bug this replaced.
- *
- * `null` → render the group in a neutral colour rather than an arbitrary texture.
- */
 function submeshTexture(
   texture: string | null | undefined,
   tex: Map<string, THREE.Texture>,
@@ -70,10 +47,6 @@ function submeshTexture(
   return (texture && tex.get(texture.toLowerCase())) || null;
 }
 
-/**
- * Load a `data:` URI (from `unpackPaint`) into a three.js texture, disposing the
- * previous one on change/unmount. Returns `null` until ready / when no URI.
- */
 function useDataTexture(uri: string | null | undefined): THREE.Texture | null {
   const [tex, setTex] = useState<THREE.Texture | null>(null);
   const current = useRef<THREE.Texture | null>(null);
@@ -114,7 +87,6 @@ function useDataTexture(uri: string | null | undefined): THREE.Texture | null {
   return tex;
 }
 
-/** Shared material: the paint texture when present, else a neutral base colour. */
 function bodyMaterial(map: THREE.Texture | null, color: string) {
   return map ? (
     <meshStandardMaterial map={map} metalness={0.15} roughness={0.55} />
@@ -123,22 +95,15 @@ function bodyMaterial(map: THREE.Texture | null, color: string) {
   );
 }
 
-/**
- * Placeholder bike stand-in built from primitives. Swapped for the real
- * decoded `model.edf` geometry once the `.edf` loader lands; the paint texture
- * wiring is already in place so that drop-in changes nothing here.
- */
 function BikeStandIn({ map }: { map: THREE.Texture | null }) {
   return (
     <group rotation={[0, Math.PI / 6, 0]}>
-      {/* wheels */}
       {[-0.9, 0.9].map((x) => (
         <mesh key={x} position={[x, 0.45, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.45, 0.14, 16, 40]} />
           <meshStandardMaterial color="#1a1a1a" roughness={0.8} />
         </mesh>
       ))}
-      {/* frame / tank / seat (takes the livery) */}
       <mesh position={[0, 0.9, 0]}>
         <boxGeometry args={[1.5, 0.42, 0.34]} />
         {bodyMaterial(map, "#c0392b")}
@@ -147,12 +112,10 @@ function BikeStandIn({ map }: { map: THREE.Texture | null }) {
         <boxGeometry args={[0.7, 0.26, 0.3]} />
         {bodyMaterial(map, "#c0392b")}
       </mesh>
-      {/* fork */}
       <mesh position={[0.85, 0.85, 0]} rotation={[0, 0, -0.35]}>
         <cylinderGeometry args={[0.05, 0.05, 0.9, 12]} />
         <meshStandardMaterial color="#888" metalness={0.7} roughness={0.3} />
       </mesh>
-      {/* handlebars */}
       <mesh position={[1.0, 1.3, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.03, 0.03, 0.5, 10]} />
         <meshStandardMaterial color="#333" />
@@ -161,13 +124,6 @@ function BikeStandIn({ map }: { map: THREE.Texture | null }) {
   );
 }
 
-/**
- * Rider **body** stand-in built from primitives. Only the body/suit + gloved
- * hands are placeholders — real helmet/boots/protection meshes (when installed)
- * are seated on top of it by {@link RiderComposite}. `showHead` hides the helmet
- * sphere when a real helmet mesh takes its place. The official rider-template mesh
- * drops in here later without touching the gear-seating logic.
- */
 function RiderBody({
   suit,
   gloves,
@@ -185,12 +141,10 @@ function RiderBody({
           {bodyMaterial(suit, "#2c3e50")}
         </mesh>
       )}
-      {/* torso (suit) */}
       <mesh position={[0, 1.15, 0]}>
         <capsuleGeometry args={[0.22, 0.45, 8, 16]} />
         {bodyMaterial(suit, "#2c3e50")}
       </mesh>
-      {/* arms + gloved hands */}
       {[-0.32, 0.32].map((x) => (
         <group key={x}>
           <mesh position={[x, 1.15, 0]} rotation={[0, 0, x < 0 ? 0.3 : -0.3]}>
@@ -203,7 +157,6 @@ function RiderBody({
           </mesh>
         </group>
       ))}
-      {/* legs */}
       {[-0.13, 0.13].map((x) => (
         <mesh key={x} position={[x, 0.5, 0]}>
           <capsuleGeometry args={[0.1, 0.6, 6, 12]} />
@@ -214,53 +167,32 @@ function RiderBody({
   );
 }
 
-/** First matching texture (by internal name) as a `data:` URI, else the first. */
 function partPng(part: RiderPart | undefined, ...names: string[]): string | null {
   if (!part?.textures.length) return null;
   const hit = part.textures.find((t) => names.includes(t.name.toLowerCase()));
   return (hit ?? part.textures[0]).png;
 }
 
-/** Helmet/protection are authored **X-up**: a helmet's bbox runs X[-0.04, 0.21] —
- * it extends *up* from an origin at the neck, with Y = left-right and Z = front-back
- * (verified by rendering it down each axis; only X-vertical is an upright helmet). It
- * needs a 90° roll about **Z** to reach three.js' Y-up.
- *
- * The decoder runs `to_right_handed` on gear (negating X) so the artwork isn't
- * mirrored — that flips the up-axis to **−X**, so the roll is **−90°** (a +90° roll
- * would send −X to −Y and stand the helmet on its head). The rider body is Y-up
- * already. Boots don't share this up-axis — see {@link BOOT_ROT}. */
+// Helmet/protection are authored X-up; after to_right_handed negates X, up is −X,
+// so a −90° roll about Z reaches three.js' Y-up. Boots differ — see BOOT_ROT.
 const GEAR_ROT: [number, number, number] = [0, 0, -Math.PI / 2];
 
-/** Boots share the gear frame but their worn-up axis is the **opposite** of the
- * helmet's. After `to_right_handed` negates X, a boot's leg-opening sits at ≈-0.07
- * and its sole at ≈-0.50 (verified from the real Fox Instinct mesh), so "up" points
- * toward **+X** — the reverse of the helmet, whose crown is at -X. Hence boots take
- * the +90° roll (+X→+Y) while the helmet takes {@link GEAR_ROT}'s -90°. A boots
- * `.edf` also ships both feet as separate nodes (`boot_l`/`boot_r`) authored
- * coincident at the ankle, split left/right by {@link bootSides}. */
+// Boots' worn-up is +X (opposite the helmet), so +90° roll. A boots `.edf` ships
+// both feet as separate nodes (`boot_l`/`boot_r`) coincident at the ankle, split by bootSides.
 const BOOT_ROT: [number, number, number] = [0, 0, Math.PI / 2];
 
-/** Protection (chest/neck armour) is authored **Y-up**, in the rider body's own
- * frame — not X-up like the helmet — so it needs **no** roll. Reusing the helmet's
- * {@link GEAR_ROT} tips it onto its side (a 90° roll), which is wrong. */
+// Protection is authored Y-up (the rider body's own frame), so no roll.
 const PROT_ROT: [number, number, number] = [0, 0, 0];
 
-/** A small downward nod so the helmet gazes ahead / slightly down rather than
- * skyward (the raw fit leaves the visor tipped up). */
+// Downward nod so the helmet gazes ahead / slightly down rather than skyward.
 const HELMET_PITCH = 0.25;
 
-/** Tip the boots' toes forward into a riding stance instead of hanging straight
- * down off the ankle. */
+// Tip the boots' toes forward into a riding stance.
 const BOOT_PITCH = 0.2;
 
-/** Splay each boot outward (toes out) about world Y, so the pair reads as a natural
- * stance rather than two parallel boots. Applied per side (±) on the full body only;
- * the solo/single preview stays straight. */
+// Splay each boot outward (toes out) about world Y; applied per side on the full body only.
 const BOOT_SPLAY = 0.48;
 
-/** One gear material in the shared "product-preview" look (paint lifted with its
- * own colour as self-illumination so it reads true against the dark background). */
 function makeGearMaterial(
   base: string | null | undefined,
   tex: Map<string, THREE.Texture>,
@@ -281,11 +213,6 @@ function makeGearMaterial(
   });
 }
 
-/** Per-submesh materials for a gear piece, one array per node (matching the node's
- * geometry groups). A helmet's `goggles` submesh binds a different texture than its
- * shell — Rust resolved each submesh's `texture` from the helmet + goggle paints — so
- * they can't share one material. Nodes with no submesh table take a single material
- * from whatever texture the paint carries. */
 function useGearMaterials(part: RiderPart, tex: Map<string, THREE.Texture>) {
   const mats = useMemo(() => {
     const first = (tex.values().next().value as THREE.Texture | undefined) ?? null;
@@ -302,14 +229,6 @@ function useGearMaterials(part: RiderPart, tex: Map<string, THREE.Texture>) {
   return mats;
 }
 
-/**
- * A real gear mesh (helmet/boots/protection) decoded from `.edf`, textured per
- * submesh, then **fitted** onto the body: uniformly scaled so its largest
- * dimension is `target` and translated so its centre lands on `anchor` (body
- * coords). The game rigs gear to skeleton bones (`helmetlinkobj = riderRIG_Head`);
- * we don't parse the rig, so this bbox fit is the stand-in for that — good enough
- * for a preview, and purely geometry-derived so it's stable.
- */
 function RiderGearMesh({
   part,
   anchor,
@@ -322,29 +241,17 @@ function RiderGearMesh({
   part: RiderPart;
   anchor: [number, number, number];
   target: number;
-  /** Up-axis correction. Helmet/protection use {@link GEAR_ROT}; boots, whose
-   * worn-up is the opposite axis, use {@link BOOT_ROT}. */
   rot?: [number, number, number];
-  /** Facing correction about world Y, applied *after* the up-axis {@link rot}. The
-   * bbox fit has no notion of front/back, so a helmet authored facing away needs a
-   * 180° yaw to look the same way as the rider. */
   yaw?: number;
-  /** How the piece meets the body vertically — which edge of its bbox lands on
-   * `anchor[1]`. Gear is worn edge-to-body, not centred: a helmet hangs its
-   * **bottom** on the neck, boots hang their **top** on the leg-bottom. */
   alignY?: "center" | "top" | "bottom";
-  /** Nod about world X, applied *after* {@link yaw} — tips a helmet's gaze down or a
-   * boot's toe forward. `+` nods the front (the +Z face) downward. */
   pitch?: number;
 }) {
   const texMap = useTextureMap(part.textures);
   const geoms = useBodyGeometries(part.nodes);
   const mats = useGearMaterials(part, texMap);
 
-  // Gear is authored around its own origin (a helmet's bbox is centred on 0, not
-  // up at head height), so it's fitted onto the body rather than dropped in place.
-  // Measure in the fully-oriented frame (up-axis rot, then yaw, then pitch), since
-  // the anchor is in body coords and the same transform drives the rendered mesh.
+  // Gear is authored around its own origin, so fit it onto the body. Measure in the
+  // fully-oriented frame (up-axis rot, then yaw, then pitch) to match the rendered mesh.
   const fit = useMemo(() => {
     const rotM = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...rot));
     const orientM = new THREE.Matrix4()
@@ -367,9 +274,7 @@ function RiderGearMesh({
 
   if (!fit) return null;
   const s = fit.scale;
-  // Vertical edge alignment: shift so the requested bbox edge (not just the centre)
-  // lands on anchor[1]. `bottom` seats the piece's underside on the anchor (helmet
-  // on the neck); `top` hangs it below the anchor (boots off the leg-bottom).
+  // Shift so the requested bbox edge (not just the centre) lands on anchor[1].
   const alignShift =
     alignY === "bottom" ? fit.halfY * s : alignY === "top" ? -fit.halfY * s : 0;
   return (
@@ -395,10 +300,8 @@ function RiderGearMesh({
   );
 }
 
-/** A boots `.edf` ships both feet as separate nodes (`boot_l`/`boot_r`) authored
- * nearly coincident at the ankle origin — the game's rig pulls them apart onto the
- * two foot bones. We don't parse the rig, so split them ourselves: order the nodes
- * by their native left-right (Y) centre and push one to each side. */
+// Boots ship both feet as separate nodes coincident at the ankle; split by their
+// native left-right (Y) centre, one to each side.
 function bootSides(part: RiderPart): { node: EdfNode; side: number }[] {
   const withY = part.nodes.map((node) => {
     let lo = Infinity;
@@ -414,8 +317,6 @@ function bootSides(part: RiderPart): { node: EdfNode; side: number }[] {
   return withY.map((w, i) => ({ node: w.node, side: i === 0 ? -1 : 1 }));
 }
 
-/** Axis-aligned bounds of a rider part's raw geometry (native, un-rotated).
- * Used to seat gear onto the real body via fractions of its bbox. */
 function partBounds(nodes: EdfNode[]) {
   const lo = [Infinity, Infinity, Infinity];
   const hi = [-Infinity, -Infinity, -Infinity];
@@ -431,10 +332,8 @@ function partBounds(nodes: EdfNode[]) {
   return { lo, hi };
 }
 
-/** Yaw (about world Y) that turns a boot's heel→toe axis to point straight along
- * +Z, cancelling the mesh's built-in toe-in/out splay. Measured in the already
- * up-righted (rotated) frame, from the centroids of the front and back 20% of the
- * boot along Z (robust to a stray toe/heel vertex). Returns 0 for degenerate input. */
+// Yaw about world Y that points a boot's heel→toe along +Z, from the centroids of
+// the front and back 20% along Z (measured in the up-righted frame). 0 for degenerate input.
 function straightenYaw(geom: THREE.BufferGeometry, rotM: THREE.Matrix4): number {
   const pos = geom.getAttribute("position") as THREE.BufferAttribute | undefined;
   if (!pos) return 0;
@@ -477,8 +376,6 @@ function straightenYaw(geom: THREE.BufferGeometry, rotM: THREE.Matrix4): number 
   return -Math.atan2(dx, dz);
 }
 
-/** Build plain geometries (one material) for the rider body — its `.edf` has no
- * submesh table, so a single suit material covers the whole mesh. */
 function useBodyGeometries(nodes: EdfNode[]) {
   const geoms = useMemo(() => {
     return nodes.map((n) => {
@@ -496,9 +393,7 @@ function useBodyGeometries(nodes: EdfNode[]) {
         );
       g.setIndex(n.indices);
       if (!n.normals.length) g.computeVertexNormals();
-      // Material groups so a multi-submesh gear node (a helmet's shell + goggles)
-      // can wear a different texture per submesh. The body has no submesh table, so
-      // no groups are added and it keeps a single material.
+      // Material groups so a multi-submesh node can wear one texture per submesh.
       n.submeshes.forEach((sm, i) => g.addGroup(sm.triStart * 3, sm.triCount * 3, i));
       g.computeBoundingBox();
       g.computeBoundingSphere();
@@ -509,14 +404,9 @@ function useBodyGeometries(nodes: EdfNode[]) {
   return geoms;
 }
 
-/** One rider-body material in the shared product-preview look. The backend tags each
- * submesh: `rider` (suit) / `gloves` (hands) bind their paint; `face` renders as bare
- * skin (no kit on the head/neck); `hide` is invisible (the number/name decal planes we
- * don't texture). Unknown/untagged falls back to the suit. */
 function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THREE.Texture>) {
   const key = name?.toLowerCase();
-  // Number/name decal planes: render nothing (no color, no depth) rather than smear
-  // the whole suit texture across a flat quad.
+  // Decal planes: render nothing rather than smear the suit over a flat quad.
   if (key === "hide") {
     return new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
   }
@@ -534,34 +424,25 @@ function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THRE
   const normalMap = (key && tex.get(`${key}_n`)) || tex.get("rider_n") || null;
   return new THREE.MeshStandardMaterial({
     map: map ?? undefined,
-    // Keep the normal for surface detail but at a subtle scale — full strength
-    // over-shadows the paint. Skip the roughness map (ambiguous semantics).
+    // Subtle normal scale — full strength over-shadows the paint.
     normalMap,
     normalScale: new THREE.Vector2(0.45, 0.45),
     color: map ? 0xffffff : 0x8a929c,
     metalness: 0.0,
     roughness: 0.62,
-    // Lift the paint with its own colour as self-illumination so the whites read
-    // white and the reds read red even in shadow (a product-preview look).
+    // Self-illuminate with the paint's own colour so it reads true even in shadow.
     emissive: map ? 0xffffff : 0x000000,
     emissiveMap: map,
     emissiveIntensity: map ? 0.32 : 0.0,
-    // Rider meshes aren't reliably wound/closed; render both faces so the body
-    // reads as solid instead of see-through.
+    // Meshes aren't reliably wound/closed — render both faces so the body reads solid.
     side: THREE.DoubleSide,
   });
 }
 
-/** The real rider **body** mesh (from the game's `rider.pkz`). The body is one skinned
- * mesh with a per-material submesh table — the **hands** are their own material bound to
- * the `gloves` paint, the rest to the `rider` suit — so a glove paint lands on the hands
- * without touching the suit. Authored Y-up, so no Z-up flip (unlike the bike). */
 function RiderBodyMesh({ part }: { part: RiderPart }) {
   const tex = useTextureMap(part.textures);
   const geoms = useBodyGeometries(part.nodes);
-  // One material per submesh (matching the geometry groups from `useBodyGeometries`),
-  // each bound to its submesh's texture. A node with no submesh table takes a single
-  // suit material.
+  // One material per submesh; a node with no submesh table takes a single suit material.
   const mats = useMemo(
     () =>
       part.nodes.map((n) =>
@@ -587,23 +468,14 @@ function RiderBodyMesh({ part }: { part: RiderPart }) {
   );
 }
 
-/**
- * A single gear item shown on its own — previewing a helmet/boots mod from the
- * Library, where you want to see *that piece*, not a whole rider wearing it.
- * Scaled to fill the frame like the rider does.
- */
 function RiderGearSolo({ part }: { part: RiderPart }) {
   const tex = useTextureMap(part.textures);
   const geoms = useBodyGeometries(part.nodes);
   const mats = useGearMaterials(part, tex);
   const rot =
     part.part === "boots" ? BOOT_ROT : part.part === "protection" ? PROT_ROT : GEAR_ROT;
-  // Measure in the ROTATED frame, and — for a two-node boots pair authored
-  // coincident at the ankle — push each foot to its own side by ~half a boot's
-  // width so the preview shows a pair rather than one boot inside the other, then
-  // straighten each toe. The arrangement is scaled to a consistent size and
-  // recentred on the origin ourselves (the up-righted boot's bbox sits well below
-  // its origin, and relying on <Center> for that left the pair under the camera).
+  // Measure in the rotated frame; for a coincident two-node boots pair, push each foot
+  // to its own side, straighten each toe, then scale and recentre on the origin ourselves.
   const layout = useMemo(() => {
     const rotM = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...rot));
     const boxes = geoms.map((g) => {
@@ -617,9 +489,7 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
       part.part === "boots" && boxes.length === 2 && !boxes.some((b) => b.isEmpty());
     if (pair) {
       const w = Math.max(boxes[0].max.x - boxes[0].min.x, boxes[1].max.x - boxes[1].min.x);
-      // Each foot goes to its correct side of the frame. The boots are mirror
-      // images authored coincident, so the one whose rotated-X centre is more +X
-      // belongs on screen-left here (camera looks from +X); place it there.
+      // Place each foot on its correct side (camera looks from +X).
       const firstIsPlusX =
         boxes[0].min.x + boxes[0].max.x >= boxes[1].min.x + boxes[1].max.x;
       offsets[0] = (firstIsPlusX ? -1 : 1) * w * 0.55;
@@ -627,8 +497,7 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
     }
     // Straighten each foot so its toe points forward instead of splaying in.
     const yaws = geoms.map((g) => (pair ? straightenYaw(g, rotM) : 0));
-    // Final arranged bounds: each foot as T(offset)·RotY(yaw)·rot, so the fit and
-    // the recentre account for the real on-screen placement.
+    // Arranged bounds: each foot as T(offset)·RotY(yaw)·rot.
     const total = new THREE.Box3();
     geoms.forEach((g, i) => {
       if (!g.boundingBox) return;
@@ -661,15 +530,6 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
   );
 }
 
-/**
- * The rider preview. When the real body mesh is available (the game's `rider.pkz`
- * is configured) it's rendered with the outfit skinned on and each installed gear
- * piece seated onto the body's bounds; otherwise it falls back to the primitive
- * stand-in with the outfit as a tint. Unset gear slots keep their placeholder.
- *
- * With gear but **no body**, it's a single-item preview (Library → a helmet), so
- * the piece is shown on its own rather than on a stand-in figure.
- */
 function RiderComposite({ parts }: { parts: RiderPart[] }) {
   const byPart = (p: RiderPart["part"]) => parts.find((x) => x.part === p);
   const body = byPart("body");
@@ -686,24 +546,19 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
     ? [helmet, boots, protection].find((p) => p?.nodes.length)
     : undefined;
 
-  // Gear anchors: fractions of the real body's bounds when present, else the
-  // fixed stand-in positions.
+  // Gear anchors: fractions of the real body's bounds when present, else fixed stand-in positions.
   const b = hasBody ? partBounds(body!.nodes) : null;
   const cx = b ? (b.lo[0] + b.hi[0]) / 2 : 0;
   const cz = b ? (b.lo[2] + b.hi[2]) / 2 : 0;
   const h = b ? b.hi[1] - b.lo[1] : 1;
   const depth = b ? b.hi[2] - b.lo[2] : 1;
-  // Half the gap between the legs, so each boot sits under its own leg (not bunched
-  // at the centre-line).
+  // Half the leg gap, so each boot sits under its own leg (not bunched at the centre-line).
   const legX = b ? 0.265 * (b.hi[0] - b.lo[0]) : 0.13;
-  // Helmet hangs its bottom edge low on the neck (so little neck shows), nudged
-  // forward in Z over the face — see the `alignY="bottom"` seat below.
+  // Helmet hangs its bottom edge low on the neck, nudged forward in Z (alignY="bottom").
   const helmetAnchor: [number, number, number] = b
-    ? [cx, b.hi[1] - 0.09 * h, cz + 0.08 * depth]
+    ? [cx, b.hi[1] - 0.11 * h, cz + 0.08 * depth]
     : [0, 1.62, 0];
-  // Boots hang their top edge on the body's floor (where the legs end), extending
-  // down to the ground — `alignY="top"` below. Nudged slightly forward in Z (and
-  // pitched, see BOOT_PITCH) so they read as a riding stance, not hanging straight down.
+  // Boots hang their top edge on the body's floor (alignY="top"), nudged forward in Z.
   const footY = b ? b.lo[1] + 0.08 * h : 0.2;
   const bootZ = b ? cz + 0.16 * depth : cz;
   const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.62 * h, cz] : [0, 1.16, 0.03];
@@ -722,7 +577,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
         <RiderGearMesh
           part={helmet!}
           anchor={helmetAnchor}
-          target={hasBody ? 0.3 * h : 0.46}
+          target={hasBody ? 0.42 * h : 0.52}
           yaw={hasBody ? Math.PI : 0}
           pitch={hasBody ? HELMET_PITCH : 0}
           alignY={hasBody ? "bottom" : "center"}
@@ -731,9 +586,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
       {!!protection?.nodes.length && (
         <RiderGearMesh part={protection!} anchor={protAnchor} target={hasBody ? 0.42 * h : 0.62} rot={PROT_ROT} />
       )}
-      {/* A boots `.edf` ships both feet as separate nodes authored coincident at
-          the ankle origin — split them left/right rather than stacking them. A
-          single-node boot (whole pair in one mesh) just renders centred. */}
+      {/* Two feet as separate nodes → split left/right; a single-node boot renders centred. */}
       {!!boots?.nodes.length &&
         (boots!.nodes.length === 2 ? (
           bootSides(boots!).map(({ node, side }, i) => (
@@ -762,9 +615,6 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   );
 }
 
-/** Build three.js geometry + per-submesh materials for each `.edf` node
- * (memoized, disposed on change). Submeshes become material groups so each part
- * (plastics, frame, chain, …) gets its own texture. */
 function useEdfMeshes(
   nodes: EdfNode[] | null | undefined,
   tex: Map<string, THREE.Texture>,
@@ -795,9 +645,7 @@ function useEdfMeshes(
           color: t ? 0xffffff : 0xb7bcc4,
           metalness: 0.2,
           roughness: 0.55,
-          // MX Bikes meshes have inconsistent winding, so single-sided rendering
-          // back-face-culls chunks and the bike looks hollow/see-through. Render
-          // both sides so it's solid.
+          // Inconsistent winding — render both sides so the bike isn't see-through.
           side: THREE.DoubleSide,
         });
 
@@ -808,8 +656,7 @@ function useEdfMeshes(
         );
         materials = n.submeshes.map((sm) => makeMat(submeshTexture(sm.texture, tex)));
       } else {
-        // No submesh table → no groups to bind individually, so the node takes the
-        // whole-node binding Rust resolved (the model's primary body texture).
+        // No submesh table → whole-node binding (the model's primary body texture).
         materials = [makeMat(submeshTexture(n.texture, tex))];
       }
       return { g, materials };
@@ -829,9 +676,7 @@ function useEdfMeshes(
   return built;
 }
 
-/** Real bike geometry decoded from `.edf`, textured per submesh. MX Bikes meshes
- * are authored **Y-up, +Z forward** (validated from part positions: bars at +Y,
- * front suspension at +Z), which is three.js's convention — so no rotation. */
+// MX Bikes meshes are authored Y-up, +Z forward (three.js' convention) — no rotation.
 function EdfMesh({
   nodes,
   textures,
@@ -855,14 +700,11 @@ function EdfMesh({
   );
 }
 
-/** Place the camera for what's on screen. The default sits high (y=1.8) to look
- * down over a bike/rider; a single gear item is centred on the origin, so that
- * angle stares down at its crown — a level, closer view reads far better. */
+// Default camera looks down over a bike/rider; a solo gear item gets a level, closer view.
 function CameraRig({ solo }: { solo: boolean }) {
   const camera = useThree((s) => s.camera);
-  // OrbitControls (`makeDefault`) owns the camera and re-applies its own orbit
-  // state every frame, so moving the camera alone gets reverted — the move has to
-  // go through the controls and be committed with `update()`.
+  // OrbitControls (`makeDefault`) owns the camera each frame, so moves must go through
+  // the controls and be committed with `update()`.
   const controls = useThree((s) => s.controls) as
     | { target: THREE.Vector3; update: () => void }
     | null;
@@ -882,28 +724,15 @@ function CameraRig({ solo }: { solo: boolean }) {
 
 export interface ModelViewerProps {
   mode: ViewerMode;
-  /** Paint texture as a `data:` URI (stand-in models only). */
   texture?: string | null;
-  /** All available bike/paint textures, bound per-submesh on the real mesh. */
   textures?: PaintTexture[];
-  /** Real bike geometry (from `loadBikeModel`). When present in bike mode, it's
-   * rendered instead of the placeholder stand-in. */
   nodes?: EdfNode[] | null;
-  /** Real rider gear + paints (from `loadRiderModel`). When present in rider mode,
-   * installed gear meshes are seated on the body stand-in. */
   riderParts?: RiderPart[] | null;
-  /** While true (and no real model yet) render nothing — the caller shows a
-   * spinner — instead of flashing the placeholder stand-in. */
   loading?: boolean;
-  /** Never render the primitive stand-in (used for real bikes: if the geometry
-   * didn't load, the caller shows a "can't load" message instead of a fake). */
   noStandIn?: boolean;
   className?: string;
 }
 
-/** Reusable 3D canvas: orbit, local lighting, contact shadow, and a stand-in
- * model for the chosen mode. No external/CDN assets (works offline in the
- * Tauri webview). */
 export function ModelViewer({
   mode,
   texture,
@@ -929,9 +758,7 @@ export function ModelViewer({
         dpr={[1, 2]}
         camera={{ position: [2.6, 1.8, 3.2], fov: 42 }}
         onCreated={({ gl }) => {
-          // A lost GPU context (driver hiccup, background throttling) otherwise
-          // leaves a permanently black canvas. Preventing the default lets the
-          // browser restore it automatically instead of killing the WebGL view.
+          // A lost GPU context otherwise leaves a black canvas; preventDefault lets the browser restore it.
           gl.domElement.addEventListener(
             "webglcontextlost",
             (e) => {
@@ -945,8 +772,7 @@ export function ModelViewer({
         <color attach="background" args={["#0e0f13"]} />
         <CameraRig solo={gearSolo} />
         <ambientLight intensity={0.75} />
-        {/* Even sky/ground fill so matte paint reads its true colour instead of
-          going grey against the dark background. */}
+        {/* Even sky/ground fill so matte paint reads its true colour. */}
         <hemisphereLight args={[0xffffff, 0x555a66, 0.7]} />
         <directionalLight
           position={[4, 6, 3]}

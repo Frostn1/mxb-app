@@ -1,51 +1,21 @@
-//! Talk to a **running MX Bikes** process directly.
-//!
-//! Two jobs, both best-effort and Windows-only:
-//!
-//! 1. **Detect** whether `mxbikes.exe` is running (so the UI can tell the user a
-//!    preset needs a profile reselect vs. "loads next launch").
-//!
-//! 2. **Live-refresh the rider look** (experimental). MX Bikes parses
-//!    `profile.ini` into in-memory globals *once*, when a profile is (re)selected
-//!    — the bike-select screen renders from those globals, not the file. So
-//!    rewriting `profile.ini` never refreshes the look on its own. Reverse
-//!    engineering of `mxbikes.exe` (see the `mxbikes-profile-load-re` notes)
-//!    found the loader at image offset [`LOADER_OFFSET`]: it re-reads
-//!    `profile.ini` and repopulates those globals. We re-run it in the live
-//!    process via `CreateRemoteThread`, reusing the game's own code path instead
-//!    of poking individual globals.
-//!
-//! ⚠️ The offset is derived from an **unpacked** build. `CreateRemoteThread`
-//! resolves the module's ASLR base at runtime and adds the offset, so it targets
-//! the right code as long as the shipping exe's layout matches. This is a spike:
-//! it runs a game function off the render thread, which can race or crash the
-//! game. It is gated behind an explicit per-apply flag and never runs by default.
-
 use serde::Serialize;
 
-/// The customization loader (`fcn.1400ecd00`) relative to the PE image base
-/// `0x140000000`: `0x1400ecd00 - 0x140000000`. Re-running it re-parses
-/// `profile.ini` and repopulates the in-memory rider-look globals.
+/// Customization loader `fcn.1400ecd00` minus PE image base `0x140000000`.
 #[cfg(windows)]
 const LOADER_OFFSET: usize = 0x000e_cd00;
 
-/// The game's main executable, matched case-insensitively when scanning the
-/// process list.
+/// The game's main executable (matched case-insensitively).
 #[cfg(windows)]
 const GAME_EXE: &str = "mxbikes.exe";
 
-/// Result of the experimental live-refresh attempt — surfaced to the UI so it
-/// can say whether the look is already live or the user must reselect.
-// Non-Windows builds only ever construct `Unsupported`/`Disabled`; the rest are
-// live on Windows.
+// Non-Windows builds only construct `Unsupported`/`Disabled`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LiveRefresh {
     /// We re-ran the loader in the live game; the look should be live.
     Refreshed,
-    /// The refresh was attempted but failed (couldn't open the process, find
-    /// the module, or spawn the thread).
+    /// The refresh was attempted but failed.
     Failed,
     /// MX Bikes isn't running, so there was nothing to refresh.
     GameNotRunning,
@@ -165,9 +135,7 @@ fn find_game_pid() -> Option<u32> {
     }
 }
 
-/// The runtime base address of `mxbikes.exe` inside process `pid` (its first
-/// module). Retries a few times because a module snapshot can transiently fail
-/// with `ERROR_BAD_LENGTH` while the loader is busy.
+/// Runtime base address of `mxbikes.exe` in `pid` (retries transient snapshot failures).
 #[cfg(windows)]
 fn module_base(pid: u32) -> Option<*mut u8> {
     for _ in 0..8 {
@@ -205,9 +173,7 @@ pub fn is_game_running() -> bool {
     find_game_pid().is_some()
 }
 
-/// Experimental: re-run the game's profile-load routine in the live process so a
-/// freshly written `profile.ini` takes effect without a restart or manual
-/// reselect. Best-effort; see the module docs for the risks.
+/// Experimental: re-run the game's profile-load routine in the live process. Best-effort.
 #[cfg(windows)]
 pub fn refresh_look() -> LiveRefresh {
     let Some(pid) = find_game_pid() else {

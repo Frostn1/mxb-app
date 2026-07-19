@@ -1,7 +1,3 @@
-//! Add-to-library pipeline: resolve a host-specific download URL, stream the
-//! archive with progress events, extract it, and place the track files into
-//! `<MX Bikes>/mods/tracks`.
-
 use crate::config::AppConfig;
 use futures_util::StreamExt;
 use regex::Regex;
@@ -50,10 +46,6 @@ struct FrostmodReload {
     outcome: crate::frostmod::ReloadOutcome,
 }
 
-/// Best-effort: ask a running FrostMod to live-reload the game's content now that
-/// a new mod has landed, and tell the UI whether it worked. Never fails the
-/// install — if FrostMod isn't running the game just picks the mod up on its
-/// next launch.
 pub(crate) fn notify_frostmod(app: &AppHandle, slug: &str) {
     let outcome = crate::frostmod::signal_reload();
     let _ = app.emit(
@@ -65,8 +57,6 @@ pub(crate) fn notify_frostmod(app: &AppHandle, slug: &str) {
     );
 }
 
-/// The shared rustls HTTP client used across the install pipeline (browser UA,
-/// cookie jar for host redirects). Also reused by the preset-bundle flow.
 pub(crate) fn build_client() -> anyhow::Result<Client> {
     Ok(Client::builder()
         .user_agent(UA)
@@ -87,26 +77,19 @@ pub async fn add_to_library(
 ) -> anyhow::Result<()> {
     let client = build_client()?;
 
-    // MEGA is end-to-end encrypted: there's no plain "direct URL" to hand to the
-    // generic downloader, so it gets its own fetch-and-decrypt path.
+    // MEGA is end-to-end encrypted — no direct URL; use the fetch-and-decrypt path.
     let h = host.to_lowercase();
     let u = url.to_lowercase();
     if h.contains("mega") || u.contains("mega.nz") || u.contains("mega.co") {
         return download_mega_and_place(app, cfg, &client, slug, url, subpath, dest_folder).await;
     }
 
-    // 1. Resolve a directly-downloadable URL for the host.
     emit(app, slug, "resolving", None, None);
     let direct = resolve_direct_url(&client, url, host).await?;
 
-    // 2-4. Download, extract, and place (shared with the paid shop source).
     download_and_place(app, cfg, &client, slug, &direct, subpath, dest_folder).await
 }
 
-/// Download an already-resolved direct URL, extract the archive, and place the
-/// mod into the game folder. Shared by the free catalog (public hosts) and the
-/// paid shop, which supplies its own authenticated client and a direct EDD file
-/// URL. Emits the same `install-progress` stages so the UI is source-agnostic.
 pub async fn download_and_place(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -116,21 +99,14 @@ pub async fn download_and_place(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<()> {
-    // Fresh working dir under the OS temp dir.
     let work = std::env::temp_dir().join(format!("frost-{}", sanitize(slug)));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work)?;
 
-    // Download the archive.
     let archive = download(app, client, slug, direct_url, &work).await?;
-
-    // Extract + place (shared with the MEGA path).
     extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
 }
 
-/// Extract a downloaded archive and place its mod files into the game folder,
-/// then clean up the work dir and nudge FrostMod. Shared by every download
-/// source (public hosts, the paid shop, and MEGA) so the tail is identical.
 fn extract_and_place(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -140,21 +116,17 @@ fn extract_and_place(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<()> {
-    // Extract it.
     emit(app, slug, "extracting", None, None);
     let extracted = work.join("extracted");
     std::fs::create_dir_all(&extracted)?;
     extract_archive(archive, &extracted)?;
 
-    // Place mod files into the game's folder for this mod type.
     emit(app, slug, "placing", None, None);
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
     place_mod(&extracted, &mods_dir, type_folder, dest_folder, slug)?;
 
-    // Record which bike folders got a sound (a sound merges into an OEM bike, so
-    // the Library can't otherwise tell it from stock). Best-effort — never fail
-    // an otherwise-successful install over provenance bookkeeping.
+    // Record which bikes got a sound so the Library can tell them from stock (best-effort).
     if type_folder.eq_ignore_ascii_case("bikes") {
         let bikes = sound_bikes_in(&extracted);
         if !bikes.is_empty() {
@@ -167,15 +139,10 @@ fn extract_and_place(
     let _ = std::fs::remove_dir_all(work);
     emit(app, slug, "done", None, None);
 
-    // New mod is in place — nudge FrostMod to reload it live if it's running.
     notify_frostmod(app, slug);
     Ok(())
 }
 
-/// Download a MEGA public file link (fetch node metadata, decrypt the stream)
-/// and place it like any other install. MEGA is end-to-end encrypted, so the
-/// generic `resolve_direct_url` → `download` path can't be used — this fetches
-/// and decrypts in-app via the pure-Rust `mega` crate.
 async fn download_mega_and_place(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -193,8 +160,6 @@ async fn download_mega_and_place(
     extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
 }
 
-/// Fetch + decrypt a MEGA public file link into `dir`, emitting the same
-/// `downloading` progress stages as the generic HTTP downloader.
 pub(crate) async fn download_mega(
     app: &AppHandle,
     http_client: &Client,
@@ -241,8 +206,6 @@ pub(crate) async fn download_mega(
     Ok(path)
 }
 
-/// A `futures` async writer that streams decrypted MEGA bytes to a file while
-/// emitting throttled `downloading` progress events (mirrors the HTTP path).
 struct MegaProgressWriter<'a> {
     file: File,
     app: &'a AppHandle,
@@ -283,9 +246,6 @@ impl futures_util::io::AsyncWrite for MegaProgressWriter<'_> {
     }
 }
 
-/// Import an already-downloaded archive or `.pkz` from disk. Used for hosts that
-/// block in-app downloads (e.g. MediaFire): the user downloads via the browser,
-/// then imports the file here and it's extracted/placed like a normal install.
 pub fn import_file(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -314,12 +274,9 @@ pub fn import_file(
 
     let _ = std::fs::remove_dir_all(&work);
 
-    // Imported mod is in place — nudge FrostMod to reload it live if it's running.
     notify_frostmod(app, &slug);
     Ok(())
 }
-
-// --- host resolution -------------------------------------------------------
 
 pub(crate) async fn resolve_direct_url(
     client: &Client,
@@ -352,9 +309,7 @@ async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String>
     if let Some(m) = direct.find(&html) {
         return Ok(m.as_str().to_string());
     }
-    // Fallback: the download button. MediaFire's current markup is a
-    // `<a aria-label="Download file" href="…">` inside `#download_link` (the
-    // old `id="downloadButton"` no longer exists), so match the aria-label.
+    // Fallback: match the download button's `aria-label="Download file"` href.
     let button = Regex::new(r#"aria-label="Download file"[^>]*href="([^"]+)""#).unwrap();
     if let Some(c) = button.captures(&html) {
         return Ok(c[1].to_string());
@@ -370,8 +325,7 @@ fn resolve_gdrive(url: &str) -> String {
         .or_else(|| by_query.captures(url))
         .map(|c| c[1].to_string());
     match id {
-        // usercontent is where the actual bytes live; large files still return a
-        // virus-scan interstitial that `download` follows.
+        // usercontent serves the bytes; large files still hit a virus-scan interstitial.
         Some(id) => {
             format!("https://drive.usercontent.google.com/download?id={id}&export=download")
         }
@@ -379,9 +333,6 @@ fn resolve_gdrive(url: &str) -> String {
     }
 }
 
-// --- download --------------------------------------------------------------
-
-/// GET with a few retries for transient transport errors (flaky CDNs, resets).
 async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::Response> {
     const ATTEMPTS: u32 = 3;
     let mut last: Option<reqwest::Error> = None;
@@ -409,8 +360,7 @@ pub(crate) async fn download(
 ) -> anyhow::Result<PathBuf> {
     let mut resp = get_with_retry(client, url).await?;
 
-    // Large Google Drive files answer with a "virus scan warning" HTML page that
-    // carries a confirm form; submit it to get the actual bytes.
+    // Large Google Drive files return a virus-scan HTML page with a confirm form; submit it.
     if content_type(&resp).starts_with("text/html") && url.contains("google") {
         let html = resp.text().await?;
         let (action, params) = parse_gdrive_confirm(&html).ok_or_else(|| {
@@ -462,7 +412,6 @@ fn content_type(resp: &reqwest::Response) -> String {
         .to_lowercase()
 }
 
-/// Parse Google Drive's virus-scan confirm form into (action, query params).
 fn parse_gdrive_confirm(html: &str) -> Option<(String, Vec<(String, String)>)> {
     let doc = Html::parse_document(html);
     let form_sel = Selector::parse("form").ok()?;
@@ -483,7 +432,6 @@ fn parse_gdrive_confirm(html: &str) -> Option<(String, Vec<(String, String)>)> {
 }
 
 fn filename_from(resp: &reqwest::Response, url: &str) -> String {
-    // Prefer the Content-Disposition filename.
     if let Some(cd) = resp
         .headers()
         .get(reqwest::header::CONTENT_DISPOSITION)
@@ -499,7 +447,6 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
             }
         }
     }
-    // Otherwise the last path segment of the URL.
     let from_url = url
         .split(['?', '#'])
         .next()
@@ -515,8 +462,6 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
     }
 }
 
-// --- extraction ------------------------------------------------------------
-
 pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
     match detect_ext(archive)?.as_str() {
         "zip" => {
@@ -529,8 +474,7 @@ pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()>
         }
         "rar" => extract_rar(archive, dest)?,
         "pkz" | "pnt" => {
-            // Already an installable mod file (a packaged track/bike `.pkz` or a
-            // loose `.pnt` paint) — carry it through unchanged to the place step.
+            // Already installable (.pkz/.pnt) — carry it through unchanged.
             let name = archive.file_name().unwrap_or_default();
             std::fs::copy(archive, dest.join(name))?;
         }
@@ -539,7 +483,6 @@ pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()>
     Ok(())
 }
 
-/// Extract a RAR archive, preserving entry paths under `dest`.
 fn extract_rar(archive: &Path, dest: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(dest)?;
     let mut open = unrar::Archive::new(archive)
@@ -588,20 +531,9 @@ fn detect_ext(archive: &Path) -> anyhow::Result<String> {
     anyhow::bail!("Could not determine the archive type of the downloaded file.")
 }
 
-// --- placement -------------------------------------------------------------
-
 /// MX Bikes content categories that live directly under `mods/`.
 const CATEGORY_DIRS: [&str; 5] = ["bikes", "tracks", "rider", "tyres", "misc"];
 
-/// Place an extracted mod into the game's `mods/` folder **preserving the
-/// archive's folder structure** (never flattening), so liveries land in
-/// `mods/bikes/<Bike>/paints/`, extracted tracks keep their folder, etc.
-///
-/// - `mods_dir` is `<MX Bikes>/mods`.
-/// - `type_folder` is the default bucket for this mod type (`tracks` / `bikes`)
-///   when the archive doesn't carry its own structure.
-///
-/// Returns the number of files placed.
 pub(crate) fn place_mod(
     extracted: &Path,
     mods_dir: &Path,
@@ -609,9 +541,7 @@ pub(crate) fn place_mod(
     dest_folder: &str,
     slug: &str,
 ) -> anyhow::Result<usize> {
-    // Look for recognized structure at the extracted root AND one wrapper level
-    // down (archives are often wrapped in a `ModName/` folder). Check the root
-    // FIRST so a `<Bike>/paints/` bundle isn't unwrapped into a bare `paints/`.
+    // Check the extracted root FIRST so a `<Bike>/paints/` bundle isn't unwrapped to bare `paints/`.
     let unwrapped = unwrap_wrapper(extracted);
     let candidates: Vec<&Path> = if unwrapped == extracted {
         vec![extracted]
@@ -619,14 +549,12 @@ pub(crate) fn place_mod(
         vec![extracted, unwrapped.as_path()]
     };
 
-    // 1. Archive already contains a `mods/` tree -> merge it in.
     for base in &candidates {
         if let Some(m) = child_dir(base, "mods") {
             return merge_tree(&m, mods_dir);
         }
     }
 
-    // 2. Archive has top-level category folders (bikes/tracks/rider/...).
     for base in &candidates {
         let cats: Vec<PathBuf> = CATEGORY_DIRS
             .iter()
@@ -642,12 +570,8 @@ pub(crate) fn place_mod(
         }
     }
 
-    // 3. Bike-livery bundle: a `<BikeName>/paints/…` structure is unambiguously
-    //    bike content, so route it to `mods/bikes` regardless of the caller's
-    //    default type_folder (the paid shop can't know the type up front).
-    //    **Rider content is exempt**: a `<helmet>/paints` or `<profile>/paints`
-    //    bundle is a rider paint that must stay under `mods/rider` — step 4 places
-    //    it via the chosen `riders/<profile>/paints` / `<model>/paints` destination.
+    // A `<Bike>/paints/…` bundle is bike content → route to `mods/bikes` regardless of
+    // the caller's default type. Rider paints are exempt (kept under `mods/rider` below).
     if !type_folder.eq_ignore_ascii_case("rider") {
         for base in &candidates {
             if contains_paints_bundle(base) {
@@ -656,11 +580,8 @@ pub(crate) fn place_mod(
         }
     }
 
-    // 3b. Sound bundle: `engine.scl` + `sfx.cfg` (a bike's sound files) with no
-    //     `mods/`/category wrapper. This is bike content that belongs at a bike's
-    //     *root* (next to `paints/`), NEVER inside `paints/`. So route it to
-    //     `mods/bikes` and, for loose files, drop a trailing `paints` segment the
-    //     picker may have supplied so a sound can't be misfiled as a livery.
+    // Sound bundle (`engine.scl`+`sfx.cfg`): bike content that belongs at the bike root,
+    // NEVER inside `paints/` → route to `mods/bikes` and drop any trailing `paints` segment.
     for base in &candidates {
         if contains_sound_bundle(base) {
             // `<Bike>/{engine.scl,sfx.cfg}` — merge the bike folder(s) as-is.
@@ -679,9 +600,7 @@ pub(crate) fn place_mod(
         }
     }
 
-    // 4. Plain placement into the mod type's folder, honoring the user's chosen
-    //    destination sub-folder (e.g. a track folder, or `<Bike>/paints` for a
-    //    loose livery). Self-structured archives above ignore it.
+    // Plain placement into the type folder, honoring the chosen destination sub-folder.
     let mut type_dir = mods_dir.join(type_folder);
     for seg in dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()) {
         type_dir.push(sanitize(seg));
@@ -691,7 +610,6 @@ pub(crate) fn place_mod(
     place_plain(&unwrapped, &type_dir, slug, wrap_loose)
 }
 
-/// Descend through redundant single-folder wrappers (e.g. `archive/ModName/...`).
 fn unwrap_wrapper(dir: &Path) -> PathBuf {
     let mut cur = dir.to_path_buf();
     loop {
@@ -726,10 +644,9 @@ fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
         .map(|e| e.path())
 }
 
-/// Sound files that define a bike's sound. Both present in a folder = a sound mod.
+/// Both present in a folder = a sound mod.
 const SOUND_MARKERS: [&str; 2] = ["engine.scl", "sfx.cfg"];
 
-/// True when `dir` directly holds both sound-marker files (`engine.scl`+`sfx.cfg`).
 fn dir_has_sound_markers(dir: &Path) -> bool {
     let mut found = [false; SOUND_MARKERS.len()];
     if let Ok(rd) = std::fs::read_dir(dir) {
@@ -748,7 +665,6 @@ fn dir_has_sound_markers(dir: &Path) -> bool {
     found.iter().all(|&f| f)
 }
 
-/// True when a child folder is a sound mod (i.e. `<Bike>/{engine.scl,sfx.cfg}`).
 fn contains_sound_bundle(base: &Path) -> bool {
     std::fs::read_dir(base)
         .map(|rd| {
@@ -759,10 +675,6 @@ fn contains_sound_bundle(base: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Bike folder names in an extracted archive that carry a sound mod (a folder
-/// directly holding `engine.scl`+`sfx.cfg`). Used to record provenance so the
-/// Library can surface sound-modded bikes it otherwise couldn't tell from stock.
-/// The shared `sounds` sample folder is skipped.
 pub fn sound_bikes_in(extracted: &Path) -> Vec<String> {
     let mut out = Vec::new();
     for entry in walkdir::WalkDir::new(extracted)
@@ -789,7 +701,6 @@ pub fn sound_bikes_in(extracted: &Path) -> Vec<String> {
     out
 }
 
-/// True when a child folder itself holds a `paints` folder (i.e. `<Bike>/paints`).
 fn contains_paints_bundle(base: &Path) -> bool {
     std::fs::read_dir(base)
         .map(|rd| {
@@ -800,11 +711,6 @@ fn contains_paints_bundle(base: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Place content that carries no MX Bikes structure into `type_dir`, preserving
-/// any sub-folders. When `wrap_loose` is set, loose files (no `.pkz`, no
-/// sub-folders) are wrapped in their own `<slug>` folder (an extracted track
-/// needs one); when unset they go straight into `type_dir` (e.g. a loose livery
-/// dropped into a chosen `paints` folder).
 fn place_plain(
     base: &Path,
     type_dir: &Path,
@@ -830,8 +736,7 @@ fn place_plain(
         .filter(|p| !is_junk(&p.file_name().unwrap_or_default().to_string_lossy()))
         .count();
 
-    // Loose files with no sub-folders: wrap in their own folder (extracted track)
-    // or drop straight in (a livery placed into a chosen paints folder).
+    // Loose files, no sub-folders: wrap in their own folder, or drop straight in.
     if !has_pkz && dirs.is_empty() && non_junk_files > 0 {
         let target = if wrap_loose {
             type_dir.join(sanitize(slug))
@@ -841,7 +746,6 @@ fn place_plain(
         return merge_tree(base, &target);
     }
 
-    // Otherwise copy top-level files (skipping junk) and merge sub-folders as-is.
     let mut n = 0;
     for p in &files {
         let name = p.file_name().unwrap_or_default();
@@ -858,7 +762,6 @@ fn place_plain(
     Ok(n)
 }
 
-/// Recursively copy `src` into `dst`, merging into existing folders.
 fn merge_tree(src: &Path, dst: &Path) -> anyhow::Result<usize> {
     std::fs::create_dir_all(dst)?;
     let mut n = 0;
@@ -891,7 +794,6 @@ fn is_junk(name: &str) -> bool {
         || n.ends_with(".md")
 }
 
-/// Strip path separators and other unsafe characters from a file/dir name.
 fn sanitize(name: &str) -> String {
     name.chars()
         .map(|c| match c {
@@ -915,7 +817,6 @@ mod tests {
 
     #[test]
     fn parses_gdrive_virus_scan_form() {
-        // Mirrors the real "Virus scan warning" interstitial markup.
         let html = r#"<!DOCTYPE html><html><head><title>Google Drive - Virus scan warning</title></head>
             <body><form id="download-form" action="https://drive.usercontent.google.com/download" method="get">
               <input type="hidden" name="id" value="1GfLnMrUXqOaBzn61">
@@ -936,8 +837,6 @@ mod tests {
         assert_eq!(sanitize("a/b\\c:d"), "a_b_c_d");
     }
 
-    /// A bare `.pnt` paint (some mods ship un-zipped) passes through extraction
-    /// unchanged instead of hitting "Unsupported archive type".
     #[test]
     fn extract_passes_through_bare_pnt() {
         let dir = std::env::temp_dir().join(format!("frost-test-pnt-{}", std::process::id()));
@@ -953,8 +852,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Live check that the Google Drive large-file confirm flow resolves to an
-    /// actual file (headers only — no full download). Ignored by default.
     #[test]
     #[ignore = "hits live Google Drive"]
     fn live_gdrive_resolves_to_file() {
@@ -998,8 +895,6 @@ mod tests {
         });
     }
 
-    /// Live test: can we actually fetch a real MediaFire-hosted track? Tries
-    /// both TLS backends against the CDN. Ignored by default.
     #[test]
     #[ignore = "hits live MediaFire CDN"]
     fn live_mediafire_download() {
@@ -1055,7 +950,6 @@ mod tests {
         let base = std::env::temp_dir().join(format!("frost-magic-{}", std::process::id()));
         std::fs::create_dir_all(&base)?;
 
-        // No/unknown extension → sniff the leading bytes.
         let rar = base.join("download.bin");
         std::fs::write(&rar, b"Rar!\x1a\x07\x01\x00")?;
         assert_eq!(detect_ext(&rar)?, "rar");
@@ -1064,7 +958,6 @@ mod tests {
         std::fs::write(&zip, b"PK\x03\x04rest")?;
         assert_eq!(detect_ext(&zip)?, "zip");
 
-        // A real extension wins without sniffing.
         let named = base.join("track.7z");
         std::fs::write(&named, b"not really 7z")?;
         assert_eq!(detect_ext(&named)?, "7z");
@@ -1085,8 +978,6 @@ mod tests {
         std::fs::write(p, b"x").unwrap();
     }
 
-    /// End-to-end: a zip containing `SomeTrack/track.pkz` + a readme lands the
-    /// `.pkz` in `mods/tracks` and drops the readme.
     #[test]
     fn extract_and_place_zip_with_pkz() -> anyhow::Result<()> {
         let base = place_tmp("zip");
@@ -1139,9 +1030,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A `<Bike>/paints/…` livery bundle routes to `mods/bikes` from its own
-    /// structure even when the caller's default type is `tracks` (the paid shop
-    /// can't know the type up front).
     #[test]
     fn livery_bundle_routes_to_bikes_even_with_tracks_default() {
         let root = place_tmp("livery-tracks-default");
@@ -1156,8 +1044,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A rider **outfit/kit** paint (loose `.pnt`) installs into the chosen rider
-    /// profile's `paints` — the `riders/<profile>/paints` level must be preserved.
     #[test]
     fn places_rider_kit_into_profile_paints() {
         let root = place_tmp("rider-kit");
@@ -1171,9 +1057,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A rider paint packaged as a `<name>/paints/…` bundle must NOT be hijacked to
-    /// `mods/bikes` by the bike-livery heuristic — it stays under `mods/rider` at
-    /// the chosen destination.
     #[test]
     fn rider_paint_bundle_not_routed_to_bikes() {
         let root = place_tmp("rider-bundle");
@@ -1186,8 +1069,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A helmet **paint** (`<helmet>/paints`) routes into that helmet's `paints`
-    /// under `mods/rider`, never to `mods/bikes`.
     #[test]
     fn helmet_paint_bundle_stays_in_rider() {
         let root = place_tmp("helmet-paint");
@@ -1283,8 +1164,6 @@ mod tests {
 
     #[test]
     fn packaged_sound_mod_merges_to_bike_root() {
-        // ASS-style archive: a wrapper folder carrying the full `mods/bikes/…`
-        // tree, sound configs at the bike root + shared samples in `bikes/sounds`.
         let root = place_tmp("sound-packaged");
         let ex = root.join("ex");
         let bike = "ASS KTM250-0.1/mods/bikes/MX2OEM_2023_KTM_250_SX-F";
@@ -1306,7 +1185,6 @@ mod tests {
 
     #[test]
     fn nested_sound_bundle_routes_to_bikes() {
-        // `<Bike>/{engine.scl,sfx.cfg}` with no `mods/` wrapper.
         let root = place_tmp("sound-nested");
         let ex = root.join("ex");
         touch(&ex.join("MX2OEM_2023_KTM_250_SX-F/engine.scl"));
@@ -1322,8 +1200,6 @@ mod tests {
 
     #[test]
     fn loose_sound_files_never_land_in_paints() {
-        // Loose `engine.scl`+`sfx.cfg`; even if the picker hands us `<Bike>/paints`
-        // the paints segment is dropped and the sound lands at the bike root.
         let root = place_tmp("sound-loose");
         let ex = root.join("ex");
         touch(&ex.join("engine.scl"));

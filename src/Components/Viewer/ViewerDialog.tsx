@@ -17,32 +17,18 @@ interface ViewerDialogProps {
   onOpenChange: (o: boolean) => void;
   title?: string;
   initialMode?: ViewerMode;
-  /** Candidate `.pnt` paint files to offer (gear-paint preview, no bike model). */
   paintPaths?: string[];
-  /** Bike folder / `.pkz` / `.edf` path to load real geometry + paints from. */
   modelSource?: string;
-  /** An installed gear item (folder or `.pkz`) to show on the rider, and which
-   * slot it fills — lets a helmet/boots mod be previewed straight from the
-   * Library, no game profile needed. */
   gearSource?: string;
   gearPart?: RiderPart["part"];
-  /** For a loose gear **paint** whose own model may not be installed: the slot to
-   * preview it on the game's **stock** model (`boots`/`helmet`/`protection`). The
-   * `.pnt` to apply is `paintPaths[paintIdx]`. */
   stockGearPart?: RiderPart["part"];
 }
 
-/** Strip folder + `.pnt` for a readable paint label. */
 function paintLabel(path: string): string {
   const base = path.replace(/\\/g, "/").split("/").pop() ?? path;
   return base.replace(/\.pnt$/i, "");
 }
 
-/**
- * Full-screen 3D viewer for a single library item — a bike (with its selectable
- * paints) or a piece of gear. Works without a game profile, so it's usable on any
- * platform for any item in the library.
- */
 export function ViewerDialog({
   open,
   onOpenChange,
@@ -53,8 +39,7 @@ export function ViewerDialog({
   gearPart,
   stockGearPart,
 }: ViewerDialogProps) {
-  // The content decides the view: a bike model → bike; gear/rider paint → rider.
-  // There's no user switch — a rider outfit is never shown as a bike.
+  // A bike model → bike; gear/rider paint → rider. No user switch.
   const isBike = !!modelSource;
   const mode: ViewerMode = isBike ? "bike" : "rider";
   const [paintIdx, setPaintIdx] = useState(0);
@@ -121,16 +106,13 @@ export function ViewerDialog({
     };
   }, [open, gearPath]);
 
-  // Rider outfit → load the real player body from the game's `rider.pkz` (the
-  // profile the paint lives under, e.g. `riders/default_mx/paints/…`). Empty if the
-  // game folder isn't set → the viewer falls back to the stand-in.
+  // Rider outfit → load the real player body from the game's `rider.pkz` for this profile.
   const riderProfile = useMemo(() => {
     const m = (gearPath ?? "").replace(/\\/g, "/").match(/riders\/([^/]+)\//i);
     return m?.[1] ?? "default_mx";
   }, [gearPath]);
   useEffect(() => {
-    // A gear preview shows the piece itself — no rider body behind it (whether an
-    // installed gear model or a loose gear paint on the stock model).
+    // A gear preview shows the piece itself — no rider body behind it.
     if (!open || isBike || gearSource || stockGearPart) {
       setBodyNodes(null);
       return;
@@ -150,8 +132,7 @@ export function ViewerDialog({
     [isBike, paints, paintIdx, gearTextures],
   );
 
-  // Gear ships its paints inside the archive, so they aren't loose files the
-  // Library can list — read them out for the picker.
+  // Gear ships paints inside the archive — read them out for the picker.
   useEffect(() => {
     if (!open || !gearSource) {
       setGearPaints({ paints: [], goggles: [] });
@@ -166,9 +147,7 @@ export function ViewerDialog({
     };
   }, [open, gearSource]);
 
-  // The gear item to show: either an installed gear model (in the selected skin +
-  // goggle paint), or — for a loose gear paint whose model isn't installed — the
-  // game's stock model for that slot wearing the paint.
+  // The gear item to show: an installed gear model, or the stock model for a loose paint.
   const gearPaint = gearPaints.paints[paintIdx];
   const gogglePaint = gearPaints.goggles[gogglesIdx];
   useEffect(() => {
@@ -197,8 +176,7 @@ export function ViewerDialog({
     };
   }, [open, isBike, gearSource, gearPart, gearPaint, gogglePaint, stockGearPart, gearPath]);
 
-  // Rider parts for the viewer: the real body (skinned with the outfit paint when
-  // we're previewing one) plus any gear item. Empty → ModelViewer's stand-in.
+  // Rider parts for the viewer: the real body (skinned when previewing a paint) plus any gear.
   const riderParts = useMemo<RiderPart[] | null>(() => {
     const out: RiderPart[] = [];
     if (bodyNodes) {
@@ -221,26 +199,18 @@ export function ViewerDialog({
       ? byName(["livery", "bike_parts"]) ?? null
       : byName(["rider", "suit", "helmet", "gloves", "boots"]) ?? null;
 
-  // Paint dropdown options: a bike's paints, a gear item's packed paints, or the
-  // loose `.pnt` candidates for a paint entry.
-  // Every paint stays selectable. A paint that touches none of the parts shown is
-  // noted, so that "nothing happened" reads as expected rather than broken — but
-  // it is NOT called wrong for the bike: it may simply paint the wheels or chain,
-  // which this preview doesn't render.
+  // Paint dropdown options: a bike's paints, a gear item's packed paints, or loose `.pnt` candidates.
   const paintOptions = isBike
     ? paints.map((p) => (p.changesPreview ? p.name : `${p.name} — no change here`))
     : gearSource
       ? gearPaints.paints
       : paintPaths.map(paintLabel);
-  // A helmet's goggles carry their own paint set (lens/strap), shown as a second
-  // picker next to the skin one.
+  // A helmet's goggles carry their own paint set (lens/strap) — a second picker.
   const goggleOptions = gearSource ? gearPaints.goggles : [];
   const paintNoChange = isBike && paints[paintIdx]?.changesPreview === false;
 
   const loading = loadingModel || loadingPaint;
-  // A bike whose load finished but yielded no geometry (e.g. an older bike that
-  // ships its parts as separate `.edf` files, no `model.edf`) — show a clear
-  // message instead of a fake stand-in.
+  // A bike that loaded but yielded no geometry (older split-`.edf` bikes) — show a message, not a fake.
   const bikeFailed = isBike && !loadingModel && !!model && !model.nodes.length;
 
   return (

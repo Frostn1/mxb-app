@@ -1,11 +1,3 @@
-//! mxbikes-shop.com "My Downloads" source (paid, authenticated).
-//!
-//! Unlike the free mxb-mods.com catalog, this source lists the tracks the
-//! signed-in user has *already purchased* on the shop's "All My Downloads" page
-//! and hands back the authenticated file URL for each so it can be streamed
-//! through the shared install pipeline. Requests use the authenticated client
-//! from [`crate::shop_session`].
-
 use crate::shop_session::SHOP_BASE;
 use reqwest::Client;
 use scraper::{ElementRef, Html, Selector};
@@ -13,8 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tauri::{AppHandle, Manager};
 
-/// One purchased download. Mirrors `ModSummary` (so the frontend can render it
-/// with the same card) plus the authenticated `download_url` to stream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShopItem {
@@ -37,12 +27,7 @@ pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Res
     let status = resp.status();
     let html = resp.text().await?;
 
-    // Cloudflare sits in front of the shop and binds its `cf_clearance` cookie to
-    // the browser's IP + TLS fingerprint. When the replayed session no longer
-    // satisfies it, Cloudflare serves a "Just a moment…" interstitial (usually
-    // 403/503) rather than the real page. Treat it like an expired session so the
-    // UI prompts a fresh sign-in (which mints a new clearance) — the wording must
-    // contain "sign in" for `Shop.tsx` to drop back to the signed-out screen.
+    // Cloudflare "Just a moment…" interstitial; error text must contain "sign in".
     let looks_like_challenge = html.contains("Just a moment")
         || html.contains("challenge-platform")
         || html.contains("cf-browser-verification");
@@ -63,8 +48,7 @@ pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Res
 
     let items = parse_my_downloads(&html);
     if items.is_empty() {
-        // No rows parsed: persist the raw page so the CSS selectors can be
-        // verified/adjusted against the real logged-in markup during review.
+        // No rows parsed: dump the raw page so selectors can be re-tuned.
         if let Ok(dir) = app.path().app_cache_dir() {
             let _ = std::fs::create_dir_all(&dir);
             let dump = dir.join("shop-downloads.html");
@@ -77,15 +61,6 @@ pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Res
     Ok(items)
 }
 
-/// Extract purchased items from the "All My Downloads" HTML.
-///
-/// The shop is WordPress + Easy Digital Downloads, and the page renders with the
-/// EDD "user downloads" block: a table of product rows, each holding the product
-/// title in a `--product` column and one or more file-download links in a
-/// `--files` column (e.g. PRO / AMS / low-quality variants). We parse that
-/// structure directly. If a future theme change breaks it, we fall back to the
-/// generic anchor scan; if *that* also yields nothing, `fetch_my_downloads` dumps
-/// the page to the cache dir so selectors can be re-tuned.
 pub fn parse_my_downloads(html: &str) -> Vec<ShopItem> {
     let doc = Html::parse_document(html);
     let items = parse_edd_blocks(&doc);
@@ -95,8 +70,6 @@ pub fn parse_my_downloads(html: &str) -> Vec<ShopItem> {
     parse_generic_anchors(&doc)
 }
 
-/// Parse the EDD "user downloads" block: one card per file link, titled by its
-/// product. Products with multiple files disambiguate with the file's label.
 fn parse_edd_blocks(doc: &Html) -> Vec<ShopItem> {
     let product_sel = Selector::parse("div.edd-order-item__product").unwrap();
     let title_sel = Selector::parse(".edd-blocks__row-column--product").unwrap();
@@ -125,11 +98,9 @@ fn parse_edd_blocks(doc: &Html) -> Vec<ShopItem> {
 
             let label = clean(&a.text().collect::<String>());
             let title = match (product.is_empty(), multi) {
-                // Single file: the product name is the cleanest label.
                 (false, false) => product.clone(),
                 // Multiple files: keep the variant (PRO/AMS/…) distinct.
                 (false, true) => format!("{product} — {label}"),
-                // No product heading: fall back to the file's own label.
                 (true, _) if !label.is_empty() => label,
                 (true, _) => "Untitled".to_string(),
             };
@@ -151,8 +122,6 @@ fn parse_edd_blocks(doc: &Html) -> Vec<ShopItem> {
     items
 }
 
-/// Theme-agnostic fallback: scan every anchor that looks like a file/EDD download
-/// link and pull a title + thumbnail from its surrounding card/row.
 fn parse_generic_anchors(doc: &Html) -> Vec<ShopItem> {
     let a_sel = Selector::parse("a[href]").unwrap();
 
@@ -196,23 +165,15 @@ fn parse_generic_anchors(doc: &Html) -> Vec<ShopItem> {
     items
 }
 
-/// Best-effort mod-type guess for a purchased item, used to choose the install
-/// destination for content we can't otherwise classify — a non-plain `.pkz`,
-/// which isn't a readable archive. Structured downloads (zip/rar/7z that carry a
-/// `mods/` tree, top-level `bikes/tracks/rider/…`, or a `<Bike>/paints/` bundle)
-/// still self-route by their folders in `install::place_mod`; this only sets the
-/// fallback bucket for the rest. Defaults to `tracks`, the shop's dominant
-/// content. Returns a `mods/` subfolder name (a `CATEGORY_DIRS` value).
+/// Best-effort mod-type guess (a `mods/` subfolder). Defaults to `tracks`.
 pub fn guess_mod_type(title: &str) -> &'static str {
     let t = title.to_lowercase();
 
-    // Rider gear/paints read off the title clearly.
     const RIDER: [&str; 10] = [
         "helmet", "boots", "glove", "goggle", "jersey", "gear set", "gearset",
         "neck brace", "rider paint", "rider kit",
     ];
-    // Bike content: manufacturers + model families, plus explicit livery/bike words.
-    // (`replica` is intentionally excluded — the shop tags tracks with it too.)
+    // `replica` excluded — the shop tags tracks with it too.
     const BIKE: [&str; 18] = [
         "ktm", "husqvarna", "husky", "gasgas", "gas gas", "yamaha", "honda",
         "kawasaki", "suzuki", "fantic", "sherco", "sx-f", "sxf", "crf", "livery",
@@ -298,9 +259,7 @@ mod tests {
 
     #[test]
     fn parses_edd_blocks_user_downloads() {
-        // Mirrors the live "All My Downloads" markup (EDD user-downloads block):
-        // product rows whose title lives in a sibling `--product` column, with one
-        // or more file links per product and no thumbnails.
+        // Mirrors the live "All My Downloads" markup (EDD user-downloads block).
         let html = r#"
             <div class="wp-block-edd-user-downloads edd-blocks__user-downloads">
               <div class="edd-blocks__row edd-blocks__row-header edd-order-items__header">
@@ -347,8 +306,7 @@ mod tests {
 
     #[test]
     fn parses_edd_style_cards() {
-        // Two purchased downloads laid out as cards with a heading, thumbnail,
-        // and an EDD download link; plus a noise link that must be ignored.
+        // Two card-style downloads plus a noise link that must be ignored.
         let html = r#"
             <div class="edd_downloads_list">
               <div class="edd_download">

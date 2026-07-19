@@ -1,29 +1,10 @@
-//! Native decoder for MX Bikes **`.pnt`** paint files — the textures that make up
-//! a livery, helmet, suit, gloves, boots, etc. This is what lets the 3D viewer
-//! show a user's actual paint on a model without shelling out to PiBoSo's
-//! PaintEd tool.
-//!
-//! A `.pnt` is an **unencrypted** container (verified against `libpnt`, the MIT
-//! reverse-engineering, and a round-tripped fixture). Layout, little-endian:
-//!
+//! `.pnt` layout, little-endian:
 //! ```text
-//! Header (108 bytes):
-//!   magic     [4]    = "PNT\0"
-//!   basename  [100]  paint display name, null-padded
-//!   count     u32    number of packed textures
-//! Then `count` image records:
-//!   filename  [100]  texture name WITHOUT extension (e.g. "livery"), null-padded
-//!   width     u32
-//!   height    u32
-//!   md5       [16]   (not needed to decode)
-//!   data_size u32    = 8 (padding) + compressed byte length
-//!   padding   [8]    zero bytes
-//!   data      [data_size-8]  raw DEFLATE (wbits -15) of BGRA pixels
+//! Header (108 bytes): magic[4]="PNT\0", basename[100], count u32
+//! Per record: filename[100], width u32, height u32, md5[16],
+//!             data_size u32 (= 8 padding + compressed len), padding[8],
+//!             data[data_size-8]  raw DEFLATE (wbits -15)
 //! ```
-//!
-//! The inflated payload is 4-bytes-per-pixel **BGRA**; we swap to RGBA for the
-//! renderer. There is no offset table — records are walked sequentially using
-//! `data_size` to reach the next one.
 
 use anyhow::{bail, Context, Result};
 use base64::Engine;
@@ -37,15 +18,11 @@ use std::path::Path;
 const MAGIC: &[u8; 4] = b"PNT\x00";
 const HEADER_SIZE: usize = 108;
 const NAME_SIZE: usize = 100;
-/// Fixed per-image header: name(100) + w(4) + h(4) + md5(16) + data_size(4).
 const IMAGE_HEADER_SIZE: usize = NAME_SIZE + 4 + 4 + 16 + 4;
-/// Zero padding between an image's header and its deflate payload.
 const IMAGE_PADDING: usize = 8;
 
-/// One decoded texture: RGBA8 pixels plus its internal name and dimensions.
 #[derive(Debug, Clone)]
 pub struct PntTexture {
-    /// Internal texture name without extension (`livery`, `helmet`, `rider`…).
     pub name: String,
     pub width: u32,
     pub height: u32,
@@ -53,21 +30,15 @@ pub struct PntTexture {
     pub rgba: Vec<u8>,
 }
 
-/// A texture ready for the frontend: a PNG `data:` URI plus its metadata. Mirrors
-/// the `data:`-URI approach the library thumbnails already use, so no asset
-/// protocol wiring is needed.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaintTexture {
-    /// Internal texture name without extension.
     pub name: String,
     pub width: u32,
     pub height: u32,
-    /// `data:image/png;base64,…` — bind straight into a three.js `TextureLoader`.
     pub png: String,
 }
 
-/// Read a `u32` (little-endian) at `off`, bounds-checked.
 fn read_u32(buf: &[u8], off: usize) -> Result<u32> {
     let end = off + 4;
     if end > buf.len() {
@@ -76,7 +47,6 @@ fn read_u32(buf: &[u8], off: usize) -> Result<u32> {
     Ok(u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]))
 }
 
-/// Read a null-padded ASCII name field of `NAME_SIZE` bytes at `off`.
 fn read_name(buf: &[u8], off: usize) -> Result<String> {
     let end = off + NAME_SIZE;
     if end > buf.len() {
@@ -87,7 +57,6 @@ fn read_name(buf: &[u8], off: usize) -> Result<String> {
     Ok(String::from_utf8_lossy(&raw[..n]).into_owned())
 }
 
-/// Decode every texture in a `.pnt` byte buffer into RGBA8.
 pub fn decode(buf: &[u8]) -> Result<Vec<PntTexture>> {
     if buf.len() < HEADER_SIZE || &buf[..4] != MAGIC {
         bail!("not a .pnt file (bad magic)");
@@ -112,11 +81,7 @@ pub fn decode(buf: &[u8]) -> Result<Vec<PntTexture>> {
             bail!("texture {i} '{name}': payload runs past end of file");
         }
 
-        // Raw DEFLATE (no zlib header) → **RGBA** pixels, already in that order.
-        // (An earlier BGRA→RGBA swap here corrupted every paint: it turned navy into
-        // brown and red into blue. Verified against PiBoSo's own stock
-        // `riders/default_mx/paints/white_navy.pnt` — its navy only reads as navy
-        // when the bytes are taken as RGBA.)
+        // Raw DEFLATE (no zlib header) → RGBA, already in order (no channel swap).
         let mut rgba = Vec::with_capacity((width as usize) * (height as usize) * 4);
         DeflateDecoder::new(&buf[data_start..data_end])
             .read_to_end(&mut rgba)
@@ -141,10 +106,6 @@ pub fn decode(buf: &[u8]) -> Result<Vec<PntTexture>> {
     Ok(out)
 }
 
-/// Decode a `.pnt` buffer, transparently reading a non-plain paint container. A
-/// locked `.pnt` is an encrypted single-blob container whose plaintext is a plain
-/// `PNT\0` file; if the bytes aren't already `PNT\0` we try to decrypt them and
-/// decode the result. Falls back to [`decode`]'s error when neither works.
 pub fn decode_any(buf: &[u8]) -> Result<Vec<PntTexture>> {
     if buf.len() >= 4 && &buf[..4] == MAGIC {
         return decode(buf);
@@ -152,16 +113,11 @@ pub fn decode_any(buf: &[u8]) -> Result<Vec<PntTexture>> {
     if let Some(plain) = crate::pkz::read_sidecar_blob(buf) {
         return decode(&plain);
     }
-    decode(buf) // not PNT and not a container we can open → report bad magic
+    decode(buf) // not PNT and no sidecar reader for it → report bad magic
 }
 
-/// Encode an [`PntTexture`] as a PNG `data:` URI for the frontend.
 fn to_png_uri(tex: &PntTexture) -> Result<String> {
-    // Fast deflate + no row filter: these are large (up to 2048²) diffuse maps
-    // headed straight for a `data:` URI in the local webview — encode speed matters
-    // far more than a few % of file size, and the default (best-compression, adaptive
-    // filter) PNG path was the viewer's dominant cost. Encode straight from the RGBA
-    // slice (no intermediate `RgbaImage` clone).
+    // Fast deflate + no row filter: encode speed over size.
     let mut png = Vec::new();
     PngEncoder::new_with_quality(&mut png, CompressionType::Fast, FilterType::NoFilter)
         .write_image(&tex.rgba, tex.width, tex.height, ExtendedColorType::Rgba8)
@@ -170,17 +126,6 @@ fn to_png_uri(tex: &PntTexture) -> Result<String> {
     Ok(format!("data:image/png;base64,{b64}"))
 }
 
-/// Extract **every** texture packed inside a bike's `model.edf`, under the name
-/// the model itself gives it (`2021crf`, `exhaust_22`, `w_plate` on the Honda;
-/// `plastics`, `450f_metals` on the KTM 450), downscaled for the viewer.
-///
-/// These names matter: `gfx.cfg` binds mesh groups to textures BY NAME, and a
-/// `.pnt` paint replaces a model texture of the same name. Collapsing them to a
-/// generic `albedo` (what this used to do, keeping only the largest) threw away
-/// the only thing that says whether a paint applies to a given model at all.
-///
-/// Normal/roughness maps (`_n` / `_r`) are skipped — the viewer's material is
-/// diffuse-only, and they're the bulk of the decode cost.
 pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
     crate::edf::embedded_textures(edf)
         .iter()
@@ -190,14 +135,10 @@ pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
         })
         .filter_map(|t| {
             let rgba = crate::edf::inflate_texture(edf, t)?;
-            // Embedded edf textures are stored **RGBA** already (unlike `.pnt`
-            // textures, which are BGRA) — swapping turns the plastics blue.
+            // Embedded edf textures are already RGBA — no channel swap.
             let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
                 t.width, t.height, rgba,
             )?);
-            // Downscale so a 4096² body map becomes a light preview texture, and
-            // encode as JPEG — these are photographic, so JPEG is ~10× smaller than
-            // PNG over the IPC boundary (no alpha needed for a diffuse).
             let scaled = img.thumbnail(1024, 1024);
             let (sw, sh) = (scaled.width(), scaled.height());
             let mut jpg = Vec::new();
@@ -215,16 +156,6 @@ pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
         .collect()
 }
 
-/// Encode a decoded [`PntTexture`] into a frontend-ready [`PaintTexture`] (PNG
-/// `data:` URI), downscaled to a preview cap. Returns a 1×1 transparent placeholder
-/// if PNG encoding fails.
-///
-/// The cap is load-bearing: a `.pnt` body map is up to 4096² — an ~80 MB data URI
-/// each — and a bike paint ships several (diffuse + normal + roughness), so at full
-/// size the frontend gets 150+ MB of textures, exhausts the webview's WebGL memory,
-/// and the model silently fails to render entirely (the exact "paint doesn't show"
-/// bug). 1024² is the same budget the model's own textures use ([`extract_edf_textures`])
-/// and is ample for a preview.
 pub fn to_texture(t: &PntTexture) -> PaintTexture {
     const MAX: u32 = 1024;
     if t.width.max(t.height) > MAX {
@@ -253,9 +184,6 @@ pub fn to_texture(t: &PntTexture) -> PaintTexture {
     }
 }
 
-/// Decode a raw image (`.tga`/`.png`/…) into a frontend-ready [`PaintTexture`].
-/// Used for a bike's own textures shipped inside its `.pkz`. `name` is the
-/// texture's base name (no extension). `None` if it can't be decoded.
 pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
     // TGA has no magic, so try it explicitly first, then fall back to sniffing.
     let img = image::codecs::tga::TgaDecoder::new(Cursor::new(bytes))
@@ -277,7 +205,6 @@ pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
     })
 }
 
-/// Decode a `.pnt` file at `path` into frontend-ready textures (PNG `data:` URIs).
 pub fn unpack_file(path: &Path) -> Result<Vec<PaintTexture>> {
     let bytes = std::fs::read(path).with_context(|| format!("read {path:?}"))?;
     decode_any(&bytes)?
@@ -297,7 +224,6 @@ pub fn unpack_file(path: &Path) -> Result<Vec<PaintTexture>> {
 mod tests {
     use super::*;
 
-    /// Investigation: print the texture names inside a `.pnt`.
     /// `MXB_PNT='…/gloves/x.pnt' cargo test dump_pnt_names -- --ignored --nocapture`
     #[test]
     #[ignore]
@@ -311,21 +237,9 @@ mod tests {
         }
     }
 
-    /// Fixture: a 4×4 32-bit paint packed with `libpnt` (a third-party packer).
-    ///
-    /// **Channel-order caveat:** `libpnt` writes pixels in the opposite byte order
-    /// to the paints MX Bikes actually ships. The game's are plain **RGBA** —
-    /// verified against PiBoSo's own stock
-    /// `rider/riders/default_mx/paints/white_navy.pnt`, whose navy only reads as
-    /// navy (blue-dominant) when the bytes are taken as RGBA; decoding it the other
-    /// way turns navy into brown and red into blue. So this fixture still exercises
-    /// the header + DEFLATE path, but its payload must be channel-swapped to line up
-    /// with our (real-file-correct) decode.
     const FIXTURE_PNT: &[u8] = include_bytes!("fixtures/test_paint.pnt");
     const FIXTURE_RGBA: &[u8] = include_bytes!("fixtures/test_paint_rgba.bin");
 
-    /// `FIXTURE_RGBA` with R/B swapped — i.e. the bytes actually stored in the
-    /// libpnt fixture, which our decoder must return verbatim.
     fn fixture_stored_pixels() -> Vec<u8> {
         let mut v = FIXTURE_RGBA.to_vec();
         for px in v.chunks_exact_mut(4) {
@@ -341,8 +255,7 @@ mod tests {
         let t = &texs[0];
         assert_eq!(t.name, "livery");
         assert_eq!((t.width, t.height), (4, 4));
-        // Pixels come back exactly as stored — no channel reordering. (Guards
-        // against re-introducing the BGRA→RGBA swap that corrupted every paint.)
+        // Pixels come back exactly as stored — no channel reordering.
         assert_eq!(
             t.rgba,
             fixture_stored_pixels(),
@@ -380,14 +293,11 @@ mod tests {
         assert!(uri.starts_with("data:image/png;base64,"));
     }
 
-    /// A non-`PNT\0` buffer that isn't a locked container we can open still surfaces
-    /// the bad-magic error via `decode_any` (no panic, no false decode).
     #[test]
     fn decode_any_rejects_garbage() {
         assert!(decode_any(b"not a paint file at all........").is_err());
     }
 
-    /// `decode_any` passes a plain `PNT\0` file straight through to `decode`.
     #[test]
     fn decode_any_handles_plain_pnt() {
         let texs = decode_any(FIXTURE_PNT).expect("decode plain via decode_any");
@@ -395,10 +305,7 @@ mod tests {
         assert_eq!(texs[0].rgba, fixture_stored_pixels());
     }
 
-    /// Real-file guard for the channel order, using PiBoSo's own stock paint:
     /// `MXB_STOCK_PNT=<…/rider.pkz extracted>/white_navy.pnt cargo test -- --ignored`.
-    /// A paint named *white_navy* must decode with its navy **blue-dominant**; if a
-    /// channel swap ever creeps back in, the navy reads brown (red-dominant).
     #[test]
     #[ignore]
     fn stock_white_navy_decodes_navy_not_brown() {
@@ -428,19 +335,17 @@ mod tests {
         );
     }
 
-    /// Local-only proof against a real **non-plain** paint: set `MXB_REAL_PNT`
-    /// to a locked `.pnt` and run `cargo test -- --ignored`. `decode_any` must
-    /// transparently read it and recover real textures.
+    /// `MXB_REAL_PNT=<non-PNT container> cargo test -- --ignored`
     #[test]
     #[ignore]
-    fn decodes_locked_paint_from_env() {
+    fn decodes_sidecar_paint_from_env() {
         let Ok(path) = std::env::var("MXB_REAL_PNT") else {
             eprintln!("set MXB_REAL_PNT to run");
             return;
         };
-        let bytes = std::fs::read(&path).expect("read locked paint");
-        assert_ne!(&bytes[..4], MAGIC, "fixture should be a LOCKED (non-PNT) paint");
-        let texs = decode_any(&bytes).expect("decode_any opens the locked paint");
+        let bytes = std::fs::read(&path).expect("read paint");
+        assert_ne!(&bytes[..4], MAGIC, "fixture should be a non-PNT container");
+        let texs = decode_any(&bytes).expect("decode_any reads the container");
         assert!(!texs.is_empty(), "recovered at least one texture");
         for t in &texs {
             eprintln!("texture '{}' {}x{} ({} px)", t.name, t.width, t.height, t.rgba.len() / 4);

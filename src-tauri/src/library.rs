@@ -7,19 +7,12 @@ use walkdir::WalkDir;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledMod {
-    /// File name, e.g. `Mosctesting.pkz`.
     pub name: String,
-    /// Absolute path on disk.
     pub path: String,
-    /// Relative parent folder under the subpath (`""` if top-level). Tracks are
-    /// often nested a few folders deep, so this preserves where they live.
     pub folder: String,
-    /// File size on disk, in bytes (shown on the library card immediately;
-    /// available even for non-plain archives we can't open).
     pub size: u64,
 }
 
-/// `<mods_path>/<subpath>`, where `subpath` is like `mods/tracks` or `mods/bikes`.
 pub fn mods_subdir(mods_path: &str, subpath: &str) -> PathBuf {
     let mut p = PathBuf::from(mods_path);
     for seg in subpath.split(['/', '\\']).filter(|s| !s.is_empty()) {
@@ -37,9 +30,6 @@ fn sanitize_seg(seg: &str) -> String {
         .collect()
 }
 
-/// Move an installed mod file into a different folder (relative to the type dir,
-/// e.g. `Supercross` or `New/Sub`; `""` = the type root). Creates the folder if
-/// needed. The source must live under the type dir (guards against stray paths).
 pub fn move_mod(
     mods_path: &str,
     from_path: &str,
@@ -80,12 +70,8 @@ pub fn move_mod(
     Ok(())
 }
 
-/// Move an installed mod file to the OS Recycle Bin / Trash. The file must live
-/// under the type dir (same guard as `move_mod`) so a stray path can't be trashed.
 pub fn uninstall_mod(mods_path: &str, from_path: &str, subpath: &str) -> anyhow::Result<()> {
     let from = PathBuf::from(from_path);
-    // A file (`.pkz`/paint) OR a directory (an extracted-folder track) — both
-    // are valid library items and can be trashed.
     if !from.exists() {
         anyhow::bail!("path not found: {from_path}");
     }
@@ -97,7 +83,6 @@ pub fn uninstall_mod(mods_path: &str, from_path: &str, subpath: &str) -> anyhow:
     Ok(())
 }
 
-/// Reveal a file in the OS file manager, selecting it when supported.
 pub fn reveal_in_explorer(path: &str) -> anyhow::Result<()> {
     let p = PathBuf::from(path);
     if !p.exists() {
@@ -124,8 +109,6 @@ pub fn reveal_in_explorer(path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Recursively find installed `.pkz` mod files under `<mods_path>/<subpath>` at
-/// any depth (tracks/bikes are frequently nested inside sub-folders).
 pub fn scan_mods(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<InstalledMod>> {
     let dir = mods_subdir(mods_path, subpath);
     if !dir.exists() {
@@ -166,9 +149,6 @@ pub fn scan_mods(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<Installed
     Ok(items)
 }
 
-/// Installed rider "models" and profiles, for building rider paint destinations:
-/// helmet/boot/protection paints drop into `<model>/paints`, and rider kit /
-/// glove paints live per rider profile under `riders/<profile>/{paints,gloves}`.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RiderTargets {
@@ -178,11 +158,8 @@ pub struct RiderTargets {
     pub profiles: Vec<String>,
 }
 
-/// List immediate sub-folder names under `<mods_path>/mods/rider/<sub>` for each
-/// rider area. Missing folders just yield empty lists (best-effort).
 pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
     let base = mods_subdir(mods_path, "mods/rider");
-    // Profiles only ever exist as folders (`riders/<profile>/`).
     let dirs_in = |sub: &str| -> Vec<String> {
         let mut out = Vec::new();
         if let Ok(rd) = fs::read_dir(base.join(sub)) {
@@ -197,10 +174,6 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
         out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         out
     };
-    // Installed gear is either an **extracted folder** or a **packaged `.pkz`**
-    // sitting directly in the kind folder — the common case (e.g.
-    // `helmets/TLD SE4.pkz`). `load_gear` resolves a name to either form, so list
-    // both, keyed by name (the `.pkz` stem), or the picker misses loose `.pkz` gear.
     let models_in = |sub: &str| -> Vec<String> {
         let mut out = Vec::new();
         if let Ok(rd) = fs::read_dir(base.join(sub)) {
@@ -229,29 +202,15 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
     }
 }
 
-/// A richer library entry than [`InstalledMod`]: it also covers **extracted**
-/// mods (a folder of loose files, not a single `.pkz`) and **loose paint
-/// files**, each tagged with a `kind` + `category` (+ owning `parent`) so the
-/// Library UI can group and detail them. Install-destination logic still uses
-/// the leaner [`scan_mods`] (packaged `.pkz` only), so this can't skew it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryEntry {
-    /// File or folder name, e.g. `FLRMX.pkz` or an extracted `FLRMX` folder.
     pub name: String,
-    /// Absolute path on disk (a file for `pkz`/`loose`, a directory for `folder`).
     pub path: String,
-    /// Relative parent folder under the type dir (`""` if top-level).
     pub folder: String,
-    /// Size in bytes (a directory reports the sum of its immediate files).
     pub size: u64,
-    /// `pkz` (packaged archive) · `folder` (extracted mod) · `loose` (a paint file).
     pub kind: String,
-    /// Type-specific tag: `track` · `bike` · `bikePaint` · `bikeModelSwap` ·
-    /// `sound` · `helmet` · `helmetPaint` · `goggles` · `boots` · `bootPaint` ·
-    /// `protection` · `protectionPaint` · `gloves` · `outfit` · `misc`.
     pub category: String,
-    /// For paints / model-swaps: the owning bike / gear model / rider profile.
     pub parent: Option<String>,
 }
 
@@ -262,7 +221,6 @@ fn has_ext(p: &Path, ext: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Drop a trailing archive/paint extension from a mod file name.
 fn strip_ext(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
     for ext in [".pkz", ".pnt", ".zip"] {
@@ -273,7 +231,6 @@ fn strip_ext(name: &str) -> String {
     name.to_string()
 }
 
-/// Relative parent folder of `path` under `base` (`""` if directly inside it).
 fn rel_folder(base: &Path, path: &Path) -> String {
     path.parent()
         .and_then(|p| p.strip_prefix(base).ok())
@@ -281,7 +238,6 @@ fn rel_folder(base: &Path, path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Sum of a directory's *immediate* files (cheap; good enough for a card).
 fn dir_size(dir: &Path) -> u64 {
     let mut total = 0;
     if let Ok(rd) = fs::read_dir(dir) {
@@ -296,7 +252,6 @@ fn dir_size(dir: &Path) -> u64 {
     total
 }
 
-/// Immediate sub-folder names of `base`, sorted case-insensitively.
 fn immediate_dirs(base: &Path) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(rd) = fs::read_dir(base) {
@@ -312,7 +267,6 @@ fn immediate_dirs(base: &Path) -> Vec<String> {
     out
 }
 
-/// Build a [`LibraryEntry`], inferring `kind` from the path (dir vs `.pkz` vs loose).
 fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> LibraryEntry {
     let is_dir = p.is_dir();
     let kind = if is_dir {
@@ -341,8 +295,6 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
     }
 }
 
-/// File extensions that mark a folder as an *extracted track* (vs a bike, which
-/// carries `.cfg` but none of these).
 const TRACK_MARKERS: [&str; 5] = ["map", "trh", "tsc", "rdf", "ssc"];
 
 fn dir_has_track_markers(dir: &Path) -> bool {
@@ -361,7 +313,6 @@ fn dir_has_track_markers(dir: &Path) -> bool {
     false
 }
 
-/// Collect the loose paint files (`.pnt`/`.pkz`) directly inside `dir`.
 fn collect_loose(
     base: &Path,
     dir: &Path,
@@ -379,7 +330,6 @@ fn collect_loose(
     }
 }
 
-/// Collect `.pkz` files directly inside `dir` (a model packaged as an archive).
 fn collect_pkz_shallow(base: &Path, dir: &Path, category: &str, out: &mut Vec<LibraryEntry>) {
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
@@ -395,14 +345,10 @@ fn sort_entries(v: &mut [LibraryEntry]) {
     v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 }
 
-/// Tracks: packaged `.pkz` **and** extracted-folder tracks (loose `.map`/`.rdf`
-/// etc.), the latter surfaced as a single `folder` entry (not one per asset).
 fn scan_tracks(dir: &Path) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
     let mut track_dirs: Vec<PathBuf> = Vec::new();
 
-    // Extracted-track folders first. Once a folder is a track, its subtree *is*
-    // that track — don't descend into it looking for more.
     for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_dir() {
             continue;
@@ -432,11 +378,8 @@ fn scan_tracks(dir: &Path) -> Vec<LibraryEntry> {
     out
 }
 
-/// Files that mark a bike folder as sound-modded (both present). Kept in sync
-/// with the installer's `SOUND_MARKERS`.
 const SOUND_MARKERS: [&str; 2] = ["engine.scl", "sfx.cfg"];
 
-/// True when `dir` directly holds both sound-marker files (`engine.scl`+`sfx.cfg`).
 fn dir_has_sound_markers(dir: &Path) -> bool {
     let mut found = [false; SOUND_MARKERS.len()];
     if let Ok(rd) = fs::read_dir(dir) {
@@ -455,15 +398,9 @@ fn dir_has_sound_markers(dir: &Path) -> bool {
     found.iter().all(|&f| f)
 }
 
-/// Bikes: top-level bike models, their `paints` liveries, model-swap `.pkz`
-/// nested inside a bike's own folder, and provenance-recorded `sound` mods.
 fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
 
-    // Sound mods: surface each recorded bike folder that still exists and still
-    // carries the sound-marker files (self-healing against a removed bike). A
-    // sound merges into an OEM bike folder, so provenance — not inspection —
-    // tells us which extracted bikes are sound-modded.
     for name in sound_bikes {
         let folder = dir.join(name);
         if folder.is_dir() && dir_has_sound_markers(&folder) {
@@ -490,15 +427,11 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
             let parent = if pos > 0 { Some(segs[pos - 1].to_string()) } else { None };
             out.push(make_entry(dir, p, "bikePaint", parent));
         } else if is_pkz {
-            // A bike model (top-level, or nested in a user sub-folder). Model-swap
-            // reclassification happens in the pass below.
             out.push(make_entry(dir, p, "bike", None));
         }
         // A loose `.pnt` outside any `paints` folder is a stray — ignore it.
     }
 
-    // Model swaps: a bike `.pkz` sitting *inside another bike's own folder*
-    // (`mods/bikes/<Bike>/<swap>.pkz`) is an alternate model for that bike.
     let bike_names: HashSet<String> = out
         .iter()
         .filter(|e| e.category == "bike" && e.folder.is_empty())
@@ -520,10 +453,6 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     out
 }
 
-/// Rider: every gear category — helmet/boot/protection models + their paints
-/// (and helmet goggles), gloves, and per-profile outfit/kit + gloves + goggles.
-/// This is why loose paints/gloves/goggles/outfit now surface where the old
-/// `.pkz`-only scan showed nothing.
 fn scan_rider(dir: &Path) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
 
@@ -543,10 +472,6 @@ fn scan_rider(dir: &Path) -> Vec<LibraryEntry> {
         }
         // A model packaged as a bare `.pkz` directly under the area folder.
         collect_pkz_shallow(dir, &abase, model_cat, &mut out);
-        // Loose paints dropped straight under the area folder — a paint whose own
-        // model isn't installed (e.g. `boots/Purple White Alpinestar Boots.pnt`).
-        // These previously surfaced nowhere. `.pnt` only: a bare `.pkz` here is a
-        // packaged model, collected just above.
         if let Ok(rd) = fs::read_dir(&abase) {
             for e in rd.flatten() {
                 let p = e.path();
@@ -573,7 +498,6 @@ fn scan_rider(dir: &Path) -> Vec<LibraryEntry> {
     out
 }
 
-/// Fallback for any other type dir (e.g. `mods/tyres`): packaged `.pkz` only.
 fn scan_generic(dir: &Path) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
     for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
@@ -585,13 +509,6 @@ fn scan_generic(dir: &Path) -> Vec<LibraryEntry> {
     out
 }
 
-/// Rich Library scan: surfaces packaged, extracted, and loose content per type,
-/// tagged for grouping/detail in the UI. Dispatches on the type dir name.
-///
-/// `sound_bikes` are bike folder names recorded as carrying an installed sound
-/// mod (see the `soundmods` provenance store): the bikes scan surfaces those that
-/// still exist as `sound` entries — a sound merges into an OEM bike folder, so it
-/// can't be told from stock by inspection alone.
 pub fn scan_library(
     mods_path: &str,
     subpath: &str,
@@ -655,8 +572,6 @@ mod tests {
         let root = tmp("lib-tracks");
         let base = root.join("mods/tracks");
         touch(&base.join("Packed.pkz"));
-        // Extracted track folder (has a .map) — the folder is one entry, its
-        // assets are not surfaced separately.
         touch(&base.join("Loose Track/Loose.map"));
         touch(&base.join("Loose Track/Loose.cfg"));
         touch(&base.join("Loose Track/Loose.pkz")); // inside a track folder → skipped
@@ -697,8 +612,6 @@ mod tests {
         // A sound-modded OEM bike folder (loose configs, no .pkz).
         touch(&base.join("MX2OEM_2023_KTM_250_SX-F/engine.scl"));
         touch(&base.join("MX2OEM_2023_KTM_250_SX-F/sfx.cfg"));
-        // Recorded but no longer on disk → pruned. And one recorded-but-stock
-        // bike folder without markers → not surfaced.
         touch(&base.join("Stock/model.edf"));
 
         let recorded = vec![
@@ -726,8 +639,6 @@ mod tests {
         touch(&base.join("helmets/AGV/paints/Blue.pnt"));
         touch(&base.join("helmets/AGV/goggles/Smoke.pnt"));
         touch(&base.join("boots/Tech10/paints/Wht.pnt"));
-        // A boot paint dropped straight under `boots/` — no model folder (how the
-        // user's Alpinestars/GBootz paints installed).
         touch(&base.join("boots/Purple White Alpinestar Boots.pnt"));
         touch(&base.join("gloves/Flexair.pnt"));
         touch(&base.join("riders/default_mx/paints/Kit.pnt"));
@@ -739,8 +650,6 @@ mod tests {
         assert!(has("helmetPaint"), "helmet paint");
         assert!(has("goggles"), "goggles");
         assert!(has("bootPaint"), "boot paint");
-        // The loose-under-`boots/` paint surfaces (parentless), not just the one in
-        // a model's `paints/` folder.
         assert!(
             cat(&v, "Purple White Alpinestar Boots.pnt")
                 .is_some_and(|e| e.category == "bootPaint" && e.parent.is_none()),

@@ -1,12 +1,3 @@
-//! mxb-mods.com catalog source.
-//!
-//! mxb-mods.com is a WordPress site behind Cloudflare. A browser-like
-//! User-Agent gets clean JSON from the WP REST API; the generic default UA is
-//! 403'd. Two channels are used:
-//!   * search / listing / images  -> WP REST API (`/wp-json/wp/v2/posts`)
-//!   * canonical download link     -> the post's rendered HTML page, where the
-//!     theme injects `div.download-container` blocks (not present in REST).
-
 use super::{DownloadOption, ModDetail, ModSource, ModSummary};
 use regex::Regex;
 use reqwest::Client;
@@ -17,7 +8,6 @@ const BASE: &str = "https://mxb-mods.com";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const PER_PAGE: &str = "24";
 
-/// The mxb-mods.com implementation of [`ModSource`].
 pub struct MxbModsSource;
 
 impl ModSource for MxbModsSource {
@@ -141,8 +131,6 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
         downloads,
     })
 }
-
-// --- parsing helpers -------------------------------------------------------
 
 fn summary_from_post(p: &Value, category_id: u32) -> Option<ModSummary> {
     let id = p.get("id")?.as_u64()?;
@@ -327,8 +315,7 @@ mod tests {
         assert!(!is_image_url("https://x/y.html"));
     }
 
-    /// Live end-to-end check against mxb-mods.com. Ignored by default (network);
-    /// run with `cargo test -- --ignored`.
+    /// Live end-to-end check against mxb-mods.com (ignored by default; network).
     #[test]
     #[ignore = "hits the live mxb-mods.com API"]
     fn live_search_and_detail() {

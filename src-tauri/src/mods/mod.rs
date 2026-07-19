@@ -44,8 +44,6 @@ pub struct ModDetail {
     pub downloads: Vec<DownloadOption>,
 }
 
-/// A swappable catalog backend. Today only [`mxb::MxbModsSource`] implements it;
-/// a future API-backed source can implement the same trait.
 #[allow(async_fn_in_trait)]
 pub trait ModSource {
     async fn search(

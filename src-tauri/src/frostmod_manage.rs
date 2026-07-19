@@ -1,8 +1,3 @@
-//! In-app FrostMod management: download FrostMod from its GitHub releases into an
-//! app-owned folder, run `frostmod.exe` as a managed background process (injector
-//! mode), and update it. The injector is Windows-only, so process control is
-//! `#[cfg(windows)]` with graceful stubs elsewhere (mirrors `frostmod.rs`).
-
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -31,8 +26,7 @@ pub struct FrostmodStatus {
 }
 
 fn frostmod_dir(app: &AppHandle) -> PathBuf {
-    // Local app-data dir (Windows: `%LOCALAPPDATA%\com.frost.mxbikes\frostmod`),
-    // alongside config/cache/logs — see `config::config_path`.
+    // Local app-data dir (Windows: `%LOCALAPPDATA%\com.frost.mxbikes\frostmod`).
     app.path()
         .app_local_data_dir()
         .expect("could not resolve app local data dir")
@@ -47,17 +41,10 @@ fn version_path(app: &AppHandle) -> PathBuf {
     frostmod_dir(app).join("version.txt")
 }
 
-/// FrostMod reads its server-browser filter from this file in its own folder,
-/// auto-generating a default on first run. That stock default *hides Kaizo*
-/// community servers — it carries a `kaizo` name rule plus a `k[a4][il1]z[o0]`
-/// regex meant to catch cheat-shop spam, which also matches the legit Kaizo
-/// servers. We drop in a curated copy that keeps the spam rules but no longer
-/// matches Kaizo, so those servers stay visible in the browser.
+/// FrostMod's server-browser filter file (its stock default hides Kaizo).
 const SERVERFILTER_FILE: &str = "frostmod_serverfilter.yaml";
 
-/// Our curated filter. Same `# frostmod-filter v4` sentinel FrostMod expects on
-/// line 1 (so it treats the config as current and won't rewrite ours), spam
-/// regex kept, all Kaizo rules removed.
+/// Curated filter: v4 sentinel kept, spam regex kept, Kaizo rules removed.
 const CURATED_SERVERFILTER: &str = "# frostmod-filter v4
 # FrostMod server filter - hide spam/ad servers from the online browser.
 # Hidden if the name contains any 'names' entry or matches any 'regex'.
@@ -71,9 +58,7 @@ regex:                  # ECMAScript regex; single-quote to keep backslashes lit
   - '(che[a4]ts|\\.pr0\\b)'
 ";
 
-/// FrostMod's stock v4 default — the one that hides Kaizo. We only replace an
-/// on-disk filter that still matches this exactly (ignoring line endings), so a
-/// user's own edits to the filter are never clobbered.
+/// FrostMod's stock v4 default (the one that hides Kaizo).
 const STOCK_SERVERFILTER: &str = "# frostmod-filter v4
 # FrostMod server filter - hide spam/ad servers from the online browser.
 # Hidden if the name contains any 'names' entry or matches any 'regex'.
@@ -93,16 +78,12 @@ fn serverfilter_path(app: &AppHandle) -> PathBuf {
     frostmod_dir(app).join(SERVERFILTER_FILE)
 }
 
-/// Compare filter text ignoring line endings (FrostMod writes CRLF on Windows)
-/// and trailing blank space, so those alone don't read as a user edit.
+/// Compare filter text ignoring line endings (CRLF) and trailing blank space.
 fn filter_eq(a: &str, b: &str) -> bool {
     a.replace('\r', "").trim_end() == b.replace('\r', "").trim_end()
 }
 
-/// Drop our curated server filter into FrostMod's folder so Kaizo servers stay
-/// visible. Writes only when the file is missing or still holds FrostMod's stock
-/// Kaizo-blocking default — a filter the user has edited is left untouched.
-/// Best-effort: failures are logged, never fatal to install/launch.
+/// Write our curated server filter, unless the user has edited it. Best-effort.
 pub fn ensure_serverfilter(app: &AppHandle) {
     let path = serverfilter_path(app);
     let should_write = match std::fs::read_to_string(&path) {
@@ -168,9 +149,7 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
     }
 }
 
-/// Overwrite a file, retrying briefly if it's still locked. Right after we stop
-/// FrostMod, Windows can take a moment to release the handles on the running
-/// `frostmod.exe`/`.dll`, so a plain write would fail with a sharing violation.
+/// Overwrite a file, retrying briefly while Windows still holds the lock.
 fn write_with_retry(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut last = None;
     for _ in 0..15 {
@@ -185,10 +164,7 @@ fn write_with_retry(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
     Err(last.expect("loop runs at least once"))
 }
 
-/// Download `frostmod.exe` + `frostmod.dll` from the latest release into our
-/// managed folder and record the version. Also used for updates. Returns the tag.
-/// Callers must stop a running FrostMod first (see `frostmod_install`), or the
-/// overwrite hits a locked file.
+/// Download `frostmod.exe` + `frostmod.dll` from the latest release; returns the tag.
 pub async fn install(app: &AppHandle) -> anyhow::Result<String> {
     let rel = latest_release().await?;
     let dir = frostmod_dir(app);
@@ -213,14 +189,12 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<String> {
         anyhow::bail!("the latest FrostMod release has no frostmod.exe/.dll");
     }
     std::fs::write(version_path(app), &rel.tag_name)?;
-    // Ship our curated server filter so Kaizo servers aren't hidden by FrostMod's
-    // stock default. Best-effort; never fails the install.
+    // Ship our curated server filter. Best-effort.
     ensure_serverfilter(app);
     Ok(rel.tag_name)
 }
 
-/// Launch `frostmod.exe` hidden as a managed child, unless it's already running.
-/// Returns whether we started it. Windows-only (the injector is a Windows binary).
+/// Launch `frostmod.exe` hidden as a managed child. Windows-only.
 #[cfg(windows)]
 pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     use std::os::windows::process::CommandExt;
@@ -234,8 +208,7 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     if !exe.exists() {
         anyhow::bail!("FrostMod isn't installed yet");
     }
-    // Refresh the curated filter before FrostMod loads it, so existing installs
-    // (whose stock default hides Kaizo) get corrected on the next launch too.
+    // Refresh the curated filter before FrostMod loads it.
     ensure_serverfilter(app);
     let child = std::process::Command::new(&exe)
         .current_dir(frostmod_dir(app))
@@ -257,9 +230,7 @@ pub fn stop(state: &FrostmodProcess) {
     }
 }
 
-/// Force-terminate any running `frostmod.exe` — including an instance this app
-/// didn't spawn (e.g. one left from a previous session) — so its files can be
-/// overwritten during an update. Best-effort; a no-op when none is running.
+/// Force-terminate any running `frostmod.exe` (even one we didn't spawn). Best-effort.
 #[cfg(windows)]
 pub fn force_stop_exe() {
     use std::os::windows::process::CommandExt;

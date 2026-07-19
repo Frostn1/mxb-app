@@ -1,58 +1,26 @@
-//! In-app bike **model swap** manager — the app-side twin of FrostMod's in-game
-//! swapper (F8 menu > 3). It reads and writes the exact same on-disk scheme, so
-//! the two stay interchangeable.
-//!
-//! A bike lives *extracted* at `<mods>/bikes/<Bike>/` as loose files: `model.edf`
-//! (the mesh) plus its `.hrc`/`.cfg` lineup/alignment — that whole set is tuned to
-//! the mesh, so it travels together. `paints/` (universal liveries) is never
-//! touched. Alternate models are parked per-bike at
-//! `<Bike>/FrostMod Models/<Variant>/`, each variant a folder holding a full file
-//! set. `<Bike>/FrostMod Models/_active.txt` names the live variant; missing/empty
-//! means the loose files are the un-captured **Original**.
-//!
-//! Invariant (identical to FrostMod's): the ACTIVE variant's files are the loose
-//! files in the bike root; every OTHER variant is a folder in the library.
-//! Swapping MOVES the current set into the library (auto-backup ⇒ reversible) and
-//! MOVES the chosen variant's set into the bike root — all-or-nothing, rolled back
-//! on any failure so a half-swapped bike is never left behind.
-
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Per-bike library folder holding the inactive model variants + the marker.
 const LIB_DIR: &str = "FrostMod Models";
-/// Marker file (inside `LIB_DIR`) naming the active variant.
 const MARKER: &str = "_active.txt";
-/// Label given to the model captured on first swap (the un-touched loose set).
 const ORIGINAL: &str = "Original";
-/// The one file every valid model set must contain (the mesh).
 const MODEL_EDF: &str = "model.edf";
 
-/// One selectable model for a bike. `active` is the live set (its files are the
-/// bike's loose files); the rest are folders under `FrostMod Models/`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelVariant {
-    /// Variant name (folder name, or "Original" for the un-captured default).
     pub name: String,
-    /// Whether this is the currently-active model.
     pub active: bool,
-    /// Whether the set has a `model.edf` (an invalid variant can't be applied).
     pub valid: bool,
-    /// Number of top-level files in the set (excludes `paints/` etc.).
     pub file_count: usize,
 }
 
-/// A bike and every model it can be swapped between.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BikeModels {
-    /// Bike folder name under `mods/bikes` (e.g. `KTM450`).
     pub bike: String,
-    /// The active variant's name ("Original" if never swapped).
     pub active: String,
-    /// Active first, then the inactive library variants (sorted).
     pub variants: Vec<ModelVariant>,
 }
 
@@ -69,8 +37,6 @@ fn variant_dir(mods_path: &str, bike: &str, name: &str) -> PathBuf {
     lib_dir(mods_path, bike).join(name)
 }
 
-/// Reject empty names or anything with a path separator / `..` — bike + variant
-/// names must be plain folder names so a swap can't reach outside `mods/bikes`.
 fn is_simple_name(s: &str) -> bool {
     !s.is_empty()
         && s != "."
@@ -80,19 +46,14 @@ fn is_simple_name(s: &str) -> bool {
         && !s.contains(':')
 }
 
-/// Read the active-variant marker; `""` when the bike has never been swapped.
 fn read_active(mods_path: &str, bike: &str) -> String {
     fs::read_to_string(lib_dir(mods_path, bike).join(MARKER))
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
 }
 
-/// Public label for the un-captured default model set (what `current_active`
-/// reports when a bike has never been swapped).
 pub const ORIGINAL_LABEL: &str = ORIGINAL;
 
-/// The currently active model variant for a bike (`"Original"` if never swapped).
-/// Public so presets can capture/compare a bike's model without a full scan.
 pub fn current_active(mods_path: &str, bike: &str) -> String {
     let a = read_active(mods_path, bike);
     if a.is_empty() {
@@ -102,7 +63,6 @@ pub fn current_active(mods_path: &str, bike: &str) -> String {
     }
 }
 
-/// Write the active-variant marker (creates the library folder if needed).
 fn write_active(mods_path: &str, bike: &str, name: &str) -> anyhow::Result<()> {
     let lib = lib_dir(mods_path, bike);
     fs::create_dir_all(&lib)?;
@@ -110,9 +70,6 @@ fn write_active(mods_path: &str, bike: &str, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Top-level *file* names directly inside `dir` (a model's `model.edf` + `.hrc`/
-/// `.cfg`); the `paints/` and `FrostMod Models/` subfolders are skipped since
-/// they're directories.
 fn list_files(dir: &Path) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(rd) = fs::read_dir(dir) {
@@ -134,10 +91,6 @@ fn file_exists(p: &Path) -> bool {
     p.is_file()
 }
 
-/// Move each named file from `src` to `dst` (created if needed). All-or-nothing:
-/// on the first failure the files already moved are moved back, and it returns
-/// `false`. Mirrors FrostMod's `MsMoveSet` (rename, falling back to copy+remove
-/// across volumes).
 fn move_set(src: &Path, dst: &Path, files: &[String]) -> bool {
     if fs::create_dir_all(dst).is_err() {
         return false;
@@ -149,7 +102,6 @@ fn move_set(src: &Path, dst: &Path, files: &[String]) -> bool {
         if move_one(&s, &d) {
             done.push(f);
         } else {
-            // Undo the ones we already moved, then report failure.
             for g in &done {
                 let _ = move_one(&dst.join(g), &src.join(g));
             }
@@ -159,8 +111,6 @@ fn move_set(src: &Path, dst: &Path, files: &[String]) -> bool {
     true
 }
 
-/// Move a single file, falling back to copy+remove when rename fails (e.g. across
-/// volumes). Returns whether the file now lives at `dst`.
 fn move_one(src: &Path, dst: &Path) -> bool {
     if fs::rename(src, dst).is_ok() {
         return true;
@@ -171,8 +121,6 @@ fn move_one(src: &Path, dst: &Path) -> bool {
     false
 }
 
-/// Build the variant list for `bike`: the active one first (marker name, or
-/// "Original" if never swapped), then the library's other subfolders, sorted.
 fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
     let active_label = {
         let a = read_active(mods_path, bike);
@@ -214,12 +162,6 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
     variants
 }
 
-/// Scan `mods/bikes` for model-swappable bikes and their variants. A folder
-/// qualifies if it has a loose `model.edf` (a normal extracted bike) **or** a
-/// `FrostMod Models/` library folder — the latter matters when the active variant
-/// is an Original whose set has no loose `model.edf` (e.g. the stock mesh is
-/// `.pkz`-packed): without it, swapping back to Original would drop the bike off
-/// the list and strand its other variants. Faithful to FrostMod's `MsScanBikes`.
 pub fn scan_model_swaps(mods_path: &str) -> Vec<BikeModels> {
     let root = bikes_root(mods_path);
     let mut out = Vec::new();
@@ -251,10 +193,6 @@ pub fn scan_model_swaps(mods_path: &str) -> Vec<BikeModels> {
     out
 }
 
-/// Swap `bike`'s model set to `target`. Auto-backs-up the current loose set into
-/// the library (reversible), moves the target's set into the bike root, and
-/// records the new active variant. On any move failure it rolls back and aborts
-/// without a broken bike. A faithful port of FrostMod's `MsApply`.
 pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Result<()> {
     if !is_simple_name(bike) || !is_simple_name(target) {
         anyhow::bail!("invalid bike or model name");
@@ -335,9 +273,6 @@ mod tests {
 
     #[test]
     fn bike_with_only_a_library_still_lists() {
-        // Edge case: the active Original has no loose model.edf (stock mesh is
-        // .pkz-packed), but a FrostMod Models library exists. The bike must still
-        // appear so its variants stay reachable.
         let root = tmp("lib-only");
         let mp = root.to_str().unwrap();
         touch(&bike_dir(mp, "RM").join("RM.pkz")); // packed mesh, no loose model.edf

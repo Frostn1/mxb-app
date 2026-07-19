@@ -2,18 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
-/// Persisted app configuration. `mods_path` is the MX Bikes root folder,
-/// e.g. `…/Documents/PiBoSo/MX Bikes`. The behaviour flags default ON
-/// (Discord-style always-on companion) and `#[serde(default)]` keeps older
-/// config files (which only had `mods_path`) loading without losing it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
     pub mods_path: String,
-    /// MX Bikes **install** directory (where `mxbikes.exe` + core `rider.pkz` live),
-    /// e.g. a Steam `…/steamapps/common/MX Bikes`. Distinct from `mods_path` (the
-    /// Documents data folder). Empty until set; used to load the core rider body
-    /// model for the 3D viewer. Best-effort auto-detected on first run.
+    /// MX Bikes install dir (`mxbikes.exe` + core `rider.pkz`); distinct from `mods_path`.
     pub game_path: String,
     /// Hide to the tray on window close and keep running.
     pub run_in_background: bool,
@@ -21,9 +14,7 @@ pub struct AppConfig {
     pub launch_at_startup: bool,
     /// Launch FrostMod automatically when the app opens.
     pub auto_run_frostmod: bool,
-    /// After applying a preset while MX Bikes is running, re-run the game's
-    /// profile loader in place so the new look shows without a restart or manual
-    /// profile reselect. Windows-only; a no-op elsewhere.
+    /// Re-run the game's profile loader in place after applying a preset (Windows-only).
     pub instant_refresh: bool,
 }
 
@@ -40,10 +31,6 @@ impl Default for AppConfig {
     }
 }
 
-/// Location of the config file inside the OS local app-data dir — on Windows
-/// `%LOCALAPPDATA%\com.frost.mxbikes\config.json`. Local (not Roaming) keeps all
-/// app state — config, shop session, FrostMod, cache, logs — in one per-machine
-/// folder rather than syncing settings across domain machines.
 pub fn config_path(app: &AppHandle) -> PathBuf {
     app.path()
         .app_local_data_dir()
@@ -70,7 +57,6 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Fill in the default MX Bikes path when the user chose "Recommended".
 pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     if cfg.mods_path.trim().is_empty() {
         if let Some(docs) = dirs_next::document_dir() {

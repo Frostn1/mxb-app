@@ -1,16 +1,3 @@
-//! Read the structure of an installed `.pkz` for the library cards.
-//!
-//! MX Bikes `.pkz` files come in two forms:
-//! - **Plain ZIP** (starts with the `PK\x03\x04` local-file-header magic) — a
-//!   community/free track or bike. We open it, read the `.ini` metadata, and
-//!   pull the preview image the author declared.
-//! - **non-plain** (any other leading bytes) — paid or protected
-//!   content tied to the game's key. These are *not* zips and can't be
-//!   inspected, so we report `locked` and the card falls back to name + size.
-//!
-//! Parsing is cached to the app cache dir (keyed by path + mtime + size) so the
-//! library stays snappy after the first look at each file.
-
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -21,38 +8,29 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 use walkdir::WalkDir;
 
-/// Local-file-header magic that begins every real ZIP (and thus every
-/// plain `.pkz`).
+/// ZIP local-file-header magic ("PK\x03\x04").
 const ZIP_MAGIC: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
 
-/// Longest edge of the generated preview thumbnail, in pixels. The card tile is
-/// ~76px wide, so 192 stays crisp at 2× DPI while keeping the `data:` URI light.
+/// Longest edge of the card thumbnail, in pixels.
 const THUMB_MAX: u32 = 192;
 
-/// Longest edge for the full-size preview shown in the library detail lightbox.
+/// Longest edge of the full-size preview, in pixels.
 const PREVIEW_MAX: u32 = 1100;
 
-/// Parsed structure of an installed `.pkz`, surfaced on the library card.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PkzMeta {
-    /// non-plain archive we can't open — card shows name + size only.
     pub locked: bool,
-    /// Display name from `[info] name` (falls back to `short_name`).
     pub name: Option<String>,
-    /// Author from `[ui] author`.
     pub author: Option<String>,
-    /// Location/description from `[ui] location`.
     pub location: Option<String>,
-    /// Track length in metres, from `[info] length`.
+    /// In metres.
     pub length: Option<u32>,
-    /// Reference altitude in metres, from `[info] altitude`.
+    /// In metres.
     pub altitude: Option<i32>,
-    /// Downscaled preview as a `data:image/png;base64,…` URI, when one is found.
     pub thumbnail: Option<String>,
 }
 
-/// On-disk cache entry: the parsed meta plus the file identity it was read from.
 #[derive(Serialize, Deserialize)]
 struct CacheEntry {
     mtime_ns: u128,
@@ -60,7 +38,6 @@ struct CacheEntry {
     meta: PkzMeta,
 }
 
-/// Read `.pkz` structure, using the app cache dir when the file is unchanged.
 pub fn read_meta_cached(app: &tauri::AppHandle, path: &str) -> Result<PkzMeta> {
     let file_meta = std::fs::metadata(path).with_context(|| format!("stat {path}"))?;
     let size = file_meta.len();
@@ -101,7 +78,6 @@ pub fn read_meta_cached(app: &tauri::AppHandle, path: &str) -> Result<PkzMeta> {
     Ok(meta)
 }
 
-/// Cache-file path for a given source `.pkz`: `<cache>/pkz-meta/<hash>.json`.
 fn cache_path(app: &tauri::AppHandle, source: &str) -> Option<PathBuf> {
     let dir = app.path().app_cache_dir().ok()?.join("pkz-meta");
     let mut hasher = DefaultHasher::new();
@@ -109,22 +85,16 @@ fn cache_path(app: &tauri::AppHandle, source: &str) -> Option<PathBuf> {
     Some(dir.join(format!("{:016x}.json", hasher.finish())))
 }
 
-/// Parse a single `.pkz` (or extracted folder) into its [`PkzMeta`]. Never
-/// errors for a *locked* file — that's a normal, expected result.
 pub fn read_meta(path: &Path) -> Result<PkzMeta> {
     Ok(inspect(path)?.0)
 }
 
-/// Full-resolution preview image (a `data:` URI, larger than the card
-/// thumbnail) for the library detail view's lightbox. `None` when the archive
-/// is locked or carries no image.
 pub fn read_preview(path: &Path) -> Result<Option<String>> {
     let (_, image) = inspect(path)?;
     Ok(image.and_then(|(name, bytes)| make_thumbnail(&name, &bytes, PREVIEW_MAX)))
 }
 
-/// The top-level `.ini` entry (fewest path segments, then shortest) — the mod's
-/// own; deeper ones belong to sub-variants.
+/// Top-level `.ini`: fewest path segments, then shortest.
 fn top_ini_index(names: &[String]) -> Option<usize> {
     names
         .iter()
@@ -140,11 +110,6 @@ fn dir_of(name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Parse a `.pkz` (zip) or extracted mod folder into its [`PkzMeta`] (with a
-/// small card thumbnail) and hand back the chosen preview image's raw bytes so
-/// a caller (e.g. the detail lightbox) can render it at a different size.
-/// Dispatches on whether `path` is a directory; both arms reuse `parse_ini` /
-/// `pick_image` so cards look identical either way.
 fn inspect(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     if path.is_dir() {
         inspect_dir(path)
@@ -156,8 +121,7 @@ fn inspect(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
 fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     let mut file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
 
-    // A real (plain) `.pkz` is a ZIP and starts with the local-file magic.
-    // Anything else is non-plain — inspectable only by the game.
+    // Plain `.pkz` starts with the ZIP local-file magic; else locked.
     let mut magic = [0u8; 4];
     if file.read(&mut magic).unwrap_or(0) < 4 || magic != ZIP_MAGIC {
         return Ok((locked(), None));
@@ -202,11 +166,8 @@ fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     Ok((meta, image))
 }
 
-/// Directory equivalent of [`inspect_zip`] for extracted tracks/bikes that
-/// aren't packed into a single `.pkz`.
 fn inspect_dir(dir: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
-    // Loose files, relative to the folder. A few levels deep is plenty to find
-    // the `.ini` and a preview without walking a whole track's asset tree.
+    // Walk a few levels deep — enough to find the `.ini` and a preview.
     let mut rels: Vec<(String, PathBuf)> = Vec::new();
     for entry in WalkDir::new(dir)
         .max_depth(3)
@@ -254,7 +215,6 @@ fn locked() -> PkzMeta {
     }
 }
 
-/// Parse the INI text, filling `[info]`/`[ui]` fields we care about.
 fn parse_ini(text: &str, meta: &mut PkzMeta, pic: &mut Option<String>) {
     let mut section = String::new();
     let clean = |v: &str| {
@@ -299,9 +259,6 @@ fn parse_ini(text: &str, meta: &mut PkzMeta, pic: &mut Option<String>) {
     }
 }
 
-/// Choose which archive entry to render as the thumbnail: the author-declared
-/// `pic` first, then any decodable image (preferring ones that look like a
-/// track/preview image).
 fn pick_image(names: &[String], ini_dir: &str, pic: Option<&str>) -> Option<usize> {
     if let Some(pic) = pic {
         let want = join_entry(ini_dir, pic).to_ascii_lowercase();
@@ -310,8 +267,7 @@ fn pick_image(names: &[String], ini_dir: &str, pic: Option<&str>) -> Option<usiz
         }
     }
 
-    // No usable `pic` — scan for an image, scoring "trackimage"/"preview"/"info"
-    // names higher so we grab the intended preview over a random texture.
+    // No usable `pic` — pick the best-scoring image.
     names
         .iter()
         .enumerate()
@@ -320,7 +276,6 @@ fn pick_image(names: &[String], ini_dir: &str, pic: Option<&str>) -> Option<usiz
         .map(|(i, _)| i)
 }
 
-/// Join an INI-relative `pic` onto the ini's directory inside the archive.
 fn join_entry(dir: &str, pic: &str) -> String {
     let pic = pic.replace('\\', "/");
     if dir.is_empty() {
@@ -335,7 +290,6 @@ fn is_image(name: &str) -> bool {
     n.ends_with(".png") || n.ends_with(".jpg") || n.ends_with(".jpeg") || n.ends_with(".tga") || n.ends_with(".bmp")
 }
 
-/// Rank candidate images so a real preview wins over incidental textures.
 fn image_score(name: &str) -> i32 {
     let n = name.to_ascii_lowercase();
     let mut score = 0;
@@ -352,8 +306,6 @@ fn image_score(name: &str) -> i32 {
     score
 }
 
-/// Decode `bytes` (handling TGA, which has no magic so it needs the explicit
-/// decoder), downscale to a small PNG, and return a `data:` URI.
 fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
     let img = if name.to_ascii_lowercase().ends_with(".tga") {
         let dec = image::codecs::tga::TgaDecoder::new(Cursor::new(bytes)).ok()?;
@@ -362,8 +314,7 @@ fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
         image::load_from_memory(bytes).ok()?
     };
 
-    // Track previews are photographic, so JPEG is far smaller than PNG. Drop to
-    // RGB first (JPEG can't hold the alpha a TGA may decode to).
+    // Drop to RGB — JPEG can't hold the alpha a TGA may decode to.
     let thumb = image::DynamicImage::ImageRgb8(img.thumbnail(max, max).to_rgb8());
     let mut jpg = Vec::new();
     thumb
@@ -373,13 +324,6 @@ fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
     Some(format!("data:image/jpeg;base64,{b64}"))
 }
 
-// ── Extraction ──────────────────────────────────────────────────────────────
-//
-// Pull the loose files (`model.edf`, `*.tga`, `*.cfg`) out of a plain-ZIP `.pkz`
-// so the 3D viewer can load a bike's geometry + textures. Locked archives that
-// aren't plain ZIPs are reported as unsupported.
-
-/// Whether a `.pkz` is a plain ZIP we can extract (vs locked).
 pub fn is_plain_zip(path: &Path) -> bool {
     let mut magic = [0u8; 4];
     std::fs::File::open(path)
@@ -388,8 +332,6 @@ pub fn is_plain_zip(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Extract a `.pkz` into `out_dir`, returning the written relative paths
-/// (forward-slashed).
 pub fn extract(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
     if is_plain_zip(path) {
         return extract_plain(path, out_dir);
@@ -403,10 +345,6 @@ pub fn extract(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
     bail!("unsupported .pkz (can't extract) for {path:?}");
 }
 
-/// If `bytes` is a creator-**locked** container we can open, return its decrypted
-/// plaintext; otherwise `None`. A non-plain paint is a single container whose
-/// plaintext is a normal `PNT\0` file, so the paint decoder can open it
-/// transparently. `None` on the public build (no ext module) or plain files.
 pub fn read_sidecar_blob(bytes: &[u8]) -> Option<Vec<u8>> {
     #[cfg(sidecar)]
     {
@@ -418,9 +356,6 @@ pub fn read_sidecar_blob(bytes: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-/// Read every entry of a `.pkz` (decompressed) as `(relative_name, bytes)` — one
-/// decrypt/inflate pass. Used to pull a bike's `model.edf` + its textures for the
-/// 3D viewer in a single shot.
 pub fn read_all(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
@@ -447,8 +382,6 @@ pub fn read_all(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     bail!("unsupported .pkz (can't read) for {path:?}");
 }
 
-/// Read only the entries of a `.pkz` whose name passes `keep`, decompressed —
-/// skipping the (costly) decompression of everything else (e.g. a bike's sounds).
 pub fn read_selected(
     path: &Path,
     keep: impl Fn(&str) -> bool + Copy,
@@ -478,9 +411,6 @@ pub fn read_selected(
     bail!("unsupported .pkz (can't read) for {path:?}");
 }
 
-/// Read a single entry (matched by file-name, case-insensitive) out of a `.pkz`,
-/// decompressed — without unpacking the whole archive. Used to pull just a bike's
-/// `model.edf` for the 3D viewer. `None` if the archive has no such entry.
 pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
@@ -509,8 +439,7 @@ pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
     bail!("unsupported .pkz (can't read {file_name}) for {path:?}");
 }
 
-/// Resolve an archive entry name to a destination under `out_dir`, dropping any
-/// `..`/absolute components (zip-slip guard). Returns `None` for empty names.
+/// Resolve entry name under `out_dir`, dropping `..`/absolute (zip-slip guard).
 pub(crate) fn safe_dest(out_dir: &Path, name: &str) -> Option<PathBuf> {
     let safe: PathBuf = name
         .replace('\\', "/")
@@ -554,8 +483,6 @@ fn extract_plain(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
 mod tests {
     use super::*;
 
-    /// Temporary investigation aid: dump a `.pkz`'s structure + text configs so we
-    /// can find the rider skeleton / gear link data.
     /// `MXB_DUMP_PKZ='…/rider.pkz' cargo test dump_pkz_layout -- --ignored --nocapture`
     #[test]
     #[ignore]
@@ -570,12 +497,10 @@ mod tests {
             *by_ext.entry(ext).or_default() += 1;
         }
         eprintln!("--- extensions: {by_ext:?}");
-        // Full listing (names only) for structure.
         for (name, data) in &entries {
             eprintln!("  {name}  ({} bytes)", data.len());
         }
-        // Dump the text of every config-ish, non-huge entry — this is where a
-        // skeleton / `helmetlinkobj` / bone transform would be declared.
+        // Dump text of every config-ish, non-huge entry.
         let is_text = |n: &str| {
             let l = n.to_ascii_lowercase();
             [".cfg", ".ini", ".skl", ".txt", ".xml", ".bones", ".rig", ".hrc", ".prm"]
@@ -590,7 +515,6 @@ mod tests {
         }
     }
 
-    /// Extract one named entry from a `.pkz` to disk, for offline binary analysis.
     /// `MXB_DUMP_PKZ='…/rider.pkz' MXB_ENTRY='rider/riders/default_mx/rider.edf' \
     ///  MXB_OUT='/tmp/rider.edf' cargo test extract_pkz_entry -- --ignored --nocapture`
     #[test]
@@ -671,7 +595,6 @@ mod tests {
         assert_eq!(pick_image(&names, "T", None), None);
     }
 
-    /// Local tool: unpack a real `.pkz` so its contents can be inspected.
     /// `MXB_REAL_PKZ=<file> MXB_OUT=<dir> cargo test extract_pkz_to_env -- --ignored`
     #[test]
     #[ignore]

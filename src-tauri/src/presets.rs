@@ -1,33 +1,9 @@
-//! Customization **presets** (per-bike loadouts) for MX Bikes.
-//!
-//! MX Bikes stores the current cosmetic selection in a single per-profile INI at
-//! `<MX Bikes>/profiles/<profile>/profile.ini`. The file is organized as **one
-//! section per customization slot** (`[paint]`, `[helmet]`, `[helmet_paint]`, …),
-//! and inside each section every line is `<bikeid>=<selected value>` — so the game
-//! keeps a *separate* full look for each bike. `[info]` holds the currently active
-//! selection (`bikeid=`, `race_number=`, …); on launch the game reads
-//! `[info].bikeid` and pulls that bike's row out of every slot section.
-//!
-//! A **preset** here is a bike-agnostic bundle of all slot values (a "look"). You
-//! build it (capture a bike's current column, or pick each slot from installed
-//! mods), save it, then **apply** it to a chosen bike — which writes that bike's
-//! row across all slot sections. Values are plain string references to installed
-//! mod/paint folders (empty = stock/none), so a recipient of a shared preset needs
-//! the referenced mods installed for it to show.
-//!
-//! Editing is line-oriented on purpose: values contain spaces, `#`, `()` and other
-//! characters a generic INI writer would quote or mangle, so we only ever rewrite
-//! the exact `<bikeid>=` lines we target and leave every other byte untouched.
-
 use anyhow::Context;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The slot sections that make up a full look, in display order. Each is keyed by
-/// bikeid inside `profile.ini`. `race_number` is handled separately (it's a scalar
-/// in `[info]`, not per-bike).
 pub const SLOT_SECTIONS: [&str; 15] = [
     "paint",
     "bike_font",
@@ -46,9 +22,6 @@ pub const SLOT_SECTIONS: [&str; 15] = [
     "tyres",
 ];
 
-/// A full cosmetic loadout — one value per slot (empty = stock/none). Field names
-/// mirror the `profile.ini` section names; `race_number` is the active `[info]`
-/// scalar, carried along so a preset can also set the rider number.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Loadout {
@@ -68,14 +41,11 @@ pub struct Loadout {
     pub riding_style: String,
     pub tyres: String,
     pub race_number: String,
-    /// Bike **model swap** variant to apply (Locker / `FrostMod Models/`). Not a
-    /// `profile.ini` value — it's a filesystem swap handled at apply time. Empty =
-    /// leave the bike's current model untouched.
+    /// Model-swap variant; not a `profile.ini` value — a filesystem swap at apply time. Empty = leave current model.
     pub model_swap: String,
 }
 
 impl Loadout {
-    /// Read the value for a slot section name.
     fn slot(&self, section: &str) -> Option<&str> {
         Some(match section {
             "paint" => &self.paint,
@@ -97,7 +67,6 @@ impl Loadout {
         })
     }
 
-    /// Write the value for a slot section name.
     fn set_slot(&mut self, section: &str, val: String) {
         match section {
             "paint" => self.paint = val,
@@ -120,39 +89,23 @@ impl Loadout {
     }
 }
 
-/// A link to an uploaded **asset bundle** for a preset (the "full share"). Present
-/// only on a share code produced by the bundle flow — never persisted to the local
-/// store (the URL is transient host content). Optional + defaulted so legacy
-/// `MXBP1-` codes (no bundle) still decode.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BundleRef {
-    /// Direct-download URL of the uploaded bundle (`.zip`).
     pub url: String,
-    /// Human label for the host (e.g. `pixeldrain`), shown in the import dialog.
     pub host: String,
-    /// Bundle size in bytes, for the import preview.
     pub size: u64,
 }
 
-/// A saved, named, bike-agnostic preset. Serialized to `presets.json` and to the
-/// portable share code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preset {
     pub name: String,
     pub loadout: Loadout,
-    /// Uploaded asset bundle (full share). Only set on a full-share code; stripped
-    /// before the preset is written to the local store.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<BundleRef>,
 }
 
-// --- profile.ini line editor ------------------------------------------------
-
-/// A `profile.ini` held as raw lines so edits touch only the targeted `key=value`
-/// lines and preserve everything else (order, blank lines, unknown sections, and
-/// the exact spacing/characters of untouched values).
 struct IniDoc {
     lines: Vec<String>,
     crlf: bool,
@@ -173,7 +126,6 @@ impl IniDoc {
         self.lines.join(sep)
     }
 
-    /// The section name if `line` is a `[section]` header.
     fn header_name(line: &str) -> Option<&str> {
         let t = line.trim();
         if t.len() >= 2 && t.starts_with('[') && t.ends_with(']') {
@@ -183,8 +135,6 @@ impl IniDoc {
         }
     }
 
-    /// `(header_index, body_end_exclusive)` for a section, or `None` if absent.
-    /// The body is the lines after the header up to the next header (or EOF).
     fn section_span(&self, section: &str) -> Option<(usize, usize)> {
         let mut header = None;
         for (i, line) in self.lines.iter().enumerate() {
@@ -206,7 +156,6 @@ impl IniDoc {
         Some((h, end))
     }
 
-    /// Value of `key` within `section` (raw, everything right of the first `=`).
     fn get(&self, section: &str, key: &str) -> Option<String> {
         let (h, end) = self.section_span(section)?;
         for line in &self.lines[h + 1..end] {
@@ -219,8 +168,6 @@ impl IniDoc {
         None
     }
 
-    /// Set `key=value` within `section`, updating the existing line, inserting a
-    /// new one at the end of the section body, or creating the section if absent.
     fn set(&mut self, section: &str, key: &str, value: &str) {
         if let Some((h, end)) = self.section_span(section) {
             for idx in (h + 1)..end {
@@ -246,8 +193,6 @@ impl IniDoc {
         }
     }
 
-    /// All bikeid keys under a slot section, in file order (skips blank/valueless
-    /// stray keys are kept — callers pick the canonical section).
     fn section_keys(&self, section: &str) -> Vec<String> {
         let mut out = Vec::new();
         if let Some((h, end)) = self.section_span(section) {
@@ -264,9 +209,6 @@ impl IniDoc {
     }
 }
 
-// --- profile discovery / read / apply ---------------------------------------
-
-/// `<mods_path>/profiles/<profile>/profile.ini`.
 fn profile_ini_path(mods_path: &str, profile: &str) -> PathBuf {
     PathBuf::from(mods_path)
         .join("profiles")
@@ -274,8 +216,6 @@ fn profile_ini_path(mods_path: &str, profile: &str) -> PathBuf {
         .join("profile.ini")
 }
 
-/// Profile folder names (under `<MX Bikes>/profiles/`) that contain a
-/// `profile.ini`, sorted case-insensitively.
 pub fn list_profiles(mods_path: &str) -> Vec<String> {
     let mut out = Vec::new();
     let base = PathBuf::from(mods_path).join("profiles");
@@ -292,8 +232,6 @@ pub fn list_profiles(mods_path: &str) -> Vec<String> {
     out
 }
 
-/// Bike ids present in a profile. Uses the `[rider]` section — its keys are always
-/// bikeids (unlike `[protection_paint]`, which can carry stray model-name keys).
 pub fn list_bikes(mods_path: &str, profile: &str) -> anyhow::Result<Vec<String>> {
     let path = profile_ini_path(mods_path, profile);
     let text = fs::read_to_string(&path)
@@ -309,7 +247,6 @@ pub fn list_bikes(mods_path: &str, profile: &str) -> anyhow::Result<Vec<String>>
     Ok(bikes)
 }
 
-/// The current loadout column for one bike in a profile.
 pub fn read_loadout(mods_path: &str, profile: &str, bikeid: &str) -> anyhow::Result<Loadout> {
     let path = profile_ini_path(mods_path, profile);
     let text = fs::read_to_string(&path)
@@ -324,10 +261,6 @@ pub fn read_loadout(mods_path: &str, profile: &str, bikeid: &str) -> anyhow::Res
     Ok(lo)
 }
 
-/// Write a loadout into a bike's row across every slot section. When `make_active`
-/// is set, also point `[info].bikeid` (and `race_number`) at this bike so it's the
-/// one the game loads next. A one-shot `profile.ini.bak` is written before the
-/// first change so the previous state can be restored.
 pub fn apply_loadout(
     mods_path: &str,
     profile: &str,
@@ -361,13 +294,10 @@ pub fn apply_loadout(
     Ok(())
 }
 
-// --- preset store (presets.json in app local data dir) ----------------------
-
 fn store_path(dir: &Path) -> PathBuf {
     dir.join("presets.json")
 }
 
-/// Load all saved presets (empty if the store doesn't exist yet).
 pub fn load_presets(dir: &Path) -> Vec<Preset> {
     match fs::read_to_string(store_path(dir)) {
         Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
@@ -381,9 +311,6 @@ fn write_presets(dir: &Path, presets: &[Preset]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Save a preset, replacing any existing one with the same name (case-insensitive).
-/// The transient bundle link is never persisted — it only rides along on a share
-/// code.
 pub fn save_preset(dir: &Path, mut preset: Preset) -> anyhow::Result<()> {
     preset.bundle = None;
     let mut all = load_presets(dir);
@@ -393,28 +320,20 @@ pub fn save_preset(dir: &Path, mut preset: Preset) -> anyhow::Result<()> {
     write_presets(dir, &all)
 }
 
-/// Delete a preset by name (case-insensitive). No error if it doesn't exist.
 pub fn delete_preset(dir: &Path, name: &str) -> anyhow::Result<()> {
     let mut all = load_presets(dir);
     all.retain(|p| !p.name.eq_ignore_ascii_case(name));
     write_presets(dir, &all)
 }
 
-/// Look up a saved preset by name (case-insensitive). Public so the bundle flow
-/// can load the preset it's about to package.
 pub fn find_preset(dir: &Path, name: &str) -> Option<Preset> {
     load_presets(dir)
         .into_iter()
         .find(|p| p.name.eq_ignore_ascii_case(name))
 }
 
-// --- sharing (portable codes) -----------------------------------------------
-
-/// Prefix that tags a share code so an importer can recognize it (and so a pasted
-/// code round-trips cleanly). `1` is the format version.
 const CODE_PREFIX: &str = "MXBP1-";
 
-/// Encode a preset as a portable one-line share code (`MXBP1-<base64 json>`).
 pub fn export_code(dir: &Path, name: &str) -> anyhow::Result<String> {
     let preset = find_preset(dir, name)
         .ok_or_else(|| anyhow::anyhow!("no preset named '{name}'"))?;
@@ -426,13 +345,10 @@ fn encode_code(preset: &Preset) -> String {
     format!("{CODE_PREFIX}{}", STANDARD.encode(json))
 }
 
-/// Encode an in-memory preset (e.g. one carrying a freshly-uploaded `bundle`) as a
-/// share code. Public counterpart to [`export_code`], which loads by name first.
 pub fn encode_code_public(preset: &Preset) -> String {
     encode_code(preset)
 }
 
-/// Parse a share code (prefixed base64, bare base64, or raw JSON) into a preset.
 pub fn decode_code(text: &str) -> anyhow::Result<Preset> {
     let t = text.trim();
     if let Some(b64) = t.strip_prefix(CODE_PREFIX) {
@@ -450,9 +366,6 @@ pub fn decode_code(text: &str) -> anyhow::Result<Preset> {
     serde_json::from_slice(&bytes).context("share code isn't a valid preset")
 }
 
-/// Import a share code: decode it, save it (deduping the name so a re-import or a
-/// clashing name doesn't overwrite silently — the caller passes a resolved name),
-/// and return the stored preset.
 pub fn import_code(dir: &Path, text: &str) -> anyhow::Result<Preset> {
     let preset = decode_code(text)?;
     save_preset(dir, preset.clone())?;
