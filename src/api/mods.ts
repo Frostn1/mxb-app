@@ -87,10 +87,13 @@ export const MOD_TYPES: ModType[] = [
     categories: [
       { id: 30, label: "All" },
       { id: 35, label: "Rider Kit" },
-      { id: 33, label: "Helmets" },
+      // Helmets/Boots point at the *Models* subcategory (313/343), not the
+      // parent (33/31) — the parent also aggregates paints, goggles & addons,
+      // so filtering by it mixed models and paints together.
+      { id: 313, label: "Helmets" },
       { id: 127, label: "Helmet Paints" },
       { id: 32, label: "Gloves" },
-      { id: 31, label: "Boots" },
+      { id: 343, label: "Boots" },
       { id: 126, label: "Boot Paints" },
       { id: 36, label: "Protection" },
       { id: 135, label: "Protection Paints" },
