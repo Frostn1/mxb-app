@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-18 — v0.2.0 — per-part bike textures, rider gear preview, library 3D quick-view
+
+Highlights of this release (full detail in the dated entries below):
+- **Per-part bike textures in the 3D viewer** — each mesh part binds its own map
+  (metals, plastics, number plate, exhaust) via the model's material index, instead
+  of one texture smeared over the whole bike.
+- **Rider gear preview** — helmets, boots and goggles (and their paints) now render
+  on the rider model, including paints from extracted (loose-folder) gear.
+- **Library 3D quick-view** — a one-click 3D preview button on library items.
+- **Rider / Presets reorg** — presets no longer embed a 3D preview; preview a build
+  from the Rider tab instead.
+
 ## 2026-07-18 — internal cleanup
 
 ### Changed
