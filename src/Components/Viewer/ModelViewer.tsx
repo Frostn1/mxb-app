@@ -577,7 +577,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
         <RiderGearMesh
           part={helmet!}
           anchor={helmetAnchor}
-          target={hasBody ? 0.42 * h : 0.52}
+          target={hasBody ? 0.38 * h : 0.52}
           yaw={hasBody ? Math.PI : 0}
           pitch={hasBody ? HELMET_PITCH : 0}
           alignY={hasBody ? "bottom" : "center"}

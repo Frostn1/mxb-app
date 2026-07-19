@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-18 — v0.2.1
+
+### Fixed
+- **Helmet sits better on the rider model** — slightly smaller helmet scale so it
+  proportions correctly against the body.
+
 ## 2026-07-18 — v0.2.0 — per-part bike textures, rider gear preview, library 3D quick-view
 
 Highlights of this release (full detail in the dated entries below):
