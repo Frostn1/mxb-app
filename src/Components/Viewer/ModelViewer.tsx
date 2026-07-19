@@ -649,13 +649,13 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
   return (
     <group scale={layout.scale}>
       <group position={[-layout.center.x, -layout.center.y, -layout.center.z]}>
-      {geoms.map((g, i) => (
-        <group key={i} position={[layout.offsets[i], 0, 0]} rotation={[0, layout.yaws[i], 0]}>
-          <group rotation={rot}>
-            <mesh geometry={g} material={mats[i]} castShadow receiveShadow />
+        {geoms.map((g, i) => (
+          <group key={i} position={[layout.offsets[i], 0, 0]} rotation={[0, layout.yaws[i], 0]}>
+            <group rotation={rot}>
+              <mesh geometry={g} material={mats[i]} castShadow receiveShadow />
+            </group>
           </group>
-        </group>
-      ))}
+        ))}
       </group>
     </group>
   );
@@ -695,7 +695,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   const depth = b ? b.hi[2] - b.lo[2] : 1;
   // Half the gap between the legs, so each boot sits under its own leg (not bunched
   // at the centre-line).
-  const legX = b ? 0.24 * (b.hi[0] - b.lo[0]) : 0.13;
+  const legX = b ? 0.265 * (b.hi[0] - b.lo[0]) : 0.13;
   // Helmet hangs its bottom edge low on the neck (so little neck shows), nudged
   // forward in Z over the face — see the `alignY="bottom"` seat below.
   const helmetAnchor: [number, number, number] = b
@@ -704,10 +704,10 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   // Boots hang their top edge on the body's floor (where the legs end), extending
   // down to the ground — `alignY="top"` below. Nudged slightly forward in Z (and
   // pitched, see BOOT_PITCH) so they read as a riding stance, not hanging straight down.
-  const footY = b ? b.lo[1] + 0.04 * h : 0.2;
-  const bootZ = b ? cz + 0.1 * depth : cz;
+  const footY = b ? b.lo[1] + 0.08 * h : 0.2;
+  const bootZ = b ? cz + 0.16 * depth : cz;
   const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.62 * h, cz] : [0, 1.16, 0.03];
-  const bootTarget = hasBody ? 0.37 * h : 0.32;
+  const bootTarget = hasBody ? 0.44 * h : 0.32;
 
   if (solo) return <RiderGearSolo part={solo} />;
 
@@ -942,49 +942,49 @@ export function ModelViewer({
           );
         }}
       >
-      <color attach="background" args={["#0e0f13"]} />
-      <CameraRig solo={gearSolo} />
-      <ambientLight intensity={0.75} />
-      {/* Even sky/ground fill so matte paint reads its true colour instead of
+        <color attach="background" args={["#0e0f13"]} />
+        <CameraRig solo={gearSolo} />
+        <ambientLight intensity={0.75} />
+        {/* Even sky/ground fill so matte paint reads its true colour instead of
           going grey against the dark background. */}
-      <hemisphereLight args={[0xffffff, 0x555a66, 0.7]} />
-      <directionalLight
-        position={[4, 6, 3]}
-        intensity={1.25}
-        castShadow
-        shadow-mapSize={[1024, 1024]}
-      />
-      <directionalLight position={[-4, 2, -3]} intensity={0.55} />
-      {/* Front fill from the camera side so the front of the kit isn't in shadow. */}
-      <directionalLight position={[0, 1.5, 5]} intensity={0.5} />
-      <Center>
-        {hasReal ? (
-          <EdfMesh nodes={nodes!} textures={texMap} />
-        ) : hasRider ? (
-          <RiderComposite parts={riderParts!} />
-        ) : loading || noStandIn ? null : mode === "bike" ? (
-          <BikeStandIn map={map} />
-        ) : (
-          <RiderBody suit={map} gloves={null} showHead />
-        )}
-      </Center>
-      <ContactShadows
-        position={[0, -0.01, 0]}
-        opacity={0.5}
-        scale={8}
-        blur={2.4}
-        far={4}
-      />
-      <OrbitControls
-        makeDefault
-        enablePan
-        screenSpacePanning
-        zoomToCursor
-        panSpeed={0.9}
-        minDistance={0.4}
-        maxDistance={20}
-        target={[0, 0, 0]}
-      />
+        <hemisphereLight args={[0xffffff, 0x555a66, 0.7]} />
+        <directionalLight
+          position={[4, 6, 3]}
+          intensity={1.25}
+          castShadow
+          shadow-mapSize={[1024, 1024]}
+        />
+        <directionalLight position={[-4, 2, -3]} intensity={0.55} />
+        {/* Front fill from the camera side so the front of the kit isn't in shadow. */}
+        <directionalLight position={[0, 1.5, 5]} intensity={0.5} />
+        <Center>
+          {hasReal ? (
+            <EdfMesh nodes={nodes!} textures={texMap} />
+          ) : hasRider ? (
+            <RiderComposite parts={riderParts!} />
+          ) : loading || noStandIn ? null : mode === "bike" ? (
+            <BikeStandIn map={map} />
+          ) : (
+            <RiderBody suit={map} gloves={null} showHead />
+          )}
+        </Center>
+        <ContactShadows
+          position={[0, -0.01, 0]}
+          opacity={0.5}
+          scale={8}
+          blur={2.4}
+          far={4}
+        />
+        <OrbitControls
+          makeDefault
+          enablePan
+          screenSpacePanning
+          zoomToCursor
+          panSpeed={0.9}
+          minDistance={0.4}
+          maxDistance={20}
+          target={[0, 0, 0]}
+        />
       </Canvas>
     </ErrorBoundary>
   );

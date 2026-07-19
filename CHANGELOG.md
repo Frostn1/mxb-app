@@ -17,6 +17,9 @@
   `gfx.cfg` override; a part whose index can't be resolved renders **neutral grey**
   rather than the wrong texture.
 - **Presets no longer embeds a 3D preview** — preview a build via the Rider tab.
+- **Refined rider boot seating on the player model** — larger boots, seated higher off
+  the leg-bottom and nudged forward, with a wider outward stance so they sit naturally
+  under the legs.
 
 ### Fixed
 - **Heavy paints render again.** `.pnt` paint textures are downscaled to 1024² for the
