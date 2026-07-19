@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-18 — helmet/boot browse shows models only
+
+### Fixed
+- **Rider browse "Helmets" and "Boots" now list only models, not paints.** The chips
+  pointed at the parent categories (Helmets 33 / Boots 31), which also aggregate
+  paints, goggles and addons — so models and paints were mixed. They now query the
+  dedicated model subcategories (Helmet Models 313 / Boot Models 343).
+
 ## 2026-07-18 — per-part bike textures, library 3D quick-view, Rider/Presets
 
 ### Added
