@@ -241,6 +241,24 @@ const GEAR_ROT: [number, number, number] = [0, 0, -Math.PI / 2];
  * coincident at the ankle, split left/right by {@link bootSides}. */
 const BOOT_ROT: [number, number, number] = [0, 0, Math.PI / 2];
 
+/** Protection (chest/neck armour) is authored **Y-up**, in the rider body's own
+ * frame — not X-up like the helmet — so it needs **no** roll. Reusing the helmet's
+ * {@link GEAR_ROT} tips it onto its side (a 90° roll), which is wrong. */
+const PROT_ROT: [number, number, number] = [0, 0, 0];
+
+/** A small downward nod so the helmet gazes ahead / slightly down rather than
+ * skyward (the raw fit leaves the visor tipped up). */
+const HELMET_PITCH = 0.25;
+
+/** Tip the boots' toes forward into a riding stance instead of hanging straight
+ * down off the ankle. */
+const BOOT_PITCH = 0.2;
+
+/** Splay each boot outward (toes out) about world Y, so the pair reads as a natural
+ * stance rather than two parallel boots. Applied per side (±) on the full body only;
+ * the solo/single preview stays straight. */
+const BOOT_SPLAY = 0.48;
+
 /** One gear material in the shared "product-preview" look (paint lifted with its
  * own colour as self-illumination so it reads true against the dark background). */
 function makeGearMaterial(
@@ -297,6 +315,9 @@ function RiderGearMesh({
   anchor,
   target,
   rot = GEAR_ROT,
+  yaw = 0,
+  alignY = "center",
+  pitch = 0,
 }: {
   part: RiderPart;
   anchor: [number, number, number];
@@ -304,6 +325,17 @@ function RiderGearMesh({
   /** Up-axis correction. Helmet/protection use {@link GEAR_ROT}; boots, whose
    * worn-up is the opposite axis, use {@link BOOT_ROT}. */
   rot?: [number, number, number];
+  /** Facing correction about world Y, applied *after* the up-axis {@link rot}. The
+   * bbox fit has no notion of front/back, so a helmet authored facing away needs a
+   * 180° yaw to look the same way as the rider. */
+  yaw?: number;
+  /** How the piece meets the body vertically — which edge of its bbox lands on
+   * `anchor[1]`. Gear is worn edge-to-body, not centred: a helmet hangs its
+   * **bottom** on the neck, boots hang their **top** on the leg-bottom. */
+  alignY?: "center" | "top" | "bottom";
+  /** Nod about world X, applied *after* {@link yaw} — tips a helmet's gaze down or a
+   * boot's toe forward. `+` nods the front (the +Z face) downward. */
+  pitch?: number;
 }) {
   const texMap = useTextureMap(part.textures);
   const geoms = useBodyGeometries(part.nodes);
@@ -311,13 +343,18 @@ function RiderGearMesh({
 
   // Gear is authored around its own origin (a helmet's bbox is centred on 0, not
   // up at head height), so it's fitted onto the body rather than dropped in place.
-  // Measure in the ROTATED frame, since the anchor is in body coords.
+  // Measure in the fully-oriented frame (up-axis rot, then yaw, then pitch), since
+  // the anchor is in body coords and the same transform drives the rendered mesh.
   const fit = useMemo(() => {
     const rotM = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...rot));
+    const orientM = new THREE.Matrix4()
+      .makeRotationX(pitch)
+      .multiply(new THREE.Matrix4().makeRotationY(yaw))
+      .multiply(rotM);
     const box = new THREE.Box3();
     for (const g of geoms) {
       if (!g.boundingBox) g.computeBoundingBox();
-      if (g.boundingBox) box.union(g.boundingBox.clone().applyMatrix4(rotM));
+      if (g.boundingBox) box.union(g.boundingBox.clone().applyMatrix4(orientM));
     }
     if (box.isEmpty()) return null;
     const size = new THREE.Vector3();
@@ -325,24 +362,34 @@ function RiderGearMesh({
     box.getSize(size);
     box.getCenter(center);
     const dim = Math.max(size.x, size.y, size.z) || 1;
-    return { scale: target / dim, center };
-  }, [geoms, target, rot]);
+    return { scale: target / dim, center, halfY: size.y / 2 };
+  }, [geoms, target, rot, yaw, pitch]);
 
   if (!fit) return null;
   const s = fit.scale;
+  // Vertical edge alignment: shift so the requested bbox edge (not just the centre)
+  // lands on anchor[1]. `bottom` seats the piece's underside on the anchor (helmet
+  // on the neck); `top` hangs it below the anchor (boots off the leg-bottom).
+  const alignShift =
+    alignY === "bottom" ? fit.halfY * s : alignY === "top" ? -fit.halfY * s : 0;
   return (
     <group
       position={[
         anchor[0] - fit.center.x * s,
-        anchor[1] - fit.center.y * s,
+        anchor[1] - fit.center.y * s + alignShift,
         anchor[2] - fit.center.z * s,
       ]}
       scale={s}
     >
-      <group rotation={rot}>
-        {geoms.map((g, i) => (
-          <mesh key={i} geometry={g} material={mats[i]} castShadow receiveShadow />
-        ))}
+      {/* Pitch (nod) ▷ yaw (facing) ▷ up-axis roll — matches the `orientM` above. */}
+      <group rotation={[pitch, 0, 0]}>
+        <group rotation={[0, yaw, 0]}>
+          <group rotation={rot}>
+            {geoms.map((g, i) => (
+              <mesh key={i} geometry={g} material={mats[i]} castShadow receiveShadow />
+            ))}
+          </group>
+        </group>
       </group>
     </group>
   );
@@ -462,40 +509,79 @@ function useBodyGeometries(nodes: EdfNode[]) {
   return geoms;
 }
 
-/** The real rider **body** mesh (from the game's `rider.pkz`), skinned with the
- * outfit: `rider` diffuse + `rider_n` normal + `rider_r` roughness. Authored
- * Y-up, so no Z-up flip (unlike the bike). */
+/** One rider-body material in the shared product-preview look. The backend tags each
+ * submesh: `rider` (suit) / `gloves` (hands) bind their paint; `face` renders as bare
+ * skin (no kit on the head/neck); `hide` is invisible (the number/name decal planes we
+ * don't texture). Unknown/untagged falls back to the suit. */
+function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THREE.Texture>) {
+  const key = name?.toLowerCase();
+  // Number/name decal planes: render nothing (no color, no depth) rather than smear
+  // the whole suit texture across a flat quad.
+  if (key === "hide") {
+    return new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+  }
+  // Head/neck: bare skin so the kit doesn't wrap onto it.
+  if (key === "face") {
+    return new THREE.MeshStandardMaterial({
+      color: 0xc79a74,
+      metalness: 0.0,
+      roughness: 0.75,
+      side: THREE.DoubleSide,
+    });
+  }
+  const suit = tex.get("rider") ?? null;
+  const map = (key && tex.get(key)) || suit;
+  const normalMap = (key && tex.get(`${key}_n`)) || tex.get("rider_n") || null;
+  return new THREE.MeshStandardMaterial({
+    map: map ?? undefined,
+    // Keep the normal for surface detail but at a subtle scale — full strength
+    // over-shadows the paint. Skip the roughness map (ambiguous semantics).
+    normalMap,
+    normalScale: new THREE.Vector2(0.45, 0.45),
+    color: map ? 0xffffff : 0x8a929c,
+    metalness: 0.0,
+    roughness: 0.62,
+    // Lift the paint with its own colour as self-illumination so the whites read
+    // white and the reds read red even in shadow (a product-preview look).
+    emissive: map ? 0xffffff : 0x000000,
+    emissiveMap: map,
+    emissiveIntensity: map ? 0.32 : 0.0,
+    // Rider meshes aren't reliably wound/closed; render both faces so the body
+    // reads as solid instead of see-through.
+    side: THREE.DoubleSide,
+  });
+}
+
+/** The real rider **body** mesh (from the game's `rider.pkz`). The body is one skinned
+ * mesh with a per-material submesh table — the **hands** are their own material bound to
+ * the `gloves` paint, the rest to the `rider` suit — so a glove paint lands on the hands
+ * without touching the suit. Authored Y-up, so no Z-up flip (unlike the bike). */
 function RiderBodyMesh({ part }: { part: RiderPart }) {
   const tex = useTextureMap(part.textures);
   const geoms = useBodyGeometries(part.nodes);
-  const material = useMemo(() => {
-    const map = tex.get("rider") ?? null;
-    return new THREE.MeshStandardMaterial({
-      map,
-      // Keep the normal for surface detail but at a subtle scale — full strength
-      // over-shadows the paint. Skip the roughness map (ambiguous semantics) for a
-      // clean, even sheen.
-      normalMap: tex.get("rider_n") ?? null,
-      normalScale: new THREE.Vector2(0.45, 0.45),
-      color: map ? 0xffffff : 0x8a929c,
-      metalness: 0.0,
-      roughness: 0.62,
-      // Lift the paint with its own colour as self-illumination so the whites read
-      // white and the reds read red even in shadow (a product-preview look, not a
-      // dim PBR one). Without this the near-black background makes the kit muddy.
-      emissive: map ? 0xffffff : 0x000000,
-      emissiveMap: map,
-      emissiveIntensity: map ? 0.32 : 0.0,
-      // Rider meshes aren't reliably wound/closed; render both faces so the body
-      // reads as solid instead of see-through.
-      side: THREE.DoubleSide,
-    });
-  }, [tex]);
-  useEffect(() => () => material.dispose(), [material]);
+  // One material per submesh (matching the geometry groups from `useBodyGeometries`),
+  // each bound to its submesh's texture. A node with no submesh table takes a single
+  // suit material.
+  const mats = useMemo(
+    () =>
+      part.nodes.map((n) =>
+        n.submeshes.length
+          ? n.submeshes.map((sm) => makeBodyMaterial(sm.texture, tex))
+          : [makeBodyMaterial("rider", tex)],
+      ),
+    [part, tex],
+  );
+  useEffect(() => () => mats.forEach((a) => a.forEach((m) => m.dispose())), [mats]);
   return (
     <group>
       {geoms.map((g, i) => (
-        <mesh key={i} geometry={g} material={material} castShadow receiveShadow />
+        <mesh
+          key={i}
+          geometry={g}
+          material={mats[i].length === 1 ? mats[i][0] : mats[i]}
+          castShadow
+          receiveShadow
+        />
       ))}
     </group>
   );
@@ -510,7 +596,8 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
   const tex = useTextureMap(part.textures);
   const geoms = useBodyGeometries(part.nodes);
   const mats = useGearMaterials(part, tex);
-  const rot = part.part === "boots" ? BOOT_ROT : GEAR_ROT;
+  const rot =
+    part.part === "boots" ? BOOT_ROT : part.part === "protection" ? PROT_ROT : GEAR_ROT;
   // Measure in the ROTATED frame, and — for a two-node boots pair authored
   // coincident at the ankle — push each foot to its own side by ~half a boot's
   // width so the preview shows a pair rather than one boot inside the other, then
@@ -605,16 +692,22 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   const cx = b ? (b.lo[0] + b.hi[0]) / 2 : 0;
   const cz = b ? (b.lo[2] + b.hi[2]) / 2 : 0;
   const h = b ? b.hi[1] - b.lo[1] : 1;
-  // Half the gap between the legs, so each boot sits under its own leg.
-  const legX = b ? 0.17 * (b.hi[0] - b.lo[0]) : 0.13;
+  const depth = b ? b.hi[2] - b.lo[2] : 1;
+  // Half the gap between the legs, so each boot sits under its own leg (not bunched
+  // at the centre-line).
+  const legX = b ? 0.24 * (b.hi[0] - b.lo[0]) : 0.13;
+  // Helmet hangs its bottom edge low on the neck (so little neck shows), nudged
+  // forward in Z over the face — see the `alignY="bottom"` seat below.
   const helmetAnchor: [number, number, number] = b
-    ? [cx, b.hi[1] - 0.06 * h, cz]
+    ? [cx, b.hi[1] - 0.09 * h, cz + 0.08 * depth]
     : [0, 1.62, 0];
-  // Each boot's tallest axis is scaled to bootTarget (~0.22·h), so half a boot ≈
-  // 0.11·h — seat each boot's centre that high to land the soles on the floor.
-  const footY = b ? b.lo[1] + 0.11 * h : 0.2;
+  // Boots hang their top edge on the body's floor (where the legs end), extending
+  // down to the ground — `alignY="top"` below. Nudged slightly forward in Z (and
+  // pitched, see BOOT_PITCH) so they read as a riding stance, not hanging straight down.
+  const footY = b ? b.lo[1] + 0.04 * h : 0.2;
+  const bootZ = b ? cz + 0.1 * depth : cz;
   const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.62 * h, cz] : [0, 1.16, 0.03];
-  const bootTarget = hasBody ? 0.22 * h : 0.32;
+  const bootTarget = hasBody ? 0.37 * h : 0.32;
 
   if (solo) return <RiderGearSolo part={solo} />;
 
@@ -626,10 +719,17 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
         <RiderBody suit={suit} gloves={gloves} showHead={!hasHelmet} />
       )}
       {hasHelmet && (
-        <RiderGearMesh part={helmet!} anchor={helmetAnchor} target={hasBody ? 0.3 * h : 0.46} />
+        <RiderGearMesh
+          part={helmet!}
+          anchor={helmetAnchor}
+          target={hasBody ? 0.3 * h : 0.46}
+          yaw={hasBody ? Math.PI : 0}
+          pitch={hasBody ? HELMET_PITCH : 0}
+          alignY={hasBody ? "bottom" : "center"}
+        />
       )}
       {!!protection?.nodes.length && (
-        <RiderGearMesh part={protection!} anchor={protAnchor} target={hasBody ? 0.42 * h : 0.62} />
+        <RiderGearMesh part={protection!} anchor={protAnchor} target={hasBody ? 0.42 * h : 0.62} rot={PROT_ROT} />
       )}
       {/* A boots `.edf` ships both feet as separate nodes authored coincident at
           the ankle origin — split them left/right rather than stacking them. A
@@ -640,13 +740,23 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
             <RiderGearMesh
               key={i}
               part={{ ...boots!, nodes: [node] }}
-              anchor={[cx + side * legX, footY, cz]}
+              anchor={[cx + side * legX, footY, bootZ]}
               target={bootTarget}
               rot={BOOT_ROT}
+              pitch={hasBody ? BOOT_PITCH : 0}
+              yaw={hasBody ? side * BOOT_SPLAY : 0}
+              alignY={hasBody ? "top" : "center"}
             />
           ))
         ) : (
-          <RiderGearMesh part={boots!} anchor={[cx, footY, cz]} target={bootTarget} rot={BOOT_ROT} />
+          <RiderGearMesh
+            part={boots!}
+            anchor={[cx, footY, bootZ]}
+            target={bootTarget}
+            rot={BOOT_ROT}
+            pitch={hasBody ? BOOT_PITCH : 0}
+            alignY={hasBody ? "top" : "center"}
+          />
         ))}
     </group>
   );

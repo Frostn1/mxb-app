@@ -15,6 +15,7 @@ import {
   normalizeModName,
   type ModType,
 } from "../../api/mods";
+import type { Loadout } from "../../types";
 
 const Dashboard = () => {
   const [view, setView] = useState<DashboardView>("browse");
@@ -26,6 +27,9 @@ const Dashboard = () => {
   const [libraryVersion, setLibraryVersion] = useState(0);
   // Normalized names of installed mods for the active type (for "in library" badges).
   const [installedNames, setInstalledNames] = useState<Set<string>>(new Set());
+  // A preset handed off from the Presets tab to load in the Rider tab (its
+  // "View in Rider" button). Consumed once by the Rider view, then cleared.
+  const [riderPreset, setRiderPreset] = useState<Loadout | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,6 +66,13 @@ const Dashboard = () => {
     setSelectedSlug(null);
   }, []);
 
+  // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
+  const openInRider = useCallback((lo: Loadout) => {
+    setRiderPreset(lo);
+    navigate("rider");
+  }, [navigate]);
+  const clearRiderPreset = useCallback(() => setRiderPreset(null), []);
+
   return (
     <InstallProvider onInstalled={onInstalled}>
       <div className="flex h-full min-h-0">
@@ -94,9 +105,9 @@ const Dashboard = () => {
           ) : view === "locker" ? (
             <Locker />
           ) : view === "presets" ? (
-            <Presets />
+            <Presets onOpenInRider={openInRider} />
           ) : view === "rider" ? (
-            <RiderStudio />
+            <RiderStudio initialLoadout={riderPreset} onLoaded={clearRiderPreset} />
           ) : (
             <Settings />
           )}

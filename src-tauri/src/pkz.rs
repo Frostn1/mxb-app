@@ -554,6 +554,60 @@ fn extract_plain(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
 mod tests {
     use super::*;
 
+    /// Temporary investigation aid: dump a `.pkz`'s structure + text configs so we
+    /// can find the rider skeleton / gear link data.
+    /// `MXB_DUMP_PKZ='…/rider.pkz' cargo test dump_pkz_layout -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn dump_pkz_layout() {
+        let path = std::env::var("MXB_DUMP_PKZ").expect("set MXB_DUMP_PKZ");
+        let entries = read_all(std::path::Path::new(&path)).expect("read pkz");
+        eprintln!("=== {} entries in {path} ===", entries.len());
+        // Group by extension so the shape is legible.
+        let mut by_ext: std::collections::BTreeMap<String, usize> = Default::default();
+        for (name, _) in &entries {
+            let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+            *by_ext.entry(ext).or_default() += 1;
+        }
+        eprintln!("--- extensions: {by_ext:?}");
+        // Full listing (names only) for structure.
+        for (name, data) in &entries {
+            eprintln!("  {name}  ({} bytes)", data.len());
+        }
+        // Dump the text of every config-ish, non-huge entry — this is where a
+        // skeleton / `helmetlinkobj` / bone transform would be declared.
+        let is_text = |n: &str| {
+            let l = n.to_ascii_lowercase();
+            [".cfg", ".ini", ".skl", ".txt", ".xml", ".bones", ".rig", ".hrc", ".prm"]
+                .iter()
+                .any(|e| l.ends_with(e))
+        };
+        for (name, data) in &entries {
+            if is_text(name) && data.len() < 200_000 {
+                eprintln!("\n########## {name} ##########");
+                eprintln!("{}", String::from_utf8_lossy(data));
+            }
+        }
+    }
+
+    /// Extract one named entry from a `.pkz` to disk, for offline binary analysis.
+    /// `MXB_DUMP_PKZ='…/rider.pkz' MXB_ENTRY='rider/riders/default_mx/rider.edf' \
+    ///  MXB_OUT='/tmp/rider.edf' cargo test extract_pkz_entry -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn extract_pkz_entry() {
+        let path = std::env::var("MXB_DUMP_PKZ").expect("set MXB_DUMP_PKZ");
+        let want = std::env::var("MXB_ENTRY").expect("set MXB_ENTRY").to_ascii_lowercase();
+        let out = std::env::var("MXB_OUT").expect("set MXB_OUT");
+        let got = read_selected(std::path::Path::new(&path), |n| {
+            n.to_ascii_lowercase() == want
+        })
+        .expect("read pkz");
+        let (name, data) = got.into_iter().next().expect("entry not found");
+        std::fs::write(&out, &data).expect("write out");
+        eprintln!("wrote {} bytes of {name} to {out}", std::fs::metadata(&out).unwrap().len());
+    }
+
     #[test]
     fn parses_info_and_ui_sections() {
         let ini = "[info]\nname = FLRMX\nshort_name = FLR\nlength = 1235\naltitude = 67\n\n[ui]\npic = TrackImage.tga\nauthor = Mack\nlocation = Florida\n";

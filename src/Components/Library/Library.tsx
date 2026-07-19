@@ -10,6 +10,7 @@ import {
   Plus,
   ChevronRight,
   Lock,
+  Box,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -31,6 +32,8 @@ import {
   categoryIcon,
 } from "./categories";
 import LibraryDetail from "./LibraryDetail";
+import { ViewerDialog } from "../Viewer/ViewerDialog";
+import { entryViewerProps } from "../Viewer/entryViewer";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
 import {
@@ -246,6 +249,7 @@ export default function Library({
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<LibraryEntry | null>(null);
+  const [view3d, setView3d] = useState<LibraryEntry | null>(null);
   const [moveTarget, setMoveTarget] = useState<LibraryEntry | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<LibraryEntry | null>(null);
 
@@ -282,6 +286,9 @@ export default function Library({
     () => sections.reduce((n, s) => n + s.items.length, 0),
     [sections],
   );
+
+  // Props for the quick 3D-view dialog (opened straight from a list card).
+  const view3dProps = view3d ? entryViewerProps(view3d, entries) : null;
 
   const doMove = async (item: LibraryEntry, toFolder: string) => {
     setBusy(true);
@@ -428,6 +435,7 @@ export default function Library({
                   {section.items.map((item) => {
                     const actions = rowActions(item);
                     const Icon = categoryIcon(item.category);
+                    const canView3d = entryViewerProps(item, entries) !== null;
                     return (
                       <ContextMenu key={item.path}>
                         <ContextMenuTrigger asChild>
@@ -439,6 +447,19 @@ export default function Library({
                             className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/[0.07] bg-card p-3 transition-colors hover:border-white/15"
                           >
                             <LibraryCardBody item={item} typeIcon={Icon} />
+                            {canView3d && (
+                              <button
+                                title="Quick 3D view"
+                                aria-label="Quick 3D view"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setView3d(item);
+                                }}
+                                className="flex-none cursor-default rounded-md p-1 text-faint transition-colors hover:bg-foreground/[0.06] hover:text-primary"
+                              >
+                                <Box className="size-4" />
+                              </button>
+                            )}
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
@@ -489,6 +510,18 @@ export default function Library({
       </div>
         </>
       )}
+
+      <ViewerDialog
+        open={Boolean(view3d)}
+        onOpenChange={(o) => !o && setView3d(null)}
+        title={view3d ? displayName(view3d.name) : undefined}
+        initialMode={view3dProps?.mode}
+        paintPaths={view3dProps?.paintPaths ?? []}
+        modelSource={view3dProps?.modelSource}
+        gearSource={view3dProps?.gearSource}
+        gearPart={view3dProps?.gearPart}
+        stockGearPart={view3dProps?.stockGearPart}
+      />
 
       <MoveDialog
         target={moveTarget}
