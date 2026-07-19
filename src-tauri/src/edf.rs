@@ -75,6 +75,15 @@ pub struct Submesh {
     /// from the model's `exhaust_22`, versus a smear of body graphics on tile 0.
     /// `None` when the group straddles tiles (small UV-wrap islands like `plate`).
     pub uv_tile: Option<i32>,
+    /// **Material index** — the u32 stored immediately before this submesh's geometry
+    /// block (`block_off - 4`). It indexes the model's **colour** textures in FILE order
+    /// (normal/roughness maps skipped), which is exactly how the game assigns a texture
+    /// to a part. Validated across Honda/KTM/Yamaha/Suzuki/TM: it reproduces the
+    /// plate→`w_plate` and exhaust bindings that previously needed `gfx.cfg` + UV-tile
+    /// hacks, AND splits the KTM's metals (`450f_metals`) from its plastics — which no
+    /// heuristic could. [`crate::bind_textures`] resolves it to a texture name; `None`
+    /// when the record has no room for it.
+    pub mat: Option<u32>,
 }
 
 /// One decoded mesh node, ready to become a three.js `BufferGeometry`.
@@ -161,6 +170,10 @@ struct RawSub {
     block_off: usize,
     vert_start: usize,
     vert_count: usize,
+    /// Material index, when this sub is one RANGE of a single skinned group (the
+    /// rider body: rider/gloves/face split across one group's contiguous ranges).
+    /// `None` for the usual case, where the material id is read from `block_off - 4`.
+    mat: Option<u32>,
 }
 
 /// A rigid 4×4 placement matrix: row-major, translation in the 4th **column**.
@@ -717,7 +730,34 @@ fn read_node(
     // which is what proved the offset: stock helmet 4120/4120, TLD SE4 6318/6318.
 
     // Raw submesh table (each entry a raw tri range) from the trailing metadata.
-    let raw_subs = detect_submeshes(b, cands, iend, raw_tris, vc);
+    let mut raw_subs = detect_submeshes(b, cands, iend, raw_tris, vc);
+    // A **skinned mesh** (the rider body) is a SINGLE group covering the whole node,
+    // whose internal contiguous ranges are distinct MATERIALS (rider/gloves/face/…),
+    // not vertex segments of one material. `read_sub_group` merges those ranges (right
+    // for a bike part), collapsing them to one submesh. Split them back out — carrying
+    // each range's material index — so each material can bind its own texture (this is
+    // what lets glove paint land on the hands). Bike nodes are covered by *multiple*
+    // groups, or single-range groups, so they never hit this and stay untouched.
+    if raw_subs.len() == 1 && raw_subs[0].tri_count == raw_tris {
+        if let Some(ranges) = read_sub_group_ranges(b, raw_subs[0].block_off, raw_tris, vc) {
+            if ranges.len() > 1 {
+                let (name, block_off) = (raw_subs[0].name.clone(), raw_subs[0].block_off);
+                raw_subs = ranges
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (ts, tc, vs2, vc2))| RawSub {
+                        name: name.clone(),
+                        tri_start: ts,
+                        tri_count: tc,
+                        block_off,
+                        vert_start: vs2,
+                        vert_count: vc2,
+                        mat: Some(i as u32),
+                    })
+                    .collect();
+            }
+        }
+    }
     // Tiles the node when the submesh triangle COUNTS sum to the raw total.
     let covers = !raw_subs.is_empty() && raw_subs.iter().map(|s| s.tri_count).sum::<usize>() == raw_tris;
 
@@ -814,6 +854,9 @@ fn read_node(
                     tri_count: kept,
                     texture: None,
                     uv_tile: uv_tile(&uvs, s.vert_start, s.vert_count),
+                    // A split skinned range carries its own material index; otherwise
+                    // it sits at `block_off - 4` (see `Submesh::mat`).
+                    mat: s.mat.or_else(|| s.block_off.checked_sub(4).map(|o| u32le(b, o))),
                 });
                 kept_start += kept;
             }
@@ -951,6 +994,49 @@ fn read_sub_group(b: &[u8], o: usize, tot_tris: usize, tot_verts: usize) -> Opti
     None
 }
 
+/// Like [`read_sub_group`] but keeps each range separately rather than merging them
+/// into one span: `[(tri_start, tri_count, vert_start, vert_count), …]`. Used to
+/// split a skinned mesh's single group (the rider body) into its per-material ranges
+/// (rider/gloves/face/…), which merge would otherwise collapse to one submesh.
+fn read_sub_group_ranges(
+    b: &[u8],
+    o: usize,
+    tot_tris: usize,
+    tot_verts: usize,
+) -> Option<Vec<(usize, usize, usize, usize)>> {
+    let tri_start = u32le(b, o) as usize;
+    let first_vs = u32le(b, o + 8) as usize;
+    let (mut tri_total, mut vc_total) = (0usize, 0usize);
+    let mut ranges = Vec::new();
+    let mut k = o;
+    for _ in 0..64 {
+        if k + 24 > b.len() {
+            return None;
+        }
+        let a = u32le(b, k) as usize;
+        let cnt = u32le(b, k + 4) as usize;
+        let vstart = u32le(b, k + 8) as usize;
+        let vcnt = u32le(b, k + 12) as usize;
+        if cnt == 0
+            || vcnt == 0
+            || a != tri_start + tri_total
+            || vstart != first_vs + vc_total
+            || a + cnt > tot_tris
+            || vstart + vcnt > tot_verts
+        {
+            return None;
+        }
+        ranges.push((a, cnt, vstart, vcnt));
+        tri_total += cnt;
+        vc_total += vcnt;
+        if u32le(b, k + 16) as usize == vc_total && u32le(b, k + 20) as usize == first_vs {
+            return Some(ranges);
+        }
+        k += 24;
+    }
+    None
+}
+
 /// A submesh geometry block found anywhere in the file, anchored by a valid rigid
 /// placement matrix at `block_off - 148`. Collected once per parse (see
 /// [`collect_sub_cands`]) so every node can chain its table against the shared pool.
@@ -1077,6 +1163,7 @@ fn chain_submeshes(
             block_off: next.block_off,
             vert_start: next.vert_start,
             vert_count: next.vert_count,
+            mat: None,
         });
         run_t += next.tri_count;
         run_v = next.vert_start + next.vert_count;
@@ -1133,6 +1220,7 @@ fn detect_submeshes_window(b: &[u8], iend: usize, tot_tris: usize, tot_verts: us
             block_off: o,
             vert_start: vstart,
             vert_count: vcnt,
+            mat: None,
         });
         run_t += cnt;
         run_v = vstart + vcnt;
@@ -1183,6 +1271,35 @@ fn submesh_transform(b: &[u8], name_off: usize, block_off: usize) -> Vec<Mat4> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Investigation aid: parse an `.edf` and print its overall vertex bounds + node
+    /// names — the reference frame for validating decoded bone world positions.
+    /// `MXB_EDF_FILE=/tmp/rider.edf cargo test edf_bounds -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn edf_bounds() {
+        let path = std::env::var("MXB_EDF_FILE").expect("set MXB_EDF_FILE");
+        let bytes = std::fs::read(&path).expect("read edf");
+        let nodes = parse(&bytes);
+        let mut lo = [f32::INFINITY; 3];
+        let mut hi = [f32::NEG_INFINITY; 3];
+        for n in &nodes {
+            for c in n.positions.chunks_exact(3) {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(c[k]);
+                    hi[k] = hi[k].max(c[k]);
+                }
+            }
+        }
+        eprintln!("nodes: {}", nodes.len());
+        eprintln!("overall bbox lo={lo:?} hi={hi:?}  size={:?}", [hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]]);
+        for n in &nodes {
+            eprintln!("  node '{}'  verts={}  submeshes={}", n.name, n.positions.len() / 3, n.submeshes.len());
+            for sm in &n.submeshes {
+                eprintln!("      submesh '{}'  tris={}  tex={:?}", sm.name, sm.tri_count, sm.texture);
+            }
+        }
+    }
 
     /// Build a submesh-group record: `[range][pair][range][pair]…`.
     fn group_bytes(ranges: &[(u32, u32, u32, u32)], pairs: &[(u32, u32)]) -> Vec<u8> {
@@ -1245,7 +1362,6 @@ mod tests {
         let b = group_bytes(&ranges, &pairs);
         assert_eq!(read_sub_group(&b, 0, 10_000, 10_000), None);
     }
-
 
     /// The chain must span records that are NOT adjacent in the file. The Suzuki
     /// chassis' first submesh sits right after its name while the rest are ~5 MB

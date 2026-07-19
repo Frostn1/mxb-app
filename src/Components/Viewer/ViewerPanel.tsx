@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Maximize2, Bike, User, Box } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Maximize2, Bike, User, Box, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent } from "../ui/dialog";
@@ -15,6 +15,9 @@ interface ViewerPanelProps {
   /** Lock the panel to the rider view (the Rider studio has no bike): starts in
    * rider mode and hides the Bike/Rider toggle. */
   riderOnly?: boolean;
+  /** Gear slots to leave OUT of the render (the Rider studio's per-piece "show on
+   * model" toggles). The body is never hidden. */
+  hiddenParts?: RiderPart["part"][];
   className?: string;
 }
 
@@ -57,10 +60,25 @@ function ModeToggle({
  * Live 3D preview of the current loadout — a panel that sits beside the preset
  * builder, with an expand button that opens the same viewer full-screen.
  */
-export function ViewerPanel({ texture, loadout, riderOnly = false, className }: ViewerPanelProps) {
+export function ViewerPanel({
+  texture,
+  loadout,
+  riderOnly = false,
+  hiddenParts,
+  className,
+}: ViewerPanelProps) {
   const [mode, setMode] = useState<ViewerMode>(riderOnly ? "rider" : "bike");
   const [expanded, setExpanded] = useState(false);
   const [riderParts, setRiderParts] = useState<RiderPart[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  // The first resolve loads immediately (snappy first demo); later slot edits are
+  // debounced so rapid picks don't thrash the decoder.
+  const firstLoad = useRef(true);
+
+  // Drop any toggled-off gear before rendering (keep the body + everything else).
+  const shownParts = hiddenParts?.length
+    ? riderParts?.filter((p) => !hiddenParts.includes(p.part)) ?? null
+    : riderParts;
 
   // Re-resolve the rider gear whenever a rider-affecting slot changes (a plain
   // key so bike-only edits don't trigger a reload). Debounced — the loadout
@@ -82,20 +100,36 @@ export function ViewerPanel({ texture, loadout, riderOnly = false, className }: 
   useEffect(() => {
     if (!loadout) {
       setRiderParts(null);
+      setLoading(false);
       return;
     }
     let alive = true;
+    setLoading(true);
+    const delay = firstLoad.current ? 0 : 200;
+    firstLoad.current = false;
     const t = setTimeout(() => {
       loadRiderModel(loadout)
+        // Swap in the new model once it's ready; keep the previous one on screen
+        // until then (and on failure) so the preview never blanks out.
         .then((m) => alive && setRiderParts(m.parts))
-        .catch(() => alive && setRiderParts(null));
-    }, 200);
+        .catch(() => {})
+        .finally(() => alive && setLoading(false));
+    }, delay);
     return () => {
       alive = false;
       clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riderKey]);
+
+  // A small non-blocking spinner shown over the canvas while a model resolves —
+  // the current/stand-in model stays visible underneath.
+  const spinner = loading && (
+    <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-[11px] text-white/85">
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      Loading…
+    </div>
+  );
 
   return (
     <>
@@ -127,9 +161,10 @@ export function ViewerPanel({ texture, loadout, riderOnly = false, className }: 
           <ModelViewer
             mode={mode}
             texture={texture}
-            riderParts={riderParts}
+            riderParts={shownParts}
             className="absolute inset-0"
           />
+          {spinner}
         </div>
       </div>
 
@@ -146,9 +181,10 @@ export function ViewerPanel({ texture, loadout, riderOnly = false, className }: 
             <ModelViewer
             mode={mode}
             texture={texture}
-            riderParts={riderParts}
+            riderParts={shownParts}
             className="absolute inset-0"
           />
+            {spinner}
           </div>
         </DialogContent>
       </Dialog>

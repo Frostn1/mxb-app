@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-07-18 — per-part bike textures, library 3D quick-view, Rider/Presets
+
+### Added
+- **Quick 3D-view button on library items.** A 3D-cube icon on each bike / gear /
+  paint card opens the 3D viewer directly (shared eligibility logic with the detail
+  view's "View in 3D").
+- **Save a rider look by name in the Rider tab**, plus a **"View in Rider"** button in
+  the Presets builder (and on saved cards) that opens the look on the player model.
+
+### Changed
+- **Bike parts now bind their real texture from the model's per-submesh material
+  index** (the `.edf` `block-4` field), so each part gets its correct map — metals,
+  plastics, number plate, exhaust — instead of the largest texture smeared over
+  everything. Validated across Honda/KTM/Yamaha/Suzuki/TM. Number plates stay on the
+  `gfx.cfg` override; a part whose index can't be resolved renders **neutral grey**
+  rather than the wrong texture.
+- **Presets no longer embeds a 3D preview** — preview a build via the Rider tab.
+
+### Fixed
+- **Heavy paints render again.** `.pnt` paint textures are downscaled to 1024² for the
+  preview (they were shipped at full 4096²), so multi-map paints no longer blow the
+  webview's WebGL memory budget and fail to show.
+
 ## 2026-07-18 — viewer: boots preview orientation & framing
 
 ### Fixed

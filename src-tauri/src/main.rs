@@ -504,22 +504,27 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
 /// Resolve which texture every mesh group binds to, from the bike's own files —
 /// never from the group's name.
 ///
-/// The rules, all read off real bikes rather than inferred:
+/// The rules, in priority order, all read off real bikes rather than inferred:
 ///
-/// * **`gfx.cfg` overrides win.** A part section may redirect a named group:
-///   `plate { texture = w_plate }`, `chain { name = chain  texture = chain }`. It
-///   overrides only those few; everything else takes the default.
-/// * **The default is the model's own primary diffuse** — the largest texture
-///   packed into `model.edf` that isn't a normal/roughness map and isn't already
-///   claimed by a `gfx.cfg` override. On the KTM 450 that texture is *named*
-///   `plastics`; on the Honda CRF450R it's named `2021crf`.
-/// * **A paint replaces a model texture of the same name.** That's the whole
-///   mechanism: a `.pnt` supplies textures by name (`plastics`, `plastics_n`), and
-///   the game binds by name.
-/// * **UV tile ≥ 1 selects a further texture.** The Honda's exhaust is authored on
-///   tile 1 and takes the next diffuse in the model (`exhaust_22`). Confirmed by
-///   rendering; only the Honda-style exhaust exercises it (the KTM/TM/GasGas models
-///   are entirely tile 0).
+/// * **`gfx.cfg` overrides win** where present: `plate { texture = w_plate }`,
+///   `chain { texture = chain }`. Explicit author intent, and covers the animated chain.
+/// * **Else the model's own material index** — each submesh stores one ([`edf::Submesh::mat`],
+///   the u32 at `block_off - 4`) that indexes the model's COLOUR textures in FILE order,
+///   EXCLUDING any the `gfx.cfg` overrides already claim (the `w_plate` number plate):
+///   those are bound above, not by the index, and counting them shifts every slot so the
+///   plate texture lands on bodywork (the Kawasaki's `Frame Plastics` — wrong in-game).
+///   This is exactly how the game assigns a texture to a part, so it's authoritative:
+///   validated across Honda/KTM/Yamaha/Suzuki/TM, it reproduces the plate→`w_plate` and
+///   exhaust bindings the old heuristics faked, AND splits the KTM's `450f_metals` from
+///   its `plastics` — which nothing else could, since both sit on UV tile 0.
+/// * **Else, if UV tile ≥ 1**, that selects a further diffuse (the Honda exhaust on
+///   tile 1 → `exhaust_22`) — still a confident binding.
+/// * **Else leave it grey.** The index pointed past the textures we can enumerate (a
+///   plate/decal whose real texture lives in a per-bike material table we can't decode),
+///   so a neutral colour is honest — grey beats smearing the wrong texture onto the part.
+///
+/// A paint then replaces a bound texture of the same name — that's how a `.pnt`
+/// re-liveries the bike.
 ///
 /// `part` is the `gfx.cfg` section this node belongs to (`chassis`, `steer`, …).
 fn bind_textures(
@@ -549,6 +554,19 @@ fn bind_textures(
         })
         .collect();
     diffuse.sort_by_key(|t| std::cmp::Reverse(t.width as u64 * t.height as u64));
+    // Colour textures in FILE order — what a submesh's material index (`sm.mat`)
+    // points into. It EXCLUDES `gfx.cfg`-claimed textures (the number plate `w_plate`,
+    // chain): those are bound by the explicit override above, NOT the material index,
+    // so counting them here shifts every index and lands the plate texture on bodywork
+    // (the Kawasaki's `Frame Plastics` picking up `w_plate` — confirmed wrong in-game).
+    // Not sorted — the index is positional over what remains (metals, plastics, exhaust…).
+    let diffuse_ord: Vec<&edf::EmbeddedTexture> = embedded
+        .iter()
+        .filter(|t| {
+            let n = t.name.to_ascii_lowercase();
+            !n.ends_with("_n") && !n.ends_with("_r") && !claimed.contains(&n)
+        })
+        .collect();
 
     for n in nodes.iter_mut() {
         let part = node_part.get(&n.name.to_ascii_lowercase());
@@ -573,9 +591,25 @@ fn bind_textures(
                 sm.texture = Some(tex.clone());
                 continue;
             }
-            // Tile 0 (or an unknown/straddling tile) → the primary diffuse.
-            let slot = sm.uv_tile.filter(|&t| t > 0).unwrap_or(0) as usize;
-            sm.texture = diffuse.get(slot).map(|t| t.name.clone());
+            // The model's own material index → its colour texture (file order). This is
+            // the authoritative per-part binding: it's what puts `450f_metals` on the
+            // KTM's forks/shock instead of smearing `plastics` over them.
+            if let Some(t) = sm.mat.and_then(|i| diffuse_ord.get(i as usize)) {
+                sm.texture = Some(t.name.clone());
+                continue;
+            }
+            // No usable material index. UV tile ≥ 1 still gives a CONFIDENT binding —
+            // the group is authored on a second tile that selects a specific diffuse
+            // (the Honda exhaust on tile 1 → `exhaust_22`), so honour it.
+            if let Some(t) = sm.uv_tile.filter(|&t| t > 0).and_then(|t| diffuse.get(t as usize)) {
+                sm.texture = Some(t.name.clone());
+                continue;
+            }
+            // Otherwise we can't resolve this group with confidence (its index points
+            // past the known textures — a plate/decal whose real texture lives in the
+            // material table we can't decode). Leave it NEUTRAL/grey rather than smear
+            // the primary diffuse onto it: gray beats the wrong texture.
+            sm.texture = None;
         }
     }
 }
@@ -733,24 +767,28 @@ fn load_rider_model_blocking(
         }
     }
 
-    // The outfit (suit) paint — its textures (`rider`/`rider_n`/`rider_r`).
+    // The outfit (suit) paint — its textures (`rider`/`rider_n`/`rider_r`) — and the
+    // gloves paint (`gloves`/`gloves_n`/`gloves_r`), which the body wears on its hand
+    // material. Both are decoded here so the real body can bind them per-submesh.
     let suit = load_rider_paint(&base, "suit", &loadout.rider, "paints", &loadout.suit_paint);
-    // Prefer the real rider BODY mesh from the game's `rider.pkz`, textured with
-    // the outfit; if it can't be loaded (no game path / not found), fall back to
-    // the outfit as a paint-only slot that tints the stand-in body.
+    let gloves = load_rider_paint(&base, "gloves", &loadout.rider, "gloves", &loadout.gloves_paint);
     let suit_texs = suit.as_ref().map(|s| s.textures.clone()).unwrap_or_default();
-    match load_rider_body(&cfg, &loadout.rider, suit_texs) {
+    let glove_texs = gloves.as_ref().map(|g| g.textures.clone()).unwrap_or_default();
+    // Prefer the real rider BODY mesh from the game's `rider.pkz`, textured with the
+    // outfit + gloves; if it can't be loaded (no game path / not found), fall back to
+    // the outfit/gloves as paint-only slots that tint the stand-in body.
+    let mut body_texs = suit_texs;
+    body_texs.extend(glove_texs);
+    match load_rider_body(&cfg, &loadout.rider, body_texs) {
         Some(body) => parts.push(body),
         None => {
             if let Some(s) = suit {
                 parts.push(s);
             }
+            if let Some(g) = gloves {
+                parts.push(g);
+            }
         }
-    }
-
-    if let Some(p) = load_rider_paint(&base, "gloves", &loadout.rider, "gloves", &loadout.gloves_paint)
-    {
-        parts.push(p);
     }
 
     Ok(RiderModel { parts })
@@ -781,12 +819,36 @@ fn load_rider_body(
     profile: &str,
     textures: Vec<paint::PaintTexture>,
 ) -> Option<RiderPart> {
-    let nodes = load_rider_body_nodes(cfg, profile)?;
+    let mut nodes = load_rider_body_nodes(cfg, profile)?;
+    tag_body_materials(&mut nodes);
     Some(RiderPart {
         part: "body".into(),
         nodes,
         textures,
     })
+}
+
+/// Name the rider body's split submeshes so the renderer binds each to the right
+/// paint. The body is one skinned mesh with a 5-material table in draw order:
+///   0 `rider` (suit)  1 `gloves` (hands)  2 `face_parts` (head/neck)
+///   3 `w_number`  4 `w_name`  (the number/name decal PLANES).
+/// The suit + gloves get their paints; the head/neck is **skinned** (no kit); and the
+/// decal planes are **hidden** — we don't generate the number/name textures, so bound
+/// to the suit they'd smear the whole paint across a flat quad on the chest/back.
+fn tag_body_materials(nodes: &mut [edf::EdfNode]) {
+    for n in nodes.iter_mut() {
+        for sm in n.submeshes.iter_mut() {
+            sm.texture = Some(
+                match sm.mat {
+                    Some(1) => "gloves",
+                    Some(2) => "face",
+                    Some(3) | Some(4) => "hide",
+                    _ => "rider",
+                }
+                .into(),
+            );
+        }
+    }
 }
 
 /// Cache of rider-side meshes decoded out of the game's `rider.pkz`
@@ -955,26 +1017,65 @@ struct GearPaints {
     goggles: Vec<String>,
 }
 
+/// The `paints/` skins + `goggles/` skins packed inside a gear folder or `.pkz`.
+fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
+    let files = read_gear_files(path).map_err(|e| format!("{e:#}"))?;
+    let names = |folder: &str| {
+        let mut out: Vec<String> = files
+            .iter()
+            .filter_map(|(n, _)| gear_folder_paint_name(n, folder))
+            .collect();
+        out.sort_by_key(|s| s.to_lowercase());
+        out.dedup();
+        out
+    };
+    Ok(GearPaints {
+        paints: names("paints"),
+        goggles: names("goggles"),
+    })
+}
+
 #[tauri::command]
 async fn list_gear_paints(path: String) -> Result<GearPaints, String> {
+    tauri::async_runtime::spawn_blocking(move || gear_paints_at(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("list_gear_paints task failed: {e}"))?
+}
+
+/// The packed paints/goggles for an **installed gear model named by the loadout**
+/// (`part` = `helmet`/`boots`/`protection`, `model` = the folder/`.pkz` stem). Gear
+/// installs packaged, so its paints live inside the archive rather than as loose
+/// files the Library scan can see — this resolves the model the same way
+/// `load_gear` does, then reads them out. Empty for stock/built-in gear.
+#[tauri::command]
+async fn list_installed_gear_paints(
+    app: tauri::AppHandle,
+    part: String,
+    model: String,
+) -> Result<GearPaints, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let files = read_gear_files(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))?;
-        let names = |folder: &str| {
-            let mut out: Vec<String> = files
-                .iter()
-                .filter_map(|(n, _)| gear_folder_paint_name(n, folder))
-                .collect();
-            out.sort_by_key(|s| s.to_lowercase());
-            out.dedup();
-            out
+        let empty = GearPaints { paints: Vec::new(), goggles: Vec::new() };
+        if model.trim().is_empty() {
+            return Ok(empty);
+        }
+        let Some(spec) = GEAR.iter().find(|g| g.part == part) else {
+            return Ok(empty);
         };
-        Ok(GearPaints {
-            paints: names("paints"),
-            goggles: names("goggles"),
-        })
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let kind_dir = std::path::Path::new(&cfg.mods_path)
+            .join("mods")
+            .join("rider")
+            .join(spec.mods_kind);
+        let stem = model.trim_end_matches(".pkz");
+        for src in [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))] {
+            if src.exists() {
+                return gear_paints_at(&src);
+            }
+        }
+        Ok(empty)
     })
     .await
-    .map_err(|e| format!("list_gear_paints task failed: {e}"))?
+    .map_err(|e| format!("list_installed_gear_paints task failed: {e}"))?
 }
 
 /// `…/<folder>/Red White.pnt` → `Red White`, when `entry` is a `.pnt` in that
@@ -1843,6 +1944,7 @@ fn main() {
             load_gear_model,
             load_stock_gear_model,
             list_gear_paints,
+            list_installed_gear_paints,
             scan_rider_targets,
             scan_model_swaps,
             apply_model_swap,
@@ -1933,8 +2035,12 @@ mod viewer_tests {
             .collect();
         for n in &m.nodes {
             for s in &n.submeshes {
-                let t = s.texture.as_ref().expect("group bound to a texture");
-                assert!(have.contains(&t.to_ascii_lowercase()), "'{t}' is available");
+                // A group either binds a texture the paint carries, or is left grey
+                // (`None`) when its material index can't be resolved — grey is a valid
+                // outcome (better than smearing the wrong texture), never a failure.
+                if let Some(t) = &s.texture {
+                    assert!(have.contains(&t.to_ascii_lowercase()), "'{t}' is available");
+                }
             }
         }
     }

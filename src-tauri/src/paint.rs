@@ -297,6 +297,20 @@ pub fn unpack_file(path: &Path) -> Result<Vec<PaintTexture>> {
 mod tests {
     use super::*;
 
+    /// Investigation: print the texture names inside a `.pnt`.
+    /// `MXB_PNT='…/gloves/x.pnt' cargo test dump_pnt_names -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn dump_pnt_names() {
+        let path = std::env::var("MXB_PNT").expect("set MXB_PNT");
+        let buf = std::fs::read(&path).expect("read pnt");
+        let texs = decode_any(&buf).expect("decode");
+        eprintln!("{} textures in {path}", texs.len());
+        for t in &texs {
+            eprintln!("  '{}'  {}x{}", t.name, t.width, t.height);
+        }
+    }
+
     /// Fixture: a 4×4 32-bit paint packed with `libpnt` (a third-party packer).
     ///
     /// **Channel-order caveat:** `libpnt` writes pixels in the opposite byte order

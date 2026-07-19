@@ -267,6 +267,18 @@ export function listGearPaints(path: string): Promise<GearPaints> {
   return invoke<GearPaints>("list_gear_paints", { path });
 }
 
+/** The packed paints/goggles for an installed gear model **named by the loadout**
+ * (`part` = helmet/boots/protection, `model` = the folder/`.pkz` name). Gear installs
+ * packaged, so its paints live inside the archive — this resolves the model like the
+ * renderer does and reads them out, for the Rider studio's paint/goggle pickers.
+ * Empty for stock/built-in gear. */
+export function listInstalledGearPaints(
+  part: RiderPart["part"],
+  model: string,
+): Promise<GearPaints> {
+  return invoke<GearPaints>("list_installed_gear_paints", { part, model });
+}
+
 /** Preview a loose gear paint on the game's **stock** model for that slot (boots /
  * helmet / protection) — for paints whose own model isn't installed. `paintPath` is
  * the loose `.pnt`; omit for the stock paint. Mesh comes from the game's `rider.pkz`,

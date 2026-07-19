@@ -182,6 +182,7 @@ pub struct RiderTargets {
 /// rider area. Missing folders just yield empty lists (best-effort).
 pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
     let base = mods_subdir(mods_path, "mods/rider");
+    // Profiles only ever exist as folders (`riders/<profile>/`).
     let dirs_in = |sub: &str| -> Vec<String> {
         let mut out = Vec::new();
         if let Ok(rd) = fs::read_dir(base.join(sub)) {
@@ -196,10 +197,34 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
         out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         out
     };
+    // Installed gear is either an **extracted folder** or a **packaged `.pkz`**
+    // sitting directly in the kind folder — the common case (e.g.
+    // `helmets/TLD SE4.pkz`). `load_gear` resolves a name to either form, so list
+    // both, keyed by name (the `.pkz` stem), or the picker misses loose `.pkz` gear.
+    let models_in = |sub: &str| -> Vec<String> {
+        let mut out = Vec::new();
+        if let Ok(rd) = fs::read_dir(base.join(sub)) {
+            for e in rd.flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    if let Some(n) = e.file_name().to_str() {
+                        out.push(n.to_string());
+                    }
+                } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("pkz")) {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        out.push(stem.to_string());
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+        out.dedup();
+        out
+    };
     RiderTargets {
-        helmets: dirs_in("helmets"),
-        boots: dirs_in("boots"),
-        protection: dirs_in("protection"),
+        helmets: models_in("helmets"),
+        boots: models_in("boots"),
+        protection: models_in("protection"),
         profiles: dirs_in("riders"),
     }
 }

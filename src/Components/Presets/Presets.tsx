@@ -12,6 +12,7 @@ import {
   Check,
   Package,
   UploadCloud,
+  User,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../ui/button";
@@ -55,7 +56,6 @@ import type {
   Preset,
   PresetApplyOutcome,
 } from "../../types";
-import { ViewerPanel } from "../Viewer/ViewerPanel";
 import { SlotField } from "./SlotField";
 import {
   SLOTS,
@@ -145,7 +145,12 @@ function applyNote(outcome: PresetApplyOutcome): string {
  * from what you've installed, save it named, quick-apply it later, and share it as
  * a code others can import. Applying nudges a running FrostMod to reload.
  */
-export default function Presets() {
+interface PresetsProps {
+  /** Open a preset in the Rider tab to view it on the player model. */
+  onOpenInRider?: (loadout: Loadout) => void;
+}
+
+export default function Presets({ onOpenInRider }: PresetsProps = {}) {
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState<string>("");
   const [bikes, setBikes] = useState<string[]>([]);
@@ -369,9 +374,23 @@ export default function Presets() {
             {/* Slot groups */}
             {grouped.map((g) => (
               <div key={g.id} className="flex flex-col gap-2">
-                <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
-                  {g.label}
-                </h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    {g.label}
+                  </h2>
+                  {/* First rider group: jump to the Rider tab to preview this look. */}
+                  {g.id === "rider" && onOpenInRider && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto h-7"
+                      onClick={() => onOpenInRider(loadout)}
+                    >
+                      <User className="size-3.5" />
+                      View in Rider
+                    </Button>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2">
                   {g.slots.map((slot) => (
                     <SlotField
@@ -408,7 +427,7 @@ export default function Presets() {
                 <p className="flex items-center gap-1.5 text-[11.5px] text-amber-500">
                   <AlertTriangle className="size-3.5" />
                   {builderMissing} slot{builderMissing > 1 ? "s" : ""} reference a mod
-                  that isn't installed — it'll show as stock in-game.
+                  that is not installed — shown as stock in-game.
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-2">
@@ -440,9 +459,6 @@ export default function Presets() {
             </div>
           </section>
 
-          {/* Live 3D preview of the current loadout */}
-          <ViewerPanel loadout={loadout} className="w-[360px] flex-none" />
-
           {/* Saved presets */}
           <aside className="flex w-[300px] flex-none flex-col gap-2 overflow-y-auto border-l border-white/[0.06] pl-5">
             <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
@@ -463,6 +479,9 @@ export default function Presets() {
                   onLoad={() => setLoadout(p.loadout)}
                   onShare={() => onShare(p)}
                   onDelete={() => void onDelete(p)}
+                  onViewInRider={
+                    onOpenInRider ? () => onOpenInRider(p.loadout) : undefined
+                  }
                 />
               ))
             )}
@@ -494,6 +513,7 @@ function PresetCard({
   onLoad,
   onShare,
   onDelete,
+  onViewInRider,
 }: {
   preset: Preset;
   applying: boolean;
@@ -502,6 +522,7 @@ function PresetCard({
   onLoad: () => void;
   onShare: () => void;
   onDelete: () => void;
+  onViewInRider?: () => void;
 }) {
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-card/50 p-3">
@@ -517,6 +538,11 @@ function PresetCard({
           </div>
         </button>
         <div className="flex flex-none items-center gap-0.5">
+          {onViewInRider && (
+            <IconBtn title="View on rider" onClick={onViewInRider}>
+              <User className="size-3.5" />
+            </IconBtn>
+          )}
           <IconBtn title="Share" onClick={onShare}>
             <Share2 className="size-3.5" />
           </IconBtn>
