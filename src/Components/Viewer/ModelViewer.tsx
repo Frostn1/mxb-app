@@ -196,9 +196,10 @@ const BOOT_SPLAY = 0.48;
 function makeGearMaterial(
   base: string | null | undefined,
   tex: Map<string, THREE.Texture>,
-  fallbackFirst: THREE.Texture | null,
 ) {
-  const map = submeshTexture(base, tex) ?? fallbackFirst;
+  // Bind only to this submesh's own texture. A miss renders neutral grey (color below) —
+  // never fall back to another texture, which would smear e.g. the goggle lens over the shell.
+  const map = submeshTexture(base, tex);
   const normalMap = base ? tex.get(`${base.toLowerCase()}_n`) ?? null : null;
   return new THREE.MeshStandardMaterial({
     map: map ?? undefined,
@@ -215,11 +216,10 @@ function makeGearMaterial(
 
 function useGearMaterials(part: RiderPart, tex: Map<string, THREE.Texture>) {
   const mats = useMemo(() => {
-    const first = (tex.values().next().value as THREE.Texture | undefined) ?? null;
     return part.nodes.map((n) =>
       n.submeshes.length
-        ? n.submeshes.map((sm) => makeGearMaterial(sm.texture, tex, first))
-        : [makeGearMaterial(n.texture ?? part.part, tex, first)],
+        ? n.submeshes.map((sm) => makeGearMaterial(sm.texture, tex))
+        : [makeGearMaterial(n.texture, tex)],
     );
   }, [part, tex]);
   useEffect(

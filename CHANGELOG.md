@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-19
+
+### Fixed
+- **Rider gear renders textured, never smeared or blank** — helmets, boots and
+  protection now bind each submesh to its own paint:
+  - A helmet whose selected paint is missing no longer renders solid white (the goggle
+    lens was being smeared over the whole shell); the shell falls back to the model's
+    first packed paint.
+  - Gear with an unknown/stale paint name (e.g. a boot paint not packed in the model)
+    now falls back to the model's first paint instead of rendering flat grey.
+  - Stock / "free" gear (helmet, boots, protection) is now textured — the game-pkz
+    fallback path was loading the mesh but never binding its paint.
+  - An unbound submesh now renders neutral grey instead of borrowing another part's
+    texture.
+- **Rider gear load failures are now logged** — a chosen model/paint that fails to load
+  is written to the app log (instead of silently vanishing), so client-side issues are
+  diagnosable.
+
 ## 2026-07-18 — v0.2.1
 
 ### Fixed
