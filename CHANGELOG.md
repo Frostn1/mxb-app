@@ -3,6 +3,16 @@
 ## 2026-07-19
 
 ### Added
+- **Sound swaps (sound mods)** — the Locker now manages each bike's engine sound the
+  same way it manages models. A sound set (`engine.scl` + `sfx.cfg`, plus any `.wav`/
+  `.mp3`) is swapped between the active loose files at the bike root and variants parked
+  in `<Bike>/FrostMod Sounds/<name>/`, with an always-present **Stock** entry to revert to
+  the built-in sound. Model and sound swap **independently** — switching a model preserves
+  the sound (a model swap no longer drags audio along). A sound can optionally be **tied**
+  to a model swap (`_bindings.json`), so it travels with that model: activating the model
+  pulls its sound in, and leaving reverts to Stock. New Tauri commands `scan_sound_swaps` /
+  `apply_sound_swap` / `bind_sound` / `unbind_sound`. The sidebar item is renamed
+  **Model Swaps → Locker**.
 - **Auto-register loose model swaps** — on launch the app now scans each bike for model
   sets dropped outside the `FrostMod Models/` folder (either straight in the bike dir or in
   an ad-hoc container folder like `models/`, each a folder with a `model.edf`). If any are

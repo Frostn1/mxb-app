@@ -34,7 +34,7 @@ const NAV: { id: DashboardView; label: string; icon: typeof Home }[] = [
   { id: "browse", label: "Browse", icon: Home },
   { id: "shop", label: "Shop", icon: Store },
   { id: "library", label: "Library", icon: LibraryIcon },
-  { id: "locker", label: "Model Swaps", icon: Bike },
+  { id: "locker", label: "Locker", icon: Bike },
   { id: "presets", label: "Presets", icon: Shirt },
   { id: "rider", label: "Rider", icon: User },
   { id: "settings", label: "Settings", icon: Settings },
