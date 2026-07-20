@@ -15,7 +15,7 @@ import {
   setProfilesPath,
   setRunInBackground,
 } from "../../api/mods";
-import { checkForUpdates } from "../../lib/updater";
+import { useUpdate } from "../../Context/Update";
 import { useConfig } from "../../Context/Config";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { useFrostmod } from "../../Context/FrostmodContext";
@@ -40,6 +40,7 @@ export default function Settings() {
   const { theme, setTheme } = useTheme();
   const { running, reload, status, installing, checking, statusError, install, start, refreshStatus } =
     useFrostmod();
+  const { check: checkForUpdates } = useUpdate();
   const [version, setVersion] = useState("");
   const [active, setActive] = useState<SectionId>("folder");
   const [busy, setBusy] = useState(false);

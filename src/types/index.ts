@@ -123,6 +123,62 @@ export interface BikeModels {
   variants: ModelVariant[];
 }
 
+/** A sound set the bike can be swapped between (active first). Mirrors `ModelVariant`. */
+export interface SoundVariant {
+  /** Variant name (folder name, or "Stock" for the built-in / no-sound default). */
+  name: string;
+  /** Whether this is the currently-active sound. */
+  active: boolean;
+  /** Whether the set has both must-files (`engine.scl` + `sfx.cfg`). A set with files
+   * but missing one is incomplete and can't be applied; an empty set can (see `empty`). */
+  valid: boolean;
+  /** No sound files at all — the "Stock" set that reverts to the built-in engine sound. */
+  empty: boolean;
+  /** Number of sound files in the set. */
+  fileCount: number;
+}
+
+/** A bike and every sound it can be swapped between, plus its model->sound bindings. */
+export interface BikeSounds {
+  /** Bike folder name under `mods/bikes`. */
+  bike: string;
+  /** The active sound's name ("Stock" if never swapped). */
+  active: string;
+  /** The bike's currently-active model swap, so bindings render relative to it. */
+  activeModel: string;
+  variants: SoundVariant[];
+  /** model-swap variant name -> bound sound variant name. */
+  bindings: Record<string, string>;
+}
+
+/** A model-set folder found loose inside a bike dir, not yet under `FrostMod Models/`. */
+export interface LooseSwapCandidate {
+  /** Variant name (the folder's own name) it would be registered under. */
+  name: string;
+  /** Path relative to the bike dir (`"Factory OEM"` or `"models/Factory OEM"`). */
+  source: string;
+  /** Number of top-level files in the set. */
+  fileCount: number;
+}
+
+/** A bike with one or more loose (unregistered) model sets. */
+export interface LooseSwapBike {
+  bike: string;
+  candidates: LooseSwapCandidate[];
+}
+
+/** Outcome of registering loose swaps (moving them into `FrostMod Models/`). */
+export interface RegisterReport {
+  /** Bikes that had at least one candidate. */
+  bikes: number;
+  /** Candidate folders successfully moved into the library. */
+  registered: number;
+  /** Candidates skipped (name already taken, or the move failed). */
+  skipped: number;
+  /** `FrostMod Models/` folders newly created on disk. */
+  foldersCreated: number;
+}
+
 /** A material group over a node's kept triangles (for per-part texturing). */
 export interface Submesh {
   /** Mesh-group name from the `.edf` (e.g. `frame.005`, `chain`). */

@@ -27,6 +27,39 @@ pub struct BikeModels {
     pub variants: Vec<ModelVariant>,
 }
 
+/// A model-set folder found loose inside a bike dir (dropped at the bike root or in an
+/// ad-hoc container folder) that isn't yet registered under `FrostMod Models/`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LooseSwapCandidate {
+    /// The variant name (the folder's own name) it would be registered under.
+    pub name: String,
+    /// Path relative to the bike dir, used to locate the folder for the move
+    /// (`"Factory OEM"` or `"models/Factory OEM"`).
+    pub source: String,
+    pub file_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LooseSwapBike {
+    pub bike: String,
+    pub candidates: Vec<LooseSwapCandidate>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterReport {
+    /// Bikes that had at least one candidate.
+    pub bikes: usize,
+    /// Candidate folders successfully moved into `FrostMod Models/`.
+    pub registered: usize,
+    /// Candidates skipped (name already taken, or the move failed).
+    pub skipped: usize,
+    /// `FrostMod Models/` folders newly created on disk.
+    pub folders_created: usize,
+}
+
 fn bikes_root(mods_path: &str) -> PathBuf {
     crate::library::mods_subdir(mods_path, "mods/bikes")
 }
@@ -130,7 +163,12 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
         if a.is_empty() { ORIGINAL.to_string() } else { a }
     };
 
-    let active_files = list_files(&bike_dir(mods_path, bike)).len();
+    // The active model set is the bike's loose files, excluding the sound set (which
+    // coexists at the root but is swapped independently).
+    let active_files = list_files(&bike_dir(mods_path, bike))
+        .into_iter()
+        .filter(|f| !crate::soundmods::is_sound_file(f))
+        .count();
     let mut variants = vec![ModelVariant {
         name: active_label.clone(),
         active: true,
@@ -221,7 +259,13 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
         anyhow::bail!("model '{target}' not found");
     }
 
-    let root_files = list_files(&root); // current model files to back up
+    // The model set is every loose root file EXCEPT the sound set — engine sound and
+    // audio are swapped independently (see `soundmods`), so a model swap must leave
+    // them at the bike root untouched.
+    let root_files: Vec<String> = list_files(&root)
+        .into_iter()
+        .filter(|f| !crate::soundmods::is_sound_file(f))
+        .collect();
     let target_files = list_files(&target_dir); // variant files to bring in
 
     // An empty variant (no files) is an intentional "no model" swap: back up the live
@@ -243,6 +287,178 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
 
     write_active(mods_path, bike, target)?;
     Ok(())
+}
+
+fn dir_has_model_edf(p: &Path) -> bool {
+    file_exists(&p.join(MODEL_EDF))
+}
+
+/// True for a bike-dir child we must never treat as a model set: the swap library
+/// itself, the paints (livery) folder, or a hidden dotfolder.
+fn is_reserved_child(name: &str) -> bool {
+    name.starts_with('.')
+        || name.eq_ignore_ascii_case(LIB_DIR)
+        || name.eq_ignore_ascii_case("paints")
+}
+
+fn subdirs(dir: &Path) -> Vec<(String, PathBuf)> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            if let Some(n) = e.file_name().to_str() {
+                out.push((n.to_string(), p));
+            }
+        }
+    }
+    out
+}
+
+/// Move a whole directory: try a fast rename, then fall back to a recursive copy +
+/// remove (handles cross-volume). Refuses to overwrite an existing destination.
+fn move_dir(src: &Path, dst: &Path) -> bool {
+    if dst.exists() {
+        return false;
+    }
+    if fs::rename(src, dst).is_ok() {
+        return true;
+    }
+    if copy_tree(src, dst).is_ok() && fs::remove_dir_all(src).is_ok() {
+        return true;
+    }
+    let _ = fs::remove_dir_all(dst); // don't leave a half-copied dir behind
+    false
+}
+
+fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for e in fs::read_dir(src)?.flatten() {
+        let from = e.path();
+        let to = dst.join(e.file_name());
+        if from.is_dir() {
+            copy_tree(&from, &to)?;
+        } else {
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn scan_loose_candidates(mods_path: &str, bike: &str) -> Vec<LooseSwapCandidate> {
+    let root = bike_dir(mods_path, bike);
+    let mut out: Vec<LooseSwapCandidate> = Vec::new();
+    for (name, path) in subdirs(&root) {
+        if is_reserved_child(&name) || !is_simple_name(&name) {
+            continue;
+        }
+        if dir_has_model_edf(&path) {
+            // A variant folder dropped straight into the bike dir.
+            out.push(LooseSwapCandidate {
+                file_count: list_files(&path).len(),
+                source: name.clone(),
+                name,
+            });
+        } else {
+            // Not a model set itself — treat it as a container (e.g. `models/`) and
+            // look one level down for variant folders.
+            for (child, child_path) in subdirs(&path) {
+                if child.starts_with('.') || !is_simple_name(&child) {
+                    continue;
+                }
+                if dir_has_model_edf(&child_path) {
+                    out.push(LooseSwapCandidate {
+                        file_count: list_files(&child_path).len(),
+                        source: format!("{name}/{child}"),
+                        name: child,
+                    });
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
+
+/// Scan every bike for model-set folders sitting outside `FrostMod Models/`, so we can
+/// offer to register them. Only bikes with at least one candidate are returned.
+pub fn detect_loose_swaps(mods_path: &str) -> Vec<LooseSwapBike> {
+    let root = bikes_root(mods_path);
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(&root) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let bike = match e.file_name().to_str() {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if bike.starts_with('.') || !is_simple_name(&bike) {
+                continue;
+            }
+            let candidates = scan_loose_candidates(mods_path, &bike);
+            if !candidates.is_empty() {
+                out.push(LooseSwapBike { bike, candidates });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.bike.to_lowercase().cmp(&b.bike.to_lowercase()));
+    out
+}
+
+/// Act on the loose swaps found by [`detect_loose_swaps`]. With `move_files`, each
+/// candidate folder is moved into the bike's `FrostMod Models/<name>/` (skipping any
+/// whose name is already taken there). Without it, we only create the `FrostMod Models/`
+/// folder for each affected bike and leave the files in place.
+pub fn register_loose_swaps(mods_path: &str, move_files: bool) -> anyhow::Result<RegisterReport> {
+    let mut report = RegisterReport::default();
+    for bike_info in detect_loose_swaps(mods_path) {
+        let bike = &bike_info.bike;
+        report.bikes += 1;
+
+        let lib = lib_dir(mods_path, bike);
+        let existed = lib.is_dir();
+        fs::create_dir_all(&lib)?;
+        if !existed {
+            report.folders_created += 1;
+        }
+
+        if !move_files {
+            continue;
+        }
+
+        for c in bike_info.candidates {
+            if !is_simple_name(&c.name) {
+                report.skipped += 1;
+                continue;
+            }
+            let dst = lib.join(&c.name);
+            if dst.exists() {
+                report.skipped += 1; // name already registered — don't clobber
+                continue;
+            }
+            let src = bike_dir(mods_path, bike).join(&c.source);
+            if move_dir(&src, &dst) {
+                report.registered += 1;
+                // If the candidate lived in a container folder that's now empty, tidy it.
+                if let Some(parent) = src.parent() {
+                    if parent != bike_dir(mods_path, bike).as_path()
+                        && subdirs(parent).is_empty()
+                        && list_files(parent).is_empty()
+                    {
+                        let _ = fs::remove_dir(parent);
+                    }
+                }
+            } else {
+                report.skipped += 1;
+            }
+        }
+    }
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -344,6 +560,30 @@ mod tests {
     }
 
     #[test]
+    fn model_swap_leaves_the_sound_set_at_the_root() {
+        // The engine sound is swapped independently — a model swap must NOT drag the
+        // loose sound files into the model backup.
+        let root = tmp("keep-sound");
+        let mp = root.to_str().unwrap();
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        touch(&bike_dir(mp, "KTM").join("engine.scl"));
+        touch(&bike_dir(mp, "KTM").join("sfx.cfg"));
+        touch(&bike_dir(mp, "KTM").join("idle.wav"));
+        touch(&variant_dir(mp, "KTM", "Factory").join("model.edf"));
+
+        apply_model_swap(mp, "KTM", "Factory").unwrap();
+
+        // Sound files stay loose at the bike root...
+        assert!(file_exists(&bike_dir(mp, "KTM").join("engine.scl")));
+        assert!(file_exists(&bike_dir(mp, "KTM").join("sfx.cfg")));
+        assert!(file_exists(&bike_dir(mp, "KTM").join("idle.wav")));
+        // ...and never land in the model's Original backup.
+        assert!(!file_exists(&variant_dir(mp, "KTM", "Original").join("engine.scl")));
+        assert!(!file_exists(&variant_dir(mp, "KTM", "Original").join("idle.wav")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn apply_empty_variant_removes_the_model() {
         let root = tmp("empty-swap");
         let mp = root.to_str().unwrap();
@@ -387,6 +627,113 @@ mod tests {
         assert!(apply_model_swap(mp, "KTM", "Bad").is_err());
         // Path-traversal names are refused.
         assert!(apply_model_swap(mp, "KTM", "../../evil").is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detects_loose_variants_at_root_and_in_a_container() {
+        let root = tmp("detect");
+        let mp = root.to_str().unwrap();
+        // Active loose set (root-level model.edf) — never a candidate.
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        touch(&bike_dir(mp, "KTM").join("KTM.cfg"));
+        // paints/ is reserved and must be ignored.
+        touch(&bike_dir(mp, "KTM").join("paints").join("Red.pnt"));
+        // A variant dropped straight into the bike dir.
+        touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
+        touch(&bike_dir(mp, "KTM").join("Factory OEM").join("KTM.cfg"));
+        // A container folder holding another variant one level down.
+        touch(&bike_dir(mp, "KTM").join("models").join("Race Kit").join("model.edf"));
+        // A folder without a model.edf is not a model set — ignored.
+        touch(&bike_dir(mp, "KTM").join("screenshots").join("shot.png"));
+
+        let found = detect_loose_swaps(mp);
+        assert_eq!(found.len(), 1);
+        let names: Vec<_> = found[0].candidates.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["Factory OEM", "Race Kit"]); // sorted, no screenshots
+        let race = found[0].candidates.iter().find(|c| c.name == "Race Kit").unwrap();
+        assert_eq!(race.source, "models/Race Kit");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn already_registered_bikes_report_nothing() {
+        let root = tmp("detect-clean");
+        let mp = root.to_str().unwrap();
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        // Variants already under the library — nothing loose.
+        touch(&variant_dir(mp, "KTM", "Factory").join("model.edf"));
+        assert!(detect_loose_swaps(mp).is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn register_moves_loose_sets_into_the_library() {
+        let root = tmp("register-move");
+        let mp = root.to_str().unwrap();
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
+        touch(&bike_dir(mp, "KTM").join("models").join("Race Kit").join("model.edf"));
+
+        let rep = register_loose_swaps(mp, true).unwrap();
+        assert_eq!(rep.bikes, 1);
+        assert_eq!(rep.registered, 2);
+        assert_eq!(rep.skipped, 0);
+        assert_eq!(rep.folders_created, 1);
+
+        // Both sets now live under FrostMod Models/ and the loose copies are gone.
+        assert!(file_exists(&variant_dir(mp, "KTM", "Factory OEM").join("model.edf")));
+        assert!(file_exists(&variant_dir(mp, "KTM", "Race Kit").join("model.edf")));
+        assert!(!dir_exists(&bike_dir(mp, "KTM").join("Factory OEM")));
+        // The now-empty container folder was tidied away.
+        assert!(!dir_exists(&bike_dir(mp, "KTM").join("models")));
+
+        // The Locker scan now sees them, and nothing loose remains.
+        let names: Vec<_> = scan_model_swaps(mp)[0]
+            .variants
+            .iter()
+            .map(|v| v.name.clone())
+            .collect();
+        assert!(names.contains(&"Factory OEM".to_string()));
+        assert!(names.contains(&"Race Kit".to_string()));
+        assert!(detect_loose_swaps(mp).is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn register_without_move_only_creates_the_folder() {
+        let root = tmp("register-nomove");
+        let mp = root.to_str().unwrap();
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
+
+        let rep = register_loose_swaps(mp, false).unwrap();
+        assert_eq!(rep.bikes, 1);
+        assert_eq!(rep.registered, 0);
+        assert_eq!(rep.folders_created, 1);
+
+        // The library folder now exists, but the loose set is untouched (still detected).
+        assert!(dir_exists(&lib_dir(mp, "KTM")));
+        assert!(file_exists(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf")));
+        assert_eq!(detect_loose_swaps(mp).len(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn register_skips_names_already_in_the_library() {
+        let root = tmp("register-collide");
+        let mp = root.to_str().unwrap();
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        // A loose "Factory" set collides with an existing library variant of the same name.
+        touch(&bike_dir(mp, "KTM").join("Factory").join("model.edf"));
+        touch(&variant_dir(mp, "KTM", "Factory").join("model.edf"));
+
+        let rep = register_loose_swaps(mp, true).unwrap();
+        assert_eq!(rep.registered, 0);
+        assert_eq!(rep.skipped, 1);
+        // The existing library variant is left intact and the loose one stays put.
+        assert!(file_exists(&variant_dir(mp, "KTM", "Factory").join("model.edf")));
+        assert!(file_exists(&bike_dir(mp, "KTM").join("Factory").join("model.edf")));
         let _ = fs::remove_dir_all(&root);
     }
 }

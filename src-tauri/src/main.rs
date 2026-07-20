@@ -133,9 +133,87 @@ async fn apply_model_swap(app: tauri::AppHandle, bike: String, target: String) -
 
 fn apply_model_swap_blocking(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let prev = modelswap::current_active(&cfg.mods_path, &bike);
     modelswap::apply_model_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
+    // Make a bound sound travel with the model (case 2); independent sounds are left
+    // untouched (case 1). Best-effort — the model swap itself already succeeded.
+    if let Err(e) = soundmods::reconcile_after_model_swap(&cfg.mods_path, &bike, &prev, &target) {
+        eprintln!("sound reconcile after model swap failed: {e:#}");
+    }
     frostmod::signal_reload();
     Ok(())
+}
+
+#[tauri::command]
+async fn scan_sound_swaps(app: tauri::AppHandle) -> Result<Vec<soundmods::BikeSounds>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(soundmods::scan_sound_swaps(&cfg.mods_path))
+    })
+    .await
+    .map_err(|e| format!("scan_sound_swaps task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn apply_sound_swap(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        soundmods::apply_sound_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
+        frostmod::signal_reload();
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("apply_sound_swap task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn bind_sound(app: tauri::AppHandle, bike: String, model: String, sound: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        soundmods::bind_sound(&cfg.mods_path, &bike, &model, &sound).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("bind_sound task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn unbind_sound(app: tauri::AppHandle, bike: String, model: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        soundmods::unbind_sound(&cfg.mods_path, &bike, &model).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("unbind_sound task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn detect_loose_swaps(app: tauri::AppHandle) -> Result<Vec<modelswap::LooseSwapBike>, String> {
+    tauri::async_runtime::spawn_blocking(move || detect_loose_swaps_blocking(app))
+        .await
+        .map_err(|e| format!("detect_loose_swaps task failed: {e}"))?
+}
+
+fn detect_loose_swaps_blocking(app: tauri::AppHandle) -> Result<Vec<modelswap::LooseSwapBike>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    Ok(modelswap::detect_loose_swaps(&cfg.mods_path))
+}
+
+#[tauri::command]
+async fn register_loose_swaps(
+    app: tauri::AppHandle,
+    move_files: bool,
+) -> Result<modelswap::RegisterReport, String> {
+    tauri::async_runtime::spawn_blocking(move || register_loose_swaps_blocking(app, move_files))
+        .await
+        .map_err(|e| format!("register_loose_swaps task failed: {e}"))?
+}
+
+fn register_loose_swaps_blocking(
+    app: tauri::AppHandle,
+    move_files: bool,
+) -> Result<modelswap::RegisterReport, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    modelswap::register_loose_swaps(&cfg.mods_path, move_files).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -408,33 +486,29 @@ fn bind_textures(
     node_part: &std::collections::HashMap<String, String>,
 ) {
     let embedded = edf::embedded_textures(edf_bytes);
-    let claimed: std::collections::HashSet<String> = gfx
-        .values()
-        .flat_map(|p| p.textures.values())
-        .map(|t| t.to_ascii_lowercase())
-        .collect();
-    let mut diffuse: Vec<&edf::EmbeddedTexture> = embedded
+    // A submesh's material index selects its colour texture by position in the model's
+    // COLOUR-texture pool, in file order (verified against every OEM bike: plastics=0,
+    // metals=1, w_plate=2, …). The pool is every embedded texture that isn't a companion
+    // map — MX Bikes names those `_n` (normal), `_s` (specular) and `_r` (reflection).
+    // The pool must include gfx-referenced textures (chain, w_plate): the index counts
+    // them, so dropping any shifts every later material onto the wrong texture.
+    let color: Vec<&edf::EmbeddedTexture> = embedded
         .iter()
         .filter(|t| {
             let n = t.name.to_ascii_lowercase();
-            !n.ends_with("_n") && !n.ends_with("_r") && !claimed.contains(&n)
-        })
-        .collect();
-    diffuse.sort_by_key(|t| std::cmp::Reverse(t.width as u64 * t.height as u64));
-    let diffuse_ord: Vec<&edf::EmbeddedTexture> = embedded
-        .iter()
-        .filter(|t| {
-            let n = t.name.to_ascii_lowercase();
-            !n.ends_with("_n") && !n.ends_with("_r") && !claimed.contains(&n)
+            !n.ends_with("_n") && !n.ends_with("_s") && !n.ends_with("_r")
         })
         .collect();
 
     for n in nodes.iter_mut() {
         let part = node_part.get(&n.name.to_ascii_lowercase());
         let overrides = part.and_then(|p| gfx.get(p)).map(|p| &p.textures);
-        n.texture = diffuse.first().map(|t| t.name.clone());
+        // A node with no submesh table is a single material — the primary body texture
+        // (plastics, by convention the first colour texture).
+        n.texture = color.first().map(|t| t.name.clone());
         for sm in n.submeshes.iter_mut() {
             let group = sm.name.to_ascii_lowercase();
+            // 1. An explicit gfx texture (animated chain, number plate) is authoritative.
             if let Some(tex) = overrides.and_then(|o| {
                 o.get(&group)
                     .or_else(|| o.iter().find(|(g, _)| group.ends_with(&format!("_{g}"))).map(|(_, t)| t))
@@ -442,14 +516,12 @@ fn bind_textures(
                 sm.texture = Some(tex.clone());
                 continue;
             }
-            if let Some(t) = sm.mat.and_then(|i| diffuse_ord.get(i as usize)) {
+            // 2. Ground truth: the material index picks the colour texture in file order.
+            if let Some(t) = sm.mat.and_then(|i| color.get(i as usize)) {
                 sm.texture = Some(t.name.clone());
                 continue;
             }
-            if let Some(t) = sm.uv_tile.filter(|&t| t > 0).and_then(|t| diffuse.get(t as usize)) {
-                sm.texture = Some(t.name.clone());
-                continue;
-            }
+            // 3. No material recorded → leave unbound so it renders neutral grey, never smeared.
             sm.texture = None;
         }
     }
@@ -1637,6 +1709,12 @@ fn main() {
             scan_rider_targets,
             scan_model_swaps,
             apply_model_swap,
+            scan_sound_swaps,
+            apply_sound_swap,
+            bind_sound,
+            unbind_sound,
+            detect_loose_swaps,
+            register_loose_swaps,
             add_to_library,
             import_file,
             move_mod,

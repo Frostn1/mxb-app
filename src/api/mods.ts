@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   BikeModels,
+  BikeSounds,
+  LooseSwapBike,
+  RegisterReport,
   Config,
   DownloadOption,
   FrostmodReload,
@@ -167,6 +170,36 @@ export function scanModelSwaps(): Promise<BikeModels[]> {
 
 export function applyModelSwap(bike: string, target: string): Promise<void> {
   return invoke<void>("apply_model_swap", { bike, target });
+}
+
+export function scanSoundSwaps(): Promise<BikeSounds[]> {
+  return invoke<BikeSounds[]>("scan_sound_swaps");
+}
+
+export function applySoundSwap(bike: string, target: string): Promise<void> {
+  return invoke<void>("apply_sound_swap", { bike, target });
+}
+
+/** Tie a sound variant to a model swap so activating that model applies the sound. */
+export function bindSound(bike: string, model: string, sound: string): Promise<void> {
+  return invoke<void>("bind_sound", { bike, model, sound });
+}
+
+export function unbindSound(bike: string, model: string): Promise<void> {
+  return invoke<void>("unbind_sound", { bike, model });
+}
+
+/** Find model-set folders sitting loose in a bike dir (not yet under `FrostMod Models/`). */
+export function detectLooseSwaps(): Promise<LooseSwapBike[]> {
+  return invoke<LooseSwapBike[]>("detect_loose_swaps");
+}
+
+/**
+ * Register the loose swaps found by {@link detectLooseSwaps}. With `move`, each set is
+ * moved into its bike's `FrostMod Models/`; without it, only the folder is created.
+ */
+export function registerLooseSwaps(move: boolean): Promise<RegisterReport> {
+  return invoke<RegisterReport>("register_loose_swaps", { moveFiles: move });
 }
 
 export function getPkzMeta(path: string): Promise<PkzMeta> {
