@@ -699,6 +699,12 @@ fn resolve_game_pkz(cfg: &config::AppConfig, name: &str) -> Option<std::path::Pa
         }
     }
     let p = std::path::Path::new(&cfg.mods_path).join(name);
+    if p.exists() {
+        return Some(p);
+    }
+    // Last resort for configs that predate game-path auto-detection: scan Steam now.
+    let detected = config::detect_game_path()?;
+    let p = std::path::Path::new(&detected).join(name);
     p.exists().then_some(p)
 }
 
@@ -1182,6 +1188,28 @@ fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Override the PiBoSo `profiles` folder for the split-folder edge case. An empty
+/// string clears the override, falling back to `<mods_path>/profiles`.
+#[tauri::command]
+fn set_profiles_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.profiles_path = path;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Scan Steam for the MX Bikes install (holds `rider.pkz`). `None` if not found.
+#[tauri::command]
+fn detect_game_path() -> Option<String> {
+    config::detect_game_path()
+}
+
+/// How many profiles (subdirs with a `profile.ini`) live under `path` — lets the
+/// UI warn when a picked profiles folder has none.
+#[tauri::command]
+fn count_profiles_in(path: String) -> usize {
+    presets::list_profiles(std::path::Path::new(&path)).len()
+}
+
 #[tauri::command]
 fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -1377,13 +1405,13 @@ fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
 #[tauri::command]
 fn presets_list_profiles(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    Ok(presets::list_profiles(&cfg.mods_path))
+    Ok(presets::list_profiles(&cfg.profiles_dir()))
 }
 
 #[tauri::command]
 fn presets_list_bikes(app: tauri::AppHandle, profile: String) -> Result<Vec<String>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    presets::list_bikes(&cfg.mods_path, &profile).map_err(|e| format!("{e:#}"))
+    presets::list_bikes(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -1394,7 +1422,7 @@ fn presets_read_loadout(
 ) -> Result<presets::Loadout, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let mut loadout =
-        presets::read_loadout(&cfg.mods_path, &profile, &bikeid).map_err(|e| format!("{e:#}"))?;
+        presets::read_loadout(&cfg.profiles_dir(), &profile, &bikeid).map_err(|e| format!("{e:#}"))?;
     let active = modelswap::current_active(&cfg.mods_path, &bikeid);
     if !active.eq_ignore_ascii_case(modelswap::ORIGINAL_LABEL) {
         loadout.model_swap = active;
@@ -1418,7 +1446,7 @@ fn presets_apply(
     make_active: bool,
 ) -> Result<PresetApplyOutcome, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    presets::apply_loadout(&cfg.mods_path, &profile, &bikeid, &loadout, make_active)
+    presets::apply_loadout(&cfg.profiles_dir(), &profile, &bikeid, &loadout, make_active)
         .map_err(|e| format!("{e:#}"))?;
     let want = loadout.model_swap.trim();
     if !want.is_empty() && !want.eq_ignore_ascii_case(&modelswap::current_active(&cfg.mods_path, &bikeid))
@@ -1615,6 +1643,9 @@ fn main() {
             uninstall_mod,
             reveal_in_explorer,
             set_game_path,
+            set_profiles_path,
+            detect_game_path,
+            count_profiles_in,
             set_run_in_background,
             set_launch_at_startup,
             set_auto_run_frostmod,

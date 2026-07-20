@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-19 — v0.2.2
+
+### Added
+- **Custom profiles folder** — Settings can now point at a `profiles` folder that lives
+  outside your MX Bikes folder (the split-folder edge case), so preset creation works for
+  those players. It defaults to `<MX Bikes folder>/profiles` and appears nested under the
+  mods folder as an optional customization, with a "Reset to default".
+- **Automatic Steam game-install detection** — the MX Bikes install (which holds
+  `rider.pkz`) is now found automatically by scanning Steam libraries, incl. extra library
+  drives via `libraryfolders.vdf`, so the 3D rider preview works out of the box. Added a
+  "Detect automatically" action for the install folder, plus a runtime fallback so
+  existing configs benefit without reconfiguring.
+
 ## 2026-07-19
 
 ### Fixed

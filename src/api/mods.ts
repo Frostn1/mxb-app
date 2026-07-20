@@ -252,6 +252,24 @@ export function setGamePath(path: string): Promise<void> {
   return invoke<void>("set_game_path", { path });
 }
 
+/** Auto-detect the Steam MX Bikes install (holds `rider.pkz`); null if not found. */
+export function detectGamePath(): Promise<string | null> {
+  return invoke<string | null>("detect_game_path");
+}
+
+/**
+ * Override the PiBoSo `profiles` folder for the split-folder edge case. Pass an
+ * empty string to clear it (falls back to `<modsPath>/profiles`).
+ */
+export function setProfilesPath(path: string): Promise<void> {
+  return invoke<void>("set_profiles_path", { path });
+}
+
+/** Count profiles (dirs with a `profile.ini`) under a folder — validate a pick. */
+export function countProfilesIn(path: string): Promise<number> {
+  return invoke<number>("count_profiles_in", { path });
+}
+
 /** Launch-at-login toggle (also flips the OS autostart entry). */
 export function setLaunchAtStartup(enabled: boolean): Promise<void> {
   return invoke<void>("set_launch_at_startup", { enabled });

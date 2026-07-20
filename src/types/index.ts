@@ -2,6 +2,11 @@ export interface Config {
   modsPath: string;
   /** MX Bikes **install** dir (holds core `rider.pkz`) for the 3D rider body. */
   gamePath?: string;
+  /**
+   * Override for the PiBoSo `profiles` folder. Empty (normal) means it lives at
+   * `<modsPath>/profiles`; set only when profiles sit outside the MX Bikes folder.
+   */
+  profilesPath?: string;
   /** Hide to the tray on close and keep running (default true). */
   runInBackground?: boolean;
   /** Launch on login (default true). */

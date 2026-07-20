@@ -209,17 +209,13 @@ impl IniDoc {
     }
 }
 
-fn profile_ini_path(mods_path: &str, profile: &str) -> PathBuf {
-    PathBuf::from(mods_path)
-        .join("profiles")
-        .join(profile)
-        .join("profile.ini")
+fn profile_ini_path(profiles_dir: &Path, profile: &str) -> PathBuf {
+    profiles_dir.join(profile).join("profile.ini")
 }
 
-pub fn list_profiles(mods_path: &str) -> Vec<String> {
+pub fn list_profiles(profiles_dir: &Path) -> Vec<String> {
     let mut out = Vec::new();
-    let base = PathBuf::from(mods_path).join("profiles");
-    if let Ok(rd) = fs::read_dir(&base) {
+    if let Ok(rd) = fs::read_dir(profiles_dir) {
         for e in rd.flatten() {
             if e.path().is_dir() && e.path().join("profile.ini").is_file() {
                 if let Some(n) = e.file_name().to_str() {
@@ -232,8 +228,8 @@ pub fn list_profiles(mods_path: &str) -> Vec<String> {
     out
 }
 
-pub fn list_bikes(mods_path: &str, profile: &str) -> anyhow::Result<Vec<String>> {
-    let path = profile_ini_path(mods_path, profile);
+pub fn list_bikes(profiles_dir: &Path, profile: &str) -> anyhow::Result<Vec<String>> {
+    let path = profile_ini_path(profiles_dir, profile);
     let text = fs::read_to_string(&path)
         .with_context(|| format!("reading {}", path.display()))?;
     let doc = IniDoc::parse(&text);
@@ -247,8 +243,8 @@ pub fn list_bikes(mods_path: &str, profile: &str) -> anyhow::Result<Vec<String>>
     Ok(bikes)
 }
 
-pub fn read_loadout(mods_path: &str, profile: &str, bikeid: &str) -> anyhow::Result<Loadout> {
-    let path = profile_ini_path(mods_path, profile);
+pub fn read_loadout(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow::Result<Loadout> {
+    let path = profile_ini_path(profiles_dir, profile);
     let text = fs::read_to_string(&path)
         .with_context(|| format!("reading {}", path.display()))?;
     let doc = IniDoc::parse(&text);
@@ -262,13 +258,13 @@ pub fn read_loadout(mods_path: &str, profile: &str, bikeid: &str) -> anyhow::Res
 }
 
 pub fn apply_loadout(
-    mods_path: &str,
+    profiles_dir: &Path,
     profile: &str,
     bikeid: &str,
     loadout: &Loadout,
     make_active: bool,
 ) -> anyhow::Result<()> {
-    let path = profile_ini_path(mods_path, profile);
+    let path = profile_ini_path(profiles_dir, profile);
     let text = fs::read_to_string(&path)
         .with_context(|| format!("reading {}", path.display()))?;
 
@@ -421,9 +417,9 @@ KTM250=p_mx
     fn lists_profiles_and_bikes() {
         let root = tmp("list");
         write_sample(&root, "main");
-        let mp = root.to_str().unwrap();
-        assert_eq!(list_profiles(mp), vec!["main"]);
-        let bikes = list_bikes(mp, "main").unwrap();
+        let profiles = root.join("profiles");
+        assert_eq!(list_profiles(&profiles), vec!["main"]);
+        let bikes = list_bikes(&profiles, "main").unwrap();
         assert_eq!(bikes, vec!["KTM250", "YZ450F"]);
         let _ = fs::remove_dir_all(&root);
     }
@@ -432,7 +428,7 @@ KTM250=p_mx
     fn reads_bike_column() {
         let root = tmp("read");
         write_sample(&root, "main");
-        let lo = read_loadout(root.to_str().unwrap(), "main", "YZ450F").unwrap();
+        let lo = read_loadout(&root.join("profiles"), "main", "YZ450F").unwrap();
         assert_eq!(lo.paint, "RedBud");
         assert_eq!(lo.helmet, "Fox");
         assert_eq!(lo.helmet_paint, "CLUTCH");
@@ -445,20 +441,20 @@ KTM250=p_mx
     fn applies_loadout_only_to_target_bike_and_backs_up() {
         let root = tmp("apply");
         let ini = write_sample(&root, "main");
-        let mp = root.to_str().unwrap();
+        let profiles = root.join("profiles");
 
         let mut lo = Loadout::default();
         lo.paint = "SnowWhite".into();
         lo.helmet = "Shoei".into();
         lo.race_number = "7".into();
-        apply_loadout(mp, "main", "KTM250", &lo, true).unwrap();
+        apply_loadout(&profiles, "main", "KTM250", &lo, true).unwrap();
 
-        let after = read_loadout(mp, "main", "KTM250").unwrap();
+        let after = read_loadout(&profiles, "main", "KTM250").unwrap();
         assert_eq!(after.paint, "SnowWhite");
         assert_eq!(after.helmet, "Shoei");
 
         // The other bike's row is untouched.
-        let other = read_loadout(mp, "main", "YZ450F").unwrap();
+        let other = read_loadout(&profiles, "main", "YZ450F").unwrap();
         assert_eq!(other.paint, "RedBud");
         assert_eq!(other.helmet, "Fox");
 

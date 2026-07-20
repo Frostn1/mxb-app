@@ -5,11 +5,14 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import {
+  countProfilesIn,
   createConfig,
+  detectGamePath,
   setAutoRunFrostmod,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
+  setProfilesPath,
   setRunInBackground,
 } from "../../api/mods";
 import { checkForUpdates } from "../../lib/updater";
@@ -47,6 +50,13 @@ export default function Settings() {
     frostmod: null,
     about: null,
   });
+
+  // The profiles folder normally lives *inside* the mods folder — surface that
+  // derived default path so the override reads as a customization of it.
+  const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
+  const defaultProfilesPath = config.modsPath
+    ? `${config.modsPath}${profilesSep}profiles`
+    : "Inside your MX Bikes folder";
 
   const runInBackground = config.runInBackground ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
@@ -154,6 +164,68 @@ export default function Settings() {
     }
   };
 
+  const detectGameFolder = async () => {
+    setBusy(true);
+    try {
+      const found = await detectGamePath();
+      if (!found) {
+        toast.info("Couldn't find MX Bikes", {
+          description: "No Steam install detected — set the folder manually.",
+        });
+        return;
+      }
+      await setGamePath(found);
+      await reloadConfig();
+      toast.success("Found your MX Bikes install", { description: found });
+    } catch (e) {
+      toast.error("Couldn't detect install folder", { description: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeProfilesFolder = async () => {
+    const picked = await pickFolder({
+      directory: true,
+      multiple: false,
+      title: "Select your MX Bikes profiles folder",
+    });
+    if (typeof picked !== "string") return;
+    setBusy(true);
+    try {
+      await setProfilesPath(picked);
+      await reloadConfig();
+      const count = await countProfilesIn(picked).catch(() => 0);
+      if (count > 0) {
+        toast.success("Profiles folder set", {
+          description: `Found ${count} profile${count === 1 ? "" : "s"}.`,
+        });
+      } else {
+        // Warn but keep the pick (per design) — they may be mid-setup.
+        toast.warning("No profiles found there", {
+          description: "Saved anyway, but preset creation needs a folder that holds your profile.ini folders.",
+        });
+      }
+    } catch (e) {
+      toast.error("Couldn't set profiles folder", { description: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetProfilesFolder = async () => {
+    setBusy(true);
+    try {
+      await setProfilesPath("");
+      await reloadConfig();
+      toast.success("Reverted to the default profiles folder");
+    } catch (e) {
+      toast.error("Couldn't reset profiles folder", { description: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const reloadGame = async () => {
     const outcome = await reload();
     if (outcome === "signaled") toast.success("FrostMod reloaded the game.");
@@ -214,6 +286,60 @@ export default function Settings() {
               Detect automatically
             </button>
 
+            {/* Profiles folder — a customization nested under the mods folder. It
+                normally lives at <mods>/profiles; override only for the split case. */}
+            <div className="ml-1.5 mt-0.5 border-l border-border pl-4">
+              <div className="flex items-center gap-2">
+                <span className="text-[11.5px] font-semibold text-foreground/80">
+                  Profiles subfolder
+                </span>
+                <span className="rounded-full bg-foreground/[0.06] px-1.5 py-[1px] text-[10px] font-medium text-muted-foreground">
+                  Customization
+                </span>
+              </div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                Presets read your profiles from here. By default it&apos;s the{" "}
+                <span className="font-mono">profiles</span> folder inside your MX Bikes
+                folder — only change it if yours lives somewhere else.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <div
+                  className={cn(
+                    "flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px]",
+                    config.profilesPath ? "text-muted-foreground" : "text-faint",
+                  )}
+                >
+                  <span
+                    className="flex-1 truncate"
+                    title={config.profilesPath || defaultProfilesPath}
+                  >
+                    {config.profilesPath || defaultProfilesPath}
+                  </span>
+                  {config.profilesPath ? (
+                    <span className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-success">
+                      <Check className="size-3" strokeWidth={3} /> Custom
+                    </span>
+                  ) : (
+                    <span className="flex-none font-sans text-[11px] font-medium text-faint">
+                      Default
+                    </span>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" onClick={changeProfilesFolder} disabled={busy}>
+                  {config.profilesPath ? "Change…" : "Set…"}
+                </Button>
+              </div>
+              {config.profilesPath && (
+                <button
+                  onClick={resetProfilesFolder}
+                  disabled={busy}
+                  className="mt-2 cursor-default self-start text-[11.5px] font-semibold text-primary hover:brightness-110 disabled:opacity-50"
+                >
+                  Reset to default
+                </button>
+              )}
+            </div>
+
             <div className="mt-1 h-px bg-border" />
 
             {/* Optional game *install* folder (holds core rider.pkz) — powers the
@@ -238,6 +364,13 @@ export default function Settings() {
                 {config.gamePath ? "Change…" : "Set…"}
               </Button>
             </div>
+            <button
+              onClick={detectGameFolder}
+              disabled={busy}
+              className="cursor-default self-start text-[11.5px] font-semibold text-primary hover:brightness-110 disabled:opacity-50"
+            >
+              Detect automatically
+            </button>
           </Section>
 
           {/* general / background */}
