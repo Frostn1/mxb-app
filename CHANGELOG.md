@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-07-19
+## 2026-07-19 — v0.3.0 — sound swaps, auto-register loose sets, update banner
 
 ### Added
 - **Sound swaps (sound mods)** — the Locker now manages each bike's engine sound the
