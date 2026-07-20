@@ -156,9 +156,10 @@ export default function Locker() {
         >
           <AlertTriangle className="size-4 flex-none text-amber-500/80" />
           <span className="min-w-0 flex-1 text-[12.5px] text-foreground/90">
-            {looseCount} model swap{looseCount === 1 ? "" : "s"} found loose in your bikes —
-            register {looseCount === 1 ? "it" : "them"} into{" "}
-            <span className="font-mono text-faint">FrostMod Models</span>.
+            {looseCount} model / sound set{looseCount === 1 ? "" : "s"} found loose in your
+            bikes — register {looseCount === 1 ? "it" : "them"} into{" "}
+            <span className="font-mono text-faint">FrostMod Models</span> /{" "}
+            <span className="font-mono text-faint">Sounds</span>.
           </span>
           <span className="flex flex-none items-center gap-1.5 text-[12px] font-semibold text-amber-500/90">
             <FolderInput className="size-3.5" />

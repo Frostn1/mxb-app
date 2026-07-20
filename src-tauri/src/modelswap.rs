@@ -37,6 +37,9 @@ pub struct LooseSwapCandidate {
     /// Path relative to the bike dir, used to locate the folder for the move
     /// (`"Factory OEM"` or `"models/Factory OEM"`).
     pub source: String,
+    /// `"model"` (a `model.edf` set → `FrostMod Models/`) or `"sound"` (an
+    /// `engine.scl` + `sfx.cfg` set → `FrostMod Sounds/`).
+    pub kind: String,
     pub file_count: usize,
 }
 
@@ -293,11 +296,38 @@ fn dir_has_model_edf(p: &Path) -> bool {
     file_exists(&p.join(MODEL_EDF))
 }
 
-/// True for a bike-dir child we must never treat as a model set: the swap library
-/// itself, the paints (livery) folder, or a hidden dotfolder.
+const KIND_MODEL: &str = "model";
+const KIND_SOUND: &str = "sound";
+
+/// Classify a loose folder as a swappable set: a `model.edf` set (models win when a
+/// folder somehow has both) or a complete `engine.scl` + `sfx.cfg` sound set. Anything
+/// else (liveries, screenshots, junk) is `None` and ignored.
+fn classify_set(p: &Path) -> Option<&'static str> {
+    if dir_has_model_edf(p) {
+        Some(KIND_MODEL)
+    } else if crate::soundmods::is_sound_set(p) {
+        Some(KIND_SOUND)
+    } else {
+        None
+    }
+}
+
+/// The library folder a candidate of this kind registers into.
+fn kind_lib_dir(mods_path: &str, bike: &str, kind: &str) -> PathBuf {
+    if kind == KIND_SOUND {
+        bike_dir(mods_path, bike).join(crate::soundmods::SOUND_LIB_DIR)
+    } else {
+        lib_dir(mods_path, bike)
+    }
+}
+
+/// True for a bike-dir child we must never treat as a loose set: either swap library
+/// (`FrostMod Models` / `FrostMod Sounds`), the paints (livery) folder, or a hidden
+/// dotfolder.
 fn is_reserved_child(name: &str) -> bool {
     name.starts_with('.')
         || name.eq_ignore_ascii_case(LIB_DIR)
+        || name.eq_ignore_ascii_case(crate::soundmods::SOUND_LIB_DIR)
         || name.eq_ignore_ascii_case("paints")
 }
 
@@ -354,36 +384,44 @@ fn scan_loose_candidates(mods_path: &str, bike: &str) -> Vec<LooseSwapCandidate>
         if is_reserved_child(&name) || !is_simple_name(&name) {
             continue;
         }
-        if dir_has_model_edf(&path) {
-            // A variant folder dropped straight into the bike dir.
+        if let Some(kind) = classify_set(&path) {
+            // A model or sound set dropped straight into the bike dir.
             out.push(LooseSwapCandidate {
                 file_count: list_files(&path).len(),
                 source: name.clone(),
+                kind: kind.to_string(),
                 name,
             });
         } else {
-            // Not a model set itself — treat it as a container (e.g. `models/`) and
+            // Not a set itself — treat it as a container (e.g. `models/`, `sounds/`) and
             // look one level down for variant folders.
             for (child, child_path) in subdirs(&path) {
                 if child.starts_with('.') || !is_simple_name(&child) {
                     continue;
                 }
-                if dir_has_model_edf(&child_path) {
+                if let Some(kind) = classify_set(&child_path) {
                     out.push(LooseSwapCandidate {
                         file_count: list_files(&child_path).len(),
                         source: format!("{name}/{child}"),
+                        kind: kind.to_string(),
                         name: child,
                     });
                 }
             }
         }
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    // Group by kind, then by name, so the dialog lists models and sounds tidily.
+    out.sort_by(|a, b| {
+        a.kind
+            .cmp(&b.kind)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
     out
 }
 
-/// Scan every bike for model-set folders sitting outside `FrostMod Models/`, so we can
-/// offer to register them. Only bikes with at least one candidate are returned.
+/// Scan every bike for model- and sound-set folders sitting outside their library
+/// (`FrostMod Models/` / `FrostMod Sounds/`), so we can offer to register them. Only
+/// bikes with at least one candidate are returned.
 pub fn detect_loose_swaps(mods_path: &str) -> Vec<LooseSwapBike> {
     let root = bikes_root(mods_path);
     let mut out = Vec::new();
@@ -411,20 +449,26 @@ pub fn detect_loose_swaps(mods_path: &str) -> Vec<LooseSwapBike> {
 }
 
 /// Act on the loose swaps found by [`detect_loose_swaps`]. With `move_files`, each
-/// candidate folder is moved into the bike's `FrostMod Models/<name>/` (skipping any
-/// whose name is already taken there). Without it, we only create the `FrostMod Models/`
-/// folder for each affected bike and leave the files in place.
+/// candidate folder is moved into its kind's library — a model set into
+/// `FrostMod Models/<name>/`, a sound set into `FrostMod Sounds/<name>/` — skipping any
+/// whose name is already taken there. Without it, we only create the relevant library
+/// folder(s) for each affected bike and leave the files in place.
 pub fn register_loose_swaps(mods_path: &str, move_files: bool) -> anyhow::Result<RegisterReport> {
     let mut report = RegisterReport::default();
     for bike_info in detect_loose_swaps(mods_path) {
         let bike = &bike_info.bike;
         report.bikes += 1;
 
-        let lib = lib_dir(mods_path, bike);
-        let existed = lib.is_dir();
-        fs::create_dir_all(&lib)?;
-        if !existed {
-            report.folders_created += 1;
+        // Create the library folder for each kind of set this bike has loose.
+        for kind in [KIND_MODEL, KIND_SOUND] {
+            if bike_info.candidates.iter().any(|c| c.kind == kind) {
+                let lib = kind_lib_dir(mods_path, bike, kind);
+                let existed = lib.is_dir();
+                fs::create_dir_all(&lib)?;
+                if !existed {
+                    report.folders_created += 1;
+                }
+            }
         }
 
         if !move_files {
@@ -436,7 +480,7 @@ pub fn register_loose_swaps(mods_path: &str, move_files: bool) -> anyhow::Result
                 report.skipped += 1;
                 continue;
             }
-            let dst = lib.join(&c.name);
+            let dst = kind_lib_dir(mods_path, bike, &c.kind).join(&c.name);
             if dst.exists() {
                 report.skipped += 1; // name already registered — don't clobber
                 continue;
@@ -734,6 +778,98 @@ mod tests {
         // The existing library variant is left intact and the loose one stays put.
         assert!(file_exists(&variant_dir(mp, "KTM", "Factory").join("model.edf")));
         assert!(file_exists(&bike_dir(mp, "KTM").join("Factory").join("model.edf")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // A complete loose sound set (both must-files) at `dir`.
+    fn touch_sound(dir: &Path) {
+        touch(&dir.join("engine.scl"));
+        touch(&dir.join("sfx.cfg"));
+    }
+    fn sound_dir(mods_path: &str, bike: &str, name: &str) -> PathBuf {
+        bike_dir(mods_path, bike).join("FrostMod Sounds").join(name)
+    }
+
+    #[test]
+    fn detects_loose_sound_sets_alongside_models() {
+        let root = tmp("detect-sound");
+        let mp = root.to_str().unwrap();
+        // Active loose model + sound at the bike root — never candidates.
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        touch_sound(&bike_dir(mp, "KTM"));
+        // A loose model set and a loose sound set dropped at the bike root.
+        touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
+        touch_sound(&bike_dir(mp, "KTM").join("Braaap"));
+        // A sound set inside a `sounds/` container, one level down.
+        touch_sound(&bike_dir(mp, "KTM").join("sounds").join("FourStroke"));
+        // A folder with a lone sfx.cfg (missing engine.scl) is incomplete — ignored.
+        touch(&bike_dir(mp, "KTM").join("Half").join("sfx.cfg"));
+
+        let found = detect_loose_swaps(mp);
+        assert_eq!(found.len(), 1);
+        let cands = &found[0].candidates;
+        // Grouped model-first, then sounds — each tagged with its kind + source.
+        let model: Vec<_> = cands.iter().filter(|c| c.kind == "model").map(|c| c.name.as_str()).collect();
+        let sound: Vec<_> = cands.iter().filter(|c| c.kind == "sound").map(|c| c.name.as_str()).collect();
+        assert_eq!(model, vec!["Factory OEM"]);
+        assert_eq!(sound, vec!["Braaap", "FourStroke"]);
+        let four = cands.iter().find(|c| c.name == "FourStroke").unwrap();
+        assert_eq!(four.source, "sounds/FourStroke");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn register_moves_sound_sets_into_frostmod_sounds() {
+        let root = tmp("register-sound");
+        let mp = root.to_str().unwrap();
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        touch_sound(&bike_dir(mp, "KTM").join("Braaap"));
+        touch(&bike_dir(mp, "KTM").join("Braaap").join("idle.wav"));
+        touch_sound(&bike_dir(mp, "KTM").join("sounds").join("FourStroke"));
+        // Plus a loose model set, to prove both kinds route to the right library.
+        touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
+
+        let rep = register_loose_swaps(mp, true).unwrap();
+        assert_eq!(rep.registered, 3); // 2 sounds + 1 model
+        assert_eq!(rep.skipped, 0);
+        assert_eq!(rep.folders_created, 2); // FrostMod Models + FrostMod Sounds
+
+        // Sounds landed under FrostMod Sounds/, the model under FrostMod Models/.
+        assert!(file_exists(&sound_dir(mp, "KTM", "Braaap").join("engine.scl")));
+        assert!(file_exists(&sound_dir(mp, "KTM", "Braaap").join("idle.wav")));
+        assert!(file_exists(&sound_dir(mp, "KTM", "FourStroke").join("sfx.cfg")));
+        assert!(file_exists(&variant_dir(mp, "KTM", "Factory OEM").join("model.edf")));
+        // The `sounds/` container was tidied once emptied.
+        assert!(!dir_exists(&bike_dir(mp, "KTM").join("sounds")));
+
+        // The sound scanner now sees them, and nothing loose remains.
+        let names: Vec<_> = crate::soundmods::scan_sound_swaps(mp)[0]
+            .variants
+            .iter()
+            .map(|v| v.name.clone())
+            .collect();
+        assert!(names.contains(&"Braaap".to_string()));
+        assert!(names.contains(&"FourStroke".to_string()));
+        assert!(detect_loose_swaps(mp).is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn register_folders_only_creates_both_libraries() {
+        let root = tmp("register-sound-nomove");
+        let mp = root.to_str().unwrap();
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        touch(&bike_dir(mp, "KTM").join("Factory OEM").join("model.edf"));
+        touch_sound(&bike_dir(mp, "KTM").join("Braaap"));
+
+        let rep = register_loose_swaps(mp, false).unwrap();
+        assert_eq!(rep.registered, 0);
+        assert_eq!(rep.folders_created, 2); // both libraries created
+        assert!(dir_exists(&lib_dir(mp, "KTM")));
+        assert!(dir_exists(&bike_dir(mp, "KTM").join("FrostMod Sounds")));
+        // Files untouched — still detected.
+        assert!(file_exists(&bike_dir(mp, "KTM").join("Braaap").join("engine.scl")));
+        assert_eq!(detect_loose_swaps(mp).len(), 1);
         let _ = fs::remove_dir_all(&root);
     }
 }

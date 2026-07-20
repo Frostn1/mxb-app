@@ -57,7 +57,7 @@ pub fn known_bikes(dir: &Path) -> Vec<String> {
 // model swap can pull its sound along; see `reconcile_after_model_swap`.
 // ---------------------------------------------------------------------------
 
-const SOUND_LIB_DIR: &str = "FrostMod Sounds";
+pub const SOUND_LIB_DIR: &str = "FrostMod Sounds";
 const MARKER: &str = "_active.txt";
 const BINDINGS: &str = "_bindings.json";
 pub const STOCK_LABEL: &str = "Stock";
@@ -119,6 +119,12 @@ pub fn is_sound_file(name: &str) -> bool {
     MUST_FILES.iter().any(|m| n == *m)
         || n.ends_with(".wav")
         || n.ends_with(".mp3")
+}
+
+/// True if `dir` holds a complete sound set (both must-files at its root). Used by the
+/// loose-swap detector to classify a folder dropped outside `FrostMod Sounds/`.
+pub fn is_sound_set(dir: &Path) -> bool {
+    has_both_must(&sound_files_in(dir))
 }
 
 /// Root-level sound files in `dir` (non-recursive, mirrors the model swapper).

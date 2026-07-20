@@ -13,14 +13,16 @@
   pulls its sound in, and leaving reverts to Stock. New Tauri commands `scan_sound_swaps` /
   `apply_sound_swap` / `bind_sound` / `unbind_sound`. The sidebar item is renamed
   **Model Swaps → Locker**.
-- **Auto-register loose model swaps** — on launch the app now scans each bike for model
-  sets dropped outside the `FrostMod Models/` folder (either straight in the bike dir or in
-  an ad-hoc container folder like `models/`, each a folder with a `model.edf`). If any are
-  found it offers to **register** them: "Register & move" relocates each into
-  `<Bike>/FrostMod Models/<name>/` so they appear under the Locker, while "Just create
-  folders" only creates the `FrostMod Models/` folder and leaves the files put. The prompt
-  shows once then snoozes; the Locker keeps a persistent banner to register later. New Tauri
-  commands `detect_loose_swaps` / `register_loose_swaps`.
+- **Auto-register loose model & sound sets** — on launch the app now scans each bike for
+  model sets (a folder with a `model.edf`) **and** sound sets (a folder with `engine.scl` +
+  `sfx.cfg`) dropped outside their library — either straight in the bike dir or in an
+  ad-hoc container folder like `models/` or `sounds/`. If any are found it offers to
+  **register** them: "Register & move" relocates each into the right library
+  (`<Bike>/FrostMod Models/<name>/` for models, `<Bike>/FrostMod Sounds/<name>/` for
+  sounds) so they appear in the Locker, while "Just create folders" only creates the
+  library folder(s) and leaves the files put. The prompt shows once then snoozes; the
+  Locker keeps a persistent banner to register later. New Tauri commands
+  `detect_loose_swaps` / `register_loose_swaps`.
 - **Update banner** — when a newer signed build is available, a slim dismissible bar now
   appears below the title bar (`MXB App vX.Y.Z is available`) with an "Update & restart"
   button that shows live download progress. It replaces the previous transient toast for

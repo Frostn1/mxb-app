@@ -151,17 +151,19 @@ export interface BikeSounds {
   bindings: Record<string, string>;
 }
 
-/** A model-set folder found loose inside a bike dir, not yet under `FrostMod Models/`. */
+/** A model- or sound-set folder found loose inside a bike dir, not yet in its library. */
 export interface LooseSwapCandidate {
   /** Variant name (the folder's own name) it would be registered under. */
   name: string;
   /** Path relative to the bike dir (`"Factory OEM"` or `"models/Factory OEM"`). */
   source: string;
+  /** `"model"` → `FrostMod Models/`, `"sound"` → `FrostMod Sounds/`. */
+  kind: "model" | "sound";
   /** Number of top-level files in the set. */
   fileCount: number;
 }
 
-/** A bike with one or more loose (unregistered) model sets. */
+/** A bike with one or more loose (unregistered) model / sound sets. */
 export interface LooseSwapBike {
   bike: string;
   candidates: LooseSwapCandidate[];
