@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bike, Check, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { Bike, Check, RefreshCw, Loader2, AlertTriangle, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { scanModelSwaps, applyModelSwap } from "../../api/mods";
@@ -128,7 +128,10 @@ function BikeCard({
 
       <div className="grid grid-cols-2 gap-2">
         {data.variants.map((v) => {
-          const selectable = !v.active && v.valid && !disabled;
+          // An empty set is an intentional "no model" swap and is applicable; a set
+          // with files but no model.edf is incomplete and stays disabled.
+          const applicable = v.valid || v.empty;
+          const selectable = !v.active && applicable && !disabled;
           return (
             <button
               key={v.name}
@@ -137,15 +140,17 @@ function BikeCard({
               title={
                 v.active
                   ? "Active model"
-                  : !v.valid
-                    ? "This set has no model.edf"
-                    : `Switch to ${v.name}`
+                  : v.empty
+                    ? "Switch to no model — removes the current model files"
+                    : !v.valid
+                      ? "This set has no model.edf"
+                      : `Switch to ${v.name}`
               }
               className={cn(
                 "flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
                 v.active
                   ? "border-primary/60 bg-primary/10"
-                  : v.valid
+                  : applicable
                     ? "cursor-pointer border-white/[0.07] hover:border-white/20"
                     : "border-white/[0.05] opacity-50",
                 disabled && !v.active && "pointer-events-none opacity-60",
@@ -158,6 +163,8 @@ function BikeCard({
                   ) : (
                     <Check className="size-4 text-primary" />
                   )
+                ) : v.empty ? (
+                  <Ban className="size-3.5 text-muted-foreground" />
                 ) : !v.valid ? (
                   <AlertTriangle className="size-3.5 text-amber-500/80" />
                 ) : busy ? (
@@ -174,7 +181,11 @@ function BikeCard({
                   {v.name}
                 </span>
                 <span className="block text-[10.5px] text-faint">
-                  {v.active ? "Active" : `${v.fileCount} file${v.fileCount === 1 ? "" : "s"}`}
+                  {v.active
+                    ? "Active"
+                    : v.empty
+                      ? "No model"
+                      : `${v.fileCount} file${v.fileCount === 1 ? "" : "s"}`}
                 </span>
               </span>
             </button>

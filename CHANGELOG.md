@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-19 — v0.2.3
+
+### Fixed
+- **Empty model swaps are now selectable** — a model-swap variant with no files (an
+  intentional "no model" set) is applicable instead of greyed out. Applying it backs the
+  current model into the library and leaves the bike with no model; swapping back restores
+  it. Sets that have files but are missing `model.edf` remain disabled as incomplete.
+
 ## 2026-07-19 — v0.2.2
 
 ### Added

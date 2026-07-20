@@ -13,6 +13,9 @@ pub struct ModelVariant {
     pub name: String,
     pub active: bool,
     pub valid: bool,
+    /// No files at all — an intentional "no model" swap (removes the current model),
+    /// distinct from an incomplete set that has files but is missing `model.edf`.
+    pub empty: bool,
     pub file_count: usize,
 }
 
@@ -127,12 +130,14 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
         if a.is_empty() { ORIGINAL.to_string() } else { a }
     };
 
+    let active_files = list_files(&bike_dir(mods_path, bike)).len();
     let mut variants = vec![ModelVariant {
         name: active_label.clone(),
         active: true,
         // The active set is the bike's loose files — valid iff model.edf is there.
         valid: file_exists(&bike_dir(mods_path, bike).join(MODEL_EDF)),
-        file_count: list_files(&bike_dir(mods_path, bike)).len(),
+        empty: active_files == 0,
+        file_count: active_files,
     }];
 
     let mut others: Vec<ModelVariant> = Vec::new();
@@ -149,9 +154,11 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
             if name.eq_ignore_ascii_case(&active_label) {
                 continue; // active is already row 0
             }
+            let files = list_files(&p).len();
             others.push(ModelVariant {
                 valid: file_exists(&p.join(MODEL_EDF)),
-                file_count: list_files(&p).len(),
+                empty: files == 0,
+                file_count: files,
                 name,
                 active: false,
             });
@@ -210,12 +217,19 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
 
     let backup_dir = variant_dir(mods_path, bike, &active_label); // park the live set here
     let target_dir = variant_dir(mods_path, bike, target); // bring this set in
-    if !dir_exists(&target_dir) || !file_exists(&target_dir.join(MODEL_EDF)) {
-        anyhow::bail!("model '{target}' is missing its {MODEL_EDF}");
+    if !dir_exists(&target_dir) {
+        anyhow::bail!("model '{target}' not found");
     }
 
     let root_files = list_files(&root); // current model files to back up
     let target_files = list_files(&target_dir); // variant files to bring in
+
+    // An empty variant (no files) is an intentional "no model" swap: back up the live
+    // set and bring in nothing, leaving the bike without a model. A variant that *has*
+    // files but no model.edf is an incomplete set and is rejected.
+    if !target_files.is_empty() && !file_exists(&target_dir.join(MODEL_EDF)) {
+        anyhow::bail!("model '{target}' is missing its {MODEL_EDF}");
+    }
 
     // 1) Back up the current set into the library (all-or-nothing).
     if !root_files.is_empty() && !move_set(&root, &backup_dir, &root_files) {
@@ -326,6 +340,36 @@ mod tests {
         apply_model_swap(mp, "KTM", "Original").unwrap();
         assert_eq!(read_active(mp, "KTM"), "Original");
         assert!(file_exists(&variant_dir(mp, "KTM", "Factory").join("model.edf")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apply_empty_variant_removes_the_model() {
+        let root = tmp("empty-swap");
+        let mp = root.to_str().unwrap();
+        // Original loose set with a model.
+        touch(&bike_dir(mp, "KTM").join("model.edf"));
+        touch(&bike_dir(mp, "KTM").join("KTM.cfg"));
+        // An intentional empty "No model" variant folder (no files).
+        fs::create_dir_all(&variant_dir(mp, "KTM", "No model")).unwrap();
+
+        // The empty variant is applicable, unlike a files-but-no-edf set.
+        apply_model_swap(mp, "KTM", "No model").unwrap();
+
+        // Marker names the empty variant; the bike root now has no model files.
+        assert_eq!(read_active(mp, "KTM"), "No model");
+        assert!(!file_exists(&bike_dir(mp, "KTM").join("model.edf")));
+        // The Original set was parked in the library.
+        assert!(file_exists(&variant_dir(mp, "KTM", "Original").join("model.edf")));
+
+        // The scan flags it empty (and therefore selectable) while it's active.
+        let bikes = scan_model_swaps(mp);
+        let active = bikes[0].variants.iter().find(|v| v.active).unwrap();
+        assert!(active.empty && !active.valid);
+
+        // And it swaps back cleanly.
+        apply_model_swap(mp, "KTM", "Original").unwrap();
+        assert!(file_exists(&bike_dir(mp, "KTM").join("model.edf")));
         let _ = fs::remove_dir_all(&root);
     }
 

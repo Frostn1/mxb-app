@@ -105,8 +105,11 @@ export interface ModelVariant {
   name: string;
   /** Whether this is the currently-active model. */
   active: boolean;
-  /** Whether the set has a `model.edf` (an invalid variant can't be applied). */
+  /** Whether the set has a `model.edf`. A set with files but no `model.edf` is
+   * incomplete and can't be applied; an empty set can (see `empty`). */
   valid: boolean;
+  /** No files at all — an intentional "no model" swap that removes the current model. */
+  empty: boolean;
   /** Number of top-level files in the set. */
   fileCount: number;
 }
