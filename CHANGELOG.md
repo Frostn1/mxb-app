@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-07-22 — v0.3.1 — folder downloads, library multi-select, full-height fix
+
+### Added
+- **Library multi-select** — a new **Select** mode turns cards into checkboxes so you can
+  act on many mods at once: **Uninstall** (each to the Recycle Bin), **Move to folder**
+  (packaged `.pkz` items), and **Select all / none**. Reuses the existing per-item move/
+  uninstall commands.
+
+### Fixed
+- **Google Drive folder links** now resolve to the mod's `.pkz` inside the folder instead
+  of failing with "Google Drive returned an unexpected page". The folder listing is scraped
+  and the archive is picked, skipping bundled server/source sub-folders.
+- **Installs place only the `.pkz`** — when a downloaded archive bundles the client `.pkz`
+  alongside a dedicated-"server" build and the unpacked track source, only the `.pkz` is
+  installed; the extras no longer get dumped into the game folder. Applies to every host
+  (Google Drive, MediaFire, MEGA).
+- **Download origin is now accurate** — the shown mirror (Google Drive / MediaFire / MEGA /
+  …) is derived from the actual link, not from an author-typed label that could read as
+  something unrelated (e.g. "GoWithTheFlow").
+- **Toast banners are dismissible** — added a close (✕) button and swipe-to-dismiss, so a
+  persistent failed-install banner can be cleared.
+- **Full app height on macOS** — the sidebar and content now fill the whole window even
+  when a view's content is short. WKWebView doesn't resolve `height: 100%` against a `1fr`
+  grid row, which collapsed the layout to content height; the outer shell is now a flexbox
+  column.
+
 ## 2026-07-19 — v0.3.0 — sound swaps, auto-register loose sets, update banner
 
 ### Added

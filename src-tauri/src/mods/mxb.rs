@@ -224,19 +224,24 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
         let href = el.select(&a_sel).next().and_then(|a| a.value().attr("href"));
         let Some(url) = href else { continue };
 
-        let host = el
+        // The shown origin must reflect the ACTUAL link — authors often type a
+        // mirror nickname (e.g. "GoWithTheFlow") in `div.filename`, which is not
+        // the host. Derive the host from the URL; keep the author's text as the
+        // label (used for per-bike sound matching).
+        let filename_text = el
             .select(&filename)
             .next()
             .map(|f| f.text().collect::<String>().trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| host_from_url(url));
+            .filter(|s| !s.is_empty());
+        let host = friendly_host(url);
+        let label = filename_text.unwrap_or_else(|| host.clone());
 
         out.push(DownloadOption {
             url: url.to_string(),
-            host: host.clone(),
+            host,
             is_default,
             is_server,
-            label: host,
+            label,
         });
     }
 
@@ -269,6 +274,34 @@ fn host_from_url(url: &str) -> String {
         .unwrap_or_default()
 }
 
+/// A friendly, accurate origin name derived from the download URL's host — so the
+/// UI shows the real mirror (Google Drive / MediaFire / MEGA …) regardless of
+/// whatever label the mod author typed on the page.
+fn friendly_host(url: &str) -> String {
+    let host = host_from_url(url).to_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host);
+    let has = |needle: &str| host.contains(needle);
+    if has("drive.google") || has("drive.usercontent.google") || has("docs.google") {
+        "Google Drive".to_string()
+    } else if has("mediafire") {
+        "MediaFire".to_string()
+    } else if has("mega.nz") || has("mega.co") {
+        "MEGA".to_string()
+    } else if has("dropbox") {
+        "Dropbox".to_string()
+    } else if has("sharemods") {
+        "ShareMods".to_string()
+    } else if has("pixeldrain") {
+        "Pixeldrain".to_string()
+    } else if has("1drv.ms") || has("onedrive") {
+        "OneDrive".to_string()
+    } else if host.is_empty() {
+        "Download".to_string()
+    } else {
+        host.to_string()
+    }
+}
+
 fn dedup(v: &mut Vec<String>) {
     let mut seen = std::collections::HashSet::new();
     v.retain(|x| seen.insert(x.clone()));
@@ -293,8 +326,26 @@ mod tests {
         let downloads = parse_downloads(html);
         assert_eq!(downloads.len(), 2);
         assert!(downloads[0].is_default);
-        assert_eq!(downloads[0].host, "drive.google.com");
+        // Origin is derived from the URL, shown as a friendly host name.
+        assert_eq!(downloads[0].host, "Google Drive");
+        assert_eq!(downloads[1].host, "MediaFire");
         assert!(downloads[0].url.contains("drive.google.com/file/d/ABC123"));
+    }
+
+    #[test]
+    fn host_reflects_url_not_author_label() {
+        // Author typed a mirror nickname in `div.filename` — the shown origin must
+        // still be the real host from the link, with the nickname kept as label.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename"><i class="fas fa-globe"></i> GoWithTheFlow</div>
+              <a href="https://www.mediafire.com/file/abc/GoWithTheFlow.zip/file">Download</a>
+            </div>
+        "#;
+        let downloads = parse_downloads(html);
+        assert_eq!(downloads.len(), 1);
+        assert_eq!(downloads[0].host, "MediaFire");
+        assert_eq!(downloads[0].label, "GoWithTheFlow");
     }
 
     #[test]

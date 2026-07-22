@@ -11,6 +11,9 @@ import {
   ChevronRight,
   Lock,
   Box,
+  ListChecks,
+  CheckCircle2,
+  Circle,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -232,6 +235,11 @@ export default function Library({
   const [view3d, setView3d] = useState<LibraryEntry | null>(null);
   const [moveTarget, setMoveTarget] = useState<LibraryEntry | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<LibraryEntry | null>(null);
+  // Multi-select: a "Select" mode turns cards into checkboxes for bulk actions.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkUninstallOpen, setBulkUninstallOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -250,6 +258,12 @@ export default function Library({
   }, [load, refreshKey]);
 
   useEffect(() => setDetail(null), [modType]);
+  // Leaving a type (or a rescan removing items) should never carry a stale selection.
+  const exitSelect = useCallback(() => {
+    setSelectMode(false);
+    setSelected(new Set());
+  }, []);
+  useEffect(() => exitSelect(), [modType, exitSelect]);
 
   const allFolders = useMemo(
     () => [...new Set(entries.map((e) => e.folder))].sort((a, b) => a.localeCompare(b)),
@@ -261,9 +275,31 @@ export default function Library({
     [modType, entries, search],
   );
 
-  const visibleCount = useMemo(
-    () => sections.reduce((n, s) => n + s.items.length, 0),
-    [sections],
+  const visibleItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
+  const visibleCount = visibleItems.length;
+
+  const toggleSelect = useCallback((path: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  const allSelected =
+    visibleItems.length > 0 && visibleItems.every((i) => selected.has(i.path));
+  const selectAllOrNone = () =>
+    setSelected(allSelected ? new Set() : new Set(visibleItems.map((i) => i.path)));
+
+  const selectedEntries = useMemo(
+    () => entries.filter((e) => selected.has(e.path)),
+    [entries, selected],
+  );
+  // Move only applies to packaged `.pkz` items (folders stay put).
+  const selectedMovable = useMemo(
+    () => selectedEntries.filter((e) => e.kind === "pkz"),
+    [selectedEntries],
   );
 
   const view3dProps = view3d ? entryViewerProps(view3d, entries) : null;
@@ -298,6 +334,57 @@ export default function Library({
     } finally {
       setBusy(false);
     }
+  };
+
+  const doBulkUninstall = async () => {
+    setBusy(true);
+    setBulkUninstallOpen(false);
+    const targets = selectedEntries;
+    let ok = 0;
+    let fail = 0;
+    for (const item of targets) {
+      try {
+        await uninstallMod(item.path, modType.installSubpath);
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    if (detail && selected.has(detail.path)) setDetail(null);
+    await load();
+    onChanged();
+    exitSelect();
+    if (fail)
+      toast.error(`Uninstalled ${ok}, ${fail} failed`, {
+        description: "Some items couldn't be removed.",
+      });
+    else
+      toast.success(`${ok} item${ok === 1 ? "" : "s"} uninstalled`, {
+        description: "Moved to the Recycle Bin.",
+      });
+    setBusy(false);
+  };
+
+  const doBulkMove = async (toFolder: string) => {
+    setBusy(true);
+    setBulkMoveOpen(false);
+    const targets = selectedMovable;
+    let ok = 0;
+    let fail = 0;
+    for (const item of targets) {
+      try {
+        await moveMod(item.path, toFolder, modType.installSubpath);
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    await load();
+    onChanged();
+    exitSelect();
+    if (fail) toast.error(`Moved ${ok}, ${fail} failed`);
+    else toast.success(`Moved ${ok} item${ok === 1 ? "" : "s"} to ${folderLabel(toFolder)}`);
+    setBusy(false);
   };
 
   const reveal = (item: LibraryEntry) =>
@@ -376,6 +463,14 @@ export default function Library({
             className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
           />
         </div>
+        <Button
+          variant={selectMode ? "default" : "outline"}
+          size="sm"
+          onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+          disabled={loading}
+        >
+          <ListChecks className="size-3.5" /> {selectMode ? "Done" : "Select"}
+        </Button>
         <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} /> Rescan
         </Button>
@@ -411,18 +506,38 @@ export default function Library({
                     const actions = rowActions(item);
                     const Icon = categoryIcon(item.category);
                     const canView3d = entryViewerProps(item, entries) !== null;
+                    const isSel = selected.has(item.path);
                     return (
                       <ContextMenu key={item.path}>
                         <ContextMenuTrigger asChild>
                           <div
                             role="button"
                             tabIndex={0}
-                            onClick={() => setDetail(item)}
-                            onKeyDown={(e) => e.key === "Enter" && setDetail(item)}
-                            className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/[0.07] bg-card p-3 transition-colors hover:border-white/15"
+                            onClick={() =>
+                              selectMode ? toggleSelect(item.path) : setDetail(item)
+                            }
+                            onKeyDown={(e) =>
+                              e.key === "Enter" &&
+                              (selectMode ? toggleSelect(item.path) : setDetail(item))
+                            }
+                            className={cn(
+                              "flex cursor-pointer items-center gap-3 rounded-xl border bg-card p-3 transition-colors",
+                              isSel
+                                ? "border-primary/60 bg-primary/[0.06]"
+                                : "border-white/[0.07] hover:border-white/15",
+                            )}
                           >
+                            {selectMode && (
+                              <span className="flex-none">
+                                {isSel ? (
+                                  <CheckCircle2 className="size-5 text-primary" />
+                                ) : (
+                                  <Circle className="size-5 text-faint" />
+                                )}
+                              </span>
+                            )}
                             <LibraryCardBody item={item} typeIcon={Icon} />
-                            {canView3d && (
+                            {!selectMode && canView3d && (
                               <button
                                 title="Quick 3D view"
                                 aria-label="Quick 3D view"
@@ -435,30 +550,32 @@ export default function Library({
                                 <Box className="size-4" />
                               </button>
                             )}
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <button
-                                  disabled={busy}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="flex-none cursor-default rounded-md px-1 text-faint transition-colors hover:text-foreground"
-                                >
-                                  <MoreHorizontal className="size-4" />
-                                </button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                {actions.map((a) => (
-                                  <Fragment key={a.key}>
-                                    {a.separatorBefore && <DropdownMenuSeparator />}
-                                    <DropdownMenuItem
-                                      variant={a.destructive ? "destructive" : "default"}
-                                      onSelect={a.onSelect}
-                                    >
-                                      <a.icon className="size-4" /> {a.label}
-                                    </DropdownMenuItem>
-                                  </Fragment>
-                                ))}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            {!selectMode && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    disabled={busy}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex-none cursor-default rounded-md px-1 text-faint transition-colors hover:text-foreground"
+                                  >
+                                    <MoreHorizontal className="size-4" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  {actions.map((a) => (
+                                    <Fragment key={a.key}>
+                                      {a.separatorBefore && <DropdownMenuSeparator />}
+                                      <DropdownMenuItem
+                                        variant={a.destructive ? "destructive" : "default"}
+                                        onSelect={a.onSelect}
+                                      >
+                                        <a.icon className="size-4" /> {a.label}
+                                      </DropdownMenuItem>
+                                    </Fragment>
+                                  ))}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
                           </div>
                         </ContextMenuTrigger>
                         <ContextMenuContent>
@@ -483,6 +600,40 @@ export default function Library({
           </div>
         )}
       </div>
+
+      {selectMode && (
+        <div className="flex flex-none items-center gap-3 border-t border-input bg-window/95 px-7 py-3">
+          <button
+            onClick={selectAllOrNone}
+            disabled={visibleCount === 0}
+            className="cursor-default text-[12px] font-semibold text-primary transition-colors hover:brightness-110 disabled:opacity-40"
+          >
+            {allSelected ? "Select none" : "Select all"}
+          </button>
+          <span className="text-[12.5px] text-muted-foreground">
+            {selected.size} selected
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={selectedMovable.length === 0 || busy}
+              onClick={() => setBulkMoveOpen(true)}
+            >
+              <FolderInput className="size-3.5" /> Move
+              {selectedMovable.length > 0 ? ` (${selectedMovable.length})` : ""}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={selected.size === 0 || busy}
+              onClick={() => setBulkUninstallOpen(true)}
+            >
+              <Trash2 className="size-3.5" /> Uninstall
+            </Button>
+          </div>
+        </div>
+      )}
         </>
       )}
 
@@ -499,12 +650,47 @@ export default function Library({
       />
 
       <MoveDialog
-        target={moveTarget}
+        open={Boolean(moveTarget)}
+        title="Move to folder"
+        subtitle={moveTarget ? displayName(moveTarget.name) : undefined}
         folders={allFolders}
         modType={modType}
+        excludeFolder={moveTarget?.folder}
         onClose={() => setMoveTarget(null)}
-        onMove={doMove}
+        onPick={(f) => moveTarget && doMove(moveTarget, f)}
       />
+
+      <MoveDialog
+        open={bulkMoveOpen}
+        title={`Move ${selectedMovable.length} item${selectedMovable.length === 1 ? "" : "s"}`}
+        subtitle="Choose a destination folder"
+        folders={allFolders}
+        modType={modType}
+        onClose={() => setBulkMoveOpen(false)}
+        onPick={(f) => doBulkMove(f)}
+      />
+
+      <AlertDialog
+        open={bulkUninstallOpen}
+        onOpenChange={(o) => !o && setBulkUninstallOpen(false)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Uninstall {selected.size} item{selected.size === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Each item is moved to the Recycle Bin — you can restore them from there.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={doBulkUninstall}>
+              Uninstall {selected.size}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={Boolean(uninstallTarget)}
@@ -534,47 +720,56 @@ export default function Library({
   );
 }
 
+/**
+ * Folder picker used for both single-item "Move to folder…" and bulk moves.
+ * `excludeFolder` hides the item's current folder (single move only); `onPick`
+ * receives the chosen (or newly typed) destination folder.
+ */
 function MoveDialog({
-  target,
+  open,
+  title,
+  subtitle,
   folders,
   modType,
+  excludeFolder,
   onClose,
-  onMove,
+  onPick,
 }: {
-  target: LibraryEntry | null;
+  open: boolean;
+  title: string;
+  subtitle?: string;
   folders: string[];
   modType: ModType;
+  excludeFolder?: string;
   onClose: () => void;
-  onMove: (item: LibraryEntry, folder: string) => void;
+  onPick: (folder: string) => void;
 }) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
 
   useEffect(() => {
-    if (target) {
+    if (open) {
       setCreating(false);
       setName("");
     }
-  }, [target]);
+  }, [open]);
 
   const options = ["", ...folders.filter((f) => f !== "")];
 
   return (
-    <Dialog open={Boolean(target)} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Move to folder</DialogTitle>
-          <DialogDescription>
-            {target && displayName(target.name)}
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          {subtitle && <DialogDescription>{subtitle}</DialogDescription>}
         </DialogHeader>
         <div className="flex max-h-64 flex-col overflow-y-auto rounded-lg border border-input p-1.5">
           {options
-            .filter((f) => f !== target?.folder)
+            .filter((f) => f !== excludeFolder)
             .map((f) => (
               <button
                 key={f || "__root__"}
-                onClick={() => target && onMove(target, f)}
+                onClick={() => onPick(f)}
                 className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-left text-[12.5px] text-foreground/90 transition-colors hover:bg-foreground/[0.06]"
               >
                 <ChevronRight className="size-3.5 text-faint" />
@@ -588,8 +783,7 @@ function MoveDialog({
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && name.trim() && target)
-                  onMove(target, name.trim());
+                if (e.key === "Enter" && name.trim()) onPick(name.trim());
                 if (e.key === "Escape") setCreating(false);
               }}
               placeholder={
@@ -614,7 +808,7 @@ function MoveDialog({
             <Button
               size="sm"
               disabled={!name.trim()}
-              onClick={() => target && name.trim() && onMove(target, name.trim())}
+              onClick={() => name.trim() && onPick(name.trim())}
             >
               Create &amp; move
             </Button>

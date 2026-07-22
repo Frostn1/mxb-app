@@ -64,10 +64,16 @@ const App = () => {
       <FrostmodProvider>
         <TooltipProvider delayDuration={300}>
           <UpdateProvider>
-            <div className="grid h-screen grid-rows-[42px_auto_1fr] overflow-hidden">
-              <TitleBar />
+            {/* Flexbox column (not grid rows) so WKWebView on macOS gives `main`
+                its full height — WebKit won't resolve a child's `height:100%`
+                against a `1fr` grid track, which collapsed the app to content
+                height when a view's content was short. */}
+            <div className="flex h-screen flex-col overflow-hidden">
+              <div className="h-[42px] flex-none">
+                <TitleBar />
+              </div>
               <UpdateBanner />
-              <main className="min-h-0 overflow-hidden bg-background text-foreground">
+              <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
                 {ready &&
                   (config ? (
                     <ConfigContext.Provider value={{ config, reloadConfig }}>

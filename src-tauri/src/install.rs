@@ -288,7 +288,13 @@ pub(crate) async fn resolve_direct_url(
     if h.contains("mediafire") || u.contains("mediafire.com") {
         resolve_mediafire(client, url).await
     } else if h.contains("drive.google") || u.contains("drive.google") {
-        Ok(resolve_gdrive(url))
+        // A folder link (…/drive/folders/ID) has no single file to fetch — look
+        // inside it, find the mod archive, and download that file directly.
+        if is_gdrive_folder(url) {
+            resolve_gdrive_folder(client, url).await
+        } else {
+            Ok(resolve_gdrive(url))
+        }
     } else {
         // Assume a direct file link.
         Ok(url.to_string())
@@ -331,6 +337,112 @@ fn resolve_gdrive(url: &str) -> String {
         }
         None => url.to_string(),
     }
+}
+
+/// True when the link points at a whole Drive folder rather than a single file.
+/// (`open?id=` is intentionally excluded — it's ambiguous and usually a file.)
+fn is_gdrive_folder(url: &str) -> bool {
+    let u = url.to_lowercase();
+    u.contains("/folders/") || u.contains("/folderview")
+}
+
+fn gdrive_folder_id(url: &str) -> Option<String> {
+    let by_path = Regex::new(r"/folders/([A-Za-z0-9_-]+)").unwrap();
+    let by_query = Regex::new(r"[?&]id=([A-Za-z0-9_-]+)").unwrap();
+    by_path
+        .captures(url)
+        .or_else(|| by_query.captures(url))
+        .map(|c| c[1].to_string())
+}
+
+/// Resolve a Drive *folder* link to a single downloadable file URL. Mod folders
+/// bundle the track archive alongside sub-folders (server files, unpacked track);
+/// we scrape the folder listing and pick the archive.
+async fn resolve_gdrive_folder(client: &Client, url: &str) -> anyhow::Result<String> {
+    let folder_id = gdrive_folder_id(url).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Couldn't read the Google Drive folder id — open the mod page to download it manually."
+        )
+    })?;
+    let html = client
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+
+    let files = parse_gdrive_folder(&html, &folder_id);
+    if files.is_empty() {
+        anyhow::bail!(
+            "This Google Drive folder has no downloadable file — open the mod page to download it manually."
+        );
+    }
+    let chosen = pick_folder_archive(&files).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Couldn't tell which file in the Google Drive folder is the mod — open the mod page to download it manually."
+        )
+    })?;
+    Ok(resolve_gdrive(&format!(
+        "https://drive.google.com/file/d/{}/view",
+        chosen.id
+    )))
+}
+
+/// A file entry scraped from a Drive folder listing.
+struct GDriveFile {
+    id: String,
+    name: String,
+    mime: String,
+}
+
+/// Extract `[fileId,[parentId],name,mime]` tuples the folder page embeds in its
+/// bootstrap data. Sub-folders (mime `application/vnd.google-apps.folder`) stay in
+/// the list so the caller can skip them explicitly.
+fn parse_gdrive_folder(html: &str, folder_id: &str) -> Vec<GDriveFile> {
+    // The listing lives in an escaped JS blob (\x5b = '[', \x22 = '"'); normalize it.
+    let text = html
+        .replace(r"\x5b", "[")
+        .replace(r"\x5d", "]")
+        .replace(r"\x22", "\"")
+        .replace(r"\/", "/");
+    let pat = Regex::new(&format!(
+        r#""([A-Za-z0-9_-]{{20,}})",\["{}"\],"((?:[^"\\]|\\.)*?)","([^"]+)""#,
+        regex::escape(folder_id)
+    ))
+    .unwrap();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for c in pat.captures_iter(&text) {
+        let id = c[1].to_string();
+        if seen.insert(id.clone()) {
+            out.push(GDriveFile {
+                id,
+                name: c[2].to_string(),
+                mime: c[3].to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// Choose the mod archive from a folder's files: skip sub-folders, prefer a known
+/// archive extension, and fall back to the sole remaining file when unambiguous.
+fn pick_folder_archive(files: &[GDriveFile]) -> Option<&GDriveFile> {
+    const ARCHIVE_EXT: [&str; 5] = [".pkz", ".zip", ".rar", ".7z", ".pnt"];
+    let candidates: Vec<&GDriveFile> = files
+        .iter()
+        .filter(|f| f.mime != "application/vnd.google-apps.folder")
+        .collect();
+    let is_archive = |f: &GDriveFile| {
+        let n = f.name.to_lowercase();
+        ARCHIVE_EXT.iter().any(|ext| n.ends_with(ext))
+    };
+    candidates
+        .iter()
+        .find(|f| is_archive(f))
+        .or_else(|| (candidates.len() == 1).then(|| &candidates[0]))
+        .copied()
 }
 
 async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::Response> {
@@ -746,6 +858,20 @@ fn place_plain(
         return merge_tree(base, &target);
     }
 
+    // A `.pkz` is the complete, installable package. When one sits at the root,
+    // sibling folders are almost always extras the archive bundles alongside it —
+    // the dedicated-"server" build and the unpacked track source. Install ONLY the
+    // `.pkz` file(s) so those extras don't get dumped into the game folder.
+    if has_pkz {
+        let mut n = 0;
+        for p in files.iter().filter(|p| has_ext(p, "pkz")) {
+            let name = p.file_name().unwrap_or_default();
+            std::fs::copy(p, type_dir.join(name))?;
+            n += 1;
+        }
+        return Ok(n);
+    }
+
     let mut n = 0;
     for p in &files {
         let name = p.file_name().unwrap_or_default();
@@ -830,6 +956,31 @@ mod tests {
         assert!(params
             .iter()
             .any(|(k, v)| k == "uuid" && v == "2b32fee2-d9c8-48a0-be9a-51d4b1dea839"));
+    }
+
+    #[test]
+    fn detects_gdrive_folder_links() {
+        assert!(is_gdrive_folder(
+            "https://drive.google.com/drive/folders/1vYkgITTCU8hXhu1yBgfsLhyvXfnlG2Ln"
+        ));
+        assert!(!is_gdrive_folder(
+            "https://drive.google.com/file/d/ABC123/view"
+        ));
+    }
+
+    #[test]
+    fn parses_gdrive_folder_listing_and_picks_archive() {
+        // Mirrors the escaped bootstrap blob a public folder page embeds.
+        let folder = "1vYkgITTCU8hXhu1yBgfsLhyvXfnlG2Ln";
+        let html = format!(
+            r#"junk \x5b\x221YKsASoNQ498qvk0CF3XEN9rOnIkkCLaR\x22,\x5b\x22{f}\x22\x5d,\x22I40 MX server\x22,\x22application/vnd.google-apps.folder\x22\x5d more \x5b\x221pymPFNcJ3h6iegZZhz2GBGQ4JBMxm2OY\x22,\x5b\x22{f}\x22\x5d,\x22I40 MX.pkz\x22,\x22application/x-zip\x22\x5d tail"#,
+            f = folder
+        );
+        let files = parse_gdrive_folder(&html, folder);
+        assert_eq!(files.len(), 2);
+        let chosen = pick_folder_archive(&files).expect("should pick the archive");
+        assert_eq!(chosen.name, "I40 MX.pkz");
+        assert_eq!(chosen.id, "1pymPFNcJ3h6iegZZhz2GBGQ4JBMxm2OY");
     }
 
     #[test]
@@ -1004,6 +1155,27 @@ mod tests {
         assert!(!mods.join("tracks/readme.txt").exists());
         let _ = std::fs::remove_dir_all(&base);
         Ok(())
+    }
+
+    #[test]
+    fn pkz_alongside_server_and_source_folders_installs_only_pkz() {
+        // Mirrors the I40 MX bundle: the client `.pkz` plus a dedicated-server
+        // folder and the unpacked track source. Only the `.pkz` should install.
+        let root = place_tmp("bundle-pkz");
+        let ex = root.join("ex");
+        touch(&ex.join("I40 MX.pkz"));
+        touch(&ex.join("I40 MX server/server.cfg"));
+        touch(&ex.join("I40 MX server/I40 MX.pkz"));
+        touch(&ex.join("I40 MX!/track.trk"));
+        touch(&ex.join("I40 MX!/textures/asphalt.tga"));
+        let mods = root.join("mods");
+        let placed = place_mod(&ex, &mods, "tracks", "", "i40-mx").unwrap();
+
+        assert_eq!(placed, 1);
+        assert!(mods.join("tracks/I40 MX.pkz").exists());
+        assert!(!mods.join("tracks/I40 MX server").exists());
+        assert!(!mods.join("tracks/I40 MX!").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
