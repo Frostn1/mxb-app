@@ -1,6 +1,22 @@
 # Changelog
 
-## 2026-07-22 — v0.3.1 — folder downloads, library multi-select, full-height fix
+## 2026-07-23 — in-garage bike switch (groundwork)
+
+### Added
+- **Garage bike-switch — cross-platform groundwork.** First slice of letting a player
+  swap their whole bike mid-session (offline, restricted to the race's class) without
+  relogging or an admin restart:
+  - New `bikeswap` module reads a bike's id / display name / **class** (`[data] cat`)
+    from its `.ini`/`.cfg` (reusing the existing `cfg` parser), with class-matching that
+    mirrors the dedicated-server `[event] category` semantics (empty = Open,
+    `/`-separated list) and an installed-bike scanner. Unit-tested.
+  - New FrostMod **command channel**: `signal_swap_bike` writes a `frostmod_cmd.json`
+    command file and pulses a dedicated `Local\FrostModCommand` event (the reload event
+    is left untouched). Tauri commands `garage_scan_bikes` / `garage_swap_bike`.
+  - Pairs with FrostMod **Stage A** (observation-only) in the sibling repo, which logs
+    the game's bike-load calls to confirm the loader offset before any live swap.
+  - Online swapping is intentionally **out of scope** — the server is authoritative and
+    anti-cheat validates client integrity on join; this is offline/local only.
 
 ### Added
 - **Library multi-select** — a new **Select** mode turns cards into checkboxes so you can

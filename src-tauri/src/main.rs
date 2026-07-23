@@ -1,6 +1,7 @@
 // Prevents an additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bikeswap;
 mod bundle;
 mod cfg;
 mod config;
@@ -1321,6 +1322,25 @@ fn frostmod_running() -> bool {
     frostmod::is_running()
 }
 
+/// Installed bikes with their class, for the garage bike-switch UI. The frontend
+/// filters this to the current race's class before offering a swap.
+#[tauri::command]
+async fn garage_scan_bikes(app: tauri::AppHandle) -> Result<Vec<bikeswap::BikeIdentity>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(bikeswap::scan_installed_bikes(&cfg.mods_path))
+    })
+    .await
+    .map_err(|e| format!("garage_scan_bikes task failed: {e}"))?
+}
+
+/// Ask FrostMod to swap the active bike (offline, in-garage). FrostMod enforces the
+/// offline/in-garage guard; this only sends the request.
+#[tauri::command]
+fn garage_swap_bike(bike_id: String) -> frostmod::SwapOutcome {
+    frostmod::signal_swap_bike(&bike_id)
+}
+
 #[tauri::command]
 async fn frostmod_status(app: tauri::AppHandle) -> FrostmodStatus {
     frostmod_manage::status(&app).await
@@ -1730,6 +1750,8 @@ fn main() {
             set_instant_refresh,
             frostmod_reload,
             frostmod_running,
+            garage_scan_bikes,
+            garage_swap_bike,
             frostmod_status,
             frostmod_install,
             frostmod_start,

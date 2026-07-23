@@ -81,3 +81,95 @@ pub fn signal_reload() -> ReloadOutcome {
 pub fn is_running() -> bool {
     false
 }
+
+// ===========================================================================
+// Command channel — swap the active bike (offline, in-garage) via FrostMod.
+//
+// The reload event carries no payload, so a bike swap needs its own channel:
+// mxb-app writes a small JSON command file, then signals a DEDICATED event so
+// FrostMod can't confuse a swap with a mods rescan. FrostMod reads the file on
+// wake and dispatches the swap on its render thread, where its own offline +
+// in-garage guard runs (a rejected swap is logged there, not returned here —
+// this side is fire-and-forget). Must match the reader in frostmod.cpp.
+// ===========================================================================
+
+/// Name of FrostMod's command event. Must match frostmod.cpp exactly.
+#[cfg(windows)]
+const COMMAND_EVENT_NAME: &[u8] = b"Local\\FrostModCommand\0";
+
+/// Command file FrostMod reads when the command event fires. Same temp dir the
+/// DLL uses — `std::env::temp_dir()` resolves to the `%TEMP%` that FrostMod's
+/// `GetTempPathA` returns.
+fn command_file_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("frostmod_cmd.json")
+}
+
+/// Serialize a swap-bike command. Kept pure (no I/O) so it can be unit-tested and
+/// so the on-disk contract with frostmod.cpp is exercised without a game.
+fn swap_command_json(bike_id: &str) -> String {
+    serde_json::json!({ "verb": "swap_bike", "bikeId": bike_id }).to_string()
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SwapOutcome {
+    /// Command file written and FrostMod signalled.
+    Signaled,
+    /// FrostMod isn't running (the command event doesn't exist).
+    NotRunning,
+    /// The command file couldn't be written.
+    WriteFailed,
+    /// Non-Windows dev build — can't talk to FrostMod.
+    Unsupported,
+}
+
+/// Ask FrostMod to swap the active bike to `bike_id`. Writes the command file
+/// first (so it's there before FrostMod wakes), then pulses the command event.
+/// Best-effort: the actual offline/in-garage decision happens inside FrostMod.
+#[cfg(windows)]
+pub fn signal_swap_bike(bike_id: &str) -> SwapOutcome {
+    if std::fs::write(command_file_path(), swap_command_json(bike_id)).is_err() {
+        return SwapOutcome::WriteFailed;
+    }
+    // SAFETY: valid NUL-terminated ANSI name; null return means the event doesn't
+    // exist (FrostMod not running) or access was denied.
+    let handle =
+        unsafe { ffi::OpenEventA(ffi::EVENT_MODIFY_STATE, 0, COMMAND_EVENT_NAME.as_ptr()) };
+    if handle.is_null() {
+        return SwapOutcome::NotRunning;
+    }
+    // SAFETY: `handle` is a valid event we just opened and close below.
+    let ok = unsafe { ffi::SetEvent(handle) } != 0;
+    unsafe { ffi::CloseHandle(handle) };
+    if ok {
+        SwapOutcome::Signaled
+    } else {
+        SwapOutcome::NotRunning
+    }
+}
+
+#[cfg(not(windows))]
+pub fn signal_swap_bike(_bike_id: &str) -> SwapOutcome {
+    // Still write the command file on dev builds so the contract can be inspected.
+    let _ = std::fs::write(command_file_path(), swap_command_json(_bike_id));
+    SwapOutcome::Unsupported
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swap_command_json_shape_and_escaping() {
+        assert_eq!(
+            swap_command_json("MX2OEM_2023_KTM_250_SX-F"),
+            r#"{"bikeId":"MX2OEM_2023_KTM_250_SX-F","verb":"swap_bike"}"#
+        );
+        // Ids are arbitrary folder names — ensure quotes/backslashes are escaped.
+        assert_eq!(
+            swap_command_json(r#"a"b\c"#),
+            r#"{"bikeId":"a\"b\\c","verb":"swap_bike"}"#
+        );
+    }
+}
