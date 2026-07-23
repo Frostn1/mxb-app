@@ -679,6 +679,14 @@ export function setInstantRefresh(enabled: boolean): Promise<void> {
   return invoke<void>("set_instant_refresh", { enabled });
 }
 
+/** Toggle watching the mods folder to reload the game on external changes. */
+export function setWatchModsReload(enabled: boolean): Promise<void> {
+  return invoke<void>("set_watch_mods_reload", { enabled });
+}
+
+/** Sentinel slug the backend tags folder-watch reloads with (vs in-app installs). */
+export const MODS_WATCH_SLUG = "__mods_watch__";
+
 /** Fires after each install with whether FrostMod picked the new mod up live. */
 export function onFrostmodReload(
   cb: (payload: FrostmodReload) => void,

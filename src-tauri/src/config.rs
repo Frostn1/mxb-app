@@ -20,6 +20,9 @@ pub struct AppConfig {
     pub auto_run_frostmod: bool,
     /// Re-run the game's profile loader in place after applying a preset (Windows-only).
     pub instant_refresh: bool,
+    /// Watch `<mods_path>/mods` and signal FrostMod to reload when tracks/bikes are
+    /// added outside the app (e.g. a manual download dropped into the folder).
+    pub watch_mods_reload: bool,
 }
 
 impl Default for AppConfig {
@@ -32,6 +35,7 @@ impl Default for AppConfig {
             launch_at_startup: true,
             auto_run_frostmod: true,
             instant_refresh: true,
+            watch_mods_reload: true,
         }
     }
 }

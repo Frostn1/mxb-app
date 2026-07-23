@@ -14,6 +14,11 @@ export interface Config {
   /** Auto-run FrostMod when the app opens (default true). */
   autoRunFrostmod?: boolean;
   instantRefresh?: boolean;
+  /**
+   * Watch `<modsPath>/mods` and reload the game when tracks/bikes are added outside
+   * MXB App (e.g. a manual download dropped into the folder). Default true.
+   */
+  watchModsReload?: boolean;
 }
 
 /** A track-mod as it appears in search results / browse grid. */

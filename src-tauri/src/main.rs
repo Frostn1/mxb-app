@@ -12,6 +12,7 @@ mod install;
 mod library;
 mod modelswap;
 mod mods;
+mod modwatch;
 mod paint;
 mod pkz;
 #[cfg(sidecar)]
@@ -25,6 +26,7 @@ use config::AppConfig;
 use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus};
 use library::InstalledMod;
+use modwatch::ModWatcher;
 use mods::mxb::MxbModsSource;
 use mods::{ModDetail, ModSource, ModSummary};
 use tauri::{
@@ -45,9 +47,18 @@ fn get_config(app: tauri::AppHandle) -> AppConfig {
 }
 
 #[tauri::command]
-fn create_config(app: tauri::AppHandle, config: AppConfig) -> Result<bool, String> {
+fn create_config(
+    app: tauri::AppHandle,
+    watcher: State<ModWatcher>,
+    config: AppConfig,
+) -> Result<bool, String> {
     let cfg = config::finalize(config);
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Begin watching straight away so a fresh setup doesn't need a restart before
+    // manual downloads reload the game.
+    if cfg.watch_mods_reload {
+        modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
     Ok(true)
 }
 
@@ -1369,6 +1380,24 @@ fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn set_watch_mods_reload(
+    app: tauri::AppHandle,
+    state: State<ModWatcher>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.watch_mods_reload = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Start/stop the watcher live so the toggle takes effect without a restart.
+    if enabled {
+        modwatch::start(&app, &state, &cfg.mods_path);
+    } else {
+        modwatch::stop(&state);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("shop-login") {
         let _ = w.set_focus();
@@ -1621,6 +1650,7 @@ fn main() {
             None,
         ))
         .manage(FrostmodProcess::default())
+        .manage(ModWatcher::default())
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
@@ -1672,6 +1702,10 @@ fn main() {
                     if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
                         let state = handle.state::<FrostmodProcess>();
                         let _ = frostmod_manage::start(handle, &state);
+                    }
+                    if cfg.watch_mods_reload {
+                        let watcher = handle.state::<ModWatcher>();
+                        modwatch::start(handle, &watcher, &cfg.mods_path);
                     }
                 }
             }
@@ -1728,6 +1762,7 @@ fn main() {
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_instant_refresh,
+            set_watch_mods_reload,
             frostmod_reload,
             frostmod_running,
             frostmod_status,

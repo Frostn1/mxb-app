@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-23
+
+### Added
+- **Auto-reload on folder changes** — a debounced watcher on `<modsPath>/mods` signals
+  FrostMod to reload the game when tracks or bikes are added outside MXB App (e.g. a manual
+  download dropped into the folder). Toggleable in Settings → FrostMod, on by default. Only
+  the content folder is watched — never `profiles/` — so gameplay churn (replays, telemetry)
+  never triggers a reload.
+
 ## 2026-07-22 — v0.3.1 — folder downloads, library multi-select, full-height fix
 
 ### Added
