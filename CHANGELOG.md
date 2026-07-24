@@ -9,6 +9,13 @@
   the content folder is watched — never `profiles/` — so gameplay churn (replays, telemetry)
   never triggers a reload.
 
+### Fixed
+- **Locker swaps now refresh live in-game** — switching a bike's model or sound in the
+  Locker re-runs the game's look loader instantly (the same `instant_refresh` path presets
+  already used), so the swap shows up without reselecting your profile. The swap toast now
+  reports the refresh result. `apply_model_swap`/`apply_sound_swap` return a
+  `SwapApplyOutcome`, and the refresh step is shared with `presets_apply`.
+
 ## 2026-07-22 — v0.3.1 — folder downloads, library multi-select, full-height fix
 
 ### Added

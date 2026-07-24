@@ -24,6 +24,7 @@ import type {
   GearPaints,
   Preset,
   PresetApplyOutcome,
+  SwapApplyOutcome,
   ReloadOutcome,
   BundlePlan,
   BundleProgress,
@@ -168,16 +169,16 @@ export function scanModelSwaps(): Promise<BikeModels[]> {
   return invoke<BikeModels[]>("scan_model_swaps");
 }
 
-export function applyModelSwap(bike: string, target: string): Promise<void> {
-  return invoke<void>("apply_model_swap", { bike, target });
+export function applyModelSwap(bike: string, target: string): Promise<SwapApplyOutcome> {
+  return invoke<SwapApplyOutcome>("apply_model_swap", { bike, target });
 }
 
 export function scanSoundSwaps(): Promise<BikeSounds[]> {
   return invoke<BikeSounds[]>("scan_sound_swaps");
 }
 
-export function applySoundSwap(bike: string, target: string): Promise<void> {
-  return invoke<void>("apply_sound_swap", { bike, target });
+export function applySoundSwap(bike: string, target: string): Promise<SwapApplyOutcome> {
+  return invoke<SwapApplyOutcome>("apply_sound_swap", { bike, target });
 }
 
 /** Tie a sound variant to a model swap so activating that model applies the sound. */

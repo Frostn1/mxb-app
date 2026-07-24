@@ -305,6 +305,13 @@ export interface PresetApplyOutcome {
   live_refresh: LiveRefresh;
 }
 
+/** Outcome of a Locker model/sound swap — same shape/feedback as a preset apply. */
+export interface SwapApplyOutcome {
+  content_reload: ReloadOutcome;
+  game_running: boolean;
+  live_refresh: LiveRefresh;
+}
+
 /** Install/version/running snapshot for the FrostMod settings panel. */
 export interface FrostmodStatus {
   /** `frostmod.exe` present in the app-managed folder. */
