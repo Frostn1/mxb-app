@@ -12,6 +12,8 @@ import {
   frostmodStart,
   frostmodStatus,
   isFrostmodRunning,
+  MODS_WATCH_SLUG,
+  onFrostmodReload,
   reloadFrostmod,
 } from "../api/mods";
 import type { FrostmodStatus } from "../types";
@@ -65,6 +67,25 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       clearInterval(id);
     };
   }, [probe, refreshStatus]);
+
+  // Surface reloads the mods-folder watcher triggers (a manual download dropped into
+  // the folder). In-app installs carry their own slug and toast, so we only react to
+  // the watcher's sentinel here.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void onFrostmodReload((p) => {
+      if (p.slug !== MODS_WATCH_SLUG) return;
+      if (p.outcome === "signaled") {
+        toast.success("New mods loaded", {
+          description: "FrostMod refreshed the game with your folder changes.",
+        });
+      }
+      void probe();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [probe]);
 
   const reload = useCallback(async () => {
     const outcome = await reloadFrostmod();

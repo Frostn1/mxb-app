@@ -65,6 +65,10 @@ rayon = "1"
 anyhow = "1"
 # Move uninstalled mods to the OS Recycle Bin / Trash rather than deleting outright.
 trash = "5"
+# Watch the mods content folder so tracks/bikes dropped in outside the app still
+# trigger a FrostMod reload. Debounced so an extract burst yields one reload.
+notify = "6"
+notify-debouncer-mini = "0.4"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

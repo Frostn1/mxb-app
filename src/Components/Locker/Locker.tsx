@@ -28,6 +28,7 @@ import type {
   LooseSwapBike,
   ModelVariant,
   SoundVariant,
+  SwapApplyOutcome,
 } from "../../types";
 import RegisterSwapsDialog from "./RegisterSwapsDialog";
 
@@ -43,6 +44,22 @@ import RegisterSwapsDialog from "./RegisterSwapsDialog";
  * switching a model preserves the sound (and vice versa). A sound can optionally be
  * **bound** to a model swap, so activating that model pulls its sound along.
  */
+
+/** Trailing feedback for a swap toast — mirrors the presets "refreshed live in-game" note. */
+function swapNote(outcome: SwapApplyOutcome): string {
+  switch (outcome.live_refresh) {
+    case "refreshed":
+      return "Refreshed live in-game.";
+    case "failed":
+      return "Instant refresh failed — reselect your profile in-game to load it.";
+    default:
+      break;
+  }
+  if (outcome.game_running) {
+    return "Reselect your profile in MX Bikes to load the swap.";
+  }
+  return "Loads next time the game opens.";
+}
 
 /** One bike's row: its models (null for sound-only bikes) and its sounds (always present). */
 interface Row {
@@ -108,12 +125,18 @@ export default function Locker() {
   const looseCount = loose.reduce((n, b) => n + b.candidates.length, 0);
 
   // Runs a mutation for `bike`, toasting success/failure and refreshing every scan.
+  // `note` optionally appends live-refresh feedback derived from the result.
   const run = useCallback(
-    async (bike: string, ok: string, fn: () => Promise<void>) => {
+    async <T,>(
+      bike: string,
+      ok: string,
+      fn: () => Promise<T>,
+      note?: (result: T) => string,
+    ) => {
       setBusy(bike);
       try {
-        await fn();
-        toast.success(ok);
+        const result = await fn();
+        toast.success(note ? `${ok} ${note(result)}` : ok);
         await load();
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
@@ -125,9 +148,9 @@ export default function Locker() {
   );
 
   const onModelSwap = (bike: string, target: string) =>
-    run(bike, `Switched ${bike} model to “${target}”.`, () => applyModelSwap(bike, target));
+    run(bike, `Switched ${bike} model to “${target}”.`, () => applyModelSwap(bike, target), swapNote);
   const onSoundSwap = (bike: string, target: string) =>
-    run(bike, `Switched ${bike} sound to “${target}”.`, () => applySoundSwap(bike, target));
+    run(bike, `Switched ${bike} sound to “${target}”.`, () => applySoundSwap(bike, target), swapNote);
   const onBind = (bike: string, model: string, sound: string) =>
     run(bike, `Tied “${sound}” to model “${model}”.`, () => bindSound(bike, model, sound));
   const onUnbind = (bike: string, model: string, sound: string) =>
