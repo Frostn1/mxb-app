@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-07-29
+## 2026-07-29 — v0.3.2 — presets: tolerate non-UTF-8 profile.ini
 
 ### Fixed
 - **Presets tab no longer errors on non-UTF-8 `profile.ini`** — MX Bikes writes profiles in
