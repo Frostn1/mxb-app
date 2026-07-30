@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-29
+
+### Fixed
+- **Presets tab no longer errors on non-UTF-8 `profile.ini`** — MX Bikes writes profiles in
+  Windows-1252/Latin-1, which isn't always valid UTF-8, so reading them failed with
+  "stream did not contain valid UTF-8". Profiles are now decoded tolerantly (UTF-8 with a
+  Latin-1 fallback), and applying a preset re-encodes in the original encoding so accented
+  names round-trip byte-for-byte and the `.bak` stays identical to the original.
+
 ## 2026-07-22 — v0.3.1 — folder downloads, library multi-select, full-height fix
 
 ### Added
