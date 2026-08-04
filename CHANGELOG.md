@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-04
+## 2026-08-04 — v0.4.0 — onboarding tour, editable presets, decoder-aware previews
 
 ### Added
 - **First-run guided tour** — an interactive spotlight walkthrough that runs once on
