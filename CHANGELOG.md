@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-04
+
+### Security
+- **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm
+  `overrides` entry, clearing two GHSA advisories for path traversal / arbitrary `.map` file
+  disclosure through attacker-controlled `sourceMappingURL` in CSS comments. Build-time only;
+  the shipped app is unaffected.
+
 ## 2026-07-29 — v0.3.2 — presets: tolerate non-UTF-8 profile.ini
 
 ### Fixed
