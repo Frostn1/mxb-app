@@ -3,6 +3,12 @@
 ## 2026-08-04
 
 ### Added
+- **First-run guided tour** — an interactive spotlight walkthrough that runs once on
+  first launch (after Setup), highlighting the Browse, Library, Locker, Presets, Rider,
+  FrostMod status, and Settings areas with anchored coach-mark bubbles and driving the
+  navigation as it goes. Layered on top of the existing Welcome carousel (reused, not
+  replaced), gated on a `mxb:tourDone:v1` flag so it shows once for everyone, and
+  replayable anytime via a "Replay tour" button in Settings → About.
 - **Per-screen help hints** — a small `?` icon beside each screen's title (Browse,
   Library, Locker, Presets, Rider, Settings) opens a popover explaining what the screen
   does. Reuses the existing popover component. The redundant inline header subtitles on
