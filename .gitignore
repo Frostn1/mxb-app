@@ -40,3 +40,6 @@ bun.lock
 
 # Local-only security/IP architecture docs — never publish to the public repo
 docs/secure-content/
+
+# CI-only checkout of the private sidecar module (see .github/workflows/release.yml)
+/.sidecar-src/

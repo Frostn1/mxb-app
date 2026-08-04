@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-08-04
+
+### Added
+- **First-run guided tour** — an interactive spotlight walkthrough that runs once on
+  first launch (after Setup), highlighting the Browse, Library, Locker, Presets, Rider,
+  FrostMod status, and Settings areas with anchored coach-mark bubbles and driving the
+  navigation as it goes. Layered on top of the existing Welcome carousel (reused, not
+  replaced), gated on a `mxb:tourDone:v1` flag so it shows once for everyone, and
+  replayable anytime via a "Replay tour" button in Settings → About.
+- **Per-screen help hints** — a small `?` icon beside each screen's title (Browse,
+  Library, Locker, Presets, Rider, Settings) opens a popover explaining what the screen
+  does. Reuses the existing popover component. The redundant inline header subtitles on
+  Locker, Presets, and Rider were removed now that the same copy lives in the hint.
+- **Edit saved presets after creation** — each saved preset has an Edit action that
+  loads it into the builder in an explicit "editing" mode; you can rename it or change
+  any slot, and saving asks for confirmation (spelling out an update, a rename, or a
+  replace) before writing.
+
+### Changed
+- **Setup surfaces the MX Bikes install path** — first-run onboarding now actively
+  scans for your Steam MX Bikes install (the folder with `rider.pkz`, powering the 3D
+  rider preview) and shows the detected path with a "Found" badge, or a manual folder
+  picker when it can't be found. The chosen/confirmed path is saved on completion. The
+  path was already auto-detected silently; this makes it visible and correctable during
+  install.
+- **Game install path auto-detected on launch** — if the MX Bikes install folder was
+  never set (e.g. the game was installed after first setup), it's now detected and saved
+  on startup, so the 3D rider preview works without a manual pick.
+- **Rider preview shows a loading state** — while the rider model resolves for the first
+  time, the preview shows "Loading rider…" instead of a placeholder body.
+- **Bike 3D preview requires the optional decoder module** — builds compiled without the
+  optional local module now hide the bike 3D preview entirely instead of showing an empty
+  one; official release builds include the module. Rider/gear previews are unaffected.
+- **UI cleanup** — the Shop tab is hidden for now, the app title moved into the sidebar
+  header (above Browse), Settings moved to the bottom of the sidebar, and the title bar
+  logo was removed.
+
 ## 2026-07-29 — v0.3.2 — presets: tolerate non-UTF-8 profile.ini
 
 ### Fixed
