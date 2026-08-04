@@ -37,8 +37,10 @@ import {
 import LibraryDetail from "./LibraryDetail";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
+import { useConfig } from "../../Context/Config";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
+import HelpHint from "@/Components/ui/help-hint";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -302,7 +304,8 @@ export default function Library({
     [selectedEntries],
   );
 
-  const view3dProps = view3d ? entryViewerProps(view3d, entries) : null;
+  const { bikePreview } = useConfig();
+  const view3dProps = view3d ? entryViewerProps(view3d, entries, bikePreview) : null;
 
   const doMove = async (item: LibraryEntry, toFolder: string) => {
     setBusy(true);
@@ -435,7 +438,13 @@ export default function Library({
       ) : (
         <>
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <h1 className="text-[21px] font-bold tracking-[-0.2px]">Library</h1>
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Library</h1>
+          <HelpHint
+            title="Library"
+            description="Your installed mods. Review what's installed and remove ones you no longer want."
+          />
+        </div>
         <Segmented
           value={modType.id}
           onChange={(id) => {
@@ -505,7 +514,7 @@ export default function Library({
                   {section.items.map((item) => {
                     const actions = rowActions(item);
                     const Icon = categoryIcon(item.category);
-                    const canView3d = entryViewerProps(item, entries) !== null;
+                    const canView3d = entryViewerProps(item, entries, bikePreview) !== null;
                     const isSel = selected.has(item.path);
                     return (
                       <ContextMenu key={item.path}>

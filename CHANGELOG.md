@@ -2,6 +2,12 @@
 
 ## 2026-08-04
 
+### Added
+- **Per-screen help hints** — a small `?` icon beside each screen's title (Browse,
+  Library, Locker, Presets, Rider, Settings) opens a popover explaining what the screen
+  does. Reuses the existing popover component. The redundant inline header subtitles on
+  Locker, Presets, and Rider were removed now that the same copy lives in the hint.
+
 ### Changed
 - **Setup surfaces the MX Bikes install path** — first-run onboarding now actively
   scans for your Steam MX Bikes install (the folder with `rider.pkz`, powering the 3D

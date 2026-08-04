@@ -13,9 +13,13 @@ import {
   Package,
   UploadCloud,
   User,
+  Pencil,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
+import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import {
@@ -143,6 +147,10 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [applyingId, setApplyingId] = useState<string | null>(null);
+  // Editing an existing preset: holds the ORIGINAL name so we can rename (save new
+  // + delete old) and confirm the change. null means we're creating a new preset.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const [sharePreset, setSharePreset] = useState<Preset | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -207,24 +215,74 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
     setSaved(await presetsList());
   }, []);
 
-  const onSave = useCallback(async () => {
+  const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+  // Does saving under the typed name replace a *different* existing preset (not the
+  // one we're editing)? That's a destructive overwrite worth confirming.
+  const nameClash = useMemo(() => {
+    const nm = name.trim();
+    if (!nm) return false;
+    return saved.some((p) => eq(p.name, nm) && !(editing && eq(p.name, editing)));
+  }, [name, saved, editing]);
+
+  // Enter edit mode: pull the preset into the builder and prime the name field.
+  const onEdit = useCallback((preset: Preset) => {
+    setEditing(preset.name);
+    setName(preset.name);
+    setLoadout(preset.loadout);
+    // Bring the builder (left column) into view on smaller layouts.
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    toast.info(`Editing “${preset.name}” — change anything, then Save changes.`);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditing(null);
+    setName("");
+  }, []);
+
+  const onSave = useCallback(() => {
     const nm = name.trim();
     if (!nm) {
       toast.error("Give the preset a name first.");
       return;
     }
+    // Always confirm an edit (it rewrites a saved preset) or a name clash (it would
+    // replace someone else's preset). A brand-new, non-clashing name saves directly.
+    if (editing || nameClash) {
+      setConfirmOpen(true);
+      return;
+    }
+    void commitSave();
+  }, [name, editing, nameClash]);
+
+  const commitSave = useCallback(async () => {
+    const nm = name.trim();
+    if (!nm) return;
     setBusy(true);
+    setConfirmOpen(false);
     try {
       await presetsSave({ name: nm, loadout });
+      // Renamed while editing → drop the old entry so it isn't duplicated.
+      if (editing && !eq(editing, nm)) {
+        await presetsDelete(editing);
+      }
       await refreshSaved();
+      const wasEditing = editing;
+      setEditing(null);
       setName("");
-      toast.success(`Saved preset “${nm}”.`);
+      toast.success(
+        wasEditing
+          ? eq(wasEditing, nm)
+            ? `Updated preset “${nm}”.`
+            : `Renamed to “${nm}” and saved changes.`
+          : `Saved preset “${nm}”.`,
+      );
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setBusy(false);
     }
-  }, [name, loadout, refreshSaved]);
+  }, [name, loadout, editing, refreshSaved]);
 
   const applyLoadout = useCallback(
     async (lo: Loadout, id: string, label: string) => {
@@ -277,10 +335,13 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <h1 className="text-[21px] font-bold tracking-[-0.2px]">Presets</h1>
-        <p className="hidden text-[12.5px] text-muted-foreground sm:block">
-          Save a full look and load it onto a bike on command.
-        </p>
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Presets</h1>
+          <HelpHint
+            title="Presets"
+            description="Save a full rider look and load it onto a bike on command."
+          />
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <Download className="size-3.5" />
@@ -382,7 +443,29 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
             ))}
 
             {/* Race number + save row */}
-            <div className="flex flex-col gap-3 rounded-xl border border-white/[0.07] bg-card/40 p-3.5">
+            <div
+              className={cn(
+                "flex flex-col gap-3 rounded-xl border p-3.5",
+                editing
+                  ? "border-primary/40 bg-primary/[0.06]"
+                  : "border-white/[0.07] bg-card/40",
+              )}
+            >
+              {editing && (
+                <div className="flex items-center gap-2 text-[12px]">
+                  <Pencil className="size-3.5 flex-none text-primary" />
+                  <span className="min-w-0 flex-1">
+                    Editing <span className="font-semibold">“{editing}”</span> — change
+                    the name or any slot, then <span className="font-semibold">Save changes</span>.
+                  </span>
+                  <button
+                    onClick={cancelEdit}
+                    className="flex flex-none cursor-default items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                  >
+                    <X className="size-3.5" /> Cancel
+                  </button>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex items-center gap-2">
                   <span className="text-[11px] font-medium text-muted-foreground">Race #</span>
@@ -413,9 +496,9 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
                   className="h-9 max-w-[220px]"
                   onKeyDown={(e) => e.key === "Enter" && void onSave()}
                 />
-                <Button size="sm" onClick={() => void onSave()} disabled={busy}>
+                <Button size="sm" onClick={() => onSave()} disabled={busy}>
                   {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-                  Save preset
+                  {editing ? "Save changes" : "Save preset"}
                 </Button>
                 <Button
                   variant="outline"
@@ -450,8 +533,10 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
                   preset={p}
                   applying={applyingId === p.name}
                   disabled={applyingId !== null}
+                  editing={editing !== null && editing.toLowerCase() === p.name.toLowerCase()}
                   onApply={() => void applyLoadout(p.loadout, p.name, p.name)}
                   onLoad={() => setLoadout(p.loadout)}
+                  onEdit={() => onEdit(p)}
                   onShare={() => onShare(p)}
                   onDelete={() => void onDelete(p)}
                   onViewInRider={
@@ -464,6 +549,16 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
         </div>
       )}
 
+      <ConfirmSaveDialog
+        open={confirmOpen}
+        editing={editing}
+        newName={name.trim()}
+        loadout={loadout}
+        replacesOther={nameClash}
+        busy={busy}
+        onConfirm={() => void commitSave()}
+        onCancel={() => setConfirmOpen(false)}
+      />
       <ShareDialog preset={sharePreset} onClose={() => setSharePreset(null)} />
       <ImportDialog
         open={importOpen}
@@ -483,8 +578,10 @@ function PresetCard({
   preset,
   applying,
   disabled,
+  editing,
   onApply,
   onLoad,
+  onEdit,
   onShare,
   onDelete,
   onViewInRider,
@@ -492,21 +589,35 @@ function PresetCard({
   preset: Preset;
   applying: boolean;
   disabled: boolean;
+  editing: boolean;
   onApply: () => void;
   onLoad: () => void;
+  onEdit: () => void;
   onShare: () => void;
   onDelete: () => void;
   onViewInRider?: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-card/50 p-3">
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-xl border p-3",
+        editing ? "border-primary/50 bg-primary/[0.06]" : "border-white/[0.07] bg-card/50",
+      )}
+    >
       <div className="flex items-start justify-between gap-2">
         <button
           onClick={onLoad}
-          title="Load into the builder"
+          title="Load a copy into the builder"
           className="min-w-0 flex-1 cursor-default text-left"
         >
-          <div className="truncate text-[13px] font-semibold">{preset.name}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-[13px] font-semibold">{preset.name}</span>
+            {editing && (
+              <span className="flex-none rounded-full bg-primary/15 px-1.5 py-[1px] text-[9.5px] font-semibold uppercase tracking-wide text-primary">
+                Editing
+              </span>
+            )}
+          </div>
           <div className="truncate text-[11px] text-muted-foreground">
             {loadoutSummary(preset.loadout)}
           </div>
@@ -517,6 +628,9 @@ function PresetCard({
               <User className="size-3.5" />
             </IconBtn>
           )}
+          <IconBtn title="Edit name or options" onClick={onEdit}>
+            <Pencil className="size-3.5" />
+          </IconBtn>
           <IconBtn title="Share" onClick={onShare}>
             <Share2 className="size-3.5" />
           </IconBtn>
@@ -550,6 +664,70 @@ function IconBtn({
     >
       {children}
     </button>
+  );
+}
+
+function ConfirmSaveDialog({
+  open,
+  editing,
+  newName,
+  loadout,
+  replacesOther,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  editing: string | null;
+  newName: string;
+  loadout: Loadout;
+  replacesOther: boolean;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const renamed = !!editing && editing.toLowerCase() !== newName.toLowerCase();
+  const title = editing ? "Save changes?" : "Replace preset?";
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            {editing
+              ? renamed
+                ? `This renames “${editing}” to “${newName}” and saves your current slots.`
+                : `This overwrites “${editing}” with your current slots.`
+              : `A preset named “${newName}” already exists — this replaces it with your current slots.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-lg border border-white/[0.07] bg-card/40 p-2.5 text-[12px]">
+          <div className="font-semibold">{newName}</div>
+          <div className="text-muted-foreground">{loadoutSummary(loadout)}</div>
+        </div>
+
+        {editing && renamed && replacesOther && (
+          <p className="flex items-start gap-1.5 text-[11.5px] text-amber-500">
+            <AlertTriangle className="mt-px size-3.5 flex-none" />
+            <span>
+              Another preset is already named “{newName}” — saving will overwrite it too.
+            </span>
+          </p>
+        )}
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onCancel} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} disabled={busy}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            {editing ? "Save changes" : "Replace"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, AlertTriangle, Save, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../ui/button";
+import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import type { GearPaints, Loadout, RiderPart } from "../../types";
@@ -153,10 +154,13 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <h1 className="text-[21px] font-bold tracking-[-0.2px]">Rider</h1>
-        <p className="hidden text-[12.5px] text-muted-foreground lg:block">
-          Dress the player model — helmet, goggles, outfit and boots together.
-        </p>
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Rider</h1>
+          <HelpHint
+            title="Rider"
+            description="Dress the player model — helmet, goggles, outfit and boots together."
+          />
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <Input
             value={name}
