@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { Snowflake, FolderOpen } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Snowflake, FolderOpen, Gamepad2, Loader2, Check } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
-import { createConfig } from "../../api/mods";
+import { createConfig, detectGamePath } from "../../api/mods";
 import { Button } from "@/Components/ui/button";
 
 interface SetupProps {
@@ -13,11 +13,36 @@ export default function Setup({ onComplete }: SetupProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // MX Bikes install (Steam) folder — auto-detected on mount so the 3D rider
+  // preview works out of the box, with a manual fallback when detection misses.
+  const [detecting, setDetecting] = useState(true);
+  const [gamePath, setGamePath] = useState<string | null>(null);
+  const [gameAuto, setGameAuto] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    detectGamePath()
+      .then((found) => {
+        if (cancelled) return;
+        if (found) {
+          setGamePath(found);
+          setGameAuto(true);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setDetecting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const finish = async (modsPath: string) => {
     setBusy(true);
     setError(null);
     try {
-      await createConfig({ modsPath });
+      await createConfig({ modsPath, gamePath: gamePath ?? "" });
       onComplete();
     } catch (e) {
       setError(String(e));
@@ -32,6 +57,18 @@ export default function Setup({ onComplete }: SetupProps) {
       title: "Select your MX Bikes folder",
     });
     if (typeof picked === "string") setChosen(picked);
+  };
+
+  const chooseGame = async () => {
+    const picked = await pickFolder({
+      directory: true,
+      multiple: false,
+      title: "Select your MX Bikes install folder",
+    });
+    if (typeof picked === "string") {
+      setGamePath(picked);
+      setGameAuto(false);
+    }
   };
 
   return (
@@ -78,6 +115,56 @@ export default function Setup({ onComplete }: SetupProps) {
           >
             {chosen ? "Choose a different folder…" : "Choose the folder manually…"}
           </button>
+        </div>
+
+        <div className="flex w-full flex-col gap-2.5">
+          <span className="text-[11.5px] font-bold uppercase tracking-[1px] text-faint">
+            MX Bikes install
+          </span>
+          {detecting ? (
+            <div className="flex items-center gap-2.5 rounded-[10px] border border-input bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
+              <Loader2 className="size-4 flex-none animate-spin text-primary" />
+              <span>Looking for your MX Bikes install…</span>
+            </div>
+          ) : gamePath ? (
+            <>
+              <div className="flex items-center gap-2.5 rounded-[10px] border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
+                <Gamepad2 className="size-4 flex-none text-primary" />
+                <span className="flex-1 truncate" title={gamePath}>
+                  {gamePath}
+                </span>
+                {gameAuto && (
+                  <span
+                    className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-primary"
+                    title="Detected automatically"
+                  >
+                    <Check className="size-3.5" strokeWidth={2.5} />
+                    Found
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={chooseGame}
+                className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
+              >
+                Choose a different folder…
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-[12.5px] text-muted-foreground">
+                Couldn&apos;t find your MX Bikes install automatically — it powers
+                the
+                3D rider preview. Pick it manually, or set it later in Settings.
+              </p>
+              <button
+                onClick={chooseGame}
+                className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
+              >
+                Choose the install folder manually…
+              </button>
+            </>
+          )}
         </div>
 
         {error && (

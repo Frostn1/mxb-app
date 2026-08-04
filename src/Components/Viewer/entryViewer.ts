@@ -43,11 +43,17 @@ export interface EntryViewerProps {
 export function entryViewerProps(
   entry: LibraryEntry,
   entries: LibraryEntry[],
+  bikePreview = true,
 ): EntryViewerProps | null {
   const isPaint = entry.kind === "loose" && /\.pnt$/i.test(entry.name);
   const viewable =
     entry.category === "bike" || RIDER_CATS.has(entry.category) || isPaint;
   if (!viewable) return null;
+
+  // A bike (or bike paint) previews from a locked archive that only the optional
+  // local module can decode. Mirror the `mode` computed below: anything not a rider
+  // category renders as a bike. Without the module, offer no bike 3D view at all.
+  if (!RIDER_CATS.has(entry.category) && !bikePreview) return null;
 
   // A gear *model* entry (not a paint) previews on the rider in its own slot.
   const gearPart: GearSlot | undefined = isPaint

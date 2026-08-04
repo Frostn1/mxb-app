@@ -8,6 +8,7 @@ import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
 import Settings from "../Settings/Settings";
+import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import { InstallProvider } from "../../Context/Install";
 import {
   DEFAULT_MOD_TYPE,
@@ -66,6 +67,22 @@ const Dashboard = () => {
     setSelectedSlug(null);
   }, []);
 
+  // First-run interactive tour — shown once, gated on a localStorage flag. Also
+  // re-triggerable from Settings via the TourContext below.
+  const [tourRun, setTourRun] = useState(
+    () => localStorage.getItem(TOUR_DONE_KEY) !== "1",
+  );
+  const startTour = useCallback(() => {
+    setView("browse");
+    setSelectedSlug(null);
+    setTourRun(true);
+  }, []);
+  const endTour = useCallback(() => {
+    localStorage.setItem(TOUR_DONE_KEY, "1");
+    setTourRun(false);
+    navigate("browse");
+  }, [navigate]);
+
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
   const openInRider = useCallback((lo: Loadout) => {
     setRiderPreset(lo);
@@ -74,6 +91,7 @@ const Dashboard = () => {
   const clearRiderPreset = useCallback(() => setRiderPreset(null), []);
 
   return (
+    <TourContext.Provider value={{ startTour }}>
     <InstallProvider onInstalled={onInstalled}>
       <div className="flex min-h-0 flex-1">
         <Sidebar view={view} onNavigate={navigate} />
@@ -113,7 +131,9 @@ const Dashboard = () => {
           )}
         </div>
       </div>
+      {tourRun && <Tour navigate={navigate} onDone={endTour} />}
     </InstallProvider>
+    </TourContext.Provider>
   );
 };
 

@@ -107,12 +107,26 @@ export function ViewerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riderKey]);
 
-  // Non-blocking spinner over the canvas while a model resolves; the current model stays visible.
-  const spinner = loading && (
-    <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-[11px] text-white/85">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      Loading…
+  // While the rider model is resolving for the first time, show a clear centered
+  // "Loading" state instead of the placeholder rider (see `riderLoading` passed to
+  // the viewer). Once a model is on screen, a re-resolve only gets the corner chip
+  // so the current model stays visible.
+  const riderFirstLoad = loading && mode === "rider" && !shownParts?.length;
+  // Suppress the stand-in rider while loading, but never hide the bike stand-in.
+  const riderLoading = mode === "rider" && loading;
+
+  const overlay = riderFirstLoad ? (
+    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+      <Loader2 className="h-6 w-6 animate-spin" />
+      <span className="text-[12.5px]">Loading rider…</span>
     </div>
+  ) : (
+    loading && (
+      <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-[11px] text-white/85">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Loading…
+      </div>
+    )
   );
 
   return (
@@ -146,9 +160,10 @@ export function ViewerPanel({
             mode={mode}
             texture={texture}
             riderParts={shownParts}
+            loading={riderLoading}
             className="absolute inset-0"
           />
-          {spinner}
+          {overlay}
         </div>
       </div>
 
@@ -166,9 +181,10 @@ export function ViewerPanel({
             mode={mode}
             texture={texture}
             riderParts={shownParts}
+            loading={riderLoading}
             className="absolute inset-0"
           />
-            {spinner}
+            {overlay}
           </div>
         </DialogContent>
       </Dialog>
