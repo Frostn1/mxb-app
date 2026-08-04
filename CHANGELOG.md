@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- **Public showcase website** — a single-page GitHub Pages landing site (`site/`) for
+  prospective users: hero, feature grid, how-it-works, download CTAs, and FAQ, styled with
+  the app's frost/dark brand and a hand-built UI mockup (no external assets). Deployed by a
+  new `.github/workflows/pages.yml` workflow on pushes that touch `site/**`. Repo-meta only —
+  no app/runtime changes.
+
 ### Security
 - **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm
   `overrides` entry, clearing two GHSA advisories for path traversal / arbitrary `.map` file
