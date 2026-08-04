@@ -1,12 +1,14 @@
 # Changelog
 
-## 2026-08-04 — v0.4.0 — onboarding tour, editable presets, decoder-aware previews
+## Unreleased
 
 ### Security
 - **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm
   `overrides` entry, clearing two GHSA advisories for path traversal / arbitrary `.map` file
   disclosure through attacker-controlled `sourceMappingURL` in CSS comments. Build-time only;
-  the shipped app is unaffected.
+  the shipped app is unaffected. (Landed after v0.4.0 was published; ships in the next release.)
+
+## 2026-08-04 — v0.4.0 — onboarding tour, editable presets, decoder-aware previews
 
 ### Added
 - **First-run guided tour** — an interactive spotlight walkthrough that runs once on
