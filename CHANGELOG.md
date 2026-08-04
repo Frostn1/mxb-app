@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-04
+
+### Changed
+- **Setup surfaces the MX Bikes install path** — first-run onboarding now actively
+  scans for your Steam MX Bikes install (the folder with `rider.pkz`, powering the 3D
+  rider preview) and shows the detected path with a "Found" badge, or a manual folder
+  picker when it can't be found. The chosen/confirmed path is saved on completion. The
+  path was already auto-detected silently; this makes it visible and correctable during
+  install.
+
 ## 2026-07-29 — v0.3.2 — presets: tolerate non-UTF-8 profile.ini
 
 ### Fixed
