@@ -23,6 +23,15 @@
   Vite's gitignored timestamped config copies. Now 0 errors / 3 dependency-array
   warnings, so lint can gate CI.
 
+### Security
+- **Bump swiper to 14.0.7** — clears a critical prototype-pollution advisory covering
+  6.5.1–12.1.1. Unlike the vite/rollup/esbuild advisories (build-time only), this one
+  ships: swiper drives the mod-detail image gallery. Major bump, but the API the gallery
+  uses (`modules`, `navigation`, `pagination`, `onSwiper`, `onSlideChange`, `slideTo`)
+  and the `swiper-button-*` / `swiper-pagination-bullet*` class names our CSS targets are
+  unchanged; no React peer-dependency constraint. Remaining audit findings are all
+  build-time tooling and don't reach the shipped bundle.
+
 ### Fixed
 - **Seven unescaped apostrophes** in the viewer's empty/error copy (`ViewerDialog.tsx`).
 - **Bikes that ship one mesh per part now load in the 3D viewer** — the viewer assumed
