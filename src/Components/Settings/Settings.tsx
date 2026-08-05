@@ -14,6 +14,7 @@ import {
   setLaunchAtStartup,
   setProfilesPath,
   setRunInBackground,
+  setWatchModsReload,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
 import { useConfig } from "../../Context/Config";
@@ -66,10 +67,20 @@ export default function Settings() {
   const launchAtStartup = config.launchAtStartup ?? true;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   const instantRefresh = config.instantRefresh ?? true;
+  const watchModsReload = config.watchModsReload ?? true;
 
   const toggleInstantRefresh = async (v: boolean) => {
     try {
       await setInstantRefresh(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error("Couldn't update setting", { description: String(e) });
+    }
+  };
+
+  const toggleWatchModsReload = async (v: boolean) => {
+    try {
+      await setWatchModsReload(v);
       await reloadConfig();
     } catch (e) {
       toast.error("Couldn't update setting", { description: String(e) });
@@ -521,6 +532,13 @@ export default function Settings() {
               desc="Start FrostMod in the background whenever MXB App opens."
               checked={autoRunFrostmod}
               onChange={toggleAutoRun}
+            />
+
+            <ToggleRow
+              label="Auto-reload on folder changes"
+              desc="Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App."
+              checked={watchModsReload}
+              onChange={toggleWatchModsReload}
             />
 
             <div className="flex gap-2">
