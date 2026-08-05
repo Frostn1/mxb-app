@@ -2,7 +2,8 @@ name: Release
 
 # Build signed-less desktop bundles and publish them to a GitHub Release.
 # Triggers on any tag like `v0.1.0`. You can also run it manually from the
-# Actions tab (workflow_dispatch) to produce a draft without tagging.
+# Actions tab (workflow_dispatch) to build without tagging. Releases are
+# published, not drafted (`releaseDraft: false`).
 
 on:
   push:
