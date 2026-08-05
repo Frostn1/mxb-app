@@ -19,6 +19,11 @@ export interface Config {
    * MXB App (e.g. a manual download dropped into the folder). Default true.
    */
   watchModsReload?: boolean;
+  /** Intro slideshow already dismissed. Saved with the config (not in localStorage)
+   *  so clearing the webview's storage doesn't replay the first-run flow. */
+  welcomeSeen?: boolean;
+  /** First-run guided tour already finished or skipped. */
+  tourDone?: boolean;
 }
 
 /** A track-mod as it appears in search results / browse grid. */

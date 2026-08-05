@@ -6,12 +6,12 @@ import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import {
   countProfilesIn,
-  createConfig,
   detectGamePath,
   setAutoRunFrostmod,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
+  setModsPath,
   setProfilesPath,
   setRunInBackground,
   setWatchModsReload,
@@ -135,7 +135,7 @@ export default function Settings() {
     if (typeof picked !== "string") return;
     setBusy(true);
     try {
-      await createConfig({ modsPath: picked });
+      await setModsPath(picked);
       await reloadConfig();
       toast.success("Game folder updated", { description: "Your library will re-scan." });
     } catch (e) {
@@ -148,7 +148,7 @@ export default function Settings() {
   const detectAgain = async () => {
     setBusy(true);
     try {
-      await createConfig({ modsPath: "" });
+      await setModsPath("");
       await reloadConfig();
       toast.success("Re-detected your MX Bikes folder");
     } catch (e) {

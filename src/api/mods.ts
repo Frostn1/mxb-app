@@ -116,6 +116,23 @@ export function createConfig(config: Config): Promise<boolean> {
   return invoke<boolean>("create_config", { config });
 }
 
+/** Change only the MX Bikes folder — an empty string re-runs auto-detection. Unlike
+ *  `createConfig`, the rest of the settings are preserved. */
+export function setModsPath(path: string): Promise<void> {
+  return invoke<void>("set_mods_path", { path });
+}
+
+/** Persist that the intro slideshow and/or the guided tour is done. */
+export function setIntroSeen(opts: {
+  welcome?: boolean;
+  tour?: boolean;
+}): Promise<void> {
+  return invoke<void>("set_intro_seen", {
+    welcome: opts.welcome ?? false,
+    tour: opts.tour ?? false,
+  });
+}
+
 /** Whether this build can decode real bike geometry for the 3D preview. Public
  *  builds without the optional local module return false, so the UI hides it. */
 export function bikePreviewAvailable(): Promise<boolean> {
