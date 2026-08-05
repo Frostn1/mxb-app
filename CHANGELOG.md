@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-04 — v0.5.1 — repository housekeeping
+
+### Changed
+- **Patch version bump to 0.5.1** across `package.json`, `src-tauri/Cargo.toml` and
+  `src-tauri/tauri.conf.json` (plus both lockfiles). No app or runtime behaviour changes
+  since v0.5.0 — this release exists to tag a clean tree after the branch cleanup below.
+
+### Removed
+- **Stale branch cleanup** — deleted 13 local branches whose work is already in `main`
+  (including the `backup/pre-email-rewrite` history backup and the superseded duplicate of
+  the v0.5.0 commit), and the 7 matching branches on `origin`. `feature/garage-bike-switch`
+  is deliberately kept: it holds unmerged bike-switch groundwork.
+
 ## 2026-08-04 — v0.5.0 — mods-folder auto-reload, live locker swaps, showcase site
 
 ### Added
