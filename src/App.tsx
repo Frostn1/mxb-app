@@ -9,7 +9,7 @@ import { FrostmodProvider } from "./Context/Frostmod";
 import { ConfigContext } from "./Context/Config";
 import { Toaster } from "@/Components/ui/sonner";
 import { TooltipProvider } from "@/Components/ui/tooltip";
-import { getConfig, isConfigured } from "./api/mods";
+import { bikePreviewAvailable, getConfig, isConfigured } from "./api/mods";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config } from "./types";
@@ -20,6 +20,9 @@ const WELCOME_SEEN_KEY = "mxb:welcomeSeen:v1";
 const App = () => {
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<Config | null>(null);
+  // Whether this build can decode real bike geometry (optional local module). Fixed
+  // at build time, so fetch it once at startup.
+  const [bikePreview, setBikePreview] = useState(false);
   const [showWelcome, setShowWelcome] = useState(
     () => localStorage.getItem(WELCOME_SEEN_KEY) !== "1",
   );
@@ -36,6 +39,7 @@ const App = () => {
   useEffect(() => {
     (async () => {
       try {
+        bikePreviewAvailable().then(setBikePreview).catch(() => {});
         if (await isConfigured()) await reloadConfig();
       } catch (err) {
         console.error("Startup failed", err);
@@ -76,7 +80,7 @@ const App = () => {
               <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
                 {ready &&
                   (config ? (
-                    <ConfigContext.Provider value={{ config, reloadConfig }}>
+                    <ConfigContext.Provider value={{ config, reloadConfig, bikePreview }}>
                       <Dashboard />
                     </ConfigContext.Provider>
                   ) : (

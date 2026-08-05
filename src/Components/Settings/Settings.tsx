@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, RefreshCw, ExternalLink, Play } from "lucide-react";
+import { Check, RefreshCw, ExternalLink, Play, Compass } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
@@ -14,12 +14,15 @@ import {
   setLaunchAtStartup,
   setProfilesPath,
   setRunInBackground,
+  setWatchModsReload,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
 import { useConfig } from "../../Context/Config";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { useFrostmod } from "../../Context/FrostmodContext";
+import { useTour } from "../Tour/Tour";
 import { Button } from "@/Components/ui/button";
+import HelpHint from "@/Components/ui/help-hint";
 import { Segmented } from "@/Components/ui/segmented";
 import { Switch } from "@/Components/ui/switch";
 import { cn } from "@/lib/utils";
@@ -41,6 +44,7 @@ export default function Settings() {
   const { running, reload, status, installing, checking, statusError, install, start, refreshStatus } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
+  const { startTour } = useTour();
   const [version, setVersion] = useState("");
   const [active, setActive] = useState<SectionId>("folder");
   const [busy, setBusy] = useState(false);
@@ -63,10 +67,20 @@ export default function Settings() {
   const launchAtStartup = config.launchAtStartup ?? true;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   const instantRefresh = config.instantRefresh ?? true;
+  const watchModsReload = config.watchModsReload ?? true;
 
   const toggleInstantRefresh = async (v: boolean) => {
     try {
       await setInstantRefresh(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error("Couldn't update setting", { description: String(e) });
+    }
+  };
+
+  const toggleWatchModsReload = async (v: boolean) => {
+    try {
+      await setWatchModsReload(v);
       await reloadConfig();
     } catch (e) {
       toast.error("Couldn't update setting", { description: String(e) });
@@ -256,7 +270,13 @@ export default function Settings() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-5">
         <div className="flex max-w-[640px] flex-col gap-[18px]">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Settings</h1>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-[21px] font-bold tracking-[-0.2px]">Settings</h1>
+            <HelpHint
+              title="Settings"
+              description="Configure your game folder, updates, and app preferences."
+            />
+          </div>
 
           {/* game folder */}
           <Section
@@ -514,6 +534,13 @@ export default function Settings() {
               onChange={toggleAutoRun}
             />
 
+            <ToggleRow
+              label="Auto-reload on folder changes"
+              desc="Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App."
+              checked={watchModsReload}
+              onChange={toggleWatchModsReload}
+            />
+
             <div className="flex gap-2">
               {status?.installed && !running && (
                 <Button variant="default" size="sm" onClick={start}>
@@ -543,7 +570,7 @@ export default function Settings() {
                 Changelog
               </button>
             </div>
-            <div>
+            <div className="flex gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -553,6 +580,9 @@ export default function Settings() {
                 }}
               >
                 <RefreshCw className="size-3.5" /> Check for updates
+              </Button>
+              <Button variant="outline" size="sm" onClick={startTour}>
+                <Compass className="size-3.5" /> Replay tour
               </Button>
             </div>
             <div className="flex flex-col gap-1 pt-1 text-[11.5px] text-faint">

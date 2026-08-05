@@ -51,6 +51,22 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Pull in the optional local module from the private repo so published builds
+      # can decode real bike geometry. Read-only deploy key (SIDECAR_DEPLOY_KEY);
+      # gated to the canonical repo so forks build the public (sidecar-less) variant.
+      - name: Fetch private sidecar module
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        uses: actions/checkout@v4
+        with:
+          repository: Frostn1/mxbapp-private
+          ssh-key: ${{ secrets.SIDECAR_DEPLOY_KEY }}
+          path: .sidecar-src
+
+      - name: Apply sidecar module
+        if: ${{ github.repository == 'Frostn1/mxb-app' }}
+        shell: bash
+        run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:

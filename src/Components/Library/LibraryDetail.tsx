@@ -13,6 +13,7 @@ import { getPkzMeta, getPkzPreview, type ModType } from "../../api/mods";
 import type { LibraryEntry, PkzMeta } from "../../types";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
+import { useConfig } from "../../Context/Config";
 import {
   displayName,
   folderLabel,
@@ -83,7 +84,11 @@ export default function LibraryDetail({
     return [...byCat.entries()];
   }, [entries, entry]);
 
-  const view = useMemo(() => entryViewerProps(entry, entries), [entry, entries]);
+  const { bikePreview } = useConfig();
+  const view = useMemo(
+    () => entryViewerProps(entry, entries, bikePreview),
+    [entry, entries, bikePreview],
+  );
 
   const rows: [string, string][] = [];
   if (meta?.author) rows.push(["Author", meta.author]);

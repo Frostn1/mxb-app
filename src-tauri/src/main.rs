@@ -12,6 +12,7 @@ mod install;
 mod library;
 mod modelswap;
 mod mods;
+mod modwatch;
 mod paint;
 mod pkz;
 #[cfg(sidecar)]
@@ -25,6 +26,7 @@ use config::AppConfig;
 use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus};
 use library::InstalledMod;
+use modwatch::ModWatcher;
 use mods::mxb::MxbModsSource;
 use mods::{ModDetail, ModSource, ModSummary};
 use tauri::{
@@ -45,9 +47,18 @@ fn get_config(app: tauri::AppHandle) -> AppConfig {
 }
 
 #[tauri::command]
-fn create_config(app: tauri::AppHandle, config: AppConfig) -> Result<bool, String> {
+fn create_config(
+    app: tauri::AppHandle,
+    watcher: State<ModWatcher>,
+    config: AppConfig,
+) -> Result<bool, String> {
     let cfg = config::finalize(config);
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Begin watching straight away so a fresh setup doesn't need a restart before
+    // manual downloads reload the game.
+    if cfg.watch_mods_reload {
+        modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
     Ok(true)
 }
 
@@ -124,14 +135,40 @@ fn scan_model_swaps_blocking(app: tauri::AppHandle) -> Result<Vec<modelswap::Bik
     Ok(modelswap::scan_model_swaps(&cfg.mods_path))
 }
 
+/// Outcome of a Locker model/sound swap — mirrors `PresetApplyOutcome` so the UI can
+/// report the same "refreshed live in-game" feedback the presets flow gives.
+#[derive(serde::Serialize)]
+struct SwapApplyOutcome {
+    content_reload: ReloadOutcome,
+    game_running: bool,
+    live_refresh: gameproc::LiveRefresh,
+}
+
+/// Re-run the game's look loader live if instant refresh is enabled, else report it off.
+fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
+    if enabled {
+        gameproc::refresh_look()
+    } else {
+        gameproc::LiveRefresh::Disabled
+    }
+}
+
 #[tauri::command]
-async fn apply_model_swap(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
+async fn apply_model_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    target: String,
+) -> Result<SwapApplyOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || apply_model_swap_blocking(app, bike, target))
         .await
         .map_err(|e| format!("apply_model_swap task failed: {e}"))?
 }
 
-fn apply_model_swap_blocking(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
+fn apply_model_swap_blocking(
+    app: tauri::AppHandle,
+    bike: String,
+    target: String,
+) -> Result<SwapApplyOutcome, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let prev = modelswap::current_active(&cfg.mods_path, &bike);
     modelswap::apply_model_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
@@ -140,8 +177,12 @@ fn apply_model_swap_blocking(app: tauri::AppHandle, bike: String, target: String
     if let Err(e) = soundmods::reconcile_after_model_swap(&cfg.mods_path, &bike, &prev, &target) {
         eprintln!("sound reconcile after model swap failed: {e:#}");
     }
-    frostmod::signal_reload();
-    Ok(())
+    let content_reload = frostmod::signal_reload();
+    Ok(SwapApplyOutcome {
+        content_reload,
+        game_running: gameproc::is_game_running(),
+        live_refresh: live_refresh(cfg.instant_refresh),
+    })
 }
 
 #[tauri::command]
@@ -155,12 +196,20 @@ async fn scan_sound_swaps(app: tauri::AppHandle) -> Result<Vec<soundmods::BikeSo
 }
 
 #[tauri::command]
-async fn apply_sound_swap(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
+async fn apply_sound_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    target: String,
+) -> Result<SwapApplyOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
         soundmods::apply_sound_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
-        frostmod::signal_reload();
-        Ok(())
+        let content_reload = frostmod::signal_reload();
+        Ok(SwapApplyOutcome {
+            content_reload,
+            game_running: gameproc::is_game_running(),
+            live_refresh: live_refresh(cfg.instant_refresh),
+        })
     })
     .await
     .map_err(|e| format!("apply_sound_swap task failed: {e}"))?
@@ -1282,6 +1331,14 @@ fn count_profiles_in(path: String) -> usize {
     presets::list_profiles(std::path::Path::new(&path)).len()
 }
 
+/// Whether this build can decode real bike geometry (the optional local module is
+/// compiled in). Public builds without it return `false`, so the UI hides the bike
+/// 3D preview instead of showing a broken/empty one.
+#[tauri::command]
+fn bike_preview_available() -> bool {
+    cfg!(sidecar)
+}
+
 #[tauri::command]
 fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -1366,6 +1423,24 @@ fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), Strin
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.instant_refresh = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn set_watch_mods_reload(
+    app: tauri::AppHandle,
+    state: State<ModWatcher>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.watch_mods_reload = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Start/stop the watcher live so the toggle takes effect without a restart.
+    if enabled {
+        modwatch::start(&app, &state, &cfg.mods_path);
+    } else {
+        modwatch::stop(&state);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1527,15 +1602,10 @@ fn presets_apply(
             .map_err(|e| format!("Cosmetics applied, but the model swap failed: {e:#}"))?;
     }
     let content_reload = frostmod::signal_reload();
-    let live = if cfg.instant_refresh {
-        gameproc::refresh_look()
-    } else {
-        gameproc::LiveRefresh::Disabled
-    };
     Ok(PresetApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
-        live_refresh: live,
+        live_refresh: live_refresh(cfg.instant_refresh),
     })
 }
 
@@ -1621,6 +1691,7 @@ fn main() {
             None,
         ))
         .manage(FrostmodProcess::default())
+        .manage(ModWatcher::default())
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
@@ -1661,7 +1732,18 @@ fn main() {
 
             let handle = app.handle();
             if config::exists(handle) {
-                if let Ok(cfg) = config::load(handle) {
+                if let Ok(mut cfg) = config::load(handle) {
+                    // Auto-detect the MX Bikes install on launch for configs that
+                    // never got one (created before detection existed, or when the
+                    // game wasn't installed yet). Only fills a blank — never overrides
+                    // a manual pick — and persists it so the 3D rider preview works.
+                    if cfg.game_path.trim().is_empty() {
+                        if let Some(gp) = config::detect_game_path() {
+                            log::info!("auto-detected MX Bikes install: {gp}");
+                            cfg.game_path = gp;
+                            let _ = config::save(handle, &cfg);
+                        }
+                    }
                     let manager = handle.autolaunch();
                     let enabled = manager.is_enabled().unwrap_or(false);
                     if cfg.launch_at_startup && !enabled {
@@ -1672,6 +1754,10 @@ fn main() {
                     if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
                         let state = handle.state::<FrostmodProcess>();
                         let _ = frostmod_manage::start(handle, &state);
+                    }
+                    if cfg.watch_mods_reload {
+                        let watcher = handle.state::<ModWatcher>();
+                        modwatch::start(handle, &watcher, &cfg.mods_path);
                     }
                 }
             }
@@ -1691,6 +1777,7 @@ fn main() {
             is_configured,
             get_config,
             create_config,
+            bike_preview_available,
             search_mods,
             get_mod_detail,
             get_installed_mods,
@@ -1728,6 +1815,7 @@ fn main() {
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_instant_refresh,
+            set_watch_mods_reload,
             frostmod_reload,
             frostmod_running,
             frostmod_status,
