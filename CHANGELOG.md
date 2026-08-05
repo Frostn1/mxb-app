@@ -13,6 +13,26 @@
   texture pool. Bikes sharing one `model.edf` are unaffected (verified byte-identical
   output on the stock 2023 KTM 450 SX-F).
 
+## 2026-08-04 — docs/site copy corrections
+
+### Fixed
+- **Supported mod types** — the site FAQ, feature list, meta description and README said
+  tracks only; tracks, bikes and rider gear are all first-class today (`MOD_TYPES` in
+  `src/api/mods.ts`), so the copy now says so and stops naming `mods/tracks` as the single
+  install target.
+- **MEGA downloads** — the site and README claimed MEGA isn't automated. It is: MEGA links
+  are fetched and decrypted in-app (`download_mega` in `src-tauri/src/install.rs`). Only
+  MEGA *folder* links still need a manual grab, which the copy now states precisely.
+- **`.rar` archives** — both the site FAQ and README said `.rar` isn't supported. It is
+  (`extract_rar` via the `unrar` crate); `.pnt` files are placed as-is alongside `.pkz`.
+- **Installer formats** — the site download card and README offered an `.msi`. The bundle
+  targets are `nsis`/`app`/`dmg`, so Windows ships an `.exe` only.
+- **Release flow** — the README (and the workflow's own header comment) said releases are
+  drafted for manual publishing; `release.yml` sets `releaseDraft: false` and publishes.
+- **Stale roadmap** — rider gear/liveries and self-update are both shipped, so they moved
+  out of "coming next"; the download section now says the app updates itself, and the
+  tech-stack list names three.js / React Three Fiber behind the 3D previews.
+
 ## 2026-08-04 — v0.5.1 — repository housekeeping
 
 ### Changed
