@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Bikes that ship one mesh per part now load in the 3D viewer** — the viewer assumed
+  every bike packs all four parts into a single `model.edf`, so a mod naming its meshes
+  after the bike (e.g. `MX1OEM_1996_Honda_CR250`: `96cr250.edf`, `96cr250_fs.edf`,
+  `96cr250_rs.edf`, `96cr250_st.edf`) failed outright with `no model.edf for bike folder`.
+  Each part's mesh is now resolved the way the game does it — through its `.hrc`'s
+  `level0 { scene = … }` — and every referenced mesh is parsed and merged. Textures are
+  bound per mesh file, since a submesh's material index selects from its own file's
+  texture pool. Bikes sharing one `model.edf` are unaffected (verified byte-identical
+  output on the stock 2023 KTM 450 SX-F).
+
 ## 2026-08-04 — v0.5.1 — repository housekeeping
 
 ### Changed

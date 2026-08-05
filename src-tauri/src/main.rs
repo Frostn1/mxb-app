@@ -362,7 +362,9 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     let t_read = t0.elapsed();
 
     let mut nodes = Vec::new();
-    let mut model: Option<&Vec<u8>> = None;
+    // Every mesh the bike ships, by file name — usually just `model.edf`, but a bike can
+    // carry one per part. Which are actually used is decided by the `.hrc`s below.
+    let mut edfs: std::collections::HashMap<String, &Vec<u8>> = std::collections::HashMap::new();
     let mut geom: Option<&Vec<u8>> = None;
     let mut gfx_bytes: Option<&Vec<u8>> = None;
     let mut hrcs: std::collections::HashMap<String, &Vec<u8>> = std::collections::HashMap::new();
@@ -370,8 +372,8 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     let mut pnt_jobs: Vec<(String, &[u8], bool)> = Vec::new();
     for (name, data) in &files {
         let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
-        if bn == "model.edf" {
-            model = Some(data);
+        if bn.ends_with(".edf") {
+            edfs.insert(bn.clone(), data);
         } else if bn.ends_with(".geom") {
             geom = Some(data);
         } else if bn.ends_with("gfx.cfg") {
@@ -388,23 +390,54 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     }
 
     let gfx = gfx_bytes.map(|b| cfg::parse_gfx(b)).unwrap_or_default();
-    let mut level0: Vec<String> = Vec::new();
+    // Group each part's level0 node under the mesh its `.hrc` names. Bikes that point
+    // every part at one `model.edf` collapse to a single group — the original path.
+    let mut scenes: Vec<(String, Vec<String>)> = Vec::new();
     let mut node_part: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for (part, gp) in &gfx {
+    // Fixed part order — `gfx` is a map, and node order must not shuffle between runs.
+    for part in cfg::GFX_PARTS {
+        let Some(gp) = gfx.get(part) else { continue };
         let Some(hrc_file) = gp.hrc.as_deref() else { continue };
         let stem = hrc_file.trim_end_matches(".hrc").trim_end_matches(".HRC");
         let Some(bytes) = hrcs.get(&stem.to_ascii_lowercase()) else {
             log::warn!("[viewer] gfx.cfg part '{part}' wants {hrc_file}, which the bike doesn't ship");
             continue;
         };
-        if let Some(node) = cfg::hrc_level0(&cfg::parse(bytes), stem) {
-            node_part.insert(node.to_ascii_lowercase(), part.clone());
-            level0.push(node);
+        let hrc = cfg::parse(bytes);
+        let Some(node) = cfg::hrc_level0(&hrc, stem) else { continue };
+        let scene = cfg::hrc_level0_scene(&hrc)
+            .map(|s| s.replace('\\', "/"))
+            .and_then(|s| s.rsplit('/').next().map(str::to_ascii_lowercase))
+            .unwrap_or_else(|| "model.edf".to_string());
+        node_part.insert(node.to_ascii_lowercase(), part.to_string());
+        match scenes.iter_mut().find(|(f, _)| *f == scene) {
+            Some((_, level0)) => level0.push(node),
+            None => scenes.push((scene, vec![node])),
         }
     }
-    if let Some(data) = model {
-        nodes = edf::parse_with_levels(data, &level0);
-        bind_textures(&mut nodes, data, &gfx, &node_part);
+
+    // Parse each referenced mesh and bind its textures against *its own* bytes: a
+    // submesh's material index selects from that file's texture pool, so a part must
+    // never be bound through another file's pool.
+    let mut used: Vec<&Vec<u8>> = Vec::new();
+    for (file, level0) in &scenes {
+        let Some(data) = edfs.get(file) else {
+            log::warn!("[viewer] an .hrc wants {file}, which the bike doesn't ship");
+            continue;
+        };
+        let mut part_nodes = edf::parse_with_levels(data, level0);
+        bind_textures(&mut part_nodes, data, &gfx, &node_part);
+        nodes.append(&mut part_nodes);
+        used.push(data);
+    }
+    // No gfx.cfg/.hrc to go on (or none of it resolved) — fall back to the bike's base
+    // mesh and let the parser's own level0 heuristic pick the parts.
+    if nodes.is_empty() {
+        if let Some(data) = base_edf(&edfs) {
+            nodes = edf::parse_with_levels(data, &[]);
+            bind_textures(&mut nodes, data, &gfx, &node_part);
+            used.push(data);
+        }
     }
     for (fname, data) in &installed {
         pnt_jobs.push((paint_display_name(fname), data.as_slice(), false));
@@ -414,7 +447,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
             eprintln!("[viewer] .geom present but missing mount points — parts unassembled");
         }
     } else if !nodes.is_empty() {
-        eprintln!("[viewer] no .geom alongside model.edf — parts unassembled");
+        eprintln!("[viewer] no .geom alongside the mesh — parts unassembled");
     }
     edf::to_right_handed(&mut nodes);
     let t_parse = t0.elapsed();
@@ -423,8 +456,16 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
         .par_iter()
         .filter_map(|(stem, data)| paint::decode_image(stem, data))
         .collect();
-    if let Some(data) = model {
-        base.extend(paint::extract_edf_textures(data));
+    // Textures embedded in the meshes actually shown. Parts often share a name (each
+    // file embeds the plastics it needs), so keep the first of each.
+    let mut seen: std::collections::HashSet<String> =
+        base.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+    for data in &used {
+        for tex in paint::extract_edf_textures(data) {
+            if seen.insert(tex.name.to_ascii_lowercase()) {
+                base.push(tex);
+            }
+        }
     }
     let mut paints: Vec<(BikePaint, bool)> = pnt_jobs
         .par_iter()
@@ -615,12 +656,30 @@ fn installed_paints(source: &std::path::Path) -> Vec<(String, Vec<u8>)> {
 
 fn wanted_bike_file(name: &str) -> bool {
     let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
-    bn == "model.edf"
+    // Any `.edf`, not just `model.edf`: a bike may ship one mesh per part, named by
+    // its `.hrc` (see `scene_files_for_parts`). Shadow meshes ride along unused.
+    bn.ends_with(".edf")
         || bn.ends_with(".tga")
         || bn.ends_with(".pnt")
         || bn.ends_with(".geom")
         || bn.ends_with(".cfg")
         || bn.ends_with(".hrc")
+}
+
+/// The bike's main mesh when the `.hrc`s can't say which it is: `model.edf` by
+/// convention, else the shortest non-shadow name — a per-part set like `96cr250.edf` /
+/// `96cr250_fs.edf` / `96cr250_s.edf` (shadow) reduces to the chassis.
+fn base_edf<'a>(
+    edfs: &std::collections::HashMap<String, &'a Vec<u8>>,
+) -> Option<&'a Vec<u8>> {
+    if let Some(data) = edfs.get("model.edf") {
+        return Some(data);
+    }
+    edfs.iter()
+        .filter(|(name, _)| !name.ends_with("_s.edf"))
+        .min_by_key(|(name, _)| (name.len(), name.to_string()))
+        .or_else(|| edfs.iter().min_by_key(|(name, _)| (name.len(), name.to_string())))
+        .map(|(_, data)| *data)
 }
 
 fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
@@ -633,24 +692,25 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
         return pkz::read_selected(p, wanted_bike_file);
     }
     if p.is_dir() {
-        if p.join("model.edf").exists() {
-            let mut out = Vec::new();
-            for entry in std::fs::read_dir(p).with_context(|| format!("read dir {p:?}"))? {
-                let path = entry?.path();
-                let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
-                if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
-                    if let (Some(name), Ok(bytes)) = (name, std::fs::read(&path)) {
-                        out.push((name, bytes));
-                    }
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(p).with_context(|| format!("read dir {p:?}"))? {
+            let path = entry?.path();
+            let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
+            if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
+                if let (Some(name), Ok(bytes)) = (name, std::fs::read(&path)) {
+                    out.push((name, bytes));
                 }
             }
+        }
+        // A mesh of any name will do — `model.edf` is the convention, not a rule.
+        if out.iter().any(|(n, _)| n.to_ascii_lowercase().ends_with(".edf")) {
             return Ok(out);
         }
         let sibling = p.with_extension("pkz");
         if sibling.exists() {
             return pkz::read_selected(&sibling, wanted_bike_file);
         }
-        bail!("no model.edf for bike folder {p:?}");
+        bail!("no .edf mesh for bike folder {p:?}");
     }
     bail!("can't load a bike model from {p:?}")
 }
