@@ -1331,6 +1331,14 @@ fn count_profiles_in(path: String) -> usize {
     presets::list_profiles(std::path::Path::new(&path)).len()
 }
 
+/// Whether this build can decode real bike geometry (the optional local module is
+/// compiled in). Public builds without it return `false`, so the UI hides the bike
+/// 3D preview instead of showing a broken/empty one.
+#[tauri::command]
+fn bike_preview_available() -> bool {
+    cfg!(sidecar)
+}
+
 #[tauri::command]
 fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -1724,7 +1732,18 @@ fn main() {
 
             let handle = app.handle();
             if config::exists(handle) {
-                if let Ok(cfg) = config::load(handle) {
+                if let Ok(mut cfg) = config::load(handle) {
+                    // Auto-detect the MX Bikes install on launch for configs that
+                    // never got one (created before detection existed, or when the
+                    // game wasn't installed yet). Only fills a blank — never overrides
+                    // a manual pick — and persists it so the 3D rider preview works.
+                    if cfg.game_path.trim().is_empty() {
+                        if let Some(gp) = config::detect_game_path() {
+                            log::info!("auto-detected MX Bikes install: {gp}");
+                            cfg.game_path = gp;
+                            let _ = config::save(handle, &cfg);
+                        }
+                    }
                     let manager = handle.autolaunch();
                     let enabled = manager.is_enabled().unwrap_or(false);
                     if cfg.launch_at_startup && !enabled {
@@ -1758,6 +1777,7 @@ fn main() {
             is_configured,
             get_config,
             create_config,
+            bike_preview_available,
             search_mods,
             get_mod_detail,
             get_installed_mods,

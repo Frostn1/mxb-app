@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import HelpHint from "@/Components/ui/help-hint";
 import {
   scanModelSwaps,
   applyModelSwap,
@@ -159,10 +160,13 @@ export default function Locker() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <h1 className="text-[21px] font-bold tracking-[-0.2px]">Locker</h1>
-        <p className="text-[12.5px] text-muted-foreground">
-          Swap each bike’s model and engine sound between the sets you’ve installed.
-        </p>
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Locker</h1>
+          <HelpHint
+            title="Locker"
+            description="Swap each bike's model and engine sound between the sets you've installed."
+          />
+        </div>
         <button
           onClick={() => void load()}
           className="ml-auto flex items-center gap-1.5 rounded-lg border border-input bg-card px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground"

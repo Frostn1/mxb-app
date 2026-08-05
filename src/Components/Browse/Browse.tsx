@@ -15,6 +15,7 @@ import { useInstall } from "../../Context/Install";
 import ModCard from "./ModCard";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
+import HelpHint from "@/Components/ui/help-hint";
 import { Skeleton } from "@/Components/ui/skeleton";
 import {
   AlertDialog,
@@ -232,6 +233,10 @@ export default function Browse({
       <header className="flex flex-none flex-col gap-4 px-7 pb-3.5 pt-5">
         <div className="flex items-center gap-3.5">
           <h1 className="text-[21px] font-bold tracking-[-0.2px]">Browse</h1>
+          <HelpHint
+            title="Browse"
+            description="Discover and install mods from the online catalog — search, filter by type, and open a mod to download it into the game."
+          />
           <Segmented
             value={modType.id}
             onChange={(id) => {

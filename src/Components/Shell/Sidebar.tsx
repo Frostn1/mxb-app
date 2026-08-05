@@ -1,6 +1,5 @@
 import {
   Home,
-  Store,
   Library as LibraryIcon,
   Bike,
   Shirt,
@@ -11,7 +10,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useConfig } from "../../Context/Config";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
@@ -32,26 +30,16 @@ interface SidebarProps {
 
 const NAV: { id: DashboardView; label: string; icon: typeof Home }[] = [
   { id: "browse", label: "Browse", icon: Home },
-  { id: "shop", label: "Shop", icon: Store },
+  // { id: "shop", label: "Shop", icon: Store }, // hidden for now
   { id: "library", label: "Library", icon: LibraryIcon },
   { id: "locker", label: "Locker", icon: Bike },
   { id: "presets", label: "Presets", icon: Shirt },
   { id: "rider", label: "Rider", icon: User },
-  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
 
-/** Short "…\PiBoSo\MX Bikes" form of a long game path. */
-function shortPath(p: string): string {
-  if (!p) return "Not set";
-  const parts = p.split(/[/\\]/).filter(Boolean);
-  const tail = parts.slice(-2).join("\\");
-  return parts.length > 2 ? `…\\${tail}` : tail;
-}
-
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
-  const { config } = useConfig();
   const { running, reload, status, start } = useFrostmod();
   const { active, queueLength } = useInstall();
 
@@ -69,12 +57,17 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
 
   return (
     <aside className="flex w-[216px] flex-none flex-col border-r border-white/[0.06] bg-window px-2.5 pb-3 pt-3.5">
+      <div className="px-3 pb-3 text-[13px] font-bold tracking-[0.2px]">
+        MXB App
+      </div>
+
       <nav className="flex flex-col gap-0.5">
         {NAV.map(({ id, label, icon: Icon }) => {
           const activeNav = view === id;
           return (
             <button
               key={id}
+              data-tour={id}
               onClick={() => onNavigate(id)}
               className={cn(
                 "flex cursor-default items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13.5px] transition-colors",
@@ -121,7 +114,10 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           </div>
         )}
 
-        <div className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2">
+        <div
+          data-tour="frostmod"
+          className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2"
+        >
           <span
             className={cn(
               "size-[7px] flex-none rounded-full",
@@ -156,12 +152,19 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           )}
         </div>
 
-        <div
-          className="truncate px-1 font-mono text-[10px] text-faint"
-          title={config.modsPath}
+        <button
+          data-tour="settings"
+          onClick={() => onNavigate("settings")}
+          className={cn(
+            "flex cursor-default items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13.5px] transition-colors",
+            view === "settings"
+              ? "bg-accent font-semibold text-accent-foreground"
+              : "font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+          )}
         >
-          {shortPath(config.modsPath)}
-        </div>
+          <Settings className="size-4" />
+          <span>Settings</span>
+        </button>
       </div>
     </aside>
   );

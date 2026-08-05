@@ -116,6 +116,12 @@ export function createConfig(config: Config): Promise<boolean> {
   return invoke<boolean>("create_config", { config });
 }
 
+/** Whether this build can decode real bike geometry for the 3D preview. Public
+ *  builds without the optional local module return false, so the UI hides it. */
+export function bikePreviewAvailable(): Promise<boolean> {
+  return invoke<boolean>("bike_preview_available");
+}
+
 export function searchMods(
   query: string,
   categoryId: number,

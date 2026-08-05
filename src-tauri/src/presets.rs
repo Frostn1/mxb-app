@@ -213,6 +213,34 @@ fn profile_ini_path(profiles_dir: &Path, profile: &str) -> PathBuf {
     profiles_dir.join(profile).join("profile.ini")
 }
 
+/// Decode a `profile.ini` the game wrote. MX Bikes uses Windows-1252/Latin-1, so
+/// the bytes are not always valid UTF-8 (`read_to_string` fails on them). Returns
+/// the text plus whether it was valid UTF-8, so a write can round-trip the
+/// original single-byte encoding instead of silently converting it.
+fn decode_ini(bytes: &[u8]) -> (String, bool) {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => (s.to_string(), true),
+        // Latin-1 is a lossless byte<->char map we reverse in `encode_ini`.
+        Err(_) => (bytes.iter().map(|&b| b as char).collect(), false),
+    }
+}
+
+/// Re-encode INI text for writing, reversing [`decode_ini`] so a Latin-1 file is
+/// written back byte-for-byte rather than upgraded to UTF-8. Edited values are
+/// ASCII, so every char is <= U+00FF when the source was Latin-1.
+fn encode_ini(text: &str, was_utf8: bool) -> Vec<u8> {
+    if was_utf8 {
+        text.as_bytes().to_vec()
+    } else {
+        text.chars().map(|c| c as u32 as u8).collect()
+    }
+}
+
+fn read_profile_ini(path: &Path) -> anyhow::Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(decode_ini(&bytes).0)
+}
+
 pub fn list_profiles(profiles_dir: &Path) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(rd) = fs::read_dir(profiles_dir) {
@@ -230,8 +258,7 @@ pub fn list_profiles(profiles_dir: &Path) -> Vec<String> {
 
 pub fn list_bikes(profiles_dir: &Path, profile: &str) -> anyhow::Result<Vec<String>> {
     let path = profile_ini_path(profiles_dir, profile);
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let text = read_profile_ini(&path)?;
     let doc = IniDoc::parse(&text);
     // `[rider]` is the cleanest bikeid-keyed section; fall back to `[paint]`.
     let mut bikes = doc.section_keys("rider");
@@ -245,8 +272,7 @@ pub fn list_bikes(profiles_dir: &Path, profile: &str) -> anyhow::Result<Vec<Stri
 
 pub fn read_loadout(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow::Result<Loadout> {
     let path = profile_ini_path(profiles_dir, profile);
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let text = read_profile_ini(&path)?;
     let doc = IniDoc::parse(&text);
 
     let mut lo = Loadout::default();
@@ -265,13 +291,14 @@ pub fn apply_loadout(
     make_active: bool,
 ) -> anyhow::Result<()> {
     let path = profile_ini_path(profiles_dir, profile);
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
 
     // Roll a backup of the pre-change file (overwrite each apply → "undo last").
+    // Back up the raw bytes so the backup stays byte-identical to the original.
     let bak = PathBuf::from(format!("{}.bak", path.display()));
-    let _ = fs::write(&bak, &text);
+    let _ = fs::write(&bak, &bytes);
 
+    let (text, was_utf8) = decode_ini(&bytes);
     let mut doc = IniDoc::parse(&text);
     for section in SLOT_SECTIONS {
         if let Some(val) = loadout.slot(section) {
@@ -285,7 +312,7 @@ pub fn apply_loadout(
         }
     }
 
-    fs::write(&path, doc.render())
+    fs::write(&path, encode_ini(&doc.render(), was_utf8))
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
@@ -463,6 +490,32 @@ KTM250=p_mx
         assert_eq!(doc.get("info", "bikeid").as_deref(), Some("KTM250"));
         assert_eq!(doc.get("info", "race_number").as_deref(), Some("7"));
         assert!(root.join("profiles/main/profile.ini.bak").is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reads_and_round_trips_latin1_profile() {
+        let root = tmp("latin1");
+        let p = root.join("profiles").join("main");
+        fs::create_dir_all(&p).unwrap();
+        let ini = p.join("profile.ini");
+        // 0xE9 is 'é' in Windows-1252/Latin-1 but an invalid UTF-8 lead byte,
+        // which is exactly what made `read_to_string` fail in the presets tab.
+        let mut bytes = SAMPLE.as_bytes().to_vec();
+        bytes.extend_from_slice(b"\n[info]\nrider_name=Andr\xE9\n");
+        fs::write(&ini, &bytes).unwrap();
+        let profiles = root.join("profiles");
+
+        // Read no longer errors on the non-UTF-8 byte.
+        assert_eq!(list_bikes(&profiles, "main").unwrap(), vec!["KTM250", "YZ450F"]);
+
+        let mut lo = Loadout::default();
+        lo.paint = "SnowWhite".into();
+        apply_loadout(&profiles, "main", "KTM250", &lo, true).unwrap();
+
+        // The Latin-1 byte survives write-back untouched (not mangled to U+FFFD).
+        let after = fs::read(&ini).unwrap();
+        assert!(after.windows(6).any(|w| w == b"Andr\xE9\n"));
         let _ = fs::remove_dir_all(&root);
     }
 

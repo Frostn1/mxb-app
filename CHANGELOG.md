@@ -15,6 +15,66 @@
   already used), so the swap shows up without reselecting your profile. The swap toast now
   reports the refresh result. `apply_model_swap`/`apply_sound_swap` return a
   `SwapApplyOutcome`, and the refresh step is shared with `presets_apply`.
+## Unreleased
+
+### Added
+- **Public showcase website** — a single-page GitHub Pages landing site (`site/`) for
+  prospective users: hero, feature grid, how-it-works, download CTAs, and FAQ, styled with
+  the app's frost/dark brand and a hand-built UI mockup (no external assets). Deployed by a
+  new `.github/workflows/pages.yml` workflow on pushes that touch `site/**`. Repo-meta only —
+  no app/runtime changes.
+
+### Security
+- **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm
+  `overrides` entry, clearing two GHSA advisories for path traversal / arbitrary `.map` file
+  disclosure through attacker-controlled `sourceMappingURL` in CSS comments. Build-time only;
+  the shipped app is unaffected. (Landed after v0.4.0 was published; ships in the next release.)
+
+## 2026-08-04 — v0.4.0 — onboarding tour, editable presets, decoder-aware previews
+
+### Added
+- **First-run guided tour** — an interactive spotlight walkthrough that runs once on
+  first launch (after Setup), highlighting the Browse, Library, Locker, Presets, Rider,
+  FrostMod status, and Settings areas with anchored coach-mark bubbles and driving the
+  navigation as it goes. Layered on top of the existing Welcome carousel (reused, not
+  replaced), gated on a `mxb:tourDone:v1` flag so it shows once for everyone, and
+  replayable anytime via a "Replay tour" button in Settings → About.
+- **Per-screen help hints** — a small `?` icon beside each screen's title (Browse,
+  Library, Locker, Presets, Rider, Settings) opens a popover explaining what the screen
+  does. Reuses the existing popover component. The redundant inline header subtitles on
+  Locker, Presets, and Rider were removed now that the same copy lives in the hint.
+- **Edit saved presets after creation** — each saved preset has an Edit action that
+  loads it into the builder in an explicit "editing" mode; you can rename it or change
+  any slot, and saving asks for confirmation (spelling out an update, a rename, or a
+  replace) before writing.
+
+### Changed
+- **Setup surfaces the MX Bikes install path** — first-run onboarding now actively
+  scans for your Steam MX Bikes install (the folder with `rider.pkz`, powering the 3D
+  rider preview) and shows the detected path with a "Found" badge, or a manual folder
+  picker when it can't be found. The chosen/confirmed path is saved on completion. The
+  path was already auto-detected silently; this makes it visible and correctable during
+  install.
+- **Game install path auto-detected on launch** — if the MX Bikes install folder was
+  never set (e.g. the game was installed after first setup), it's now detected and saved
+  on startup, so the 3D rider preview works without a manual pick.
+- **Rider preview shows a loading state** — while the rider model resolves for the first
+  time, the preview shows "Loading rider…" instead of a placeholder body.
+- **Bike 3D preview requires the optional decoder module** — builds compiled without the
+  optional local module now hide the bike 3D preview entirely instead of showing an empty
+  one; official release builds include the module. Rider/gear previews are unaffected.
+- **UI cleanup** — the Shop tab is hidden for now, the app title moved into the sidebar
+  header (above Browse), Settings moved to the bottom of the sidebar, and the title bar
+  logo was removed.
+
+## 2026-07-29 — v0.3.2 — presets: tolerate non-UTF-8 profile.ini
+
+### Fixed
+- **Presets tab no longer errors on non-UTF-8 `profile.ini`** — MX Bikes writes profiles in
+  Windows-1252/Latin-1, which isn't always valid UTF-8, so reading them failed with
+  "stream did not contain valid UTF-8". Profiles are now decoded tolerantly (UTF-8 with a
+  Latin-1 fallback), and applying a preset re-encodes in the original encoding so accented
+  names round-trip byte-for-byte and the `.bak` stays identical to the original.
 
 ## 2026-07-22 — v0.3.1 — folder downloads, library multi-select, full-height fix
 
