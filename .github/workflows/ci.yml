@@ -1,0 +1,86 @@
+name: CI
+
+# Verification on every push to main and every PR. Release builds (release.yml) only
+# run on a tag, so without this nothing checks a change before it lands.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch supersedes the previous run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend (typecheck, lint, build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  rust:
+    name: Rust (test) — ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux is the quick check; Windows is what ships, so it must pass there too.
+        platform: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # No `cargo fmt --check` gate: the tree has never been rustfmt'd (~170 sites across
+      # nearly every file), so a format pass wants its own commit — and one right now
+      # would conflict across the unmerged feature/garage-bike-switch work.
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # The crate links against Tauri's webview stack, so a Linux build needs the
+      # system libs even when we're only running tests.
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            patchelf
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Run tests
+        working-directory: ./src-tauri
+        # Tests needing a real MX Bikes asset are `#[ignore]`d and stay skipped here.
+        run: cargo test --locked
