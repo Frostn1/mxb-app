@@ -2,7 +2,19 @@
 
 ## Unreleased
 
+### Changed
+- **ESLint actually runs clean now** — the config reported 85 errors, 72 of them
+  `react/no-unknown-property` firing on react-three-fiber's three.js JSX in
+  `ModelViewer.tsx` (typed by `@react-three/fiber`, so `tsc` is the real check) and one
+  from a rule that was never registered. Added `eslint-plugin-react-hooks`
+  (`rules-of-hooks` as an error, `exhaustive-deps` as a warning — v7's `recommended` also
+  pulls in the React Compiler ruleset, which flags ~50 pre-existing patterns and deserves
+  its own pass), pointed the Node-globals override at `.mjs` scripts too, and ignored
+  Vite's gitignored timestamped config copies. Now 0 errors / 3 dependency-array
+  warnings, so lint can gate CI.
+
 ### Fixed
+- **Seven unescaped apostrophes** in the viewer's empty/error copy (`ViewerDialog.tsx`).
 - **Bikes that ship one mesh per part now load in the 3D viewer** — the viewer assumed
   every bike packs all four parts into a single `model.edf`, so a mod naming its meshes
   after the bike (e.g. `MX1OEM_1996_Honda_CR250`: `96cr250.edf`, `96cr250_fs.edf`,
