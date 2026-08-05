@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-04 — docs/site copy corrections
+
+### Fixed
+- **Supported mod types** — the site FAQ, feature list, meta description and README said
+  tracks only; tracks, bikes and rider gear are all first-class today (`MOD_TYPES` in
+  `src/api/mods.ts`), so the copy now says so and stops naming `mods/tracks` as the single
+  install target.
+- **MEGA downloads** — the site and README claimed MEGA isn't automated. It is: MEGA links
+  are fetched and decrypted in-app (`download_mega` in `src-tauri/src/install.rs`). Only
+  MEGA *folder* links still need a manual grab, which the copy now states precisely.
+
 ## 2026-08-04 — v0.5.1 — repository housekeeping
 
 ### Changed

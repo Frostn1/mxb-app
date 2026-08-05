@@ -14,10 +14,10 @@ single flow:
 
 > **Search a mod → open its page → click _Add to Library_ → done.**
 
-MXB App downloads the mod, extracts it, and drops the track files into your MX
-Bikes `mods/tracks` folder automatically.
+MXB App downloads the mod, extracts it, and drops the files into the matching MX
+Bikes `mods` folder automatically.
 
-Track mods are supported today; more mod types are planned.
+Tracks, bikes and rider gear are supported today; more mod types are planned.
 
 ## Download
 
@@ -35,8 +35,9 @@ first launch — choose _Run anyway_ / right-click _Open_.
 - **Catalog** comes from [mxb-mods.com](https://mxb-mods.com) via its public
   WordPress REST API (search, listings, images), behind a swappable `ModSource`
   trait in the Rust backend.
-- **Downloads** are resolved per host — MediaFire and Google Drive today, direct
-  links as-is. Mega isn't supported yet (open the page to grab it manually).
+- **Downloads** are resolved per host — MediaFire, Google Drive and MEGA, direct
+  links as-is. MEGA *folder* links are the exception (open the page to grab
+  those manually).
 - **Archives**: `.zip` and `.7z` are extracted natively; `.pkz` files are placed
   as-is. (`.rar` is not supported yet.)
 
