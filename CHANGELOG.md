@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- **CI verification on every push and PR** (`.github/workflows/ci.yml`) — nothing checked
+  a change before it landed: `release.yml` only runs on a version tag and `pages.yml` only
+  deploys the site. Two jobs now run on pushes to `main` and on every PR: frontend
+  (`npm ci` → typecheck → lint → build) and Rust (`cargo test --locked`) on both Linux and
+  Windows, since Windows is what ships. Tests needing a real MX Bikes asset stay
+  `#[ignore]`d. Verified the sidecar-less public variant — what CI actually builds —
+  compiles and passes (108 tests). No `cargo fmt --check` gate yet: the tree has never
+  been rustfmt'd, so that wants its own pass once `feature/garage-bike-switch` lands.
+
 ### Changed
 - **ESLint actually runs clean now** — the config reported 85 errors, 72 of them
   `react/no-unknown-property` firing on react-three-fiber's three.js JSX in
