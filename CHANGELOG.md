@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-04
+
+### Added
+- **Locked archives show their real name & preview** — on builds with the optional
+  decoder module, a creator-locked `.pkz` (e.g. a locked track) now surfaces its name,
+  author, length and thumbnail in the library instead of an anonymous "Locked" entry. It
+  stays flagged as locked (the files remain sealed — no unpack or 3D preview), and public
+  builds without the module are unchanged.
 ## 2026-07-23
 
 ### Added
