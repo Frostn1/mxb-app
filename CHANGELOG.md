@@ -8,6 +8,14 @@
   author, length and thumbnail in the library instead of an anonymous "Locked" entry. It
   stays flagged as locked (the files remain sealed — no unpack or 3D preview), and public
   builds without the module are unchanged.
+
+### Fixed
+- **First-run tour no longer runs behind the welcome slides** — the guided tour now starts
+  only after the intro slideshow is dismissed, so its spotlights land on visible UI instead
+  of hidden elements (previously it ran under the overlay and appeared to show nothing). The
+  slideshow was also trimmed to just the intro; the per-feature walkthrough it used to
+  duplicate is left to the tour.
+
 ## 2026-07-23
 
 ### Added

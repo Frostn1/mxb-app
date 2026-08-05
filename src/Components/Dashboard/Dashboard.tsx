@@ -18,7 +18,13 @@ import {
 } from "../../api/mods";
 import type { Loadout } from "../../types";
 
-const Dashboard = () => {
+interface DashboardProps {
+  /** True while the Welcome slideshow is still up. The tour waits for it to close
+   *  so its spotlights land on visible UI, not behind the overlay. */
+  welcomeActive?: boolean;
+}
+
+const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const [view, setView] = useState<DashboardView>("browse");
   const [modType, setModType] = useState<ModType>(DEFAULT_MOD_TYPE);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
@@ -69,9 +75,7 @@ const Dashboard = () => {
 
   // First-run interactive tour — shown once, gated on a localStorage flag. Also
   // re-triggerable from Settings via the TourContext below.
-  const [tourRun, setTourRun] = useState(
-    () => localStorage.getItem(TOUR_DONE_KEY) !== "1",
-  );
+  const [tourRun, setTourRun] = useState(false);
   const startTour = useCallback(() => {
     setView("browse");
     setSelectedSlug(null);
@@ -82,6 +86,14 @@ const Dashboard = () => {
     setTourRun(false);
     navigate("browse");
   }, [navigate]);
+
+  // Auto-start the first-run tour once — but only after the Welcome slideshow has
+  // been dismissed, otherwise its spotlights sit behind the overlay and show nothing.
+  useEffect(() => {
+    if (welcomeActive) return;
+    if (localStorage.getItem(TOUR_DONE_KEY) === "1") return;
+    startTour();
+  }, [welcomeActive, startTour]);
 
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
   const openInRider = useCallback((lo: Loadout) => {

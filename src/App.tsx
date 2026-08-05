@@ -81,7 +81,7 @@ const App = () => {
                 {ready &&
                   (config ? (
                     <ConfigContext.Provider value={{ config, reloadConfig, bikePreview }}>
-                      <Dashboard />
+                      <Dashboard welcomeActive={showWelcome} />
                     </ConfigContext.Provider>
                   ) : (
                     <Setup onComplete={reloadConfig} />
