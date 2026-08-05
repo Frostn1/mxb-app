@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Box, Loader2 } from "lucide-react";
-import { Dialog, DialogContent } from "../ui/dialog";
+import { Box, Loader2, X } from "lucide-react";
+import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
 import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import {
   unpackPaint,
@@ -215,7 +215,12 @@ export function ViewerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[85vh] w-[92vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+      {/* The close button lives in the header row (below) so it lines up with the
+          paint pickers instead of floating over them at a fixed offset. */}
+      <DialogContent
+        showClose={false}
+        className="flex h-[85vh] w-[92vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+      >
         <div className="flex flex-none items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <Box className="h-4 w-4 flex-none text-muted-foreground" />
@@ -254,6 +259,10 @@ export function ViewerDialog({
                 </select>
               </label>
             )}
+            <DialogClose className="rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
+              <X className="size-4" />
+              <span className="sr-only">Close</span>
+            </DialogClose>
           </div>
         </div>
 

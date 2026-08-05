@@ -1,22 +1,6 @@
 # Changelog
 
-## 2026-08-04
-
-### Added
-- **Locked archives show their real name & preview** — on builds with the optional
-  decoder module, a creator-locked `.pkz` (e.g. a locked track) now surfaces its name,
-  author, length and thumbnail in the library instead of an anonymous "Locked" entry. It
-  stays flagged as locked (the files remain sealed — no unpack or 3D preview), and public
-  builds without the module are unchanged.
-
-### Fixed
-- **First-run tour no longer runs behind the welcome slides** — the guided tour now starts
-  only after the intro slideshow is dismissed, so its spotlights land on visible UI instead
-  of hidden elements (previously it ran under the overlay and appeared to show nothing). The
-  slideshow was also trimmed to just the intro; the per-feature walkthrough it used to
-  duplicate is left to the tour.
-
-## 2026-07-23
+## 2026-08-04 — v0.5.0 — mods-folder auto-reload, live locker swaps, showcase site
 
 ### Added
 - **Auto-reload on folder changes** — a debounced watcher on `<modsPath>/mods` signals
@@ -24,27 +8,39 @@
   download dropped into the folder). Toggleable in Settings → FrostMod, on by default. Only
   the content folder is watched — never `profiles/` — so gameplay churn (replays, telemetry)
   never triggers a reload.
-
-### Fixed
-- **Locker swaps now refresh live in-game** — switching a bike's model or sound in the
-  Locker re-runs the game's look loader instantly (the same `instant_refresh` path presets
-  already used), so the swap shows up without reselecting your profile. The swap toast now
-  reports the refresh result. `apply_model_swap`/`apply_sound_swap` return a
-  `SwapApplyOutcome`, and the refresh step is shared with `presets_apply`.
-## Unreleased
-
-### Added
 - **Public showcase website** — a single-page GitHub Pages landing site (`site/`) for
   prospective users: hero, feature grid, how-it-works, download CTAs, and FAQ, styled with
   the app's frost/dark brand and a hand-built UI mockup (no external assets). Deployed by a
   new `.github/workflows/pages.yml` workflow on pushes that touch `site/**`. Repo-meta only —
   no app/runtime changes.
+- **Gesture hint in the 3D viewer** — a muted legend in the canvas corner (rotate / zoom /
+  pan) so it's obvious the preview is draggable. Hidden while a model or paint is loading.
+- **Locked archives show their real name & preview** — on builds with the optional
+  decoder module, a creator-locked `.pkz` (e.g. a locked track) now surfaces its name,
+  author, length and thumbnail in the library instead of an anonymous "Locked" entry. It
+  stays flagged as locked (the files remain sealed — no unpack or 3D preview), and public
+  builds without the module are unchanged.
+
+### Fixed
+- **Paint picker no longer sits under the close button** — the 3D preview's close button now
+  sits inside the header row, vertically centred with the Paint/Goggles dropdowns instead of
+  overlapping them.
+- **First-run tour no longer runs behind the welcome slides** — the guided tour now starts
+  only after the intro slideshow is dismissed, so its spotlights land on visible UI instead
+  of hidden elements (previously it ran under the overlay and appeared to show nothing). The
+  slideshow was also trimmed to just the intro; the per-feature walkthrough it used to
+  duplicate is left to the tour.
+- **Locker swaps now refresh live in-game** — switching a bike's model or sound in the
+  Locker re-runs the game's look loader instantly (the same `instant_refresh` path presets
+  already used), so the swap shows up without reselecting your profile. The swap toast now
+  reports the refresh result. `apply_model_swap`/`apply_sound_swap` return a
+  `SwapApplyOutcome`, and the refresh step is shared with `presets_apply`.
 
 ### Security
 - **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm
   `overrides` entry, clearing two GHSA advisories for path traversal / arbitrary `.map` file
   disclosure through attacker-controlled `sourceMappingURL` in CSS comments. Build-time only;
-  the shipped app is unaffected. (Landed after v0.4.0 was published; ships in the next release.)
+  the shipped app is unaffected. (Landed after v0.4.0 was published.)
 
 ## 2026-08-04 — v0.4.0 — onboarding tour, editable presets, decoder-aware previews
 
