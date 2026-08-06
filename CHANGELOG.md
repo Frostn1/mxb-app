@@ -33,6 +33,30 @@
   build-time tooling and don't reach the shipped bundle.
 
 ### Fixed
+- **First-run setup no longer replays on every launch.** Two pieces of first-run state
+  were stored in places that don't reliably survive a restart, and losing either one
+  put the user back at the start:
+  - *The setup screen.* `is_configured` was a bare "does `config.json` exist?" check, so
+    anything that took the file out — an app-data wipe, a config written under a
+    different Windows account, a half-written file, a failed save — dropped the user back
+    into setup with no way out but redoing it. Since that screen's default action only
+    runs auto-detection anyway, startup now re-detects instead: `config::load_or_detect`
+    rebuilds the config from `Documents\PiBoSo\MX Bikes` when it's recognizably an MX
+    Bikes folder (has `profiles/` or `mods/`), and setup appears only when that finds
+    nothing. A corrupt `config.json` is now a parse *error* that triggers the same
+    rebuild, rather than deserializing to an empty config that left the app pointed at
+    no folder at all. Startup logs the config path and whether it was found.
+  - *The intro slideshow and guided tour.* Both were gated on `localStorage` alone, which
+    the webview drops whenever its storage is cleared. They're now recorded in the config
+    (`welcomeSeen` / `tourDone`), with the old keys still honored and migrated on first
+    launch so nobody sees the intro twice.
+- **Changing the MX Bikes folder in Settings no longer resets everything else.** Both
+  "choose a different folder" and "re-detect" called `createConfig` with just the path,
+  and every field the frontend omitted was refilled from `AppConfig::default()` — so
+  picking a new folder also wiped the detected game install and reset launch-at-startup,
+  run-in-background, auto-run FrostMod, instant refresh and the mods watcher. They now
+  call a `set_mods_path` command that touches only the folder (and restarts the watcher),
+  matching how `set_game_path` and the other setting commands already behaved.
 - **Seven unescaped apostrophes** in the viewer's empty/error copy (`ViewerDialog.tsx`).
 - **Bikes that ship one mesh per part now load in the 3D viewer** — the viewer assumed
   every bike packs all four parts into a single `model.edf`, so a mod naming its meshes

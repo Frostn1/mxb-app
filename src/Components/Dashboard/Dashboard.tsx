@@ -10,10 +10,12 @@ import ModDetail from "../ModDetail/ModDetail";
 import Settings from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import { InstallProvider } from "../../Context/Install";
+import { useConfig } from "../../Context/Config";
 import {
   DEFAULT_MOD_TYPE,
   getInstalledMods,
   normalizeModName,
+  setIntroSeen,
   type ModType,
 } from "../../api/mods";
 import type { Loadout } from "../../types";
@@ -25,6 +27,7 @@ interface DashboardProps {
 }
 
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
+  const { config } = useConfig();
   const [view, setView] = useState<DashboardView>("browse");
   const [modType, setModType] = useState<ModType>(DEFAULT_MOD_TYPE);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
@@ -83,6 +86,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   }, []);
   const endTour = useCallback(() => {
     localStorage.setItem(TOUR_DONE_KEY, "1");
+    // The config is the durable record — localStorage above is just the immediate
+    // gate, and it doesn't survive the webview's storage being cleared.
+    void setIntroSeen({ tour: true }).catch(() => {});
     setTourRun(false);
     navigate("browse");
   }, [navigate]);
@@ -91,9 +97,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // been dismissed, otherwise its spotlights sit behind the overlay and show nothing.
   useEffect(() => {
     if (welcomeActive) return;
-    if (localStorage.getItem(TOUR_DONE_KEY) === "1") return;
+    if (config.tourDone || localStorage.getItem(TOUR_DONE_KEY) === "1") return;
     startTour();
-  }, [welcomeActive, startTour]);
+  }, [welcomeActive, startTour, config.tourDone]);
 
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
   const openInRider = useCallback((lo: Loadout) => {

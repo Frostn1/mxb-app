@@ -36,9 +36,12 @@ use tauri::{
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
+/// Whether the app is ready to use. Falls back to auto-detection when the config file
+/// is missing, so the setup screen only appears when the MX Bikes folder genuinely
+/// can't be found — not every time the saved config goes astray.
 #[tauri::command]
 fn is_configured(app: tauri::AppHandle) -> bool {
-    config::exists(&app)
+    config::load_or_detect(&app).is_some()
 }
 
 #[tauri::command]
@@ -52,7 +55,13 @@ fn create_config(
     watcher: State<ModWatcher>,
     config: AppConfig,
 ) -> Result<bool, String> {
-    let cfg = config::finalize(config);
+    let mut cfg = config::finalize(config);
+    // Setup only sends the folders, so carry over first-run state from any config
+    // that's already there — rewriting it would replay the intro and the tour.
+    if let Ok(prev) = config::load(&app) {
+        cfg.welcome_seen |= prev.welcome_seen;
+        cfg.tour_done |= prev.tour_done;
+    }
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
     // Begin watching straight away so a fresh setup doesn't need a restart before
     // manual downloads reload the game.
@@ -1369,6 +1378,39 @@ fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Point the app at a different MX Bikes folder; an empty string re-runs detection.
+/// Only the folder changes — unlike a full `create_config`, the rest of the settings
+/// (startup, tray, FrostMod, first-run state) are left alone.
+#[tauri::command]
+fn set_mods_path(
+    app: tauri::AppHandle,
+    watcher: State<ModWatcher>,
+    path: String,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.mods_path = path;
+    let cfg = config::finalize(cfg);
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    if cfg.watch_mods_reload {
+        modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
+    Ok(())
+}
+
+/// Remember that the intro slideshow / guided tour is done. No-ops before the config
+/// exists — writing one there would leave the app "configured" with no folder set;
+/// the webview flag covers that short window instead.
+#[tauri::command]
+fn set_intro_seen(app: tauri::AppHandle, welcome: bool, tour: bool) -> Result<(), String> {
+    if !config::exists(&app) {
+        return Ok(());
+    }
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.welcome_seen |= welcome;
+    cfg.tour_done |= tour;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Override the PiBoSo `profiles` folder for the split-folder edge case. An empty
 /// string clears the override, falling back to `<mods_path>/profiles`.
 #[tauri::command]
@@ -1791,35 +1833,42 @@ fn main() {
                 .build(app)?;
 
             let handle = app.handle();
-            if config::exists(handle) {
-                if let Ok(mut cfg) = config::load(handle) {
-                    // Auto-detect the MX Bikes install on launch for configs that
-                    // never got one (created before detection existed, or when the
-                    // game wasn't installed yet). Only fills a blank — never overrides
-                    // a manual pick — and persists it so the 3D rider preview works.
-                    if cfg.game_path.trim().is_empty() {
-                        if let Some(gp) = config::detect_game_path() {
-                            log::info!("auto-detected MX Bikes install: {gp}");
-                            cfg.game_path = gp;
-                            let _ = config::save(handle, &cfg);
-                        }
-                    }
-                    let manager = handle.autolaunch();
-                    let enabled = manager.is_enabled().unwrap_or(false);
-                    if cfg.launch_at_startup && !enabled {
-                        let _ = manager.enable();
-                    } else if !cfg.launch_at_startup && enabled {
-                        let _ = manager.disable();
-                    }
-                    if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
-                        let state = handle.state::<FrostmodProcess>();
-                        let _ = frostmod_manage::start(handle, &state);
-                    }
-                    if cfg.watch_mods_reload {
-                        let watcher = handle.state::<ModWatcher>();
-                        modwatch::start(handle, &watcher, &cfg.mods_path);
+            log::info!(
+                "config: {} ({})",
+                config::config_path(handle).display(),
+                if config::exists(handle) { "found" } else { "missing" },
+            );
+            // `load_or_detect` rebuilds a missing/unreadable config from the standard
+            // MX Bikes folder, so a lost config no longer means a trip through setup.
+            if let Some(mut cfg) = config::load_or_detect(handle) {
+                // Auto-detect the MX Bikes install on launch for configs that
+                // never got one (created before detection existed, or when the
+                // game wasn't installed yet). Only fills a blank — never overrides
+                // a manual pick — and persists it so the 3D rider preview works.
+                if cfg.game_path.trim().is_empty() {
+                    if let Some(gp) = config::detect_game_path() {
+                        log::info!("auto-detected MX Bikes install: {gp}");
+                        cfg.game_path = gp;
+                        let _ = config::save(handle, &cfg);
                     }
                 }
+                let manager = handle.autolaunch();
+                let enabled = manager.is_enabled().unwrap_or(false);
+                if cfg.launch_at_startup && !enabled {
+                    let _ = manager.enable();
+                } else if !cfg.launch_at_startup && enabled {
+                    let _ = manager.disable();
+                }
+                if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
+                    let state = handle.state::<FrostmodProcess>();
+                    let _ = frostmod_manage::start(handle, &state);
+                }
+                if cfg.watch_mods_reload {
+                    let watcher = handle.state::<ModWatcher>();
+                    modwatch::start(handle, &watcher, &cfg.mods_path);
+                }
+            } else {
+                log::info!("no MX Bikes folder found — showing first-run setup");
             }
             shop_session::load_session(handle);
             Ok(())
@@ -1868,6 +1917,8 @@ fn main() {
             uninstall_mod,
             reveal_in_explorer,
             set_game_path,
+            set_mods_path,
+            set_intro_seen,
             set_profiles_path,
             detect_game_path,
             count_profiles_in,
