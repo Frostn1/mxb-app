@@ -99,7 +99,30 @@ jobs:
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
           releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
-          releaseBody: "See the assets below to download and install."
+          # Nearly everyone here is on Windows, and the asset list now runs to six
+          # files across three platforms — so lead with the one file most people
+          # want and describe the rest by extension. Extensions don't drift when the
+          # `finalize` job renames the assets, exact filenames would.
+          releaseBody: |
+            ## Which file do I download?
+
+            **Windows — download the `.exe`.** That's the installer, and it's what
+            almost everyone needs. Run it and you're done.
+
+            <details>
+            <summary>macOS and Linux</summary>
+
+            - **macOS (Apple Silicon)** — the `.dmg`.
+            - **Linux** — the `.AppImage` works on any distro: download, `chmod +x`, run
+              it. Prefer your package manager? `.deb` for Debian/Ubuntu, `.rpm` for
+              Fedora. Note MX Bikes itself runs through Proton on Linux.
+
+            </details>
+
+            The `.sig` and `.tar.gz` files are used by the in-app updater — you don't
+            need to download those.
+
+            ---
           # Publish straight away (not a draft) so the updater's `latest.json`
           # endpoint (releases/latest) resolves without a manual publish step.
           releaseDraft: false
