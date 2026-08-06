@@ -9,10 +9,11 @@ import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
 import Settings from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
-import { InstallProvider } from "../../Context/Install";
+import { InstallProvider, type ModTarget } from "../../Context/Install";
 import { useConfig } from "../../Context/Config";
 import {
   DEFAULT_MOD_TYPE,
+  MOD_TYPES,
   getInstalledMods,
   normalizeModName,
   setIntroSeen,
@@ -66,6 +67,17 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     setSelectedCategoryId(categoryId);
   }, []);
 
+  // Jump straight to a mod's detail page from anywhere (the failed-install
+  // banner) — restores the mod type its install targeted, so Browse and the
+  // detail page agree on folders and livery routing.
+  const openModTarget = useCallback(({ slug, subpath, categoryId }: ModTarget) => {
+    const type = MOD_TYPES.find((t) => t.installSubpath === subpath);
+    if (type) setModType(type);
+    setSelectedCategoryId(categoryId ?? type?.categoryId ?? null);
+    setSelectedSlug(slug);
+    setView("browse");
+  }, []);
+
   const changeType = useCallback((t: ModType) => {
     setModType(t);
     setSelectedSlug(null);
@@ -110,7 +122,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
 
   return (
     <TourContext.Provider value={{ startTour }}>
-    <InstallProvider onInstalled={onInstalled}>
+    <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
       <div className="flex min-h-0 flex-1">
         <Sidebar view={view} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
