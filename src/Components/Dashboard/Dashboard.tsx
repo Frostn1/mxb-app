@@ -153,7 +153,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           ) : view === "locker" ? (
             <Locker />
           ) : view === "presets" ? (
-            <Presets onOpenInRider={openInRider} />
+            <Presets onOpenInRider={openInRider} onOpenLocker={() => setView("locker")} />
           ) : view === "rider" ? (
             <RiderStudio initialLoadout={riderPreset} onLoaded={clearRiderPreset} />
           ) : (
