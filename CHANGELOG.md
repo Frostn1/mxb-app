@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-08-06 — v0.6.1 — Rider tab gear slots
 
 ### Fixed
 - **Rider tab: Kit / suit, Gloves and Boot paint no longer come up empty.** Three

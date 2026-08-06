@@ -1996,6 +1996,9 @@ mod viewer_tests {
                 continue;
             }
             eprintln!("=== {bn} ({} bytes)", data.len());
+            if let Ok(dir) = std::env::var("MXB_DUMP_DIR") {
+                std::fs::write(std::path::Path::new(&dir).join(&bn), data).unwrap();
+            }
             let embedded = crate::edf::embedded_textures(data);
             for (i, t) in embedded.iter().enumerate() {
                 eprintln!("   embedded[{i}] {} {}x{}", t.name, t.width, t.height);
