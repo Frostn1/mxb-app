@@ -230,6 +230,15 @@ export function getPkzMeta(path: string): Promise<PkzMeta> {
   return invoke<PkzMeta>("get_pkz_meta", { path });
 }
 
+/**
+ * Metadata for many mods in one call, but only where it's already cached — a `null`
+ * marks an entry that still needs {@link getPkzMeta}. Lets a known library paint
+ * without opening a single archive.
+ */
+export function getPkzMetaCached(paths: string[]): Promise<(PkzMeta | null)[]> {
+  return invoke<(PkzMeta | null)[]>("get_pkz_meta_cached", { paths });
+}
+
 export function getPkzPreview(path: string): Promise<string | null> {
   return invoke<string | null>("get_pkz_preview", { path });
 }

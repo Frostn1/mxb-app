@@ -1,10 +1,12 @@
 use anyhow::{bail, Context, Result};
 use base64::Engine;
+use image::ImageDecoder;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex, Once, OnceLock};
 use tauri::Manager;
 use walkdir::WalkDir;
 
@@ -16,6 +18,70 @@ const THUMB_MAX: u32 = 192;
 
 /// Longest edge of the full-size preview, in pixels.
 const PREVIEW_MAX: u32 = 1100;
+
+/// Ceiling on what a single preview decode may allocate. Track previews are often
+/// uncompressed TGAs, and one oversized file shouldn't be able to claim hundreds of
+/// megabytes just to end up as a 192px thumbnail.
+const MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Widest/tallest preview we'll decode. Anything bigger is a mistake in the mod, not
+/// something a card needs.
+const MAX_DECODE_EDGE: u32 = 8192;
+
+// ===========================================================================
+// Inspection gate
+//
+// Cracking a `.pkz` open is expensive: a seek-heavy read off disk, then a preview
+// image decoded to a full-size bitmap before it's downscaled. The Library renders a
+// card per installed mod and every card asks for its metadata at once, so a large
+// collection would otherwise fan out into hundreds of concurrent blocking tasks —
+// each holding tens of megabytes of decoded pixels and competing for the same disk.
+// That is enough to push the whole machine into swap, not just stall the app.
+//
+// A small permit count keeps the work bounded no matter how many callers pile in.
+// ===========================================================================
+
+struct Gate {
+    free: Mutex<usize>,
+    ready: Condvar,
+}
+
+static INSPECT_GATE: OnceLock<Gate> = OnceLock::new();
+
+fn gate() -> &'static Gate {
+    INSPECT_GATE.get_or_init(|| Gate {
+        // Two to four at a time: enough to keep a disk busy, few enough that the
+        // peak memory of concurrent image decodes stays bounded.
+        free: Mutex::new(
+            std::thread::available_parallelism()
+                .map(|n| n.get().clamp(2, 4))
+                .unwrap_or(2),
+        ),
+        ready: Condvar::new(),
+    })
+}
+
+/// Held for the duration of one archive inspection; releases its slot on drop.
+struct Permit(&'static Gate);
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        // Recover from poisoning rather than propagating it — a panic in one
+        // inspection must not wedge the gate for every later caller.
+        *self.0.free.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        self.0.ready.notify_one();
+    }
+}
+
+fn acquire() -> Permit {
+    let gate = gate();
+    let mut free = gate.free.lock().unwrap_or_else(|e| e.into_inner());
+    while *free == 0 {
+        free = gate.ready.wait(free).unwrap_or_else(|e| e.into_inner());
+    }
+    *free -= 1;
+    Permit(gate)
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,54 +101,120 @@ pub struct PkzMeta {
 struct CacheEntry {
     mtime_ns: u128,
     size: u64,
+    /// File name the entry was built from. Guards the (vanishingly unlikely) case of
+    /// two different mods hashing to the same cache file.
+    #[serde(default)]
+    name: String,
     meta: PkzMeta,
 }
 
-pub fn read_meta_cached(app: &tauri::AppHandle, path: &str) -> Result<PkzMeta> {
-    let file_meta = std::fs::metadata(path).with_context(|| format!("stat {path}"))?;
-    let size = file_meta.len();
-    let mtime_ns = file_meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+/// Identity of a mod file for caching purposes: its name, size and mtime.
+///
+/// Deliberately *not* its full path. Pointing the app at a different MX Bikes folder —
+/// a moved install, a second copy on another drive — used to change every key at once,
+/// so a warm library went cold and re-inspected every archive in one burst. Windows
+/// preserves both timestamps and sizes across a move or copy, so identity survives.
+#[derive(Clone, Copy)]
+struct Stamp {
+    size: u64,
+    mtime_ns: u128,
+}
 
-    let cache_file = cache_path(app, path);
-    if let Some(cf) = &cache_file {
-        if let Ok(bytes) = std::fs::read(cf) {
-            if let Ok(entry) = serde_json::from_slice::<CacheEntry>(&bytes) {
-                if entry.mtime_ns == mtime_ns && entry.size == size {
-                    return Ok(entry.meta);
-                }
-            }
-        }
+fn stamp(path: &str) -> Result<Stamp> {
+    let file_meta = std::fs::metadata(path).with_context(|| format!("stat {path}"))?;
+    Ok(Stamp {
+        size: file_meta.len(),
+        mtime_ns: file_meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    })
+}
+
+fn file_name_of(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+pub fn read_meta_cached(app: &tauri::AppHandle, path: &str) -> Result<PkzMeta> {
+    let stamp = stamp(path)?;
+    let cache_file = cache_path(app, path, stamp);
+    if let Some(meta) = cache_file.as_deref().and_then(|cf| read_cache(cf, path, stamp)) {
+        return Ok(meta);
+    }
+
+    // Only genuine misses queue for the disk + decode work.
+    let _permit = acquire();
+    // Someone ahead of us in the queue may have been inspecting this very file.
+    if let Some(meta) = cache_file.as_deref().and_then(|cf| read_cache(cf, path, stamp)) {
+        return Ok(meta);
     }
 
     let meta = read_meta(Path::new(path))?;
-
     if let Some(cf) = &cache_file {
-        if let Some(parent) = cf.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let entry = CacheEntry {
-            mtime_ns,
-            size,
-            meta: meta.clone(),
-        };
-        if let Ok(bytes) = serde_json::to_vec(&entry) {
-            let _ = std::fs::write(cf, bytes);
-        }
+        write_cache(cf, path, stamp, &meta);
     }
-
     Ok(meta)
 }
 
-fn cache_path(app: &tauri::AppHandle, source: &str) -> Option<PathBuf> {
-    let dir = app.path().app_cache_dir().ok()?.join("pkz-meta");
+/// Metadata for `path` only if it's already cached — never opens the archive.
+///
+/// Lets the Library paint every card it has seen before in one pass, leaving the
+/// gated inspection above for the handful of entries that are genuinely new.
+pub fn read_meta_if_cached(app: &tauri::AppHandle, path: &str) -> Option<PkzMeta> {
+    let stamp = stamp(path).ok()?;
+    let cache_file = cache_path(app, path, stamp)?;
+    read_cache(&cache_file, path, stamp)
+}
+
+fn read_cache(cache_file: &Path, path: &str, stamp: Stamp) -> Option<PkzMeta> {
+    let bytes = std::fs::read(cache_file).ok()?;
+    let entry: CacheEntry = serde_json::from_slice(&bytes).ok()?;
+    let same_file =
+        entry.mtime_ns == stamp.mtime_ns && entry.size == stamp.size && entry.name == file_name_of(path);
+    same_file.then_some(entry.meta)
+}
+
+fn write_cache(cache_file: &Path, path: &str, stamp: Stamp, meta: &PkzMeta) {
+    if let Some(parent) = cache_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let entry = CacheEntry {
+        mtime_ns: stamp.mtime_ns,
+        size: stamp.size,
+        name: file_name_of(path),
+        meta: meta.clone(),
+    };
+    if let Ok(bytes) = serde_json::to_vec(&entry) {
+        let _ = std::fs::write(cache_file, bytes);
+    }
+}
+
+/// Bumped when the key changes shape, so stale entries are ignored rather than
+/// misread. The previous generation was keyed on the absolute path.
+const CACHE_DIR: &str = "pkz-meta-v2";
+
+fn cache_path(app: &tauri::AppHandle, source: &str, stamp: Stamp) -> Option<PathBuf> {
+    let cache_root = app.path().app_cache_dir().ok()?;
+    drop_stale_cache(&cache_root);
+
     let mut hasher = DefaultHasher::new();
-    source.hash(&mut hasher);
-    Some(dir.join(format!("{:016x}.json", hasher.finish())))
+    file_name_of(source).hash(&mut hasher);
+    stamp.size.hash(&mut hasher);
+    stamp.mtime_ns.hash(&mut hasher);
+    Some(cache_root.join(CACHE_DIR).join(format!("{:016x}.json", hasher.finish())))
+}
+
+/// Clear out the path-keyed generation once per run — nothing will ever read it again.
+fn drop_stale_cache(cache_root: &Path) {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let _ = std::fs::remove_dir_all(cache_root.join("pkz-meta"));
+    });
 }
 
 pub fn read_meta(path: &Path) -> Result<PkzMeta> {
@@ -90,6 +222,7 @@ pub fn read_meta(path: &Path) -> Result<PkzMeta> {
 }
 
 pub fn read_preview(path: &Path) -> Result<Option<String>> {
+    let _permit = acquire();
     let (_, image) = inspect(path)?;
     Ok(image.and_then(|(name, bytes)| make_thumbnail(&name, &bytes, PREVIEW_MAX)))
 }
@@ -356,12 +489,27 @@ fn image_score(name: &str) -> i32 {
     score
 }
 
+/// Allocation ceiling applied to every preview decode. Without it a single
+/// mis-authored image can claim far more memory than the thumbnail it produces.
+fn decode_limits() -> image::Limits {
+    let mut limits = image::Limits::no_limits();
+    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    limits.max_image_width = Some(MAX_DECODE_EDGE);
+    limits.max_image_height = Some(MAX_DECODE_EDGE);
+    limits
+}
+
 fn make_thumbnail(name: &str, bytes: &[u8], max: u32) -> Option<String> {
     let img = if name.to_ascii_lowercase().ends_with(".tga") {
-        let dec = image::codecs::tga::TgaDecoder::new(Cursor::new(bytes)).ok()?;
+        let mut dec = image::codecs::tga::TgaDecoder::new(Cursor::new(bytes)).ok()?;
+        dec.set_limits(decode_limits()).ok()?;
         image::DynamicImage::from_decoder(dec).ok()?
     } else {
-        image::load_from_memory(bytes).ok()?
+        let mut reader = image::ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .ok()?;
+        reader.limits(decode_limits());
+        reader.decode().ok()?
     };
 
     // Drop to RGB — JPEG can't hold the alpha a TGA may decode to.
@@ -532,6 +680,81 @@ fn extract_plain(path: &Path, out_dir: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn tmp_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("frost-pkz-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn cached_metadata_survives_the_library_moving() {
+        let dir = tmp_dir("cache-move");
+        let cache_file = dir.join("entry.json");
+        let stamp = Stamp { size: 1234, mtime_ns: 999 };
+        let meta = PkzMeta {
+            name: Some("Red Bud".into()),
+            ..Default::default()
+        };
+        write_cache(&cache_file, "/old/mods/tracks/Red Bud.pkz", stamp, &meta);
+
+        // Same file, different folder: pointing the app at a moved MX Bikes install
+        // must not re-inspect every archive it already knows.
+        let hit = read_cache(&cache_file, "/new/drive/mods/tracks/Red Bud.pkz", stamp);
+        assert_eq!(hit.and_then(|m| m.name).as_deref(), Some("Red Bud"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_replaced_or_different_mod_is_not_a_cache_hit() {
+        let dir = tmp_dir("cache-miss");
+        let cache_file = dir.join("entry.json");
+        let stamp = Stamp { size: 1234, mtime_ns: 999 };
+        write_cache(&cache_file, "/mods/tracks/Red Bud.pkz", stamp, &PkzMeta::default());
+
+        // Updated in place — same name and path, new contents.
+        let resized = Stamp { size: 4321, ..stamp };
+        assert!(read_cache(&cache_file, "/mods/tracks/Red Bud.pkz", resized).is_none());
+        let retouched = Stamp { mtime_ns: 1000, ..stamp };
+        assert!(read_cache(&cache_file, "/mods/tracks/Red Bud.pkz", retouched).is_none());
+        // A different mod that happens to hash to the same cache file.
+        assert!(read_cache(&cache_file, "/mods/tracks/Other.pkz", stamp).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn inspection_gate_bounds_concurrent_reads() {
+        // The Library asks for every card's metadata at once. Letting all of those
+        // open archives and decode previews simultaneously is what locked machines
+        // up, so the gate has to hold regardless of how many callers arrive.
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+
+        let threads: Vec<_> = (0..32)
+            .map(|_| {
+                let (live, peak) = (Arc::clone(&live), Arc::clone(&peak));
+                std::thread::spawn(move || {
+                    let _permit = acquire();
+                    let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    live.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        let peak = peak.load(Ordering::SeqCst);
+        assert!(peak >= 1, "the gate must let work through at all");
+        assert!(peak <= 4, "at most 4 inspections at once, saw {peak}");
+    }
 
     /// `MXB_DUMP_PKZ='…/rider.pkz' cargo test dump_pkz_layout -- --ignored --nocapture`
     #[test]

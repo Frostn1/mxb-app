@@ -345,31 +345,31 @@ fn sort_entries(v: &mut [LibraryEntry]) {
     v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 }
 
+/// Extracted tracks and packaged `.pkz`, in one pass.
+///
+/// An extracted track's folder *is* the mod, so once its markers are found we stop
+/// descending: the interior can hold thousands of files, and any `.pkz` down there
+/// belongs to the track rather than being a mod of its own. Pruning is what keeps a
+/// large tracks folder from being walked twice over and every path compared against
+/// every track found so far.
 fn scan_tracks(dir: &Path) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
-    let mut track_dirs: Vec<PathBuf> = Vec::new();
+    let mut walk = WalkDir::new(dir).into_iter();
 
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-        if !entry.file_type().is_dir() {
-            continue;
-        }
+    loop {
+        let entry = match walk.next() {
+            None => break,
+            Some(Err(_)) => continue,
+            Some(Ok(e)) => e,
+        };
         let p = entry.path();
-        if p == dir || track_dirs.iter().any(|t| p.starts_with(t)) {
-            continue;
-        }
-        if dir_has_track_markers(p) {
-            track_dirs.push(p.to_path_buf());
-            out.push(make_entry(dir, p, "track", None));
-        }
-    }
 
-    // Packaged `.pkz`, skipping any that live inside an extracted-track folder.
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let p = entry.path();
-        if has_ext(p, "pkz") && !track_dirs.iter().any(|t| p.starts_with(t)) {
+        if entry.file_type().is_dir() {
+            if p != dir && dir_has_track_markers(p) {
+                out.push(make_entry(dir, p, "track", None));
+                walk.skip_current_dir();
+            }
+        } else if entry.file_type().is_file() && has_ext(p, "pkz") {
             out.push(make_entry(dir, p, "track", None));
         }
     }
