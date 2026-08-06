@@ -1284,9 +1284,13 @@ fn load_rider_paint(
     sub: &str,
     paint: &str,
 ) -> Option<RiderPart> {
-    if profile.is_empty() || paint.is_empty() {
+    if paint.is_empty() {
         return None;
     }
+    // With no profile picked the body mesh already falls back to the stock rider
+    // (`load_rider_body_nodes`); do the same here so a chosen suit/glove paint still
+    // resolves instead of silently dropping off the preview.
+    let profile = if profile.is_empty() { "default_mx" } else { profile };
     let data = read_paint_file(&base.join("riders").join(profile).join(sub), paint)?;
     let textures: Vec<_> = paint::decode_any(&data).ok()?.iter().map(paint::to_texture).collect();
     if textures.is_empty() {
@@ -1980,6 +1984,48 @@ fn main() {
 
 #[cfg(test)]
 mod viewer_tests {
+    // TEMP DIAGNOSTIC — remove before commit.
+    #[test]
+    #[ignore]
+    fn tmp_dump_pools() {
+        let path = std::env::var("MXB_REAL_PKZ").expect("set MXB_REAL_PKZ");
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("files");
+        for (name, data) in &files {
+            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+            if !bn.ends_with(".edf") {
+                continue;
+            }
+            eprintln!("=== {bn} ({} bytes)", data.len());
+            if let Ok(dir) = std::env::var("MXB_DUMP_DIR") {
+                std::fs::write(std::path::Path::new(&dir).join(&bn), data).unwrap();
+            }
+            let embedded = crate::edf::embedded_textures(data);
+            for (i, t) in embedded.iter().enumerate() {
+                eprintln!("   embedded[{i}] {} {}x{}", t.name, t.width, t.height);
+            }
+            let color: Vec<&crate::edf::EmbeddedTexture> = embedded
+                .iter()
+                .filter(|t| {
+                    let n = t.name.to_ascii_lowercase();
+                    !n.ends_with("_n") && !n.ends_with("_s") && !n.ends_with("_r")
+                })
+                .collect();
+            for (i, t) in color.iter().enumerate() {
+                eprintln!("   color[{i}] {}", t.name);
+            }
+            let nodes = crate::edf::parse_with_levels(data, &[]);
+            for n in &nodes {
+                eprintln!("   node '{}' tex={:?}", n.name, n.texture);
+                for s in &n.submeshes {
+                    eprintln!("      sub '{}' mat={:?} tile={:?}", s.name, s.mat, s.uv_tile);
+                }
+            }
+        }
+        for (name, _) in &files {
+            eprintln!("file: {name}");
+        }
+    }
+
     #[test]
     #[ignore]
     fn bike_model_from_pkz() {

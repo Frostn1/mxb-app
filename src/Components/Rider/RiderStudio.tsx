@@ -85,7 +85,14 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   const load = useCallback(async () => {
     setError(null);
     try {
-      setScans(await loadScans());
+      const sc = await loadScans();
+      setScans(sc);
+      // Kit, gloves and profile goggles are all looked up by rider profile. Presets gets
+      // one for free from the captured loadout; a fresh Rider tab has none, which left
+      // those slots empty. Seed the first installed profile unless one is already set.
+      setLoadout((prev) =>
+        prev.rider || !sc.riderProfiles.length ? prev : { ...prev, rider: sc.riderProfiles[0] },
+      );
     } catch (e) {
       setError(String(e));
     }
