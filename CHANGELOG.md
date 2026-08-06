@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — mod-manager performance, Discord release announcements
+## 2026-08-06 — v0.6.2 — mod-manager performance, Discord release announcements
 
 ### Added
 - **Every tagged release now announces itself in Discord.** A new `notify` job runs after
@@ -16,8 +16,6 @@
   - The webhook is a credential and lives in the `DISCORD_WEBHOOK_URL` Actions secret,
     never in the repo. If it's missing the job warns and passes rather than failing a
     release that already built and published fine.
-
-### Added
 - **`Join the Discord` in Settings → About & updates**, opening the community invite in
   the system browser. The invite is permanent — a link that expires would leave a dead
   button in every already-shipped build.
