@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased — mod-manager performance
+## Unreleased — mod-manager performance, Discord release announcements
+
+### Added
+- **Every tagged release now announces itself in Discord.** A new `notify` job runs after
+  the installers are renamed and posts one embed to the server's release channel: the
+  version and its headline, the changelog section for that version (continuation lines
+  folded back onto their bullets, since the file hard-wraps mid-sentence and Discord
+  renders those breaks literally), and direct Windows / macOS download links pointing at
+  the finished assets. The logic lives in `scripts/notify-discord.sh` rather than inline
+  YAML so it can be run locally against a published release — `--print` dumps the payload
+  without sending — before it ever fires in CI.
+  - Gated to `Frostn1/mxb-app` on a real `v*` tag, so forks stay silent and
+    `workflow_dispatch` test builds don't reach the channel.
+  - The webhook is a credential and lives in the `DISCORD_WEBHOOK_URL` Actions secret,
+    never in the repo. If it's missing the job warns and passes rather than failing a
+    release that already built and published fine.
 
 ### Fixed
 - **A large library no longer locks the machine up on first open, or after changing the

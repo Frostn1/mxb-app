@@ -122,3 +122,25 @@ jobs:
           if [ -f latest.json ]; then
             gh release upload "$TAG" latest.json -R "$REPO" --clobber
           fi
+
+  # Announce the finished release in Discord. Runs after `finalize` so the download links
+  # point at the renamed installers, and only for real tags on the canonical repo — forks
+  # stay silent, and `workflow_dispatch` test builds (throwaway `v<run_number>` tags) don't
+  # spam the channel.
+  notify:
+    needs: finalize
+    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post release announcement to Discord
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # Missing secret is a warning, not a failure — see the script.
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: bash scripts/notify-discord.sh "${{ github.ref_name }}"
