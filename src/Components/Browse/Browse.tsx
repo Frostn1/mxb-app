@@ -281,9 +281,14 @@ export default function Browse({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
         {error ? (
-          <div className="flex flex-col items-center gap-3 py-20 text-center">
-            <p className="text-[13px] text-destructive">
-              Couldn&apos;t load mods: {error}
+          <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
+            <p className="text-[13px] font-semibold text-destructive">
+              Couldn&apos;t load mods
+            </p>
+            {/* The backend now explains blocks in plain words; show that on its own line
+                rather than glued to the heading, and keep it selectable for bug reports. */}
+            <p className="select-text text-[12.5px] leading-relaxed text-muted-foreground">
+              {error.replace(/^Error:\s*/, "")}
             </p>
             <Button variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)}>
               Retry

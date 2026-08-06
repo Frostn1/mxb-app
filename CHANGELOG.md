@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Browse survives mxb-mods.com's bot protection better, and says something useful when
+  it doesn't.** A user hit `403 Forbidden` on every browse and got the raw reqwest text,
+  percent-encoded URL and all. The client claimed to be Chrome while sending none of
+  Chrome's headers — no `Accept-Encoding` at all, since reqwest's `gzip`/`brotli` features
+  weren't enabled — kept no cookies, and was rebuilt from scratch on every call.
+  - One client for the session, with a cookie jar so a `cf_clearance` is replayed rather
+    than arriving cold, and connection reuse so typing in the search box costs one TLS
+    handshake instead of one per keystroke — the traffic shape that invites rate limiting.
+  - The header set Chrome actually sends, a full four-part Chrome version (no browser
+    emits the `Chrome/126.0` form we were using), and gzip/brotli enabled.
+  - 403 / 429 / 503 retry with backoff instead of failing on the first refusal, and each
+    maps to a plain-English message with something to do about it.
+  - A Cloudflare interstitial served as a 200 no longer reads as "No download link was
+    found on this page" — it says the page was intercepted.
+
+  Honest caveat: the 403 is not reproducible from here (the current client gets 200s), so
+  this is a set of well-founded improvements rather than a confirmed cure. The clearer
+  error means the next report will say which of these it is.
+
 ## 2026-08-06 — v0.6.2 — mod-manager performance, Discord release announcements
 
 ### Added
