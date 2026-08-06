@@ -165,7 +165,13 @@ fn write_with_retry(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
 }
 
 /// Download `frostmod.exe` + `frostmod.dll` from the latest release; returns the tag.
+///
+/// Refused off Windows: FrostMod is a Win32 DLL injected into the game, so downloading it
+/// elsewhere just parks two unusable binaries in the app's data dir before `start()` bails.
 pub async fn install(app: &AppHandle) -> anyhow::Result<String> {
+    if cfg!(not(windows)) {
+        anyhow::bail!("FrostMod runs on Windows only");
+    }
     let rel = latest_release().await?;
     let dir = frostmod_dir(app);
     std::fs::create_dir_all(&dir)?;

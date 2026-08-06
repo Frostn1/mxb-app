@@ -1470,6 +1470,17 @@ fn bike_preview_available() -> bool {
     cfg!(sidecar)
 }
 
+/// The OS we're running on — `"windows"`, `"macos"`, `"linux"`.
+///
+/// The frontend used to infer this from `navigator.userAgent`, which can tell a Mac from
+/// everything else and nothing more. Features that only exist on Windows (FrostMod, the
+/// live in-game refresh) need to know the difference between Windows and Linux, so it
+/// comes from the backend rather than adding `plugin-os` and a capability for one string.
+#[tauri::command]
+fn app_platform() -> &'static str {
+    std::env::consts::OS
+}
+
 #[tauri::command]
 fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -1924,7 +1935,12 @@ fn main() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let cfg = config::load(window.app_handle()).unwrap_or_default();
-                if cfg.run_in_background && !cfg!(debug_assertions) {
+                // Never on Linux: the tray runs through libayatana-appindicator, which
+                // doesn't deliver click events to Tauri and isn't present at all on a
+                // stock GNOME desktop. Hiding there can strand the window with no way
+                // back, so closing closes.
+                let tray_can_restore = cfg!(not(target_os = "linux"));
+                if cfg.run_in_background && tray_can_restore && !cfg!(debug_assertions) {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -1935,6 +1951,7 @@ fn main() {
             get_config,
             create_config,
             bike_preview_available,
+            app_platform,
             search_mods,
             get_mod_detail,
             get_installed_mods,

@@ -17,6 +17,7 @@ import {
   setWatchModsReload,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
+import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { useFrostmod } from "../../Context/FrostmodContext";
@@ -43,6 +44,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
 
 export default function Settings() {
   const { config, reloadConfig } = useConfig();
+  const isWindows = usePlatform() === "windows";
   const { theme, setTheme } = useTheme();
   const { running, reload, status, installing, checking, statusError, install, start, refreshStatus } =
     useFrostmod();
@@ -415,7 +417,11 @@ export default function Settings() {
             <div className="h-px bg-border" />
             <ToggleRow
               label="Instant preset refresh"
-              desc="When you apply a preset while MX Bikes is running, refresh the look in-game instantly — no restart or profile reselect. Windows only; if it can't, you'll be told to reselect your profile."
+              desc={
+                isWindows
+                  ? "When you apply a preset while MX Bikes is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile."
+                  : "Refreshing the look in-game without a restart needs FrostMod, which is Windows-only — you'll be told to reselect your profile instead."
+              }
               checked={instantRefresh}
               onChange={toggleInstantRefresh}
             />
@@ -441,7 +447,10 @@ export default function Settings() {
             </div>
           </Section>
 
-          {/* frostmod */}
+          {/* frostmod — a Win32 DLL injected into the game, so it has nothing to do
+              anywhere else. Hidden rather than shown-and-disabled: every control in it
+              would fail, including one that downloads two Windows binaries. */}
+          {isWindows && (
           <Section
             title="FrostMod"
             innerRef={(el) => (refs.current.frostmod = el)}
@@ -555,6 +564,7 @@ export default function Settings() {
               </Button>
             </div>
           </Section>
+          )}
 
           {/* about */}
           <Section title="About & updates" innerRef={(el) => (refs.current.about = el)}>

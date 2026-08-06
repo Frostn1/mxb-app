@@ -34,7 +34,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg"],
+    "targets": ["nsis", "app", "dmg", "appimage", "deb", "rpm"],
+    "category": "Game",
     "createUpdaterArtifacts": true,
     "licenseFile": "../LICENSE",
     "publisher": "Frost",

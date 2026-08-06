@@ -94,7 +94,10 @@ fn looks_like_mods_dir(path: &str) -> bool {
     if path.trim().is_empty() || !dir.is_dir() {
         return false;
     }
-    dir.join("profiles").is_dir() || dir.join("mods").is_dir()
+    // Case-insensitive: under Proton these can come back as `Mods`/`Profiles` on a
+    // case-sensitive filesystem, and an exact match would reject a perfectly good folder.
+    crate::library::resolve_child(dir, "profiles").is_dir()
+        || crate::library::resolve_child(dir, "mods").is_dir()
 }
 
 /// The saved config, or one built on the spot when the MX Bikes folder sits where it
@@ -135,7 +138,13 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
 
 pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     if cfg.mods_path.trim().is_empty() {
-        if let Some(docs) = dirs_next::document_dir() {
+        // On Linux the game runs under Proton and writes into the Wine prefix, not the
+        // user's real Documents — check there first, since `document_dir()` would
+        // otherwise hand back a path MX Bikes has never written to (and often `None`,
+        // because it depends on `~/.config/user-dirs.dirs` existing).
+        if let Some(p) = detect_proton_mods_path() {
+            cfg.mods_path = p;
+        } else if let Some(docs) = dirs_next::document_dir() {
             cfg.mods_path = docs
                 .join("PiBoSo")
                 .join("MX Bikes")
@@ -151,6 +160,36 @@ pub fn finalize(mut cfg: AppConfig) -> AppConfig {
         }
     }
     cfg
+}
+
+/// MX Bikes' Steam AppID — names its Proton prefix under `steamapps/compatdata`.
+const MX_BIKES_APPID: &str = "655500";
+
+/// The MX Bikes user folder inside a Proton prefix.
+///
+/// Under Proton the game is a Windows process, so `Documents` is the prefix's fake
+/// `C:` drive — `compatdata/655500/pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes`
+/// — and nothing is ever written to the user's real `~/Documents`. Without this a Linux
+/// player lands on the setup screen with no working default to accept.
+///
+/// Returns the first prefix that actually looks like a mods dir, so a stale prefix from an
+/// uninstalled copy can't win over a real one.
+fn detect_proton_mods_path() -> Option<String> {
+    if cfg!(not(target_os = "linux")) {
+        return None;
+    }
+    for lib in steam_libraries() {
+        let candidate = lib
+            .join("steamapps")
+            .join("compatdata")
+            .join(MX_BIKES_APPID)
+            .join("pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes");
+        let as_str = candidate.to_string_lossy().into_owned();
+        if looks_like_mods_dir(&as_str) {
+            return Some(as_str);
+        }
+    }
+    None
 }
 
 /// Locate the MX Bikes install folder (the one containing `rider.pkz`) by scanning
@@ -195,7 +234,15 @@ fn steam_libraries() -> Vec<PathBuf> {
         if let Some(home) = dirs_next::home_dir() {
             push(&mut roots, home.join("Library/Application Support/Steam"));
             push(&mut roots, home.join(".steam/steam"));
+            push(&mut roots, home.join(".steam/root"));
             push(&mut roots, home.join(".local/share/Steam"));
+            // Flatpak and snap Steam keep their own home, so the paths above miss them
+            // entirely — which for a Flatpak user means no detection at all.
+            push(
+                &mut roots,
+                home.join(".var/app/com.valvesoftware.Steam/data/Steam"),
+            );
+            push(&mut roots, home.join("snap/steam/common/.local/share/Steam"));
         }
     }
 
@@ -321,5 +368,47 @@ mod tests {
                 "D:\\SteamLibrary".to_string(),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod linux_paths_tests {
+    use super::*;
+
+    /// A Proton prefix laid out the way Steam actually makes one, checked through the
+    /// same `looks_like_mods_dir` gate detection uses. Runs on every OS: the layout is
+    /// what's under test, not the host.
+    #[test]
+    fn recognises_a_proton_prefix_layout() {
+        let root = std::env::temp_dir().join(format!("frost-proton-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mods = root
+            .join("steamapps/compatdata")
+            .join(MX_BIKES_APPID)
+            .join("pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes");
+        std::fs::create_dir_all(mods.join("mods").join("bikes")).unwrap();
+        std::fs::create_dir_all(mods.join("profiles")).unwrap();
+
+        assert!(
+            looks_like_mods_dir(&mods.to_string_lossy()),
+            "the prefix's MX Bikes folder is a valid mods dir"
+        );
+        // And the path the app builds from a library root matches where Steam put it.
+        let built = root
+            .join("steamapps")
+            .join("compatdata")
+            .join(MX_BIKES_APPID)
+            .join("pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes");
+        assert_eq!(built, mods);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn proton_detection_is_linux_only() {
+        // On Windows/macOS the game is native and writes to the real Documents folder,
+        // so the prefix probe must never hijack detection there.
+        if cfg!(not(target_os = "linux")) {
+            assert!(detect_proton_mods_path().is_none());
+        }
     }
 }
