@@ -172,5 +172,4 @@ mod tests {
             r#"{"bikeId":"a\"b\\c","verb":"swap_bike"}"#
         );
     }
-
 }
