@@ -1,12 +1,5 @@
 import { useState } from "react";
-import {
-  Snowflake,
-  Compass,
-  Download,
-  RefreshCw,
-  ArrowLeft,
-  ArrowRight,
-} from "lucide-react";
+import { Snowflake, ArrowLeft, ArrowRight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/Components/ui/button";
 import { cn } from "@/lib/utils";
@@ -22,26 +15,14 @@ interface Slide {
   body: string;
 }
 
+// Just the intro. The per-feature walkthrough (Browse, Library, FrostMod, …) is
+// handled by the in-app guided tour, which runs right after this — so the slides
+// that used to duplicate it were dropped to avoid saying everything twice.
 const SLIDES: Slide[] = [
   {
     icon: Snowflake,
     title: "Welcome to MXB App",
-    body: "Your mod manager for MX Bikes. Keep your tracks, bikes and paints organized in one place — no more zip files scattered across your desktop.",
-  },
-  {
-    icon: Compass,
-    title: "Browse & install",
-    body: "Explore mxb-mods.com right inside the app and install any track, bike or paint with a single click. MXB App unpacks it straight into your MX Bikes folder.",
-  },
-  {
-    icon: Download,
-    title: "One click, done",
-    body: "Downloads, extraction and placement are handled for you — the correct folder structure every time, so mods just work when you launch the game.",
-  },
-  {
-    icon: RefreshCw,
-    title: "FrostMod keeps it live",
-    body: "FrostMod reloads the game after an install, so new content shows up without restarting MX Bikes. Set your MX Bikes folder next and you're ready to ride.",
+    body: "Your mod manager for MX Bikes. Keep your tracks, bikes and paints organized in one place — no more zip files scattered across your desktop. We'll show you around in a few seconds.",
   },
 ];
 
@@ -71,33 +52,41 @@ export default function Welcome({ onDone }: WelcomeProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {SLIDES.map((_, i) => (
-            <span
-              key={i}
-              className={cn(
-                "h-1.5 rounded-full transition-all",
-                i === index ? "w-5 bg-primary" : "w-1.5 bg-foreground/20",
-              )}
-            />
-          ))}
-        </div>
+        {SLIDES.length > 1 && (
+          <div className="flex items-center gap-2">
+            {SLIDES.map((_, i) => (
+              <span
+                key={i}
+                className={cn(
+                  "h-1.5 rounded-full transition-all",
+                  i === index ? "w-5 bg-primary" : "w-1.5 bg-foreground/20",
+                )}
+              />
+            ))}
+          </div>
+        )}
 
-        <div className="flex w-full items-center justify-between gap-3">
-          {index > 0 ? (
-            <Button variant="ghost" onClick={back}>
-              <ArrowLeft /> Back
-            </Button>
-          ) : (
-            <Button variant="ghost" onClick={onDone}>
-              Skip
-            </Button>
-          )}
-          <Button onClick={next}>
-            {isLast ? "Get started" : "Next"}
-            {!isLast && <ArrowRight />}
+        {SLIDES.length === 1 ? (
+          <Button className="w-full" onClick={onDone}>
+            Get started
           </Button>
-        </div>
+        ) : (
+          <div className="flex w-full items-center justify-between gap-3">
+            {index > 0 ? (
+              <Button variant="ghost" onClick={back}>
+                <ArrowLeft /> Back
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={onDone}>
+                Skip
+              </Button>
+            )}
+            <Button onClick={next}>
+              {isLast ? "Get started" : "Next"}
+              {!isLast && <ArrowRight />}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MXB App — one-click mod manager for MX Bikes</title>
+  <meta name="description" content="MXB App is a desktop mod manager for MX Bikes. Search a mod, click Add to Library, and it's downloaded, extracted, and installed for you." />
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="MXB App — one-click mod manager for MX Bikes" />
+  <meta property="og:description" content="Search a mod → Add to Library → done. MXB App downloads, extracts, and drops tracks, bikes and rider gear straight into your game." />
+  <meta property="og:image" content="logo.svg" />
+
+  <style>
+    :root {
+      --window: #0d0f12;
+      --background: #121417;
+      --foreground: #eef2f5;
+      --card: #1a1d22;
+      --popover: #22262c;
+      --primary: #9ccfec;
+      --primary-2: #b7e0f6;
+      --primary-3: #5d8fb0;
+      --primary-foreground: #0d1216;
+      --secondary: #2a2f36;
+      --muted: #1a1d22;
+      --muted-foreground: #8a949c;
+      --faint: #5f6a73;
+      --accent-foreground: #c3e3f7;
+      --success: #7fd6a4;
+      --warning: #e8c07f;
+      --border: rgba(255, 255, 255, 0.08);
+      --radius: 0.7rem;
+      --maxw: 1120px;
+      --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--foreground);
+      background: var(--background);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.55;
+      overflow-x: hidden;
+    }
+    a { color: inherit; text-decoration: none; }
+    img, svg { max-width: 100%; }
+    h1, h2, h3 { line-height: 1.15; margin: 0; letter-spacing: -0.02em; }
+    p { margin: 0; }
+
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+    /* subtle frost glow field */
+    .glow {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background:
+        radial-gradient(60rem 40rem at 78% -8%, rgba(156, 207, 236, 0.14), transparent 60%),
+        radial-gradient(46rem 34rem at 6% 4%, rgba(93, 143, 176, 0.12), transparent 55%);
+    }
+    main, header, footer { position: relative; z-index: 1; }
+
+    /* ---------- Nav ---------- */
+    header.nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: saturate(140%) blur(10px);
+      background: rgba(13, 15, 18, 0.72);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      height: 62px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+    .brand img { width: 26px; height: 26px; }
+    .brand span { letter-spacing: -0.01em; }
+    .nav-links { display: flex; gap: 26px; margin-left: auto; }
+    .nav-links a {
+      color: var(--muted-foreground);
+      font-size: 0.925rem;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+    .nav-links a:hover { color: var(--foreground); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 0.925rem;
+      padding: 9px 16px;
+      border-radius: 0.55rem;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: transform 0.12s, background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: linear-gradient(180deg, var(--primary-2), var(--primary));
+      color: var(--primary-foreground);
+      box-shadow: 0 6px 22px rgba(156, 207, 236, 0.22);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--foreground);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover { background: rgba(255, 255, 255, 0.04); }
+    .nav .btn { margin-left: 6px; }
+    .nav-links + .btn { margin-left: 0; }
+
+    /* ---------- Hero ---------- */
+    .hero { padding: 84px 0 40px; }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 1fr;
+      gap: 56px;
+      align-items: center;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent-foreground);
+      background: rgba(156, 207, 236, 0.1);
+      border: 1px solid rgba(156, 207, 236, 0.22);
+      padding: 5px 12px;
+      border-radius: 999px;
+      margin-bottom: 22px;
+    }
+    .hero h1 {
+      font-size: clamp(2.3rem, 5vw, 3.5rem);
+      font-weight: 800;
+    }
+    .hero h1 .grad {
+      background: linear-gradient(120deg, var(--primary-2), var(--primary), var(--primary-3));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero p.sub {
+      margin-top: 20px;
+      font-size: 1.14rem;
+      color: var(--muted-foreground);
+      max-width: 34ch;
+    }
+    .flow {
+      margin-top: 22px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      color: var(--accent-foreground);
+    }
+    .flow .pill {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 0.5rem;
+    }
+    .flow .arrow { color: var(--faint); }
+    .cta-row { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 12px; }
+    .cta-note { margin-top: 14px; font-size: 0.85rem; color: var(--faint); }
+
+    /* ---------- App mockup ---------- */
+    .mock {
+      background: var(--window);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(156, 207, 236, 0.06);
+      transform: perspective(1400px) rotateY(-7deg) rotateX(2deg);
+      transform-origin: center;
+    }
+    .mock .titlebar {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 13px;
+      background: var(--window);
+      border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot.r { background: #e88f8f; }
+    .dot.y { background: #e8c07f; }
+    .dot.g { background: #7fd6a4; }
+    .mock .body { display: grid; grid-template-columns: 148px 1fr; min-height: 340px; }
+    .mock .side {
+      background: var(--window);
+      border-right: 1px solid var(--border);
+      padding: 12px 10px;
+    }
+    .side .side-brand {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 0.78rem; font-weight: 700; padding: 4px 8px 12px;
+    }
+    .side .side-brand img { width: 16px; height: 16px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 0.82rem; color: var(--muted-foreground);
+      padding: 8px 10px; border-radius: 0.5rem; margin-bottom: 2px;
+    }
+    .nav-item svg { width: 15px; height: 15px; opacity: 0.85; }
+    .nav-item.active {
+      color: var(--accent-foreground);
+      background: rgba(156, 207, 236, 0.12);
+    }
+    .nav-item.foot { margin-top: auto; }
+    .mock .side { display: flex; flex-direction: column; }
+    .mock .content { padding: 15px 16px; background: var(--background); }
+    .content .chead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+    .content .chead h4 { font-size: 0.98rem; font-weight: 700; }
+    .searchbar {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.78rem; color: var(--faint);
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 0.5rem; padding: 7px 10px; margin-bottom: 14px;
+    }
+    .searchbar svg { width: 14px; height: 14px; }
+    .card-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
+    .modcard { background: var(--card); border: 1px solid var(--border); border-radius: 0.55rem; overflow: hidden; }
+    .modcard .thumb {
+      height: 56px;
+      background: linear-gradient(135deg, rgba(156,207,236,0.20), rgba(93,143,176,0.10));
+      border-bottom: 1px solid var(--border);
+    }
+    .modcard:nth-child(2) .thumb { background: linear-gradient(135deg, rgba(127,214,164,0.18), rgba(93,143,176,0.10)); }
+    .modcard:nth-child(3) .thumb { background: linear-gradient(135deg, rgba(232,192,127,0.16), rgba(93,143,176,0.10)); }
+    .modcard:nth-child(4) .thumb { background: linear-gradient(135deg, rgba(183,224,246,0.20), rgba(45,60,72,0.30)); }
+    .modcard:nth-child(5) .thumb { background: linear-gradient(135deg, rgba(156,207,236,0.14), rgba(127,214,164,0.12)); }
+    .modcard:nth-child(6) .thumb { background: linear-gradient(135deg, rgba(232,143,143,0.14), rgba(93,143,176,0.10)); }
+    .modcard .meta { padding: 8px 9px; }
+    .modcard .t { font-size: 0.72rem; font-weight: 600; }
+    .modcard .s { font-size: 0.64rem; color: var(--faint); margin-top: 3px; }
+    .modcard .add {
+      margin-top: 7px; font-size: 0.62rem; font-weight: 700;
+      color: var(--primary-foreground);
+      background: linear-gradient(180deg, var(--primary-2), var(--primary));
+      border-radius: 0.35rem; padding: 4px 0; text-align: center;
+    }
+
+    /* ---------- Sections ---------- */
+    section { padding: 68px 0; }
+    .section-head { max-width: 640px; margin: 0 auto 44px; text-align: center; }
+    .section-head .kicker {
+      font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--primary);
+    }
+    .section-head h2 { font-size: clamp(1.7rem, 3.4vw, 2.3rem); margin-top: 10px; }
+    .section-head p { margin-top: 12px; color: var(--muted-foreground); font-size: 1.05rem; }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+    .feature {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .feature:hover { transform: translateY(-3px); border-color: rgba(156, 207, 236, 0.3); }
+    .feature .ic {
+      width: 42px; height: 42px; border-radius: 0.6rem;
+      display: grid; place-items: center; margin-bottom: 15px;
+      background: rgba(156, 207, 236, 0.12);
+      border: 1px solid rgba(156, 207, 236, 0.22);
+      color: var(--primary);
+    }
+    .feature .ic svg { width: 21px; height: 21px; }
+    .feature h3 { font-size: 1.06rem; }
+    .feature p { margin-top: 8px; color: var(--muted-foreground); font-size: 0.94rem; }
+
+    /* how it works */
+    #how { background: linear-gradient(180deg, transparent, rgba(156,207,236,0.03), transparent); }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .step { text-align: center; padding: 10px; }
+    .step .num {
+      width: 46px; height: 46px; margin: 0 auto 16px;
+      display: grid; place-items: center; border-radius: 50%;
+      font-weight: 800; font-size: 1.1rem;
+      color: var(--primary-foreground);
+      background: linear-gradient(180deg, var(--primary-2), var(--primary));
+    }
+    .step h3 { font-size: 1.08rem; }
+    .step p { margin-top: 8px; color: var(--muted-foreground); font-size: 0.94rem; }
+
+    /* download */
+    .dl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; max-width: 780px; margin: 0 auto; }
+    .platform {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px; text-align: center;
+    }
+    .platform .os { display: flex; align-items: center; justify-content: center; gap: 9px; font-weight: 700; font-size: 1.1rem; }
+    .platform .os svg { width: 20px; height: 20px; color: var(--primary); }
+    .platform .kind { margin-top: 6px; color: var(--muted-foreground); font-size: 0.9rem; }
+    .platform .badge {
+      display: inline-block; margin-top: 12px; font-size: 0.72rem; font-weight: 700;
+      color: var(--success); background: rgba(127,214,164,0.1);
+      border: 1px solid rgba(127,214,164,0.25); border-radius: 999px; padding: 3px 11px;
+    }
+    .platform .badge.alt { color: var(--warning); background: rgba(232,192,127,0.1); border-color: rgba(232,192,127,0.25); }
+    .platform .btn { margin-top: 18px; width: 100%; justify-content: center; }
+    .warn-note {
+      max-width: 780px; margin: 22px auto 0; text-align: center;
+      font-size: 0.88rem; color: var(--muted-foreground);
+      background: rgba(232,192,127,0.06); border: 1px solid rgba(232,192,127,0.18);
+      border-radius: var(--radius); padding: 14px 18px;
+    }
+    .warn-note code { font-family: var(--mono); color: var(--accent-foreground); }
+
+    /* FAQ */
+    .faq { max-width: 780px; margin: 0 auto; display: grid; gap: 12px; }
+    details.qa {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 4px 20px;
+    }
+    details.qa summary {
+      cursor: pointer; list-style: none; padding: 16px 0;
+      font-weight: 600; font-size: 1rem; display: flex;
+      align-items: center; justify-content: space-between; gap: 12px;
+    }
+    details.qa summary::-webkit-details-marker { display: none; }
+    details.qa summary .chev { transition: transform 0.2s; color: var(--faint); flex: none; }
+    details.qa[open] summary .chev { transform: rotate(180deg); }
+    details.qa p { padding: 0 0 18px; color: var(--muted-foreground); font-size: 0.95rem; }
+    details.qa a { color: var(--accent-foreground); text-decoration: underline; text-underline-offset: 2px; }
+
+    /* final CTA */
+    .final {
+      text-align: center;
+      background: linear-gradient(180deg, rgba(156,207,236,0.08), rgba(156,207,236,0.02));
+      border: 1px solid rgba(156,207,236,0.16);
+      border-radius: 1.1rem; padding: 54px 28px; margin: 0 24px;
+    }
+    .final h2 { font-size: clamp(1.7rem, 3.4vw, 2.3rem); }
+    .final p { margin-top: 12px; color: var(--muted-foreground); }
+    .final .cta-row { justify-content: center; }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      margin-top: 72px;
+      padding: 34px 0;
+      color: var(--faint);
+      font-size: 0.88rem;
+    }
+    .foot-inner { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+    .foot-inner .brand { color: var(--foreground); }
+    .foot-links { margin-left: auto; display: flex; gap: 22px; }
+    .foot-links a:hover { color: var(--foreground); }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+      .hero p.sub { max-width: none; }
+      .mock { transform: none; }
+      .features { grid-template-columns: repeat(2, 1fr); }
+      .steps { grid-template-columns: 1fr; gap: 30px; }
+    }
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .hero { padding: 56px 0 30px; }
+      .features { grid-template-columns: 1fr; }
+      .dl-grid { grid-template-columns: 1fr; }
+      .card-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .btn:hover, .feature:hover { transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+
+  <!-- ===== Nav ===== -->
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top">
+        <img src="logo.svg" alt="" />
+        <span>MXB App</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#download">Download</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a class="btn btn-ghost" href="https://github.com/Frostn1/mxb-app" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/Frostn1/mxb-app/releases">Download</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ===== Hero ===== -->
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div>
+          <span class="eyebrow">🏍️ Desktop mod manager for MX Bikes</span>
+          <h1>Install MX Bikes mods in <span class="grad">one click.</span></h1>
+          <p class="sub">
+            No more mxb-mods → MediaFire → unzip → hunt for the right folder.
+            MXB App does the whole dance for you.
+          </p>
+          <div class="flow">
+            <span class="pill">Search a mod</span>
+            <span class="arrow">→</span>
+            <span class="pill">Add to Library</span>
+            <span class="arrow">→</span>
+            <span class="pill">Done</span>
+          </div>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/Frostn1/mxb-app/releases">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download for Windows
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/Frostn1/mxb-app" target="_blank" rel="noopener">View on GitHub</a>
+          </div>
+          <p class="cta-note">Free &amp; open source · Windows x64 · macOS (Apple Silicon)</p>
+        </div>
+
+        <!-- App mockup -->
+        <div class="mock" role="img" aria-label="MXB App browsing the mod catalog">
+          <div class="titlebar">
+            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+          </div>
+          <div class="body">
+            <aside class="side">
+              <div class="side-brand"><img src="logo.svg" alt="" />MXB App</div>
+              <div class="nav-item active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Browse
+              </div>
+              <div class="nav-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                Library
+              </div>
+              <div class="nav-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Locker
+              </div>
+              <div class="nav-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                Presets
+              </div>
+              <div class="nav-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                Rider
+              </div>
+              <div class="nav-item foot">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Settings
+              </div>
+            </aside>
+            <div class="content">
+              <div class="chead"><h4>Browse</h4></div>
+              <div class="searchbar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Search tracks…
+              </div>
+              <div class="card-grid">
+                <div class="modcard"><div class="thumb"></div><div class="meta"><div class="t">Alpine SX</div><div class="s">Supercross</div><div class="add">Add to Library</div></div></div>
+                <div class="modcard"><div class="thumb"></div><div class="meta"><div class="t">Sand Dunes</div><div class="s">Motocross</div><div class="add">Add to Library</div></div></div>
+                <div class="modcard"><div class="thumb"></div><div class="meta"><div class="t">Riverbed MX</div><div class="s">Enduro</div><div class="add">Add to Library</div></div></div>
+                <div class="modcard"><div class="thumb"></div><div class="meta"><div class="t">Night Arena</div><div class="s">Supercross</div><div class="add">Add to Library</div></div></div>
+                <div class="modcard"><div class="thumb"></div><div class="meta"><div class="t">Pine Ridge</div><div class="s">Motocross</div><div class="add">Add to Library</div></div></div>
+                <div class="modcard"><div class="thumb"></div><div class="meta"><div class="t">Clay County</div><div class="s">Motocross</div><div class="add">Add to Library</div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Features ===== -->
+    <section id="features">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="kicker">Features</div>
+          <h2>Everything your MX Bikes garage needs</h2>
+          <p>From finding a track to swapping engine sounds — managed from one window.</p>
+        </div>
+        <div class="features">
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <h3>One-click install</h3>
+            <p>Add to Library and MXB App downloads the mod, extracts it, and drops the files straight into the right <code>mods</code> folder — tracks, bikes or rider.</p>
+          </div>
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
+            <h3>Browse the catalog</h3>
+            <p>Search and preview the full mxb-mods.com catalog — listings, images and galleries — without leaving the app.</p>
+          </div>
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg></div>
+            <h3>Library management</h3>
+            <p>See everything you've installed at a glance. Multi-select to uninstall, move, or organize many mods into folders at once.</p>
+          </div>
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+            <h3>Locker: models &amp; sounds</h3>
+            <p>Swap each bike's model or engine sound in and out with a click. Park variants and switch whenever you like.</p>
+          </div>
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></div>
+            <h3>Editable presets</h3>
+            <p>Save combinations of gear and settings as presets, then rename or re-tune any slot later — no need to rebuild from scratch.</p>
+          </div>
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
+            <h3>3D rider preview</h3>
+            <p>See your rider and gear rendered in 3D right inside the app, so you know exactly how a setup looks before you ride.</p>
+          </div>
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+            <h3>Multi-host downloads</h3>
+            <p>MediaFire, Google Drive (including Drive folders) and MEGA links are resolved automatically, so you rarely touch a browser again.</p>
+          </div>
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+            <h3>Safe by design</h3>
+            <p>Uninstalls go to the Recycle Bin and applying a preset keeps a byte-for-byte backup — nothing is destroyed behind your back.</p>
+          </div>
+          <div class="feature">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg></div>
+            <h3>Guided onboarding</h3>
+            <p>A first-run tour walks you through every screen, and a help hint on each one explains what it does — so you're never lost.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== How it works ===== -->
+    <section id="how">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="kicker">How it works</div>
+          <h2>Three steps, zero file-wrangling</h2>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <div class="num">1</div>
+            <h3>Find a mod</h3>
+            <p>Search the mxb-mods.com catalog inside the app and open the mod's page.</p>
+          </div>
+          <div class="step">
+            <div class="num">2</div>
+            <h3>Add to Library</h3>
+            <p>One click. MXB App downloads from the host and extracts the archive for you.</p>
+          </div>
+          <div class="step">
+            <div class="num">3</div>
+            <h3>Ride</h3>
+            <p>The mod lands in the matching MX Bikes <code>mods</code> folder, ready to load.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Download ===== -->
+    <section id="download">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="kicker">Download</div>
+          <h2>Get MXB App</h2>
+          <p>Grab the latest installer from the Releases page. Free and open source — after that, the app updates itself.</p>
+        </div>
+        <div class="dl-grid">
+          <div class="platform">
+            <div class="os">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.1 10.5 4v7.5H3zM10.5 12.5V20L3 18.9v-6.4zM11.5 3.85 21 2.5v9H11.5zM21 12.5v9l-9.5-1.35V12.5z"/></svg>
+              Windows x64
+            </div>
+            <div class="kind"><code>.exe</code> installer</div>
+            <div class="badge">Recommended · MX Bikes runs on Windows</div>
+            <a class="btn btn-primary" href="https://github.com/Frostn1/mxb-app/releases">Download for Windows</a>
+          </div>
+          <div class="platform">
+            <div class="os">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.4 12.9c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.5-.2-2.8.8-3.5.8s-1.9-.8-3-.8c-1.6 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7 2-1.1 2.8-2.2c.9-1.3 1.2-2.5 1.3-2.6-.1 0-2.5-1-2.5-3.8zM14 6.3c.6-.8 1-1.9.9-3-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-.9 2.8 1 .1 2-.5 2.7-1.2z"/></svg>
+              macOS
+            </div>
+            <div class="kind"><code>.dmg</code> · Apple Silicon</div>
+            <div class="badge alt">For working on the download/extract UI</div>
+            <a class="btn btn-ghost" href="https://github.com/Frostn1/mxb-app/releases">Download for macOS</a>
+          </div>
+        </div>
+        <div class="warn-note">
+          Builds are unsigned, so Windows SmartScreen / macOS Gatekeeper will warn on
+          first launch — choose <code>Run anyway</code> (Windows) or right-click →
+          <code>Open</code> (macOS). This is expected for indie apps.
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== FAQ ===== -->
+    <section id="faq">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="kicker">FAQ</div>
+          <h2>Good to know</h2>
+        </div>
+        <div class="faq">
+          <details class="qa" open>
+            <summary>Which mods are supported?<svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></summary>
+            <p>Tracks, bikes and rider gear are all supported — search, install, and manage them end to end. Bike model and sound swaps are handled in the Locker. More mod types are planned.</p>
+          </details>
+          <details class="qa">
+            <summary>Which download hosts work?<svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></summary>
+            <p>MediaFire, Google Drive (including Drive folders) and MEGA are resolved automatically, and direct links are downloaded as-is. The one exception is a MEGA <em>folder</em> link — open the mod page to grab that one manually.</p>
+          </details>
+          <details class="qa">
+            <summary>What archive types can it extract?<svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></summary>
+            <p><code>.zip</code>, <code>.7z</code> and <code>.rar</code> are extracted natively, and already-packaged <code>.pkz</code> / <code>.pnt</code> files are placed as-is.</p>
+          </details>
+          <details class="qa">
+            <summary>Do I need Windows?<svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></summary>
+            <p>To install mods into a real game, yes — MX Bikes is Windows-only. A macOS (Apple Silicon) build exists mainly for working on the app itself.</p>
+          </details>
+          <details class="qa">
+            <summary>Is it free and open source?<svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></summary>
+            <p>Yes. MXB App is free and MIT-licensed. The source lives on <a href="https://github.com/Frostn1/mxb-app" target="_blank" rel="noopener">GitHub</a>, where you can also file issues and follow releases.</p>
+          </details>
+          <details class="qa">
+            <summary>Is it affiliated with MX Bikes or mxb-mods?<svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></summary>
+            <p>No. MXB App is an independent community tool. MX Bikes and mxb-mods.com are the property of their respective owners.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Final CTA ===== -->
+    <section style="padding-top: 0;">
+      <div class="final">
+        <h2>Stop wrangling files. Start riding.</h2>
+        <p>Install MXB App and add your next track in one click.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/Frostn1/mxb-app/releases">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download now
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/Frostn1/mxb-app" target="_blank" rel="noopener">Star on GitHub</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== Footer ===== -->
+  <footer>
+    <div class="wrap foot-inner">
+      <a class="brand" href="#top"><img src="logo.svg" alt="" width="22" height="22" />MXB App</a>
+      <span>· MIT licensed · Not affiliated with MX Bikes</span>
+      <div class="foot-links">
+        <a href="https://github.com/Frostn1/mxb-app" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Frostn1/mxb-app/releases">Releases</a>
+        <a href="https://mxb-mods.com" target="_blank" rel="noopener">mxb-mods.com</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

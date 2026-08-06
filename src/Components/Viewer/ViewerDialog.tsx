@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Box, Loader2 } from "lucide-react";
-import { Dialog, DialogContent } from "../ui/dialog";
+import { Box, Loader2, X } from "lucide-react";
+import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
 import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import {
   unpackPaint,
@@ -215,7 +215,12 @@ export function ViewerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[85vh] w-[92vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+      {/* The close button lives in the header row (below) so it lines up with the
+          paint pickers instead of floating over them at a fixed offset. */}
+      <DialogContent
+        showClose={false}
+        className="flex h-[85vh] w-[92vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+      >
         <div className="flex flex-none items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <Box className="h-4 w-4 flex-none text-muted-foreground" />
@@ -254,6 +259,10 @@ export function ViewerDialog({
                 </select>
               </label>
             )}
+            <DialogClose className="rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
+              <X className="size-4" />
+              <span className="sr-only">Close</span>
+            </DialogClose>
           </div>
         </div>
 
@@ -271,7 +280,7 @@ export function ViewerDialog({
           {stockGearPart && gear && !loading && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
               <span className="rounded-md bg-black/70 px-3 py-1.5 text-center text-xs text-white/90">
-                Shown on the game's stock {stockGearPart}. A paint made for a different
+                Shown on the game&apos;s stock {stockGearPart}. A paint made for a different
                 model may not line up perfectly.
               </span>
             </div>
@@ -279,17 +288,19 @@ export function ViewerDialog({
           {paintNoChange && !loading && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
               <span className="rounded-md bg-black/70 px-3 py-1.5 text-center text-xs text-white/90">
-                None of this paint's textures are used by the parts shown here, so the
-                preview doesn't change. It may still paint the wheels or chain, which
-                this view doesn't render.
+                None of this paint&apos;s textures are used by the parts shown here, so the
+                preview doesn&apos;t change. It may still paint the wheels or chain, which
+                this view doesn&apos;t render.
               </span>
             </div>
           )}
           {bikeFailed && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
-              <span className="text-sm font-medium text-foreground">Can't load bike model</span>
+              <span className="text-sm font-medium text-foreground">
+                Can&apos;t load bike model
+              </span>
               <span className="text-xs text-muted-foreground">
-                This bike's 3D model isn't in a format the viewer supports yet.
+                This bike&apos;s 3D model isn&apos;t in a format the viewer supports yet.
               </span>
             </div>
           )}

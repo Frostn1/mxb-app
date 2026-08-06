@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Center, ContactShadows } from "@react-three/drei";
+import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
+import { cn } from "@/lib/utils";
 import type { EdfNode, PaintTexture, RiderPart } from "../../types";
 import { ErrorBoundary } from "../ErrorBoundary";
 
@@ -722,6 +724,26 @@ function CameraRig({ solo }: { solo: boolean }) {
   return null;
 }
 
+// Legend for the OrbitControls gestures below — the canvas gives no other clue
+// that it's draggable. Kept muted so it reads as chrome, never competing with the model.
+function ControlsHint() {
+  const items = [
+    { Icon: Rotate3d, label: "Drag to rotate" },
+    { Icon: ZoomIn, label: "Scroll to zoom" },
+    { Icon: Move, label: "Right-drag to pan" },
+  ];
+  return (
+    <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45">
+      {items.map(({ Icon, label }) => (
+        <span key={label} className="flex items-center gap-1">
+          <Icon className="h-3.5 w-3.5" />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export interface ModelViewerProps {
   mode: ViewerMode;
   texture?: string | null;
@@ -751,67 +773,70 @@ export function ModelViewer({
   const gearSolo =
     hasRider && !riderParts!.some((p) => p.part === "body" && p.nodes.length);
   return (
-    <ErrorBoundary compact label="model-viewer">
-      <Canvas
-        className={className}
-        shadows
-        dpr={[1, 2]}
-        camera={{ position: [2.6, 1.8, 3.2], fov: 42 }}
-        onCreated={({ gl }) => {
-          // A lost GPU context otherwise leaves a black canvas; preventDefault lets the browser restore it.
-          gl.domElement.addEventListener(
-            "webglcontextlost",
-            (e) => {
-              e.preventDefault();
-              console.warn("[ModelViewer] WebGL context lost — awaiting restore");
-            },
-            false,
-          );
-        }}
-      >
-        <color attach="background" args={["#0e0f13"]} />
-        <CameraRig solo={gearSolo} />
-        <ambientLight intensity={0.75} />
-        {/* Even sky/ground fill so matte paint reads its true colour. */}
-        <hemisphereLight args={[0xffffff, 0x555a66, 0.7]} />
-        <directionalLight
-          position={[4, 6, 3]}
-          intensity={1.25}
-          castShadow
-          shadow-mapSize={[1024, 1024]}
-        />
-        <directionalLight position={[-4, 2, -3]} intensity={0.55} />
-        {/* Front fill from the camera side so the front of the kit isn't in shadow. */}
-        <directionalLight position={[0, 1.5, 5]} intensity={0.5} />
-        <Center>
-          {hasReal ? (
-            <EdfMesh nodes={nodes!} textures={texMap} />
-          ) : hasRider ? (
-            <RiderComposite parts={riderParts!} />
-          ) : loading || noStandIn ? null : mode === "bike" ? (
-            <BikeStandIn map={map} />
-          ) : (
-            <RiderBody suit={map} gloves={null} showHead />
-          )}
-        </Center>
-        <ContactShadows
-          position={[0, -0.01, 0]}
-          opacity={0.5}
-          scale={8}
-          blur={2.4}
-          far={4}
-        />
-        <OrbitControls
-          makeDefault
-          enablePan
-          screenSpacePanning
-          zoomToCursor
-          panSpeed={0.9}
-          minDistance={0.4}
-          maxDistance={20}
-          target={[0, 0, 0]}
-        />
-      </Canvas>
-    </ErrorBoundary>
+    <div className={cn("relative", className)}>
+      <ErrorBoundary compact label="model-viewer">
+        <Canvas
+          className="h-full w-full"
+          shadows
+          dpr={[1, 2]}
+          camera={{ position: [2.6, 1.8, 3.2], fov: 42 }}
+          onCreated={({ gl }) => {
+            // A lost GPU context otherwise leaves a black canvas; preventDefault lets the browser restore it.
+            gl.domElement.addEventListener(
+              "webglcontextlost",
+              (e) => {
+                e.preventDefault();
+                console.warn("[ModelViewer] WebGL context lost — awaiting restore");
+              },
+              false,
+            );
+          }}
+        >
+          <color attach="background" args={["#0e0f13"]} />
+          <CameraRig solo={gearSolo} />
+          <ambientLight intensity={0.75} />
+          {/* Even sky/ground fill so matte paint reads its true colour. */}
+          <hemisphereLight args={[0xffffff, 0x555a66, 0.7]} />
+          <directionalLight
+            position={[4, 6, 3]}
+            intensity={1.25}
+            castShadow
+            shadow-mapSize={[1024, 1024]}
+          />
+          <directionalLight position={[-4, 2, -3]} intensity={0.55} />
+          {/* Front fill from the camera side so the front of the kit isn't in shadow. */}
+          <directionalLight position={[0, 1.5, 5]} intensity={0.5} />
+          <Center>
+            {hasReal ? (
+              <EdfMesh nodes={nodes!} textures={texMap} />
+            ) : hasRider ? (
+              <RiderComposite parts={riderParts!} />
+            ) : loading || noStandIn ? null : mode === "bike" ? (
+              <BikeStandIn map={map} />
+            ) : (
+              <RiderBody suit={map} gloves={null} showHead />
+            )}
+          </Center>
+          <ContactShadows
+            position={[0, -0.01, 0]}
+            opacity={0.5}
+            scale={8}
+            blur={2.4}
+            far={4}
+          />
+          <OrbitControls
+            makeDefault
+            enablePan
+            screenSpacePanning
+            zoomToCursor
+            panSpeed={0.9}
+            minDistance={0.4}
+            maxDistance={20}
+            target={[0, 0, 0]}
+          />
+        </Canvas>
+      </ErrorBoundary>
+      {!loading && <ControlsHint />}
+    </div>
   );
 }

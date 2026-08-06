@@ -87,6 +87,13 @@ pub fn hrc_level0(cfg: &CfgNode, stem: &str) -> Option<String> {
     Some(lvl.get("name").unwrap_or(stem).to_string())
 }
 
+/// The `.edf` a part's `.hrc` names in `level0 { scene = … }`. Most bikes point every
+/// part at one shared `model.edf`, but a mod may ship a separate mesh per part
+/// (`96cr250.edf`, `96cr250_fs.edf`, …) — this is how the game resolves which is which.
+pub fn hrc_level0_scene(cfg: &CfgNode) -> Option<String> {
+    cfg.block("level0")?.get("scene").map(str::to_string)
+}
+
 pub fn hrc_all_levels(cfg: &CfgNode, stem: &str) -> Vec<String> {
     let mut out = Vec::new();
     for (name, blk) in &cfg.blocks {
@@ -330,5 +337,37 @@ level1
     fn missing_level0_reads_as_none() {
         let c = parse(b"level1\n{\nname = chassisb\n}\n");
         assert_eq!(hrc_level0(&c, "chassis"), None);
+    }
+
+    /// The real `chassis.hrc` from MX1OEM_1996_Honda_CR250 — a bike that ships one mesh
+    /// per part instead of the usual shared `model.edf`.
+    const CR250_CHASSIS_HRC: &[u8] = br#"level0
+{
+	scene = 96cr250.edf
+	switch = 0
+}"#;
+
+    #[test]
+    fn hrc_level0_scene_names_the_part_mesh() {
+        // Shared-mesh bikes: every part points at the same file.
+        assert_eq!(
+            hrc_level0_scene(&parse(HONDA_CHASSIS_HRC)).as_deref(),
+            Some("model.edf"),
+        );
+        assert_eq!(
+            hrc_level0_scene(&parse(HONDA_FSUSP_HRC)).as_deref(),
+            Some("model.edf"),
+        );
+        // Per-part meshes: the chassis lives in its own file.
+        assert_eq!(
+            hrc_level0_scene(&parse(CR250_CHASSIS_HRC)).as_deref(),
+            Some("96cr250.edf"),
+        );
+    }
+
+    #[test]
+    fn hrc_level0_scene_is_none_without_a_scene() {
+        assert_eq!(hrc_level0_scene(&parse(b"level0\n{\nswitch = 0\n}\n")), None);
+        assert_eq!(hrc_level0_scene(&parse(b"level1\n{\nscene = a.edf\n}\n")), None);
     }
 }

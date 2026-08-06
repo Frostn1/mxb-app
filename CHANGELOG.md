@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-07-23 — in-garage bike switch (groundwork)
+## Unreleased
 
 ### Added
 - **Garage bike-switch — cross-platform groundwork.** First slice of letting a player
@@ -17,6 +17,193 @@
     the game's bike-load calls to confirm the loader offset before any live swap.
   - Online swapping is intentionally **out of scope** — the server is authoritative and
     anti-cheat validates client integrity on join; this is offline/local only.
+- **CI verification on every push and PR** (`.github/workflows/ci.yml`) — nothing checked
+  a change before it landed: `release.yml` only runs on a version tag and `pages.yml` only
+  deploys the site. Two jobs now run on pushes to `main` and on every PR: frontend
+  (`npm ci` → typecheck → lint → build) and Rust (`cargo test --locked`) on both Linux and
+  Windows, since Windows is what ships. Tests needing a real MX Bikes asset stay
+  `#[ignore]`d. Verified the sidecar-less public variant — what CI actually builds —
+  compiles and passes (108 tests). No `cargo fmt --check` gate yet: the tree has never
+  been rustfmt'd, so that wants its own dedicated commit.
+
+### Changed
+- **ESLint actually runs clean now** — the config reported 85 errors, 72 of them
+  `react/no-unknown-property` firing on react-three-fiber's three.js JSX in
+  `ModelViewer.tsx` (typed by `@react-three/fiber`, so `tsc` is the real check) and one
+  from a rule that was never registered. Added `eslint-plugin-react-hooks`
+  (`rules-of-hooks` as an error, `exhaustive-deps` as a warning — v7's `recommended` also
+  pulls in the React Compiler ruleset, which flags ~50 pre-existing patterns and deserves
+  its own pass), pointed the Node-globals override at `.mjs` scripts too, and ignored
+  Vite's gitignored timestamped config copies. Now 0 errors / 3 dependency-array
+  warnings, so lint can gate CI.
+
+### Security
+- **Bump swiper to 14.0.7** — clears a critical prototype-pollution advisory covering
+  6.5.1–12.1.1. Unlike the vite/rollup/esbuild advisories (build-time only), this one
+  ships: swiper drives the mod-detail image gallery. Major bump, but the API the gallery
+  uses (`modules`, `navigation`, `pagination`, `onSwiper`, `onSlideChange`, `slideTo`)
+  and the `swiper-button-*` / `swiper-pagination-bullet*` class names our CSS targets are
+  unchanged; no React peer-dependency constraint. Remaining audit findings are all
+  build-time tooling and don't reach the shipped bundle.
+
+### Fixed
+- **First-run setup no longer replays on every launch.** Two pieces of first-run state
+  were stored in places that don't reliably survive a restart, and losing either one
+  put the user back at the start:
+  - *The setup screen.* `is_configured` was a bare "does `config.json` exist?" check, so
+    anything that took the file out — an app-data wipe, a config written under a
+    different Windows account, a half-written file, a failed save — dropped the user back
+    into setup with no way out but redoing it. Since that screen's default action only
+    runs auto-detection anyway, startup now re-detects instead: `config::load_or_detect`
+    rebuilds the config from `Documents\PiBoSo\MX Bikes` when it's recognizably an MX
+    Bikes folder (has `profiles/` or `mods/`), and setup appears only when that finds
+    nothing. A corrupt `config.json` is now a parse *error* that triggers the same
+    rebuild, rather than deserializing to an empty config that left the app pointed at
+    no folder at all. Startup logs the config path and whether it was found.
+  - *The intro slideshow and guided tour.* Both were gated on `localStorage` alone, which
+    the webview drops whenever its storage is cleared. They're now recorded in the config
+    (`welcomeSeen` / `tourDone`), with the old keys still honored and migrated on first
+    launch so nobody sees the intro twice.
+- **Changing the MX Bikes folder in Settings no longer resets everything else.** Both
+  "choose a different folder" and "re-detect" called `createConfig` with just the path,
+  and every field the frontend omitted was refilled from `AppConfig::default()` — so
+  picking a new folder also wiped the detected game install and reset launch-at-startup,
+  run-in-background, auto-run FrostMod, instant refresh and the mods watcher. They now
+  call a `set_mods_path` command that touches only the folder (and restarts the watcher),
+  matching how `set_game_path` and the other setting commands already behaved.
+- **Seven unescaped apostrophes** in the viewer's empty/error copy (`ViewerDialog.tsx`).
+- **Bikes that ship one mesh per part now load in the 3D viewer** — the viewer assumed
+  every bike packs all four parts into a single `model.edf`, so a mod naming its meshes
+  after the bike (e.g. `MX1OEM_1996_Honda_CR250`: `96cr250.edf`, `96cr250_fs.edf`,
+  `96cr250_rs.edf`, `96cr250_st.edf`) failed outright with `no model.edf for bike folder`.
+  Each part's mesh is now resolved the way the game does it — through its `.hrc`'s
+  `level0 { scene = … }` — and every referenced mesh is parsed and merged. Textures are
+  bound per mesh file, since a submesh's material index selects from its own file's
+  texture pool. Bikes sharing one `model.edf` are unaffected (verified byte-identical
+  output on the stock 2023 KTM 450 SX-F).
+
+## 2026-08-04 — docs/site copy corrections
+
+### Fixed
+- **Supported mod types** — the site FAQ, feature list, meta description and README said
+  tracks only; tracks, bikes and rider gear are all first-class today (`MOD_TYPES` in
+  `src/api/mods.ts`), so the copy now says so and stops naming `mods/tracks` as the single
+  install target.
+- **MEGA downloads** — the site and README claimed MEGA isn't automated. It is: MEGA links
+  are fetched and decrypted in-app (`download_mega` in `src-tauri/src/install.rs`). Only
+  MEGA *folder* links still need a manual grab, which the copy now states precisely.
+- **`.rar` archives** — both the site FAQ and README said `.rar` isn't supported. It is
+  (`extract_rar` via the `unrar` crate); `.pnt` files are placed as-is alongside `.pkz`.
+- **Installer formats** — the site download card and README offered an `.msi`. The bundle
+  targets are `nsis`/`app`/`dmg`, so Windows ships an `.exe` only.
+- **Release flow** — the README (and the workflow's own header comment) said releases are
+  drafted for manual publishing; `release.yml` sets `releaseDraft: false` and publishes.
+- **Stale roadmap** — rider gear/liveries and self-update are both shipped, so they moved
+  out of "coming next"; the download section now says the app updates itself, and the
+  tech-stack list names three.js / React Three Fiber behind the 3D previews.
+
+## 2026-08-04 — v0.5.1 — repository housekeeping
+
+### Changed
+- **Patch version bump to 0.5.1** across `package.json`, `src-tauri/Cargo.toml` and
+  `src-tauri/tauri.conf.json` (plus both lockfiles). No app or runtime behaviour changes
+  since v0.5.0 — this release exists to tag a clean tree after the branch cleanup below.
+
+### Removed
+- **Stale branch cleanup** — deleted 13 local branches whose work is already in `main`
+  (including the `backup/pre-email-rewrite` history backup and the superseded duplicate of
+  the v0.5.0 commit), and the 7 matching branches on `origin`. `feature/garage-bike-switch`
+  is deliberately kept: it holds unmerged bike-switch groundwork.
+
+## 2026-08-04 — v0.5.0 — mods-folder auto-reload, live locker swaps, showcase site
+
+### Added
+- **Auto-reload on folder changes** — a debounced watcher on `<modsPath>/mods` signals
+  FrostMod to reload the game when tracks or bikes are added outside MXB App (e.g. a manual
+  download dropped into the folder). Toggleable in Settings → FrostMod, on by default. Only
+  the content folder is watched — never `profiles/` — so gameplay churn (replays, telemetry)
+  never triggers a reload.
+- **Public showcase website** — a single-page GitHub Pages landing site (`site/`) for
+  prospective users: hero, feature grid, how-it-works, download CTAs, and FAQ, styled with
+  the app's frost/dark brand and a hand-built UI mockup (no external assets). Deployed by a
+  new `.github/workflows/pages.yml` workflow on pushes that touch `site/**`. Repo-meta only —
+  no app/runtime changes.
+- **Gesture hint in the 3D viewer** — a muted legend in the canvas corner (rotate / zoom /
+  pan) so it's obvious the preview is draggable. Hidden while a model or paint is loading.
+- **Locked archives show their real name & preview** — on builds with the optional
+  decoder module, a creator-locked `.pkz` (e.g. a locked track) now surfaces its name,
+  author, length and thumbnail in the library instead of an anonymous "Locked" entry. It
+  stays flagged as locked (the files remain sealed — no unpack or 3D preview), and public
+  builds without the module are unchanged.
+
+### Fixed
+- **Paint picker no longer sits under the close button** — the 3D preview's close button now
+  sits inside the header row, vertically centred with the Paint/Goggles dropdowns instead of
+  overlapping them.
+- **First-run tour no longer runs behind the welcome slides** — the guided tour now starts
+  only after the intro slideshow is dismissed, so its spotlights land on visible UI instead
+  of hidden elements (previously it ran under the overlay and appeared to show nothing). The
+  slideshow was also trimmed to just the intro; the per-feature walkthrough it used to
+  duplicate is left to the tour.
+- **Locker swaps now refresh live in-game** — switching a bike's model or sound in the
+  Locker re-runs the game's look loader instantly (the same `instant_refresh` path presets
+  already used), so the swap shows up without reselecting your profile. The swap toast now
+  reports the refresh result. `apply_model_swap`/`apply_sound_swap` return a
+  `SwapApplyOutcome`, and the refresh step is shared with `presets_apply`.
+
+### Security
+- **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm
+  `overrides` entry, clearing two GHSA advisories for path traversal / arbitrary `.map` file
+  disclosure through attacker-controlled `sourceMappingURL` in CSS comments. Build-time only;
+  the shipped app is unaffected. (Landed after v0.4.0 was published.)
+
+## 2026-08-04 — v0.4.0 — onboarding tour, editable presets, decoder-aware previews
+
+### Added
+- **First-run guided tour** — an interactive spotlight walkthrough that runs once on
+  first launch (after Setup), highlighting the Browse, Library, Locker, Presets, Rider,
+  FrostMod status, and Settings areas with anchored coach-mark bubbles and driving the
+  navigation as it goes. Layered on top of the existing Welcome carousel (reused, not
+  replaced), gated on a `mxb:tourDone:v1` flag so it shows once for everyone, and
+  replayable anytime via a "Replay tour" button in Settings → About.
+- **Per-screen help hints** — a small `?` icon beside each screen's title (Browse,
+  Library, Locker, Presets, Rider, Settings) opens a popover explaining what the screen
+  does. Reuses the existing popover component. The redundant inline header subtitles on
+  Locker, Presets, and Rider were removed now that the same copy lives in the hint.
+- **Edit saved presets after creation** — each saved preset has an Edit action that
+  loads it into the builder in an explicit "editing" mode; you can rename it or change
+  any slot, and saving asks for confirmation (spelling out an update, a rename, or a
+  replace) before writing.
+
+### Changed
+- **Setup surfaces the MX Bikes install path** — first-run onboarding now actively
+  scans for your Steam MX Bikes install (the folder with `rider.pkz`, powering the 3D
+  rider preview) and shows the detected path with a "Found" badge, or a manual folder
+  picker when it can't be found. The chosen/confirmed path is saved on completion. The
+  path was already auto-detected silently; this makes it visible and correctable during
+  install.
+- **Game install path auto-detected on launch** — if the MX Bikes install folder was
+  never set (e.g. the game was installed after first setup), it's now detected and saved
+  on startup, so the 3D rider preview works without a manual pick.
+- **Rider preview shows a loading state** — while the rider model resolves for the first
+  time, the preview shows "Loading rider…" instead of a placeholder body.
+- **Bike 3D preview requires the optional decoder module** — builds compiled without the
+  optional local module now hide the bike 3D preview entirely instead of showing an empty
+  one; official release builds include the module. Rider/gear previews are unaffected.
+- **UI cleanup** — the Shop tab is hidden for now, the app title moved into the sidebar
+  header (above Browse), Settings moved to the bottom of the sidebar, and the title bar
+  logo was removed.
+
+## 2026-07-29 — v0.3.2 — presets: tolerate non-UTF-8 profile.ini
+
+### Fixed
+- **Presets tab no longer errors on non-UTF-8 `profile.ini`** — MX Bikes writes profiles in
+  Windows-1252/Latin-1, which isn't always valid UTF-8, so reading them failed with
+  "stream did not contain valid UTF-8". Profiles are now decoded tolerantly (UTF-8 with a
+  Latin-1 fallback), and applying a preset re-encodes in the original encoding so accented
+  names round-trip byte-for-byte and the `.bak` stays identical to the original.
+
+## 2026-07-22 — v0.3.1 — folder downloads, library multi-select, full-height fix
 
 ### Added
 - **Library multi-select** — a new **Select** mode turns cards into checkboxes so you can

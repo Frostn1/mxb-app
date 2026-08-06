@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +20,17 @@ pub struct AppConfig {
     pub auto_run_frostmod: bool,
     /// Re-run the game's profile loader in place after applying a preset (Windows-only).
     pub instant_refresh: bool,
+    /// Watch `<mods_path>/mods` and signal FrostMod to reload when tracks/bikes are
+    /// added outside the app (e.g. a manual download dropped into the folder).
+    pub watch_mods_reload: bool,
+    /// The intro slideshow has been dismissed. Kept here rather than in the webview's
+    /// `localStorage` so it survives that storage being cleared (WebView2 resets it on
+    /// an app-data wipe, and an OS shutdown can kill the tray-resident process before
+    /// it flushes) — losing it made the app re-run its first-run flow on every launch.
+    pub welcome_seen: bool,
+    /// The first-run guided tour has been finished or skipped. Persisted alongside
+    /// `welcome_seen`, for the same reason.
+    pub tour_done: bool,
 }
 
 impl Default for AppConfig {
@@ -32,6 +43,9 @@ impl Default for AppConfig {
             launch_at_startup: true,
             auto_run_frostmod: true,
             instant_refresh: true,
+            watch_mods_reload: true,
+            welcome_seen: false,
+            tour_done: false,
         }
     }
 }
@@ -64,7 +78,50 @@ pub fn exists(app: &AppHandle) -> bool {
 pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
     let path = config_path(app);
     let text = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&text).unwrap_or_default())
+    // A truncated/corrupt file is an error, not a silent empty config: callers that
+    // can rebuild one (see `load_or_detect`) get the chance to, instead of the app
+    // coming up pointed at nothing.
+    Ok(serde_json::from_str(&text)?)
+}
+
+/// Whether `path` is really a player's MX Bikes folder — the game keeps `profiles/`
+/// there, and `mods/` shows up as soon as anything is installed. Checking for those
+/// rather than just "the folder exists" keeps auto-detection from quietly adopting an
+/// empty `Documents\PiBoSo\MX Bikes` for someone whose setup lives elsewhere; they
+/// still get the setup screen to point us at it.
+fn looks_like_mods_dir(path: &str) -> bool {
+    let dir = Path::new(path.trim());
+    if path.trim().is_empty() || !dir.is_dir() {
+        return false;
+    }
+    dir.join("profiles").is_dir() || dir.join("mods").is_dir()
+}
+
+/// The saved config, or one built on the spot when the MX Bikes folder sits where it
+/// normally does. Returns `None` only when there's genuinely nothing to go on — the
+/// one case where the setup screen has something to ask.
+///
+/// The setup screen never gathered more than this: its default action just runs the
+/// same detection. So when the config file goes missing — an app-data wipe, a config
+/// written under a different Windows account, a failed write — the app re-detects and
+/// carries on rather than walking the user through setup again on every launch.
+pub fn load_or_detect(app: &AppHandle) -> Option<AppConfig> {
+    if exists(app) {
+        match load(app) {
+            Ok(cfg) => return Some(cfg),
+            Err(e) => log::warn!("config.json unreadable ({e:#}) — re-detecting"),
+        }
+    }
+
+    let cfg = finalize(AppConfig::default());
+    if !looks_like_mods_dir(&cfg.mods_path) {
+        return None;
+    }
+    log::info!("no usable config — auto-detected MX Bikes folder: {}", cfg.mods_path);
+    if let Err(e) = save(app, &cfg) {
+        log::warn!("couldn't save the auto-detected config: {e:#}");
+    }
+    Some(cfg)
 }
 
 pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
@@ -192,6 +249,54 @@ mod tests {
         cfg.mods_path = "/games/mxb".into();
         cfg.profiles_path = "/other/drive/profiles".into();
         assert_eq!(cfg.profiles_dir(), PathBuf::from("/other/drive/profiles"));
+    }
+
+    #[test]
+    fn only_a_real_mx_bikes_folder_is_adopted_automatically() {
+        let root = std::env::temp_dir()
+            .join(format!("frost-config-detect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        assert!(!looks_like_mods_dir(""));
+        assert!(!looks_like_mods_dir(&root.join("nope").to_string_lossy()));
+
+        // The folder exists but holds nothing of ours — don't assume it's the one.
+        let bare = root.join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        assert!(!looks_like_mods_dir(&bare.to_string_lossy()));
+
+        // `profiles/` (the game writes it) or `mods/` (we do) makes it recognizable.
+        let played = root.join("played");
+        std::fs::create_dir_all(played.join("profiles")).unwrap();
+        assert!(looks_like_mods_dir(&played.to_string_lossy()));
+
+        let modded = root.join("modded");
+        std::fs::create_dir_all(modded.join("mods")).unwrap();
+        assert!(looks_like_mods_dir(&modded.to_string_lossy()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn older_configs_keep_their_settings_and_default_the_new_flags() {
+        // A config written before the intro flags existed must still load — a parse
+        // failure now makes the app re-detect and overwrite it.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"modsPath":"C:\\MXB","gamePath":"C:\\Steam\\MX Bikes","runInBackground":false}"#,
+        )
+        .expect("older config still parses");
+        assert_eq!(cfg.mods_path, "C:\\MXB");
+        assert_eq!(cfg.game_path, "C:\\Steam\\MX Bikes");
+        assert!(!cfg.run_in_background);
+        assert!(cfg.launch_at_startup, "unset fields fall back to the defaults");
+        assert!(!cfg.welcome_seen);
+        assert!(!cfg.tour_done);
+    }
+
+    #[test]
+    fn corrupt_config_is_an_error_not_an_empty_config() {
+        assert!(serde_json::from_str::<AppConfig>(r#"{"modsPath":"C:\\MX"#).is_err());
     }
 
     #[test]

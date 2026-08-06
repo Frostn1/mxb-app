@@ -9,33 +9,59 @@ import { FrostmodProvider } from "./Context/Frostmod";
 import { ConfigContext } from "./Context/Config";
 import { Toaster } from "@/Components/ui/sonner";
 import { TooltipProvider } from "@/Components/ui/tooltip";
-import { getConfig, isConfigured } from "./api/mods";
+import { bikePreviewAvailable, getConfig, isConfigured, setIntroSeen } from "./api/mods";
+import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config } from "./types";
 
-/** Bumped when the intro tour changes enough to warrant showing it again. */
+/**
+ * Bumped when the intro tour changes enough to warrant showing it again.
+ *
+ * The saved config (`welcomeSeen`) is the real record — this only covers the window
+ * before one exists, i.e. while the setup screen is still up. Keeping it in the
+ * webview's storage alone is what made the intro replay after that storage was
+ * cleared.
+ */
 const WELCOME_SEEN_KEY = "mxb:welcomeSeen:v1";
 
 const App = () => {
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<Config | null>(null);
-  const [showWelcome, setShowWelcome] = useState(
-    () => localStorage.getItem(WELCOME_SEEN_KEY) !== "1",
+  // Whether this build can decode real bike geometry (optional local module). Fixed
+  // at build time, so fetch it once at startup.
+  const [bikePreview, setBikePreview] = useState(false);
+  const [welcomeDismissed, setWelcomeDismissed] = useState(
+    () => localStorage.getItem(WELCOME_SEEN_KEY) === "1",
   );
+  const showWelcome = !welcomeDismissed && !config?.welcomeSeen;
 
   const dismissWelcome = useCallback(() => {
     localStorage.setItem(WELCOME_SEEN_KEY, "1");
-    setShowWelcome(false);
+    setWelcomeDismissed(true);
+    // No-ops when there's no config yet (dismissed from over the setup screen); the
+    // flag above holds until setup writes one, and the effect below persists it then.
+    void setIntroSeen({ welcome: true }).catch(() => {});
   }, []);
 
   const reloadConfig = useCallback(async () => {
     setConfig(await getConfig());
   }, []);
 
+  // Carry the old webview-only flags into the config once, so an existing install
+  // doesn't get shown the intro again the first time that storage is lost.
+  useEffect(() => {
+    if (!config) return;
+    const welcome =
+      !config.welcomeSeen && localStorage.getItem(WELCOME_SEEN_KEY) === "1";
+    const tour = !config.tourDone && localStorage.getItem(TOUR_DONE_KEY) === "1";
+    if (welcome || tour) void setIntroSeen({ welcome, tour }).catch(() => {});
+  }, [config]);
+
   useEffect(() => {
     (async () => {
       try {
+        bikePreviewAvailable().then(setBikePreview).catch(() => {});
         if (await isConfigured()) await reloadConfig();
       } catch (err) {
         console.error("Startup failed", err);
@@ -76,8 +102,8 @@ const App = () => {
               <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
                 {ready &&
                   (config ? (
-                    <ConfigContext.Provider value={{ config, reloadConfig }}>
-                      <Dashboard />
+                    <ConfigContext.Provider value={{ config, reloadConfig, bikePreview }}>
+                      <Dashboard welcomeActive={showWelcome} />
                     </ConfigContext.Provider>
                   ) : (
                     <Setup onComplete={reloadConfig} />

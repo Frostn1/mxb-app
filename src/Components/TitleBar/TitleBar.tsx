@@ -1,4 +1,4 @@
-import { Minus, Square, X, Snowflake } from "lucide-react";
+import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
 
@@ -22,12 +22,7 @@ export default function TitleBar() {
         IS_MAC ? "pl-[82px]" : "pl-4",
       )}
     >
-      <div className="flex items-center gap-2.5" data-tauri-drag-region>
-        <div className="grid size-[18px] place-items-center rounded-[5px] bg-gradient-to-br from-[#9ccfec] to-[#5d8fb0] text-[#0d0f12]">
-          <Snowflake className="size-3" strokeWidth={2.5} />
-        </div>
-        <span className="text-[13px] font-bold tracking-[0.2px]">MXB App</span>
-      </div>
+      <div data-tauri-drag-region />
 
       {!IS_MAC && (
         <div className="flex h-full">

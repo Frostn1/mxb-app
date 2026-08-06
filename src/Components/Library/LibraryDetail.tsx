@@ -13,6 +13,7 @@ import { getPkzMeta, getPkzPreview, type ModType } from "../../api/mods";
 import type { LibraryEntry, PkzMeta } from "../../types";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
+import { useConfig } from "../../Context/Config";
 import {
   displayName,
   folderLabel,
@@ -83,7 +84,11 @@ export default function LibraryDetail({
     return [...byCat.entries()];
   }, [entries, entry]);
 
-  const view = useMemo(() => entryViewerProps(entry, entries), [entry, entries]);
+  const { bikePreview } = useConfig();
+  const view = useMemo(
+    () => entryViewerProps(entry, entries, bikePreview),
+    [entry, entries, bikePreview],
+  );
 
   const rows: [string, string][] = [];
   if (meta?.author) rows.push(["Author", meta.author]);
@@ -184,11 +189,19 @@ export default function LibraryDetail({
             {meta?.locked && (
               <div className="flex items-start gap-2.5 rounded-lg border border-white/[0.08] bg-foreground/[0.03] px-3.5 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
                 <Lock className="mt-0.5 size-3.5 flex-none text-faint" />
-                <span>
-                  This track is <b className="text-foreground/80">locked</b>, so
-                  its name, length and preview can’t be read from the file —
-                  only its filename and size.
-                </span>
+                {meta?.name?.trim() ? (
+                  <span>
+                    This track is <b className="text-foreground/80">locked</b> by its
+                    creator. Its name, details and preview are shown here, but the files
+                    stay sealed — it can’t be unpacked or previewed in 3D.
+                  </span>
+                ) : (
+                  <span>
+                    This track is <b className="text-foreground/80">locked</b>, so
+                    its name, length and preview can’t be read from the file —
+                    only its filename and size.
+                  </span>
+                )}
               </div>
             )}
 

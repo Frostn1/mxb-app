@@ -121,10 +121,12 @@ fn inspect(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
 fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     let mut file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
 
-    // Plain `.pkz` starts with the ZIP local-file magic; else locked.
+    // Plain `.pkz` starts with the ZIP local-file magic; else it's a non-plain
+    // archive. If this build has the optional reader it can still surface the name +
+    // preview (see `inspect_locked`); otherwise it stays an anonymous locked entry.
     let mut magic = [0u8; 4];
     if file.read(&mut magic).unwrap_or(0) < 4 || magic != ZIP_MAGIC {
-        return Ok((locked(), None));
+        return inspect_locked(path);
     }
     file.seek(SeekFrom::Start(0))?;
 
@@ -212,6 +214,54 @@ fn locked() -> PkzMeta {
     PkzMeta {
         locked: true,
         ..Default::default()
+    }
+}
+
+/// Small metadata files worth pulling out of a non-plain archive to build its
+/// preview: the descriptor `.ini` and any candidate preview image. Keeps us from
+/// decoding a whole (possibly huge) track just to read its name.
+fn is_meta_entry(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".ini")
+        || [".jpg", ".jpeg", ".png", ".dds", ".tga", ".bmp"]
+            .iter()
+            .any(|ext| lower.ends_with(ext))
+}
+
+/// Build a `PkzMeta` (+ preview image) from already-decoded `(name, bytes)` entries,
+/// reusing the same `.ini`/image selection as the plain-zip path.
+fn meta_from_entries(entries: &[(String, Vec<u8>)]) -> (PkzMeta, Option<(String, Vec<u8>)>) {
+    let names: Vec<String> = entries.iter().map(|(n, _)| n.replace('\\', "/")).collect();
+    let mut meta = PkzMeta::default();
+    let mut pic: Option<String> = None;
+    let mut ini_dir = String::new();
+
+    if let Some(idx) = top_ini_index(&names) {
+        ini_dir = dir_of(&names[idx]);
+        parse_ini(&String::from_utf8_lossy(&entries[idx].1), &mut meta, &mut pic);
+    }
+
+    let mut image = None;
+    if let Some(img_idx) = pick_image(&names, &ini_dir, pic.as_deref()) {
+        let bytes = &entries[img_idx].1;
+        meta.thumbnail = make_thumbnail(&names[img_idx], bytes, THUMB_MAX);
+        image = Some((names[img_idx].clone(), bytes.clone()));
+    }
+    (meta, image)
+}
+
+/// A non-plain (creator-locked) archive. If this build carries the optional reader,
+/// pull just the descriptor + preview so the entry shows its real name/author/thumb
+/// (still flagged `locked`); otherwise `read_selected` bails and it stays anonymous.
+fn inspect_locked(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
+    match read_selected(path, is_meta_entry) {
+        Ok(entries) if !entries.is_empty() => {
+            let (mut meta, image) = meta_from_entries(&entries);
+            // It's still creator-locked — keep the badge; we only surfaced its preview.
+            meta.locked = true;
+            Ok((meta, image))
+        }
+        _ => Ok((locked(), None)),
     }
 }
 

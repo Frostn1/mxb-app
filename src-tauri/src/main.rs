@@ -13,6 +13,7 @@ mod install;
 mod library;
 mod modelswap;
 mod mods;
+mod modwatch;
 mod paint;
 mod pkz;
 #[cfg(sidecar)]
@@ -26,6 +27,7 @@ use config::AppConfig;
 use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus};
 use library::InstalledMod;
+use modwatch::ModWatcher;
 use mods::mxb::MxbModsSource;
 use mods::{ModDetail, ModSource, ModSummary};
 use tauri::{
@@ -35,9 +37,12 @@ use tauri::{
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
+/// Whether the app is ready to use. Falls back to auto-detection when the config file
+/// is missing, so the setup screen only appears when the MX Bikes folder genuinely
+/// can't be found — not every time the saved config goes astray.
 #[tauri::command]
 fn is_configured(app: tauri::AppHandle) -> bool {
-    config::exists(&app)
+    config::load_or_detect(&app).is_some()
 }
 
 #[tauri::command]
@@ -46,9 +51,24 @@ fn get_config(app: tauri::AppHandle) -> AppConfig {
 }
 
 #[tauri::command]
-fn create_config(app: tauri::AppHandle, config: AppConfig) -> Result<bool, String> {
-    let cfg = config::finalize(config);
+fn create_config(
+    app: tauri::AppHandle,
+    watcher: State<ModWatcher>,
+    config: AppConfig,
+) -> Result<bool, String> {
+    let mut cfg = config::finalize(config);
+    // Setup only sends the folders, so carry over first-run state from any config
+    // that's already there — rewriting it would replay the intro and the tour.
+    if let Ok(prev) = config::load(&app) {
+        cfg.welcome_seen |= prev.welcome_seen;
+        cfg.tour_done |= prev.tour_done;
+    }
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Begin watching straight away so a fresh setup doesn't need a restart before
+    // manual downloads reload the game.
+    if cfg.watch_mods_reload {
+        modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
     Ok(true)
 }
 
@@ -125,14 +145,40 @@ fn scan_model_swaps_blocking(app: tauri::AppHandle) -> Result<Vec<modelswap::Bik
     Ok(modelswap::scan_model_swaps(&cfg.mods_path))
 }
 
+/// Outcome of a Locker model/sound swap — mirrors `PresetApplyOutcome` so the UI can
+/// report the same "refreshed live in-game" feedback the presets flow gives.
+#[derive(serde::Serialize)]
+struct SwapApplyOutcome {
+    content_reload: ReloadOutcome,
+    game_running: bool,
+    live_refresh: gameproc::LiveRefresh,
+}
+
+/// Re-run the game's look loader live if instant refresh is enabled, else report it off.
+fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
+    if enabled {
+        gameproc::refresh_look()
+    } else {
+        gameproc::LiveRefresh::Disabled
+    }
+}
+
 #[tauri::command]
-async fn apply_model_swap(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
+async fn apply_model_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    target: String,
+) -> Result<SwapApplyOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || apply_model_swap_blocking(app, bike, target))
         .await
         .map_err(|e| format!("apply_model_swap task failed: {e}"))?
 }
 
-fn apply_model_swap_blocking(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
+fn apply_model_swap_blocking(
+    app: tauri::AppHandle,
+    bike: String,
+    target: String,
+) -> Result<SwapApplyOutcome, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let prev = modelswap::current_active(&cfg.mods_path, &bike);
     modelswap::apply_model_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
@@ -141,8 +187,12 @@ fn apply_model_swap_blocking(app: tauri::AppHandle, bike: String, target: String
     if let Err(e) = soundmods::reconcile_after_model_swap(&cfg.mods_path, &bike, &prev, &target) {
         eprintln!("sound reconcile after model swap failed: {e:#}");
     }
-    frostmod::signal_reload();
-    Ok(())
+    let content_reload = frostmod::signal_reload();
+    Ok(SwapApplyOutcome {
+        content_reload,
+        game_running: gameproc::is_game_running(),
+        live_refresh: live_refresh(cfg.instant_refresh),
+    })
 }
 
 #[tauri::command]
@@ -156,12 +206,20 @@ async fn scan_sound_swaps(app: tauri::AppHandle) -> Result<Vec<soundmods::BikeSo
 }
 
 #[tauri::command]
-async fn apply_sound_swap(app: tauri::AppHandle, bike: String, target: String) -> Result<(), String> {
+async fn apply_sound_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    target: String,
+) -> Result<SwapApplyOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
         soundmods::apply_sound_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
-        frostmod::signal_reload();
-        Ok(())
+        let content_reload = frostmod::signal_reload();
+        Ok(SwapApplyOutcome {
+            content_reload,
+            game_running: gameproc::is_game_running(),
+            live_refresh: live_refresh(cfg.instant_refresh),
+        })
     })
     .await
     .map_err(|e| format!("apply_sound_swap task failed: {e}"))?
@@ -314,7 +372,9 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     let t_read = t0.elapsed();
 
     let mut nodes = Vec::new();
-    let mut model: Option<&Vec<u8>> = None;
+    // Every mesh the bike ships, by file name — usually just `model.edf`, but a bike can
+    // carry one per part. Which are actually used is decided by the `.hrc`s below.
+    let mut edfs: std::collections::HashMap<String, &Vec<u8>> = std::collections::HashMap::new();
     let mut geom: Option<&Vec<u8>> = None;
     let mut gfx_bytes: Option<&Vec<u8>> = None;
     let mut hrcs: std::collections::HashMap<String, &Vec<u8>> = std::collections::HashMap::new();
@@ -322,8 +382,8 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     let mut pnt_jobs: Vec<(String, &[u8], bool)> = Vec::new();
     for (name, data) in &files {
         let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
-        if bn == "model.edf" {
-            model = Some(data);
+        if bn.ends_with(".edf") {
+            edfs.insert(bn.clone(), data);
         } else if bn.ends_with(".geom") {
             geom = Some(data);
         } else if bn.ends_with("gfx.cfg") {
@@ -340,23 +400,54 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     }
 
     let gfx = gfx_bytes.map(|b| cfg::parse_gfx(b)).unwrap_or_default();
-    let mut level0: Vec<String> = Vec::new();
+    // Group each part's level0 node under the mesh its `.hrc` names. Bikes that point
+    // every part at one `model.edf` collapse to a single group — the original path.
+    let mut scenes: Vec<(String, Vec<String>)> = Vec::new();
     let mut node_part: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for (part, gp) in &gfx {
+    // Fixed part order — `gfx` is a map, and node order must not shuffle between runs.
+    for part in cfg::GFX_PARTS {
+        let Some(gp) = gfx.get(part) else { continue };
         let Some(hrc_file) = gp.hrc.as_deref() else { continue };
         let stem = hrc_file.trim_end_matches(".hrc").trim_end_matches(".HRC");
         let Some(bytes) = hrcs.get(&stem.to_ascii_lowercase()) else {
             log::warn!("[viewer] gfx.cfg part '{part}' wants {hrc_file}, which the bike doesn't ship");
             continue;
         };
-        if let Some(node) = cfg::hrc_level0(&cfg::parse(bytes), stem) {
-            node_part.insert(node.to_ascii_lowercase(), part.clone());
-            level0.push(node);
+        let hrc = cfg::parse(bytes);
+        let Some(node) = cfg::hrc_level0(&hrc, stem) else { continue };
+        let scene = cfg::hrc_level0_scene(&hrc)
+            .map(|s| s.replace('\\', "/"))
+            .and_then(|s| s.rsplit('/').next().map(str::to_ascii_lowercase))
+            .unwrap_or_else(|| "model.edf".to_string());
+        node_part.insert(node.to_ascii_lowercase(), part.to_string());
+        match scenes.iter_mut().find(|(f, _)| *f == scene) {
+            Some((_, level0)) => level0.push(node),
+            None => scenes.push((scene, vec![node])),
         }
     }
-    if let Some(data) = model {
-        nodes = edf::parse_with_levels(data, &level0);
-        bind_textures(&mut nodes, data, &gfx, &node_part);
+
+    // Parse each referenced mesh and bind its textures against *its own* bytes: a
+    // submesh's material index selects from that file's texture pool, so a part must
+    // never be bound through another file's pool.
+    let mut used: Vec<&Vec<u8>> = Vec::new();
+    for (file, level0) in &scenes {
+        let Some(data) = edfs.get(file) else {
+            log::warn!("[viewer] an .hrc wants {file}, which the bike doesn't ship");
+            continue;
+        };
+        let mut part_nodes = edf::parse_with_levels(data, level0);
+        bind_textures(&mut part_nodes, data, &gfx, &node_part);
+        nodes.append(&mut part_nodes);
+        used.push(data);
+    }
+    // No gfx.cfg/.hrc to go on (or none of it resolved) — fall back to the bike's base
+    // mesh and let the parser's own level0 heuristic pick the parts.
+    if nodes.is_empty() {
+        if let Some(data) = base_edf(&edfs) {
+            nodes = edf::parse_with_levels(data, &[]);
+            bind_textures(&mut nodes, data, &gfx, &node_part);
+            used.push(data);
+        }
     }
     for (fname, data) in &installed {
         pnt_jobs.push((paint_display_name(fname), data.as_slice(), false));
@@ -366,7 +457,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
             eprintln!("[viewer] .geom present but missing mount points — parts unassembled");
         }
     } else if !nodes.is_empty() {
-        eprintln!("[viewer] no .geom alongside model.edf — parts unassembled");
+        eprintln!("[viewer] no .geom alongside the mesh — parts unassembled");
     }
     edf::to_right_handed(&mut nodes);
     let t_parse = t0.elapsed();
@@ -375,8 +466,16 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
         .par_iter()
         .filter_map(|(stem, data)| paint::decode_image(stem, data))
         .collect();
-    if let Some(data) = model {
-        base.extend(paint::extract_edf_textures(data));
+    // Textures embedded in the meshes actually shown. Parts often share a name (each
+    // file embeds the plastics it needs), so keep the first of each.
+    let mut seen: std::collections::HashSet<String> =
+        base.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+    for data in &used {
+        for tex in paint::extract_edf_textures(data) {
+            if seen.insert(tex.name.to_ascii_lowercase()) {
+                base.push(tex);
+            }
+        }
     }
     let mut paints: Vec<(BikePaint, bool)> = pnt_jobs
         .par_iter()
@@ -567,12 +666,30 @@ fn installed_paints(source: &std::path::Path) -> Vec<(String, Vec<u8>)> {
 
 fn wanted_bike_file(name: &str) -> bool {
     let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
-    bn == "model.edf"
+    // Any `.edf`, not just `model.edf`: a bike may ship one mesh per part, named by
+    // its `.hrc` (see `scene_files_for_parts`). Shadow meshes ride along unused.
+    bn.ends_with(".edf")
         || bn.ends_with(".tga")
         || bn.ends_with(".pnt")
         || bn.ends_with(".geom")
         || bn.ends_with(".cfg")
         || bn.ends_with(".hrc")
+}
+
+/// The bike's main mesh when the `.hrc`s can't say which it is: `model.edf` by
+/// convention, else the shortest non-shadow name — a per-part set like `96cr250.edf` /
+/// `96cr250_fs.edf` / `96cr250_s.edf` (shadow) reduces to the chassis.
+fn base_edf<'a>(
+    edfs: &std::collections::HashMap<String, &'a Vec<u8>>,
+) -> Option<&'a Vec<u8>> {
+    if let Some(data) = edfs.get("model.edf") {
+        return Some(data);
+    }
+    edfs.iter()
+        .filter(|(name, _)| !name.ends_with("_s.edf"))
+        .min_by_key(|(name, _)| (name.len(), name.to_string()))
+        .or_else(|| edfs.iter().min_by_key(|(name, _)| (name.len(), name.to_string())))
+        .map(|(_, data)| *data)
 }
 
 fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
@@ -585,24 +702,25 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
         return pkz::read_selected(p, wanted_bike_file);
     }
     if p.is_dir() {
-        if p.join("model.edf").exists() {
-            let mut out = Vec::new();
-            for entry in std::fs::read_dir(p).with_context(|| format!("read dir {p:?}"))? {
-                let path = entry?.path();
-                let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
-                if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
-                    if let (Some(name), Ok(bytes)) = (name, std::fs::read(&path)) {
-                        out.push((name, bytes));
-                    }
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(p).with_context(|| format!("read dir {p:?}"))? {
+            let path = entry?.path();
+            let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
+            if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
+                if let (Some(name), Ok(bytes)) = (name, std::fs::read(&path)) {
+                    out.push((name, bytes));
                 }
             }
+        }
+        // A mesh of any name will do — `model.edf` is the convention, not a rule.
+        if out.iter().any(|(n, _)| n.to_ascii_lowercase().ends_with(".edf")) {
             return Ok(out);
         }
         let sibling = p.with_extension("pkz");
         if sibling.exists() {
             return pkz::read_selected(&sibling, wanted_bike_file);
         }
-        bail!("no model.edf for bike folder {p:?}");
+        bail!("no .edf mesh for bike folder {p:?}");
     }
     bail!("can't load a bike model from {p:?}")
 }
@@ -1261,6 +1379,39 @@ fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Point the app at a different MX Bikes folder; an empty string re-runs detection.
+/// Only the folder changes — unlike a full `create_config`, the rest of the settings
+/// (startup, tray, FrostMod, first-run state) are left alone.
+#[tauri::command]
+fn set_mods_path(
+    app: tauri::AppHandle,
+    watcher: State<ModWatcher>,
+    path: String,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.mods_path = path;
+    let cfg = config::finalize(cfg);
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    if cfg.watch_mods_reload {
+        modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
+    Ok(())
+}
+
+/// Remember that the intro slideshow / guided tour is done. No-ops before the config
+/// exists — writing one there would leave the app "configured" with no folder set;
+/// the webview flag covers that short window instead.
+#[tauri::command]
+fn set_intro_seen(app: tauri::AppHandle, welcome: bool, tour: bool) -> Result<(), String> {
+    if !config::exists(&app) {
+        return Ok(());
+    }
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.welcome_seen |= welcome;
+    cfg.tour_done |= tour;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Override the PiBoSo `profiles` folder for the split-folder edge case. An empty
 /// string clears the override, falling back to `<mods_path>/profiles`.
 #[tauri::command]
@@ -1281,6 +1432,14 @@ fn detect_game_path() -> Option<String> {
 #[tauri::command]
 fn count_profiles_in(path: String) -> usize {
     presets::list_profiles(std::path::Path::new(&path)).len()
+}
+
+/// Whether this build can decode real bike geometry (the optional local module is
+/// compiled in). Public builds without it return `false`, so the UI hides the bike
+/// 3D preview instead of showing a broken/empty one.
+#[tauri::command]
+fn bike_preview_available() -> bool {
+    cfg!(sidecar)
 }
 
 #[tauri::command]
@@ -1386,6 +1545,24 @@ fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), Strin
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.instant_refresh = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn set_watch_mods_reload(
+    app: tauri::AppHandle,
+    state: State<ModWatcher>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.watch_mods_reload = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Start/stop the watcher live so the toggle takes effect without a restart.
+    if enabled {
+        modwatch::start(&app, &state, &cfg.mods_path);
+    } else {
+        modwatch::stop(&state);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1547,15 +1724,10 @@ fn presets_apply(
             .map_err(|e| format!("Cosmetics applied, but the model swap failed: {e:#}"))?;
     }
     let content_reload = frostmod::signal_reload();
-    let live = if cfg.instant_refresh {
-        gameproc::refresh_look()
-    } else {
-        gameproc::LiveRefresh::Disabled
-    };
     Ok(PresetApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
-        live_refresh: live,
+        live_refresh: live_refresh(cfg.instant_refresh),
     })
 }
 
@@ -1641,6 +1813,7 @@ fn main() {
             None,
         ))
         .manage(FrostmodProcess::default())
+        .manage(ModWatcher::default())
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
@@ -1680,20 +1853,42 @@ fn main() {
                 .build(app)?;
 
             let handle = app.handle();
-            if config::exists(handle) {
-                if let Ok(cfg) = config::load(handle) {
-                    let manager = handle.autolaunch();
-                    let enabled = manager.is_enabled().unwrap_or(false);
-                    if cfg.launch_at_startup && !enabled {
-                        let _ = manager.enable();
-                    } else if !cfg.launch_at_startup && enabled {
-                        let _ = manager.disable();
-                    }
-                    if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
-                        let state = handle.state::<FrostmodProcess>();
-                        let _ = frostmod_manage::start(handle, &state);
+            log::info!(
+                "config: {} ({})",
+                config::config_path(handle).display(),
+                if config::exists(handle) { "found" } else { "missing" },
+            );
+            // `load_or_detect` rebuilds a missing/unreadable config from the standard
+            // MX Bikes folder, so a lost config no longer means a trip through setup.
+            if let Some(mut cfg) = config::load_or_detect(handle) {
+                // Auto-detect the MX Bikes install on launch for configs that
+                // never got one (created before detection existed, or when the
+                // game wasn't installed yet). Only fills a blank — never overrides
+                // a manual pick — and persists it so the 3D rider preview works.
+                if cfg.game_path.trim().is_empty() {
+                    if let Some(gp) = config::detect_game_path() {
+                        log::info!("auto-detected MX Bikes install: {gp}");
+                        cfg.game_path = gp;
+                        let _ = config::save(handle, &cfg);
                     }
                 }
+                let manager = handle.autolaunch();
+                let enabled = manager.is_enabled().unwrap_or(false);
+                if cfg.launch_at_startup && !enabled {
+                    let _ = manager.enable();
+                } else if !cfg.launch_at_startup && enabled {
+                    let _ = manager.disable();
+                }
+                if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
+                    let state = handle.state::<FrostmodProcess>();
+                    let _ = frostmod_manage::start(handle, &state);
+                }
+                if cfg.watch_mods_reload {
+                    let watcher = handle.state::<ModWatcher>();
+                    modwatch::start(handle, &watcher, &cfg.mods_path);
+                }
+            } else {
+                log::info!("no MX Bikes folder found — showing first-run setup");
             }
             shop_session::load_session(handle);
             Ok(())
@@ -1711,6 +1906,7 @@ fn main() {
             is_configured,
             get_config,
             create_config,
+            bike_preview_available,
             search_mods,
             get_mod_detail,
             get_installed_mods,
@@ -1741,6 +1937,8 @@ fn main() {
             uninstall_mod,
             reveal_in_explorer,
             set_game_path,
+            set_mods_path,
+            set_intro_seen,
             set_profiles_path,
             detect_game_path,
             count_profiles_in,
@@ -1748,6 +1946,7 @@ fn main() {
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_instant_refresh,
+            set_watch_mods_reload,
             frostmod_reload,
             frostmod_running,
             garage_scan_bikes,

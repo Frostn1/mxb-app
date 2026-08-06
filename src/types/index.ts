@@ -14,6 +14,16 @@ export interface Config {
   /** Auto-run FrostMod when the app opens (default true). */
   autoRunFrostmod?: boolean;
   instantRefresh?: boolean;
+  /**
+   * Watch `<modsPath>/mods` and reload the game when tracks/bikes are added outside
+   * MXB App (e.g. a manual download dropped into the folder). Default true.
+   */
+  watchModsReload?: boolean;
+  /** Intro slideshow already dismissed. Saved with the config (not in localStorage)
+   *  so clearing the webview's storage doesn't replay the first-run flow. */
+  welcomeSeen?: boolean;
+  /** First-run guided tour already finished or skipped. */
+  tourDone?: boolean;
 }
 
 /** A track-mod as it appears in search results / browse grid. */
@@ -295,6 +305,13 @@ export type LiveRefresh =
   | "unsupported";
 
 export interface PresetApplyOutcome {
+  content_reload: ReloadOutcome;
+  game_running: boolean;
+  live_refresh: LiveRefresh;
+}
+
+/** Outcome of a Locker model/sound swap — same shape/feedback as a preset apply. */
+export interface SwapApplyOutcome {
   content_reload: ReloadOutcome;
   game_running: boolean;
   live_refresh: LiveRefresh;

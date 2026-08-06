@@ -24,6 +24,7 @@ import type {
   GearPaints,
   Preset,
   PresetApplyOutcome,
+  SwapApplyOutcome,
   ReloadOutcome,
   BundlePlan,
   BundleProgress,
@@ -115,6 +116,29 @@ export function createConfig(config: Config): Promise<boolean> {
   return invoke<boolean>("create_config", { config });
 }
 
+/** Change only the MX Bikes folder — an empty string re-runs auto-detection. Unlike
+ *  `createConfig`, the rest of the settings are preserved. */
+export function setModsPath(path: string): Promise<void> {
+  return invoke<void>("set_mods_path", { path });
+}
+
+/** Persist that the intro slideshow and/or the guided tour is done. */
+export function setIntroSeen(opts: {
+  welcome?: boolean;
+  tour?: boolean;
+}): Promise<void> {
+  return invoke<void>("set_intro_seen", {
+    welcome: opts.welcome ?? false,
+    tour: opts.tour ?? false,
+  });
+}
+
+/** Whether this build can decode real bike geometry for the 3D preview. Public
+ *  builds without the optional local module return false, so the UI hides it. */
+export function bikePreviewAvailable(): Promise<boolean> {
+  return invoke<boolean>("bike_preview_available");
+}
+
 export function searchMods(
   query: string,
   categoryId: number,
@@ -168,16 +192,16 @@ export function scanModelSwaps(): Promise<BikeModels[]> {
   return invoke<BikeModels[]>("scan_model_swaps");
 }
 
-export function applyModelSwap(bike: string, target: string): Promise<void> {
-  return invoke<void>("apply_model_swap", { bike, target });
+export function applyModelSwap(bike: string, target: string): Promise<SwapApplyOutcome> {
+  return invoke<SwapApplyOutcome>("apply_model_swap", { bike, target });
 }
 
 export function scanSoundSwaps(): Promise<BikeSounds[]> {
   return invoke<BikeSounds[]>("scan_sound_swaps");
 }
 
-export function applySoundSwap(bike: string, target: string): Promise<void> {
-  return invoke<void>("apply_sound_swap", { bike, target });
+export function applySoundSwap(bike: string, target: string): Promise<SwapApplyOutcome> {
+  return invoke<SwapApplyOutcome>("apply_sound_swap", { bike, target });
 }
 
 /** Tie a sound variant to a model swap so activating that model applies the sound. */
@@ -678,6 +702,14 @@ export function setAutoRunFrostmod(enabled: boolean): Promise<void> {
 export function setInstantRefresh(enabled: boolean): Promise<void> {
   return invoke<void>("set_instant_refresh", { enabled });
 }
+
+/** Toggle watching the mods folder to reload the game on external changes. */
+export function setWatchModsReload(enabled: boolean): Promise<void> {
+  return invoke<void>("set_watch_mods_reload", { enabled });
+}
+
+/** Sentinel slug the backend tags folder-watch reloads with (vs in-app installs). */
+export const MODS_WATCH_SLUG = "__mods_watch__";
 
 /** Fires after each install with whether FrostMod picked the new mod up live. */
 export function onFrostmodReload(

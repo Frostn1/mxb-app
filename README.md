@@ -14,31 +14,39 @@ single flow:
 
 > **Search a mod → open its page → click _Add to Library_ → done.**
 
-MXB App downloads the mod, extracts it, and drops the track files into your MX
-Bikes `mods/tracks` folder automatically.
+MXB App downloads the mod, extracts it, and drops the files into the matching MX
+Bikes `mods` folder automatically.
 
-Track mods are supported today; more mod types are planned.
+Tracks, bikes and rider gear are supported today; more mod types are planned.
 
 ## Download
 
 Grab the latest installer from the
 [**Releases**](https://github.com/Frostn1/mxb-app/releases) page:
 
-- **Windows** — `.msi` or `.exe` (recommended; MX Bikes runs on Windows).
+- **Windows** — `.exe` NSIS installer (recommended; MX Bikes runs on Windows).
 - **macOS** (Apple Silicon) — `.dmg`, for working on the download/extract UI.
 
 Builds are unsigned, so Windows SmartScreen / macOS Gatekeeper will warn on
 first launch — choose _Run anyway_ / right-click _Open_.
+
+You only install once: the app checks for new releases on launch (and every 6
+hours), then downloads and installs them on restart.
 
 ## How it works
 
 - **Catalog** comes from [mxb-mods.com](https://mxb-mods.com) via its public
   WordPress REST API (search, listings, images), behind a swappable `ModSource`
   trait in the Rust backend.
-- **Downloads** are resolved per host — MediaFire and Google Drive today, direct
-  links as-is. Mega isn't supported yet (open the page to grab it manually).
-- **Archives**: `.zip` and `.7z` are extracted natively; `.pkz` files are placed
-  as-is. (`.rar` is not supported yet.)
+- **Downloads** are resolved per host — MediaFire, Google Drive and MEGA, direct
+  links as-is. MEGA *folder* links are the exception (open the page to grab
+  those manually).
+- **Archives**: `.zip`, `.7z` and `.rar` are extracted natively; already-packaged
+  `.pkz` / `.pnt` files are placed as-is.
+- **Live reload**: a debounced watcher on `<modsPath>/mods` signals FrostMod to
+  reload the game when mods are added — including ones installed outside the app.
+- **Self-update**: `tauri-plugin-updater` against the `latest.json` published with
+  each release; signature-verified, installs on restart.
 
 ## Tech stack
 
@@ -49,6 +57,9 @@ first launch — choose _Run anyway_ / right-click _Open_.
   (Radix primitives) for UI, [lucide](https://lucide.dev/) icons,
   [Sonner](https://sonner.emilkowal.ski/) toasts, and
   [Swiper](https://swiperjs.com/) for galleries
+- [three.js](https://threejs.org/) via
+  [React Three Fiber](https://r3f.docs.pmnd.rs/) + drei for the 3D rider and bike
+  previews
 
 ## Development
 
@@ -96,21 +107,16 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The workflow produces a **draft** release with the installers attached — review
-it in the Releases tab and publish when ready. You can also trigger a build
-without tagging via **Actions → Release → Run workflow**.
+The workflow **publishes** the release with the installers attached
+(`releaseDraft: false`), renames the bundles to `MXB-App-<ver>-<arch>.<ext>` and
+patches `latest.json` so self-update keeps verifying. You can also trigger a
+build without tagging via **Actions → Release → Run workflow**.
 
 ## Roadmap
 
 Features coming next:
 
-- **Liveries** — browse and install **bike liveries** and **rider gear/kit**
-  (helmet, jersey, pants, boots), installed into each bike's `paints` folder and
-  the rider folders, with previews so you can see a livery before installing it.
-- **Auto-update** — the app updates itself in the background: it checks for a new
-  release on launch, downloads it, and installs on restart, so you're always on
-  the latest version without re-downloading the installer.
-- More mod types (assets, sounds, wheels, …) — the `ModSource` trait and category
-  ids already generalize beyond tracks.
-- An injected DLL that reads your in-game track list and one-click-installs the
-  tracks you're missing, then refreshes the game library.
+- More mod types (assets, wheels, …) — the `ModSource` trait and category ids
+  already generalize beyond tracks, bikes and rider gear.
+- Reading your in-game track list through FrostMod (which already handles the
+  live reload) to one-click-install the tracks you're missing.
