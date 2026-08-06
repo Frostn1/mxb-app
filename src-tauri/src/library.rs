@@ -13,10 +13,35 @@ pub struct InstalledMod {
     pub size: u64,
 }
 
+/// The child of `dir` named `seg`, matching case-insensitively when the exact name isn't
+/// there.
+///
+/// Windows and macOS don't care about case, so a hardcoded `"mods"` always resolved. Linux
+/// does: MX Bikes runs under Proton on a case-sensitive filesystem, where a folder the game
+/// or a mod archive created as `Mods` is a different path from `mods`, and every lookup
+/// silently missed. Falls back to the literal name so paths we're about to *create* still
+/// come out as written.
+pub fn resolve_child(dir: &Path, seg: &str) -> PathBuf {
+    let exact = dir.join(seg);
+    if exact.exists() {
+        return exact;
+    }
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().eq_ignore_ascii_case(seg) {
+                return e.path();
+            }
+        }
+    }
+    exact
+}
+
+/// Resolve `mods/bikes`-style relative paths under the MX Bikes folder. The single funnel
+/// for these lookups, so making it case-tolerant covers the whole app at once.
 pub fn mods_subdir(mods_path: &str, subpath: &str) -> PathBuf {
     let mut p = PathBuf::from(mods_path);
     for seg in subpath.split(['/', '\\']).filter(|s| !s.is_empty()) {
-        p.push(seg);
+        p = resolve_child(&p, seg);
     }
     p
 }
@@ -677,5 +702,47 @@ mod tests {
         assert!(res.is_err());
         assert!(outside.exists());
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod path_case_tests {
+    use super::*;
+
+    /// True when the filesystem under `dir` distinguishes case (ext4 does, APFS/NTFS
+    /// as shipped do not) — the assertion only means something on the former.
+    fn case_sensitive_fs(dir: &Path) -> bool {
+        let probe = dir.join("CaseProbe");
+        std::fs::create_dir_all(&probe).unwrap();
+        !dir.join("caseprobe").exists()
+    }
+
+    #[test]
+    fn resolves_a_child_whose_case_differs() {
+        let root = std::env::temp_dir().join(format!("frost-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let sensitive = case_sensitive_fs(&root);
+        // What a Proton prefix or a mod archive can leave on a case-sensitive filesystem.
+        std::fs::create_dir_all(root.join("Mods").join("Bikes")).unwrap();
+
+        let got = mods_subdir(root.to_str().unwrap(), "mods/bikes");
+        assert!(got.is_dir(), "lookup found the real folder: {got:?}");
+        if sensitive {
+            assert!(got.ends_with("Bikes"), "kept the on-disk casing: {got:?}");
+        } else {
+            eprintln!("case-insensitive filesystem — the OS resolved it for us");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn falls_back_to_the_literal_name_for_paths_we_create() {
+        let root = std::env::temp_dir().join(format!("frost-case-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let got = mods_subdir(root.to_str().unwrap(), "mods/tracks");
+        assert!(got.ends_with("tracks"), "nothing on disk yet, so use what we asked for");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

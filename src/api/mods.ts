@@ -829,3 +829,9 @@ export function onPresetBundleProgress(
 ): Promise<UnlistenFn> {
   return listen<BundleProgress>("preset-bundle-progress", (event) => cb(event.payload));
 }
+
+/** `"windows"` | `"macos"` | `"linux"`. Features gated on the OS ask the backend rather
+ *  than guessing from `navigator.userAgent`, which can't tell Windows from Linux. */
+export function appPlatform(): Promise<string> {
+  return invoke<string>("app_platform");
+}

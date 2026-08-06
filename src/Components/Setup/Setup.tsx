@@ -2,13 +2,26 @@ import { useEffect, useState } from "react";
 import { Snowflake, FolderOpen, Gamepad2, Loader2, Check } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { createConfig, detectGamePath } from "../../api/mods";
+import { usePlatform } from "../../lib/usePlatform";
 import { Button } from "@/Components/ui/button";
 
 interface SetupProps {
   onComplete: () => void;
 }
 
+/**
+ * Where MX Bikes keeps its user folder, per OS. On Linux the game runs under Proton and
+ * writes inside the Wine prefix, so pointing someone at `~/Documents` would send them
+ * looking in a folder MX Bikes has never touched.
+ */
+function hintFor(platform: string | null): string {
+  if (platform === "linux") return "steamapps/compatdata/655500/.../Documents/PiBoSo/MX Bikes";
+  if (platform === "macos") return "Documents/PiBoSo/MX Bikes";
+  return "Documents\\PiBoSo\\MX Bikes";
+}
+
 export default function Setup({ onComplete }: SetupProps) {
+  const defaultHint = hintFor(usePlatform());
   const [chosen, setChosen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,10 +116,8 @@ export default function Setup({ onComplete }: SetupProps) {
           ) : (
             <p className="text-[12.5px] text-muted-foreground">
               MXB App will auto-detect your{" "}
-              <span className="font-mono text-foreground/80">
-                Documents\PiBoSo\MX Bikes
-              </span>{" "}
-              folder. You can also pick it yourself.
+              <span className="font-mono text-foreground/80">{defaultHint}</span> folder.
+              You can also pick it yourself.
             </p>
           )}
           <button

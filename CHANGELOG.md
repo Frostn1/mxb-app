@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+- **Linux builds.** Releases now produce an AppImage, a `.deb` and an `.rpm` alongside the
+  Windows and macOS installers, built on a third CI leg. The AppImage isn't optional —
+  it's the only Linux artifact the updater can use, so `latest.json` gets its
+  `linux-x86_64` entry from it. Pinned to Ubuntu 22.04 rather than `latest`, because an
+  AppImage inherits its builder's glibc as a floor and would otherwise refuse to start on
+  older distros.
+- **MX Bikes is found automatically under Proton.** The game runs as a Windows process
+  there, so it writes into the Wine prefix —
+  `steamapps/compatdata/655500/pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes` —
+  and never touches the real `~/Documents`. Detection checks the prefix first, and now
+  also finds Steam installed via Flatpak or snap, or at `~/.steam/root`.
+
 ### Fixed
 - **A failed install is no longer a dead end once you've browsed away.** The failure
   toast only offered Retry, and the error itself — the message, the destination picker,
@@ -61,6 +74,11 @@
   Honest caveat: the 403 is not reproducible from here (the current client gets 200s), so
   this is a set of well-founded improvements rather than a confirmed cure. The clearer
   error means the next report will say which of these it is.
+- **Folder lookups no longer depend on how a name is capitalised.** Windows and macOS
+  don't care, so hardcoded lowercase `mods` / `profiles` always resolved. Under Proton the
+  filesystem is case-sensitive, and a folder the game or a mod archive created as `Mods`
+  was simply invisible. Resolution now falls back to a case-insensitive match, in the one
+  helper every `mods/...` path already goes through.
 
 ### Changed
 - **The Locker says what to do when it finds nothing**, instead of only what's missing —
@@ -70,6 +88,18 @@
   once ever; it now tracks which folders it has asked about, so a swap installed later
   still gets offered. The Locker and Presets also re-scan when the mods folder changes,
   rather than waiting for a manual Refresh.
+- **Windows-only features are hidden rather than offered and broken on Linux.** The
+  FrostMod section — a Win32 DLL injected into the game — no longer appears, and can't be
+  asked to download two `.exe`/`.dll` files that would never run. Instant preset refresh
+  explains why it's unavailable instead of saying "Windows only" to a Windows user. The
+  setup screen shows the Proton path rather than `Documents\PiBoSo\MX Bikes`. The frontend
+  now asks the backend which OS it's on, instead of inferring it from `navigator.userAgent`
+  (which can spot a Mac and nothing else).
+- **Closing the window on Linux really closes it.** Close-to-tray relies on the tray
+  surviving, but Tauri doesn't receive tray clicks through libayatana-appindicator and a
+  stock GNOME desktop has no tray at all — hiding there could strand the window with no
+  way back.
+
 
 ## 2026-08-06 — v0.6.2 — mod-manager performance, Discord release announcements
 
