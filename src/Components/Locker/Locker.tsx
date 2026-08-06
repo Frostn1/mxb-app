@@ -10,6 +10,7 @@ import {
   FolderInput,
   Link2,
   Link2Off,
+  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,9 @@ import {
   scanModelSwaps,
   applyModelSwap,
   detectLooseSwaps,
+  detectOrphanedSetup,
+  repairOrphanedSetup,
+  onModsChanged,
   scanSoundSwaps,
   applySoundSwap,
   bindSound,
@@ -28,6 +32,7 @@ import type {
   BikeSounds,
   LooseSwapBike,
   ModelVariant,
+  OrphanedSetup,
   SoundVariant,
   SwapApplyOutcome,
 } from "../../types";
@@ -102,17 +107,21 @@ export default function Locker() {
   // Model sets found sitting loose outside `FrostMod Models/` (banner + dialog).
   const [loose, setLoose] = useState<LooseSwapBike[]>([]);
   const [registerOpen, setRegisterOpen] = useState(false);
+  // Bikes gutted by a pre-0.6.3 swap — their setup files are in a swap folder.
+  const [orphaned, setOrphaned] = useState<OrphanedSetup[]>([]);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [models, sounds, detected] = await Promise.all([
+      const [models, sounds, detected, broken] = await Promise.all([
         scanModelSwaps(),
         scanSoundSwaps().catch(() => [] as BikeSounds[]),
         detectLooseSwaps().catch(() => [] as LooseSwapBike[]),
+        detectOrphanedSetup().catch(() => [] as OrphanedSetup[]),
       ]);
       setRows(mergeRows(models, sounds));
       setLoose(detected);
+      setOrphaned(broken);
     } catch (e) {
       setError(String(e));
       setRows([]);
@@ -121,6 +130,15 @@ export default function Locker() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // Installing a mod or editing the folder changes what's swappable — pick it up without
+  // making the user hit Rescan (same watcher `Context/Frostmod` listens to).
+  useEffect(() => {
+    const un = onModsChanged(() => void load());
+    return () => {
+      void un.then((f) => f());
+    };
   }, [load]);
 
   const looseCount = loose.reduce((n, b) => n + b.candidates.length, 0);
@@ -147,6 +165,11 @@ export default function Locker() {
     },
     [load],
   );
+
+  const onRepair = (bike: string) =>
+    run(bike, `Restored ${bike}'s setup files.`, () => repairOrphanedSetup(bike), (n) =>
+      `${n} file${n === 1 ? "" : "s"} put back — the bike should load again.`,
+    );
 
   const onModelSwap = (bike: string, target: string) =>
     run(bike, `Switched ${bike} model to “${target}”.`, () => applyModelSwap(bike, target), swapNote);
@@ -176,6 +199,33 @@ export default function Locker() {
         </button>
       </header>
 
+      {orphaned.map((o) => (
+        <div
+          key={o.bike}
+          className="mx-7 mb-3.5 flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/[0.07] px-3.5 py-2.5"
+        >
+          <Wrench className="size-4 flex-none text-destructive/80" />
+          <span className="min-w-0 flex-1 text-[12.5px] text-foreground/90">
+            <span className="font-semibold">{o.bike}</span> is missing its setup files — an
+            earlier version moved them into a swap folder, which stops the bike loading
+            in-game at all.{" "}
+            <span className="font-mono text-faint">{o.files.join(", ")}</span>
+          </span>
+          <button
+            onClick={() => void onRepair(o.bike)}
+            disabled={busy !== null}
+            className="flex flex-none items-center gap-1.5 rounded-md bg-destructive/15 px-2.5 py-1.5 text-[12px] font-semibold text-destructive transition-colors hover:bg-destructive/25 disabled:opacity-50"
+          >
+            {busy === o.bike ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Wrench className="size-3.5" />
+            )}
+            Restore
+          </button>
+        </div>
+      ))}
+
       {looseCount > 0 && (
         <button
           onClick={() => setRegisterOpen(true)}
@@ -201,11 +251,32 @@ export default function Locker() {
         ) : rows === null ? (
           <p className="py-16 text-center text-[13px] text-muted-foreground">Scanning bikes…</p>
         ) : rows.length === 0 ? (
-          <p className="py-16 text-center text-[13px] text-muted-foreground">
-            No extracted bikes found. Swaps need a bike unpacked into
-            <span className="mx-1 font-mono text-faint">mods/bikes/&lt;Bike&gt;/</span>
-            (a loose <span className="font-mono text-faint">model.edf</span> or sound files).
-          </p>
+          <div className="mx-auto max-w-md py-14 text-[13px] text-muted-foreground">
+            <p className="mb-3 text-center text-foreground/90">No swappable bikes yet.</p>
+            <p className="mb-3">Two things have to be true before a swap can happen:</p>
+            <ol className="mb-4 list-decimal space-y-2 pl-5">
+              <li>
+                The bike is <span className="text-foreground/90">unpacked</span> into
+                <span className="mx-1 font-mono text-faint">mods/bikes/&lt;Bike&gt;/</span>—
+                a packed <span className="font-mono text-faint">.pkz</span> can&apos;t be
+                swapped.
+                Unpack one from the Library.
+              </li>
+              <li>
+                Each alternate model sits in its own folder inside that bike, holding a mesh
+                (<span className="font-mono text-faint">.edf</span>). Drop it anywhere in the
+                bike folder and hit Scan below — we&apos;ll offer to file it under
+                <span className="mx-1 font-mono text-faint">FrostMod Models/</span>.
+              </li>
+            </ol>
+            <button
+              onClick={() => void load()}
+              className="mx-auto flex items-center gap-1.5 rounded-lg border border-input bg-card px-3 py-2 text-[12.5px] transition-colors hover:text-foreground"
+            >
+              <RefreshCw className="size-3.5" />
+              Scan for swaps
+            </button>
+          </div>
         ) : (
           <div className="flex flex-col gap-4">
             {rows.map((r) => (

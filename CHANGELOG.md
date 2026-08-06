@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Swapping a bike's model no longer takes the bike with it.** The swapper treated every
+  loose file in `mods/bikes/<Bike>/` as part of the model, so a swap carted the bike's own
+  setup — the `.hrc` files naming each part's mesh, plus `.cfg` and `.geom` — off into
+  `FrostMod Models/`. The game then couldn't see the bike at all, which is why a swapped
+  model "didn't show in game" and then the bike itself vanished from the list. A swap now
+  moves only the files a swap actually provides:
+  - Each parked set records what it owns in `_files.txt` on the way in, so the reverse
+    swap moves back exactly what it moved out instead of guessing.
+  - Before any manifest exists, the set is scoped to the meshes at the bike root plus
+    whatever that bike's other swap folders contain — self-scoping, and it leaves setup
+    files the swaps never mention exactly where the game expects them.
+  - A swap that legitimately ships its own `.hrc` still displaces the bike's, and still
+    gives it back when you swap away.
+- **Bikes already broken by this can be repaired in one click.** The Locker now spots a
+  bike with no `.hrc` at its root — nothing left to tell the game which mesh each part
+  uses — and offers to put the missing files back from the swap folder holding them. It
+  copies rather than moves, so repairing can't break the swap set they came from, and a
+  bike stripped bare (what swapping to an empty "no model" variant used to do) gets its
+  whole set back and its active marker corrected, rather than setup with no model. Bikes
+  that carry a packed `.pkz` inside their folder are left alone — a missing `.hrc` is
+  normal there, since the loose files only layer over the packed bike.
+- **Bikes and swaps whose mesh isn't called `model.edf` are visible again.** A bike may
+  split its mesh one `.edf` per part (`96cr250.edf`, `96cr250_st.edf`, …); the viewer
+  learned that in 0.5.2 but the swapper never did, so those bikes never appeared in the
+  Locker, their swap folders were never offered for registration, and applying one failed
+  with "missing its model.edf". Both sides now share one definition of a bike's files
+  (`bikefiles`) and accept any `.edf` as a mesh.
+- **Model swaps show up in Presets.** The scan keys on the bike's folder name while the
+  Presets slot asked by the `bikeid` in `profile.ini`; the two agree in case only by
+  convention, and any divergence silently produced an empty dropdown. The lookup is now
+  case-insensitive, for bike paints as well. Incomplete sets (files but no mesh) are no
+  longer offered, since applying one could only fail.
+
+### Changed
+- **The Locker says what to do when it finds nothing**, instead of only what's missing —
+  the two conditions a swap needs, and a Scan button — and the empty "Model swap" slot in
+  Presets now explains that swaps are registered in the Locker and links there.
+- **New swaps get noticed.** The startup prompt to file loose swap folders used to show
+  once ever; it now tracks which folders it has asked about, so a swap installed later
+  still gets offered. The Locker and Presets also re-scan when the mods folder changes,
+  rather than waiting for a manual Refresh.
+
 ## 2026-08-06 — v0.6.2 — mod-manager performance, Discord release announcements
 
 ### Added
