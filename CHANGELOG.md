@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A failed install is no longer a dead end once you've browsed away.** The failure
+  toast only offered Retry, and the error itself — the message, the destination picker,
+  the reinstall controls — lives on the mod's own page. Leave that page while the
+  download is running and the failure had nowhere to send you back to. The banner is now
+  the way back: clicking it reopens that mod's detail page, restoring the mod type the
+  install targeted so Browse and the detail page agree on folders and livery routing.
+  Retry and the dismiss X still do only their own job. Shop installs, which have no
+  browse page, keep the plain toast.
+
 ## 2026-08-06 — v0.6.2 — mod-manager performance, Discord release announcements
 
 ### Added
