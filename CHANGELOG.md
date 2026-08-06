@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **Releases now say which file to download.** The release body led with "See the assets
+  below", which was thin with three files and no help at all now there are six across
+  three platforms. It opens with the Windows `.exe` — what nearly everyone here needs —
+  and tucks macOS and Linux behind a fold, noting that the `.sig`/`.tar.gz` files are the
+  updater's and shouldn't be downloaded. The Discord announcement labels the Windows link
+  "start here" and gained a Linux (AppImage) link. Both describe files by extension, so
+  the rename step can't make them wrong.
 - **Linux builds.** Releases now produce an AppImage, a `.deb` and an `.rpm` alongside the
   Windows and macOS installers, built on a third CI leg. The AppImage isn't optional —
   it's the only Linux artifact the updater can use, so `latest.json` gets its

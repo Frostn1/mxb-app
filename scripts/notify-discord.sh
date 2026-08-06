@@ -113,6 +113,9 @@ fi
 # names rather than Tauri's `MXB.App_0.6.1_x64-setup.exe`.
 win="$(jq -r '[.assets[] | select(.name | test("\\.exe$"))] | first | .url // empty' <<<"$meta")"
 mac="$(jq -r '[.assets[] | select(.name | test("\\.dmg$"))] | first | .url // empty' <<<"$meta")"
+# The AppImage is the portable one that works on any distro, so it's the Linux link
+# worth putting in a chat message; .deb/.rpm are a click away on the release page.
+lin="$(jq -r '[.assets[] | select(.name | test("\\.AppImage$"))] | first | .url // empty' <<<"$meta")"
 
 icon="https://raw.githubusercontent.com/$REPO/$TAG/src-tauri/icons/icon.png"
 avatar="https://raw.githubusercontent.com/$REPO/main/src-tauri/icons/icon.png"
@@ -126,6 +129,7 @@ payload="$(jq -n \
   --arg ts "$published" \
   --arg win "$win" \
   --arg mac "$mac" \
+  --arg lin "$lin" \
   '{
     username: "MXB App",
     avatar_url: $avatar,
@@ -140,7 +144,7 @@ payload="$(jq -n \
       footer: { text: "MXB App • GitHub Releases" },
       fields: (
         (if $win != "" then [{
-          name: "⬇ Windows",
+          name: "⬇ Windows — start here",
           value: ("[" + ($win | split("/") | last) + "](" + $win + ")"),
           inline: true
         }] else [] end)
@@ -148,6 +152,12 @@ payload="$(jq -n \
         (if $mac != "" then [{
           name: "⬇ macOS (Apple Silicon)",
           value: ("[" + ($mac | split("/") | last) + "](" + $mac + ")"),
+          inline: true
+        }] else [] end)
+        +
+        (if $lin != "" then [{
+          name: "⬇ Linux (AppImage)",
+          value: ("[" + ($lin | split("/") | last) + "](" + $lin + ")"),
           inline: true
         }] else [] end)
       )
