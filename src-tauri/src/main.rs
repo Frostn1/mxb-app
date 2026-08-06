@@ -286,6 +286,26 @@ fn get_pkz_meta_blocking(app: tauri::AppHandle, path: String) -> Result<pkz::Pkz
     pkz::read_meta_cached(&app, &path).map_err(|e| format!("{e:#}"))
 }
 
+/// Metadata for many mods at once, but only for the ones already cached — `None` marks
+/// an entry the caller still has to request individually.
+///
+/// The Library asks for this first so a known collection paints in a single round trip
+/// instead of one request (and one archive read) per card.
+#[tauri::command]
+async fn get_pkz_meta_cached(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<Option<pkz::PkzMeta>>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .iter()
+            .map(|p| pkz::read_meta_if_cached(&app, p))
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("get_pkz_meta_cached task failed: {e}"))
+}
+
 #[tauri::command]
 async fn get_pkz_preview(path: String) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || get_pkz_preview_blocking(path))
@@ -1386,10 +1406,14 @@ fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
 /// Point the app at a different MX Bikes folder; an empty string re-runs detection.
 /// Only the folder changes — unlike a full `create_config`, the rest of the settings
 /// (startup, tray, FrostMod, first-run state) are left alone.
+///
+/// Async so the switch runs off the UI thread: `finalize` can scan Steam libraries and
+/// restarting the watcher tears down its background thread, neither of which should be
+/// able to lock up the window.
 #[tauri::command]
-fn set_mods_path(
+async fn set_mods_path(
     app: tauri::AppHandle,
-    watcher: State<ModWatcher>,
+    watcher: State<'_, ModWatcher>,
     path: String,
 ) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -1915,6 +1939,7 @@ fn main() {
             get_mod_detail,
             get_installed_mods,
             scan_library,
+            get_pkz_meta_cached,
             get_pkz_meta,
             get_pkz_preview,
             unpack_paint,

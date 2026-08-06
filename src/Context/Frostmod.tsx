@@ -17,9 +17,24 @@ import {
   reloadFrostmod,
 } from "../api/mods";
 import type { FrostmodStatus } from "../types";
+import { displayName } from "../lib/mods";
 import { FrostmodContext } from "./FrostmodContext";
 
 const POLL_MS = 5000;
+
+/**
+ * Name what the folder watcher picked up. The watcher reports mods as `<type>/<name>`;
+ * showing them beats a generic "your folder changed", which left people unsure whether
+ * the drop had been seen at all.
+ */
+function watchDescription(mods: string[]): string {
+  const asked = "Asked FrostMod to reload the game.";
+  if (mods.length === 0) return asked;
+  const names = mods.map((m) => displayName(m.split("/").pop() ?? m));
+  const shown = names.slice(0, 3).join(", ");
+  const rest = names.length - 3;
+  return `${rest > 0 ? `${shown} and ${rest} more` : shown} — ${asked.toLowerCase()}`;
+}
 
 export function FrostmodProvider({ children }: { children: ReactNode }) {
   const [running, setRunning] = useState<boolean | null>(null);
@@ -76,9 +91,14 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     void onFrostmodReload((p) => {
       if (p.slug !== MODS_WATCH_SLUG) return;
       if (p.outcome === "signaled") {
-        toast.success("New mods loaded", {
-          description: "FrostMod refreshed the game with your folder changes.",
-        });
+        // "Added", not "loaded": signalling FrostMod only tells us its reload event
+        // exists and was poked — whether the game picked the mods up is FrostMod's to
+        // report, and claiming otherwise is what makes a failed reload so confusing.
+        const mods = p.mods ?? [];
+        toast.success(
+          mods.length === 1 ? "New mod added" : `${mods.length || "New"} mods added`,
+          { description: watchDescription(mods) },
+        );
       }
       void probe();
     }).then((fn) => {

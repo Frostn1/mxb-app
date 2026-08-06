@@ -20,7 +20,6 @@ import { toast } from "sonner";
 import {
   MOD_TYPES,
   scanLibrary,
-  getPkzMeta,
   moveMod,
   revealInExplorer,
   uninstallMod,
@@ -28,6 +27,7 @@ import {
 } from "../../api/mods";
 import type { LibraryEntry, PkzMeta } from "../../types";
 import { displayName, folderLabel, formatBytes, formatLength } from "../../lib/mods";
+import { metaKey, peekMeta, primeMetaCache, requestMeta } from "../../lib/pkzMeta";
 import {
   CATEGORY_LABEL,
   SECTION_LABEL,
@@ -84,8 +84,6 @@ interface RowAction {
   separatorBefore?: boolean;
 }
 
-const metaCache = new Map<string, PkzMeta>();
-
 function LibraryCardBody({
   item,
   typeIcon: TypeIcon,
@@ -93,31 +91,41 @@ function LibraryCardBody({
   item: LibraryEntry;
   typeIcon: LucideIcon;
 }) {
-  const cacheKey = `${item.path}:${item.size}`;
-  const [meta, setMeta] = useState<PkzMeta | null>(
-    () => metaCache.get(cacheKey) ?? null,
-  );
+  const cacheKey = metaKey(item);
+  const [meta, setMeta] = useState<PkzMeta | null>(() => peekMeta(cacheKey) ?? null);
+  // The thumbnail tile doubles as the visibility probe for the card.
+  const [tile, setTile] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const cached = metaCache.get(cacheKey);
+    const cached = peekMeta(cacheKey);
     if (cached) {
       setMeta(cached);
       return;
     }
-    let alive = true;
     setMeta(null);
-    getPkzMeta(item.path)
-      .then((m) => {
-        metaCache.set(cacheKey, m);
-        if (alive) setMeta(m);
-      })
-      .catch(() => {
-        /* leave the icon/size fallback in place */
-      });
+    if (!tile) return;
+
+    // Reading metadata means opening the archive and decoding its preview, so only
+    // the cards a player actually scrolls to are worth it. Asking for all of them the
+    // moment the grid renders is what made a large library lock the machine up.
+    let alive = true;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        io.disconnect();
+        void requestMeta(item.path, cacheKey).then((m) => {
+          if (alive && m) setMeta(m);
+        });
+      },
+      // A little ahead of the viewport, so scrolling finds them already loaded.
+      { rootMargin: "400px" },
+    );
+    io.observe(tile);
     return () => {
       alive = false;
+      io.disconnect();
     };
-  }, [item.path, cacheKey]);
+  }, [item.path, cacheKey, tile]);
 
   const title = meta?.name?.trim() || displayName(item.name);
   const parts: string[] = [];
@@ -128,7 +136,10 @@ function LibraryCardBody({
 
   return (
     <>
-      <div className="relative grid h-12 w-[76px] flex-none place-items-center overflow-hidden rounded-md bg-gradient-to-br from-[#3a3f45] to-[#20242a] text-foreground/25">
+      <div
+        ref={setTile}
+        className="relative grid h-12 w-[76px] flex-none place-items-center overflow-hidden rounded-md bg-gradient-to-br from-[#3a3f45] to-[#20242a] text-foreground/25"
+      >
         {meta?.thumbnail ? (
           <img src={meta.thumbnail} alt="" className="h-full w-full object-cover" />
         ) : (
@@ -247,7 +258,11 @@ export default function Library({
     setLoading(true);
     setError(null);
     try {
-      setEntries(await scanLibrary(modType.installSubpath));
+      const scanned = await scanLibrary(modType.installSubpath);
+      // Pull everything already known in one round trip, so a library that's been
+      // opened before renders complete without touching a single archive.
+      await primeMetaCache(scanned);
+      setEntries(scanned);
     } catch (e) {
       setError(String(e));
     } finally {

@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased — mod-manager performance
+
+### Fixed
+- **A large library no longer locks the machine up on first open, or after changing the
+  MX Bikes folder.** Two people hit the same wall from different directions — one on the
+  very first launch with a big collection, one every time they repointed the folder.
+  Both are the same storm:
+  - The Library renders a card per installed mod and every card asked for its metadata
+    the moment it mounted. Each request opens the `.pkz`, reads its descriptor, and
+    decodes the preview image to a full-size bitmap before shrinking it to a 192px
+    thumbnail — so a few hundred mods meant a few hundred simultaneous archive reads and
+    image decodes competing for the same disk and RAM. Cards now request metadata only
+    once they scroll into view, a few at a time.
+  - The backend now gates archive inspection to 2–4 at once no matter how many callers
+    arrive, and caps what a single preview decode may allocate. The gate is the real
+    safety net: no UI change can reopen the floodgates.
+  - Metadata cache entries were keyed on the mod's **absolute path**, so pointing the app
+    at a moved or copied MX Bikes folder invalidated every entry at once and re-inspected
+    the entire collection in one burst. They're now keyed on the file itself (name, size,
+    mtime), which survives a move.
+  - A freshly scanned library pulls everything already cached in a single round trip
+    instead of one request per card, so a library that's been opened before paints
+    without touching an archive at all.
+- **`Change…` on the MX Bikes folder no longer blocks the window** — `set_mods_path` ran
+  on the UI thread, where re-detecting the Steam install and restarting the watcher could
+  stall it.
+- **Scanning the tracks folder walks it once, not twice.** An extracted track's folder is
+  the mod, so the scan now stops descending at it rather than walking its (often
+  thousands of) interior files and comparing every path against every track found so far.
+
+### Changed
+- **The folder watcher waits for a copy to finish, and says what it picked up.** It used
+  to pulse a reload on every debounced burst, so dropping a folder of tracks in asked the
+  game to re-scan its content over and over *while the files were still being written* —
+  a plausible cause of a track that only shows up after a full game restart. It now
+  accumulates changes until the folder goes quiet (3s, capped at 45s) and fires one
+  reload, skips half-written downloads (`.crdownload`, `.part`, `.tmp`), and collapses
+  every change inside a mod to one entry so an extracting track counts once, not
+  hundreds of times. The toast names what landed.
+  - Scoping the reload to just the new mods stays FrostMod's call — its reload already
+    rebuilds the content lists surgically, one list per frame. All this side owes it is
+    a single pulse, once the writes are done.
+- **The folder-watcher toast no longer claims more than it knows.** Signalling FrostMod
+  only tells us its reload event exists and was poked; FrostMod can still abort (offsets
+  mismatch on an unrecognised game build) or drop the request as re-entrant. The toast
+  now says the mods were *added* and that a reload was *asked for*, rather than
+  announcing that the game refreshed.
+
 ## 2026-08-06 — v0.6.1 — Rider tab gear slots
 
 ### Fixed
