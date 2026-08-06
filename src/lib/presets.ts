@@ -135,7 +135,10 @@ export async function loadScans(): Promise<Scans> {
     if (e.category === "bikePaint" && e.parent) push(s.bikePaints, e.parent, stripExt(e.name));
   }
   for (const b of swaps) {
-    if (b.variants.length) s.modelSwaps[b.bike] = b.variants.map((v) => v.name);
+    // Only offer sets that can actually be applied — an incomplete one (files but no
+    // mesh) is rejected by the backend, so offering it only produces a failed apply.
+    const usable = b.variants.filter((v) => v.valid || v.empty).map((v) => v.name);
+    if (usable.length) s.modelSwaps[b.bike] = usable;
   }
   for (const e of rider) {
     const v = stripExt(e.name);
@@ -175,6 +178,17 @@ export async function loadScans(): Promise<Scans> {
   return s;
 }
 
+/**
+ * Look a bike up in a scan map. The scans key on the on-disk folder name while the slot
+ * asks by the `bikeid` written in `profile.ini`; those agree in case only by convention,
+ * and an exact match silently yielded an empty dropdown whenever they didn't.
+ */
+function forBike(map: Record<string, string[]>, bikeid: string): string[] {
+  if (map[bikeid]) return map[bikeid];
+  const hit = Object.keys(map).find((k) => k.toLowerCase() === bikeid.toLowerCase());
+  return hit ? map[hit] : [];
+}
+
 /** Paints for `model`, plus any installed with no owning model folder. */
 function forModel(map: Record<string, string[]>, model: string): string[] {
   return [...(map[model] ?? []), ...(map[ANY_MODEL] ?? [])];
@@ -197,10 +211,10 @@ export function slotOptions(
   let opts: string[] = [];
   switch (slot.key) {
     case "paint":
-      opts = scans.bikePaints[bikeid] ?? [];
+      opts = forBike(scans.bikePaints, bikeid);
       break;
     case "modelSwap":
-      opts = scans.modelSwaps[bikeid] ?? [];
+      opts = forBike(scans.modelSwaps, bikeid);
       break;
     case "helmet":
       opts = scans.helmets;

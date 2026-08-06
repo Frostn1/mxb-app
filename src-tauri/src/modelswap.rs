@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 const LIB_DIR: &str = "FrostMod Models";
 const MARKER: &str = "_active.txt";
 const ORIGINAL: &str = "Original";
-const MODEL_EDF: &str = "model.edf";
+/// Per-variant record of the filenames that variant owns, written whenever we park a
+/// set. Lets the reverse swap move back exactly what it moved out instead of guessing.
+const MANIFEST: &str = "_files.txt";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,8 +128,107 @@ fn list_files(dir: &Path) -> Vec<String> {
 fn dir_exists(p: &Path) -> bool {
     p.is_dir()
 }
-fn file_exists(p: &Path) -> bool {
-    p.is_file()
+fn is_bookkeeping(name: &str) -> bool {
+    name.eq_ignore_ascii_case(MANIFEST) || name.eq_ignore_ascii_case(MARKER)
+}
+
+/// The files a parked variant actually consists of — its own bookkeeping doesn't count.
+fn set_files(dir: &Path) -> Vec<String> {
+    list_files(dir)
+        .into_iter()
+        .filter(|f| !is_bookkeeping(f))
+        .collect()
+}
+
+fn read_manifest(dir: &Path) -> Option<Vec<String>> {
+    let text = fs::read_to_string(dir.join(MANIFEST)).ok()?;
+    let files: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    if files.is_empty() { None } else { Some(files) }
+}
+
+fn write_manifest(dir: &Path, files: &[String]) {
+    if files.is_empty() {
+        let _ = fs::remove_file(dir.join(MANIFEST));
+        return;
+    }
+    let _ = fs::create_dir_all(dir);
+    let _ = fs::write(dir.join(MANIFEST), format!("{}\n", files.join("\n")));
+}
+
+fn contains_ci(haystack: &[String], needle: &str) -> bool {
+    haystack.iter().any(|h| h.eq_ignore_ascii_case(needle))
+}
+
+/// Every filename mentioned by a *parked* variant other than `except`. Used to scope the
+/// very first swap of a bike, before any manifest exists: the files this bike's swaps
+/// deal with are exactly the files its swaps contain.
+fn files_known_to_other_variants(mods_path: &str, bike: &str, except: &[&str]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Ok(rd) = fs::read_dir(lib_dir(mods_path, bike)) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_string();
+            if except.iter().any(|x| x.eq_ignore_ascii_case(&name)) {
+                continue;
+            }
+            for f in read_manifest(&p).unwrap_or_else(|| set_files(&p)) {
+                if !contains_ci(&out, &f) {
+                    out.push(f);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The loose root files that belong to the **active model set** — never the whole folder.
+///
+/// A bike root holds far more than its model: the `.hrc`s naming each part's scene, plus
+/// `.cfg`/`.geom` and physics data. Parking all of it (what versions up to 0.6.1 did) is
+/// what made the bike itself vanish from the game. The set is resolved as:
+///
+/// 1. the active variant's manifest, when we wrote one on the way in;
+/// 2. otherwise every mesh at the root (a model swap always replaces the mesh) plus any
+///    file this bike's other parked variants contain — self-scoping, and it leaves setup
+///    the swaps never mention exactly where the game expects it.
+///
+/// `incoming` adds the files the arriving set would overwrite, which must be displaced
+/// whatever else is true. Sound files are excluded throughout: they swap independently
+/// (see `soundmods`), so a model swap must leave them at the root untouched.
+fn active_set_files(mods_path: &str, bike: &str, active: &str, incoming: &[String]) -> Vec<String> {
+    let root = bike_dir(mods_path, bike);
+    let root_files = list_files(&root);
+
+    let owned = match read_manifest(&variant_dir(mods_path, bike, active)) {
+        Some(m) => m,
+        None => {
+            let mut m: Vec<String> = root_files
+                .iter()
+                .filter(|f| crate::bikefiles::is_mesh(f))
+                .cloned()
+                .collect();
+            for f in files_known_to_other_variants(mods_path, bike, &[active]) {
+                if !contains_ci(&m, &f) {
+                    m.push(f);
+                }
+            }
+            m
+        }
+    };
+
+    root_files
+        .into_iter()
+        .filter(|f| !crate::soundmods::is_sound_file(f) && !is_bookkeeping(f))
+        .filter(|f| contains_ci(&owned, f) || contains_ci(incoming, f))
+        .collect()
 }
 
 fn move_set(src: &Path, dst: &Path, files: &[String]) -> bool {
@@ -166,17 +267,14 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
         if a.is_empty() { ORIGINAL.to_string() } else { a }
     };
 
-    // The active model set is the bike's loose files, excluding the sound set (which
-    // coexists at the root but is swapped independently).
-    let active_files = list_files(&bike_dir(mods_path, bike))
-        .into_iter()
-        .filter(|f| !crate::soundmods::is_sound_file(f))
-        .count();
+    // The active model set is the subset of the bike's loose files that belongs to the
+    // model — not the whole folder (see `active_set_files`).
+    let active_files = active_set_files(mods_path, bike, &active_label, &[]).len();
     let mut variants = vec![ModelVariant {
         name: active_label.clone(),
         active: true,
-        // The active set is the bike's loose files — valid iff model.edf is there.
-        valid: file_exists(&bike_dir(mods_path, bike).join(MODEL_EDF)),
+        // The active set is loose at the root — valid iff a mesh is there.
+        valid: crate::bikefiles::dir_has_mesh(&bike_dir(mods_path, bike)),
         empty: active_files == 0,
         file_count: active_files,
     }];
@@ -195,9 +293,9 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
             if name.eq_ignore_ascii_case(&active_label) {
                 continue; // active is already row 0
             }
-            let files = list_files(&p).len();
+            let files = set_files(&p).len();
             others.push(ModelVariant {
-                valid: file_exists(&p.join(MODEL_EDF)),
+                valid: crate::bikefiles::dir_has_mesh(&p),
                 empty: files == 0,
                 file_count: files,
                 name,
@@ -223,8 +321,10 @@ pub fn scan_model_swaps(mods_path: &str) -> Vec<BikeModels> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
+            // Any mesh qualifies, not just `model.edf` — a bike may ship one EDF per
+            // part (`96cr250.edf`, `96cr250_st.edf`, …), and those were invisible here.
             let qualifies =
-                file_exists(&p.join(MODEL_EDF)) || dir_exists(&p.join(LIB_DIR));
+                crate::bikefiles::dir_has_mesh(&p) || dir_exists(&p.join(LIB_DIR));
             if bike.starts_with('.') || !qualifies {
                 continue;
             }
@@ -262,21 +362,17 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
         anyhow::bail!("model '{target}' not found");
     }
 
-    // The model set is every loose root file EXCEPT the sound set — engine sound and
-    // audio are swapped independently (see `soundmods`), so a model swap must leave
-    // them at the bike root untouched.
-    let root_files: Vec<String> = list_files(&root)
-        .into_iter()
-        .filter(|f| !crate::soundmods::is_sound_file(f))
-        .collect();
-    let target_files = list_files(&target_dir); // variant files to bring in
+    let target_files = set_files(&target_dir); // variant files to bring in
 
     // An empty variant (no files) is an intentional "no model" swap: back up the live
     // set and bring in nothing, leaving the bike without a model. A variant that *has*
-    // files but no model.edf is an incomplete set and is rejected.
-    if !target_files.is_empty() && !file_exists(&target_dir.join(MODEL_EDF)) {
-        anyhow::bail!("model '{target}' is missing its {MODEL_EDF}");
+    // files but no mesh at all is an incomplete set and is rejected.
+    if !target_files.is_empty() && !crate::bikefiles::dir_has_mesh(&target_dir) {
+        anyhow::bail!("model '{target}' has no mesh (.edf) — it looks like an incomplete set");
     }
+
+    // Only the files that belong to the model move. The bike's own setup stays put.
+    let root_files = active_set_files(mods_path, bike, &active_label, &target_files);
 
     // 1) Back up the current set into the library (all-or-nothing).
     if !root_files.is_empty() && !move_set(&root, &backup_dir, &root_files) {
@@ -288,22 +384,182 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
         anyhow::bail!("swap failed and was rolled back (see the model files)");
     }
 
+    // Record what each side owns, so the next swap moves exactly this back and never has
+    // to guess again.
+    write_manifest(&backup_dir, &root_files);
+    write_manifest(&target_dir, &target_files);
     write_active(mods_path, bike, target)?;
     Ok(())
 }
 
-fn dir_has_model_edf(p: &Path) -> bool {
-    file_exists(&p.join(MODEL_EDF))
+/// A bike whose setup files (`.hrc`/`.cfg`/`.geom`) were carried off into a swap folder
+/// by a version that treated the whole folder as the model set. The game can't see such
+/// a bike at all until they're back at the root.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanedSetup {
+    pub bike: String,
+    /// Filenames missing from the bike root that a parked variant still holds.
+    pub files: Vec<String>,
+}
+
+fn root_setup_files(mods_path: &str, bike: &str) -> Vec<String> {
+    list_files(&bike_dir(mods_path, bike))
+        .into_iter()
+        .filter(|f| crate::bikefiles::is_bike_setup(f) && !crate::soundmods::is_sound_file(f))
+        .collect()
+}
+
+/// Setup files a parked variant holds that the bike root is missing, paired with where to
+/// find them. Empty when nothing is wrong.
+///
+/// Gated on the unambiguous signature of the damage: not one `.hrc` at the bike root, so
+/// nothing tells the game which mesh each part uses. Without that gate a swap set that
+/// legitimately ships its own `.cfg` would look broken. Note this must *not* also require
+/// a mesh at the root — swapping to an empty "no model" variant under the old rule left
+/// the root with nothing at all, which is the worst case and the one worth catching.
+fn orphaned_setup_for(mods_path: &str, bike: &str) -> Vec<(String, PathBuf)> {
+    let root = bike_dir(mods_path, bike);
+    // A `.pkz` sitting in the bike folder is a packed fallback the loose files layer over,
+    // so having no `.hrc` of its own is normal there, not damage.
+    if list_files(&root).iter().any(|f| f.to_ascii_lowercase().ends_with(".pkz")) {
+        return Vec::new();
+    }
+    let at_root = root_setup_files(mods_path, bike);
+    if at_root.iter().any(|f| f.to_ascii_lowercase().ends_with(".hrc")) {
+        return Vec::new();
+    }
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    if let Ok(rd) = fs::read_dir(lib_dir(mods_path, bike)) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            for f in set_files(&p) {
+                if !crate::bikefiles::is_bike_setup(&f) || crate::soundmods::is_sound_file(&f) {
+                    continue;
+                }
+                if contains_ci(&at_root, &f) || out.iter().any(|(n, _)| n.eq_ignore_ascii_case(&f)) {
+                    continue;
+                }
+                out.push((f.clone(), p.join(&f)));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    out
+}
+
+pub fn detect_orphaned_setup(mods_path: &str) -> Vec<OrphanedSetup> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(bikes_root(mods_path)) {
+        for e in rd.flatten() {
+            if !e.path().is_dir() {
+                continue;
+            }
+            let bike = match e.file_name().to_str() {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if bike.starts_with('.') || !is_simple_name(&bike) {
+                continue;
+            }
+            let files: Vec<String> =
+                orphaned_setup_for(mods_path, &bike).into_iter().map(|(n, _)| n).collect();
+            if !files.is_empty() {
+                out.push(OrphanedSetup { bike, files });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.bike.to_lowercase().cmp(&b.bike.to_lowercase()));
+    out
+}
+
+/// Put a gutted bike back together at its root. Deliberately a **copy**: the variant that
+/// holds the files keeps its own, so repairing can't break a swap set even if a file
+/// turned out to legitimately belong to it. Returns how many files were restored.
+///
+/// When the root was stripped bare — no mesh either, which is what swapping to an empty
+/// variant used to do — the donor variant's whole set comes back and it becomes the active
+/// model, so the bike is coherent again rather than setup-without-a-model.
+pub fn repair_orphaned_setup(mods_path: &str, bike: &str) -> anyhow::Result<usize> {
+    if !is_simple_name(bike) {
+        anyhow::bail!("invalid bike name");
+    }
+    let root = bike_dir(mods_path, bike);
+    if !dir_exists(&root) {
+        anyhow::bail!("bike '{bike}' not found");
+    }
+    let missing = orphaned_setup_for(mods_path, bike);
+    if missing.is_empty() {
+        anyhow::bail!("nothing to restore for '{bike}'");
+    }
+
+    // The variant holding most of the bike's setup is the one it came from.
+    let donor: Option<PathBuf> = {
+        let mut counts: Vec<(PathBuf, usize)> = Vec::new();
+        for (_, path) in &missing {
+            let dir = match path.parent() {
+                Some(d) => d.to_path_buf(),
+                None => continue,
+            };
+            match counts.iter_mut().find(|(p, _)| *p == dir) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((dir, 1)),
+            }
+        }
+        counts.into_iter().max_by_key(|(_, n)| *n).map(|(p, _)| p)
+    };
+
+    let mut restore: Vec<(String, PathBuf)> = missing;
+    let stripped = !crate::bikefiles::dir_has_mesh(&root);
+    if stripped {
+        if let Some(d) = &donor {
+            for f in set_files(d) {
+                if !restore.iter().any(|(n, _)| n.eq_ignore_ascii_case(&f)) {
+                    restore.push((f.clone(), d.join(&f)));
+                }
+            }
+        }
+    }
+
+    let mut restored = 0usize;
+    for (name, src) in &restore {
+        let dst = root.join(name);
+        if dst.exists() {
+            continue;
+        }
+        if fs::copy(src, &dst).is_ok() {
+            restored += 1;
+        }
+    }
+    if restored == 0 {
+        anyhow::bail!("nothing to restore for '{bike}'");
+    }
+    // The root now mirrors the donor, so say so — otherwise the next swap would park the
+    // restored files under whatever name the stale marker happens to hold.
+    if stripped {
+        if let Some(name) = donor
+            .as_ref()
+            .and_then(|d| d.file_name())
+            .and_then(|n| n.to_str())
+        {
+            write_active(mods_path, bike, name)?;
+        }
+    }
+    Ok(restored)
 }
 
 const KIND_MODEL: &str = "model";
 const KIND_SOUND: &str = "sound";
 
-/// Classify a loose folder as a swappable set: a `model.edf` set (models win when a
-/// folder somehow has both) or a complete `engine.scl` + `sfx.cfg` sound set. Anything
-/// else (liveries, screenshots, junk) is `None` and ignored.
+/// Classify a loose folder as a swappable set: a mesh set — any `.edf`, since a bike may
+/// ship one per part (models win when a folder somehow has both) — or a complete
+/// `engine.scl` + `sfx.cfg` sound set. Anything else (liveries, screenshots, junk) is
+/// `None` and ignored.
 fn classify_set(p: &Path) -> Option<&'static str> {
-    if dir_has_model_edf(p) {
+    if crate::bikefiles::dir_has_mesh(p) {
         Some(KIND_MODEL)
     } else if crate::soundmods::is_sound_set(p) {
         Some(KIND_SOUND)
@@ -517,6 +773,371 @@ mod tests {
     fn touch(p: &Path) {
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, b"x").unwrap();
+    }
+    fn file_exists(p: &Path) -> bool {
+        p.is_file()
+    }
+
+    /// A realistic extracted bike: mesh + the setup files the game needs to see it.
+    fn make_bike(mp: &str, bike: &str, mesh: &str) {
+        touch(&bike_dir(mp, bike).join(mesh));
+        touch(&bike_dir(mp, bike).join("chassis.hrc"));
+        touch(&bike_dir(mp, bike).join("bike.cfg"));
+        touch(&bike_dir(mp, bike).join("wheel.geom"));
+    }
+    fn names_at(p: &Path) -> Vec<String> {
+        let mut v = list_files(p);
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn swap_leaves_the_bikes_setup_files_at_the_root() {
+        // The 0.6.1 bug: every loose root file was parked, so the game lost the bike.
+        let root = tmp("keeps-setup");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        touch(&bike_dir(mp, "KTM450").join("body.tga"));
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+
+        apply_model_swap(mp, "KTM450", "Factory").unwrap();
+
+        let at_root = names_at(&bike_dir(mp, "KTM450"));
+        for keep in ["chassis.hrc", "bike.cfg", "wheel.geom"] {
+            assert!(at_root.contains(&keep.to_string()), "{keep} must stay: {at_root:?}");
+        }
+        assert!(at_root.contains(&"model.edf".to_string()), "the new mesh arrived");
+        let parked = names_at(&variant_dir(mp, "KTM450", ORIGINAL));
+        assert!(parked.contains(&"model.edf".to_string()), "old mesh parked");
+        assert!(!parked.contains(&"chassis.hrc".to_string()), "setup never parked");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn swap_round_trip_restores_the_original_set() {
+        let root = tmp("round-trip");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        fs::write(bike_dir(mp, "KTM450").join("model.edf"), b"stock").unwrap();
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        touch(&variant_dir(mp, "KTM450", "Factory").join("factory.tga"));
+
+        let before = names_at(&bike_dir(mp, "KTM450"));
+        apply_model_swap(mp, "KTM450", "Factory").unwrap();
+        apply_model_swap(mp, "KTM450", ORIGINAL).unwrap();
+
+        assert_eq!(names_at(&bike_dir(mp, "KTM450")), before, "root is back to stock");
+        assert_eq!(
+            fs::read(bike_dir(mp, "KTM450").join("model.edf")).unwrap(),
+            b"stock",
+            "the original mesh came back, not the swap's"
+        );
+        assert_eq!(
+            names_at(&variant_dir(mp, "KTM450", "Factory")),
+            vec!["_files.txt", "factory.tga", "model.edf"],
+            "the swap is parked whole again"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn per_part_edf_bike_scans_and_swaps() {
+        // A bike whose mesh is split per part has no `model.edf` at all — it used to be
+        // invisible to the Locker and rejected on apply.
+        let root = tmp("per-part");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "CR250", "96cr250.edf");
+        touch(&bike_dir(mp, "CR250").join("96cr250_st.edf"));
+        touch(&variant_dir(mp, "CR250", "OEM").join("96cr250.edf"));
+
+        let bikes = scan_model_swaps(mp);
+        assert_eq!(bikes.len(), 1, "per-part bike lists");
+        assert!(bikes[0].variants.iter().all(|v| v.valid), "both sets are valid");
+
+        apply_model_swap(mp, "CR250", "OEM").unwrap();
+        let at_root = names_at(&bike_dir(mp, "CR250"));
+        assert!(at_root.contains(&"chassis.hrc".to_string()));
+        // Every root mesh is part of the model set, including the part the swap omits.
+        assert!(!at_root.contains(&"96cr250_st.edf".to_string()));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn loose_per_part_set_is_detected_for_registration() {
+        let root = tmp("loose-per-part");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "CR250", "96cr250.edf");
+        touch(&bike_dir(mp, "CR250").join("OEM Replica").join("96cr250.edf"));
+
+        let found = detect_loose_swaps(mp);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].candidates[0].name, "OEM Replica");
+        assert_eq!(found[0].candidates[0].kind, KIND_MODEL);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn set_with_files_but_no_mesh_is_rejected() {
+        let root = tmp("no-mesh");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        touch(&variant_dir(mp, "KTM450", "Broken").join("readme.txt"));
+
+        let err = apply_model_swap(mp, "KTM450", "Broken").unwrap_err().to_string();
+        assert!(err.contains("no mesh"), "got: {err}");
+        assert!(
+            bike_dir(mp, "KTM450").join("chassis.hrc").is_file(),
+            "a rejected swap touches nothing"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detects_and_repairs_a_bike_gutted_by_an_older_version() {
+        let root = tmp("repair");
+        let mp = root.to_str().unwrap();
+        // Reproduce the damage: setup files sitting in the swap folder, missing at root.
+        touch(&bike_dir(mp, "KTM450").join("model.edf"));
+        for f in ["chassis.hrc", "bike.cfg", "wheel.geom"] {
+            touch(&variant_dir(mp, "KTM450", ORIGINAL).join(f));
+        }
+        touch(&variant_dir(mp, "KTM450", ORIGINAL).join("model.edf"));
+
+        let found = detect_orphaned_setup(mp);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].bike, "KTM450");
+        assert_eq!(found[0].files, vec!["bike.cfg", "chassis.hrc", "wheel.geom"]);
+
+        assert_eq!(repair_orphaned_setup(mp, "KTM450").unwrap(), 3);
+        for f in ["chassis.hrc", "bike.cfg", "wheel.geom"] {
+            assert!(bike_dir(mp, "KTM450").join(f).is_file(), "{f} restored");
+            assert!(
+                variant_dir(mp, "KTM450", ORIGINAL).join(f).is_file(),
+                "{f} left in the variant too — repair copies, it can't break a set"
+            );
+        }
+        assert!(detect_orphaned_setup(mp).is_empty(), "nothing left to repair");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_healthy_bike_is_not_flagged_for_repair() {
+        let root = tmp("healthy");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        // A swap that legitimately ships its own hrc, while the root has one too.
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        touch(&variant_dir(mp, "KTM450", "Factory").join("chassis.hrc"));
+        // And one that ships a cfg the base bike never had — not damage, just a set.
+        touch(&variant_dir(mp, "KTM450", "Loud").join("model.edf"));
+        touch(&variant_dir(mp, "KTM450", "Loud").join("extra.cfg"));
+
+        assert!(detect_orphaned_setup(mp).is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn repairs_a_bike_stripped_bare_by_a_no_model_swap() {
+        // The state found in a real install: swapping to an empty variant under the old
+        // rule left the bike root with nothing but `paints/`, the whole bike parked under
+        // `Original`, and the marker pointing at the empty variant.
+        let root = tmp("stripped");
+        let mp = root.to_str().unwrap();
+        fs::create_dir_all(bike_dir(mp, "KTM450").join("paints")).unwrap();
+        for f in ["model.edf", "gfx.cfg", "chassis.hrc", "fsusp.hrc", "rsusp.hrc", "steer.hrc"] {
+            touch(&variant_dir(mp, "KTM450", ORIGINAL).join(f));
+        }
+        fs::create_dir_all(variant_dir(mp, "KTM450", "new model")).unwrap();
+        write_active(mp, "KTM450", "new model").unwrap();
+
+        let found = detect_orphaned_setup(mp);
+        assert_eq!(found.len(), 1, "a bike with nothing at its root is the worst case");
+        assert_eq!(found[0].bike, "KTM450");
+
+        assert_eq!(repair_orphaned_setup(mp, "KTM450").unwrap(), 6, "whole set restored");
+        let at_root = names_at(&bike_dir(mp, "KTM450"));
+        assert!(crate::bikefiles::dir_has_mesh(&bike_dir(mp, "KTM450")), "mesh is back");
+        for f in ["chassis.hrc", "fsusp.hrc", "rsusp.hrc", "steer.hrc", "gfx.cfg"] {
+            assert!(at_root.contains(&f.to_string()), "{f} restored: {at_root:?}");
+        }
+        assert_eq!(read_active(mp, "KTM450"), ORIGINAL, "the marker matches what's at root");
+        assert!(detect_orphaned_setup(mp).is_empty(), "nothing left to repair");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_packed_bike_with_swaps_is_not_flagged_for_repair() {
+        // No loose model at the root: the pkz provides it, so a missing hrc is normal.
+        let root = tmp("packed-not-flagged");
+        let mp = root.to_str().unwrap();
+        touch(&bike_dir(mp, "RM").join("RM.pkz"));
+        touch(&variant_dir(mp, "RM", "Factory").join("model.edf"));
+        touch(&variant_dir(mp, "RM", "Factory").join("chassis.hrc"));
+
+        assert!(detect_orphaned_setup(mp).is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_swaps_own_setup_file_is_displaced_and_restored() {
+        let root = tmp("swap-owns-hrc");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        fs::write(bike_dir(mp, "KTM450").join("chassis.hrc"), b"stock-hrc").unwrap();
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        fs::write(variant_dir(mp, "KTM450", "Factory").join("chassis.hrc"), b"factory-hrc")
+            .unwrap();
+
+        apply_model_swap(mp, "KTM450", "Factory").unwrap();
+        assert_eq!(
+            fs::read(bike_dir(mp, "KTM450").join("chassis.hrc")).unwrap(),
+            b"factory-hrc",
+            "the swap's own hrc wins while it is active"
+        );
+        apply_model_swap(mp, "KTM450", ORIGINAL).unwrap();
+        assert_eq!(
+            fs::read(bike_dir(mp, "KTM450").join("chassis.hrc")).unwrap(),
+            b"stock-hrc",
+            "and the bike's own comes back"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Read-only sweep of a real MX Bikes folder: what the Locker would list, what it
+    /// would offer to register, and whether anything looks gutted. Touches nothing.
+    ///
+    /// MXB_REAL_BIKES=~/Projects/PiBoSo/"MX Bikes" \
+    ///   cargo test real_mods_tree_discovery -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_mods_tree_discovery() {
+        let Ok(mp) = std::env::var("MXB_REAL_BIKES") else {
+            eprintln!("set MXB_REAL_BIKES to the MX Bikes folder to run");
+            return;
+        };
+        let bikes = scan_model_swaps(&mp);
+        eprintln!("-- swappable bikes: {}", bikes.len());
+        for b in &bikes {
+            let vs: Vec<String> = b
+                .variants
+                .iter()
+                .map(|v| {
+                    format!(
+                        "{}{}{} ({} files)",
+                        v.name,
+                        if v.active { "*" } else { "" },
+                        if v.valid { "" } else { " !no-mesh" },
+                        v.file_count
+                    )
+                })
+                .collect();
+            eprintln!("   {} -> {}", b.bike, vs.join(", "));
+        }
+        eprintln!("-- loose sets offered for registration:");
+        for b in detect_loose_swaps(&mp) {
+            for c in &b.candidates {
+                eprintln!("   {}/{} [{}] {} files", b.bike, c.source, c.kind, c.file_count);
+            }
+        }
+        eprintln!("-- bikes flagged as gutted: {:?}", detect_orphaned_setup(&mp));
+    }
+
+    /// Repairs a real damaged bike, on a copy. Skips cleanly when the tree is healthy.
+    ///
+    /// MXB_REAL_BIKES=~/Documents/PiBoSo/"MX Bikes" \
+    ///   cargo test real_gutted_bike_is_repaired -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_gutted_bike_is_repaired() {
+        let Ok(src_root) = std::env::var("MXB_REAL_BIKES") else { return };
+        let Some(flagged) = detect_orphaned_setup(&src_root).into_iter().next() else {
+            eprintln!("no damaged bike in this tree — nothing to repair");
+            return;
+        };
+        eprintln!("repairing real bike: {} (missing {:?})", flagged.bike, flagged.files);
+
+        let root = tmp("real-repair");
+        let mp = root.to_str().unwrap();
+        copy_tree(&bike_dir(&src_root, &flagged.bike), &bike_dir(mp, &flagged.bike))
+            .expect("copy the damaged bike");
+        eprintln!("root before: {:?}", names_at(&bike_dir(mp, &flagged.bike)));
+
+        let n = repair_orphaned_setup(mp, &flagged.bike).expect("repair runs");
+        eprintln!("restored {n} files");
+        eprintln!("root after:  {:?}", names_at(&bike_dir(mp, &flagged.bike)));
+        eprintln!("active is now: {:?}", read_active(mp, &flagged.bike));
+
+        assert!(
+            detect_orphaned_setup(mp).is_empty(),
+            "the bike is no longer flagged as damaged"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// End-to-end against a **real** extracted bike, because the whole defect was a wrong
+    /// assumption about what a real bike folder contains. Copies the bike into a scratch
+    /// mods tree, swaps it, and asserts the bike still resolves through the app's own
+    /// loader — `.hrc` → scene → `.edf`, the same chain the game walks. Under the old
+    /// "park every loose file" rule this fails: the `.hrc`s end up in the swap folder and
+    /// `gather_bike_files` can't find a bike at all.
+    ///
+    /// MXB_REAL_BIKES=~/Projects/PiBoSo/"MX Bikes" \
+    ///   cargo test real_bike_survives_a_model_swap -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_bike_survives_a_model_swap() {
+        let Ok(src_root) = std::env::var("MXB_REAL_BIKES") else {
+            eprintln!("set MXB_REAL_BIKES to the MX Bikes folder to run");
+            return;
+        };
+        let src_bikes = Path::new(&src_root).join("mods").join("bikes");
+        // Any extracted bike with a mesh and at least one .hrc will do.
+        let (bike, src_dir) = subdirs(&src_bikes)
+            .into_iter()
+            .find(|(_, p)| {
+                crate::bikefiles::dir_has_mesh(p)
+                    && list_files(p).iter().any(|f| f.to_ascii_lowercase().ends_with(".hrc"))
+            })
+            .expect("no extracted bike with a mesh + .hrc found");
+        eprintln!("using real bike: {bike}");
+
+        let root = tmp("real-bike");
+        let mp = root.to_str().unwrap();
+        let dst = bike_dir(mp, &bike);
+        copy_tree(&src_dir, &dst).expect("copy bike");
+        // A realistic swap set: an alternate mesh, nothing else.
+        let mesh = list_files(&dst)
+            .into_iter()
+            .find(|f| crate::bikefiles::is_mesh(f))
+            .expect("mesh");
+        let variant = variant_dir(mp, &bike, "Factory");
+        fs::create_dir_all(&variant).unwrap();
+        fs::copy(dst.join(&mesh), variant.join(&mesh)).expect("copy mesh into the variant");
+
+        let before = names_at(&dst);
+        eprintln!("root before: {before:?}");
+        let nodes_before = crate::load_bike_model_blocking(dst.to_string_lossy().to_string())
+            .expect("the bike loads before the swap")
+            .nodes
+            .len();
+        assert!(nodes_before > 0, "loader produced no nodes before the swap");
+
+        apply_model_swap(mp, &bike, "Factory").expect("swap applies");
+
+        let after = names_at(&dst);
+        eprintln!("root after:  {after:?}");
+        for f in before.iter().filter(|f| crate::bikefiles::is_bike_setup(f)) {
+            assert!(after.contains(f), "{f} must still be at the bike root after a swap");
+        }
+        let model =
+            crate::load_bike_model_blocking(dst.to_string_lossy().to_string())
+                .expect("the bike still loads after the swap");
+        assert_eq!(model.nodes.len(), nodes_before, "same parts resolve after the swap");
+
+        apply_model_swap(mp, &bike, ORIGINAL).expect("swap back");
+        assert_eq!(names_at(&dst), before, "swapping back restores the bike folder exactly");
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -873,3 +1494,4 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 }
+

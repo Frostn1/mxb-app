@@ -1,3 +1,4 @@
+import type React from "react";
 import { Combobox } from "../ui/combobox";
 import type { SlotDef } from "../../lib/presets";
 
@@ -12,12 +13,15 @@ export function SlotField({
   value,
   options,
   missing,
+  hint,
   onChange,
 }: {
   slot: SlotDef;
   value: string;
   options: string[];
   missing: boolean;
+  /** Shown under the field — says why it's empty when "No matches." wouldn't. */
+  hint?: React.ReactNode;
   onChange: (v: string) => void;
 }) {
   return (
@@ -34,6 +38,7 @@ export function SlotField({
         )}
       </span>
       <Combobox value={value} options={options} onChange={onChange} invalid={missing} />
+      {hint && <span className="text-[11px] leading-snug text-faint">{hint}</span>}
     </div>
   );
 }

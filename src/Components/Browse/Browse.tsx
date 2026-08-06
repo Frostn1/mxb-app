@@ -95,7 +95,7 @@ export default function Browse({
           isLiveryContext(modType, categoryId),
         );
         if (res.ok) {
-          startInstall(res.params);
+          startInstall({ ...res.params, categoryId });
           toast.success(`Queued “${res.params.title}”`, {
             description: `Installing to ${res.params.destFolder || "root"}.`,
           });
@@ -137,7 +137,7 @@ export default function Browse({
             isLiveryContext(modType, categoryId),
           );
           if (res.ok) {
-            startInstall(res.params);
+            startInstall({ ...res.params, categoryId });
             queued++;
           } else {
             skipped.push(res.title);

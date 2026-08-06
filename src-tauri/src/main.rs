@@ -1,6 +1,7 @@
 // Prevents an additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bikefiles;
 mod bikeswap;
 mod bundle;
 mod cfg;
@@ -273,6 +274,28 @@ fn register_loose_swaps_blocking(
 ) -> Result<modelswap::RegisterReport, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     modelswap::register_loose_swaps(&cfg.mods_path, move_files).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn detect_orphaned_setup(
+    app: tauri::AppHandle,
+) -> Result<Vec<modelswap::OrphanedSetup>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(modelswap::detect_orphaned_setup(&cfg.mods_path))
+    })
+    .await
+    .map_err(|e| format!("detect_orphaned_setup task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn repair_orphaned_setup(app: tauri::AppHandle, bike: String) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        modelswap::repair_orphaned_setup(&cfg.mods_path, &bike).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("repair_orphaned_setup task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -684,17 +707,10 @@ fn installed_paints(source: &std::path::Path) -> Vec<(String, Vec<u8>)> {
     out
 }
 
-fn wanted_bike_file(name: &str) -> bool {
-    let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
-    // Any `.edf`, not just `model.edf`: a bike may ship one mesh per part, named by
-    // its `.hrc` (see `scene_files_for_parts`). Shadow meshes ride along unused.
-    bn.ends_with(".edf")
-        || bn.ends_with(".tga")
-        || bn.ends_with(".pnt")
-        || bn.ends_with(".geom")
-        || bn.ends_with(".cfg")
-        || bn.ends_with(".hrc")
-}
+// Any `.edf`, not just `model.edf`: a bike may ship one mesh per part, named by its
+// `.hrc` (see `scene_files_for_parts`). Shadow meshes ride along unused. Shared with
+// `modelswap` so the swapper and the viewer classify the same files the same way.
+use bikefiles::is_viewer_file as wanted_bike_file;
 
 /// The bike's main mesh when the `.hrc`s can't say which it is: `model.edf` by
 /// convention, else the shortest non-shadow name — a per-part set like `96cr250.edf` /
@@ -1960,6 +1976,8 @@ fn main() {
             unbind_sound,
             detect_loose_swaps,
             register_loose_swaps,
+            detect_orphaned_setup,
+            repair_orphaned_setup,
             add_to_library,
             import_file,
             move_mod,
@@ -2009,48 +2027,6 @@ fn main() {
 
 #[cfg(test)]
 mod viewer_tests {
-    // TEMP DIAGNOSTIC — remove before commit.
-    #[test]
-    #[ignore]
-    fn tmp_dump_pools() {
-        let path = std::env::var("MXB_REAL_PKZ").expect("set MXB_REAL_PKZ");
-        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("files");
-        for (name, data) in &files {
-            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
-            if !bn.ends_with(".edf") {
-                continue;
-            }
-            eprintln!("=== {bn} ({} bytes)", data.len());
-            if let Ok(dir) = std::env::var("MXB_DUMP_DIR") {
-                std::fs::write(std::path::Path::new(&dir).join(&bn), data).unwrap();
-            }
-            let embedded = crate::edf::embedded_textures(data);
-            for (i, t) in embedded.iter().enumerate() {
-                eprintln!("   embedded[{i}] {} {}x{}", t.name, t.width, t.height);
-            }
-            let color: Vec<&crate::edf::EmbeddedTexture> = embedded
-                .iter()
-                .filter(|t| {
-                    let n = t.name.to_ascii_lowercase();
-                    !n.ends_with("_n") && !n.ends_with("_s") && !n.ends_with("_r")
-                })
-                .collect();
-            for (i, t) in color.iter().enumerate() {
-                eprintln!("   color[{i}] {}", t.name);
-            }
-            let nodes = crate::edf::parse_with_levels(data, &[]);
-            for n in &nodes {
-                eprintln!("   node '{}' tex={:?}", n.name, n.texture);
-                for s in &n.submeshes {
-                    eprintln!("      sub '{}' mat={:?} tile={:?}", s.name, s.mat, s.uv_tile);
-                }
-            }
-        }
-        for (name, _) in &files {
-            eprintln!("file: {name}");
-        }
-    }
-
     #[test]
     #[ignore]
     fn bike_model_from_pkz() {
