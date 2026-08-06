@@ -115,8 +115,8 @@ export interface ModelVariant {
   name: string;
   /** Whether this is the currently-active model. */
   active: boolean;
-  /** Whether the set has a `model.edf`. A set with files but no `model.edf` is
-   * incomplete and can't be applied; an empty set can (see `empty`). */
+  /** Whether the set has a mesh (any `.edf` — a bike may ship one per part). A set with
+   * files but no mesh is incomplete and can't be applied; an empty set can (see `empty`). */
   valid: boolean;
   /** No files at all — an intentional "no model" swap that removes the current model. */
   empty: boolean;
@@ -189,6 +189,17 @@ export interface RegisterReport {
   skipped: number;
   /** `FrostMod Models/` folders newly created on disk. */
   foldersCreated: number;
+}
+
+/**
+ * A bike whose setup files (`.hrc`/`.cfg`/`.geom`) were carried into a swap folder by a
+ * version that treated the whole bike folder as the model set. The game can't see such a
+ * bike at all until they're restored.
+ */
+export interface OrphanedSetup {
+  bike: string;
+  /** Filenames missing from the bike root that a parked variant still holds. */
+  files: string[];
 }
 
 /** A material group over a node's kept triangles (for per-part texturing). */

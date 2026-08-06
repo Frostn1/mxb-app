@@ -201,6 +201,7 @@ export default function ModDetail({
         title: detail.title,
         subpath: modType.installSubpath,
         destFolder,
+        categoryId,
         url: mirror.url,
         host: mirror.host,
       });
@@ -219,6 +220,7 @@ export default function ModDetail({
       title: detail.title,
       subpath: modType.installSubpath,
       destFolder: localStorage.getItem(destKey) ?? "",
+      categoryId,
       path: picked,
     });
   };

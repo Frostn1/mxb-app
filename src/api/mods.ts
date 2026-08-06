@@ -4,6 +4,7 @@ import type {
   BikeModels,
   BikeSounds,
   LooseSwapBike,
+  OrphanedSetup,
   RegisterReport,
   Config,
   DownloadOption,
@@ -224,6 +225,19 @@ export function detectLooseSwaps(): Promise<LooseSwapBike[]> {
  */
 export function registerLooseSwaps(move: boolean): Promise<RegisterReport> {
   return invoke<RegisterReport>("register_loose_swaps", { moveFiles: move });
+}
+
+/**
+ * Bikes whose setup files were moved into a swap folder by a version that treated the
+ * whole bike folder as the model set — such a bike doesn't load in-game at all.
+ */
+export function detectOrphanedSetup(): Promise<OrphanedSetup[]> {
+  return invoke<OrphanedSetup[]>("detect_orphaned_setup");
+}
+
+/** Copy a gutted bike's setup files back to its root. Returns how many were restored. */
+export function repairOrphanedSetup(bike: string): Promise<number> {
+  return invoke<number>("repair_orphaned_setup", { bike });
 }
 
 export function getPkzMeta(path: string): Promise<PkzMeta> {
@@ -725,6 +739,15 @@ export function onFrostmodReload(
   cb: (payload: FrostmodReload) => void,
 ): Promise<UnlistenFn> {
   return listen<FrostmodReload>("frostmod-reload", (event) => cb(event.payload));
+}
+
+/**
+ * Fires whenever the mods folder gains content — an in-app install or a file dropped in
+ * and caught by the watcher. Screens that scan the folder use this to stay current
+ * instead of relying on the user to hit Rescan.
+ */
+export function onModsChanged(cb: () => void): Promise<UnlistenFn> {
+  return onFrostmodReload(() => cb());
 }
 
 export function presetsListProfiles(): Promise<string[]> {

@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AlertTriangle, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   addToLibrary,
@@ -31,7 +32,18 @@ interface StartParams {
   title: string;
   subpath: string;
   destFolder: string;
+  /** Browse category the mod was opened under — lets a failed install jump back
+   *  to its detail page with the right livery routing. */
+  categoryId?: number;
   source: InstallSource;
+}
+
+/** Where a failed install can send the user back to. Shop installs have no
+ *  browse page, so they get no target. */
+export interface ModTarget {
+  slug: string;
+  subpath: string;
+  categoryId?: number;
 }
 
 export interface ActiveInstall extends StartParams {
@@ -61,15 +73,21 @@ const InstallContext = createContext<InstallContextValue | null>(null);
 
 export function InstallProvider({
   onInstalled,
+  onOpenMod,
   children,
 }: {
   onInstalled?: () => void;
+  /** Navigate to a mod's detail page — used by the failure toast so a user who
+   *  browsed away can get back to the error and retry. */
+  onOpenMod?: (target: ModTarget) => void;
   children: ReactNode;
 }) {
   const [active, setActive] = useState<ActiveInstall | null>(null);
   const [queueLength, setQueueLength] = useState(0);
   const onInstalledRef = useRef(onInstalled);
   onInstalledRef.current = onInstalled;
+  const onOpenModRef = useRef(onOpenMod);
+  onOpenModRef.current = onOpenMod;
   const clearTimer = useRef<number | null>(null);
   // Installs run one at a time (the engine handles a single transfer); extra
   // requests wait in this queue and are drained sequentially.
@@ -143,11 +161,37 @@ export function InstallProvider({
       setActive((cur) =>
         cur && cur.slug === slug ? { ...cur, stage: "error", message } : cur,
       );
-      toast.error(`Install failed — ${title}`, {
-        description: message,
-        duration: Infinity,
-        action: { label: "Retry", onClick: () => void run(params) },
-      });
+      // Shop items have no browse page, so their failure stays a plain toast.
+      const target: ModTarget | null =
+        source.kind === "shop"
+          ? null
+          : { slug, subpath, categoryId: params.categoryId };
+      if (!target) {
+        toast.error(`Install failed — ${title}`, {
+          description: message,
+          duration: Infinity,
+          action: { label: "Retry", onClick: () => void run(params) },
+        });
+      } else {
+        toast.custom(
+          (id) => (
+            <InstallFailedToast
+              title={title}
+              message={message}
+              onOpen={() => {
+                toast.dismiss(id);
+                onOpenModRef.current?.(target);
+              }}
+              onRetry={() => {
+                toast.dismiss(id);
+                void run(params);
+              }}
+              onDismiss={() => toast.dismiss(id)}
+            />
+          ),
+          { duration: Infinity },
+        );
+      }
     } finally {
       unlisten();
       unlistenFrost();
@@ -219,6 +263,72 @@ export function InstallProvider({
 
   return (
     <InstallContext.Provider value={value}>{children}</InstallContext.Provider>
+  );
+}
+
+/** Persistent failure banner. The whole card is clickable — it reopens the mod's
+ *  page, where the error card and its retry/destination controls live. The
+ *  surrounding toast still carries the shared card chrome (background, border,
+ *  radius) from `Components/ui/sonner`; a custom toast only loses the padding and
+ *  the built-in close button, so this supplies those. */
+function InstallFailedToast({
+  title,
+  message,
+  onOpen,
+  onRetry,
+  onDismiss,
+}: {
+  title: string;
+  message: string;
+  onOpen: () => void;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onOpen();
+      }}
+      title="Open the mod's page"
+      className="group flex w-full cursor-default flex-col gap-1 rounded-xl px-4 py-3 transition-colors hover:bg-foreground/[0.04]"
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-px size-3.5 flex-none text-destructive" />
+        <span className="flex-1 font-bold text-destructive">
+          Install failed — {title}
+        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDismiss();
+          }}
+          aria-label="Dismiss"
+          className="-mr-1 -mt-0.5 flex-none cursor-default rounded-full p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <span className="line-clamp-3 pl-[22px] text-[11.5px] text-muted-foreground">
+        {message}
+      </span>
+      <div className="mt-1.5 flex items-center justify-between gap-2 pl-[22px]">
+        <span className="text-[11px] text-muted-foreground">
+          Click to open the mod’s page
+        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+          className="flex-none cursor-default rounded-md bg-primary px-2 py-1 text-[11.5px] font-semibold text-primary-foreground transition-[filter] hover:brightness-110"
+        >
+          Retry
+        </button>
+      </div>
+    </div>
   );
 }
 

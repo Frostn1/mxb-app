@@ -38,6 +38,7 @@ import {
   DialogDescription,
 } from "../ui/dialog";
 import {
+  onModsChanged,
   presetsListProfiles,
   presetsListBikes,
   presetsReadLoadout,
@@ -132,9 +133,11 @@ function applyNote(outcome: PresetApplyOutcome): string {
 
 interface PresetsProps {
   onOpenInRider?: (loadout: Loadout) => void;
+  /** Jump to the Locker — where model swaps have to be registered before they show here. */
+  onOpenLocker?: () => void;
 }
 
-export default function Presets({ onOpenInRider }: PresetsProps = {}) {
+export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = {}) {
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState<string>("");
   const [bikes, setBikes] = useState<string[]>([]);
@@ -178,6 +181,15 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // Registering a swap in the Locker (or installing a mod) changes what these slots can
+  // offer — re-scan on the same signal instead of waiting for a manual Refresh.
+  useEffect(() => {
+    const un = onModsChanged(() => void load());
+    return () => {
+      void un.then((f) => f());
+    };
   }, [load]);
 
   useEffect(() => {
@@ -428,16 +440,36 @@ export default function Presets({ onOpenInRider }: PresetsProps = {}) {
                   )}
                 </div>
                 <div className="grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2">
-                  {g.slots.map((slot) => (
-                    <SlotField
-                      key={slot.key}
-                      slot={slot}
-                      value={loadout[slot.key]}
-                      options={scans ? slotOptions(slot, bike, loadout, scans) : []}
-                      missing={scans ? isMissing(slot, bike, loadout, scans) : false}
-                      onChange={(v) => setSlot(slot.key, v)}
-                    />
-                  ))}
+                  {g.slots.map((slot) => {
+                    const options = scans ? slotOptions(slot, bike, loadout, scans) : [];
+                    return (
+                      <SlotField
+                        key={slot.key}
+                        slot={slot}
+                        value={loadout[slot.key]}
+                        options={options}
+                        missing={scans ? isMissing(slot, bike, loadout, scans) : false}
+                        hint={
+                          // "No matches." doesn't tell you a swap has to be registered
+                          // in the Locker before it can be picked here.
+                          slot.key === "modelSwap" && scans && options.length === 0 ? (
+                            <>
+                              No model swaps registered for this bike —{" "}
+                              <button
+                                type="button"
+                                onClick={onOpenLocker}
+                                className="underline underline-offset-2 hover:text-foreground"
+                              >
+                                set them up in the Locker
+                              </button>
+                              .
+                            </>
+                          ) : undefined
+                        }
+                        onChange={(v) => setSlot(slot.key, v)}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             ))}
