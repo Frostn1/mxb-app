@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Rider tab: Kit / suit, Gloves and Boot paint no longer come up empty.** Three
+  separate causes, all of which left slots blank or inert in the Rider studio while
+  Presets looked fine:
+  - Kit / suit, gloves and profile goggles are all looked up by **rider profile**.
+    Presets gets one for free when it captures the live loadout; the Rider tab started
+    from an empty loadout, so every profile-keyed slot resolved to nothing. It now seeds
+    the first installed rider profile on load (a preset opened via *View in Rider* still
+    wins).
+  - Picking a glove or kit paint changed nothing in the 3D preview, because
+    `load_rider_paint` bailed outright when no profile was set. It now falls back to the
+    stock `default_mx` profile, matching what the body mesh already did.
+  - A loose `.pnt` dropped straight into `mods/rider/boots` (or `helmets` / `protection`)
+    belongs to no model folder, and the scan silently discarded every parentless paint.
+    Those now land in a shared bucket that's offered for every model of that type.
+- Slot options are unchanged for Presets other than picking up the same
+  previously-discarded parentless paints.
+
 ## 2026-08-06 — v0.6.0 — garage bike-switch groundwork, CI gating, first-run setup fixes
 
 ### Added

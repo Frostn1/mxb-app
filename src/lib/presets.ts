@@ -73,16 +73,23 @@ const BUILTINS: Partial<Record<keyof Loadout, string[]>> = {
   tyres: ["p_mx"],
 };
 
+/**
+ * Bucket key for paints installed without an owning model folder — a loose `.pnt`
+ * dropped straight into `mods/rider/boots` belongs to no model, so it's offered for
+ * every model rather than discarded.
+ */
+export const ANY_MODEL = "*";
+
 export interface Scans {
   bikePaints: Record<string, string[]>; // bikeid → livery names
   modelSwaps: Record<string, string[]>; // bikeid → model-swap variant names
   helmets: string[];
-  helmetPaints: Record<string, string[]>; // helmet model → paints
+  helmetPaints: Record<string, string[]>; // helmet model (or ANY_MODEL) → paints
   goggles: Record<string, string[]>; // helmet model / rider profile → goggles
   boots: string[];
-  bootPaints: Record<string, string[]>; // boots model → paints
+  bootPaints: Record<string, string[]>; // boots model (or ANY_MODEL) → paints
   protection: string[];
-  protectionPaints: Record<string, string[]>; // protection model → paints
+  protectionPaints: Record<string, string[]>; // protection model (or ANY_MODEL) → paints
   gloves: string[];
   outfits: Record<string, string[]>; // rider profile → kit paints
   riderProfiles: string[];
@@ -134,16 +141,16 @@ export async function loadScans(): Promise<Scans> {
     const v = stripExt(e.name);
     switch (e.category) {
       case "helmetPaint":
-        if (e.parent) push(s.helmetPaints, e.parent, v);
+        push(s.helmetPaints, e.parent ?? ANY_MODEL, v);
         break;
       case "goggles":
-        if (e.parent) push(s.goggles, e.parent, v);
+        push(s.goggles, e.parent ?? ANY_MODEL, v);
         break;
       case "bootPaint":
-        if (e.parent) push(s.bootPaints, e.parent, v);
+        push(s.bootPaints, e.parent ?? ANY_MODEL, v);
         break;
       case "protectionPaint":
-        if (e.parent) push(s.protectionPaints, e.parent, v);
+        push(s.protectionPaints, e.parent ?? ANY_MODEL, v);
         break;
       case "gloves":
         s.gloves.push(v);
@@ -168,6 +175,19 @@ export async function loadScans(): Promise<Scans> {
   return s;
 }
 
+/** Paints for `model`, plus any installed with no owning model folder. */
+function forModel(map: Record<string, string[]>, model: string): string[] {
+  return [...(map[model] ?? []), ...(map[ANY_MODEL] ?? [])];
+}
+
+/**
+ * Per-profile assets for `profile` — or, with no rider profile picked yet, everything
+ * installed across profiles, so the slot isn't mysteriously empty on a fresh Rider tab.
+ */
+function forProfile(map: Record<string, string[]>, profile: string): string[] {
+  return profile ? (map[profile] ?? []) : Object.values(map).flat();
+}
+
 export function slotOptions(
   slot: SlotDef,
   bikeid: string,
@@ -186,28 +206,31 @@ export function slotOptions(
       opts = scans.helmets;
       break;
     case "helmetPaint":
-      opts = scans.helmetPaints[loadout.helmet] ?? [];
+      opts = forModel(scans.helmetPaints, loadout.helmet);
       break;
     case "gogglesPaint":
-      opts = [...(scans.goggles[loadout.helmet] ?? []), ...(scans.goggles[loadout.rider] ?? [])];
+      opts = [
+        ...forModel(scans.goggles, loadout.helmet),
+        ...forProfile(scans.goggles, loadout.rider),
+      ];
       break;
     case "boots":
       opts = scans.boots;
       break;
     case "bootsPaint":
-      opts = scans.bootPaints[loadout.boots] ?? [];
+      opts = forModel(scans.bootPaints, loadout.boots);
       break;
     case "protection":
       opts = scans.protection;
       break;
     case "protectionPaint":
-      opts = scans.protectionPaints[loadout.protection] ?? [];
+      opts = forModel(scans.protectionPaints, loadout.protection);
       break;
     case "glovesPaint":
       opts = scans.gloves;
       break;
     case "suitPaint":
-      opts = scans.outfits[loadout.rider] ?? [];
+      opts = forProfile(scans.outfits, loadout.rider);
       break;
     case "rider":
       opts = scans.riderProfiles;
