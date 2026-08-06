@@ -295,6 +295,9 @@ export type ReloadOutcome = "signaled" | "not_running" | "unsupported";
 export interface FrostmodReload {
   slug: string;
   outcome: ReloadOutcome;
+  /** Mods the folder watcher saw change, as `<type>/<name>`. Only the watcher sets
+   *  this — an in-app install already knows what it placed. */
+  mods?: string[];
 }
 
 export type LiveRefresh =

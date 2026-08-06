@@ -110,6 +110,12 @@ fn swap_command_json(bike_id: &str) -> String {
     serde_json::json!({ "verb": "swap_bike", "bikeId": bike_id }).to_string()
 }
 
+/// Serialize a scoped-reload command: the mods that changed, each as `<type>/<name>`
+/// relative to the content root (e.g. `tracks/Red Bud`).
+fn reload_paths_command_json(mods: &[String]) -> String {
+    serde_json::json!({ "verb": "reload_paths", "mods": mods }).to_string()
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -156,6 +162,33 @@ pub fn signal_swap_bike(_bike_id: &str) -> SwapOutcome {
     SwapOutcome::Unsupported
 }
 
+/// Name the mods that changed, so FrostMod can reload just those instead of re-scanning
+/// the whole collection.
+///
+/// Advisory, and deliberately paired with — never a replacement for — the plain reload
+/// pulse that follows it: a FrostMod build that doesn't know the `reload_paths` verb
+/// ignores the file and still does its usual full reload. Best-effort throughout; a
+/// failed write or a missing event just means the scoping hint didn't land.
+pub fn signal_reload_paths(mods: &[String]) {
+    if mods.is_empty() {
+        return;
+    }
+    if std::fs::write(command_file_path(), reload_paths_command_json(mods)).is_err() {
+        return;
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: valid NUL-terminated ANSI name; a null return means FrostMod isn't
+        // running, in which case there's nothing to tell.
+        let handle =
+            unsafe { ffi::OpenEventA(ffi::EVENT_MODIFY_STATE, 0, COMMAND_EVENT_NAME.as_ptr()) };
+        if !handle.is_null() {
+            unsafe { ffi::SetEvent(handle) };
+            unsafe { ffi::CloseHandle(handle) };
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +203,23 @@ mod tests {
         assert_eq!(
             swap_command_json(r#"a"b\c"#),
             r#"{"bikeId":"a\"b\\c","verb":"swap_bike"}"#
+        );
+    }
+
+    #[test]
+    fn reload_paths_command_carries_every_changed_mod() {
+        assert_eq!(
+            reload_paths_command_json(&["tracks/Red Bud".into(), "bikes/KTM450.pkz".into()]),
+            r#"{"mods":["tracks/Red Bud","bikes/KTM450.pkz"],"verb":"reload_paths"}"#
+        );
+    }
+
+    #[test]
+    fn reload_paths_escapes_mod_names() {
+        // Mod keys are folder names, so they can hold anything the filesystem allows.
+        assert_eq!(
+            reload_paths_command_json(&[r#"tracks/a"b\c"#.into()]),
+            r#"{"mods":["tracks/a\"b\\c"],"verb":"reload_paths"}"#
         );
     }
 }
