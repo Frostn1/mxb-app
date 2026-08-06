@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
 
 ### Added
 - **Releases now say which file to download.** The release body led with "See the assets
