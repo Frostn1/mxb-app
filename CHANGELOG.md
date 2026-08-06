@@ -17,6 +17,11 @@
     never in the repo. If it's missing the job warns and passes rather than failing a
     release that already built and published fine.
 
+### Added
+- **`Join the Discord` in Settings → About & updates**, opening the community invite in
+  the system browser. The invite is permanent — a link that expires would leave a dead
+  button in every already-shipped build.
+
 ### Fixed
 - **A large library no longer locks the machine up on first open, or after changing the
   MX Bikes folder.** Two people hit the same wall from different directions — one on the

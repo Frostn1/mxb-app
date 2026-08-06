@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, RefreshCw, ExternalLink, Play, Compass } from "lucide-react";
+import { Check, RefreshCw, ExternalLink, Play, Compass, MessagesSquare } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
@@ -28,6 +28,9 @@ import { Switch } from "@/Components/ui/switch";
 import { cn } from "@/lib/utils";
 
 const REPO_URL = "https://github.com/Frostn1/mxb-app";
+// Permanent invite (no expiry, no use cap) — a link that dies leaves a dead button
+// in a shipped build, and the app can't be told about a new one without an update.
+const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
 type SectionId = "folder" | "general" | "appearance" | "frostmod" | "about";
 const SECTIONS: { id: SectionId; label: string }[] = [
@@ -583,6 +586,9 @@ export default function Settings() {
               </Button>
               <Button variant="outline" size="sm" onClick={startTour}>
                 <Compass className="size-3.5" /> Replay tour
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => openUrl(DISCORD_URL)}>
+                <MessagesSquare className="size-3.5" /> Join the Discord
               </Button>
             </div>
             <div className="flex flex-col gap-1 pt-1 text-[11.5px] text-faint">
