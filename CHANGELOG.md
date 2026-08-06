@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-08-06 — v0.6.0 — garage bike-switch groundwork, CI gating, first-run setup fixes
 
 ### Added
 - **Garage bike-switch — cross-platform groundwork.** First slice of letting a player
