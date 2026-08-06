@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Added
+- **Garage bike-switch — cross-platform groundwork.** First slice of letting a player
+  swap their whole bike mid-session (offline, restricted to the race's class) without
+  relogging or an admin restart:
+  - New `bikeswap` module reads a bike's id / display name / **class** (`[data] cat`)
+    from its `.ini`/`.cfg` (reusing the existing `cfg` parser), with class-matching that
+    mirrors the dedicated-server `[event] category` semantics (empty = Open,
+    `/`-separated list) and an installed-bike scanner. Unit-tested.
+  - New FrostMod **command channel**: `signal_swap_bike` writes a `frostmod_cmd.json`
+    command file and pulses a dedicated `Local\FrostModCommand` event (the reload event
+    is left untouched). Tauri commands `garage_scan_bikes` / `garage_swap_bike`.
+  - Pairs with FrostMod **Stage A** (observation-only) in the sibling repo, which logs
+    the game's bike-load calls to confirm the loader offset before any live swap.
+  - Online swapping is intentionally **out of scope** — the server is authoritative and
+    anti-cheat validates client integrity on join; this is offline/local only.
 - **CI verification on every push and PR** (`.github/workflows/ci.yml`) — nothing checked
   a change before it landed: `release.yml` only runs on a version tag and `pages.yml` only
   deploys the site. Two jobs now run on pushes to `main` and on every PR: frontend
@@ -10,7 +24,7 @@
   Windows, since Windows is what ships. Tests needing a real MX Bikes asset stay
   `#[ignore]`d. Verified the sidecar-less public variant — what CI actually builds —
   compiles and passes (108 tests). No `cargo fmt --check` gate yet: the tree has never
-  been rustfmt'd, so that wants its own pass once `feature/garage-bike-switch` lands.
+  been rustfmt'd, so that wants its own dedicated commit.
 
 ### Changed
 - **ESLint actually runs clean now** — the config reported 85 errors, 72 of them
