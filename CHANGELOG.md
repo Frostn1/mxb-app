@@ -33,16 +33,20 @@
 ### Changed
 - **The folder watcher waits for a copy to finish, and says what it picked up.** It used
   to pulse a reload on every debounced burst, so dropping a folder of tracks in asked the
-  game to re-scan its content over and over while the files were still being written. It
-  now accumulates changes until the folder goes quiet (capped at 45s), skips half-written
-  downloads (`.crdownload`, `.part`, `.tmp`), and reports the affected mods — the toast
-  names them instead of announcing a bare reload.
-- **Groundwork for a scoped in-game reload.** The watcher reduces changed paths to the
-  mods they belong to (`tracks/Red Bud`) and hands that set to FrostMod over the existing
-  command channel as a new `reload_paths` verb, before pulsing the usual reload event.
-  A FrostMod that doesn't know the verb ignores the file and does its normal full reload,
-  so this is inert until the matching sibling-repo change lands — at which point the game
-  can reload just the new mods rather than everything.
+  game to re-scan its content over and over *while the files were still being written* —
+  a plausible cause of a track that only shows up after a full game restart. It now
+  accumulates changes until the folder goes quiet (3s, capped at 45s) and fires one
+  reload, skips half-written downloads (`.crdownload`, `.part`, `.tmp`), and collapses
+  every change inside a mod to one entry so an extracting track counts once, not
+  hundreds of times. The toast names what landed.
+  - Scoping the reload to just the new mods stays FrostMod's call — its reload already
+    rebuilds the content lists surgically, one list per frame. All this side owes it is
+    a single pulse, once the writes are done.
+- **The folder-watcher toast no longer claims more than it knows.** Signalling FrostMod
+  only tells us its reload event exists and was poked; FrostMod can still abort (offsets
+  mismatch on an unrecognised game build) or drop the request as re-entrant. The toast
+  now says the mods were *added* and that a reload was *asked for*, rather than
+  announcing that the game refreshed.
 
 ## 2026-08-06 — v0.6.1 — Rider tab gear slots
 

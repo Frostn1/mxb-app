@@ -84,6 +84,10 @@ fn watch_root(mods_path: &str) -> PathBuf {
 }
 
 /// Changes seen since the last reload, plus when the most recent one landed.
+///
+/// All the coalescing lives here rather than in the settle thread, so "a copy in
+/// progress yields exactly one reload, once it's finished" is something tests can
+/// assert against a clock they control.
 #[derive(Default)]
 struct Pending {
     mods: BTreeSet<String>,
@@ -91,6 +95,35 @@ struct Pending {
     last_seen: Option<Instant>,
     /// A settle thread is already waiting on this batch.
     settling: bool,
+}
+
+impl Pending {
+    /// Fold a batch of changed mods in. Returns whether this batch is the one that
+    /// needs a settle thread started behind it — every later batch joins that one.
+    fn absorb(&mut self, keys: Vec<String>, now: Instant) -> bool {
+        self.mods.extend(keys);
+        self.first_seen.get_or_insert(now);
+        self.last_seen = Some(now);
+        let start = !self.settling;
+        self.settling = true;
+        start
+    }
+
+    /// The batch, once the folder has gone quiet — or once we've waited long enough
+    /// that a still-trickling download shouldn't hold the reload any longer. Taking it
+    /// resets the state, so the next change starts a fresh batch.
+    fn take_if_settled(&mut self, now: Instant) -> Option<Vec<String>> {
+        let since = |t: Option<Instant>| t.map(|t| now.saturating_duration_since(t));
+        let quiet = since(self.last_seen).is_none_or(|d| d >= SETTLE);
+        let overdue = since(self.first_seen).is_some_and(|d| d >= MAX_SETTLE);
+        if !quiet && !overdue {
+            return None;
+        }
+        if overdue && !quiet {
+            log::info!("mods watcher: still changing after {MAX_SETTLE:?} — reloading what's landed");
+        }
+        Some(std::mem::take(self).mods.into_iter().collect())
+    }
 }
 
 /// Start (or restart) the watcher on `<mods_path>/mods`. Replaces any existing
@@ -196,16 +229,10 @@ fn on_batch(
         return;
     }
 
-    let now = Instant::now();
-    let start_settling = {
-        let mut p = pending.lock().unwrap_or_else(|e| e.into_inner());
-        p.mods.extend(keys);
-        p.first_seen.get_or_insert(now);
-        p.last_seen = Some(now);
-        let start = !p.settling;
-        p.settling = true;
-        start
-    };
+    let start_settling = pending
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .absorb(keys, Instant::now());
 
     if start_settling {
         let app = app.clone();
@@ -222,32 +249,28 @@ fn settle_then_reload(app: AppHandle, pending: Arc<Mutex<Pending>>, live: Arc<At
         if !live.load(Ordering::SeqCst) {
             return;
         }
-
-        let mut p = pending.lock().unwrap_or_else(|e| e.into_inner());
-        let quiet = p.last_seen.map(|t| t.elapsed() >= SETTLE).unwrap_or(true);
-        let overdue = p.first_seen.map(|t| t.elapsed() >= MAX_SETTLE).unwrap_or(false);
-        if quiet || overdue {
-            if overdue && !quiet {
-                log::info!("mods watcher: still changing after {MAX_SETTLE:?} — reloading what's landed");
-            }
-            let taken = std::mem::take(&mut *p);
-            break taken.mods;
+        let settled = pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take_if_settled(Instant::now());
+        if let Some(mods) = settled {
+            break mods;
         }
     };
 
     if mods.is_empty() {
         return;
     }
-    reload(&app, mods.into_iter().collect());
+    reload(&app, mods);
 }
 
-/// Tell FrostMod which mods changed, then pulse the reload it already understands.
+/// Pulse FrostMod's reload once for the settled batch.
 ///
-/// Order matters: the command file is in place before the reload event fires, so a
-/// FrostMod that reads it can scope the rescan to those mods. One that doesn't simply
-/// ignores an unknown verb and does its usual full reload — no behaviour change.
+/// Scoping the reload to just these mods is FrostMod's call, not ours — its reload
+/// already rebuilds the content lists surgically, stepped a list per frame. All this
+/// side owes it is one pulse, after the writes are done. The mod names ride along to
+/// the UI only.
 fn reload(app: &AppHandle, mods: Vec<String>) {
-    crate::frostmod::signal_reload_paths(&mods);
     let outcome = crate::frostmod::signal_reload();
     log::info!("mods watcher: {} mod(s) changed -> reload {outcome:?}: {mods:?}", mods.len());
     let _ = app.emit(
@@ -298,6 +321,83 @@ mod tests {
         assert_eq!(mod_key(root, root), None);
         // Somewhere else entirely (a watcher restart racing a path change).
         assert_eq!(mod_key(root, Path::new("/elsewhere/x.pkz")), None);
+    }
+
+    /// A batch of changed mod keys, as `on_batch` would hand them over.
+    fn batch(keys: &[&str]) -> Vec<String> {
+        keys.iter().map(|k| k.to_string()).collect()
+    }
+
+    #[test]
+    fn a_copy_in_progress_yields_one_reload_once_it_finishes() {
+        // Dropping a folder of tracks in writes files for as long as the copy takes,
+        // and the debouncer hands us a batch throughout. Reloading on each one asks
+        // the game to rescan while the files are still being written — which is how a
+        // track ends up missing until the game is restarted.
+        let t0 = Instant::now();
+        let mut p = Pending::default();
+
+        assert!(p.absorb(batch(&["tracks/Red Bud"]), t0), "first batch starts settling");
+        assert!(
+            !p.absorb(batch(&["tracks/Iron Man"]), t0 + Duration::from_secs(1)),
+            "later batches join the one already settling — no second thread, no second reload",
+        );
+        // Still being written: nothing fires.
+        assert_eq!(p.take_if_settled(t0 + Duration::from_secs(2)), None);
+        assert_eq!(p.take_if_settled(t0 + Duration::from_secs(3)), None);
+
+        // Quiet for SETTLE after the *last* write — now, and only now, one reload
+        // carrying both tracks.
+        let settled = p
+            .take_if_settled(t0 + Duration::from_secs(1) + SETTLE)
+            .expect("fires once the folder goes quiet");
+        assert_eq!(settled, vec!["tracks/Iron Man", "tracks/Red Bud"]);
+    }
+
+    #[test]
+    fn every_change_inside_one_mod_collapses_to_a_single_entry() {
+        let t0 = Instant::now();
+        let mut p = Pending::default();
+        // An extracting track touches hundreds of files; the game only needs telling once.
+        p.absorb(batch(&["tracks/Red Bud"]), t0);
+        p.absorb(batch(&["tracks/Red Bud", "tracks/Red Bud"]), t0);
+        assert_eq!(p.take_if_settled(t0 + SETTLE), Some(vec!["tracks/Red Bud".into()]));
+    }
+
+    #[test]
+    fn a_download_that_never_settles_still_reloads_eventually() {
+        // A slow trickle would otherwise hold the reload forever.
+        let t0 = Instant::now();
+        let mut p = Pending::default();
+        p.absorb(batch(&["tracks/Slow"]), t0);
+
+        let mut t = t0;
+        for _ in 0..10 {
+            t += Duration::from_secs(1);
+            p.absorb(batch(&["tracks/Slow"]), t);
+            assert_eq!(p.take_if_settled(t), None, "never quiet, and not yet overdue");
+        }
+        assert!(
+            p.take_if_settled(t0 + MAX_SETTLE).is_some(),
+            "past the cap we act on what's landed",
+        );
+    }
+
+    #[test]
+    fn taking_a_batch_leaves_the_next_change_to_start_a_fresh_one() {
+        let t0 = Instant::now();
+        let mut p = Pending::default();
+        p.absorb(batch(&["tracks/First"]), t0);
+        assert!(p.take_if_settled(t0 + SETTLE).is_some());
+
+        // The settle thread has retired; the next drop must be able to start another.
+        let later = t0 + SETTLE + Duration::from_secs(60);
+        assert!(p.absorb(batch(&["tracks/Second"]), later), "a new batch settles on its own");
+        assert_eq!(
+            p.take_if_settled(later + SETTLE),
+            Some(vec!["tracks/Second".into()]),
+            "and carries only the new mod",
+        );
     }
 
     #[test]
