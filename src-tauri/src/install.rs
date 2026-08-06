@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+// Same string as `shop_session::UA`, kept in one place.
+use crate::shop_session::UA;
 const EMIT_EVERY_BYTES: u64 = 512 * 1024;
 
 #[derive(Debug, Clone, Serialize)]

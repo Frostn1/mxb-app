@@ -5,7 +5,11 @@ use scraper::{Html, Selector};
 use serde_json::Value;
 
 const BASE: &str = "https://mxb-mods.com";
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+/// A full four-part version, unlike the `Chrome/126.0` form used elsewhere — real Chrome
+/// never sends a two-part version, and a UA that no browser would emit is itself a signal
+/// to a bot filter. Deliberately not `shop_session::UA`: that one has to keep matching the
+/// login WebView or the `cf_clearance` minted there stops verifying.
+const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.140 Safari/537.36";
 const PER_PAGE: &str = "24";
 
 pub struct MxbModsSource;
@@ -25,11 +29,115 @@ impl ModSource for MxbModsSource {
     }
 }
 
+/// One client for the whole session, not one per call.
+///
+/// Two reasons beyond the obvious. It keeps a cookie jar, so if Cloudflare ever hands out
+/// a `cf_clearance` we replay it instead of arriving cold every time — the pattern
+/// `shop_session` already uses for the sibling domain. And it reuses connections, so a
+/// user typing in the search box costs one TLS handshake rather than one per keystroke,
+/// which is the sort of traffic shape that gets a client rate-limited in the first place.
+fn client() -> anyhow::Result<&'static Client> {
+    static CLIENT: std::sync::OnceLock<Result<Client, String>> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| build_client().map_err(|e| format!("{e:#}")))
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
 fn build_client() -> anyhow::Result<Client> {
+    use reqwest::header::{HeaderMap, HeaderValue};
+    // What Chrome actually sends on a same-origin `fetch`. reqwest sends almost none of
+    // these on its own, so a request claiming to be Chrome didn't look like one.
+    let mut headers = HeaderMap::new();
+    for (k, v) in [
+        ("accept", "application/json, text/plain, */*"),
+        ("accept-language", "en-US,en;q=0.9"),
+        ("sec-fetch-site", "same-origin"),
+        ("sec-fetch-mode", "cors"),
+        ("sec-fetch-dest", "empty"),
+        ("referer", BASE),
+    ] {
+        headers.insert(k, HeaderValue::from_static(v));
+    }
     Ok(Client::builder()
         .user_agent(UA)
+        .default_headers(headers)
+        .cookie_store(true)
+        .connect_timeout(std::time::Duration::from_secs(15))
         .timeout(std::time::Duration::from_secs(30))
         .build()?)
+}
+
+/// Statuses worth trying again: Cloudflare hands out 403 on a bad bot score, 429 on rate
+/// limiting, and 503 while an interstitial is up. All three are commonly transient for a
+/// client that is not in fact a bot.
+fn worth_retrying(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 403 | 429 | 503)
+}
+
+/// `GET` with backoff over the transient blocks above. Transport errors retry too, which
+/// is what `install::get_with_retry` already does for download hosts.
+async fn get_with_retry(
+    url: &str,
+    params: &[(&str, String)],
+) -> anyhow::Result<reqwest::Response> {
+    const ATTEMPTS: u32 = 3;
+    let client = client()?;
+    let mut last_err: Option<anyhow::Error> = None;
+    for attempt in 1..=ATTEMPTS {
+        match client.get(url).query(params).send().await {
+            Ok(resp) if !worth_retrying(resp.status()) => return Ok(resp),
+            Ok(resp) => {
+                let status = resp.status();
+                if attempt == ATTEMPTS {
+                    return Ok(resp);
+                }
+                last_err = Some(anyhow::anyhow!("{status}"));
+            }
+            Err(e) => {
+                if attempt == ATTEMPTS {
+                    return Err(e.into());
+                }
+                last_err = Some(e.into());
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+    }
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("request failed")))
+}
+
+/// Turn a blocked response into something a person can act on. The raw reqwest `Display`
+/// ("HTTP status client error (403 Forbidden) for url (…)") told users nothing and shipped
+/// them a URL with percent-encoded query params.
+fn blocked_error(status: reqwest::StatusCode) -> anyhow::Error {
+    match status.as_u16() {
+        403 => anyhow::anyhow!(
+            "mxb-mods.com refused the request (403). Its bot protection sometimes blocks \
+             an app it doesn't recognise — wait a minute and hit Retry. If it keeps \
+             happening, opening mxb-mods.com in your browser first usually clears it."
+        ),
+        429 => anyhow::anyhow!(
+            "mxb-mods.com is rate-limiting us (429). Give it a minute, then hit Retry."
+        ),
+        503 => anyhow::anyhow!(
+            "mxb-mods.com is unavailable right now (503) — it may be behind a Cloudflare \
+             check. Try again shortly."
+        ),
+        _ => anyhow::anyhow!("mxb-mods.com returned {status}"),
+    }
+}
+
+/// A Cloudflare interstitial served with a 200, which would otherwise parse as an empty
+/// page — the quiet failure behind "No download link was found on this page".
+///
+/// Deliberately *not* keyed on `challenge-platform`: Cloudflare injects that script into
+/// ordinary pages too (verified — it appears once in a normal 212 KB mod page that parses
+/// fine), so matching it would condemn every mod page. The markers below only appear on
+/// the interstitial itself.
+fn is_challenge(html: &str) -> bool {
+    html.contains("cf-browser-verification")
+        || html.contains("cf_chl_opt")
+        || html.to_ascii_lowercase().contains("<title>just a moment")
 }
 
 pub async fn search(
@@ -37,7 +145,6 @@ pub async fn search(
     category_id: u32,
     page: u32,
 ) -> anyhow::Result<Vec<ModSummary>> {
-    let client = build_client()?;
     let url = format!("{BASE}/wp-json/wp/v2/posts");
 
     let mut params: Vec<(&str, String)> = vec![
@@ -52,12 +159,14 @@ pub async fn search(
         params.push(("search", q.to_string()));
     }
 
-    let resp = client.get(&url).query(&params).send().await?;
+    let resp = get_with_retry(&url, &params).await?;
     // WP returns 400 (rest_post_invalid_page_number) once you page past the end.
     if resp.status() == reqwest::StatusCode::BAD_REQUEST {
         return Ok(vec![]);
     }
-    let resp = resp.error_for_status()?;
+    if !resp.status().is_success() {
+        return Err(blocked_error(resp.status()));
+    }
     let posts: Vec<Value> = resp.json().await?;
 
     Ok(posts
@@ -67,20 +176,16 @@ pub async fn search(
 }
 
 pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
-    let client = build_client()?;
-
     // 1. Post metadata + description via the REST API.
     let url = format!("{BASE}/wp-json/wp/v2/posts");
     let params = vec![
         ("slug", slug.to_string()),
         ("_embed", "wp:featuredmedia".to_string()),
     ];
-    let resp = client
-        .get(&url)
-        .query(&params)
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp = get_with_retry(&url, &params).await?;
+    if !resp.status().is_success() {
+        return Err(blocked_error(resp.status()));
+    }
     let posts: Vec<Value> = resp.json().await?;
     let post = posts
         .into_iter()
@@ -110,14 +215,24 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
 
     let description_html = strip_images(&content);
 
-    // 2. Download links + version from the rendered page HTML.
-    let (downloads, version) = match client.get(&link).send().await {
-        Ok(r) => {
-            let html = r.text().await.unwrap_or_default();
-            (parse_downloads(&html), parse_version(&html))
-        }
-        Err(_) => (Vec::new(), None),
-    };
+    // 2. Download links + version from the rendered page HTML. A block here used to be
+    // swallowed: a 403 is `Ok(resp)`, so its error body went to the parsers and produced
+    // zero downloads — the page then said "No download link was found on this page"
+    // rather than "we couldn't read the page". Surface it instead.
+    let resp = get_with_retry(&link, &[]).await?;
+    if !resp.status().is_success() {
+        return Err(blocked_error(resp.status()));
+    }
+    let html = resp.text().await.unwrap_or_default();
+    let (downloads, version) = (parse_downloads(&html), parse_version(&html));
+    // Only call it a challenge when the page also yielded nothing, so a marker that turns
+    // up in a page that actually parsed can never turn a working mod into an error.
+    if downloads.is_empty() && is_challenge(&html) {
+        anyhow::bail!(
+            "mxb-mods.com served a Cloudflare check instead of the mod page. Open \
+             mxb-mods.com in your browser once, then hit Retry."
+        );
+    }
 
     Ok(ModDetail {
         id,
@@ -393,3 +508,80 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+mod client_tests {
+    use super::*;
+
+    #[test]
+    fn retries_only_the_transient_blocks() {
+        for code in [403u16, 429, 503] {
+            assert!(worth_retrying(reqwest::StatusCode::from_u16(code).unwrap()), "{code}");
+        }
+        for code in [200u16, 400, 404, 500] {
+            assert!(!worth_retrying(reqwest::StatusCode::from_u16(code).unwrap()), "{code}");
+        }
+    }
+
+    #[test]
+    fn spots_a_cloudflare_interstitial() {
+        assert!(is_challenge("<title>Just a moment...</title>"));
+        assert!(is_challenge(r#"<form id="challenge-form" class="cf-browser-verification">"#));
+        assert!(is_challenge("window._cf_chl_opt = {};"));
+    }
+
+    #[test]
+    fn a_normal_page_is_not_a_challenge() {
+        // Cloudflare injects this script into ordinary pages; a real 212 KB mod page that
+        // parses fine contains it. Matching on it would break every mod detail view.
+        let real = r#"<title>MXB App - MXB-Mods.com</title>
+            <div class="download-container"><a href="https://x/f.pkz">Default</a></div>
+            <script src="/cdn-cgi/challenge-platform/h/b/scripts/jsd/main.js"></script>"#;
+        assert!(!is_challenge(real));
+        assert!(!parse_downloads(real).is_empty(), "and it still parses");
+    }
+
+    #[test]
+    fn blocked_errors_say_what_to_do() {
+        let msg = blocked_error(reqwest::StatusCode::FORBIDDEN).to_string();
+        assert!(msg.contains("403") && msg.contains("Retry"), "{msg}");
+        // The old text leaked a percent-encoded URL at the user; make sure we don't.
+        assert!(!msg.contains("wp-json"), "{msg}");
+    }
+
+    /// Live check against mxb-mods.com — the client this ships, not an approximation.
+    /// `cargo test live_ -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_search_and_detail() {
+        let mods = search("", 22, 1).await.expect("search works");
+        eprintln!("search returned {} tracks", mods.len());
+        assert!(!mods.is_empty(), "the tracks category should not be empty");
+
+        let d = detail(&mods[0].slug).await.expect("detail works");
+        eprintln!("detail '{}': {} downloads, version {:?}", d.title, d.downloads.len(), d.version);
+        assert!(!d.title.is_empty());
+    }
+
+    /// The headers really do go out — proves the fix is on the wire, not just in source.
+    #[tokio::test]
+    #[ignore]
+    async fn live_sends_browser_headers() {
+        let body: serde_json::Value = client()
+            .unwrap()
+            .get("https://httpbin.org/headers")
+            .send()
+            .await
+            .expect("reachable")
+            .json()
+            .await
+            .expect("json");
+        let h = &body["headers"];
+        eprintln!("{}", serde_json::to_string_pretty(h).unwrap());
+        assert!(h["User-Agent"].as_str().unwrap().contains("Chrome/131.0.6778.140"));
+        assert!(h["Accept-Encoding"].as_str().unwrap().contains("gzip"));
+        assert!(h["Accept-Language"].as_str().is_some());
+        assert!(h["Sec-Fetch-Mode"].as_str().is_some());
+    }
+}
+

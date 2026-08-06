@@ -29,11 +29,16 @@ walkdir = "2"
 # rustls: consistent modern TLS across platforms (native SChannel failed on
 # Windows). MediaFire downloads work directly with this client — its CDN no
 # longer blocks the rustls fingerprint (verified against a live 427 MB .pkz).
+# `gzip`/`brotli` are not just bandwidth: without them reqwest sends no
+# `Accept-Encoding` at all, which makes a client claiming to be Chrome look
+# nothing like Chrome to a bot filter.
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "stream",
     "json",
     "cookies",
+    "gzip",
+    "brotli",
 ] }
 tokio = { version = "1", features = ["time"] }
 futures-util = { version = "0.3", features = ["io"] }
@@ -73,3 +78,8 @@ notify-debouncer-mini = "0.4"
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+# `#[tokio::test]` for the live network checks against mxb-mods.com. Dev-only, so the
+# shipped binary keeps the minimal `time`-only tokio it already had.
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
