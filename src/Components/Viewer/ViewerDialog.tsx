@@ -11,6 +11,7 @@ import {
   listGearPaints,
 } from "../../api/mods";
 import type { PaintTexture, BikeModel, EdfNode, RiderPart, GearPaints } from "../../types";
+import { useT } from "../../i18n/context";
 
 interface ViewerDialogProps {
   open: boolean;
@@ -51,6 +52,7 @@ export function ViewerDialog({
   gearPart,
   stockGearPart,
 }: ViewerDialogProps) {
+  const t = useT();
   // A bike model → bike; gear/rider paint → rider. No user switch.
   const isBike = !!modelSource;
   const mode: ViewerMode = isBike ? "bike" : "rider";
@@ -261,12 +263,12 @@ export function ViewerDialog({
         <div className="flex flex-none items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <Box className="h-4 w-4 flex-none text-muted-foreground" />
-            <span className="truncate">{title ?? "3D Preview"}</span>
+            <span className="truncate">{title ?? t("viewer.preview3d")}</span>
           </div>
           <div className="flex flex-none items-center gap-2">
             {paintOptions.length > 0 && (
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                Paint
+                {t("viewer.paint")}
                 <select
                   value={paintIdx}
                   onChange={(e) => setPaintIdx(Number(e.target.value))}
@@ -282,7 +284,7 @@ export function ViewerDialog({
             )}
             {goggleOptions.length > 0 && (
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                Goggles
+                {t("category.goggles")}
                 <select
                   value={gogglesIdx}
                   onChange={(e) => setGogglesIdx(Number(e.target.value))}
@@ -298,7 +300,7 @@ export function ViewerDialog({
             )}
             <DialogClose className="rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
               <X className="size-4" />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{t("common.close")}</span>
             </DialogClose>
           </div>
         </div>
@@ -317,17 +319,14 @@ export function ViewerDialog({
           {stockGearPart && gear && !loading && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
               <span className="rounded-md bg-black/70 px-3 py-1.5 text-center text-xs text-white/90">
-                Shown on the game&apos;s stock {stockGearPart}. A paint made for a different
-                model may not line up perfectly.
+                {t("viewer.stockGearNote", { part: stockGearPart })}
               </span>
             </div>
           )}
           {paintNoChange && !loading && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
               <span className="rounded-md bg-black/70 px-3 py-1.5 text-center text-xs text-white/90">
-                None of this paint&apos;s textures are used by the parts shown here, so the
-                preview doesn&apos;t change. It may still paint the wheels or chain, which
-                this view doesn&apos;t render.
+                {t("viewer.paintNoChange")}
               </span>
             </div>
           )}
@@ -345,7 +344,7 @@ export function ViewerDialog({
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40">
               <Loader2 className="h-6 w-6 animate-spin text-white/80" />
               <span className="text-sm text-white/80">
-                {loadingModel ? "Loading model…" : "Loading paint…"}
+                {loadingModel ? t("viewer.loadingModel") : t("viewer.loadingPaint")}
               </span>
               {/* Indeterminate bar so a slow decode/transfer never looks hung. */}
               <div className="h-1 w-52 overflow-hidden rounded-full bg-white/15">
@@ -359,7 +358,7 @@ export function ViewerDialog({
           )}
           {!loading && err && (
             <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/55 px-2 py-1 text-xs text-white/85">
-              No paint preview ({err})
+              {t("viewer.noPaintPreview", { err })}
             </div>
           )}
         </div>

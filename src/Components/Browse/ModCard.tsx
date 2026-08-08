@@ -20,6 +20,7 @@ import {
 } from "@/Components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { formatDateShort } from "../../lib/mods";
+import { useT } from "../../i18n/context";
 
 interface ModCardProps {
   mod: ModSummary;
@@ -46,6 +47,7 @@ export default function ModCard({
   onToggleSelect,
   onQuickInstall,
 }: ModCardProps) {
+  const t = useT();
   const [broken, setBroken] = useState(false);
   const Icon = isBike ? Bike : Mountain;
 
@@ -113,7 +115,7 @@ export default function ModCard({
               {installed && (
                 <Badge variant="success" className="flex-none">
                   <Check className="size-3" strokeWidth={3} />
-                  Installed
+                  {t("common.installed")}
                 </Badge>
               )}
             </div>
@@ -125,20 +127,21 @@ export default function ModCard({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onQuickInstall}>
-          <Download className="size-4" /> {installed ? "Quick reinstall" : "Quick install"}
+          <Download className="size-4" />{" "}
+          {installed ? t("browse.quickReinstall") : t("browse.quickInstall")}
         </ContextMenuItem>
         <ContextMenuItem onSelect={onOpen}>
-          <Info className="size-4" /> Open details
+          <Info className="size-4" /> {t("browse.openDetails")}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={onToggleSelect}>
           {selected ? (
             <>
-              <SquareCheck className="size-4" /> Deselect
+              <SquareCheck className="size-4" /> {t("common.deselect")}
             </>
           ) : (
             <>
-              <Square className="size-4" /> Select
+              <Square className="size-4" /> {t("common.select")}
             </>
           )}
         </ContextMenuItem>

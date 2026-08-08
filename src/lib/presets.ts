@@ -1,4 +1,5 @@
 import type { BikeModels, LibraryEntry, Loadout } from "../types";
+import type { TKey } from "../i18n";
 import {
   scanLibrary,
   scanRiderTargets,
@@ -8,7 +9,8 @@ import {
 
 export interface SlotDef {
   key: keyof Loadout;
-  label: string;
+  /** Translation key — resolved with `t()` at render. */
+  label: TKey;
   group: "bike" | "rider" | "head" | "body";
   /** Which other slot this slot's options depend on (for dependent dropdowns). */
   dependsOn?: "bikeid" | "helmet" | "boots" | "protection" | "rider";
@@ -17,29 +19,34 @@ export interface SlotDef {
 }
 
 export const SLOTS: SlotDef[] = [
-  { key: "paint", label: "Bike livery", group: "bike", dependsOn: "bikeid" },
-  { key: "modelSwap", label: "Model swap", group: "bike", dependsOn: "bikeid" },
-  { key: "bikeFont", label: "Number font", group: "bike", freeText: true },
-  { key: "tyres", label: "Tyres", group: "bike" },
-  { key: "rider", label: "Rider profile", group: "rider" },
-  { key: "suitPaint", label: "Kit / suit", group: "rider", dependsOn: "rider" },
-  { key: "suitFont", label: "Suit font", group: "rider", freeText: true },
-  { key: "glovesPaint", label: "Gloves", group: "rider" },
-  { key: "ridingStyle", label: "Riding style", group: "rider" },
-  { key: "helmet", label: "Helmet", group: "head" },
-  { key: "helmetPaint", label: "Helmet paint", group: "head", dependsOn: "helmet" },
-  { key: "gogglesPaint", label: "Goggles", group: "head", dependsOn: "helmet" },
-  { key: "boots", label: "Boots", group: "body" },
-  { key: "bootsPaint", label: "Boot paint", group: "body", dependsOn: "boots" },
-  { key: "protection", label: "Protection", group: "body" },
-  { key: "protectionPaint", label: "Protection paint", group: "body", dependsOn: "protection" },
+  { key: "paint", label: "slot.paint", group: "bike", dependsOn: "bikeid" },
+  { key: "modelSwap", label: "slot.modelSwap", group: "bike", dependsOn: "bikeid" },
+  { key: "bikeFont", label: "slot.bikeFont", group: "bike", freeText: true },
+  { key: "tyres", label: "slot.tyres", group: "bike" },
+  { key: "rider", label: "slot.rider", group: "rider" },
+  { key: "suitPaint", label: "slot.suitPaint", group: "rider", dependsOn: "rider" },
+  { key: "suitFont", label: "slot.suitFont", group: "rider", freeText: true },
+  { key: "glovesPaint", label: "slot.glovesPaint", group: "rider" },
+  { key: "ridingStyle", label: "slot.ridingStyle", group: "rider" },
+  { key: "helmet", label: "slot.helmet", group: "head" },
+  { key: "helmetPaint", label: "slot.helmetPaint", group: "head", dependsOn: "helmet" },
+  { key: "gogglesPaint", label: "slot.gogglesPaint", group: "head", dependsOn: "helmet" },
+  { key: "boots", label: "slot.boots", group: "body" },
+  { key: "bootsPaint", label: "slot.bootsPaint", group: "body", dependsOn: "boots" },
+  { key: "protection", label: "slot.protection", group: "body" },
+  {
+    key: "protectionPaint",
+    label: "slot.protectionPaint",
+    group: "body",
+    dependsOn: "protection",
+  },
 ];
 
-export const SLOT_GROUPS: { id: SlotDef["group"]; label: string }[] = [
-  { id: "bike", label: "Bike" },
-  { id: "rider", label: "Rider" },
-  { id: "head", label: "Head" },
-  { id: "body", label: "Body" },
+export const SLOT_GROUPS: { id: SlotDef["group"]; label: TKey }[] = [
+  { id: "bike", label: "slotGroup.bike" },
+  { id: "rider", label: "slotGroup.rider" },
+  { id: "head", label: "slotGroup.head" },
+  { id: "body", label: "slotGroup.body" },
 ];
 
 export const EMPTY_LOADOUT: Loadout = {

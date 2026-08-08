@@ -21,6 +21,8 @@ import {
   formatLength,
 } from "../../lib/mods";
 import { CATEGORY_ICON, CATEGORY_LABEL, categoryIcon } from "./categories";
+import { Trans } from "../../i18n";
+import { useT } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
 
 interface LibraryDetailProps {
@@ -48,6 +50,7 @@ export default function LibraryDetail({
   onMove,
   onOpenEntry,
 }: LibraryDetailProps) {
+  const t = useT();
   const [meta, setMeta] = useState<PkzMeta | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState(false);
@@ -91,15 +94,25 @@ export default function LibraryDetail({
   );
 
   const rows: [string, string][] = [];
-  if (meta?.author) rows.push(["Author", meta.author]);
-  if (meta?.length) rows.push(["Length", formatLength(meta.length)]);
-  if (meta?.altitude != null) rows.push(["Altitude", `${meta.altitude} m`]);
-  if (meta?.location) rows.push(["Location", meta.location]);
-  rows.push(["Type", CATEGORY_LABEL[entry.category] ?? "Mod"]);
-  if (entry.parent) rows.push(["Belongs to", entry.parent]);
-  rows.push(["Format", entry.kind === "folder" ? "Extracted folder" : entry.kind === "loose" ? "Paint file" : "Packaged .pkz"]);
-  if (entry.size) rows.push(["Size", formatBytes(entry.size)]);
-  rows.push(["Folder", folderLabel(entry.folder)]);
+  if (meta?.author) rows.push([t("libraryDetail.author"), meta.author]);
+  if (meta?.length) rows.push([t("libraryDetail.length"), formatLength(meta.length)]);
+  if (meta?.altitude != null) rows.push([t("libraryDetail.altitude"), `${meta.altitude} m`]);
+  if (meta?.location) rows.push([t("libraryDetail.location"), meta.location]);
+  rows.push([
+    t("libraryDetail.type"),
+    CATEGORY_LABEL[entry.category] ? t(CATEGORY_LABEL[entry.category]) : t("libraryDetail.mod"),
+  ]);
+  if (entry.parent) rows.push([t("libraryDetail.belongsTo"), entry.parent]);
+  rows.push([
+    t("libraryDetail.format"),
+    entry.kind === "folder"
+      ? t("libraryDetail.extractedFolder")
+      : entry.kind === "loose"
+        ? t("libraryDetail.paintFile")
+        : t("libraryDetail.packagedPkz"),
+  ]);
+  if (entry.size) rows.push([t("libraryDetail.size"), formatBytes(entry.size)]);
+  rows.push([t("libraryDetail.folder"), folderLabel(entry.folder)]);
 
   const canMove = entry.kind === "pkz";
 
@@ -191,15 +204,29 @@ export default function LibraryDetail({
                 <Lock className="mt-0.5 size-3.5 flex-none text-faint" />
                 {meta?.name?.trim() ? (
                   <span>
-                    This track is <b className="text-foreground/80">locked</b> by its
-                    creator. Its name, details and preview are shown here, but the files
-                    stay sealed — it can’t be unpacked or previewed in 3D.
+                    <Trans
+                      k="libraryDetail.lockedWithMeta"
+                      values={{
+                        locked: (
+                          <b className="text-foreground/80">
+                            {t("libraryDetail.lockedWord")}
+                          </b>
+                        ),
+                      }}
+                    />
                   </span>
                 ) : (
                   <span>
-                    This track is <b className="text-foreground/80">locked</b>, so
-                    its name, length and preview can’t be read from the file —
-                    only its filename and size.
+                    <Trans
+                      k="libraryDetail.lockedNoMeta"
+                      values={{
+                        locked: (
+                          <b className="text-foreground/80">
+                            {t("libraryDetail.lockedWord")}
+                          </b>
+                        ),
+                      }}
+                    />
                   </span>
                 )}
               </div>
@@ -266,7 +293,7 @@ export default function LibraryDetail({
               !meta?.author &&
               !meta?.length && (
                 <p className="text-[12.5px] text-muted-foreground">
-                  No embedded details were found for this item.
+                  {t("libraryDetail.noEmbedded")}
                 </p>
               )}
           </div>

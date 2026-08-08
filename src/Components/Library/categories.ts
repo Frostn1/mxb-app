@@ -14,40 +14,43 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { LibraryCategory } from "../../types";
+import type { TKey } from "../../i18n";
 
-/** Human label per library category (section headers + detail "Type"). */
-export const CATEGORY_LABEL: Record<string, string> = {
-  track: "Track",
-  bike: "Bike",
-  bikePaint: "Livery",
-  bikeModelSwap: "Model swap",
-  sound: "Sound",
-  helmet: "Helmet",
-  helmetPaint: "Helmet paint",
-  goggles: "Goggles",
-  boots: "Boots",
-  bootPaint: "Boot paint",
-  protection: "Protection",
-  protectionPaint: "Protection paint",
-  gloves: "Gloves",
-  outfit: "Outfit / kit",
-  misc: "Other",
+/** Translation key per library category (section headers + detail "Type").
+ *  Singular — resolved with `t()` at render. */
+export const CATEGORY_LABEL: Record<string, TKey> = {
+  track: "category.track",
+  bike: "category.bike",
+  bikePaint: "category.bikePaint",
+  bikeModelSwap: "category.bikeModelSwap",
+  sound: "category.sound",
+  helmet: "category.helmet",
+  helmetPaint: "category.helmetPaint",
+  goggles: "category.goggles",
+  boots: "category.boots",
+  bootPaint: "category.bootPaint",
+  protection: "category.protection",
+  protectionPaint: "category.protectionPaint",
+  gloves: "category.gloves",
+  outfit: "category.outfit",
+  misc: "category.misc",
 };
 
-/** Section header label per category, used when grouping the Rider tab. */
-export const SECTION_LABEL: Record<string, string> = {
+/** Section header key per category, used when grouping the Rider tab. Plural in
+ *  English; other languages pluralize their own way inside the string. */
+export const SECTION_LABEL: Record<string, TKey> = {
   ...CATEGORY_LABEL,
-  bikePaint: "Liveries",
-  bikeModelSwap: "Model swaps",
-  sound: "Sounds",
-  helmet: "Helmets",
-  helmetPaint: "Helmet paints",
-  boots: "Boots",
-  bootPaint: "Boot paints",
-  protection: "Protection",
-  protectionPaint: "Protection paints",
-  gloves: "Gloves",
-  outfit: "Outfit / kit",
+  bikePaint: "section.bikePaint",
+  bikeModelSwap: "section.bikeModelSwap",
+  sound: "section.sound",
+  helmet: "section.helmet",
+  helmetPaint: "section.helmetPaint",
+  boots: "section.boots",
+  bootPaint: "section.bootPaint",
+  protection: "section.protection",
+  protectionPaint: "section.protectionPaint",
+  gloves: "section.gloves",
+  outfit: "section.outfit",
 };
 
 export const CATEGORY_ICON: Record<string, LucideIcon> = {

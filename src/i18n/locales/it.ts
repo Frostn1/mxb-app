@@ -1,0 +1,750 @@
+import type { Translation } from "..";
+
+/**
+ * Italian.
+ *
+ * Terminology follows what the MX Bikes community actually says rather than
+ * dictionary equivalents: `mod`, `setup`, `preset` and `Stock` stay as-is —
+ * they're the words riders use — while gear is translated (`casco`, `stivali`,
+ * `maschera` for goggles, `livrea` for a bike paint).
+ *
+ * Product names (MXB App, FrostMod, MX Bikes) are never translated.
+ */
+export const it: Translation = {
+  // ── Generico ───────────────────────────────────────────────────────────────
+  "common.cancel": "Annulla",
+  "common.back": "Indietro",
+  "common.next": "Avanti",
+  "common.skip": "Salta",
+  "common.close": "Chiudi",
+  "common.save": "Salva",
+  "common.delete": "Elimina",
+  "common.rename": "Rinomina",
+  "common.retry": "Riprova",
+  "common.tryAgain": "Riprova",
+  "common.loading": "Caricamento…",
+  "common.installed": "Installato",
+  "common.select": "Seleziona",
+  "common.deselect": "Deseleziona",
+  "common.selectAll": "Seleziona tutto",
+  "common.clear": "Svuota",
+  "common.done": "Fatto",
+  "common.apply": "Applica",
+  "common.remove": "Rimuovi",
+  "common.open": "Apri",
+  "common.refresh": "Aggiorna",
+  "common.dismiss": "Ignora",
+  "common.later": "Più tardi",
+  "common.active": "Attivo",
+
+  // ── Controlli finestra ─────────────────────────────────────────────────────
+  "window.minimize": "Riduci a icona",
+  "window.maximize": "Ingrandisci",
+  "window.close": "Chiudi",
+
+  // ── Navigazione ────────────────────────────────────────────────────────────
+  "nav.browse": "Esplora",
+  "nav.shop": "Shop",
+  "nav.library": "Libreria",
+  "nav.locker": "Armadietto",
+  "nav.presets": "Preset",
+  "nav.rider": "Pilota",
+  "nav.settings": "Impostazioni",
+
+  "sidebar.installing": "Installazione di “{{name}}”",
+  "sidebar.queued": "+{{count}} in coda",
+
+  // ── FrostMod ───────────────────────────────────────────────────────────────
+  "frostmod.checking": "Controllo di FrostMod…",
+  "frostmod.running": "FrostMod attivo",
+  "frostmod.notRunning": "FrostMod non attivo",
+  "frostmod.reloadGame": "Ricarica il gioco",
+  "frostmod.start": "Avvia FrostMod",
+  "frostmod.reloadedGame": "FrostMod ha ricaricato il gioco.",
+  "frostmod.notRunningToast": "FrostMod non è in esecuzione.",
+  "frostmod.started": "FrostMod avviato",
+  "frostmod.alreadyRunning": "FrostMod è già in esecuzione",
+  "frostmod.startFailed": "Impossibile avviare FrostMod",
+  "frostmod.installedToast": "FrostMod {{version}} installato",
+  "frostmod.installedToastDesc":
+    "Ricaricherà il gioco in tempo reale quando aggiungi mod.",
+  "frostmod.installFailed": "Impossibile installare FrostMod",
+  "frostmod.newModsAdded": "Nuove mod aggiunte",
+  "frostmod.modsAdded_one": "Nuova mod aggiunta",
+  "frostmod.modsAdded_other": "{{count}} mod aggiunte",
+  "frostmod.askedReload": "Richiesto a FrostMod di ricaricare il gioco.",
+  "frostmod.andMore_one": "{{names}} e altra {{count}}",
+  "frostmod.andMore_other": "{{names}} e altre {{count}}",
+  "frostmod.watchDesc":
+    "{{names}} — richiesto a FrostMod di ricaricare il gioco.",
+
+  // ── Configurazione iniziale ────────────────────────────────────────────────
+  "setup.title": "Benvenuto in MXB App",
+  "setup.tagline":
+    "Sfoglia mxb-mods, installa con un clic e lascia che sia FrostMod a ricaricare il gioco per te.",
+  "setup.modsFolder": "Cartella MX Bikes",
+  "setup.autoDetect":
+    "MXB App rileverà automaticamente la tua cartella {{hint}}. Puoi anche sceglierla tu.",
+  "setup.chooseManually": "Scegli la cartella manualmente…",
+  "setup.chooseDifferent": "Scegli un'altra cartella…",
+  "setup.gameInstall": "Installazione di MX Bikes",
+  "setup.detecting": "Ricerca dell'installazione di MX Bikes…",
+  "setup.found": "Trovata",
+  "setup.detectedAutomatically": "Rilevata automaticamente",
+  "setup.installNotFound":
+    "Non ho trovato automaticamente la tua installazione di MX Bikes — serve per l'anteprima 3D del pilota. Scegliela manualmente, oppure impostala più tardi nelle Impostazioni.",
+  "setup.chooseInstallManually":
+    "Scegli manualmente la cartella d'installazione…",
+  "setup.startBrowsing": "Inizia a sfogliare le mod",
+  "setup.detectAndStart": "Rileva e inizia",
+  "setup.pickModsFolder": "Seleziona la tua cartella MX Bikes",
+  "setup.pickInstallFolder": "Seleziona la cartella d'installazione di MX Bikes",
+
+  // ── Benvenuto ──────────────────────────────────────────────────────────────
+  "welcome.intro.title": "Benvenuto in MXB App",
+  "welcome.intro.body":
+    "Il tuo gestore di mod per MX Bikes. Tieni piste, moto e grafiche organizzate in un unico posto — niente più file zip sparsi sul desktop. Ti facciamo fare un giro in pochi secondi.",
+  "welcome.getStarted": "Iniziamo",
+
+  // ── Preset ─────────────────────────────────────────────────────────────────
+  "presets.missing": "mancante",
+  "presets.missingHint":
+    "Questa mod non è installata — in gioco apparirà come stock",
+  "presets.missingMods":
+    "Mod mancanti: {{mods}}. Installale per vedere quelle parti.",
+  "presets.help":
+    "Salva un look completo del pilota e caricalo su una moto quando vuoi.",
+  "presets.profile": "Profilo",
+  "presets.namePlaceholder": "Nome del preset…",
+  "presets.savePreset": "Salva preset",
+  "presets.saveChanges": "Salva modifiche",
+  "presets.saveChangesQ": "Salvare le modifiche?",
+  "presets.replaceQ": "Sostituire il preset?",
+  "presets.replace": "Sostituisci",
+  "presets.loadCopy": "Carica una copia nell'editor",
+  "presets.viewOnRider": "Vedi sul pilota",
+  "presets.editNameOrOptions": "Modifica nome o opzioni",
+  "presets.share": "Condividi",
+  "presets.nameFirst": "Prima dai un nome al preset.",
+  "presets.pickProfileAndBike": "Scegli un profilo e una moto a cui applicarlo.",
+  "presets.updated": "Preset “{{name}}” aggiornato.",
+  "presets.renamed": "Rinominato in “{{name}}” e modifiche salvate.",
+  "presets.saved": "Preset “{{name}}” salvato.",
+  "presets.editing":
+    "Stai modificando “{{name}}” — cambia quello che vuoi, poi salva le modifiche.",
+  "presets.appliedRefreshed":
+    "“{{label}}” applicato a {{bike}} — aggiornato in tempo reale nel gioco.",
+  "presets.appliedRefreshFailed":
+    "“{{label}}” applicato a {{bike}} — salvato, ma l'aggiornamento istantaneo non è riuscito: riseleziona il profilo in gioco per caricarlo.",
+  "presets.appliedGameRunning":
+    "“{{label}}” applicato a {{bike}} — salvato. Riseleziona il profilo in MX Bikes (menu Profilo) per caricare il nuovo look.",
+  "presets.appliedNextTime":
+    "“{{label}}” applicato a {{bike}} — salvato. Verrà caricato alla prossima apertura del gioco.",
+  "presets.phaseBundling": "Preparazione dei file…",
+  "presets.phaseUploading": "Caricamento del pacchetto…",
+  "presets.phaseDownloading": "Download del pacchetto…",
+  "presets.phaseInstalling": "Installazione dei file…",
+  "presets.bundleUploaded":
+    "Pacchetto completo caricato — ora il codice include anche i file.",
+  "presets.shareHintFull":
+    "Questo codice include un pacchetto scaricabile — chi lo riceve sceglie Importazione completa e ottiene tutto, anche senza mod installate.",
+  "presets.shareHintConfig":
+    "Manda questo codice a chi vuoi. Lo importa da Preset → Importa. Servono le stesse mod installate perché si veda ogni parte.",
+  "presets.generatingCode": "Generazione del codice…",
+  "presets.nothingToBundle":
+    "Nessun file installato da includere — questo look è tutto stock/font.",
+  "presets.createFullBundle": "Crea pacchetto completo",
+  "presets.copiedFull": "Codice con pacchetto completo copiato.",
+  "presets.copiedShare": "Codice di condivisione copiato.",
+  "presets.copyFailed":
+    "Impossibile copiare — seleziona il codice e copialo a mano.",
+  "presets.copyFullCode": "Copia codice completo",
+  "presets.copyCode": "Copia codice",
+  "presets.importTitle": "Importa preset",
+  "presets.importBody": "Incolla un codice che ti hanno mandato.",
+  "presets.configOnly": "Solo configurazione",
+  "presets.import": "Importa",
+  "presets.fullImport": "Importazione completa",
+  "presets.editingBanner":
+    "Stai modificando {{name}} — cambia il nome o qualsiasi slot, poi {{save}}.",
+  "presets.bundleNotice":
+    "Include un pacchetto completo (~{{size}} da {{host}}). Usa {{fullImport}} per scaricare e installare tutto — non serve avere già le mod.",
+
+  // ── Slot dei preset ────────────────────────────────────────────────────────
+  "slot.paint": "Livrea moto",
+  "slot.modelSwap": "Cambio modello",
+  "slot.bikeFont": "Font numeri",
+  "slot.tyres": "Gomme",
+  "slot.rider": "Profilo pilota",
+  "slot.suitPaint": "Completo / kit",
+  "slot.suitFont": "Font completo",
+  "slot.glovesPaint": "Guanti",
+  "slot.ridingStyle": "Stile di guida",
+  "slot.helmet": "Casco",
+  "slot.helmetPaint": "Grafica casco",
+  "slot.gogglesPaint": "Maschera",
+  "slot.boots": "Stivali",
+  "slot.bootsPaint": "Grafica stivali",
+  "slot.protection": "Protezioni",
+  "slot.protectionPaint": "Grafica protezioni",
+  "slotGroup.bike": "Moto",
+  "slotGroup.rider": "Pilota",
+  "slotGroup.head": "Testa",
+  "slotGroup.body": "Corpo",
+
+  // ── Studio pilota ──────────────────────────────────────────────────────────
+  "rider.help":
+    "Vesti il modello del pilota — casco, maschera, completo e stivali insieme.",
+  "rider.namePlaceholder": "Dai un nome a questo pilota…",
+  "rider.nameFirst": "Prima dai un nome a questo look.",
+  "rider.showOnModel": "Mostra sul modello",
+
+  // ── Tour guidato ───────────────────────────────────────────────────────────
+  "tour.welcomeTour.title": "Fai un giro veloce",
+  "tour.welcomeTour.body":
+    "Bastano pochi secondi per vedere dov'è ogni cosa. Puoi saltare quando vuoi.",
+  "tour.browse.title": "Sfoglia le mod",
+  "tour.browse.body":
+    "Cerca su mxb-mods.com direttamente da qui e installa qualsiasi pista, moto o grafica con un solo clic.",
+  "tour.library.title": "La tua libreria",
+  "tour.library.body":
+    "Tutto ciò che hai installato, in un unico posto — aggiorna o rimuovi le mod senza mai toccare un file zip.",
+  "tour.locker.title": "L'armadietto",
+  "tour.locker.body":
+    "Cambia i modelli delle moto quando vuoi. MXB App registra i pezzi in modo che il gioco li riconosca.",
+  "tour.presets.title": "Preset",
+  "tour.presets.body":
+    "Salva le combinazioni di equipaggiamento e grafiche, poi applica un look completo con un clic — anche mentre stai guidando.",
+  "tour.rider.title": "Studio pilota",
+  "tour.rider.body":
+    "Guarda l'anteprima del tuo equipaggiamento sul pilota 3D prima di portarlo in pista.",
+  "tour.frostmod.title": "FrostMod, in diretta",
+  "tour.frostmod.body":
+    "Qui vedi lo stato di FrostMod. Ricarica MX Bikes dopo un'installazione, così i nuovi contenuti compaiono senza riavviare il gioco.",
+  "tour.settings.title": "Impostazioni",
+  "tour.settings.body":
+    "Qui imposti la cartella di gioco, il comportamento in background e le opzioni di FrostMod. Da qui puoi anche rivedere questo tour.",
+  "tour.done.title": "È tutto pronto",
+  "tour.done.body":
+    "Il tour finisce qui. Vai su Esplora e installa la tua prima mod.",
+
+  // ── Errori ─────────────────────────────────────────────────────────────────
+  "error.previewFailed": "Impossibile mostrare l'anteprima",
+  "error.somethingWentWrong": "Qualcosa è andato storto",
+  "error.unexpected": "Si è verificato un errore imprevisto.",
+  "error.reloadApp": "Ricarica l'app",
+
+  // ── Aggiornamenti ──────────────────────────────────────────────────────────
+  "update.available": "{{version}} è disponibile.",
+  "update.downloading": "Download in corso…",
+  "update.downloadingPct": "Download in corso… {{pct}}%",
+  "update.pitch":
+    "Aggiorna per avere le ultime funzionalità e correzioni.",
+  "update.updating": "Aggiornamento…",
+  "update.updateAndRestart": "Aggiorna e riavvia",
+  "update.dismiss": "Ignora la notifica di aggiornamento",
+  "update.onLatest": "Hai già l'ultima versione",
+  "update.checkFailed": "Impossibile controllare gli aggiornamenti",
+  "update.failed": "Aggiornamento non riuscito",
+
+  // ── Visualizzatore 3D ──────────────────────────────────────────────────────
+  "viewer.preview3d": "Anteprima 3D",
+  "viewer.expand": "Ingrandisci",
+  "viewer.paint": "Grafica",
+  "viewer.loadingModel": "Caricamento modello…",
+  "viewer.loadingPaint": "Caricamento grafica…",
+  "viewer.loadingRider": "Caricamento pilota…",
+  "viewer.dragToRotate": "Trascina per ruotare",
+  "viewer.scrollToZoom": "Scorri per zoomare",
+  "viewer.rightDragToPan": "Trascina col destro per spostare",
+
+  // ── Combobox ───────────────────────────────────────────────────────────────
+  "combobox.search": "Cerca…",
+  "combobox.use": "Usa “{{value}}”",
+
+  // ── Tipi di mod ────────────────────────────────────────────────────────────
+  "modType.tracks": "Piste",
+  "modType.bikes": "Moto",
+  "modType.rider": "Pilota",
+  "modType.tracksInline": "piste",
+  "modType.bikesInline": "moto",
+  "modType.riderInline": "equipaggiamento pilota",
+
+  // ── Filtri categoria ───────────────────────────────────────────────────────
+  "browseCat.all": "Tutto",
+  "browseCat.beginner": "Principiante",
+  "browseCat.intermediate": "Intermedio",
+  "browseCat.pro": "Pro",
+  "browseCat.assets": "Risorse",
+  "browseCat.newBikes": "Nuove moto",
+  "browseCat.liveries": "Livree",
+  "browseCat.sounds": "Suoni",
+  "browseCat.riderKit": "Kit pilota",
+  "browseCat.helmets": "Caschi",
+  "browseCat.helmetPaints": "Grafiche casco",
+  "browseCat.gloves": "Guanti",
+  "browseCat.boots": "Stivali",
+  "browseCat.bootPaints": "Grafiche stivali",
+  "browseCat.protection": "Protezioni",
+  "browseCat.protectionPaints": "Grafiche protezioni",
+
+  // ── Esplora ────────────────────────────────────────────────────────────────
+  "browse.help":
+    "Scopri e installa mod dal catalogo online — cerca, filtra per tipo e apri una mod per scaricarla nel gioco.",
+  "browse.searchPlaceholder": "Cerca {{type}}…",
+  "browse.sortedByNewest": "Ordinate dalle più recenti",
+  "browse.loadFailed": "Impossibile caricare le mod",
+  "browse.empty": "Nessun risultato per {{type}}.",
+  "browse.loadMore": "Carica altre",
+  "browse.selectedCount": "{{count}} selezionate",
+  "browse.queuing": "Accodamento…",
+  "browse.quickInstallCount": "Installa rapidamente {{count}}",
+  "browse.quickInstall": "Installazione rapida",
+  "browse.quickReinstall": "Reinstallazione rapida",
+  "browse.openDetails": "Apri i dettagli",
+  "browse.reinstallOne": "Reinstallare “{{title}}”?",
+  "browse.reinstallMany": "Reinstallare le mod che hai già?",
+  "browse.reinstallOneBody":
+    "Questa mod è già nella tua libreria. Reinstallandola verrà scaricata di nuovo e i file installati saranno sovrascritti.",
+  "browse.reinstallManyBody":
+    "{{installed}} delle {{total}} selezionate sono già installate. Continuando verranno reinstallate e sovrascritte.",
+  "browse.reinstall": "Reinstalla",
+  "browse.reinstallAll": "Reinstalla tutto",
+  "browse.queued": "“{{title}}” in coda",
+  "browse.queuedDesc": "Installazione in {{folder}}.",
+  "browse.rootFolder": "principale",
+  "browse.needsBrowser": "“{{title}}” va scaricata dal browser",
+  "browse.needsBrowserDesc":
+    "{{host}} blocca i download nell'app — apri la sua pagina per completare.",
+  "browse.noDownload": "Nessun download trovato per “{{title}}”",
+  "browse.quickInstallFailed":
+    "Impossibile installare rapidamente “{{title}}”",
+  "browse.queuedBulk_one": "{{count}} mod in coda",
+  "browse.queuedBulk_other": "{{count}} mod in coda",
+  "browse.queuedBulkDesc": "Verranno installate una dopo l'altra.",
+  "browse.queuedBulkSkipped_one": "{{count}} saltata — host solo browser.",
+  "browse.queuedBulkSkipped_other": "{{count}} saltate — host solo browser.",
+  "browse.bulkFailed": "Impossibile installare rapidamente la selezione",
+  "browse.bulkFailedDesc_one": "Va scaricata dal browser.",
+  "browse.bulkFailedDesc_other":
+    "Tutte e {{count}} vanno scaricate dal browser.",
+
+  // ── Shop ───────────────────────────────────────────────────────────────────
+  "shop.myDownloads": "I miei download",
+  "shop.signInTitle": "Accedi a MX Bikes Shop",
+  "shop.signInBody":
+    "Accedi a mxbikes-shop.com per vedere e installare le piste che hai acquistato. Apriamo il sito vero — la tua password non passa mai da questa app.",
+  "shop.signIn": "Accedi",
+  "shop.logOut": "Esci",
+  "shop.signedIn": "Accesso a MX Bikes Shop effettuato",
+  "shop.sessionFailed":
+    "Impossibile recuperare la tua sessione MX Bikes Shop",
+  "shop.queuedDesc": "Installazione nella tua cartella piste.",
+  "shop.loadFailed": "Impossibile caricare i tuoi download: {{error}}",
+  "shop.empty": "Nessun download acquistato trovato sul tuo account.",
+
+  // ── Finestra d'installazione ───────────────────────────────────────────────
+  "installDialog.installTo": "Installa in",
+  "installDialog.installToFolder": "Installa in {{folder}}",
+  "installDialog.change": "Cambia",
+  "installDialog.searchBikes": "Cerca moto…",
+  "installDialog.searchFolders": "Cerca cartelle…",
+  "installDialog.probably": "Probabilmente",
+  "installDialog.allFolders": "Tutte le cartelle",
+  "installDialog.noFolderMatch":
+    "Nessuna cartella corrisponde — creala qui sotto.",
+  "installDialog.rememberedFor": "Ricordato per {{type}}",
+  "installDialog.downloadFrom": "Scarica da",
+  "installDialog.downloadPerBike": "Download (per moto)",
+  "installDialog.opensInBrowser":
+    "Si apre nel browser — MXB App completa l'installazione",
+  "installDialog.matchedBike": "Abbinato alla tua moto",
+  "installDialog.differentBike": "Moto / pacchetto diverso",
+  "installDialog.directFastest": "Diretto · il più veloce",
+  "installDialog.direct": "Diretto",
+  "installDialog.perBikeHint":
+    "Ogni download è una moto diversa — selezionato automaticamente in base alla tua scelta. Scegli il pacchetto “all bikes” per averle tutte in una volta.",
+  "installDialog.mirrorsHint":
+    "Tutti i mirror contengono lo stesso file. Se uno non funziona, prova il successivo.",
+
+  // ── Dettagli libreria ──────────────────────────────────────────────────────
+  "libraryDetail.author": "Autore",
+  "libraryDetail.length": "Lunghezza",
+  "libraryDetail.altitude": "Altitudine",
+  "libraryDetail.location": "Località",
+  "libraryDetail.type": "Tipo",
+  "libraryDetail.mod": "Mod",
+  "libraryDetail.belongsTo": "Appartiene a",
+  "libraryDetail.format": "Formato",
+  "libraryDetail.extractedFolder": "Cartella estratta",
+  "libraryDetail.paintFile": "File grafica",
+  "libraryDetail.packagedPkz": "Pacchetto .pkz",
+  "libraryDetail.size": "Dimensione",
+  "libraryDetail.folder": "Cartella",
+  "libraryDetail.lockedWord": "bloccata",
+  "libraryDetail.lockedWithMeta":
+    "Questa pista è {{locked}} dal suo creatore. Nome, dettagli e anteprima sono visibili qui, ma i file restano sigillati — non può essere estratta né vista in 3D.",
+  "libraryDetail.lockedNoMeta":
+    "Questa pista è {{locked}}, quindi nome, lunghezza e anteprima non si possono leggere dal file — solo nome file e dimensione.",
+
+  // ── Pagina mod ─────────────────────────────────────────────────────────────
+  "modDetail.stageResolve": "Risoluzione",
+  "modDetail.stageDownload": "Download",
+  "modDetail.stageExtract": "Estrazione",
+  "modDetail.stagePlace": "Posizionamento",
+  "modDetail.stageReload": "Ricarica",
+  "modDetail.modFiles": "File mod",
+  "modDetail.copied": "Copiato",
+  "modDetail.copy": "Copia",
+  "modDetail.addToLibrary": "Aggiungi alla libreria",
+  "modDetail.host": "Host",
+  "modDetail.installsTo": "Installa in",
+  "modDetail.noDownloadLink":
+    "Nessun link di download trovato in questa pagina — aprila su mxb-mods.com.",
+  "modDetail.frostmodHint":
+    "FrostMod ricaricherà l'elenco {{kind}} al termine.",
+  "modDetail.kindRider": "pilota",
+  "modDetail.kindBike": "moto",
+  "modDetail.kindTrack": "piste",
+  "modDetail.details": "Dettagli",
+  "modDetail.format": "Formato",
+  "modDetail.mirrors": "Mirror",
+  "modDetail.type": "Tipo",
+  "modDetail.addedToLibrary": "Aggiunta alla tua libreria",
+  "modDetail.extracting": "Estrazione…",
+  "modDetail.addingToLibrary": "Aggiunta alla libreria…",
+  "modDetail.resolving": "Risoluzione del download…",
+  "modDetail.finishInBrowser": "Completa nel browser",
+  "modDetail.viewOnSite": "Vedi su mxb-mods.com",
+
+  // ── Impostazioni ───────────────────────────────────────────────────────────
+  "settings.help":
+    "Configura la cartella di gioco, gli aggiornamenti e le preferenze dell'app.",
+  "settings.gameFolder": "Cartella di gioco",
+  "settings.general": "Generali",
+  "settings.appearance": "Aspetto",
+  "settings.frostmod": "FrostMod",
+  "settings.about": "Info e aggiornamenti",
+  "settings.modsFolderDesc":
+    "Dove vengono installate le mod. Cambiandola, la libreria viene riscansionata.",
+  "settings.insideModsFolder": "Dentro la tua cartella MX Bikes",
+  "settings.notSet": "Non impostata",
+  "settings.change": "Cambia…",
+  "settings.set": "Imposta…",
+  "settings.theme": "Tema",
+  "settings.themeLight": "Chiaro",
+  "settings.themeDark": "Scuro",
+  "settings.themeSystem": "Sistema",
+  "settings.language": "Lingua",
+  "settings.languageSystem": "Sistema",
+  "settings.runInBackground": "Continua in background",
+  "settings.runInBackgroundDesc":
+    "Chiudendo la finestra, MXB App resta nella barra di sistema così FrostMod rimane collegato. Esci dall'icona nella barra.",
+  "settings.launchAtStartup": "Avvia all'accensione",
+  "settings.launchAtStartupDesc":
+    "Avvia MXB App automaticamente quando accedi.",
+  "settings.instantRefresh": "Aggiornamento preset istantaneo",
+  "settings.instantRefreshDesc":
+    "Quando applichi un preset mentre MX Bikes è in esecuzione, aggiorna il look in gioco all'istante — senza riavvio né riselezione del profilo. Se non ci riesce, ti verrà chiesto di riselezionare il profilo.",
+  "settings.instantRefreshWindowsOnly":
+    "Aggiornare il look in gioco senza riavviare richiede FrostMod, che è solo per Windows — ti verrà invece chiesto di riselezionare il profilo.",
+  "settings.autoRunFrostmod": "Avvia FrostMod automaticamente",
+  "settings.autoRunFrostmodDesc":
+    "Avvia FrostMod in background ogni volta che apri MXB App.",
+  "settings.watchModsReload": "Ricarica automatica alle modifiche",
+  "settings.watchModsReloadDesc":
+    "Ricarica il gioco automaticamente quando piste o moto vengono aggiunte alla cartella mod — anche se scaricate manualmente fuori da MXB App.",
+  "settings.checking": "Controllo…",
+  "settings.runningConnected": "In esecuzione · gioco collegato",
+  "settings.notRunning": "Non in esecuzione",
+  "settings.frostmodInstalled": "Installato{{suffix}}",
+  "settings.notInstalled": "Non installato",
+  "settings.checkingGitHub": "Controllo dell'ultima release su GitHub…",
+  "settings.updateCheckFailed":
+    "Impossibile controllare gli aggiornamenti — offline o GitHub non raggiungibile.",
+  "settings.latestVersion": "Ultima: {{version}}",
+  "settings.checkNewer": "Cerca una versione più recente di FrostMod",
+  "settings.working": "Elaborazione…",
+  "settings.installFrostmod": "Installa FrostMod",
+  "settings.updateTo": "Aggiorna a {{version}}",
+  "settings.reinstallLatest": "Reinstalla l'ultima",
+  "settings.upToDate": "Aggiornato",
+  "settings.madeWith": "Fatto con",
+  "settings.updateFailed": "Impossibile aggiornare l'impostazione",
+  "settings.startupUpdateFailed":
+    "Impossibile aggiornare l'avvio automatico",
+  "settings.folderUpdated": "Cartella di gioco aggiornata",
+  "settings.folderUpdatedDesc": "La tua libreria verrà riscansionata.",
+  "settings.setFolderFailed": "Impossibile impostare la cartella",
+  "settings.reDetected": "Cartella MX Bikes rilevata di nuovo",
+  "settings.detectFolderFailed": "Impossibile rilevare la cartella",
+  "settings.pickInstallFolder":
+    "Seleziona la cartella d'installazione di MX Bikes (contiene rider.pkz)",
+  "settings.installSet": "Installazione di gioco impostata",
+  "settings.installSetDesc":
+    "L'anteprima 3D del pilota può ora caricare il modello reale del corpo.",
+  "settings.setInstallFailed":
+    "Impossibile impostare la cartella d'installazione",
+  "settings.installNotFound": "Impossibile trovare MX Bikes",
+  "settings.installNotFoundDesc":
+    "Nessuna installazione Steam rilevata — imposta la cartella manualmente.",
+  "settings.installFound": "Installazione di MX Bikes trovata",
+  "settings.detectInstallFailed":
+    "Impossibile rilevare la cartella d'installazione",
+  "settings.pickProfilesFolder":
+    "Seleziona la cartella dei profili di MX Bikes",
+  "settings.profilesSet": "Cartella dei profili impostata",
+  "settings.profilesFound_one": "Trovato {{count}} profilo.",
+  "settings.profilesFound_other": "Trovati {{count}} profili.",
+  "settings.noProfilesThere": "Nessun profilo trovato lì",
+  "settings.noProfilesThereDesc":
+    "Salvata comunque, ma per creare preset serve una cartella che contenga le cartelle dei tuoi profile.ini.",
+  "settings.setProfilesFailed":
+    "Impossibile impostare la cartella dei profili",
+  "settings.profilesReverted":
+    "Ripristinata la cartella dei profili predefinita",
+  "settings.resetProfilesFailed":
+    "Impossibile reimpostare la cartella dei profili",
+  "settings.frostmodNotRunningHint":
+    "FrostMod non è in esecuzione — avvialo per ricaricare le mod a caldo.",
+  "settings.reloadUnavailable":
+    "La ricarica non è disponibile su questa piattaforma.",
+
+  // ── Avvio del gioco ────────────────────────────────────────────────────────
+  "game.play": "Gioca",
+  "game.starting": "Avvio…",
+  "game.running": "MX Bikes in esecuzione",
+  "game.launch": "Avvia MX Bikes",
+  "game.alreadyRunning": "MX Bikes è già in esecuzione",
+  "game.launching": "Avvio di MX Bikes…",
+  "game.launchFailed": "Impossibile avviare MX Bikes",
+
+  // ── Stringhe sfuggite alla prima scansione (JSX su più righe) ──────────────
+  "libraryDetail.noEmbedded": "Nessun dettaglio incorporato trovato per questo elemento.",
+  "modDetail.downloadFromHost": "Scarica da {{host}}",
+  "modDetail.openHost": "Apri {{host}}",
+  "modDetail.thenAddFile": "Poi aggiungi il file",
+  "modDetail.chooseDownloaded": "Scegli il file scaricato",
+  "presets.chooseProfilesFolder": "Scegli la cartella dei profili…",
+  "presets.viewInRider": "Vedi nel Pilota",
+  "presets.noModelSwapsHere": "Nessun cambio modello registrato per questa moto —",
+  "presets.setUpInLocker": "impostali nell'Armadietto",
+  "presets.makeActiveBike": "Rendi questa la moto attiva",
+  "presets.nameClash":
+    "Esiste già un altro preset chiamato “{{name}}” — salvando sovrascriverai anche quello.",
+  "presets.shareWarning":
+    "Carica su un link pubblico e temporaneo — ridistribuisce file di mod fatti da altri, quindi condividi con criterio.",
+  "settings.profilesDesc":
+    "I preset leggono i tuoi profili da qui — il percorso qui sotto è quello che l'app sta usando adesso. È la cartella {{profiles}} dentro la tua cartella MX Bikes, oppure {{documents}} se hai spostato la cartella delle mod. Impostalo solo se il tuo è altrove.",
+  "settings.resetToDefault": "Ripristina il predefinito",
+  "settings.gameInstallDesc":
+    "Cartella d'installazione del gioco (facoltativa) — dove è installato MX Bikes (contiene {{file}}). Impostala per caricare il corpo reale del pilota nell'anteprima 3D.",
+  "viewer.stockGearNote":
+    "Mostrato sul {{part}} stock del gioco. Una grafica fatta per un altro modello potrebbe non combaciare alla perfezione.",
+  "viewer.paintNoChange":
+    "Nessuna delle texture di questa grafica è usata dalle parti mostrate qui, quindi l'anteprima non cambia. Potrebbe comunque colorare ruote o catena, che questa vista non mostra.",
+  "viewer.noPaintPreview": "Nessuna anteprima della grafica ({{err}})",
+
+  // ── Libreria ───────────────────────────────────────────────────────────────
+  "library.help":
+    "Le tue mod installate. Controlla cosa è installato e rimuovi ciò che non ti serve più.",
+  "library.rootFolder": "(principale)",
+  "library.byAuthor": "di {{author}}",
+  "library.locked": "Bloccato — il contenuto non è leggibile",
+  "library.searchPlaceholder": "Cerca tra le installate…",
+  "library.scanning": "Scansione della libreria…",
+  "library.empty":
+    "Nessuna mod {{type}} installata — vai su Esplora e aggiungine una.",
+  "library.noMatches": "Nessun risultato.",
+  "library.quick3d": "Anteprima 3D rapida",
+  "library.selectNone": "Deseleziona tutto",
+  "library.move": "Sposta",
+  "library.uninstall": "Disinstalla",
+  "library.uninstallAction": "Disinstalla…",
+  "library.moveToFolder": "Sposta nella cartella…",
+  "library.showInExplorer": "Mostra in Esplora file",
+  "library.moveDialogTitle": "Sposta nella cartella",
+  "library.moveCount_one": "Sposta {{count}} elemento",
+  "library.moveCount_other": "Sposta {{count}} elementi",
+  "library.chooseDestination": "Scegli una cartella di destinazione",
+  "library.newFolder": "Nuova cartella…",
+  "library.newFolderName": "Nome della nuova cartella",
+  "library.createAndMove": "Crea e sposta",
+  "library.confirmUninstall": "Disinstallare {{name}}?",
+  "library.confirmUninstallBody":
+    "L'elemento viene spostato nel Cestino — puoi ripristinarlo da lì.",
+  "library.confirmBulkUninstall_one": "Disinstallare {{count}} elemento?",
+  "library.confirmBulkUninstall_other": "Disinstallare {{count}} elementi?",
+  "library.confirmBulkUninstallBody":
+    "Ogni elemento viene spostato nel Cestino — puoi ripristinarli da lì.",
+  "library.uninstallCount": "Disinstalla {{count}}",
+  "library.moveFailed": "Impossibile spostare la mod",
+  "library.uninstallFailed": "Impossibile disinstallare",
+  "library.openFailed": "Impossibile aprire",
+  "library.uninstalledOne": "{{name}} disinstallata",
+  "library.movedToBin": "Spostata nel Cestino.",
+  "library.someNotRemoved": "Alcuni elementi non sono stati rimossi.",
+  "library.bulkUninstalled_one": "{{count}} elemento disinstallato",
+  "library.bulkUninstalled_other": "{{count}} elementi disinstallati",
+  "library.bulkUninstallPartial": "Disinstallati {{ok}}, {{fail}} falliti",
+  "library.bulkMovePartial": "Spostati {{ok}}, {{fail}} falliti",
+  "library.bulkMoved_one": "Spostato {{count}} elemento in {{folder}}",
+  "library.bulkMoved_other": "Spostati {{count}} elementi in {{folder}}",
+
+  // ── Armadietto ─────────────────────────────────────────────────────────────
+  "locker.help":
+    "Cambia il modello e il suono del motore di ogni moto tra i set che hai installato.",
+  "locker.rescan": "Riscansiona",
+  "locker.restore": "Ripristina",
+  "locker.register": "Registra",
+  "locker.scanning": "Scansione delle moto…",
+  "locker.scanForSwaps": "Cerca set da scambiare",
+  "locker.orphanBanner":
+    "A {{bike}} mancano i file di setup — una versione precedente li ha spostati in una cartella di swap, e questo impedisce del tutto il caricamento della moto in gioco. {{files}}",
+  "locker.looseBanner_one":
+    "{{count}} set modello / suono trovato sparso tra le tue moto — registralo in {{modelsFolder}} / {{soundsFolder}}.",
+  "locker.looseBanner_other":
+    "{{count}} set modello / suono trovati sparsi tra le tue moto — registrali in {{modelsFolder}} / {{soundsFolder}}.",
+  "locker.emptyTitle": "Ancora nessuna moto scambiabile.",
+  "locker.emptyIntro":
+    "Servono due condizioni prima che uno scambio sia possibile:",
+  "locker.unpacked": "estratta",
+  "locker.emptyRuleUnpacked":
+    "La moto è {{unpacked}} in {{path}}— un {{pkz}} compresso non può essere scambiato. Estraine una dalla Libreria.",
+  "locker.emptyRuleMesh":
+    "Ogni modello alternativo sta nella sua cartella dentro quella moto e contiene una mesh ({{edf}}). Mettila ovunque nella cartella della moto e premi Cerca qui sotto — ti proporremo di archiviarla in {{folder}}.",
+  "locker.summary": "{{model}} · suono “{{sound}}”",
+  "locker.modelNamed": "modello “{{name}}”",
+  "locker.noModelSwaps": "nessun cambio modello",
+  "locker.models": "Modelli",
+  "locker.sounds": "Suoni",
+  "locker.onlyOneModel": "Un solo modello — installane altri per scambiare",
+  "locker.onlyStock":
+    "Solo Stock — installa una mod audio per scambiare",
+  "locker.noModel": "Nessun modello",
+  "locker.stock": "Stock",
+  "locker.activeModel": "Modello attivo",
+  "locker.activeSound": "Suono attivo",
+  "locker.switchToNoModel":
+    "Passa a nessun modello — rimuove i file del modello attuale",
+  "locker.switchToStock":
+    "Passa a Stock — rimuove la mod audio (torna il suono originale)",
+  "locker.missingModelEdf": "Questo set non ha model.edf",
+  "locker.missingSoundFiles": "A questo set mancano engine.scl o sfx.cfg",
+  "locker.switchTo": "Passa a {{name}}",
+  "locker.tiedToModel": "Legato al modello {{models}}",
+  "locker.boundHint":
+    "“{{sound}}” è legato al modello “{{model}}” — segue quel modello. Clicca per slegarlo.",
+  "locker.unboundHint":
+    "Lega il suono attivo “{{sound}}” al modello “{{model}}” così passando a quel modello arriva anche il suono.",
+  "locker.tieAction": "Lega “{{sound}}” a “{{model}}”",
+  "locker.untieAction": "Slega “{{sound}}” da “{{model}}”",
+  "locker.restored": "Ripristinati i file di setup di {{bike}}.",
+  "locker.restoredNote_one":
+    "{{count}} file rimesso a posto — la moto dovrebbe caricarsi di nuovo.",
+  "locker.restoredNote_other":
+    "{{count}} file rimessi a posto — la moto dovrebbe caricarsi di nuovo.",
+  "locker.switchedModel":
+    "Modello di {{bike}} cambiato in “{{target}}”.",
+  "locker.switchedSound": "Suono di {{bike}} cambiato in “{{target}}”.",
+  "locker.tied": "“{{sound}}” legato al modello “{{model}}”.",
+  "locker.untied": "“{{sound}}” slegato dal modello “{{model}}”.",
+  "locker.refreshedLive": "Aggiornato in tempo reale nel gioco.",
+  "locker.refreshFailed":
+    "Aggiornamento istantaneo fallito — riseleziona il profilo in gioco per caricarlo.",
+  "locker.reselectProfile":
+    "Riseleziona il tuo profilo in MX Bikes per caricare lo scambio.",
+  "locker.loadsNextTime":
+    "Verrà caricato alla prossima apertura del gioco.",
+  "locker.modelRefreshing":
+    "Aggiornamento in gioco — se è la moto che hai selezionata, cambia adesso.",
+  "locker.modelFrostmodNotRunning":
+    "Avvia FrostMod per vedere i cambi modello in tempo reale — per ora riseleziona la moto in gioco.",
+  "locker.modelFrostmodUnreachable":
+    "Impossibile raggiungere FrostMod — riseleziona la moto in gioco per caricarla.",
+  "locker.modelRefreshWindowsOnly":
+    "L'aggiornamento del modello in tempo reale è solo per Windows — riseleziona la moto in gioco.",
+  "locker.modelInstantRefreshOff":
+    "Riseleziona la moto in MX Bikes per caricarla (l'aggiornamento istantaneo è disattivato).",
+
+  // ── Registrazione set sparsi ───────────────────────────────────────────────
+  "swaps.model": "modello",
+  "swaps.modelSets_one": "{{count}} cambio modello",
+  "swaps.modelSets_other": "{{count}} cambi modello",
+  "swaps.soundSets_one": "{{count}} mod audio",
+  "swaps.soundSets_other": "{{count}} mod audio",
+  "swaps.and": "{{a}} e {{b}}",
+  "swaps.noSets": "0 set",
+  "swaps.foundTitle": "Trovati {{summary}}",
+  "swaps.description":
+    "Queste cartelle sono sparse dentro le tue moto. Registrale per spostarle ciascuna nella libreria giusta — {{modelsFolder}} per i modelli, {{soundsFolder}} per i suoni — così compaiono nell'Armadietto.",
+  "swaps.registered_one": "Registrato {{count}} set.",
+  "swaps.registered_other": "Registrati {{count}} set.",
+  "swaps.nothingMoved": "Non è stato spostato nulla.",
+  "swaps.skipped_one": "{{count}} saltato (nome già in uso).",
+  "swaps.skipped_other": "{{count}} saltati (nomi già in uso).",
+  "swaps.foldersCreated_one":
+    "Create le cartelle di libreria per {{count}} moto.",
+  "swaps.foldersCreated_other":
+    "Create le cartelle di libreria per {{count}} moto.",
+  "swaps.foldersCreatedDesc":
+    "Le tue cartelle modello / suono sono rimaste dove sono.",
+  "swaps.justCreateFolders": "Crea solo le cartelle",
+  "swaps.registerAndMove": "Registra e sposta",
+  "swaps.fileCount_one": "{{count}} file",
+  "swaps.fileCount_other": "{{count}} file",
+
+  // ── Installazione ──────────────────────────────────────────────────────────
+  "install.installed": "{{title}} installata",
+  "install.reloadedDesc":
+    "Gioco ricaricato tramite FrostMod — è già attiva.",
+  "install.addedDesc": "Aggiunta alla tua libreria.",
+  "install.failed": "Installazione fallita — {{title}}",
+  "install.openModPage": "Apri la pagina della mod",
+  "install.clickToOpen": "Clicca per aprire la pagina della mod",
+
+  // ── Categorie (singolare) ──────────────────────────────────────────────────
+  "category.track": "Pista",
+  "category.bike": "Moto",
+  "category.bikePaint": "Livrea",
+  "category.bikeModelSwap": "Cambio modello",
+  "category.sound": "Suono",
+  "category.helmet": "Casco",
+  "category.helmetPaint": "Grafica casco",
+  "category.goggles": "Maschera",
+  "category.boots": "Stivali",
+  "category.bootPaint": "Grafica stivali",
+  "category.protection": "Protezioni",
+  "category.protectionPaint": "Grafica protezioni",
+  "category.gloves": "Guanti",
+  "category.outfit": "Completo / kit",
+  "category.misc": "Altro",
+
+  // ── Intestazioni di sezione (plurale) ──────────────────────────────────────
+  "section.bikePaint": "Livree",
+  "section.bikeModelSwap": "Cambi modello",
+  "section.sound": "Suoni",
+  "section.helmet": "Caschi",
+  "section.helmetPaint": "Grafiche casco",
+  "section.boots": "Stivali",
+  "section.bootPaint": "Grafiche stivali",
+  "section.protection": "Protezioni",
+  "section.protectionPaint": "Grafiche protezioni",
+  "section.gloves": "Guanti",
+  "section.outfit": "Completo / kit",
+
+  // ── Destinazioni d'installazione ───────────────────────────────────────────
+  "dest.bikesRoot": "Moto (principale)",
+  "dest.tracksRoot": "Piste (principale)",
+  "dest.bikeFolder": "{{name}} — cartella moto",
+  "dest.bikePaints": "{{name}} — grafiche",
+  "dest.helmetsNewModel": "Caschi (nuovo modello)",
+  "dest.bootsNewModel": "Stivali (nuovo modello)",
+  "dest.protectionNewModel": "Protezioni (nuovo modello)",
+  "dest.helmetPaintsFor": "{{name}} · grafiche casco",
+  "dest.gogglesFor": "{{name}} · maschera",
+  "dest.bootPaintsFor": "{{name}} · grafiche stivali",
+  "dest.protectionPaintsFor": "{{name}} · grafiche protezioni",
+  "dest.outfitFor": "{{name}} · completo / kit",
+  "dest.glovesFor": "{{name}} · guanti",
+};

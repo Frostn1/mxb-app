@@ -9,6 +9,7 @@ import {
 import { check as checkForUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
+import { useT } from "../i18n/context";
 
 /** The updater only works inside the Tauri runtime (no-op in the browser). */
 function inTauri(): boolean {
@@ -42,6 +43,7 @@ type UpdateContextValue = {
 const UpdateContext = createContext<UpdateContextValue | null>(null);
 
 export function UpdateProvider({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const [available, setAvailable] = useState<Update | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -53,7 +55,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     try {
       const update = await checkForUpdate();
       if (!update) {
-        if (!silent) toast.success("You're on the latest version");
+        if (!silent) toast.success(t("update.onLatest"));
         setAvailable(null);
         return;
       }
@@ -64,11 +66,12 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       }
       setAvailable(update);
     } catch (e) {
-      if (!silent) toast.error("Couldn't check for updates", { description: String(e) });
+      if (!silent)
+        toast.error(t("update.checkFailed"), { description: String(e) });
     } finally {
       inFlight.current = false;
     }
-  }, []);
+  }, [t]);
 
   const install = useCallback(async () => {
     if (!available || installing) return;
@@ -93,11 +96,11 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       });
       await relaunch();
     } catch (e) {
-      toast.error("Update failed", { description: String(e) });
+      toast.error(t("update.failed"), { description: String(e) });
       setInstalling(false);
       setProgress(null);
     }
-  }, [available, installing]);
+  }, [available, installing, t]);
 
   const dismiss = useCallback(() => {
     if (available) localStorage.setItem(DISMISSED_UPDATE_KEY, available.version);
