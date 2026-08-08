@@ -1,6 +1,7 @@
 use super::{DownloadOption, ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use crate::mxb_session;
 use futures_util::StreamExt;
+use obfstr::obfstr;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -456,7 +457,7 @@ async fn listing_response(
     category_id: u32,
     page: Page,
 ) -> anyhow::Result<(Fetched, Option<u32>)> {
-    let url = format!("{BASE}/wp-json/wp/v2/posts");
+    let url = format!("{BASE}{}", obfstr!("/wp-json/wp/v2/posts"));
     let mut params: Vec<(&str, String)> = vec![
         ("categories", category_id.to_string()),
         ("_embed", "wp:featuredmedia".to_string()),
@@ -537,7 +538,10 @@ async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
 /// differences are `limit`/`offset` instead of `page`, and that paging past the end
 /// returns an empty list rather than a 400.
 async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec<ModSummary>> {
-    let url = format!("{BASE}/wp-json/wordpress-popular-posts/v1/popular-posts");
+    let url = format!(
+        "{BASE}{}",
+        obfstr!("/wp-json/wordpress-popular-posts/v1/popular-posts")
+    );
     let per_page: u32 = PER_PAGE.parse().unwrap_or(24);
     let params: Vec<(&str, String)> = vec![
         ("taxonomy", "category".to_string()),
@@ -562,7 +566,7 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
 
 pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // 1. Post metadata + description via the REST API.
-    let url = format!("{BASE}/wp-json/wp/v2/posts");
+    let url = format!("{BASE}{}", obfstr!("/wp-json/wp/v2/posts"));
     let params = vec![
         ("slug", slug.to_string()),
         ("_embed", "wp:featuredmedia".to_string()),
@@ -703,7 +707,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The rating plugin has no REST route; its front end reads scores from this admin-ajax
 /// action, which answers unauthenticated with `{voteCount, avgRating}`.
 async fn rating(id: u64) -> anyhow::Result<ModRating> {
-    let url = format!("{BASE}/wp-admin/admin-ajax.php");
+    let url = format!("{BASE}{}", obfstr!("/wp-admin/admin-ajax.php"));
     let form = [
         ("action", "load_results".to_string()),
         ("postID", id.to_string()),

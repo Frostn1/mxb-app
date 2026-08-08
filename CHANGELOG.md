@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-08 — Unreleased
+
+### Changed
+- **Release binaries are stripped and hardened against reverse-engineering.** Added a
+  `[profile.release]` that strips the symbol table from every platform's artifact, builds with
+  fat LTO + a single codegen unit (functions inlined/merged so a decompiler can't recover clean
+  structure), and aborts on panic (no unwind tables). `opt-level` stays at 3 so the viewer's hot
+  paths aren't sacrificed. On Windows this also means no PDB is produced. Self-update is
+  unaffected — the updater signs file content after the build.
+- **Sensitive endpoint paths no longer appear in a `strings` dump.** Wired in `obfstr` and
+  XOR-obfuscated the runtime-built API paths and upload/download URLs (WordPress REST/admin-ajax
+  paths, pixeldrain upload, Google Drive resolver). Public host bases stay as-is — they're
+  visible in network traffic regardless and are bound into `const` config.
+
 ## 2026-08-08 — v0.7.1 — Browse works for blocked players, the model-swap crash is gone, and the Rider preview wears a real rider
 
 ### Added
