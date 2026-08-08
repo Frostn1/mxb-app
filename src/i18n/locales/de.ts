@@ -649,6 +649,8 @@ export const de: Translation = {
   "join.alreadyRunning":
     "Schließe zuerst {{game}} — ein laufendes Spiel kann nicht zu einem Server geschickt werden.",
   "join.failed": "Diesem Server konnte nicht beigetreten werden",
+  "join.manual": "Einem nicht gelisteten Server beitreten",
+  "join.noServers": "Noch keine Server gelistet — tippe eine Adresse ein, die du bekommen hast.",
 
   "servers.title": "Server",
   "servers.subtitle":
@@ -672,6 +674,18 @@ export const de: Translation = {
   "servers.actionFailed": "Das hat nicht geklappt",
   "servers.trackChanged": "Strecke auf {{track}} gesetzt — der Server wurde neu gestartet.",
   "servers.saveFailed": "Deine Serverliste konnte nicht gespeichert werden",
+  "servers.trackLoading": "Strecken werden gelesen…",
+  "servers.trackEmpty": "Keine Strecken auf diesem Host",
+  "servers.nameOptional": "Servername (optional — vom Host gelesen)",
+  "servers.probing": "Agent wird geprüft…",
+  "servers.probeFailed": "Dieser Agent war nicht erreichbar",
+  "servers.probed": "{{name}} gefunden",
+  "servers.pairingWhere":
+    "Starte mxb-agent auf der Maschine, die deinen Server hostet. Er gibt diese Zeile bei jedem Start aus — kopiere sie vollständig.",
+  "servers.manualEntry": "Ich habe keinen Kopplungscode — Daten von Hand eintragen",
+  "servers.pairingPlaceholder": "Kopplungscode einfügen",
+  "servers.pairingHint":
+    "Der Agent gibt diese Zeile beim Start aus. Füge sie hier ein, dann füllen sich Adresse und Token von selbst — oder trage sie unten von Hand ein.",
 
   "settings.experimental": "Experimentell",
   "settings.experimentalServers": "Server und Paint-Sync",
@@ -701,6 +715,20 @@ export const de: Translation = {
   "sync.pulled": "{{installed}} von {{riders}} Fahrern installiert ({{had}} schon vorhanden)",
   "sync.pullFailed": "Abgleich fehlgeschlagen",
   "sync.rejected": "{{count}} mit unsicherem Ziel übersprungen",
+  "sync.pickProfile": "Du fährst als",
+  "sync.pickProfileHint":
+    "Deine MX-Bikes-Profile, wie die App sie gefunden hat. Eines auszuwählen ist das, was den Apps der anderen Spieler sagt, welche Paints dir gehören.",
+  "sync.noProfiles":
+    "Keine MX-Bikes-Profile gefunden — tippe deinen Fahrernamen genau so ein, wie er im Spiel steht.",
+  "sync.guidClaimed": "Über GUID {{guid}} identifiziert",
+  "sync.guidPending":
+    "Deine GUID wird von selbst übernommen, sobald einer deiner Server dich zum ersten Mal verbinden sieht. Bis dahin identifiziert dich dein Fahrername.",
+  "sync.guidManual": "Manuell eingeben",
+  "sync.whereCode":
+    "Paint-Sync läuft vorerst nur auf Einladung. Codes werden im Discord vergeben — frag dort nach und füge den erhaltenen Code oben ein.",
+  "sync.getCode": "Im Discord fragen",
+  "sync.autoNote":
+    "Deine Paints veröffentlichen sich selbst, sobald du dein Aussehen änderst, und die der anderen kommen beim Spielstart an.",
 
   // ── Vom ersten Durchlauf übersehene Strings (mehrzeiliges JSX) ─────────────
   "libraryDetail.noEmbedded": "Für dieses Element wurden keine eingebetteten Details gefunden.",

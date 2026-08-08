@@ -88,7 +88,7 @@ pub struct AppConfig {
     /// the saved config (see [`AppConfig::experimental_enabled`]).
     pub experimental: bool,
     /// Bearer token for this player's control-plane account, from enrolling with an invite
-    /// code. Empty until they enrol.
+    /// code. Empty until they enroll.
     pub cp_token: String,
     /// The in-game rider name this account enrolled with. Kept so the UI can show which
     /// identity the paints are published under.

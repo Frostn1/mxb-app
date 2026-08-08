@@ -50,9 +50,16 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   if (method === "GET" && path === "/health") return json(200, { ok: true });
 
-  // Enrolment is the one unauthenticated write: it trades an invite code for a token.
+  // Enrollment is the one unauthenticated write: it trades an invite code for a token.
   // Steam sign-in will replace the invite code without changing anything downstream.
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
+
+  // The server list is public, and has to be: it is what the app's join picker offers, and
+  // requiring a token meant a player who hadn't enrolled was shown an empty box asking for
+  // an IP address — the exact question the registry exists to answer. Nothing here is
+  // secret; it is the same name/region/address a server browser shows, and `agent_url` is
+  // deliberately not selected, so the admin API's location stays private.
+  if (method === "GET" && path === "/v1/servers") return listServers(env);
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
@@ -60,7 +67,6 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
-  if (method === "GET" && path === "/v1/servers") return listServers(env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
 
   const paint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
@@ -283,6 +289,14 @@ async function getPaint(sha256: string, env: Env): Promise<Response> {
   });
 }
 
+/**
+ * The joinable servers. Unauthenticated — see the routing table.
+ *
+ * `agent_url` is not in the select list and must not be added to it: that column is the
+ * base URL of a server's admin API, and while it is still bearer-protected on the agent
+ * side, publishing where every one of them lives hands an attacker the target list for
+ * free. Everything else here is what a player needs in order to connect.
+ */
 async function listServers(env: Env): Promise<Response> {
   const servers = await env.DB.prepare(
     "SELECT id, name, region, address FROM servers ORDER BY region, name",

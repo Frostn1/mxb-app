@@ -237,71 +237,172 @@ fn local_paths(
     Ok(None)
 }
 
-/// Fetch everyone's paints and install the ones this machine is missing.
-pub async fn pull(cfg: &AppConfig, token: &str, server_id: &str) -> anyhow::Result<PullOutcome> {
+/// A server in the control plane's registry, as `GET /v1/servers` returns it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisteredServer {
+    pub id: String,
+    pub name: String,
+    pub region: String,
+    /// `host:port` — the same form the game's connect flag takes.
+    pub address: String,
+}
+
+/// The joinable servers.
+///
+/// `token` is optional because this endpoint is public: the join picker has to work before
+/// a player has enrolled, since "which servers can I join" is exactly what someone with no
+/// account is asking. It is still sent when we have one, so the control plane can key
+/// anything it later wants to personalise off the caller.
+pub async fn registry(token: Option<&str>) -> anyhow::Result<Vec<RegisteredServer>> {
     #[derive(Deserialize)]
-    struct Rider {
-        #[allow(dead_code)]
-        #[serde(rename = "riderName")]
-        rider_name: String,
-        paints: Vec<PaintEntry>,
+    struct Resp {
+        servers: Vec<RegisteredServer>,
     }
-    #[derive(Deserialize)]
-    struct Roster {
-        riders: Vec<Rider>,
+    let mut req = client()?.get(format!("{CONTROL_PLANE}/v1/servers"));
+    if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
+        req = req.bearer_auth(token);
+    }
+    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    Ok(resp.servers)
+}
+
+/// The roster key for the server at `address`.
+///
+/// A registered server is keyed by its registry id. Anything else is keyed by its own
+/// normalized `host:port`, which is stable, unforgeable by us, and the obvious thing for
+/// the control plane to key presence on later — better than dropping the sync entirely
+/// just because a player joined a server we don't run.
+///
+/// Both sides are normalized before comparing, so a registry row written as `10.0.0.5` and
+/// an address pasted as `10.0.0.5:54210` are recognised as the same server.
+pub fn server_key_for(servers: &[RegisteredServer], address: &str) -> String {
+    let Ok(wanted) = crate::gameproc::parse_server_address(address) else {
+        return address.trim().to_string();
+    };
+    servers
+        .iter()
+        .find(|s| {
+            crate::gameproc::parse_server_address(&s.address)
+                .map(|a| a.eq_ignore_ascii_case(&wanted))
+                .unwrap_or(false)
+        })
+        .map(|s| s.id.clone())
+        .unwrap_or(wanted)
+}
+
+#[derive(Deserialize)]
+struct RosterRider {
+    #[serde(rename = "riderName")]
+    rider_name: String,
+    #[serde(default)]
+    guid: Option<String>,
+    paints: Vec<PaintEntry>,
+}
+
+#[derive(Deserialize)]
+struct Roster {
+    riders: Vec<RosterRider>,
+}
+
+/// Identity for de-duplication: the GUID where the rider has claimed one, their name
+/// otherwise. The same order of preference the control plane groups by, so the two agree
+/// on what counts as one rider.
+fn rider_key(rider: &RosterRider) -> String {
+    match rider.guid.as_deref().map(str::trim).filter(|g| !g.is_empty()) {
+        Some(guid) => guid.to_string(),
+        None => format!("name:{}", rider.rider_name.to_lowercase()),
+    }
+}
+
+/// Fetch everyone's paints across `server_ids` and install the ones this machine is missing.
+///
+/// Takes a list rather than one id because a player who picks their server from the in-game
+/// browser gives us nothing to aim at, so the app syncs every server they could land on.
+/// Rosters overlap heavily — the same rider is on more than one, and riders share paints —
+/// so everything is de-duplicated *before* any work happens. Without that, two servers means
+/// hashing every local file twice and a report that double-counts what it did.
+pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow::Result<PullOutcome> {
+    let http = client()?;
+
+    let mut seen_riders: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Keyed by destination: two riders wearing the same paint is one file to write, and the
+    // digest is part of the key so a genuine disagreement isn't silently collapsed.
+    let mut wanted: Vec<PaintEntry> = Vec::new();
+    let mut seen_paints: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
+    let mut reached = 0usize;
+
+    for server_id in server_ids {
+        let roster: Roster = match http
+            .get(format!("{CONTROL_PLANE}/v1/roster"))
+            .query(&[("server", server_id.as_str())])
+            .bearer_auth(token)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+        {
+            Ok(resp) => resp.json().await?,
+            // One unreachable roster shouldn't sink the others — the player still wants the
+            // paints for the servers that did answer.
+            Err(e) => {
+                log::warn!("[sync] roster for {server_id} failed: {e}");
+                continue;
+            }
+        };
+        reached += 1;
+        for rider in roster.riders {
+            seen_riders.insert(rider_key(&rider));
+            for paint in rider.paints {
+                if seen_paints.insert((paint.rel_dest.clone(), paint.sha256.clone())) {
+                    wanted.push(paint);
+                }
+            }
+        }
     }
 
-    let http = client()?;
-    let roster: Roster = http
-        .get(format!("{CONTROL_PLANE}/v1/roster"))
-        .query(&[("server", server_id)])
-        .bearer_auth(token)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    if reached == 0 && !server_ids.is_empty() {
+        anyhow::bail!("couldn't read a roster from any server");
+    }
 
     let mods_dir = crate::library::mods_root(&cfg.mods_path);
-    let mut out = PullOutcome { riders: roster.riders.len(), ..Default::default() };
+    let mut out = PullOutcome { riders: seen_riders.len(), ..Default::default() };
 
-    for rider in &roster.riders {
-        for paint in &rider.paints {
-            let Some(dest) = safe_dest(&mods_dir, &paint.rel_dest) else {
-                // Refused rather than sanitised: a destination we had to rewrite is one we
-                // don't understand, and guessing writes someone's file somewhere odd.
-                log::warn!("refusing paint destination {:?}", paint.rel_dest);
-                out.rejected += 1;
-                continue;
-            };
-            if dest.is_file() && sha256_file(&dest).map(|h| h == paint.sha256).unwrap_or(false) {
-                out.already_had += 1;
-                continue;
-            }
-
-            let bytes = http
-                .get(format!("{CONTROL_PLANE}/v1/paints/{}", paint.sha256))
-                .bearer_auth(token)
-                .send()
-                .await?
-                .error_for_status()?
-                .bytes()
-                .await?;
-
-            // Verify before writing. The digest is the only thing making these bytes
-            // trustworthy, and an unverified write would put unchecked content into the
-            // game's folder under a name the game will load.
-            if sha256_bytes(&bytes) != paint.sha256 {
-                log::warn!("digest mismatch for {}, skipping", paint.sha256);
-                out.rejected += 1;
-                continue;
-            }
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&dest, &bytes)?;
-            out.installed += 1;
+    for paint in &wanted {
+        let Some(dest) = safe_dest(&mods_dir, &paint.rel_dest) else {
+            // Refused rather than sanitised: a destination we had to rewrite is one we
+            // don't understand, and guessing writes someone's file somewhere odd.
+            log::warn!("refusing paint destination {:?}", paint.rel_dest);
+            out.rejected += 1;
+            continue;
+        };
+        if dest.is_file() && sha256_file(&dest).map(|h| h == paint.sha256).unwrap_or(false) {
+            out.already_had += 1;
+            continue;
         }
+
+        let bytes = http
+            .get(format!("{CONTROL_PLANE}/v1/paints/{}", paint.sha256))
+            .bearer_auth(token)
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await?;
+
+        // Verify before writing. The digest is the only thing making these bytes
+        // trustworthy, and an unverified write would put unchecked content into the
+        // game's folder under a name the game will load.
+        if sha256_bytes(&bytes) != paint.sha256 {
+            log::warn!("digest mismatch for {}, skipping", paint.sha256);
+            out.rejected += 1;
+            continue;
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&dest, &bytes)?;
+        out.installed += 1;
     }
     Ok(out)
 }
@@ -357,6 +458,51 @@ mod tests {
         assert!(safe_dest(&mods(), "bikes/\u{0}/x.pnt").is_none());
         assert!(safe_dest(&mods(), &format!("{}x.pnt", "a/".repeat(200))).is_none());
         assert!(safe_dest(&mods(), "   ").is_none());
+    }
+
+    fn registry() -> Vec<RegisteredServer> {
+        vec![
+            RegisteredServer {
+                id: "eu-frankfurt-1".into(),
+                name: "EU 1".into(),
+                region: "eu".into(),
+                // Registered without a port, the way an address is usually published.
+                address: "203.0.113.10".into(),
+            },
+            RegisteredServer {
+                id: "us-east-1".into(),
+                name: "US 1".into(),
+                region: "us".into(),
+                address: "198.51.100.7:54999".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn matches_a_registered_server_across_port_notation() {
+        // The whole point of normalizing both sides: these three all name EU 1.
+        for addr in ["203.0.113.10", "203.0.113.10:54210", " 203.0.113.10:54210 "] {
+            assert_eq!(server_key_for(&registry(), addr), "eu-frankfurt-1", "{addr:?}");
+        }
+        assert_eq!(server_key_for(&registry(), "198.51.100.7:54999"), "us-east-1");
+    }
+
+    #[test]
+    fn a_non_default_port_is_a_different_server() {
+        // Same host, another port is another server — it must not collapse onto EU 1.
+        assert_eq!(server_key_for(&registry(), "203.0.113.10:54211"), "203.0.113.10:54211");
+    }
+
+    #[test]
+    fn falls_back_to_the_normalized_address_when_unregistered() {
+        assert_eq!(server_key_for(&registry(), "192.0.2.1"), "192.0.2.1:54210");
+        assert_eq!(server_key_for(&[], "192.0.2.1:6000"), "192.0.2.1:6000");
+    }
+
+    #[test]
+    fn an_unparseable_address_is_passed_through_rather_than_dropped() {
+        // Nothing sane to resolve, but the caller still gets a key instead of a panic.
+        assert_eq!(server_key_for(&registry(), "not a host"), "not a host");
     }
 
     #[test]

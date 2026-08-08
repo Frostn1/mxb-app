@@ -27,16 +27,16 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
 | GET | `/v1/me` | bearer | Account and current loadout |
 | PUT | `/v1/loadout` | bearer | Replace the loadout; returns `missing` — the blobs still to upload |
-| GET | `/v1/servers` | bearer | Server registry |
+| GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
 | GET | `/v1/roster?server=<id>` | bearer | Riders and their paints, for the sync |
 
-Enrolment by invite code stands in for Steam sign-in until there's an API key. `accounts`
+Enrollment by invite code stands in for Steam sign-in until there's an API key. `accounts`
 already carries a nullable `steam_id`, so adding Steam is a backfill rather than a rewrite
 of every account's identity.
 
 ## Security notes
 
-- Tokens are shown **once** at enrolment and stored only as a SHA-256 digest. Lookup is by
+- Tokens are shown **once** at enrollment and stored only as a SHA-256 digest. Lookup is by
   digest, so the comparison happens inside the index — there's no string compare of a secret
   to leak timing, and a database dump yields nothing presentable.
 - An unknown invite code and an already-claimed one return the **same** 403. Distinguishing

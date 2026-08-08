@@ -1768,9 +1768,14 @@ export function publishPaints(profile: string, bike: string): Promise<PublishOut
   return invoke<PublishOutcome>("publish_paints", { profile, bike });
 }
 
-/** Install every other rider's paints. */
-export function syncPaints(serverId: string): Promise<PullOutcome> {
-  return invoke<PullOutcome>("sync_paints", { serverId });
+/**
+ * Install every other rider's paints.
+ *
+ * The app already does this on its own when the game launches — this is the manual retry
+ * for a sync that ran before someone had published, or that hit a flaky connection.
+ */
+export function syncPaints(): Promise<PullOutcome> {
+  return invoke<PullOutcome>("sync_paints");
 }
 
 // ── Dedicated servers ────────────────────────────────────────────────────────
@@ -1802,6 +1807,23 @@ export interface ServerStatus {
   };
 }
 
+/** A server the control plane knows about — the list the join picker offers. */
+export interface RegisteredServer {
+  id: string;
+  name: string;
+  region: string;
+  /** `host:port`, the form the game's connect flag takes. */
+  address: string;
+}
+
+/**
+ * The joinable servers. Empty when this install hasn't enrolled — the registry needs a
+ * token — so callers should fall back to asking for an address rather than showing an error.
+ */
+export function cpServers(): Promise<RegisteredServer[]> {
+  return invoke<RegisteredServer[]>("cp_servers");
+}
+
 export type ServerAction = "start" | "stop" | "restart";
 
 export function listServers(): Promise<ServerRef[]> {
@@ -1820,6 +1842,45 @@ export function serverStatus(id: string): Promise<ServerStatus> {
 
 export function serverAction(id: string, action: ServerAction): Promise<unknown> {
   return invoke<unknown>("server_action", { id, action });
+}
+
+/** The tracks that host has installed — the only values its `.ini` will accept. */
+export function serverTracks(id: string): Promise<string[]> {
+  return invoke<string[]>("server_tracks", { id });
+}
+
+/**
+ * Ask an agent to describe itself before it's saved, so the add form can fill in the name
+ * the host already knows — and so a bad address or token fails here rather than as a dead
+ * row in the list.
+ */
+export function serverProbe(url: string, token: string): Promise<ServerStatus> {
+  return invoke<ServerStatus>("server_probe", { url, token });
+}
+
+/**
+ * An `mxb://enroll?code=…` link was opened.
+ *
+ * Fires with the invite code alone — the backend has already checked the link is the enroll
+ * route and that the code is a plain token. It only ever *prefills* the field; enrolling is
+ * still a button the player presses, so a link can't spend an invite by itself.
+ */
+export function onEnrollLink(cb: (code: string) => void): Promise<UnlistenFn> {
+  return listen<string>("deep-link-enroll", (event) => cb(event.payload));
+}
+
+/** The address and token packed into the one-line code `mxb-agent` prints at startup. */
+export interface Pairing {
+  url: string;
+  token: string;
+}
+
+/**
+ * Unpack that code. The agent already knows its own address and token, so pairing is a
+ * paste rather than two fields transcribed off a terminal.
+ */
+export function parsePairing(blob: string): Promise<Pairing> {
+  return invoke<Pairing>("parse_pairing", { blob });
 }
 
 /** Change server settings. The agent restarts the game, which reads its `.ini` only at startup. */

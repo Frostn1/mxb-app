@@ -641,6 +641,8 @@ export const ptBR: Translation = {
   "join.alreadyRunning":
     "Feche o {{game}} primeiro — um jogo em execução não pode ser enviado para um servidor.",
   "join.failed": "Não foi possível entrar nesse servidor",
+  "join.manual": "Entrar num servidor fora da lista",
+  "join.noServers": "Ainda não há servidores listados — digite um endereço que você recebeu.",
 
   "servers.title": "Servidores",
   "servers.subtitle":
@@ -664,6 +666,18 @@ export const ptBR: Translation = {
   "servers.actionFailed": "Não deu certo",
   "servers.trackChanged": "Pista definida como {{track}} — o servidor reiniciou.",
   "servers.saveFailed": "Não foi possível salvar sua lista de servidores",
+  "servers.trackLoading": "Lendo as pistas…",
+  "servers.trackEmpty": "Nenhuma pista nesse host",
+  "servers.nameOptional": "Nome do servidor (opcional — lido do host)",
+  "servers.probing": "Verificando esse agente…",
+  "servers.probeFailed": "Não foi possível alcançar esse agente",
+  "servers.probed": "{{name}} encontrado",
+  "servers.pairingWhere":
+    "Rode o mxb-agent na máquina que hospeda seu servidor. Ele imprime esta linha sempre que inicia — copie ela inteira.",
+  "servers.manualEntry": "Não tenho código de pareamento — inserir os dados à mão",
+  "servers.pairingPlaceholder": "Cole o código de pareamento",
+  "servers.pairingHint":
+    "O agente imprime esta linha ao iniciar. Cole-a aqui e o endereço e o token se preenchem sozinhos — ou digite-os à mão abaixo.",
 
   "settings.experimental": "Experimental",
   "settings.experimentalServers": "Servidores e sincronização de pinturas",
@@ -693,6 +707,20 @@ export const ptBR: Translation = {
   "sync.pulled": "{{installed}} instaladas de {{riders}} pilotos ({{had}} já tinha)",
   "sync.pullFailed": "Não foi possível sincronizar",
   "sync.rejected": "{{count}} ignoradas por destino inseguro",
+  "sync.pickProfile": "Você pilota como",
+  "sync.pickProfileHint":
+    "Seus perfis do MX Bikes, como o app os encontrou. Escolher um é o que diz aos apps dos outros jogadores quais paints são seus.",
+  "sync.noProfiles":
+    "Nenhum perfil do MX Bikes encontrado — digite seu nome de piloto exatamente como aparece no jogo.",
+  "sync.guidClaimed": "Identificado pelo GUID {{guid}}",
+  "sync.guidPending":
+    "Seu GUID é capturado sozinho na primeira vez que um dos seus servidores vê você conectar. Até lá, seu nome de piloto identifica você.",
+  "sync.guidManual": "Inserir manualmente",
+  "sync.whereCode":
+    "Por enquanto o paint sync é só por convite. Os códigos são distribuídos no Discord — peça lá e cole acima o que você receber.",
+  "sync.getCode": "Perguntar no Discord",
+  "sync.autoNote":
+    "Seus paints se publicam sozinhos sempre que você muda o visual, e os dos outros chegam ao iniciar o jogo.",
 
   // ── Textos que a primeira varredura não pegou (JSX em várias linhas) ──────
   "libraryDetail.noEmbedded": "Nenhum detalhe embutido foi encontrado para este item.",

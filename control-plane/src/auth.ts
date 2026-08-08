@@ -1,7 +1,7 @@
 /**
  * Bearer tokens for player accounts.
  *
- * Tokens are shown once at enrolment and stored only as a SHA-256 digest, so a dump of the
+ * Tokens are shown once at enrollment and stored only as a SHA-256 digest, so a dump of the
  * database yields nothing that can be presented as a credential. Lookup is by digest, which
  * also means the comparison happens inside the index rather than in our code — there is no
  * string compare to leak timing.

@@ -6,8 +6,10 @@
 
 mod config;
 mod ini;
+mod pairing;
 mod roster;
 mod supervisor;
+mod tracks;
 
 use config::Config;
 use serde::Deserialize;
@@ -35,6 +37,15 @@ fn main() {
         }
     };
     let listen = cfg.listen.clone();
+
+    // Printed before anything else can fail, and on every start rather than once at
+    // install: an operator who lost the line just restarts the agent to get it back.
+    let pairing = pairing::Pairing {
+        url: pairing::public_url(&cfg.listen, cfg.public_url.as_deref()),
+        token: cfg.token.clone(),
+    };
+    eprintln!("mxb-agent: pair this server by pasting the line below into the app");
+    println!("{}", pairing.encode());
 
     let shared: Shared = Arc::new(Mutex::new(Supervisor::new(cfg)));
 
@@ -87,6 +98,7 @@ fn handle(mut request: Request, shared: &Shared) {
     let response = match (method.as_str(), path.as_str()) {
         ("GET", "/status") => status(shared),
         ("GET", "/players") => players(shared),
+        ("GET", "/tracks") => installed_tracks(shared),
         ("POST", "/start") => act(shared, |s| s.start()),
         ("POST", "/stop") => act(shared, |s| s.stop()),
         ("POST", "/restart") => act(shared, |s| s.restart()),
@@ -147,6 +159,15 @@ fn players(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
         // No log yet is a server that has not been connected to, not a failure.
         Err(_) => json(200, &serde_json::json!({ "players": [] })),
     }
+}
+
+/// The tracks this host can actually run, so the app offers a list instead of a text box
+/// the operator has to spell a track name into from memory.
+fn installed_tracks(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let guard = shared.lock().unwrap();
+    let dir = guard.config().game_dir.clone();
+    drop(guard);
+    json(200, &serde_json::json!({ "tracks": tracks::installed(&dir) }))
 }
 
 fn act<F>(shared: &Shared, f: F) -> Response<std::io::Cursor<Vec<u8>>>
