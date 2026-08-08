@@ -9,6 +9,22 @@ use crate::config::AppConfig;
 #[cfg(windows)]
 const LOADER_OFFSET: usize = 0x000e_cd00;
 
+/// The flag that makes a fresh game process connect straight to a server.
+///
+/// Undocumented: PiBoSo's docs list only `-dedicated` and `-clientport`, but the argv
+/// parser at `0x140133640` (image base `0x140000000`) also handles `-directconnect` and a
+/// sibling `-connect`. Each takes the *next* argv as a string, copies it to a global, and
+/// sets a startup-mode enum — 2 for `-directconnect`, 3 for `-connect`.
+///
+/// Which of the two we want, and the exact address form the game expects, still need
+/// confirming against the in-game `log.txt` on Windows. Both live here as single constants
+/// so that test flips one line rather than reshaping the call site.
+const CONNECT_FLAG: &str = "-directconnect";
+
+/// Port used when an address doesn't carry one. The dedicated server's default, and what
+/// every published MX Bikes server address omits.
+const DEFAULT_SERVER_PORT: u16 = 54210;
+
 // Non-Windows builds only construct `Unsupported`/`Disabled`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -417,19 +433,97 @@ fn resolve_exe(cfg: &AppConfig) -> anyhow::Result<(std::path::PathBuf, std::path
 /// exe isn't ours to spawn — Steam has to set up the prefix — so Linux hands the Steam
 /// URL to the desktop instead.
 pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
+    launch_with(cfg, None)
+}
+
+/// Start MX Bikes and connect it straight to `address`, unless it's already running.
+///
+/// The game only reads the connect flag at startup, so a running copy can't be steered
+/// into a server — the caller gets [`LaunchOutcome::AlreadyRunning`] and has to close it
+/// first.
+pub fn join(cfg: &AppConfig, address: &str) -> anyhow::Result<LaunchOutcome> {
+    let address = parse_server_address(address)?;
+    launch_with(cfg, Some(&address))
+}
+
+/// Normalize a user-supplied server address into the `host:port` form the connect flag
+/// takes, filling in [`DEFAULT_SERVER_PORT`] when it's left off.
+///
+/// Deliberately strict, because the result is handed to the game as a command-line
+/// argument: anything that could smuggle a *second* argument past us — whitespace, a
+/// leading `-` — has to be rejected here, or a pasted address could quietly turn into
+/// another flag entirely.
+pub fn parse_server_address(input: &str) -> anyhow::Result<String> {
+    let raw = input.trim();
+    if raw.is_empty() {
+        anyhow::bail!("Enter a server address, like 203.0.113.10:54210.");
+    }
+    // MX Bikes networking is IPv4-only, so a bracketed literal is a mistake worth naming
+    // rather than letting it fail as an unresolvable host.
+    if raw.starts_with('[') {
+        anyhow::bail!("MX Bikes servers are IPv4 only — use an address like 203.0.113.10:54210.");
+    }
+
+    let (host, port) = match raw.rsplit_once(':') {
+        Some((host, port)) => {
+            let parsed: u16 = port
+                .parse()
+                .ok()
+                .filter(|p| *p > 0)
+                .ok_or_else(|| anyhow::anyhow!("\"{port}\" isn't a valid port — expected 1-65535."))?;
+            (host, parsed)
+        }
+        None => (raw, DEFAULT_SERVER_PORT),
+    };
+
+    if host.is_empty() {
+        anyhow::bail!("Enter a server address, like 203.0.113.10:54210.");
+    }
+    if host.starts_with('-') {
+        anyhow::bail!("\"{host}\" isn't a valid server address.");
+    }
+    if !host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    {
+        anyhow::bail!(
+            "\"{host}\" isn't a valid server address — use an IP or hostname, like 203.0.113.10:54210."
+        );
+    }
+
+    Ok(format!("{host}:{port}"))
+}
+
+/// The argv entries that make the game join `address`.
+///
+/// Two separate entries, not `flag=value`: the parser matches the flag and then reads the
+/// *following* argv as the address.
+fn connect_args(address: &str) -> [String; 2] {
+    [CONNECT_FLAG.to_string(), address.to_string()]
+}
+
+/// Shared body of [`launch`] and [`join`] — `address` is already normalized.
+fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchOutcome> {
     if is_game_running() {
         return Ok(LaunchOutcome::AlreadyRunning);
     }
     let (dir, exe) = resolve_exe(cfg)?;
-    log::info!("launching {}: {}", cfg.game().display, exe.display());
+    let game = cfg.game().display;
+    match address {
+        Some(addr) => log::info!("launching {game} into {addr}: {}", exe.display()),
+        None => log::info!("launching {game}: {}", exe.display()),
+    }
 
     #[cfg(windows)]
     {
         // No CREATE_NO_WINDOW here (unlike the headless FrostMod child) — the game
         // draws its own window and hiding the console would gain nothing.
-        std::process::Command::new(&exe)
-            .current_dir(&dir)
-            .spawn()
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.current_dir(&dir);
+        if let Some(addr) = address {
+            cmd.args(connect_args(addr));
+        }
+        cmd.spawn()
             .map_err(|e| anyhow::anyhow!("Couldn't start {}: {e}", exe.display()))?;
         Ok(LaunchOutcome::Launched)
     }
@@ -437,7 +531,13 @@ pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
     #[cfg(target_os = "linux")]
     {
         let _ = dir;
-        let url = format!("steam://rungameid/{}", cfg.game().steam_appid);
+        // Steam takes launch arguments after a `//` separator. Under Proton this is the
+        // only way to reach the exe's argv, since Steam — not us — spawns it.
+        let appid = cfg.game().steam_appid;
+        let url = match address {
+            Some(addr) => format!("steam://rungameid/{appid}//{}", connect_args(addr).join(" ")),
+            None => format!("steam://rungameid/{appid}"),
+        };
         std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| {
             anyhow::anyhow!("Couldn't ask Steam to launch {} ({url}): {e}", cfg.game().display)
         })?;
@@ -446,7 +546,7 @@ pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
 
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = dir;
+        let _ = (dir, address);
         anyhow::bail!("Launching MX Bikes is supported on Windows and Linux only")
     }
 }
@@ -460,6 +560,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn fills_in_the_default_port_when_the_address_omits_one() {
+        assert_eq!(parse_server_address("203.0.113.10").unwrap(), "203.0.113.10:54210");
+        assert_eq!(parse_server_address("mx.example.com").unwrap(), "mx.example.com:54210");
+    }
+
+    #[test]
+    fn keeps_an_explicit_port_and_trims_surrounding_space() {
+        assert_eq!(parse_server_address("  203.0.113.10:9000  ").unwrap(), "203.0.113.10:9000");
+    }
+
+    #[test]
+    fn rejects_addresses_that_could_smuggle_a_second_argument() {
+        // The whole point of validating: each of these would otherwise reach the game's
+        // argv parser as an extra flag rather than as part of the address.
+        for bad in ["203.0.113.10 -mod evil", "-directconnect", "203.0.113.10:54210 -log"] {
+            assert!(
+                parse_server_address(bad).is_err(),
+                "{bad:?} must not survive validation"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_empty_and_malformed_ports() {
+        for bad in ["", "   ", "203.0.113.10:", "203.0.113.10:0", "203.0.113.10:99999", ":54210"] {
+            assert!(parse_server_address(bad).is_err(), "{bad:?} must not survive validation");
+        }
+    }
+
+    #[test]
+    fn names_ipv6_rather_than_failing_on_lookup() {
+        let err = parse_server_address("[::1]:54210").unwrap_err().to_string();
+        assert!(err.contains("IPv4"), "expected an IPv4-only message, got {err:?}");
+    }
+
+    #[test]
+    fn passes_the_flag_and_address_as_separate_argv_entries() {
+        // `flag=value` would be read as one argument and never matched.
+        assert_eq!(
+            connect_args("203.0.113.10:54210"),
+            ["-directconnect".to_string(), "203.0.113.10:54210".to_string()]
+        );
     }
 
     #[test]

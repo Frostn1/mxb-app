@@ -1031,6 +1031,17 @@ export function launchGame(): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("launch_game");
 }
 
+/**
+ * Start MX Bikes connected straight to `address` (`host` or `host:port`; the port
+ * defaults to 54210).
+ *
+ * Resolves to `already_running` when the game is already up — the connect flag is only
+ * read at startup, so a running copy can't be steered into a server.
+ */
+export function joinServer(address: string): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("join_server", { address });
+}
+
 /** Is MX Bikes currently running? Always false off Windows — the probe is Win32-only. */
 export function isGameRunning(): Promise<boolean> {
   return invoke<boolean>("game_running");

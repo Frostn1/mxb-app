@@ -534,6 +534,16 @@ export const es: Translation = {
   "game.alreadyRunning": "{{game}} ya está en ejecución",
   "game.launching": "Iniciando {{game}}…",
   "game.launchFailed": "No se pudo iniciar {{game}}",
+  "join.title": "Unirse a un servidor",
+  "join.desc":
+    "Introduce la dirección de un servidor para iniciar {{game}} conectado directamente a él.",
+  "join.address": "Dirección del servidor",
+  "join.action": "Unirse",
+  "join.joining": "Conectando…",
+  "join.launching": "Conectando a {{address}}…",
+  "join.alreadyRunning":
+    "Cierra {{game}} primero — un juego ya iniciado no se puede enviar a un servidor.",
+  "join.failed": "No se pudo unir a ese servidor",
 
   // ── Cadenas que el primer barrido no vio (JSX multilínea) ─────────────────
   "libraryDetail.noEmbedded": "No se encontraron detalles incrustados para este elemento.",

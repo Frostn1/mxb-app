@@ -13,6 +13,8 @@ export interface GameCaps {
   shop: boolean;
   /** The Manage view (parking mods to trim what the game loads). */
   manage: boolean;
+  /** Join a server by address (launches the game with `-directconnect`). */
+  joinByAddress: boolean;
 }
 
 /** One title the app can drive, as reported by `listGames()`. */

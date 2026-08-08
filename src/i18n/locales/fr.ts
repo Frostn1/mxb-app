@@ -538,6 +538,16 @@ export const fr: Translation = {
   "game.alreadyRunning": "{{game}} est déjà en cours d'exécution",
   "game.launching": "Lancement de {{game}}…",
   "game.launchFailed": "Impossible de lancer {{game}}",
+  "join.title": "Rejoindre un serveur",
+  "join.desc":
+    "Saisissez l'adresse d'un serveur pour lancer {{game}} en vous y connectant directement.",
+  "join.address": "Adresse du serveur",
+  "join.action": "Rejoindre",
+  "join.joining": "Connexion…",
+  "join.launching": "Connexion à {{address}}…",
+  "join.alreadyRunning":
+    "Fermez d'abord {{game}} — un jeu déjà lancé ne peut pas être envoyé vers un serveur.",
+  "join.failed": "Impossible de rejoindre ce serveur",
 
   // ── Chaînes manquées par le premier balayage (JSX multi-lignes) ────────────
   "libraryDetail.noEmbedded": "Aucun détail intégré n'a été trouvé pour cet élément.",

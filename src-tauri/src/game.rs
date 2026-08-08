@@ -120,6 +120,10 @@ pub struct Caps {
     pub viewer: bool,
     /// The authenticated paid-content shop. mxbikes-shop.com is MX Bikes only.
     pub shop: bool,
+    /// Join a server by address, by launching the game with `-directconnect`. The argv
+    /// parser it was found in and the default port it assumes are both MX Bikes'; GP
+    /// Bikes has its own, so this stays off there until they're confirmed.
+    pub join_by_address: bool,
     /// The Manage view — parking mods in `mxbapp_disabled` to trim what the game loads.
     /// Filesystem-only, so it *works* for any title; off for GP Bikes because it isn't
     /// wanted there, not because it can't.
@@ -198,6 +202,7 @@ pub static MXB: GameProfile = GameProfile {
         viewer: true,
         shop: true,
         manage: true,
+        join_by_address: true,
     },
 };
 
@@ -244,6 +249,7 @@ pub static GPB: GameProfile = GameProfile {
         viewer: false,
         shop: false,
         manage: false,
+        join_by_address: false,
     },
 };
 
@@ -334,5 +340,6 @@ mod tests {
         assert!(!caps.instant_refresh, "instant refresh pokes mxbikes.exe");
         assert!(!caps.shop, "mxbikes-shop.com is MX Bikes only");
         assert!(!caps.manage, "Manage is MX Bikes only for now");
+        assert!(!caps.join_by_address, "GP's connect flag and port are unconfirmed");
     }
 }

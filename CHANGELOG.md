@@ -73,6 +73,23 @@
   unchanged. Applying a preset no longer creates `profile.ini` sections that the game
   doesn't use.
 
+## 2026-08-07 — join a server by address
+
+### Added
+- **Join a server straight from the app.** A new *Join a server* button in the sidebar takes
+  a server address and starts MX Bikes already connected to it, rather than launching the
+  game and leaving you to find the server in the in-game WORLD list. The game has carried an
+  undocumented `-directconnect` flag all along — PiBoSo documents only `-dedicated` and
+  `-clientport` — which reads the address from the argument that follows it. A bare host gets
+  the dedicated server's default port, 54210.
+
+  The address is validated in the Rust command rather than in the UI, because it ends up on
+  the game's command line: anything that could smuggle a second argument past us — embedded
+  whitespace, a leading `-` — is rejected there, so a pasted address can't quietly turn into
+  a different flag. The connect flag is only read at startup, so asking to join while MX
+  Bikes is already running says so instead of appearing to work.
+
+## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
 ## 2026-08-08 — v0.7.1 — Browse works for blocked players, the model-swap crash is gone, and the Rider preview wears a real rider
 
 ### Added

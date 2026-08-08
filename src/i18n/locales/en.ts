@@ -514,6 +514,16 @@ export const en = {
   "game.alreadyRunning": "{{game}} is already running",
   "game.launching": "Launching {{game}}…",
   "game.launchFailed": "Couldn't launch {{game}}",
+  "join.title": "Join a server",
+  "join.desc":
+    "Enter a server address to start {{game}} connected straight to it.",
+  "join.address": "Server address",
+  "join.action": "Join",
+  "join.joining": "Joining…",
+  "join.launching": "Joining {{address}}…",
+  "join.alreadyRunning":
+    "Close {{game}} first — a running game can't be sent to a server.",
+  "join.failed": "Couldn't join that server",
 
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",

@@ -11,6 +11,7 @@ import {
   Loader2,
   Gamepad2,
   SlidersHorizontal,
+  Plug,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ import { launchGame } from "../../api/mods";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
+import JoinServerDialog from "./JoinServerDialog";
 
 export type DashboardView =
   | "browse"
@@ -73,6 +75,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const { game } = useConfig();
   const caps = game.caps;
   const [starting, setStarting] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -206,6 +209,34 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
                 : t("game.play")}
           </span>
         </button>
+
+        {/* Join-by-address launches the game with `-directconnect`. Both the argv parser
+            offset it was found at and the default port it assumes are MX Bikes', so it
+            stays behind a capability until GP's are confirmed. */}
+        {caps.joinByAddress && (
+        <>
+        <button
+          onClick={() => setJoinOpen(true)}
+          disabled={gameRunning}
+          title={gameRunning ? t("game.running") : t("join.title")}
+          className={cn(
+            "flex cursor-default items-center justify-center gap-2 rounded-lg border border-white/[0.07] px-3 py-1.5 text-[12px] font-medium transition-colors",
+            gameRunning
+              ? "text-muted-foreground"
+              : "text-foreground/80 hover:bg-white/[0.04]",
+          )}
+        >
+          <Plug className="size-3.5" />
+          <span>{t("join.title")}</span>
+        </button>
+
+        <JoinServerDialog
+          open={joinOpen}
+          onOpenChange={setJoinOpen}
+          onJoined={refreshGame}
+        />
+        </>
+        )}
 
         {/* FrostMod is a compiled MX Bikes plugin — there is nothing to report, start or
             reload for a title it wasn't built for. */}

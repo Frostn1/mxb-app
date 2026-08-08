@@ -542,6 +542,16 @@ export const de: Translation = {
   "game.alreadyRunning": "{{game}} läuft bereits",
   "game.launching": "{{game}} wird gestartet…",
   "game.launchFailed": "{{game}} konnte nicht gestartet werden",
+  "join.title": "Server beitreten",
+  "join.desc":
+    "Gib eine Serveradresse ein, um {{game}} direkt damit verbunden zu starten.",
+  "join.address": "Serveradresse",
+  "join.action": "Beitreten",
+  "join.joining": "Verbinden…",
+  "join.launching": "Verbinde mit {{address}}…",
+  "join.alreadyRunning":
+    "Schließe zuerst {{game}} — ein laufendes Spiel kann nicht zu einem Server geschickt werden.",
+  "join.failed": "Diesem Server konnte nicht beigetreten werden",
 
   // ── Vom ersten Durchlauf übersehene Strings (mehrzeiliges JSX) ─────────────
   "libraryDetail.noEmbedded": "Für dieses Element wurden keine eingebetteten Details gefunden.",

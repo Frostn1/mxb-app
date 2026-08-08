@@ -529,6 +529,16 @@ export const it: Translation = {
   "game.alreadyRunning": "{{game}} è già in esecuzione",
   "game.launching": "Avvio di {{game}}…",
   "game.launchFailed": "Impossibile avviare {{game}}",
+  "join.title": "Entra in un server",
+  "join.desc":
+    "Inserisci l'indirizzo di un server per avviare {{game}} collegandoti direttamente.",
+  "join.address": "Indirizzo del server",
+  "join.action": "Entra",
+  "join.joining": "Connessione…",
+  "join.launching": "Connessione a {{address}}…",
+  "join.alreadyRunning":
+    "Chiudi prima {{game}} — un gioco già avviato non può essere collegato a un server.",
+  "join.failed": "Impossibile entrare in quel server",
 
   // ── Stringhe sfuggite alla prima scansione (JSX su più righe) ──────────────
   "libraryDetail.noEmbedded": "Nessun dettaglio incorporato trovato per questo elemento.",
