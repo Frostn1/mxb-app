@@ -542,6 +542,30 @@ export const en = {
   "servers.trackChanged": "Track set to {{track}} — the server restarted.",
   "servers.saveFailed": "Couldn't save your server list",
 
+  "settings.experimental": "Experimental",
+  "settings.experimentalServers": "Servers and paint sync",
+  "settings.experimentalServersDesc":
+    "Unfinished. Adds the Servers tab, lets you run dedicated servers, and syncs paints so everyone on a server renders correctly.",
+  "settings.experimentalForced":
+    "Turned on for this run by MXB_EXPERIMENTAL — the setting has no effect until you unset it.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Paint sync",
+  "sync.desc":
+    "MX Bikes never sends paints, so other riders show up in default liveries unless you already have their exact file. Publish yours and pull back everyone else's.",
+  "sync.enroll": "Enrol",
+  "sync.enrolled": "Enrolled as {{name}}",
+  "sync.enrollFailed": "Couldn't enrol",
+  "sync.codePlaceholder": "Invite code",
+  "sync.riderNamePlaceholder": "In-game rider name",
+  "sync.riderNameHint":
+    "This has to match your rider name in MX Bikes exactly — it's how other players' apps know which paints are yours.",
+  "sync.ridingAs": "Publishing as {{name}}",
+  "sync.pull": "Sync paints",
+  "sync.pulled": "Installed {{installed}} from {{riders}} riders ({{had}} already had)",
+  "sync.pullFailed": "Couldn't sync paints",
+  "sync.rejected": "Skipped {{count}} with an unsafe destination",
+
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",
   "modDetail.downloadFromHost": "Download from {{host}}",

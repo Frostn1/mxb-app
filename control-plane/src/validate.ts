@@ -6,8 +6,23 @@
  * not about plumbing.
  */
 
-/** Paint slots the game actually has. Anything else is a client bug or a probe. */
-export const SLOTS = ["bike", "helmet", "boots", "goggles", "gear", "protections"] as const;
+/**
+ * Slot names, which are the `profile.ini` section names the game itself uses — not a
+ * vocabulary of our own. The app reads and writes these sections directly, so inventing
+ * parallel names would mean a translation layer on both sides and a mismatch the first time
+ * one of them gained a slot.
+ */
+export const SLOTS = [
+  "paint",
+  "bike_font",
+  "helmet_paint",
+  "goggles_paint",
+  "suit_paint",
+  "suit_font",
+  "boots_paint",
+  "gloves_paint",
+  "protection_paint",
+] as const;
 export type Slot = (typeof SLOTS)[number];
 
 export function isSlot(value: unknown): value is Slot {
@@ -50,6 +65,32 @@ export function isPaintFileName(value: unknown): value is string {
   // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f\x7f:*?"<>|]/.test(name)) return false;
   return name.toLowerCase().endsWith(".pnt");
+}
+
+/**
+ * A destination path, relative to the receiver's `mods` folder, that is safe to write.
+ *
+ * This is the most dangerous value in the whole API: one player uploads it and another
+ * player's app joins it onto a real directory. A value of `../../../mxbikes.ini`, an
+ * absolute path, or a Windows drive letter would each escape the mods folder entirely. It
+ * is rejected here and again on the client, because only the client's check actually
+ * protects a disk — this one just stops the bad value being stored and served.
+ */
+export function isRelDest(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const p = value.trim();
+  if (p.length === 0 || p.length > 256) return false;
+  // Forward slashes only, so there is a single form to reason about.
+  if (p.includes("\\")) return false;
+  // No absolute paths, no drive letters, no UNC.
+  if (p.startsWith("/") || /^[a-z]:/i.test(p)) return false;
+  // No traversal, in any segment.
+  const segments = p.split("/");
+  if (segments.some((s) => s === "" || s === "." || s === "..")) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f:*?"<>|]/.test(p)) return false;
+  // The last segment has to be the paint itself, under the same rules as any filename.
+  return isPaintFileName(segments[segments.length - 1]);
 }
 
 /** Paints are single-digit megabytes; anything far past that is not a paint. */

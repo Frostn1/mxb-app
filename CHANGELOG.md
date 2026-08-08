@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-08-08 — v0.8.0-beta.1 — everyone on the server finally looks right
+
+### Added
+- **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
+  whatever file on *your* disk happens to match the name they picked, so a full grid shows
+  up in default liveries. The game can't tell us what they picked either — its plugin API
+  carries rider names, bikes and lap data, and no paint field at all. So the loop is closed
+  outside the game. Your app publishes what your rider is wearing; every other app pulls it
+  back and installs it. Paints are content-addressed by SHA-256, so twenty riders sharing a
+  livery is one stored object and nineteen uploads that never happen, and a second sync
+  installs nothing it already has.
+
+  Everyone on the server needs the app for this to work — that's inherent, not a limitation
+  we chose.
+
+- **A Servers tab**, for running dedicated servers: start, stop and restart the game on a
+  host, watch its uptime and how many times it came back on its own, and change the track.
+  It talks to `mxb-agent` on the host rather than to a cloud provider, because a desktop app
+  that shipped provider credentials could create infrastructure from any machine it ran on.
+
+- **An Experimental switch in Settings**, off by default, gating both of the above. They
+  talk to a live service and write files other players uploaded, so they're opt-in rather
+  than something you find by accident. `MXB_EXPERIMENTAL=1` turns them on for a single run
+  without touching your saved settings — and the switch says so rather than looking stuck.
+
+- **Beta builds now say they're beta**, next to the version in Settings → About. The badge
+  keys off a semver pre-release suffix, which is the same thing the release workflow uses to
+  mark a build as a pre-release, so the two can't disagree.
+
+### Security
+- A paint carries the destination it should be written to, and that path arrives from
+  another player. It's validated twice — once by the service and again in the app before it
+  becomes a real path — because only the second check actually protects a disk. Anything
+  with a separator, a `..`, a drive letter, a control character or a non-`.pnt` extension is
+  refused outright rather than sanitised: a path we'd have to rewrite is one we don't
+  understand. Downloaded bytes are checked against their digest before being written.
+
 ## 2026-08-08 — run a dedicated server from the app
 
 ### Added

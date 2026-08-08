@@ -570,6 +570,30 @@ export const de: Translation = {
   "servers.trackChanged": "Strecke auf {{track}} gesetzt — der Server wurde neu gestartet.",
   "servers.saveFailed": "Deine Serverliste konnte nicht gespeichert werden",
 
+  "settings.experimental": "Experimentell",
+  "settings.experimentalServers": "Server und Paint-Sync",
+  "settings.experimentalServersDesc":
+    "Unfertig. Fügt den Server-Tab hinzu, lässt dich Dedicated Server betreiben und gleicht Paints ab, damit alle auf einem Server richtig aussehen.",
+  "settings.experimentalForced":
+    "Für diesen Lauf durch MXB_EXPERIMENTAL aktiviert — die Einstellung wirkt erst, wenn du die Variable entfernst.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Paint-Sync",
+  "sync.desc":
+    "MX Bikes überträgt Paints nie, also erscheinen andere Fahrer im Standard-Look, wenn du ihre Datei nicht schon hast. Veröffentliche deine und hol dir die der anderen.",
+  "sync.enroll": "Registrieren",
+  "sync.enrolled": "Registriert als {{name}}",
+  "sync.enrollFailed": "Registrierung fehlgeschlagen",
+  "sync.codePlaceholder": "Einladungscode",
+  "sync.riderNamePlaceholder": "Fahrername im Spiel",
+  "sync.riderNameHint":
+    "Muss exakt deinem Fahrernamen in MX Bikes entsprechen — daran erkennen die Apps der anderen, welche Paints dir gehören.",
+  "sync.ridingAs": "Veröffentlicht als {{name}}",
+  "sync.pull": "Paints abgleichen",
+  "sync.pulled": "{{installed}} von {{riders}} Fahrern installiert ({{had}} schon vorhanden)",
+  "sync.pullFailed": "Abgleich fehlgeschlagen",
+  "sync.rejected": "{{count}} mit unsicherem Ziel übersprungen",
+
   // ── Vom ersten Durchlauf übersehene Strings (mehrzeiliges JSX) ─────────────
   "libraryDetail.noEmbedded": "Für dieses Element wurden keine eingebetteten Details gefunden.",
   "modDetail.downloadFromHost": "Von {{host}} herunterladen",

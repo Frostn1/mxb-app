@@ -1020,6 +1020,57 @@ export function appPlatform(): Promise<string> {
   return invoke<string>("app_platform");
 }
 
+// ── Experimental features, beta builds, paint sync ───────────────────────────
+
+export interface ExperimentalState {
+  /** Whether the unfinished multiplayer features should be shown at all. */
+  enabled: boolean;
+  /** On because `MXB_EXPERIMENTAL=1` was set, so the toggle can explain itself. */
+  forcedByEnv: boolean;
+  version: string;
+  /** A semver pre-release suffix (`0.8.0-beta.1`) — what makes this build a beta. */
+  prerelease: boolean;
+  /** Whether this install has a control-plane account yet. */
+  enrolled: boolean;
+  riderName: string;
+}
+
+export interface PublishOutcome {
+  published: number;
+  uploaded: number;
+}
+
+export interface PullOutcome {
+  riders: number;
+  installed: number;
+  alreadyHad: number;
+  /** Entries refused because their destination wasn't safe to write. */
+  rejected: number;
+}
+
+export function experimentalState(): Promise<ExperimentalState> {
+  return invoke<ExperimentalState>("experimental_state");
+}
+
+export function setExperimental(enabled: boolean): Promise<void> {
+  return invoke<void>("set_experimental", { enabled });
+}
+
+/** Trade an invite code for an account. The token is stored by the backend, never here. */
+export function enrollAccount(code: string, riderName: string): Promise<string> {
+  return invoke<string>("enroll_account", { code, riderName });
+}
+
+/** Publish this rider's paints so everyone else on the server can see them. */
+export function publishPaints(profile: string, bike: string): Promise<PublishOutcome> {
+  return invoke<PublishOutcome>("publish_paints", { profile, bike });
+}
+
+/** Install every other rider's paints. */
+export function syncPaints(serverId: string): Promise<PullOutcome> {
+  return invoke<PullOutcome>("sync_paints", { serverId });
+}
+
 // ── Dedicated servers ────────────────────────────────────────────────────────
 
 /** A dedicated server the player administers, as stored in the app config. */

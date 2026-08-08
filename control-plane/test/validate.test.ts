@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { bearer } from "../src/auth";
-import { isPaintFileName, isPaintSize, isRiderName, isSha256, isSlot, MAX_PAINT_BYTES } from "../src/validate";
+import {
+  isPaintFileName,
+  isPaintSize,
+  isRelDest,
+  isRiderName,
+  isSha256,
+  isSlot,
+  MAX_PAINT_BYTES,
+} from "../src/validate";
 
 describe("paint filenames", () => {
   it("accepts an ordinary paint", () => {
@@ -32,6 +40,41 @@ describe("paint filenames", () => {
     expect(isPaintFileName("livery.png")).toBe(false);
     expect(isPaintFileName("livery")).toBe(false);
     expect(isPaintFileName("")).toBe(false);
+  });
+});
+
+describe("destination paths", () => {
+  it("accepts the layout the game actually uses", () => {
+    expect(isRelDest("bikes/2026 KTM 450/paints/Frost.pnt")).toBe(true);
+    expect(isRelDest("rider/helmets/Airoh/paints/Frost.pnt")).toBe(true);
+  });
+
+  it("refuses to escape the mods folder", () => {
+    // One player uploads this and another player's app joins it onto a real directory —
+    // this is the value that would actually write outside the mods folder.
+    for (const bad of [
+      "../mxbikes.ini",
+      "bikes/../../../mxbikes.ini",
+      "/etc/passwd",
+      "C:/Windows/system32/x.pnt",
+      "c:\\windows\\x.pnt",
+      "bikes\\ktm\\paints\\x.pnt",
+      "bikes//paints/x.pnt",
+      "./x.pnt",
+    ]) {
+      expect(isRelDest(bad), bad).toBe(false);
+    }
+  });
+
+  it("still requires the last segment to be a paint", () => {
+    expect(isRelDest("bikes/ktm/paints/notapaint.txt")).toBe(false);
+    expect(isRelDest("bikes/ktm/paints")).toBe(false);
+  });
+
+  it("rejects control characters and absurd lengths", () => {
+    expect(isRelDest("bikes/\u0000/x.pnt")).toBe(false);
+    expect(isRelDest("a/".repeat(200) + "x.pnt")).toBe(false);
+    expect(isRelDest(42)).toBe(false);
   });
 });
 
@@ -72,9 +115,12 @@ describe("content addressing", () => {
 });
 
 describe("slots", () => {
-  it("accepts the game's slots only", () => {
-    expect(isSlot("bike")).toBe(true);
-    expect(isSlot("goggles")).toBe(true);
+  it("accepts the profile.ini section names the game uses", () => {
+    expect(isSlot("paint")).toBe(true);
+    expect(isSlot("goggles_paint")).toBe(true);
+    expect(isSlot("protection_paint")).toBe(true);
+    // Not a paint slot — models and non-paint settings must not carry a blob.
+    expect(isSlot("tyres")).toBe(false);
     expect(isSlot("wheels")).toBe(false);
     expect(isSlot(null)).toBe(false);
   });

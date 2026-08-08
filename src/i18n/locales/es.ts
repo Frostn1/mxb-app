@@ -563,6 +563,30 @@ export const es: Translation = {
   "servers.trackChanged": "Pista cambiada a {{track}} — el servidor se reinició.",
   "servers.saveFailed": "No se pudo guardar tu lista de servidores",
 
+  "settings.experimental": "Experimental",
+  "settings.experimentalServers": "Servidores y sincronización de pinturas",
+  "settings.experimentalServersDesc":
+    "Sin terminar. Añade la pestaña Servidores, te deja gestionar servidores dedicados y sincroniza las pinturas para que todos en un servidor se vean bien.",
+  "settings.experimentalForced":
+    "Activado en esta sesión por MXB_EXPERIMENTAL — el ajuste no hace nada hasta que lo quites.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Sincronización de pinturas",
+  "sync.desc":
+    "MX Bikes nunca envía las pinturas, así que los demás pilotos se ven con las de serie si no tienes ya su archivo exacto. Publica la tuya y descarga las de los demás.",
+  "sync.enroll": "Registrarse",
+  "sync.enrolled": "Registrado como {{name}}",
+  "sync.enrollFailed": "No se pudo registrar",
+  "sync.codePlaceholder": "Código de invitación",
+  "sync.riderNamePlaceholder": "Nombre de piloto en el juego",
+  "sync.riderNameHint":
+    "Tiene que coincidir exactamente con tu nombre de piloto en MX Bikes — así saben las apps de los demás qué pinturas son tuyas.",
+  "sync.ridingAs": "Publicando como {{name}}",
+  "sync.pull": "Sincronizar pinturas",
+  "sync.pulled": "Instaladas {{installed}} de {{riders}} pilotos ({{had}} ya estaban)",
+  "sync.pullFailed": "No se pudieron sincronizar las pinturas",
+  "sync.rejected": "Se omitieron {{count}} con un destino no seguro",
+
   // ── Cadenas que el primer barrido no vio (JSX multilínea) ─────────────────
   "libraryDetail.noEmbedded": "No se encontraron detalles incrustados para este elemento.",
   "modDetail.downloadFromHost": "Descargar desde {{host}}",

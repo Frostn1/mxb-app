@@ -1,15 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Play, Square, RotateCw, Trash2, Plus, Server as ServerIcon } from "lucide-react";
+import {
+  Loader2,
+  Play,
+  Square,
+  RotateCw,
+  Trash2,
+  Plus,
+  Download,
+  Shirt,
+  Server as ServerIcon,
+} from "lucide-react";
 import { Button } from "@/Components/ui/button";
 import { Input } from "@/Components/ui/input";
 import { cn } from "@/lib/utils";
 import {
+  enrollAccount,
+  experimentalState,
   listServers,
   saveServers,
   serverAction,
   serverSetConfig,
   serverStatus,
+  syncPaints,
+  type ExperimentalState,
   type ServerAction,
   type ServerRef,
   type ServerStatus,
@@ -171,6 +185,100 @@ const ServerRow = ({ server, onRemove }: RowProps) => {
   );
 };
 
+/**
+ * Enrolment and paint sync.
+ *
+ * MX Bikes sends no custom content, so other riders render in default liveries unless you
+ * already hold their exact paint file. This is the panel that fixes that: publish what
+ * you're wearing, pull back what everyone else published.
+ */
+const PaintSync = () => {
+  const t = useT();
+  const [state, setState] = useState<ExperimentalState | null>(null);
+  const [code, setCode] = useState("");
+  const [riderName, setRiderName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(() => {
+    experimentalState()
+      .then(setState)
+      .catch(() => {});
+  }, []);
+  useEffect(refresh, [refresh]);
+
+  const enroll = async () => {
+    setBusy(true);
+    try {
+      const name = await enrollAccount(code.trim(), riderName.trim());
+      toast.success(t("sync.enrolled", { name }));
+      setCode("");
+      refresh();
+    } catch (e) {
+      toast.error(t("sync.enrollFailed"), { description: String(e) });
+    }
+    setBusy(false);
+  };
+
+  const pull = async () => {
+    setBusy(true);
+    try {
+      const r = await syncPaints("eu-frankfurt-1");
+      toast.success(
+        t("sync.pulled", { installed: r.installed, riders: r.riders, had: r.alreadyHad }),
+      );
+      if (r.rejected > 0) toast.warning(t("sync.rejected", { count: r.rejected }));
+    } catch (e) {
+      toast.error(t("sync.pullFailed"), { description: String(e) });
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="mb-5 rounded-xl border border-white/[0.07] p-4">
+      <div className="flex items-center gap-2">
+        <Shirt className="size-4 text-muted-foreground" />
+        <h2 className="font-semibold">{t("sync.title")}</h2>
+      </div>
+      <p className="mt-1 text-[12.5px] text-muted-foreground">{t("sync.desc")}</p>
+
+      {state?.enrolled ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-[12.5px] text-muted-foreground">
+            {t("sync.ridingAs", { name: state.riderName })}
+          </span>
+          <Button className="ml-auto" size="sm" disabled={busy} onClick={() => void pull()}>
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}{" "}
+            {t("sync.pull")}
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-2">
+          <Input
+            value={riderName}
+            onChange={(e) => setRiderName(e.target.value)}
+            placeholder={t("sync.riderNamePlaceholder")}
+            spellCheck={false}
+          />
+          <Input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder={t("sync.codePlaceholder")}
+            spellCheck={false}
+          />
+          <p className="text-[11.5px] text-muted-foreground">{t("sync.riderNameHint")}</p>
+          <Button
+            size="sm"
+            disabled={busy || !code.trim() || !riderName.trim()}
+            onClick={() => void enroll()}
+          >
+            {t("sync.enroll")}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Servers = () => {
   const t = useT();
   const [servers, setServers] = useState<ServerRef[]>([]);
@@ -212,6 +320,8 @@ const Servers = () => {
         <h1 className="text-xl font-semibold">{t("servers.title")}</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">{t("servers.subtitle")}</p>
       </header>
+
+      <PaintSync />
 
       {servers.length === 0 && !adding && (
         <div className="rounded-xl border border-dashed border-white/[0.1] p-8 text-center">

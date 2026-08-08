@@ -567,6 +567,30 @@ export const fr: Translation = {
   "servers.trackChanged": "Circuit réglé sur {{track}} — le serveur a redémarré.",
   "servers.saveFailed": "Impossible d'enregistrer votre liste de serveurs",
 
+  "settings.experimental": "Expérimental",
+  "settings.experimentalServers": "Serveurs et synchronisation des décos",
+  "settings.experimentalServersDesc":
+    "Inachevé. Ajoute l'onglet Serveurs, vous permet d'héberger des serveurs dédiés et synchronise les décos pour que tout le monde s'affiche correctement.",
+  "settings.experimentalForced":
+    "Activé pour cette session par MXB_EXPERIMENTAL — le réglage reste sans effet tant qu'il est défini.",
+  "settings.betaBadge": "Bêta",
+
+  "sync.title": "Synchronisation des décos",
+  "sync.desc":
+    "MX Bikes n'envoie jamais les décos : les autres pilotes apparaissent en déco d'origine si vous n'avez pas déjà leur fichier exact. Publiez la vôtre et récupérez celles des autres.",
+  "sync.enroll": "S'inscrire",
+  "sync.enrolled": "Inscrit en tant que {{name}}",
+  "sync.enrollFailed": "Inscription impossible",
+  "sync.codePlaceholder": "Code d'invitation",
+  "sync.riderNamePlaceholder": "Nom de pilote en jeu",
+  "sync.riderNameHint":
+    "Il doit correspondre exactement à votre nom de pilote dans MX Bikes — c'est ainsi que les apps des autres savent quelles décos sont les vôtres.",
+  "sync.ridingAs": "Publié sous {{name}}",
+  "sync.pull": "Synchroniser les décos",
+  "sync.pulled": "{{installed}} installées depuis {{riders}} pilotes ({{had}} déjà présentes)",
+  "sync.pullFailed": "Synchronisation impossible",
+  "sync.rejected": "{{count}} ignorées : destination non sûre",
+
   // ── Chaînes manquées par le premier balayage (JSX multi-lignes) ────────────
   "libraryDetail.noEmbedded": "Aucun détail intégré n'a été trouvé pour cet élément.",
   "modDetail.downloadFromHost": "Télécharger depuis {{host}}",

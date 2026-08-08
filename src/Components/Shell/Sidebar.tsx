@@ -19,7 +19,7 @@ import { useFrostmod } from "../../Context/FrostmodContext";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
-import { launchGame } from "../../api/mods";
+import { experimentalState, launchGame } from "../../api/mods";
 import { useGameRunning } from "../../lib/useGameRunning";
 
 export type DashboardView =
@@ -45,9 +45,15 @@ const NAV: { id: DashboardView; label: TKey; icon: typeof Home }[] = [
   { id: "locker", label: "nav.locker", icon: Bike },
   { id: "presets", label: "nav.presets", icon: Shirt },
   { id: "rider", label: "nav.rider", icon: User },
-  { id: "servers", label: "nav.servers", icon: ServerIcon },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
 ];
+
+/** Shown only when the experimental features are on — see `settings.experimental`. */
+const EXPERIMENTAL_NAV: { id: DashboardView; label: TKey; icon: typeof Home } = {
+  id: "servers",
+  label: "nav.servers",
+  icon: ServerIcon,
+};
 
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
 
@@ -60,6 +66,15 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const { active, queueLength } = useInstall();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const [starting, setStarting] = useState(false);
+  // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
+  // leaving that page is exactly when the nav needs to reflect a change.
+  const [experimental, setExperimental] = useState(false);
+
+  useEffect(() => {
+    experimentalState()
+      .then((s) => setExperimental(s.enabled))
+      .catch(() => {});
+  }, [view]);
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -109,7 +124,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex flex-col gap-0.5">
-        {NAV.map(({ id, label, icon: Icon }) => {
+        {(experimental ? [...NAV, EXPERIMENTAL_NAV] : NAV).map(({ id, label, icon: Icon }) => {
           const activeNav = view === id;
           return (
             <button

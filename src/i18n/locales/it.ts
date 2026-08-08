@@ -557,6 +557,30 @@ export const it: Translation = {
   "servers.trackChanged": "Pista impostata su {{track}} — il server è stato riavviato.",
   "servers.saveFailed": "Impossibile salvare l'elenco dei server",
 
+  "settings.experimental": "Sperimentale",
+  "settings.experimentalServers": "Server e sincronizzazione livree",
+  "settings.experimentalServersDesc":
+    "Non finito. Aggiunge la scheda Server, ti permette di gestire server dedicati e sincronizza le livree perché tutti sul server si vedano correttamente.",
+  "settings.experimentalForced":
+    "Attivato per questa sessione da MXB_EXPERIMENTAL — l'impostazione non ha effetto finché non lo rimuovi.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Sincronizzazione livree",
+  "sync.desc":
+    "MX Bikes non invia mai le livree, quindi gli altri piloti appaiono con quelle di serie se non hai già il loro file esatto. Pubblica la tua e scarica quelle degli altri.",
+  "sync.enroll": "Registrati",
+  "sync.enrolled": "Registrato come {{name}}",
+  "sync.enrollFailed": "Registrazione non riuscita",
+  "sync.codePlaceholder": "Codice invito",
+  "sync.riderNamePlaceholder": "Nome pilota in gioco",
+  "sync.riderNameHint":
+    "Deve corrispondere esattamente al tuo nome pilota in MX Bikes — è così che le app degli altri sanno quali livree sono tue.",
+  "sync.ridingAs": "Pubblichi come {{name}}",
+  "sync.pull": "Sincronizza livree",
+  "sync.pulled": "Installate {{installed}} da {{riders}} piloti ({{had}} già presenti)",
+  "sync.pullFailed": "Sincronizzazione non riuscita",
+  "sync.rejected": "Saltate {{count}} con una destinazione non sicura",
+
   // ── Stringhe sfuggite alla prima scansione (JSX su più righe) ──────────────
   "libraryDetail.noEmbedded": "Nessun dettaglio incorporato trovato per questo elemento.",
   "modDetail.downloadFromHost": "Scarica da {{host}}",
