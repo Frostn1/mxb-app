@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   countProfilesIn,
   detectGamePath,
+  presetsListProfiles,
   setAutoRunFrostmod,
   setGamePath,
   setInstantRefresh,
@@ -61,12 +62,28 @@ export default function Settings() {
     about: null,
   });
 
-  // The profiles folder normally lives *inside* the mods folder — surface that
-  // derived default path so the override reads as a customization of it.
+  // The folder the backend *actually* reads profiles from when there's no override.
+  // Usually `<modsPath>/profiles`, but it falls back to `Documents\PiBoSo\MX Bikes\
+  // profiles` when that one doesn't exist — show the resolved path so a fallback is
+  // visible here rather than something the player has to infer.
+  const [resolvedProfilesPath, setResolvedProfilesPath] = useState("");
+  useEffect(() => {
+    if (config.profilesPath) {
+      // An override is shown verbatim; nothing to resolve.
+      setResolvedProfilesPath("");
+      return;
+    }
+    presetsListProfiles()
+      .then((scan) => setResolvedProfilesPath(scan.dir))
+      .catch(() => setResolvedProfilesPath(""));
+  }, [config.modsPath, config.profilesPath]);
+
   const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
-  const defaultProfilesPath = config.modsPath
-    ? `${config.modsPath}${profilesSep}profiles`
-    : "Inside your MX Bikes folder";
+  const defaultProfilesPath =
+    resolvedProfilesPath ||
+    (config.modsPath
+      ? `${config.modsPath}${profilesSep}profiles`
+      : "Inside your MX Bikes folder");
 
   const runInBackground = config.runInBackground ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
@@ -324,9 +341,12 @@ export default function Settings() {
                 </span>
               </div>
               <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-                Presets read your profiles from here. By default it&apos;s the{" "}
+                Presets read your profiles from here — the path below is where the app
+                is looking right now. It&apos;s the{" "}
                 <span className="font-mono">profiles</span> folder inside your MX Bikes
-                folder — only change it if yours lives somewhere else.
+                folder, or your{" "}
+                <span className="font-mono">Documents\PiBoSo\MX Bikes</span> one if you
+                moved your mods folder. Set it only if yours is somewhere else.
               </p>
               <div className="mt-2 flex gap-2">
                 <div

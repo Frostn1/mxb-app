@@ -241,19 +241,48 @@ fn read_profile_ini(path: &Path) -> anyhow::Result<String> {
     Ok(decode_ini(&bytes).0)
 }
 
-pub fn list_profiles(profiles_dir: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    if let Ok(rd) = fs::read_dir(profiles_dir) {
-        for e in rd.flatten() {
-            if e.path().is_dir() && e.path().join("profile.ini").is_file() {
-                if let Some(n) = e.file_name().to_str() {
-                    out.push(n.to_string());
+/// The profiles folder as the app sees it: where it looked, whether that folder is
+/// even there, and what it found.
+///
+/// `exists` is the point of this type. A missing folder and a folder holding zero
+/// profiles both used to surface as an empty list, so the UI could only ever say
+/// "no profiles" — never "that folder isn't there", which is the far more common
+/// cause and the only one the player can act on.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfilesScan {
+    pub dir: String,
+    pub exists: bool,
+    pub profiles: Vec<String>,
+}
+
+pub fn scan_profiles(profiles_dir: &Path) -> ProfilesScan {
+    let mut profiles = Vec::new();
+    let exists = match fs::read_dir(profiles_dir) {
+        Ok(rd) => {
+            for e in rd.flatten() {
+                if e.path().is_dir() && e.path().join("profile.ini").is_file() {
+                    if let Some(n) = e.file_name().to_str() {
+                        profiles.push(n.to_string());
+                    }
                 }
             }
+            true
         }
+        // Unreadable counts as missing: either way there's nothing to list, and the
+        // folder can't be used as-is.
+        Err(_) => false,
+    };
+    profiles.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    ProfilesScan {
+        dir: profiles_dir.to_string_lossy().into_owned(),
+        exists,
+        profiles,
     }
-    out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
-    out
+}
+
+pub fn list_profiles(profiles_dir: &Path) -> Vec<String> {
+    scan_profiles(profiles_dir).profiles
 }
 
 pub fn list_bikes(profiles_dir: &Path, profile: &str) -> anyhow::Result<Vec<String>> {
@@ -448,6 +477,34 @@ KTM250=p_mx
         assert_eq!(list_profiles(&profiles), vec!["main"]);
         let bikes = list_bikes(&profiles, "main").unwrap();
         assert_eq!(bikes, vec!["KTM250", "YZ450F"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A folder that isn't there and a folder with nothing in it both list zero
+    /// profiles — the scan has to tell them apart, since only the first one means
+    /// "you're pointed at the wrong place".
+    #[test]
+    fn scan_tells_a_missing_folder_from_an_empty_one() {
+        let root = tmp("scan");
+
+        let missing = root.join("not-here");
+        let scan = scan_profiles(&missing);
+        assert!(!scan.exists);
+        assert!(scan.profiles.is_empty());
+        assert_eq!(scan.dir, missing.to_string_lossy());
+
+        let empty = root.join("profiles");
+        fs::create_dir_all(&empty).unwrap();
+        let scan = scan_profiles(&empty);
+        assert!(scan.exists, "the folder is there, it just holds no profiles");
+        assert!(scan.profiles.is_empty());
+
+        // A subdir without a profile.ini isn't a profile, but the folder still exists.
+        fs::create_dir_all(empty.join("junk")).unwrap();
+        let scan = scan_profiles(&empty);
+        assert!(scan.exists);
+        assert!(scan.profiles.is_empty());
+
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-07
+
+### Fixed
+- **Presets no longer comes up blank when your mods folder lives somewhere else.**
+  `mxbikes.ini` lets you point the mods folder at another drive, but the game has no
+  equivalent redirect for profiles — it keeps writing those to
+  `Documents\PiBoSo\MX Bikes\profiles`. The app only ever looked at
+  `<mods folder>\profiles`, found nothing, and rendered an empty Presets tab with no
+  hint that a path was involved. It now falls back to the stock `Documents` folder when
+  the one beside your mods isn't there, and Settings shows the path it actually resolved
+  to instead of the one it assumed (#27).
+- **The empty Presets tab explains itself.** Instead of "launch the game once", it names
+  the folder it read, says outright when that folder doesn't exist, points at the
+  `mxbikes.ini` split as the likely cause, and offers a button straight to the Settings
+  picker.
+
 ## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
 
 ### Added

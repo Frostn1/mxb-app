@@ -338,8 +338,8 @@ export function detectGamePath(): Promise<string | null> {
 }
 
 /**
- * Override the PiBoSo `profiles` folder for the split-folder edge case. Pass an
- * empty string to clear it (falls back to `<modsPath>/profiles`).
+ * Override the PiBoSo `profiles` folder. Pass an empty string to clear it (back to
+ * the resolved default — see {@link presetsListProfiles}).
  */
 export function setProfilesPath(path: string): Promise<void> {
   return invoke<void>("set_profiles_path", { path });
@@ -750,8 +750,18 @@ export function onModsChanged(cb: () => void): Promise<UnlistenFn> {
   return onFrostmodReload(() => cb());
 }
 
-export function presetsListProfiles(): Promise<string[]> {
-  return invoke<string[]>("presets_list_profiles");
+/** The profiles folder as the backend resolved it, and what it holds. */
+export type ProfilesScan = {
+  /** Absolute path the profiles were read from. */
+  dir: string;
+  /** Whether that folder is actually there — an empty list means something different
+   *  when it isn't (wrong path) than when it is (game never made a profile). */
+  exists: boolean;
+  profiles: string[];
+};
+
+export function presetsListProfiles(): Promise<ProfilesScan> {
+  return invoke<ProfilesScan>("presets_list_profiles");
 }
 
 /** Bike ids present in a profile — the targets a loadout can be applied to. */
