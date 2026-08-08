@@ -687,12 +687,21 @@ mod tests {
     }
 
     /// Each title resolves its own `Documents\PiBoSo\<game>` folder.
+    ///
+    /// `default_user_dir` is `None` when the host has no Documents folder to build on —
+    /// which is the case on a headless CI runner, where `dirs_next::document_dir()` reads
+    /// `~/.config/user-dirs.dirs` and finds nothing. That's a property of the runner, not
+    /// a failure, so the assertion is on the *shape* of a path when there is one.
     #[test]
     fn each_game_has_its_own_user_folder() {
-        let mxb = default_user_dir(&crate::game::MXB).unwrap();
-        let gpb = default_user_dir(&crate::game::GPB).unwrap();
+        let (Some(mxb), Some(gpb)) =
+            (default_user_dir(&crate::game::MXB), default_user_dir(&crate::game::GPB))
+        else {
+            return; // no Documents folder on this host — nothing to assert about
+        };
         assert!(mxb.ends_with("PiBoSo/MX Bikes"), "{}", mxb.display());
         assert!(gpb.ends_with("PiBoSo/GP Bikes"), "{}", gpb.display());
+        assert_ne!(mxb, gpb, "the two titles must not share a folder");
     }
 
     #[test]
