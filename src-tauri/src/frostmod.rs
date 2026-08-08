@@ -193,9 +193,15 @@ pub fn signal_refresh_model(bike_id: &str) -> CommandOutcome {
 /// it does not own, never validates the object that call mutates, and swallows the
 /// resulting access violation, so the game keeps running on a half-swapped machine and
 /// crashes to desktop at the *next* bike the player selects by hand. Withholding the
-/// command is the only fix available from this side; v0.9.10 is the release that stops
+/// command is the only fix available from this side; v0.9.11 is the release that stops
 /// replaying. Raise this again if a later FrostMod changes how the verb behaves.
-pub const MODEL_REFRESH_MIN_VERSION: &str = "v0.9.10";
+///
+/// Why v0.9.11 and not v0.9.10: a `v0.9.10-rc1` was published from a branch that never
+/// removed the replay, and its own `version.h` reads 0.9.10. Since this gate compares
+/// numerically, a v0.9.10 floor would read that pre-release as new enough and hand it the
+/// verb that crashes it. FrostMod took the next number to put itself unambiguously above
+/// that tag; the two constants must stay in step.
+pub const MODEL_REFRESH_MIN_VERSION: &str = "v0.9.11";
 
 /// Parse a release tag (`v0.9.9`, `0.10.0`, `v1.0.0-rc1`) into comparable parts.
 /// `None` when the tag isn't a version we can read.
@@ -250,14 +256,23 @@ mod tests {
         assert!(!model_refresh_is_safe(Some("v0.9.9")));
         assert!(!model_refresh_is_safe(Some("v0.9.8")));
         assert!(!model_refresh_is_safe(Some("v0.8.12")));
-        assert!(model_refresh_is_safe(Some("v0.9.10")));
-        assert!(model_refresh_is_safe(Some("0.9.10"))); // tags carry the v, but be lenient
+        assert!(model_refresh_is_safe(Some("v0.9.11")));
+        assert!(model_refresh_is_safe(Some("0.9.11"))); // tags carry the v, but be lenient
+    }
+
+    #[test]
+    fn the_0_9_10_that_still_replays_is_withheld_from() {
+        // A v0.9.10-rc1 was published from a branch that never removed the replay, which
+        // is why the floor is 0.9.11 and not 0.9.10. Sending to it crashes the game, so
+        // this is the case the floor exists to exclude — not a version-parsing nicety.
+        assert!(!model_refresh_is_safe(Some("v0.9.10-rc1")));
+        assert!(!model_refresh_is_safe(Some("v0.9.10")));
     }
 
     #[test]
     fn versions_compare_by_number_not_by_string() {
-        // The trap: "v0.9.10" < "v0.9.9" lexically, and "v0.10.0" < "v0.9.9" too.
-        assert!(model_refresh_is_safe(Some("v0.9.10")));
+        // The trap: "v0.9.11" < "v0.9.9" lexically, and "v0.10.0" < "v0.9.9" too.
+        assert!(model_refresh_is_safe(Some("v0.9.11")));
         assert!(model_refresh_is_safe(Some("v0.10.0")));
         assert!(model_refresh_is_safe(Some("v1.0.0")));
     }
@@ -266,7 +281,7 @@ mod tests {
     fn a_prerelease_of_the_minimum_counts_as_the_minimum() {
         // Our own release flow tags pre-releases with a `-` suffix (see release.yml),
         // and such a build carries the fix.
-        assert!(model_refresh_is_safe(Some("v0.9.10-rc1")));
+        assert!(model_refresh_is_safe(Some("v0.9.11-rc1")));
         assert!(!model_refresh_is_safe(Some("v0.9.9-rc1")));
     }
 

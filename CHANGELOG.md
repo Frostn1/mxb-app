@@ -89,7 +89,7 @@
   the resulting fault so the game carried on with a half-swapped machine. Nothing looked
   wrong at the time; the crash landed on the *next* bike selected by hand, which is why it
   read as "choosing a bike crashes the game" rather than as anything to do with the swap.
-  The app no longer sends that request to any FrostMod below v0.9.10 — the release that
+  The app no longer sends that request to any FrostMod below v0.9.11 — the release that
   stops replaying — and a FrostMod whose version it can't read counts as one to leave
   alone, where before an unreadable version was given the benefit of the doubt. Model swaps
   and presets still apply in full; the swapped model now appears when you re-select the
