@@ -540,6 +540,115 @@ pub fn material_slots(b: &[u8], colors: usize) -> Vec<Option<usize>> {
     out
 }
 
+/// Companion maps ride alongside a colour texture and are never the look itself — MX
+/// Bikes names them `_n` normal, `_s` specular, `_r` reflection.
+pub fn is_companion_texture(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.ends_with("_n") || n.ends_with("_s") || n.ends_with("_r")
+}
+
+/// A model's COLOUR textures, in file order. Material indices count these — including the
+/// gfx-referenced ones (chain, `w_plate`) — so dropping any shifts every later material
+/// onto the wrong texture, which is why the filter lives in one place.
+pub fn color_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
+    embedded_textures(b)
+        .into_iter()
+        .filter(|t| !is_companion_texture(&t.name))
+        .collect()
+}
+
+/// Which colour texture each material draws from, ready to answer part by part.
+///
+/// Two readings of a material index compete: its position in the colour list above, and
+/// whatever the header's material table maps it to. Neither is right on every model —
+/// blob order puts the number plate over the KX250's bodywork, the table puts the KTM
+/// 125 SX's cables on it — so where they disagree the mesh breaks the tie, per part.
+pub struct MaterialReadings {
+    pub color: Vec<EmbeddedTexture>,
+    slots: Vec<Option<usize>>,
+    disputed: Vec<usize>,
+    /// Inked-texel masks, held only for the textures a dispute actually turns on.
+    ink: std::collections::HashMap<usize, Vec<bool>>,
+}
+
+/// Which reading one part was drawn for, and how strongly its geometry said so.
+pub struct MaterialFit {
+    pub by_table: bool,
+    pub table_fit: f64,
+    pub blob_fit: f64,
+}
+
+impl MaterialReadings {
+    pub fn new(b: &[u8]) -> Self {
+        let color = color_textures(b);
+        let slots = match std::env::var("MXB_MAT_TABLE").as_deref() {
+            Ok("0") => Vec::new(),
+            _ => material_slots(b, color.len()),
+        };
+        let disputed: Vec<usize> = (0..color.len())
+            .filter(|i| matches!(slots.get(*i), Some(Some(j)) if j != i))
+            .collect();
+        // Only the disputed textures get inflated, and only on the models that disagree.
+        let ink = disputed
+            .iter()
+            .flat_map(|i| [*i, slots[*i].unwrap_or(*i)])
+            .collect::<std::collections::BTreeSet<usize>>()
+            .into_iter()
+            .filter_map(|slot| Some((slot, content_mask(b, color.get(slot)?)?)))
+            .collect();
+        Self { color, slots, disputed, ink }
+    }
+
+    /// Ask one part's geometry which reading it was drawn for: for every disputed
+    /// material, how much of what the part samples lands on texels the artist actually
+    /// inked. The parts of one model need not agree — the YZ125's chassis reads through
+    /// the table while its steering reads straight off the blob list.
+    pub fn fit(&self, node: &EdfNode) -> MaterialFit {
+        // A part that draws on ONE material numbers it 0 whichever material that is, so
+        // the index says nothing to look up — the YZ125 numbers its chassis' plastics 0
+        // and, in the rear suspension, its metals 0 too. Only a part that distinguishes
+        // materials at all is worth resolving.
+        let spread: std::collections::HashSet<u32> =
+            node.submeshes.iter().filter_map(|s| s.mat).collect();
+        let (mut table_fit, mut blob_fit) = (0f64, 0f64);
+        if spread.len() > 1 {
+            for mat in spread.iter().map(|m| *m as usize).filter(|m| self.disputed.contains(m)) {
+                let mut seen = vec![false; FIT_RES * FIT_RES];
+                for sm in node.submeshes.iter().filter(|s| s.mat == Some(mat as u32)) {
+                    for (dst, src) in
+                        seen.iter_mut().zip(uv_coverage(node, sm.tri_start, sm.tri_count))
+                    {
+                        *dst |= src;
+                    }
+                }
+                if !seen.iter().any(|s| *s) {
+                    continue;
+                }
+                // A blank overlay (`w_plate`, which the game composites numbers onto) has
+                // no islands to land on and so scores nothing — it can only ever lose a
+                // comparison, never win one.
+                let landed = |slot: usize| {
+                    self.ink.get(&slot).map_or(0.0, |m| {
+                        seen.iter().zip(m).filter(|(s, i)| **s && **i).count() as f64
+                    })
+                };
+                let Some(Some(via_table)) = self.slots.get(mat).copied() else { continue };
+                table_fit += landed(via_table);
+                blob_fit += landed(mat);
+            }
+        }
+        MaterialFit { by_table: spread.len() > 1 && table_fit > blob_fit, table_fit, blob_fit }
+    }
+
+    /// The colour texture a material draws from, under the reading `fit` settled on.
+    pub fn texture(&self, mat: usize, fit: &MaterialFit) -> Option<&EmbeddedTexture> {
+        match self.slots.get(mat).filter(|_| fit.by_table) {
+            Some(slot) => slot.and_then(|s| self.color.get(s)),
+            None => self.color.get(mat),
+        }
+    }
+}
+
 // Record layout from `width`: | width u32 | height u32 | md5[16] | u32 | data_size u32 | pad[8] | data |
 // data_size counts the 8 pad bytes, so payload = data_size - 8.
 const TEX_SIZE_FROM_W: usize = 28;
