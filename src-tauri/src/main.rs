@@ -734,24 +734,21 @@ fn bind_textures(
     gfx: &std::collections::HashMap<String, cfg::GfxPart>,
     node_part: &std::collections::HashMap<String, String>,
 ) {
-    let readings = edf::MaterialReadings::new(edf_bytes);
+    let colors = edf::color_textures(edf_bytes);
 
     for n in nodes.iter_mut() {
         let part = node_part.get(&n.name.to_ascii_lowercase());
         let overrides = part.and_then(|p| gfx.get(p)).map(|p| &p.textures);
-        // Ask this part's geometry which reading of a material index it was drawn for.
-        let fit = readings.fit(n);
-        if fit.table_fit != fit.blob_fit {
-            log::info!(
-                "[viewer] node '{}' reads its materials through the {} (fit {:.0} vs {:.0})",
-                n.name,
-                if fit.by_table { "material table" } else { "texture order" },
-                fit.table_fit.max(fit.blob_fit),
-                fit.table_fit.min(fit.blob_fit),
-            );
+        if n.materials.is_empty() {
+            log::warn!("[viewer] node '{}' has no material table — falling back", n.name);
         }
-        // A node with no submesh table is a single material — the first colour texture.
-        n.texture = readings.color.first().map(|t| t.name.clone());
+        // A material id is local to its node, so ask the node's own table.
+        let material_texture = |mat: Option<u32>| -> Option<&edf::EmbeddedTexture> {
+            let slot = n.materials.get(mat? as usize).copied().flatten()?;
+            colors.get(slot)
+        };
+        // A node with no submesh table draws on its first material.
+        n.texture = material_texture(Some(0)).or_else(|| colors.first()).map(|t| t.name.clone());
         for sm in n.submeshes.iter_mut() {
             let group = sm.name.to_ascii_lowercase();
             // 1. An explicit gfx texture (animated chain, number plate) is authoritative.
@@ -762,8 +759,8 @@ fn bind_textures(
                 sm.texture = Some(tex.clone());
                 continue;
             }
-            // 2. The material index picks its colour texture, via the table where usable.
-            if let Some(t) = sm.mat.and_then(|i| readings.texture(i as usize, &fit)) {
+            // 2. The node's material table picks the colour texture this range was drawn on.
+            if let Some(t) = material_texture(sm.mat) {
                 sm.texture = Some(t.name.clone());
                 continue;
             }
@@ -1638,7 +1635,7 @@ fn bind_gear_submeshes(
     main: &GearSide,
     goggle: &GearSide,
 ) {
-    let readings = mesh.map(edf::MaterialReadings::new);
+    let colors = mesh.map(edf::color_textures).unwrap_or_default();
     // What this side puts on a piece the mesh draws from `emb`.
     let wear = |emb: Option<&str>, goggles_here: bool| -> Option<String> {
         let (side, other) = if goggles_here { (goggle, main) } else { (main, goggle) };
@@ -1649,26 +1646,24 @@ fn bind_gear_submeshes(
             .or_else(|| goggles_here.then(|| other.primary.clone()).flatten())
     };
     for node in nodes.iter_mut() {
-        let fit = readings.as_ref().map(|r| r.fit(node));
+        // A material id is local to its node — resolve it through that node's own table.
+        let material_texture = |mat: Option<u32>| -> Option<&str> {
+            let slot = node.materials.get(mat? as usize).copied().flatten()?;
+            colors.get(slot).map(|t| t.name.as_str())
+        };
         let node_goggle = is_goggle_name(&node.name);
         if node.submeshes.is_empty() {
             // No submesh table means no material index to look up. Take the mesh's own
             // colour texture for this side, so a goggle node isn't handed the shell's.
-            let emb = readings.as_ref().and_then(|r| {
-                r.color
-                    .iter()
-                    .map(|t| t.name.as_str())
-                    .find(|n| is_goggle_name(n) == node_goggle)
-            });
+            let emb = colors
+                .iter()
+                .map(|t| t.name.as_str())
+                .find(|n| is_goggle_name(n) == node_goggle);
             node.texture = wear(emb, node_goggle);
             continue;
         }
         for sm in &mut node.submeshes {
-            let emb = readings
-                .as_ref()
-                .zip(fit.as_ref())
-                .and_then(|(r, f)| r.texture(sm.mat? as usize, f))
-                .map(|t| t.name.as_str());
+            let emb = material_texture(sm.mat);
             let goggles_here =
                 node_goggle || is_goggle_name(&sm.name) || emb.is_some_and(is_goggle_name);
             sm.texture = wear(emb, goggles_here);
@@ -3011,6 +3006,7 @@ mod gear_bind_tests {
             submeshes: subs.iter().map(|s| submesh(s)).collect(),
             texture: None,
             placed: false,
+            materials: Vec::new(),
         }
     }
 
@@ -3532,6 +3528,157 @@ mod viewer_tests {
         names.dedup();
         assert_eq!(names.len(), unique, "no duplicate node names survive");
         eprintln!("{before} nodes -> {} after LOD dedup", nodes.len());
+    }
+
+    /// Write a bike's raw `.edf` meshes out so the binary layout can be studied directly.
+    ///
+    /// `MXB_REAL_PKZ=<bike.pkz> MXB_EDF_OUT=<dir> \
+    ///   cargo test extract_bike_edfs -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn extract_bike_edfs() {
+        let (Ok(path), Ok(out)) = (std::env::var("MXB_REAL_PKZ"), std::env::var("MXB_EDF_OUT"))
+        else {
+            eprintln!("set MXB_REAL_PKZ and MXB_EDF_OUT to run");
+            return;
+        };
+        let stem = std::path::Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        std::fs::create_dir_all(&out).expect("create out dir");
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("gather");
+        for (name, data) in &files {
+            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+            if !bn.ends_with(".edf") {
+                continue;
+            }
+            let dst = std::path::Path::new(&out).join(format!("{stem}__{bn}"));
+            std::fs::write(&dst, data).expect("write edf");
+            println!("wrote {} ({} bytes)", dst.display(), data.len());
+        }
+    }
+
+    /// Dump, as one JSON object, everything that decides which texture each part of a
+    /// bike wears: the mesh's colour list, what each reading of a material index claims,
+    /// which reading the geometry settled on, and what the viewer finally bound.
+    ///
+    /// `MXB_REAL_PKZ='…/mods/bikes/MX2OEM_2023_Kawasaki_KX250.pkz' \
+    ///   cargo test audit_bike_bindings -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn audit_bike_bindings() {
+        let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
+            eprintln!("set MXB_REAL_PKZ to run");
+            return;
+        };
+        let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let bike = std::path::Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        // What the viewer renders today.
+        let model = super::load_bike_model_blocking(path.clone()).expect("load bike");
+        // Keyed on the triangle range too: one group name can appear twice in a node,
+        // once per material, and those two are exactly the interesting case.
+        let bound: std::collections::HashMap<(String, String, u32), Option<String>> = model
+            .nodes
+            .iter()
+            .flat_map(|n| {
+                n.submeshes.iter().map(move |s| {
+                    (
+                        (n.name.to_ascii_lowercase(), s.name.to_ascii_lowercase(), s.tri_start),
+                        s.texture.clone(),
+                    )
+                })
+            })
+            .collect();
+
+        // The same meshes again, raw, so both readings of every material can be shown
+        // side by side with the fit that chose between them.
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("gather");
+        let mut out = String::new();
+        out.push_str(&format!("{{\"bike\":\"{}\",\"meshes\":[", esc(&bike)));
+        let mut first_mesh = true;
+        for (name, data) in &files {
+            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+            if !bn.ends_with(".edf") {
+                continue;
+            }
+            let nodes = crate::edf::parse_with_levels(data, &[]);
+            if nodes.is_empty() {
+                continue;
+            }
+            let color = crate::edf::color_textures(data);
+            if color.is_empty() {
+                continue; // a shadow mesh carries no colour textures and is never rendered
+            }
+            let colors: Vec<String> =
+                color.iter().map(|t| format!("\"{}\"", esc(&t.name))).collect();
+            if !first_mesh {
+                out.push(',');
+            }
+            first_mesh = false;
+            out.push_str(&format!(
+                "{{\"file\":\"{}\",\"colors\":[{}],\"nodes\":[",
+                esc(&bn),
+                colors.join(",")
+            ));
+            for (i, n) in nodes.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                // The node's OWN material table: local id -> colour texture.
+                let table: Vec<String> = n
+                    .materials
+                    .iter()
+                    .map(|slot| match slot.and_then(|s| color.get(s)) {
+                        Some(t) => format!("\"{}\"", esc(&t.name)),
+                        None => "null".into(),
+                    })
+                    .collect();
+                out.push_str(&format!(
+                    "{{\"node\":\"{}\",\"materials\":[{}],\"submeshes\":[",
+                    esc(&n.name),
+                    table.join(",")
+                ));
+                for (j, s) in n.submeshes.iter().enumerate() {
+                    if j > 0 {
+                        out.push(',');
+                    }
+                    let key =
+                        (n.name.to_ascii_lowercase(), s.name.to_ascii_lowercase(), s.tri_start);
+                    let rendered = bound
+                        .get(&key)
+                        .cloned()
+                        .flatten()
+                        .map(|t| format!("\"{}\"", esc(&t)))
+                        .unwrap_or_else(|| "null".into());
+                    out.push_str(&format!(
+                        "{{\"group\":\"{}\",\"mat\":{},\"tris\":{},\"rendered\":{}}}",
+                        esc(&s.name),
+                        s.mat.map(|m| m.to_string()).unwrap_or_else(|| "null".into()),
+                        s.tri_count,
+                        rendered,
+                    ));
+                }
+                out.push_str("]}");
+            }
+            out.push_str("]}");
+        }
+        let paints: Vec<String> = model
+            .paints
+            .iter()
+            .map(|p| {
+                let mut t: Vec<String> =
+                    p.textures.iter().map(|t| format!("\"{}\"", esc(&t.name))).collect();
+                t.sort_unstable();
+                format!("{{\"paint\":\"{}\",\"textures\":[{}]}}", esc(&p.name), t.join(","))
+            })
+            .collect();
+        out.push_str(&format!("],\"paints\":[{}]}}", paints.join(",")));
+        println!("AUDIT {out}");
     }
 }
 

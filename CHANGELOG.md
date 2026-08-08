@@ -138,6 +138,42 @@
   own look".
 
 ### Fixed
+- **Every bike now paints the parts a paint is meant to reach.** This is the third pass at
+  the same bug, and the first that goes at what was actually wrong. A part's material was
+  being looked up in a table read from the top of the mesh file, treated as the model's
+  one and only table. It isn't a model-wide table at all — it is simply the *first* node's,
+  because that node's geometry starts exactly where it ends. **Every part carries its own**,
+  and a material id means nothing outside the part it belongs to. Reading one part's ids
+  through another's put the blank number-plate texture — the one the game composites race
+  numbers onto, which no paint can touch — over real bodywork: the Suzuki RM250 and RM125
+  wore it on the fork lowers, triple clamps and both levers, the Honda CR500AF on its entire
+  swingarm and front end, the Husqvarna TC 125/TC 250 on the fork guards, chain guard and
+  front bodywork. Across the 53 stock bikes it covered about 124,000 triangles of bodywork;
+  it now covers about 4,900, all of it geometry the mesh itself marks as number plates.
+  Bikes that share a part with another bike — much of the KTM, Husqvarna and GasGas range —
+  now bind that part identically on every one of them, where 9 such parts previously
+  disagreed.
+- **Swingarms and chain guards wearing each other's texture.** Where one mesh group holds
+  several materials, the ids were assumed to count upward from the group's first. They
+  don't — each range names its own. On the Husqvarna FC 250 and FC 350 that swapped the
+  swingarm body onto the plastics sheet and its chain guard onto the metals one, against
+  fourteen sibling bikes carrying the identical part the right way round.
+- **Bikes no longer look different from one launch to the next.** Choosing between two
+  readings of a material meant scoring a part's UV layout against the textures, and the
+  backdrop colour that scoring rested on was picked by iterating a hash map — so tied
+  colours resolved differently on each run, and sometimes twice within one run. Six bikes
+  bound parts differently between launches; on the Triumph TF 450-RC that was the whole
+  20,570-triangle frame and engine going blank on some runs. With one reading of a material
+  id there is nothing to score and nothing to guess: the scoring machinery is gone.
+- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
+  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
+  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
+  so the preview never blanks; but with no error anywhere that is indistinguishable from a
+  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
+  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
+  preview for as long as what you're looking at is out of date, and writes the error to the
+  console. The toast fires once per distinct message rather than once per pick, since a
+  persistent fault is re-hit on every slot edit.
 - **Bikes wearing the wrong texture on their bodywork.** A part's material was matched to
   the texture list in whatever order the exporter wrote it, which only works on bikes
   written in material order. The Kawasaki KX250/KX450 wore their blank number-plate texture
