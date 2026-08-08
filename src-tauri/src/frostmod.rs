@@ -132,10 +132,12 @@ pub enum CommandOutcome {
     WriteFailed,
     /// Non-Windows dev build — can't talk to FrostMod.
     Unsupported,
-    /// Sent, but the installed FrostMod predates the verb — it logs "unknown verb"
-    /// and does nothing. Only the caller knows which verb it sent and which release
-    /// introduced it, so this is never produced by `send_command` itself.
-    TooOld,
+    /// Deliberately not sent: the installed FrostMod isn't one we'll hand this verb to
+    /// (too old to understand it, or old enough to mishandle it — see
+    /// `MODEL_REFRESH_MIN_VERSION`), or its version couldn't be read at all. Only the
+    /// caller knows which verb it wanted and which release made it safe, so this is
+    /// never produced by `send_command` itself.
+    Withheld,
 }
 
 /// Write the command file (so it's there before FrostMod wakes), then pulse the
@@ -176,20 +178,33 @@ pub fn signal_swap_bike(bike_id: &str) -> CommandOutcome {
 }
 
 /// Ask FrostMod to re-apply `bike_id` so a just-swapped model shows in the garage
-/// straight away. A no-op inside FrostMod unless that bike is the selected one, so
-/// this is safe to fire after every model swap.
+/// straight away. A no-op inside FrostMod unless that bike is the selected one.
+///
+/// NOT safe to fire at every FrostMod — see `model_refresh_is_safe`, which every
+/// caller must clear first.
 pub fn signal_refresh_model(bike_id: &str) -> CommandOutcome {
     send_command(command_json("refresh_bike_model", bike_id))
 }
 
-/// The FrostMod release that added the command listener and `refresh_bike_model`.
-/// Anything older creates no `Local\FrostModCommand` event at all, so the send comes
-/// back `NotRunning` — but a *future* verb on a listening-but-older FrostMod would be
-/// taken and dropped, which is the case this gate really guards.
-pub const MODEL_REFRESH_MIN_VERSION: &str = "v0.9.9";
+/// The oldest FrostMod we will send `refresh_bike_model` to.
+///
+/// This is a **safety** floor, not a capability floor. v0.9.9 introduced the verb and
+/// handles it — badly: it replays the game's captured bike-apply call with a descriptor
+/// it does not own, never validates the object that call mutates, and swallows the
+/// resulting access violation, so the game keeps running on a half-swapped machine and
+/// crashes to desktop at the *next* bike the player selects by hand. Withholding the
+/// command is the only fix available from this side; v0.9.11 is the release that stops
+/// replaying. Raise this again if a later FrostMod changes how the verb behaves.
+///
+/// Why v0.9.11 and not v0.9.10: a `v0.9.10-rc1` was published from a branch that never
+/// removed the replay, and its own `version.h` reads 0.9.10. Since this gate compares
+/// numerically, a v0.9.10 floor would read that pre-release as new enough and hand it the
+/// verb that crashes it. FrostMod took the next number to put itself unambiguously above
+/// that tag; the two constants must stay in step.
+pub const MODEL_REFRESH_MIN_VERSION: &str = "v0.9.11";
 
 /// Parse a release tag (`v0.9.9`, `0.10.0`, `v1.0.0-rc1`) into comparable parts.
-/// Anything unparseable is `None` — we then assume support rather than cry wolf.
+/// `None` when the tag isn't a version we can read.
 fn version_parts(tag: &str) -> Option<(u32, u32, u32)> {
     let core = tag.trim().trim_start_matches(['v', 'V']);
     // Drop any pre-release/build tail: `0.9.9-rc1` is 0.9.9 for our purposes, since
@@ -203,15 +218,17 @@ fn version_parts(tag: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
-/// Does the FrostMod release tagged `tag` understand `refresh_bike_model`?
+/// May we send `refresh_bike_model` to the installed FrostMod, tagged `tag`?
 ///
-/// A tag we can't read counts as supported: `version.txt` is written by our own
-/// installer, so an unreadable one means something unusual, and warning "update
-/// FrostMod" at a user who already has the newest build is worse than staying quiet.
-pub fn supports_model_refresh(tag: &str) -> bool {
-    match (version_parts(tag), version_parts(MODEL_REFRESH_MIN_VERSION)) {
+/// A tag we can't read — absent `version.txt`, or one holding something that isn't a
+/// version — counts as **unsafe**. That inverts the old rule, which gave an unreadable
+/// tag the benefit of the doubt because the cost of being wrong was an over-cautious
+/// toast. The cost is now a crash to desktop (see `MODEL_REFRESH_MIN_VERSION`), so an
+/// unknown build is one we don't poke; the player re-selects the bike instead.
+pub fn model_refresh_is_safe(tag: Option<&str>) -> bool {
+    match (tag.and_then(version_parts), version_parts(MODEL_REFRESH_MIN_VERSION)) {
         (Some(have), Some(min)) => have >= min,
-        _ => true,
+        _ => false,
     }
 }
 
@@ -234,41 +251,54 @@ mod tests {
     }
 
     #[test]
-    fn the_refresh_verb_needs_the_release_that_introduced_it() {
-        assert!(supports_model_refresh("v0.9.9"));
-        assert!(supports_model_refresh("0.9.9")); // tags are written with the v, but be lenient
-        assert!(!supports_model_refresh("v0.9.8"));
-        assert!(!supports_model_refresh("v0.8.12"));
+    fn the_release_that_replays_unsafely_is_withheld_from() {
+        // v0.9.9 has the verb and crashes the game with it — the floor is above it.
+        assert!(!model_refresh_is_safe(Some("v0.9.9")));
+        assert!(!model_refresh_is_safe(Some("v0.9.8")));
+        assert!(!model_refresh_is_safe(Some("v0.8.12")));
+        assert!(model_refresh_is_safe(Some("v0.9.11")));
+        assert!(model_refresh_is_safe(Some("0.9.11"))); // tags carry the v, but be lenient
+    }
+
+    #[test]
+    fn the_0_9_10_that_still_replays_is_withheld_from() {
+        // A v0.9.10-rc1 was published from a branch that never removed the replay, which
+        // is why the floor is 0.9.11 and not 0.9.10. Sending to it crashes the game, so
+        // this is the case the floor exists to exclude — not a version-parsing nicety.
+        assert!(!model_refresh_is_safe(Some("v0.9.10-rc1")));
+        assert!(!model_refresh_is_safe(Some("v0.9.10")));
     }
 
     #[test]
     fn versions_compare_by_number_not_by_string() {
-        // The trap: "v0.9.10" < "v0.9.9" lexically, and "v0.10.0" < "v0.9.9" too.
-        assert!(supports_model_refresh("v0.9.10"));
-        assert!(supports_model_refresh("v0.10.0"));
-        assert!(supports_model_refresh("v1.0.0"));
+        // The trap: "v0.9.11" < "v0.9.9" lexically, and "v0.10.0" < "v0.9.9" too.
+        assert!(model_refresh_is_safe(Some("v0.9.11")));
+        assert!(model_refresh_is_safe(Some("v0.10.0")));
+        assert!(model_refresh_is_safe(Some("v1.0.0")));
     }
 
     #[test]
     fn a_prerelease_of_the_minimum_counts_as_the_minimum() {
         // Our own release flow tags pre-releases with a `-` suffix (see release.yml),
-        // and such a build carries the verb.
-        assert!(supports_model_refresh("v0.9.9-rc1"));
-        assert!(!supports_model_refresh("v0.9.8-rc1"));
+        // and such a build carries the fix.
+        assert!(model_refresh_is_safe(Some("v0.9.11-rc1")));
+        assert!(!model_refresh_is_safe(Some("v0.9.9-rc1")));
     }
 
     #[test]
-    fn an_unreadable_tag_is_given_the_benefit_of_the_doubt() {
-        // Better silent than telling someone on the newest build to update.
-        assert!(supports_model_refresh(""));
-        assert!(supports_model_refresh("nightly"));
-        assert!(supports_model_refresh("v-broken-"));
+    fn a_version_we_cannot_read_is_withheld_from() {
+        // Inverted deliberately: the old rule assumed support, because the cost of
+        // guessing wrong was a needless "update FrostMod". It is now a crash.
+        assert!(!model_refresh_is_safe(None)); // no version.txt at all
+        assert!(!model_refresh_is_safe(Some("")));
+        assert!(!model_refresh_is_safe(Some("nightly")));
+        assert!(!model_refresh_is_safe(Some("v-broken-")));
     }
 
     #[test]
     fn short_tags_fill_the_missing_parts_with_zero() {
-        assert!(supports_model_refresh("v1"));
-        assert!(!supports_model_refresh("v0.9"));
+        assert!(model_refresh_is_safe(Some("v1")));
+        assert!(!model_refresh_is_safe(Some("v0.9")));
     }
 
     #[test]

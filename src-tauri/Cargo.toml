@@ -94,7 +94,3 @@ tauri = { version = "2", features = ["test"] }
 # `#[tokio::test]` for the live network checks against mxb-mods.com. Dev-only, so the
 # shipped binary keeps the minimal `time`-only tokio it already had.
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
-# Builds the synthetic Cloudflare 403 the refusal diagnostics are tested against — a real
-# one can't be provoked locally, since it is scored on IP and TLS fingerprint. `reqwest`
-# already depends on this; naming it here just makes it importable from tests.
-http = "1"

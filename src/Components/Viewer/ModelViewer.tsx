@@ -286,19 +286,28 @@ function useGearMaterials(part: RiderPart, tex: Map<string, THREE.Texture>) {
 function RiderGearMesh({
   part,
   anchor,
-  target,
+  target = 1,
   rot = GEAR_ROT,
   yaw = 0,
   alignY = "center",
   pitch = 0,
+  fit: fitMode = "box",
 }: {
   part: RiderPart;
   anchor: [number, number, number];
-  target: number;
+  /** Longest edge the bounding box is scaled to. Ignored when `fit` is `"native"`. */
+  target?: number;
   rot?: [number, number, number];
   yaw?: number;
   alignY?: "center" | "top" | "bottom";
   pitch?: number;
+  /**
+   * How the piece meets the body. `"box"` scales its bounding box to `target` and centres
+   * it on the anchor — right for a helmet or a boot, each authored around its own origin
+   * in its own frame. `"native"` hangs it off the anchor unscaled, at the size and offset
+   * it was authored at, and ignores `target`.
+   */
+  fit?: "box" | "native";
 }) {
   const texMap = useTextureMap(part.textures);
   const geoms = useNodeGeometries(part.nodes);
@@ -327,16 +336,19 @@ function RiderGearMesh({
   }, [geoms, target, rot, yaw, pitch]);
 
   if (!fit) return null;
-  const s = fit.scale;
+  // Native: the mesh already knows its own size and where it hangs off the mount, so the
+  // only thing left to do is put its origin on the anchor.
+  const s = fitMode === "native" ? 1 : fit.scale;
   // Shift so the requested bbox edge (not just the centre) lands on anchor[1].
   const alignShift =
     alignY === "bottom" ? fit.halfY * s : alignY === "top" ? -fit.halfY * s : 0;
+  const recentre = fitMode === "native" ? new THREE.Vector3() : fit.center;
   return (
     <group
       position={[
-        anchor[0] - fit.center.x * s,
-        anchor[1] - fit.center.y * s + alignShift,
-        anchor[2] - fit.center.z * s,
+        anchor[0] - recentre.x * s,
+        anchor[1] - recentre.y * s + alignShift,
+        anchor[2] - recentre.z * s,
       ]}
       scale={s}
     >
@@ -622,6 +634,10 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   // Boots hang their top edge on the body's floor (alignY="top"), nudged forward in Z.
   const footY = b ? b.lo[1] + 0.08 * h : 0.2;
   const bootZ = b ? cz + 0.16 * depth : cz;
+  // Where a protection's own origin sits on the body. Unlike a helmet or a boot, the whole
+  // slot shares one mount: a chest protector, a neck brace, a chain and a bib are all
+  // authored around the same point in the rider's own frame, so this anchor places every
+  // one of them and their own geometry does the rest.
   const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.62 * h, cz] : [0, 1.16, 0.03];
   const bootTarget = hasBody ? 0.44 * h : 0.32;
 
@@ -644,8 +660,16 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
           alignY={hasBody ? "bottom" : "center"}
         />
       )}
+      {/* Native, not fitted: the protection slot spans a full chest protector and a thin
+          necklace, and scaling each to one size inflated the chain to vest proportions and
+          threw away the offset a piece like a chain or a hood hangs at deliberately. */}
       {!!protection?.nodes.length && (
-        <RiderGearMesh part={protection!} anchor={protAnchor} target={hasBody ? 0.42 * h : 0.62} rot={PROT_ROT} />
+        <RiderGearMesh
+          part={protection!}
+          anchor={protAnchor}
+          rot={PROT_ROT}
+          fit="native"
+        />
       )}
       {/* Two feet as separate nodes → split left/right; a single-node boot renders centred. */}
       {!!boots?.nodes.length &&

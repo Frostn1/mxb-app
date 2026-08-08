@@ -132,12 +132,25 @@ fn store_rgba(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> PaintTextur
 const MAX_EDGE: u32 = 1024;
 
 pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
+    extract_edf_textures_where(edf, |_| true)
+}
+
+/// The textures of [`extract_edf_textures`] whose names `want` accepts.
+///
+/// Inflating a 2048² blob and re-encoding it is the expensive part of this by a wide margin
+/// — on a rider body it dwarfs parsing the mesh. A caller that already knows it will throw a
+/// texture away shouldn't pay to decode it first.
+pub fn extract_edf_textures_where(
+    edf: &[u8],
+    want: impl Fn(&str) -> bool,
+) -> Vec<PaintTexture> {
     crate::edf::embedded_textures(edf)
         .iter()
         .filter(|t| {
             let n = t.name.to_ascii_lowercase();
             !n.ends_with("_n") && !n.ends_with("_r")
         })
+        .filter(|t| want(&t.name))
         .filter_map(|t| {
             let rgba = crate::edf::inflate_texture(edf, t)?;
             // Embedded edf textures are already RGBA — no channel swap.
