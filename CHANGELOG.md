@@ -3,6 +3,23 @@
 ## 2026-08-07 — six languages, a Play button, live model swaps
 
 ### Added
+- **A Manage section: race presets, and mods you can switch off.** MX Bikes mounts every
+  archive in your mods folder at startup, so a big library is paid for on every load —
+  even though a race needs one track, one bike, one gear set and a support pack or two.
+  A preset can now carry the content its race needs: give it the track it's ridden on and
+  pin the packs that have to stay (the OEM pack), hit **Race mode**, and the app puts the
+  preset's look on *and* takes everything else out of the game's way in one action. The
+  paint, gear and model swap in the loadout are found automatically — the same resolver
+  that packs a full share bundle — so the only things to pick by hand are the ones a
+  loadout can't express. Nothing is deleted: disabled mods move to
+  `<MX Bikes>\mxbapp_disabled`, mirroring the folder they came from, and **Enable
+  everything** puts every one of them back in exactly the path it left. The Mods list
+  does the same by hand — a switch per mod, bulk enable/disable of whatever the filter is
+  showing, and delete straight to the recycle bin. Manage sits in the main window's
+  sidebar and as a tab in the in-game overlay, so the next race can be lined up between
+  sessions without leaving the game. Loose paints, model-swap sets and sound folders are
+  left alone — they aren't what a load is waiting on, and moving them would break the
+  Locker's bookkeeping.
 - **An in-game overlay, on a hotkey.** Everything the app does still meant leaving the
   game to do it. Ctrl+Shift+M (rebindable in Settings → In-game overlay) now brings
   Presets, the Locker and Browse up over MX Bikes in a floating panel; Esc closes it and

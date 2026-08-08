@@ -406,12 +406,63 @@ export interface BundleRef {
   size: number;
 }
 
+/**
+ * The content a preset needs installed, beyond the cosmetics in its loadout: the track
+ * it's ridden on, plus packs the player pins as always-needed (the OEM pack).
+ *
+ * Paths are relative to the MX Bikes root, forward-slashed
+ * (`mods/tracks/EU/RedBud.pkz`), so they survive the mods folder moving.
+ */
+export interface PresetContent {
+  tracks: string[];
+  keep: string[];
+}
+
 /** A saved, named, bike-agnostic preset (a loadout you can apply to any bike). */
 export interface Preset {
   name: string;
   loadout: Loadout;
   /** Uploaded asset bundle, set only on a full-share code. */
   bundle?: BundleRef | null;
+  /** Race content. Absent on presets that only ever dress a bike. */
+  content?: PresetContent | null;
+}
+
+/** One mod as the Manage tab sees it — its identity is `rel`, enabled or not. */
+export interface ModEntry {
+  /** Path relative to the MX Bikes root, *as if enabled* (`mods/tracks/RedBud.pkz`). */
+  rel: string;
+  name: string;
+  /** Library category (`track`, `bike`, `bikePaint`, `helmet`, …). */
+  category: LibraryCategory;
+  /** Folder inside its content type. Empty at the top level. */
+  folder: string;
+  size: number;
+  enabled: boolean;
+  /** An extracted track folder rather than a single archive. */
+  isDir: boolean;
+}
+
+/** What racing a preset would move, worked out before anything does. */
+export interface StatePlan {
+  keep: ModEntry[];
+  disable: ModEntry[];
+  enable: ModEntry[];
+  /** Slots the preset asks for that aren't installed. */
+  unresolved: UnresolvedSlot[];
+  gameRunning: boolean;
+}
+
+/** What a Manage operation actually did. `failed` is `[rel, reason]` per stuck file. */
+export interface ModsStateOutcome {
+  disabled: number;
+  enabled: number;
+  deleted: number;
+  failed: [string, string][];
+  content_reload: ReloadOutcome;
+  game_running: boolean;
+  /** Present only on a race apply, when cosmetics went in alongside the content. */
+  look: PresetApplyOutcome | null;
 }
 
 /** One asset a preset references, resolved to its source + `mods/` destination. */
