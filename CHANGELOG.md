@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-07
+
+### Added
+- **Swapping a model now changes it in-game instantly, on the bike you have selected.**
+  A model swap moved the files and re-ran the game's *customization* loader — which
+  reloads paints and gear but never the bike mesh, so the garage kept showing the old
+  model until you switched bike class away and back. The Locker now also asks FrostMod
+  to re-apply the bike (new `refresh_bike_model` command), which re-reads it from disk
+  and brings the new model up immediately. FrostMod acts only on the bike you currently
+  have selected, so swapping any other bike never disturbs what you're looking at.
+  Presets get the same treatment when they carry a model swap. Gated on the existing
+  **Instant refresh** setting, since it reaches into the running game.
+
+### Fixed
+- **The Locker no longer claims a model swap "Refreshed live in-game" when it didn't.**
+  The note was derived purely from the look-loader call succeeding, which says nothing
+  about whether the mesh reloaded — so it read as done while the garage still showed the
+  old model. Model and sound swaps now report separately, and the model note reflects
+  what actually happened: refreshing now, FrostMod not running, or instant refresh off.
+
 ## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
 
 ### Added
