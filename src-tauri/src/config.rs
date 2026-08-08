@@ -67,6 +67,43 @@ pub struct AppConfig {
     /// A *fresh* install is stamped with the running version at setup (see
     /// `create_config`), because nothing in a version you just installed is new to you.
     pub seen_version: String,
+    /// Dedicated servers this player administers, each with its agent address and bearer
+    /// token. Stored here in clear, like the rest of the config — worth knowing before
+    /// adding a server whose token protects anything beyond the game process it runs.
+    pub servers: Vec<crate::servers::ServerRef>,
+    /// Show the unfinished multiplayer features — the Servers tab and paint sync.
+    ///
+    /// Off by default even in a beta build: these talk to a live control plane and write
+    /// files other players uploaded, so they're opt-in rather than something a player finds
+    /// by accident. Also settable with `MXB_EXPERIMENTAL=1` for a run that doesn't touch
+    /// the saved config (see [`AppConfig::experimental_enabled`]).
+    pub experimental: bool,
+    /// Bearer token for this player's control-plane account, from enrolling with an invite
+    /// code. Empty until they enrol.
+    pub cp_token: String,
+    /// The in-game rider name this account enrolled with. Kept so the UI can show which
+    /// identity the paints are published under.
+    pub cp_rider_name: String,
+    /// This player's MX Bikes GUID, once claimed. The stable identity the roster keys on —
+    /// rider names are free text and change between sessions.
+    pub cp_guid: String,
+}
+
+/// Set to `1` to force the experimental features on for one run.
+pub const EXPERIMENTAL_ENV: &str = "MXB_EXPERIMENTAL";
+
+impl AppConfig {
+    /// Whether the experimental features should be visible.
+    ///
+    /// The environment variable wins so a build can be handed to a tester with a flag
+    /// rather than a settings walkthrough, and so turning it on for one run leaves no
+    /// trace in their saved config.
+    pub fn experimental_enabled(&self) -> bool {
+        if std::env::var(EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false) {
+            return true;
+        }
+        self.experimental
+    }
 }
 
 /// Toggle combo used until the player picks another one.
@@ -103,6 +140,11 @@ impl Default for AppConfig {
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
             seen_version: String::new(),
+            servers: Vec::new(),
+            experimental: false,
+            cp_token: String::new(),
+            cp_rider_name: String::new(),
+            cp_guid: String::new(),
         }
     }
 }

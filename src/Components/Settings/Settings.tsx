@@ -31,6 +31,9 @@ import {
   setRunInBackground,
   setWatchModsReload,
   type OverlayState,
+  experimentalState as experimentalStateApi,
+  setExperimental,
+  type ExperimentalState,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
@@ -181,6 +184,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
   const [version, setVersion] = useState("");
+  const [experimental, setExperimentalState] = useState<ExperimentalState | null>(null);
   const [active, setActive] = useState<SectionId>(initialSection ?? "folder");
   // FrostMod has no GP Bikes build, so its section isn't there to jump to either.
   const sections = SECTIONS.filter((s) => s.id !== "frostmod" || caps.frostmod);
@@ -324,6 +328,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(""));
+    experimentalStateApi().then(setExperimentalState).catch(() => {});
     // Re-check FrostMod against GitHub whenever Settings opens — the provider
     // only fetches once at launch, so this catches releases cut since then.
     void refreshStatus();
@@ -921,10 +926,40 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           </Section>
           )}
 
+          {/* experimental */}
+          <Section title={t("settings.experimental")} innerRef={() => {}}>
+            <ToggleRow
+              label={t("settings.experimentalServers")}
+              desc={
+                experimental?.forcedByEnv
+                  ? t("settings.experimentalForced")
+                  : t("settings.experimentalServersDesc")
+              }
+              checked={experimental?.enabled ?? false}
+              onChange={(v) => {
+                // The env override wins in the backend, so flipping the switch would look
+                // like it did nothing. Say so instead of pretending.
+                if (experimental?.forcedByEnv) {
+                  toast.info(t("settings.experimentalForced"));
+                  return;
+                }
+                setExperimental(v)
+                  .then(() => experimentalStateApi())
+                  .then(setExperimentalState)
+                  .catch((e) => toast.error(String(e)));
+              }}
+            />
+          </Section>
+
           {/* about */}
           <Section title={t("settings.about")} innerRef={(el) => (refs.current.about = el)}>
             <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
               <span>mxb-app {version && `v${version}`}</span>
+              {experimental?.prerelease && (
+                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+                  {t("settings.betaBadge")}
+                </span>
+              )}
               <button
                 onClick={() => openUrl(REPO_URL)}
                 className="flex cursor-default items-center gap-1 font-semibold text-primary hover:brightness-110"

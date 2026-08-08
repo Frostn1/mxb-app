@@ -1,0 +1,230 @@
+//! mxb-agent — supervises an MX Bikes dedicated server and exposes it over HTTP.
+//!
+//! Runs on the game host next to `mxbikes.exe`. The desktop app talks to this rather than
+//! to the cloud provider, which is the point: managing a server from the app must never
+//! require provider credentials to be shipped inside the app.
+
+mod config;
+mod ini;
+mod roster;
+mod supervisor;
+
+use config::Config;
+use serde::Deserialize;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use supervisor::Supervisor;
+use tiny_http::{Header, Request, Response, Server};
+
+/// How often the crash watcher checks on the game.
+const WATCH_INTERVAL: Duration = Duration::from_secs(5);
+
+type Shared = Arc<Mutex<Supervisor>>;
+
+fn main() {
+    let cfg_path = std::env::args()
+        .nth(1)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("agent.json"));
+
+    let cfg = match Config::load(&cfg_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("mxb-agent: {e}");
+            std::process::exit(1);
+        }
+    };
+    let listen = cfg.listen.clone();
+
+    let shared: Shared = Arc::new(Mutex::new(Supervisor::new(cfg)));
+
+    // Start the game up front, so a reboot brings the server back with the agent.
+    if let Err(e) = shared.lock().unwrap().start() {
+        eprintln!("mxb-agent: couldn't start the game: {e}");
+    }
+
+    {
+        let watched = Arc::clone(&shared);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(WATCH_INTERVAL);
+            if watched.lock().unwrap().revive_if_crashed() {
+                eprintln!("mxb-agent: the game exited on its own — restarted it");
+            }
+        });
+    }
+
+    let server = match Server::http(&listen) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("mxb-agent: couldn't listen on {listen}: {e}");
+            std::process::exit(1);
+        }
+    };
+    eprintln!("mxb-agent: listening on {listen}");
+
+    for request in server.incoming_requests() {
+        handle(request, &shared);
+    }
+}
+
+fn handle(mut request: Request, shared: &Shared) {
+    let method = request.method().as_str().to_string();
+    // Strip any query string: routes here take no parameters.
+    let path = request.url().split('?').next().unwrap_or("/").to_string();
+
+    // Liveness is deliberately unauthenticated — it reveals nothing, and it has to work
+    // for whoever is debugging a box they can't get a token onto yet.
+    if method == "GET" && path == "/health" {
+        let _ = request.respond(json(200, &serde_json::json!({ "ok": true })));
+        return;
+    }
+
+    if !authorized(&request, shared) {
+        let _ = request.respond(json(401, &serde_json::json!({ "error": "unauthorized" })));
+        return;
+    }
+
+    let response = match (method.as_str(), path.as_str()) {
+        ("GET", "/status") => status(shared),
+        ("GET", "/players") => players(shared),
+        ("POST", "/start") => act(shared, |s| s.start()),
+        ("POST", "/stop") => act(shared, |s| s.stop()),
+        ("POST", "/restart") => act(shared, |s| s.restart()),
+        ("GET", "/config") => match shared.lock().unwrap().read_ini() {
+            Ok(text) => json(200, &serde_json::json!({ "ini": text })),
+            Err(e) => json(500, &serde_json::json!({ "error": e })),
+        },
+        ("PUT", "/config") => {
+            let mut body = String::new();
+            if request.as_reader().read_to_string(&mut body).is_err() {
+                json(400, &serde_json::json!({ "error": "couldn't read the request body" }))
+            } else {
+                update_config(shared, &body)
+            }
+        }
+        _ => json(404, &serde_json::json!({ "error": "no such endpoint" })),
+    };
+    let _ = request.respond(response);
+}
+
+fn authorized(request: &Request, shared: &Shared) -> bool {
+    let expected = shared.lock().unwrap().config().token.clone();
+    request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Authorization"))
+        .and_then(|h| config::bearer(h.value.as_str()))
+        .map(|presented| config::token_matches(&expected, presented))
+        .unwrap_or(false)
+}
+
+fn status(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let mut guard = shared.lock().unwrap();
+    let game = guard.status();
+    let port = guard.config().game_port;
+    // Config is best-effort: a server whose .ini we can't read is still worth reporting on.
+    let text = guard.read_ini().unwrap_or_default();
+    json(
+        200,
+        &serde_json::json!({
+            "game": game,
+            "port": port,
+            "server": {
+                "name": ini::get(&text, ini::NAME),
+                "track": ini::get(&text, ini::TRACK),
+                "maxClients": ini::get(&text, ini::MAX_CLIENT),
+            }
+        }),
+    )
+}
+
+/// Who is connected right now, with the GUID that identifies them stably.
+fn players(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let guard = shared.lock().unwrap();
+    let log = guard.config().game_dir.join("log.txt");
+    match std::fs::read_to_string(&log) {
+        Ok(text) => json(200, &serde_json::json!({ "players": roster::connected(&text) })),
+        // No log yet is a server that has not been connected to, not a failure.
+        Err(_) => json(200, &serde_json::json!({ "players": [] })),
+    }
+}
+
+fn act<F>(shared: &Shared, f: F) -> Response<std::io::Cursor<Vec<u8>>>
+where
+    F: FnOnce(&mut Supervisor) -> Result<(), String>,
+{
+    let mut guard = shared.lock().unwrap();
+    match f(&mut guard) {
+        Ok(()) => {
+            let game = guard.status();
+            json(200, &serde_json::json!({ "ok": true, "game": game }))
+        }
+        Err(e) => json(500, &serde_json::json!({ "error": e })),
+    }
+}
+
+/// The subset of server settings the app may change. Anything else is a hand edit on the
+/// box — this is an API for running a server, not for rewriting arbitrary game config.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ConfigPatch {
+    track: Option<String>,
+    name: Option<String>,
+    max_clients: Option<u32>,
+}
+
+fn update_config(shared: &Shared, body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let patch: ConfigPatch = match serde_json::from_str(body) {
+        Ok(p) => p,
+        Err(e) => return json(400, &serde_json::json!({ "error": format!("bad JSON: {e}") })),
+    };
+
+    let mut guard = shared.lock().unwrap();
+    let mut text = match guard.read_ini() {
+        Ok(t) => t,
+        Err(e) => return json(500, &serde_json::json!({ "error": e })),
+    };
+
+    let mut changed = false;
+    if let Some(track) = patch.track.as_deref() {
+        // Values go onto the game's command-free config, but a newline would still let a
+        // caller inject an unrelated key — so reject anything that isn't one line.
+        if track.contains(['\n', '\r']) {
+            return json(400, &serde_json::json!({ "error": "track must be a single line" }));
+        }
+        text = ini::set(&text, ini::TRACK, track);
+        changed = true;
+    }
+    if let Some(name) = patch.name.as_deref() {
+        if name.contains(['\n', '\r']) {
+            return json(400, &serde_json::json!({ "error": "name must be a single line" }));
+        }
+        text = ini::set(&text, ini::NAME, name);
+        changed = true;
+    }
+    if let Some(max) = patch.max_clients {
+        text = ini::set(&text, ini::MAX_CLIENT, &max.to_string());
+        changed = true;
+    }
+
+    if !changed {
+        return json(400, &serde_json::json!({ "error": "nothing to change" }));
+    }
+    if let Err(e) = guard.write_ini(&text) {
+        return json(500, &serde_json::json!({ "error": e }));
+    }
+    // The game reads its .ini once at startup, so a config change only means anything
+    // after a restart. Doing it here keeps the API honest about what it just did.
+    if let Err(e) = guard.restart() {
+        return json(500, &serde_json::json!({ "error": format!("config saved, restart failed: {e}") }));
+    }
+    let game = guard.status();
+    json(200, &serde_json::json!({ "ok": true, "restarted": true, "game": game }))
+}
+
+fn json(code: u16, value: &serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
+    let body = serde_json::to_vec(value).unwrap_or_else(|_| b"{}".to_vec());
+    let header = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+        .expect("a literal header is always valid");
+    Response::from_data(body).with_status_code(code).with_header(header)
+}

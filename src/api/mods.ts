@@ -1281,3 +1281,121 @@ export function onPresetBundleProgress(
 export function appPlatform(): Promise<string> {
   return invoke<string>("app_platform");
 }
+
+// ── Experimental features, beta builds, paint sync ───────────────────────────
+
+export interface ExperimentalState {
+  /** The MX Bikes GUID this account has claimed, if any. */
+  guid?: string;
+  /** Whether the unfinished multiplayer features should be shown at all. */
+  enabled: boolean;
+  /** On because `MXB_EXPERIMENTAL=1` was set, so the toggle can explain itself. */
+  forcedByEnv: boolean;
+  version: string;
+  /** A semver pre-release suffix (`0.8.0-beta.1`) — what makes this build a beta. */
+  prerelease: boolean;
+  /** Whether this install has a control-plane account yet. */
+  enrolled: boolean;
+  riderName: string;
+}
+
+export interface PublishOutcome {
+  published: number;
+  uploaded: number;
+}
+
+export interface PullOutcome {
+  riders: number;
+  installed: number;
+  alreadyHad: number;
+  /** Entries refused because their destination wasn't safe to write. */
+  rejected: number;
+}
+
+export function experimentalState(): Promise<ExperimentalState> {
+  return invoke<ExperimentalState>("experimental_state");
+}
+
+export function setExperimental(enabled: boolean): Promise<void> {
+  return invoke<void>("set_experimental", { enabled });
+}
+
+/** Trade an invite code for an account. The token is stored by the backend, never here. */
+export function enrollAccount(code: string, riderName: string): Promise<string> {
+  return invoke<string>("enroll_account", { code, riderName });
+}
+
+/**
+ * Claim this player's MX Bikes GUID — the identity that survives a rider-name change and
+ * the one the dedicated server logs on every connection. First-come on the server side.
+ */
+export function setGuid(guid: string): Promise<void> {
+  return invoke<void>("set_guid", { guid });
+}
+
+/** Publish this rider's paints so everyone else on the server can see them. */
+export function publishPaints(profile: string, bike: string): Promise<PublishOutcome> {
+  return invoke<PublishOutcome>("publish_paints", { profile, bike });
+}
+
+/** Install every other rider's paints. */
+export function syncPaints(serverId: string): Promise<PullOutcome> {
+  return invoke<PullOutcome>("sync_paints", { serverId });
+}
+
+// ── Dedicated servers ────────────────────────────────────────────────────────
+
+/** A dedicated server the player administers, as stored in the app config. */
+export interface ServerRef {
+  id: string;
+  name: string;
+  /** Base URL of the `mxb-agent` on the host, e.g. `http://203.0.113.10:8787`. */
+  url: string;
+  /** Bearer token from that host's `agent.json`. */
+  token: string;
+}
+
+/** What `mxb-agent` reports about a server. */
+export interface ServerStatus {
+  game: {
+    running: boolean;
+    pid: number | null;
+    uptime_secs: number;
+    /** Times the agent brought the game back after it exited on its own. */
+    restarts: number;
+  };
+  port: number;
+  server: {
+    name: string | null;
+    track: string | null;
+    maxClients: string | null;
+  };
+}
+
+export type ServerAction = "start" | "stop" | "restart";
+
+export function listServers(): Promise<ServerRef[]> {
+  return invoke<ServerRef[]>("list_servers");
+}
+
+/** Replace the whole saved list — the UI owns add/edit/remove and ordering. */
+export function saveServers(servers: ServerRef[]): Promise<void> {
+  return invoke<void>("save_servers", { servers });
+}
+
+/** Commands take an id, not a token: the frontend never hands back a secret it was given. */
+export function serverStatus(id: string): Promise<ServerStatus> {
+  return invoke<ServerStatus>("server_status", { id });
+}
+
+export function serverAction(id: string, action: ServerAction): Promise<unknown> {
+  return invoke<unknown>("server_action", { id, action });
+}
+
+/** Change server settings. The agent restarts the game, which reads its `.ini` only at startup. */
+export function serverSetConfig(
+  id: string,
+  patch: { track?: string; name?: string; maxClients?: number },
+): Promise<unknown> {
+  return invoke<unknown>("server_set_config", { id, patch });
+}

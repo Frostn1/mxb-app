@@ -15,6 +15,8 @@ export interface GameCaps {
   manage: boolean;
   /** Join a server by address (launches the game with `-directconnect`). */
   joinByAddress: boolean;
+  /** The Servers tab and paint sync (MX Bikes dedicated servers, MX Bikes GUIDs). */
+  servers: boolean;
 }
 
 /** One title the app can drive, as reported by `listGames()`. */

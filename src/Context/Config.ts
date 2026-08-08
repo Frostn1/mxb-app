@@ -10,6 +10,7 @@ const MXB_CAPS: GameCaps = {
   shop: true,
   manage: true,
   joinByAddress: true,
+  servers: true,
 };
 
 const MXB_FALLBACK: GameInfo = {

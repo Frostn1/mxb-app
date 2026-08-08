@@ -120,6 +120,9 @@ pub struct Caps {
     pub viewer: bool,
     /// The authenticated paid-content shop. mxbikes-shop.com is MX Bikes only.
     pub shop: bool,
+    /// The Servers tab and paint sync. Administers MX Bikes dedicated servers and keys
+    /// riders by MX Bikes GUID, so it has no meaning for another title.
+    pub servers: bool,
     /// Join a server by address, by launching the game with `-directconnect`. The argv
     /// parser it was found in and the default port it assumes are both MX Bikes'; GP
     /// Bikes has its own, so this stays off there until they're confirmed.
@@ -203,6 +206,7 @@ pub static MXB: GameProfile = GameProfile {
         shop: true,
         manage: true,
         join_by_address: true,
+        servers: true,
     },
 };
 
@@ -250,6 +254,7 @@ pub static GPB: GameProfile = GameProfile {
         shop: false,
         manage: false,
         join_by_address: false,
+        servers: false,
     },
 };
 

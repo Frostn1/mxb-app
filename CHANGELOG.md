@@ -73,6 +73,82 @@
   unchanged. Applying a preset no longer creates `profile.ini` sections that the game
   doesn't use.
 
+## 2026-08-08 — everyone on the server finally looks right
+
+### Added
+- **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
+  whatever file on *your* disk happens to match the name they picked, so a full grid shows
+  up in default liveries. The game can't tell us what they picked either — its plugin API
+  carries rider names, bikes and lap data, and no paint field at all. So the loop is closed
+  outside the game. Your app publishes what your rider is wearing; every other app pulls it
+  back and installs it. Paints are content-addressed by SHA-256, so twenty riders sharing a
+  livery is one stored object and nineteen uploads that never happen, and a second sync
+  installs nothing it already has.
+
+  Everyone on the server needs the app for this to work — that's inherent, not a limitation
+  we chose.
+
+- **A Servers tab**, for running dedicated servers: start, stop and restart the game on a
+  host, watch its uptime and how many times it came back on its own, and change the track.
+  It talks to `mxb-agent` on the host rather than to a cloud provider, because a desktop app
+  that shipped provider credentials could create infrastructure from any machine it ran on.
+
+- **An Experimental switch in Settings**, off by default, gating both of the above. They
+  talk to a live service and write files other players uploaded, so they're opt-in rather
+  than something you find by accident. `MXB_EXPERIMENTAL=1` turns them on for a single run
+  without touching your saved settings — and the switch says so rather than looking stuck.
+
+- **Beta builds now say they're beta**, next to the version in Settings → About. The badge
+  keys off a semver pre-release suffix, which is the same thing the release workflow uses to
+  mark a build as a pre-release, so the two can't disagree.
+
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
+
+### Security
+- A paint carries the destination it should be written to, and that path arrives from
+  another player. It's validated twice — once by the service and again in the app before it
+  becomes a real path — because only the second check actually protects a disk. Anything
+  with a separator, a `..`, a drive letter, a control character or a non-`.pnt` extension is
+  refused outright rather than sanitised: a path we'd have to rewrite is one we don't
+  understand. Downloaded bytes are checked against their digest before being written.
+
+## 2026-08-08 — run a dedicated server from the app
+
+### Added
+- **A Servers tab that manages the dedicated servers you run.** Start, stop and restart the
+  game on a host, see whether it's up, how long it's been up, how many times it came back on
+  its own, and switch the track — all without an RDP session or a shell. Each server is added
+  with its agent address and token, and its status refreshes while the tab is open.
+
+- **`mxb-agent`, a supervisor that runs on the game host** (`server-agent/`). It **owns** the
+  `mxbikes.exe` process rather than managing whatever happens to be running, and that
+  ownership is what makes the rest work: exit detection comes from the child handle instead
+  of polling the process table, so a server that crashes is **brought back automatically**;
+  "restart" isn't a race between a kill and someone else's respawn; and a reboot that starts
+  the agent starts the game with it. A deliberate stop is suppressed, so the watcher doesn't
+  fight you by reviving a server you meant to shut down.
+
+  The app talks to this agent, never to a cloud provider — a desktop app that shipped
+  provider credentials could create infrastructure on any machine it ran on. What it holds
+  instead is a bearer token for one server you already administer.
+
+  Settings changes patch the server's `.ini` **in place**: the one operation that matters is
+  changing a single key while leaving every other byte alone, which is what general INI
+  parsers are worst at — a parse/serialise round-trip reorders keys and drops comments, and
+  this is a file server owners edit by hand. Only `track`, `name` and `maxclient` are exposed,
+  values containing newlines are rejected so a caller can't inject unrelated keys, and the
+  game is restarted afterwards because it reads its `.ini` only at startup.
+
+  Note the agent speaks plain HTTP, so its token crosses the network in clear. Terminate TLS
+  in front of it, or keep it on a private network, before exposing it to the open internet.
+
 ## 2026-08-07 — join a server by address
 
 ### Added
@@ -721,6 +797,15 @@
   Vite's gitignored timestamped config copies. Now 0 errors / 3 dependency-array
   warnings, so lint can gate CI.
 
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
+
 ### Security
 - **Bump swiper to 14.0.7** — clears a critical prototype-pollution advisory covering
   6.5.1–12.1.1. Unlike the vite/rollup/esbuild advisories (build-time only), this one
@@ -834,6 +919,15 @@
   already used), so the swap shows up without reselecting your profile. The swap toast now
   reports the refresh result. `apply_model_swap`/`apply_sound_swap` return a
   `SwapApplyOutcome`, and the refresh step is shared with `presets_apply`.
+
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 
 ### Security
 - **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm

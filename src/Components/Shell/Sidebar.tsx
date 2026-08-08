@@ -11,6 +11,7 @@ import {
   Loader2,
   Gamepad2,
   SlidersHorizontal,
+  Server as ServerIcon,
   Plug,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,7 +20,7 @@ import { useFrostmod } from "../../Context/FrostmodContext";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
-import { launchGame } from "../../api/mods";
+import { experimentalState, launchGame } from "../../api/mods";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
@@ -32,6 +33,7 @@ export type DashboardView =
   | "locker"
   | "presets"
   | "rider"
+  | "servers"
   | "manage"
   | "settings";
 
@@ -62,6 +64,21 @@ const NAV: {
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
+/** Shown only when the experimental features are on — see `settings.experimental`.
+ *  Also capability-gated: it administers MX Bikes dedicated servers and keys riders by
+ *  MX Bikes GUID, neither of which means anything for another title. */
+const EXPERIMENTAL_NAV: {
+  id: DashboardView;
+  label: TKey;
+  icon: typeof Home;
+  cap?: keyof GameCaps;
+} = {
+  id: "servers",
+  label: "nav.servers",
+  icon: ServerIcon,
+  cap: "servers",
+};
+
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
 
 /** MX Bikes takes a while to show up in the process list; stop saying "Starting…" after this. */
@@ -76,6 +93,15 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const caps = game.caps;
   const [starting, setStarting] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
+  // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
+  // leaving that page is exactly when the nav needs to reflect a change.
+  const [experimental, setExperimental] = useState(false);
+
+  useEffect(() => {
+    experimentalState()
+      .then((s) => setExperimental(s.enabled))
+      .catch(() => {});
+  }, [view]);
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -130,7 +156,9 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex flex-col gap-0.5">
-        {NAV.filter(({ cap }) => !cap || caps[cap]).map(({ id, label, icon: Icon }) => {
+        {(experimental ? [...NAV, EXPERIMENTAL_NAV] : NAV)
+          .filter(({ cap }) => !cap || caps[cap])
+          .map(({ id, label, icon: Icon }) => {
           const activeNav = view === id;
           return (
             <button
