@@ -19,13 +19,15 @@
   model.
 
 ### Fixed
-- **The rider stands up.** Rider meshes don't agree on which axis is up: the stock motocross
+- **The rider stands up and faces forward.** Rider meshes don't agree on which axis is up: the stock motocross
   rider is authored Y-up, while the supermoto rider and Rider+ are Z-up and arrived lying on
   their back. Every piece of gear is anchored and scaled to a fraction of the body's height,
   so a body on its side measured a quarter of a metre tall instead of a metre and a bit — the
   helmet and boots shrank to specks and sank into the torso, which read as gear that never
-  loaded. A body whose longest axis isn't its height is now rolled upright; one that already
-  stands is left alone.
+  loaded. Standing it up alone left it facing backwards, which matters just as much: the
+  viewer nudges the helmet and boots forward, so a rider turned around wears its gear through
+  its own back. A body whose longest axis isn't its height is now rolled upright *and* turned
+  to face front; one that already stands is left alone.
 - **A rider model loads without decoding pixels nobody sees.** Dressing a body in its own
   baked textures used to inflate and re-encode every texture the mesh carried, then throw
   most of them away — skin renders as a flat colour and the name and number planes render as

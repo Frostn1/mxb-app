@@ -1033,9 +1033,17 @@ fn load_rider_body(
 /// look wrong — it measures a quarter of a metre tall instead of a metre and a bit, and the
 /// helmet and boots scale down to specks and sink into the torso.
 ///
-/// A rider is a standing figure: its longest axis is its height. Where that's Z, roll it up.
-/// Where it's already Y, leave the mesh alone — guessing at a body that's already upright is
-/// how the stock rider would get broken to fix a custom one.
+/// A rider is a standing figure: its longest axis is its height. Where that's Z, the mesh is
+/// authored in the other convention and takes that convention's one fixed rotation. Where
+/// it's already Y, leave the mesh alone — guessing at a body that's already upright is how
+/// the stock rider would get broken to fix a custom one.
+///
+/// The rotation is a half turn about Y on top of the quarter turn about X. Standing the body
+/// up alone leaves it facing backwards, which the name and number planes give away: they sit
+/// on a rider's back, and on the stock motocross rider — authored upright, so correct by
+/// construction — they sit behind its centre. On the Z-up meshes a bare quarter turn puts
+/// them in front. Both halves are needed together: `y = -z, z = -y` on its own mirrors the
+/// mesh rather than turning it, which would swap the rider's left and right hands.
 fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
     for n in nodes.iter() {
@@ -1050,14 +1058,14 @@ fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
     if ext[2] <= ext[1] || ext[2] <= ext[0] {
         return;
     }
-    // A quarter turn about X: y' = -z, z' = y. This way round, and not the other, because
-    // these meshes lie head-away — the head sits at the most negative Z, so negating it puts
-    // the head at the top where the gear anchors expect to find it.
     for n in nodes.iter_mut() {
         for v in n.positions.chunks_exact_mut(3).chain(n.normals.chunks_exact_mut(3)) {
-            let (y, z) = (v[1], v[2]);
+            let (x, y, z) = (v[0], v[1], v[2]);
+            v[0] = -x;
+            // Negated, not taken as-is: these meshes lie head-away, with the head at the
+            // most negative Z, so this is what puts it at the top.
             v[1] = -z;
-            v[2] = y;
+            v[2] = -y;
         }
     }
     log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
@@ -3344,6 +3352,48 @@ mod viewer_tests {
             // wrists of its rolled-sleeve variants, which reach well down the body.
             let (_, fhi) = bounds(&nodes, true);
             eprintln!("  skin tops out at {:.3} of {:.3}", fhi[1], hi[1]);
+
+            // Which way does it face? Report the Z centroid of each slot relative to the
+            // body's own centre, plus the head alone (the top eighth of the skin, so
+            // Rider+'s bare wrists don't drag the number toward the bars).
+            let cz = (lo[2] + hi[2]) / 2.0;
+            let mut per: std::collections::BTreeMap<String, (f64, f64, usize)> = Default::default();
+            for n in &nodes {
+                for sm in &n.submeshes {
+                    let slot = sm.texture.clone().unwrap_or_default();
+                    for i in &n.indices
+                        [sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3]
+                    {
+                        let v = &n.positions[*i as usize * 3..*i as usize * 3 + 3];
+                        let e = per.entry(slot.clone()).or_default();
+                        e.0 += (v[2] - cz) as f64;
+                        e.2 += 1;
+                        if slot == "face" && v[1] > hi[1] - 0.125 * h {
+                            let hd = per.entry("face(head)".into()).or_default();
+                            hd.0 += (v[2] - cz) as f64;
+                            hd.2 += 1;
+                        }
+                    }
+                }
+            }
+            for (slot, (sum, _, n)) in &per {
+                eprintln!("  {slot:>12} z-centroid {:+.4} ({n} verts)", sum / *n as f64);
+            }
+            let centroid = |slot: &str| per.get(slot).map(|(s, _, n)| s / *n as f64);
+
+            // And it faces the right way. The viewer nudges the helmet and boots forward in
+            // +Z, so a rider turned around wears its gear through its own back.
+            //
+            // The name and number planes are the tell: they go on a rider's back. Where the
+            // model has none, fall back to the head, which leans forward over the bars —
+            // a weaker signal, so it only decides when the strong one is absent.
+            match centroid("hide") {
+                Some(back) => assert!(back < 0.0, "the name and number sit on the back ({back:+.4})"),
+                None => {
+                    let head = centroid("face(head)").expect("a rider has a head");
+                    assert!(head > 0.0, "the head leans forward ({head:+.4})");
+                }
+            }
             assert!(
                 fhi[1] > lo[1] + 0.9 * h,
                 "the head is at the top (skin tops at {:.3}, body {:.3}..{:.3})",
