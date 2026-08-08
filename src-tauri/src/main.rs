@@ -1876,6 +1876,16 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Start MX Bikes and connect it straight to a server.
+///
+/// The game reads the connect flag only at startup, so this reports `already_running`
+/// rather than trying to steer a copy that's already up.
+#[tauri::command]
+fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))
+}
+
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
 #[tauri::command]
 fn game_running() -> bool {
@@ -2658,6 +2668,7 @@ fn main() {
             frostmod_start,
             frostmod_stop,
             launch_game,
+            join_server,
             game_running,
             shop_login,
             shop_status,
