@@ -292,7 +292,11 @@ export const it: Translation = {
   "browse.help":
     "Scopri e installa mod dal catalogo online — cerca, filtra per tipo e apri una mod per scaricarla nel gioco.",
   "browse.searchPlaceholder": "Cerca {{type}}…",
-  "browse.sortedByNewest": "Ordinate dalle più recenti",
+  "browseSort.newest": "Più recenti",
+  "browseSort.oldest": "Meno recenti",
+  "browseSort.popularAll": "Più popolari",
+  "browseSort.popularMonth": "Popolari questo mese",
+  "browseSort.popularWeek": "Popolari questa settimana",
   "browse.loadFailed": "Impossibile caricare le mod",
   "browse.empty": "Nessun risultato per {{type}}.",
   "browse.loadMore": "Carica altre",

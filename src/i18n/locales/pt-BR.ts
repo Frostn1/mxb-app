@@ -295,7 +295,11 @@ export const ptBR: Translation = {
   "browse.help":
     "Descubra e instale mods do catálogo online — pesquise, filtre por tipo e abra um mod para baixá-lo no jogo.",
   "browse.searchPlaceholder": "Pesquisar {{type}}…",
-  "browse.sortedByNewest": "Ordenados pelos mais recentes",
+  "browseSort.newest": "Mais recentes",
+  "browseSort.oldest": "Mais antigos",
+  "browseSort.popularAll": "Mais populares",
+  "browseSort.popularMonth": "Populares este mês",
+  "browseSort.popularWeek": "Populares esta semana",
   "browse.loadFailed": "Não foi possível carregar os mods",
   "browse.empty": "Nenhum resultado em {{type}}.",
   "browse.loadMore": "Carregar mais",

@@ -1,4 +1,4 @@
-use super::{DownloadOption, ModDetail, ModRating, ModSource, ModSummary};
+use super::{DownloadOption, ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use crate::mxb_session;
 use futures_util::StreamExt;
 use regex::Regex;
@@ -20,8 +20,9 @@ impl ModSource for MxbModsSource {
         query: &str,
         category_id: u32,
         page: u32,
+        sort: ModSort,
     ) -> anyhow::Result<Vec<ModSummary>> {
-        search(query, category_id, page).await
+        search(query, category_id, page, sort).await
     }
 
     async fn detail(&self, slug: &str) -> anyhow::Result<ModDetail> {
@@ -188,22 +189,36 @@ pub async fn search(
     query: &str,
     category_id: u32,
     page: u32,
+    sort: ModSort,
 ) -> anyhow::Result<Vec<ModSummary>> {
-    let url = format!("{BASE}/wp-json/wp/v2/posts");
-
-    let mut params: Vec<(&str, String)> = vec![
-        ("categories", category_id.to_string()),
-        ("page", page.to_string()),
-        ("per_page", PER_PAGE.to_string()),
-        ("orderby", "date".to_string()),
-        ("_embed", "wp:featuredmedia".to_string()),
-    ];
     let q = query.trim();
-    if !q.is_empty() {
-        params.push(("search", q.to_string()));
-    }
+    // The popular listings come from a plugin endpoint that has no search of its own, so
+    // a typed query always means the plain catalog. The UI hides those options while the
+    // box has text in it; this is the backstop.
+    let sort = if q.is_empty() || sort.popular_range().is_none() {
+        sort
+    } else {
+        ModSort::Newest
+    };
 
-    let resp = get_with_retry(&url, &params).await?;
+    match sort {
+        ModSort::Newest => listing(q, category_id, Page::Number(page)).await,
+        ModSort::Oldest => oldest(q, category_id, page).await,
+        // `popular_range` is Some for every remaining variant.
+        _ => popular(category_id, page, sort.popular_range().unwrap_or("all")).await,
+    }
+}
+
+/// Which slice of a listing to ask for. WP accepts either, and `Offset` is what makes
+/// oldest-first possible — see [`oldest`].
+enum Page {
+    Number(u32),
+    Offset { skip: u32, take: u32 },
+}
+
+/// One page of the catalog in the site's own order (newest first, near enough).
+async fn listing(q: &str, category_id: u32, page: Page) -> anyhow::Result<Vec<ModSummary>> {
+    let (resp, _) = listing_response(q, category_id, page).await?;
     // WP returns 400 (rest_post_invalid_page_number) once you page past the end.
     if resp.status() == reqwest::StatusCode::BAD_REQUEST {
         return Ok(vec![]);
@@ -212,7 +227,120 @@ pub async fn search(
         return Err(blocked_error(resp.status()));
     }
     let posts: Vec<Value> = resp.json().await?;
+    Ok(posts
+        .iter()
+        .filter_map(|p| summary_from_post(p, category_id))
+        .collect())
+}
 
+/// The raw response plus the total post count WP reports in `X-WP-Total`.
+async fn listing_response(
+    q: &str,
+    category_id: u32,
+    page: Page,
+) -> anyhow::Result<(reqwest::Response, Option<u32>)> {
+    let url = format!("{BASE}/wp-json/wp/v2/posts");
+    let mut params: Vec<(&str, String)> = vec![
+        ("categories", category_id.to_string()),
+        ("_embed", "wp:featuredmedia".to_string()),
+    ];
+    match page {
+        Page::Number(n) => {
+            params.push(("page", n.to_string()));
+            params.push(("per_page", PER_PAGE.to_string()));
+        }
+        Page::Offset { skip, take } => {
+            params.push(("offset", skip.to_string()));
+            params.push(("per_page", take.to_string()));
+        }
+    }
+    if !q.is_empty() {
+        params.push(("search", q.to_string()));
+    }
+    let resp = get_with_retry(&url, &params).await?;
+    let total = resp
+        .headers()
+        .get("x-wp-total")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u32>().ok());
+    Ok((resp, total))
+}
+
+/// Oldest first.
+///
+/// `orderby=date&order=asc` is ignored by the site, but `offset` is honoured — so we walk
+/// the same fixed listing backwards: page 1 is the last `PER_PAGE` posts, reversed. The
+/// final page is the short one, which is what the caller's "is there more?" check keys on.
+async fn oldest(q: &str, category_id: u32, page: u32) -> anyhow::Result<Vec<ModSummary>> {
+    let per_page: u32 = PER_PAGE.parse().unwrap_or(24);
+    let total = total_count(q, category_id).await?;
+    let taken = (page - 1).saturating_mul(per_page);
+    if taken >= total {
+        return Ok(vec![]);
+    }
+    // How far from the end this page starts; the last one is short when the count doesn't
+    // divide evenly, and saturating at 0 is exactly that case.
+    let remaining = total - taken;
+    let take = remaining.min(per_page);
+    let skip = remaining - take;
+
+    let mut posts = listing(q, category_id, Page::Offset { skip, take }).await?;
+    posts.reverse();
+    Ok(posts)
+}
+
+/// How long a listing's post count is trusted. New mods appear a few times a day, and
+/// being one behind only shifts the oldest page by a slot.
+const TOTAL_TTL: Duration = Duration::from_secs(300);
+
+fn total_cache() -> &'static Mutex<HashMap<(u32, String), (u32, Instant)>> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<(u32, String), (u32, Instant)>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// How many posts a category (optionally narrowed by a search) holds, from `X-WP-Total`.
+/// Cached, because every "load more" under the oldest sort needs it again.
+async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
+    let key = (category_id, q.to_string());
+    if let Some((total, at)) = lock(total_cache()).get(&key) {
+        if at.elapsed() < TOTAL_TTL {
+            return Ok(*total);
+        }
+    }
+    // One post is enough to read the header off; the body is discarded.
+    let (resp, total) = listing_response(q, category_id, Page::Offset { skip: 0, take: 1 }).await?;
+    if !resp.status().is_success() {
+        return Err(blocked_error(resp.status()));
+    }
+    let total = total.ok_or_else(|| anyhow::anyhow!("the catalog didn't report a post count"))?;
+    lock(total_cache()).insert(key, (total, Instant::now()));
+    Ok(total)
+}
+
+/// One page of a category ranked by views, from the site's popular-posts plugin.
+///
+/// It hands back ordinary post objects, so the same parser reads them — the only
+/// differences are `limit`/`offset` instead of `page`, and that paging past the end
+/// returns an empty list rather than a 400.
+async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec<ModSummary>> {
+    let url = format!("{BASE}/wp-json/wordpress-popular-posts/v1/popular-posts");
+    let per_page: u32 = PER_PAGE.parse().unwrap_or(24);
+    let params: Vec<(&str, String)> = vec![
+        ("taxonomy", "category".to_string()),
+        ("term_id", category_id.to_string()),
+        ("range", range.to_string()),
+        ("order_by", "views".to_string()),
+        ("limit", per_page.to_string()),
+        ("offset", ((page - 1) * per_page).to_string()),
+        ("_embed", "wp:featuredmedia".to_string()),
+    ];
+
+    let resp = get_with_retry(&url, &params).await?;
+    if !resp.status().is_success() {
+        return Err(blocked_error(resp.status()));
+    }
+    let posts: Vec<Value> = resp.json().await?;
     Ok(posts
         .iter()
         .filter_map(|p| summary_from_post(p, category_id))
@@ -627,7 +755,9 @@ mod tests {
     #[ignore = "hits the live mxb-mods.com API"]
     fn live_search_and_detail() {
         tauri::async_runtime::block_on(async {
-            let results = search("supercross", 22, 1).await.expect("search failed");
+            let results = search("supercross", 22, 1, ModSort::Newest)
+                .await
+                .expect("search failed");
             assert!(!results.is_empty(), "expected some track results");
             let first = &results[0];
             assert!(!first.title.is_empty());
@@ -735,13 +865,72 @@ mod client_tests {
     #[tokio::test]
     #[ignore]
     async fn live_search_and_detail() {
-        let mods = search("", 22, 1).await.expect("search works");
+        let mods = search("", 22, 1, ModSort::Newest).await.expect("search works");
         eprintln!("search returned {} tracks", mods.len());
         assert!(!mods.is_empty(), "the tracks category should not be empty");
 
         let d = detail(&mods[0].slug).await.expect("detail works");
         eprintln!("detail '{}': {} downloads, version {:?}", d.title, d.downloads.len(), d.version);
         assert!(!d.title.is_empty());
+    }
+
+    /// Every sort the UI offers really is accepted by the catalog, and each one changes
+    /// the order it hands back. `cargo test live_ -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_search_sorts() {
+        let newest = search("", 22, 1, ModSort::Newest).await.expect("newest works");
+        assert!(!newest.is_empty(), "the tracks category should not be empty");
+
+        // Every sort must actually move the listing. The site ignores `orderby`, so a
+        // sort that quietly did nothing is the exact failure mode worth catching.
+        for sort in [
+            ModSort::Oldest,
+            ModSort::PopularAll,
+            ModSort::PopularMonth,
+            ModSort::PopularWeek,
+        ] {
+            let mods = search("", 22, 1, sort)
+                .await
+                .unwrap_or_else(|e| panic!("{sort:?} failed: {e:#}"));
+            assert!(!mods.is_empty(), "{sort:?} returned nothing");
+            assert_ne!(
+                mods[0].id, newest[0].id,
+                "{sort:?} returned the same listing as newest — is it being ignored?"
+            );
+            eprintln!("{sort:?}: first is '{}' ({})", mods[0].title, mods[0].date);
+        }
+
+        // Oldest walks the listing backwards, so its first page really should be the
+        // catalog's earliest posts — years behind whatever is on the newest page.
+        let oldest = search("", 22, 1, ModSort::Oldest).await.expect("oldest works");
+        assert!(
+            oldest[0].date < newest[0].date,
+            "oldest ({}) should predate newest ({})",
+            oldest[0].date,
+            newest[0].date
+        );
+        // ...and it pages without repeating itself.
+        let oldest_p2 = search("", 22, 2, ModSort::Oldest).await.expect("oldest pages");
+        assert!(!oldest_p2.is_empty(), "oldest page 2 was empty");
+        assert!(
+            oldest_p2.iter().all(|m| !oldest.iter().any(|o| o.id == m.id)),
+            "oldest page 2 repeats page 1"
+        );
+
+        // A popular sort can't carry a search term, so a query has to fall back to the
+        // catalog rather than silently returning the unfiltered top-viewed list.
+        let searched = search("supercross", 22, 1, ModSort::PopularAll)
+            .await
+            .expect("popular + query falls back");
+        let plain = search("supercross", 22, 1, ModSort::Newest)
+            .await
+            .expect("newest + query works");
+        assert_eq!(
+            searched.first().map(|m| m.id),
+            plain.first().map(|m| m.id),
+            "a query under a popular sort should behave like newest"
+        );
     }
 
     /// The headers really do go out — proves the fix is on the wire, not just in source.

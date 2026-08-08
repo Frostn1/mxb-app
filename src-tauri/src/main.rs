@@ -33,7 +33,7 @@ use frostmod_manage::{FrostmodProcess, FrostmodStatus};
 use library::InstalledMod;
 use modwatch::ModWatcher;
 use mods::mxb::MxbModsSource;
-use mods::{ModDetail, ModRating, ModSource, ModSummary};
+use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -108,8 +108,12 @@ async fn search_mods(
     query: String,
     category_id: u32,
     page: u32,
+    sort: ModSort,
 ) -> Result<Vec<ModSummary>, String> {
-    with_clearance(&app, || MxbModsSource.search(&query, category_id, page)).await
+    with_clearance(&app, || {
+        MxbModsSource.search(&query, category_id, page, sort)
+    })
+    .await
 }
 
 /// Community scores for the mods currently on screen, keyed by post id. Ids the site

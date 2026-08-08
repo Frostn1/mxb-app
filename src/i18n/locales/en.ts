@@ -289,7 +289,11 @@ export const en = {
   "browse.help":
     "Discover and install mods from the online catalog — search, filter by type, and open a mod to download it into the game.",
   "browse.searchPlaceholder": "Search {{type}}…",
-  "browse.sortedByNewest": "Sorted by newest",
+  "browseSort.newest": "Newest",
+  "browseSort.oldest": "Oldest",
+  "browseSort.popularAll": "Most popular",
+  "browseSort.popularMonth": "Popular this month",
+  "browseSort.popularWeek": "Popular this week",
   "browse.loadFailed": "Couldn't load mods",
   "browse.empty": "No {{type}} found.",
   "browse.loadMore": "Load more",
