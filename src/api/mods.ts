@@ -16,8 +16,11 @@ import type {
   LibraryEntry,
   Loadout,
   ModDetail,
+  ModEntry,
   ModRating,
+  ModsStateOutcome,
   ModSummary,
+  StatePlan,
   PkzMeta,
   PaintTexture,
   BikeModel,
@@ -916,6 +919,46 @@ export function presetsDecode(text: string): Promise<Preset> {
 /** Import a share code: decode + save + return the stored preset. */
 export function presetsImport(text: string): Promise<Preset> {
   return invoke<Preset>("presets_import", { text });
+}
+
+/** Every mod the Manage tab can act on, enabled and disabled alike. */
+export function modsStateScan(): Promise<ModEntry[]> {
+  return invoke<ModEntry[]>("mods_state_scan");
+}
+
+/** What racing this preset would enable and disable — nothing moves. */
+export function modsStatePlan(name: string): Promise<StatePlan> {
+  return invoke<StatePlan>("mods_state_plan", { name });
+}
+
+/** Enable or disable a hand-picked set of mods, by `rel` path. */
+export function modsStateSet(
+  rels: string[],
+  enabled: boolean,
+): Promise<ModsStateOutcome> {
+  return invoke<ModsStateOutcome>("mods_state_set", { rels, enabled });
+}
+
+/** Send mods to the recycle bin, enabled or disabled, by `rel` path. */
+export function modsStateDelete(rels: string[]): Promise<ModsStateOutcome> {
+  return invoke<ModsStateOutcome>("mods_state_delete", { rels });
+}
+
+/**
+ * Race mode: apply the preset's look and leave the game holding only the content it
+ * needs. Blank `profile`/`bikeid` skips the cosmetics and does the content alone.
+ */
+export function modsStateApply(
+  name: string,
+  profile: string,
+  bikeid: string,
+): Promise<ModsStateOutcome> {
+  return invoke<ModsStateOutcome>("mods_state_apply", { name, profile, bikeid });
+}
+
+/** Move every disabled mod back to where it came from. */
+export function modsStateRestoreAll(): Promise<ModsStateOutcome> {
+  return invoke<ModsStateOutcome>("mods_state_restore_all");
 }
 
 export function presetBundleStats(loadout: Loadout): Promise<BundlePlan> {

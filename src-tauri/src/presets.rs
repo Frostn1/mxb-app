@@ -97,6 +97,22 @@ pub struct BundleRef {
     pub size: u64,
 }
 
+/// The content a preset needs on disk, beyond the cosmetics in its [`Loadout`].
+///
+/// A loadout says how the bike is *dressed*; this says what has to be *installed* for the
+/// session it belongs to — the track it's ridden on, plus whatever the player pins as
+/// always-needed (the OEM pack and friends). It's what lets Manage take everything else
+/// out of the game's way before a race.
+///
+/// Paths are relative to the MX Bikes root, forward-slashed (`mods/tracks/EU/RedBud.pkz`),
+/// so a preset survives the mods folder moving or being shared with another player.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PresetContent {
+    pub tracks: Vec<String>,
+    pub keep: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preset {
@@ -104,6 +120,11 @@ pub struct Preset {
     pub loadout: Loadout,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<BundleRef>,
+    /// Race content. Absent on every preset saved before Manage existed, and on presets
+    /// that are only ever used to dress a bike — `None` and an empty one mean the same
+    /// thing, but skipping it keeps old share codes byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<PresetContent>,
 }
 
 struct IniDoc {
@@ -587,13 +608,31 @@ KTM250=p_mx
                 l
             },
             bundle: None,
+            content: Some(PresetContent {
+                tracks: vec!["mods/tracks/RedBud.pkz".into()],
+                keep: vec!["mods/bikes/OEM Pack.pkz".into()],
+            }),
         };
         let code = encode_code(&preset);
         assert!(code.starts_with(CODE_PREFIX));
         let back = decode_code(&code).unwrap();
         assert_eq!(back.name, "RedBud #92");
         assert_eq!(back.loadout.helmet_paint, "CLUTCH Deeg F REDB");
+        assert_eq!(back.content.unwrap().tracks, vec!["mods/tracks/RedBud.pkz"]);
         let _ = round_trip_raw_json(&preset);
+    }
+
+    /// Presets saved before Manage existed have no `content` key at all. They have to keep
+    /// loading — both from `presets.json` and from a share code someone posted last month.
+    #[test]
+    fn a_preset_without_content_still_loads() {
+        let json = r#"{"name":"Old","loadout":{"paint":"RedBud"}}"#;
+        let back = decode_code(json).unwrap();
+        assert_eq!(back.name, "Old");
+        assert!(back.content.is_none());
+        // And it round-trips back out without growing a `content` key.
+        let out = serde_json::to_string(&back).unwrap();
+        assert!(!out.contains("content"), "{out}");
     }
 
     fn round_trip_raw_json(preset: &Preset) -> anyhow::Result<()> {
