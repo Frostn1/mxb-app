@@ -13,6 +13,86 @@
   read is assumed new enough — telling someone on the latest build to update is the
   worse mistake — and the version is compared numerically, so v0.9.10 doesn't read as
   older than v0.9.9.
+## 2026-08-07
+
+### Added
+- **New versions now show what's new in them.** An update used to land silently: the banner
+  said a version was available, the app restarted, and the same screen came back. The
+  overlay was the worst case — a feature that doesn't exist until you know its shortcut, in
+  a release nobody had a reason to read about. After an update the app now shows the
+  release's headline feature (for 0.7.0, the overlay, with your own shortcut on it and a
+  link straight to its settings), a line each for the rest, and a link to the full release
+  notes for everything the list leaves out. Once per version, never on a fresh install —
+  a first run gets the intro and the tour instead, and nothing in a version you just
+  installed is news to you. It's re-openable any time from Settings → About & updates →
+  What's new.
+
+### Changed
+- **Settings → In-game overlay explains itself.** The section was a switch, a key field and
+  one grey line, which left the two things that actually decide whether the overlay works
+  looking optional. It now shows whether MX Bikes is running, offers **Show overlay now** so
+  you can see the thing without launching a race, and says plainly that a game holding the
+  screen in exclusive fullscreen can't be drawn over — set it to Borderless or Windowed in
+  Options → Video. When the screen is being held exclusively *right now*, it says so, since
+  that means the overlay is already open behind the game. And if the shortcut does nothing,
+  it points at the shortcut: another app owning the combo is the usual cause.
+
+### Fixed
+- **The overlay shortcut no longer defaults to Discord's mute key.** Ctrl+Shift+M is
+  Discord's default mute toggle; Discord registers it globally and gets there first, so on
+  a lot of machines our hotkey never bound at all — invisibly, because a shortcut that was
+  never registered has nothing to report at the moment you press it. The default is now
+  **Ctrl+Shift+X**, and an install still carrying the old default is moved to it on the next
+  launch. A combo you picked yourself is left alone. When registration does fail, Settings
+  now names the reason instead of leaving you with "I pressed it and nothing happened".
+## 2026-08-08
+
+### Fixed
+- **Switching goggles finally changes the goggles.** Picking a lens still did nothing on
+  the rider or in the Library's 3D view even once the preview started re-resolving for it
+  (yesterday's fix), because the preview decided which piece *was* the goggles from the
+  name of the mesh group — and a helmet's goggles are as often called `mask`, or live in a
+  node of their own with no groups to name, so the goggle paint was decoded, shipped to
+  the viewer and worn by nothing. The mesh's own materials now say which piece draws
+  from which texture, the same reading the bike viewer uses, with the names as a hint on
+  top rather than the whole story. Goggle paints that ship apart from the helmet — under
+  your rider profile, or loose beside a `.pkz` — are now loaded too, instead of silently
+  falling back to whichever goggle the helmet happened to pack first; a name that really
+  can't be found says so in the log. And the game's own free helmets, which never loaded a
+  goggle paint at all, now wear one like an installed helmet does.
+- **Bikes whose bodywork came out in the wrong texture.** A part's material index was read
+  as a position in the model's texture list in the order the exporter happened to write
+  them, which only matches on bikes that were written in material order. The 2023 Kawasaki
+  KX250/KX450 store `w_plate` between `metals` and `plastics`, so their entire bodywork
+  wore the blank number-plate texture and an installed paint changed nothing visible. The
+  model's own material table now decides, which also fixes the Yamaha YZ125/YZ250, where
+  the chassis and the engine had swapped textures. Neither reading is right on every bike,
+  so where they disagree the mesh breaks the tie: a part's UV layout only lines up with
+  the atlas it was drawn against, and each part is asked separately, since a bike's parts
+  need not agree — the YZ125's chassis reads through the table while its steering reads
+  straight off the texture order. That puts the KTM 125 SX back on its plastics too.
+- **The front fender and fork guards rendering in bare metal.** A mesh group can hold
+  several materials as contiguous ranges — a fork leg and the plastic guard on it, a
+  triple clamp and the fender — and we merged each group into one submesh, so every range
+  wore the first one's texture. Each range now binds its own.
+
+### Changed
+- **Library thumbnails show a bike's manufacturer logo.** A bike's 250x250 `logo.tga` was
+  losing a scoring tie to `team.tga`, a 32x64 strip, so bikes showed a coloured sliver. A
+  real preview image still wins where a mod ships one. Cached thumbnails are rebuilt.
+- **Hovering a name in the Library shows the full name, folder and location.** The row
+  truncates hard, and the folder id is what you need when matching a paint to its bike.
+
+## 2026-08-07 — six languages, a Play button, live model swaps
+## 2026-08-07 — a way out of the overlay that isn't the game
+
+### Added
+- **"Open full app" in the in-game overlay.** The overlay carries Presets, the Locker and
+  Browse; Rider, the Library and Settings only exist in the main window, and the only way
+  there was to close the overlay — which drops you back into the game — and then alt-tab.
+  A button next to the close X now puts the overlay away and brings the main window
+  forward instead, keeping the focus where you asked for it rather than handing it back to
+  MX Bikes on the way out.
 
 ## 2026-08-07 — v0.7.0 — Six languages, an in-game overlay, and bikes wearing the right paint
 

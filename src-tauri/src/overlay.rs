@@ -9,6 +9,8 @@
 //! What it deliberately does *not* do is draw inside the game's swapchain. Exclusive
 //! fullscreen therefore covers it — see [`fullscreen_hint`].
 
+use std::sync::Mutex;
+
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -38,6 +40,26 @@ pub struct OverlayState {
     pub game_running: bool,
     /// A DirectX app is holding the screen exclusively right now.
     pub fullscreen_blocked: bool,
+    /// Why the hotkey isn't live, when it isn't. `None` means the combo is registered
+    /// — or that the overlay is switched off, which the player already knows.
+    pub hotkey_error: Option<String>,
+}
+
+/// Why the last [`register`] call failed, if it did.
+///
+/// A hotkey that never bound has nothing to say at the moment it isn't pressed, and
+/// startup only logs the failure (`main.rs`), so without this the player's evidence is
+/// "I pressed it and nothing happened". Settings reads it and names the cause.
+static HOTKEY_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+fn record_hotkey_result(result: &Result<(), String>) {
+    if let Ok(mut slot) = HOTKEY_ERROR.lock() {
+        *slot = result.as_ref().err().cloned();
+    }
+}
+
+fn hotkey_error() -> Option<String> {
+    HOTKEY_ERROR.lock().ok().and_then(|slot| slot.clone())
 }
 
 /// The configured combo, falling back to the default when the setting is blank.
@@ -130,11 +152,20 @@ fn center_over_game<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
-/// Hide the overlay and return keyboard focus to MX Bikes.
-pub fn hide<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+/// Take the overlay off the screen, leaving the foreground where it lands.
+///
+/// Separate from [`hide`] for the "Open full app" button: focus is on its way to the
+/// main window, so pulling MX Bikes forward on the way out would only fight it.
+pub fn dismiss<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(LABEL) {
         window.hide().map_err(|e| format!("{e:#}"))?;
     }
+    Ok(())
+}
+
+/// Hide the overlay and return keyboard focus to MX Bikes.
+pub fn hide<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    dismiss(app)?;
     // Order matters: the game can't take the foreground while our window still holds it.
     gameproc::focus_game();
     Ok(())
@@ -145,6 +176,12 @@ pub fn hide<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 /// Unregisters everything first so a hotkey change can't leave the old combo live —
 /// this app registers no other shortcuts, so the blanket call is the honest one.
 pub fn register<R: Runtime>(app: &AppHandle<R>, cfg: &config::AppConfig) -> Result<(), String> {
+    let result = bind(app, cfg);
+    record_hotkey_result(&result);
+    result
+}
+
+fn bind<R: Runtime>(app: &AppHandle<R>, cfg: &config::AppConfig) -> Result<(), String> {
     let shortcuts = app.global_shortcut();
     let _ = shortcuts.unregister_all();
     if !cfg.overlay_enabled {
@@ -178,6 +215,9 @@ pub fn state(cfg: &config::AppConfig) -> OverlayState {
         hotkey: hotkey_of(cfg).to_string(),
         game_running: gameproc::is_game_running(),
         fullscreen_blocked: gameproc::is_exclusive_fullscreen(),
+        // A disabled overlay has no binding by design — reporting that as a fault
+        // would put a warning under a switch the player just turned off.
+        hotkey_error: cfg.overlay_enabled.then(hotkey_error).flatten(),
     }
 }
 
@@ -202,6 +242,30 @@ mod tests {
     #[test]
     fn the_default_hotkey_is_registrable() {
         parse_hotkey(DEFAULT_OVERLAY_HOTKEY).expect("the shipped default must parse");
+    }
+
+    /// One test, not three: `HOTKEY_ERROR` is process-wide, so separate tests touching
+    /// it would race each other under the default parallel runner.
+    #[test]
+    fn a_failed_binding_is_remembered_and_reported() {
+        let cfg = config::AppConfig::default();
+
+        record_hotkey_result(&Err("another app already has it".into()));
+        assert_eq!(
+            state(&cfg).hotkey_error.as_deref(),
+            Some("another app already has it"),
+            "a hotkey that never bound has to say so somewhere the player can look",
+        );
+
+        let mut off = cfg.clone();
+        off.overlay_enabled = false;
+        assert!(
+            state(&off).hotkey_error.is_none(),
+            "an overlay switched off isn't broken, so it doesn't get a warning",
+        );
+
+        record_hotkey_result(&Ok(()));
+        assert!(state(&cfg).hotkey_error.is_none(), "a later success clears it");
     }
 
     /// A hand-edited config holding junk should surface a message naming the junk,
@@ -252,6 +316,15 @@ mod tests {
     fn hiding_a_never_opened_overlay_is_harmless() {
         let app = mock_app();
         hide(app.handle()).expect("nothing to hide is not a failure");
+        assert!(app.get_webview_window(LABEL).is_none());
+    }
+
+    /// "Open full app" routes through `dismiss` before the main window is raised, and
+    /// it too can fire with no overlay window built yet.
+    #[test]
+    fn dismissing_a_never_opened_overlay_is_harmless() {
+        let app = mock_app();
+        dismiss(app.handle()).expect("nothing to dismiss is not a failure");
         assert!(app.get_webview_window(LABEL).is_none());
     }
 }
