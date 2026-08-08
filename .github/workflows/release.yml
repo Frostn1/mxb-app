@@ -4,6 +4,13 @@ name: Release
 # Triggers on any tag like `v0.1.0`. You can also run it manually from the
 # Actions tab (workflow_dispatch) to build without tagging. Releases are
 # published, not drafted (`releaseDraft: false`).
+#
+# A tag with a suffix — `v0.7.0-beta.1`, `v0.7.0-rc.2` — builds the same three
+# platforms but publishes as a PRE-RELEASE: GitHub keeps it off `releases/latest`,
+# which is the endpoint the in-app updater reads, so existing installs are not
+# offered it and the Discord announcement is held back. Beta testers install it by
+# downloading the installer from the release page. Tagging the plain `v0.7.0`
+# afterwards is what ships it to everyone.
 
 on:
   push:
@@ -87,6 +94,21 @@ jobs:
         shell: bash
         run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
 
+      # The release page should say what shipped, not only which file to download — so
+      # the body is composed from this tag's CHANGELOG section. Same section the Discord
+      # announcement reads, so the two can't drift apart.
+      - name: Compose release notes
+        id: notes
+        shell: bash
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
+        run: |
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            bash scripts/release-notes.sh "$TAG"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -99,34 +121,18 @@ jobs:
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
           releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
-          # Nearly everyone here is on Windows, and the asset list now runs to six
-          # files across three platforms — so lead with the one file most people
-          # want and describe the rest by extension. Extensions don't drift when the
-          # `finalize` job renames the assets, exact filenames would.
-          releaseBody: |
-            ## Which file do I download?
-
-            **Windows — download the `.exe`.** That's the installer, and it's what
-            almost everyone needs. Run it and you're done.
-
-            <details>
-            <summary>macOS and Linux</summary>
-
-            - **macOS (Apple Silicon)** — the `.dmg`.
-            - **Linux** — the `.AppImage` works on any distro: download, `chmod +x`, run
-              it. Prefer your package manager? `.deb` for Debian/Ubuntu, `.rpm` for
-              Fedora. Note MX Bikes itself runs through Proton on Linux.
-
-            </details>
-
-            The `.sig` and `.tar.gz` files are used by the in-app updater — you don't
-            need to download those.
-
-            ---
+          # What shipped, then which file to download — worded in scripts/release-notes.sh.
+          # The download half describes files by extension, since exact filenames drift
+          # when the `finalize` job renames the assets.
+          releaseBody: ${{ steps.notes.outputs.body }}
           # Publish straight away (not a draft) so the updater's `latest.json`
           # endpoint (releases/latest) resolves without a manual publish step.
           releaseDraft: false
-          prerelease: false
+          # A suffixed tag (`v0.7.0-beta.1`) is a beta: same artifacts, but flagged
+          # pre-release so `releases/latest` — and with it every installed app's update
+          # check — stays on the last full release until the plain tag is cut.
+          # A manual `workflow_dispatch` build is never the release everyone should get.
+          prerelease: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
 
   # Tauri names bundles like `MXB.App_0.1.0_x64-setup.exe`, which reads as ugly/
@@ -171,10 +177,12 @@ jobs:
   # Announce the finished release in Discord. Runs after `finalize` so the download links
   # point at the renamed installers, and only for real tags on the canonical repo — forks
   # stay silent, and `workflow_dispatch` test builds (throwaway `v<run_number>` tags) don't
-  # spam the channel.
+  # spam the channel. Pre-release tags stay quiet too: a beta goes to the people who asked
+  # for it, and the channel hears about the version once, when everyone can have it.
+  # (`scripts/notify-discord.sh <tag> --print` renders the message without sending it.)
   notify:
     needs: finalize
-    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
+    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
