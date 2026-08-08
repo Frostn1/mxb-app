@@ -14,10 +14,12 @@ mod gameproc;
 mod imgcache;
 mod install;
 mod library;
+mod lru;
 mod modelswap;
 mod mods;
 mod modstate;
 mod modwatch;
+mod mxb_fetch;
 mod mxb_session;
 mod overlay;
 mod paint;
@@ -25,10 +27,13 @@ mod pkz;
 #[cfg(sidecar)]
 mod sidecar;
 mod presets;
+mod paintsync;
+mod servers;
 mod shop_catalog_session;
 mod shop_credentials;
 mod shop_session;
 mod soundmods;
+mod texstore;
 mod upload;
 
 use config::AppConfig;
@@ -44,6 +49,43 @@ use tauri::{
     Emitter, Manager, State, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+
+/// The app window, as opposed to the transient ones the app opens alongside it (the
+/// overlay, the mxb-mods.com clearance check, the shop login). `tauri.conf.json` declares
+/// it without an explicit label, which is Tauri's default of `main`.
+const MAIN_WINDOW: &str = "main";
+
+/// The shop login WebView, opened on demand and closed once the session is captured.
+const SHOP_LOGIN_WINDOW: &str = "shop-login";
+
+/// Whether closing this window should park it in the tray rather than destroy it.
+///
+/// Only the main window. The transient ones are owned by the code that opened them, and
+/// hiding one instead of closing it keeps its label registered for the life of the
+/// process — the next attempt to build it then fails with "a webview with label `…`
+/// already exists" and never opens again. A tester hit exactly that on the mxb-mods.com
+/// clearance window: the first Cloudflare handshake worked, and every Retry afterwards
+/// silently did nothing.
+fn parks_in_tray(label: &str) -> bool {
+    label == MAIN_WINDOW
+}
+
+/// Whether a window may make this IPC call.
+///
+/// Exists for one window. [`mxb_fetch`] parks a hidden webview on the *remote* mxb-mods.com
+/// origin, and giving it a capability is what lets its page hand fetch results back. But a
+/// capability grants IPC in general, and the commands registered with `generate_handler!`
+/// are not covered by the permission ACL — so without this, script on mxb-mods.com could
+/// call `create_config`, `install_mod` or anything else the app exposes.
+///
+/// So that window gets an allowlist of exactly one call: emitting the result event. Every
+/// other window is unaffected and keeps whatever its own capability file grants.
+fn ipc_allowed(label: &str, command: &str) -> bool {
+    if label != mxb_fetch::WINDOW {
+        return true;
+    }
+    command == "plugin:event|emit"
+}
 
 /// Whether the app is ready to use. Falls back to auto-detection when the config file
 /// is missing, so the setup screen only appears when the MX Bikes folder genuinely
@@ -87,25 +129,21 @@ fn create_config(
     Ok(true)
 }
 
-/// Which site's check window to open. Both catalogs sit behind Cloudflare, but their
-/// clearances are separate cookies in separate jars, so the retry has to know which one it
-/// is asking for.
-#[derive(Debug, Clone, Copy)]
-enum Clearance {
-    MxbMods,
-    Shop,
-}
-
-/// Run a catalog call; if Cloudflare refuses it, earn a `cf_clearance` in a real browser and
-/// try exactly once more.
+/// Run an mxb-mods.com call; if Cloudflare refuses it, run it again from inside a real
+/// browser and keep using that transport for the rest of the session.
 ///
-/// Once, not a loop: the handshake either produced a cookie the client didn't have or it
-/// didn't, and repeating it would just reopen the window at someone who is already stuck.
-/// Only refusals we could plausibly clear get this treatment — a 429 wants patience, not a
-/// browser window.
+/// This used to earn a `cf_clearance` in a WebView and replay the cookie through the HTTP
+/// client. A tester's log showed why that can't work: the challenge cleared in about a
+/// second, the cookie was sent correctly, and Cloudflare served the interstitial to reqwest
+/// anyway — a clearance is bound to the TLS fingerprint that earned it. So instead of moving
+/// the cookie to the request, we move the request to the browser. See [`mxb_fetch`].
+///
+/// Once, not a loop: the second attempt is on a different transport, so if that is refused
+/// too, trying a third time changes nothing. Only refusals a browser could plausibly satisfy
+/// get this treatment — a 429 wants patience, not another request.
 async fn with_clearance<T, F, Fut>(
-    app: &tauri::AppHandle,
-    site: Clearance,
+    _app: &tauri::AppHandle,
+    what: &str,
     op: F,
 ) -> Result<T, String>
 where
@@ -116,18 +154,37 @@ where
         Ok(value) => return Ok(value),
         Err(err) => err,
     };
-    match err.downcast_ref::<mods::Blocked>() {
-        Some(blocked) if blocked.clearable() => {}
-        _ => return Err(format!("{err:#}")),
+    match err.downcast_ref::<mods::mxb::Blocked>() {
+        Some(blocked) if blocked.clearable() => {
+            log::info!(
+                "{what} blocked ({}) — retrying it from inside the WebView",
+                blocked
+                    .status
+                    .map_or_else(|| "interstitial".to_string(), |s| s.to_string())
+            );
+        }
+        // Not clearable, or not a block at all — a parse failure, a timeout, a 429.
+        _ => {
+            log::warn!("{what} failed and a browser wouldn't help: {err:#}");
+            return Err(format!("{err:#}"));
+        }
     }
-    let cleared = match site {
-        Clearance::MxbMods => mxb_session::handshake(app).await,
-        Clearance::Shop => shop_catalog_session::handshake(app).await,
-    };
-    if !cleared {
-        return Err(format!("{err:#}"));
+    // Latches for the session: once this client's fingerprint has been refused on this
+    // network, every later request would be refused the same way, so there is nothing to
+    // gain from trying the HTTP client again first.
+    mods::mxb::use_webview();
+    match op().await {
+        Ok(value) => {
+            log::info!("{what} succeeded through the WebView");
+            Ok(value)
+        }
+        // Report the browser's failure, not the original 403 — if the site is refusing a
+        // real browser too, "open mxb-mods.com and hit Retry" is the wrong advice.
+        Err(e) => {
+            log::warn!("{what} failed through the WebView too: {e:#}");
+            Err(format!("{e:#}"))
+        }
     }
-    op().await.map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -138,7 +195,7 @@ async fn search_mods(
     page: u32,
     sort: ModSort,
 ) -> Result<Vec<ModSummary>, String> {
-    with_clearance(&app, Clearance::MxbMods, || {
+    with_clearance(&app, "search", || {
         MxbModsSource.search(&query, category_id, page, sort)
     })
     .await
@@ -153,7 +210,7 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 
 #[tauri::command]
 async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
-    with_clearance(&app, Clearance::MxbMods, || MxbModsSource.detail(&slug)).await
+    with_clearance(&app, "mod detail", || MxbModsSource.detail(&slug)).await
 }
 
 // ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
@@ -179,10 +236,9 @@ fn shop_catalog_status(app: tauri::AppHandle) -> mods::shop_catalog::ShopStatus 
 async fn shop_catalog_categories(
     app: tauri::AppHandle,
 ) -> Result<Vec<mods::shop_catalog::ShopCategory>, String> {
-    with_clearance(&app, Clearance::Shop, || {
-        mods::shop_catalog::categories(&app)
-    })
-    .await
+    mods::shop_catalog::categories(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -194,10 +250,9 @@ async fn shop_catalog_search(
     sort: mods::shop_catalog::ShopSort,
     on_sale_only: bool,
 ) -> Result<mods::shop_catalog::ShopPage, String> {
-    with_clearance(&app, Clearance::Shop, || {
-        mods::shop_catalog::search(&app, &query, category_id, page, sort, on_sale_only)
-    })
-    .await
+    mods::shop_catalog::search(&app, &query, category_id, page, sort, on_sale_only)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -205,10 +260,9 @@ async fn shop_catalog_detail(
     app: tauri::AppHandle,
     id: u64,
 ) -> Result<mods::shop_catalog::ShopModDetail, String> {
-    with_clearance(&app, Clearance::Shop, || {
-        mods::shop_catalog::detail(&app, id)
-    })
-    .await
+    mods::shop_catalog::detail(&app, id)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// Ignores the cache age and any `ETag` we hold — "Refresh" has to mean refresh, not
@@ -217,10 +271,9 @@ async fn shop_catalog_detail(
 async fn shop_catalog_refresh(
     app: tauri::AppHandle,
 ) -> Result<mods::shop_catalog::ShopStatus, String> {
-    with_clearance(&app, Clearance::Shop, || {
-        mods::shop_catalog::force_refresh(&app)
-    })
-    .await
+    mods::shop_catalog::force_refresh(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -264,6 +317,18 @@ fn scan_rider_targets_blocking(app: tauri::AppHandle) -> Result<library::RiderTa
 }
 
 #[tauri::command]
+async fn scan_bike_targets(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || scan_bike_targets_blocking(app))
+        .await
+        .map_err(|e| format!("scan_bike_targets task failed: {e}"))?
+}
+
+fn scan_bike_targets_blocking(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    Ok(library::scan_bike_targets(&cfg.mods_path, &cfg.profiles_dir()))
+}
+
+#[tauri::command]
 async fn scan_model_swaps(app: tauri::AppHandle) -> Result<Vec<modelswap::BikeModels>, String> {
     tauri::async_runtime::spawn_blocking(move || scan_model_swaps_blocking(app))
         .await
@@ -301,12 +366,14 @@ fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
 /// instant refresh is off — the same switch that gates `live_refresh`, since both
 /// reach into the running game.
 ///
-/// A FrostMod that predates `refresh_bike_model` logs an unknown verb and drops it,
-/// which reads as `Signaled` here and would have the UI promise a refresh that can't
-/// happen. The tag our installer recorded is the only evidence available on this side,
-/// so a clean send is downgraded to `TooOld` when it names a build without the verb.
-/// `NotRunning`/`WriteFailed` are left alone: they say something more specific, and an
-/// unreadable tag is treated as new enough (see `supports_model_refresh`).
+/// The tag our installer recorded decides whether the command goes out at all. It used
+/// to be sent unconditionally and only the *wording* adjusted afterwards, because the
+/// worst an old FrostMod did was log an unknown verb and drop it. That is no longer the
+/// worst: FrostMod v0.9.9 acts on the verb by replaying a bike-apply call it captured
+/// earlier, which corrupts the game's bike state and crashes it to desktop at the next
+/// bike the player picks by hand. So the check moved *before* the send — nothing is
+/// written to the command file and no event is pulsed for a build we don't trust.
+/// See `frostmod::MODEL_REFRESH_MIN_VERSION`.
 fn model_refresh_cmd(
     app: &tauri::AppHandle,
     enabled: bool,
@@ -315,11 +382,11 @@ fn model_refresh_cmd(
     if !enabled {
         return None;
     }
-    let sent = frostmod::signal_refresh_model(bike);
-    let too_old = matches!(sent, frostmod::CommandOutcome::Signaled)
-        && frostmod_manage::installed_version(app)
-            .is_some_and(|tag| !frostmod::supports_model_refresh(&tag));
-    Some(if too_old { frostmod::CommandOutcome::TooOld } else { sent })
+    let tag = frostmod_manage::installed_version(app);
+    if !frostmod::model_refresh_is_safe(tag.as_deref()) {
+        return Some(frostmod::CommandOutcome::Withheld);
+    }
+    Some(frostmod::signal_refresh_model(bike))
 }
 
 #[tauri::command]
@@ -516,6 +583,17 @@ fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, Strin
     paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
+/// Raw RGBA for a texture the viewer was handed a token for.
+///
+/// Returns an `ipc::Response`, which travels as `application/octet-stream` and lands in the
+/// webview as an `ArrayBuffer` — the pixels are never encoded, base64'd, or parsed as JSON
+/// on the way. The frontend feeds the buffer straight to a `THREE.DataTexture`. `async`
+/// keeps the copy off the main thread, as with every other command here.
+#[tauri::command]
+async fn texture_bytes(token: String) -> tauri::ipc::Response {
+    tauri::ipc::Response::new(texstore::bytes_or_missing(&token))
+}
+
 #[tauri::command]
 async fn unpack_pkz(path: String, out_dir: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || unpack_pkz_blocking(path, out_dir))
@@ -543,10 +621,23 @@ struct BikeModel {
     paints: Vec<BikePaint>,
 }
 
-fn bike_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, BikeModel>> {
-    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, BikeModel>>> =
+impl BikeModel {
+    /// Every texture token the model holds, so evicting it can free the pixels too.
+    fn tokens(&self) -> Vec<String> {
+        self.paints
+            .iter()
+            .flat_map(|p| p.textures.iter().map(|t| t.token.clone()))
+            .collect()
+    }
+}
+
+/// Bikes are big (geometry plus every paint's pixels), so hold only the few most recent.
+const BIKE_CACHE_CAP: usize = 3;
+
+fn bike_cache() -> &'static std::sync::Mutex<lru::Lru<BikeModel>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<lru::Lru<BikeModel>>> =
         std::sync::OnceLock::new();
-    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+    CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(BIKE_CACHE_CAP)))
 }
 
 fn bike_cache_key(source: &str) -> String {
@@ -570,7 +661,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     use rayon::prelude::*;
     let t0 = std::time::Instant::now();
     let key = bike_cache_key(&source);
-    if let Some(m) = bike_cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
+    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         log::info!("load_bike_model {source}: cache hit ({:?})", t0.elapsed());
         return Ok(m);
     }
@@ -701,7 +792,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
         })
         .collect();
     let base_count = base.len();
-    let t_encode = t0.elapsed();
+    let t_textures = t0.elapsed();
 
     let bound: std::collections::HashSet<String> = nodes
         .iter()
@@ -746,12 +837,18 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
         });
     }
 
+    let distinct_tex: std::collections::HashSet<&str> = paints
+        .iter()
+        .flat_map(|p| p.textures.iter().map(|t| t.token.as_str()))
+        .collect();
     log::info!(
-        "load_bike_model {source}: {} paint(s) + {base_count} base tex | read {t_read:?}, parse {:?}, encode {:?}, total {:?}",
+        "load_bike_model {source}: {} paint(s) + {base_count} base tex | read {t_read:?}, parse {:?}, decode {:?}, total {:?} | {} distinct texture(s), {:.1} MB resident in the texture store",
         paints.len(),
         t_parse - t_read,
-        t_encode - t_parse,
+        t_textures - t_parse,
         t0.elapsed(),
+        distinct_tex.len(),
+        texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
     );
     for p in &paints {
         let mut names: Vec<&str> = p.textures.iter().map(|t| t.name.as_str()).collect();
@@ -779,10 +876,10 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
 
     let model = BikeModel { nodes, paints };
     if let Ok(mut c) = bike_cache().lock() {
-        if c.len() >= 6 {
-            c.clear();
+        // The evicted bike's pixels go with it — nothing else references them.
+        if let Some(dropped) = c.insert(key, model.clone()) {
+            texstore::release(&dropped.tokens());
         }
-        c.insert(key, model.clone());
     }
     Ok(model)
 }
@@ -793,24 +890,21 @@ fn bind_textures(
     gfx: &std::collections::HashMap<String, cfg::GfxPart>,
     node_part: &std::collections::HashMap<String, String>,
 ) {
-    let readings = edf::MaterialReadings::new(edf_bytes);
+    let colors = edf::color_textures(edf_bytes);
 
     for n in nodes.iter_mut() {
         let part = node_part.get(&n.name.to_ascii_lowercase());
         let overrides = part.and_then(|p| gfx.get(p)).map(|p| &p.textures);
-        // Ask this part's geometry which reading of a material index it was drawn for.
-        let fit = readings.fit(n);
-        if fit.table_fit != fit.blob_fit {
-            log::info!(
-                "[viewer] node '{}' reads its materials through the {} (fit {:.0} vs {:.0})",
-                n.name,
-                if fit.by_table { "material table" } else { "texture order" },
-                fit.table_fit.max(fit.blob_fit),
-                fit.table_fit.min(fit.blob_fit),
-            );
+        if n.materials.is_empty() {
+            log::warn!("[viewer] node '{}' has no material table — falling back", n.name);
         }
-        // A node with no submesh table is a single material — the first colour texture.
-        n.texture = readings.color.first().map(|t| t.name.clone());
+        // A material id is local to its node, so ask the node's own table.
+        let material_texture = |mat: Option<u32>| -> Option<&edf::EmbeddedTexture> {
+            let slot = n.materials.get(mat? as usize).copied().flatten()?;
+            colors.get(slot)
+        };
+        // A node with no submesh table draws on its first material.
+        n.texture = material_texture(Some(0)).or_else(|| colors.first()).map(|t| t.name.clone());
         for sm in n.submeshes.iter_mut() {
             let group = sm.name.to_ascii_lowercase();
             // 1. An explicit gfx texture (animated chain, number plate) is authoritative.
@@ -821,8 +915,8 @@ fn bind_textures(
                 sm.texture = Some(tex.clone());
                 continue;
             }
-            // 2. The material index picks its colour texture, via the table where usable.
-            if let Some(t) = sm.mat.and_then(|i| readings.texture(i as usize, &fit)) {
+            // 2. The node's material table picks the colour texture this range was drawn on.
+            if let Some(t) = material_texture(sm.mat) {
                 sm.texture = Some(t.name.clone());
                 continue;
             }
@@ -972,8 +1066,9 @@ fn load_rider_model_blocking(
         }
     }
 
-    let suit = load_rider_paint(&base, "suit", &loadout.rider, "paints", &loadout.suit_paint);
-    let gloves = load_rider_paint(&base, "gloves", &loadout.rider, "gloves", &loadout.gloves_paint);
+    let suit = load_rider_paint(&cfg, &base, "suit", &loadout.rider, "paints", &loadout.suit_paint);
+    let gloves =
+        load_rider_paint(&cfg, &base, "gloves", &loadout.rider, "gloves", &loadout.gloves_paint);
     if !loadout.suit_paint.is_empty() && suit.is_none() {
         log::warn!("[rider] suit paint '{}' did not load for profile '{}'", loadout.suit_paint, loadout.rider);
     }
@@ -1012,18 +1107,176 @@ async fn load_rider_body_model(
     .map_err(|e| format!("load_rider_body_model task failed: {e}"))?
 }
 
+/// The textures a body mesh carries itself, memoised alongside the mesh.
+///
+/// These depend on the model and not on the loadout, but reaching them means reading the
+/// whole `rider.edf` back — 67 MB for Rider+. The viewer reloads on every loadout change, so
+/// without this a rider wearing a kit that leaves one slot bare re-reads the model each time
+/// you touch a dropdown.
+///
+/// Only textures the viewer could actually draw are decoded. Skin renders as flat colour and
+/// the `w_` planes render as nothing, so inflating and re-encoding them is time spent on
+/// pixels no one will ever see — and on a rider body that decode costs more than parsing the
+/// mesh does.
+fn body_textures(src: &BodySource, profile: &str) -> Option<Vec<paint::PaintTexture>> {
+    static C: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Vec<paint::PaintTexture>>>,
+    > = std::sync::OnceLock::new();
+    let cache = C.get_or_init(Default::default);
+    let key = src.cache_key(profile);
+    if let Some(t) = cache.lock().ok().and_then(|c| c.get(&key).cloned()) {
+        return Some(t);
+    }
+    let drawn = |name: &str| !matches!(body_slot(Some(name)).as_str(), "hide" | "face");
+    let texs = paint::extract_edf_textures_where(&src.read(profile)?, drawn);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(key, texs.clone());
+    }
+    Some(texs)
+}
+
 fn load_rider_body(
     cfg: &config::AppConfig,
     profile: &str,
-    textures: Vec<paint::PaintTexture>,
+    mut textures: Vec<paint::PaintTexture>,
 ) -> Option<RiderPart> {
-    let mut nodes = load_rider_body_nodes(cfg, profile)?;
-    tag_body_materials(&mut nodes);
+    let profile = rider_profile_or_stock(profile);
+    let src = rider_body_source(cfg, profile)?;
+    let nodes = rider_body_nodes(&src, profile)?;
+
+    // Whatever the mesh asks for that no paint supplies, the model itself supplies: the
+    // supermoto rider ships no `.pnt` at all and wears its baked textures, and a custom
+    // model paints its own extra pieces into the mesh. Reading the file back costs real
+    // time on a 60 MB body, so only a name actually missing pays for it.
+    let supplied: std::collections::HashSet<String> =
+        textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+    let wanted: std::collections::HashSet<String> = nodes
+        .iter()
+        .flat_map(|n| n.submeshes.iter().filter_map(|s| s.texture.as_deref()))
+        .map(|t| t.to_ascii_lowercase())
+        // `hide` draws nothing and `face` is bare skin — neither wants a texture.
+        .filter(|t| t != "hide" && t != "face" && !supplied.contains(t))
+        .collect();
+    if !wanted.is_empty() {
+        match body_textures(&src, profile) {
+            Some(own) => textures.extend(
+                own.into_iter().filter(|t| wanted.contains(&t.name.to_ascii_lowercase())),
+            ),
+            None => log::warn!("[rider] body '{profile}' could not be re-read for {wanted:?}"),
+        }
+    }
+
+    log::info!(
+        "[rider] body '{profile}' loaded from {src:?}: {} nodes, tex={:?}",
+        nodes.len(),
+        textures.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+    );
     Some(RiderPart {
         part: "body".into(),
         nodes,
         textures,
     })
+}
+
+/// Stand a rider body up.
+///
+/// Rider meshes don't agree on which axis is up. The stock motocross rider is authored Y-up;
+/// the supermoto rider and Rider+ are Z-up and arrive lying on their back. The viewer anchors
+/// every piece of gear to a fraction of the body's height, so a body on its side doesn't just
+/// look wrong — it measures a quarter of a metre tall instead of a metre and a bit, and the
+/// helmet and boots scale down to specks and sink into the torso.
+///
+/// A rider is a standing figure: its longest axis is its height. Where that's Z, the mesh is
+/// authored in the other convention and takes that convention's one fixed rotation. Where
+/// it's already Y, leave the mesh alone — guessing at a body that's already upright is how
+/// the stock rider would get broken to fix a custom one.
+///
+/// The rotation is a half turn about Y on top of the quarter turn about X. Standing the body
+/// up alone leaves it facing backwards, which the name and number planes give away: they sit
+/// on a rider's back, and on the stock motocross rider — authored upright, so correct by
+/// construction — they sit behind its centre. On the Z-up meshes a bare quarter turn puts
+/// them in front. Both halves are needed together: `y = -z, z = -y` on its own mirrors the
+/// mesh rather than turning it, which would swap the rider's left and right hands.
+fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for n in nodes.iter() {
+        for v in n.positions.chunks_exact(3) {
+            for a in 0..3 {
+                lo[a] = lo[a].min(v[a]);
+                hi[a] = hi[a].max(v[a]);
+            }
+        }
+    }
+    let ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+    if ext[2] <= ext[1] || ext[2] <= ext[0] {
+        return;
+    }
+    for n in nodes.iter_mut() {
+        for v in n.positions.chunks_exact_mut(3).chain(n.normals.chunks_exact_mut(3)) {
+            let (x, y, z) = (v[0], v[1], v[2]);
+            v[0] = -x;
+            // Negated, not taken as-is: these meshes lie head-away, with the head at the
+            // most negative Z, so this is what puts it at the top.
+            v[1] = -z;
+            v[2] = -y;
+        }
+    }
+    log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
+}
+
+/// Bind each body submesh to the texture the mesh itself says it wears.
+///
+/// A material index is not a slot: it counts into the model's own texture list, and that
+/// list is written in the exporter's order. `default_mx` happens to put the suit first and
+/// the gloves second; `default_sm` puts the face second and its gloves third; Rider+ puts
+/// the gloves first and the suit last. So a fixed index→slot map is one model memorised —
+/// it already swaps face and gloves on the supermoto rider, and on a custom model it smears
+/// the glove texture across the whole body. Read the name the model was drawn against
+/// instead, the same reading the bike and gear viewers take — through each node's own
+/// material table, since an id counts into the table of the part that owns it and means
+/// nothing outside it (see `bind_textures`).
+fn bind_body_submeshes(nodes: &mut [edf::EdfNode], mesh: &[u8]) {
+    let colors = edf::color_textures(mesh);
+    if colors.is_empty() {
+        // A mesh whose texture table doesn't parse tells us nothing; the stock layout is
+        // still right for the model the app has always shown.
+        return tag_body_materials(nodes);
+    }
+    bind_body_to_colors(nodes, &colors);
+}
+
+/// The binding itself, split out so a test can drive it without a mesh blob: reading a
+/// material id through the wrong node's table is the failure worth pinning down, and it
+/// needs two nodes whose tables disagree, not a parseable `.edf`.
+fn bind_body_to_colors(nodes: &mut [edf::EdfNode], colors: &[edf::EmbeddedTexture]) {
+    for node in nodes.iter_mut() {
+        // Disjoint field borrows: the node's table is read while its submeshes are written.
+        let materials = &node.materials;
+        for sm in node.submeshes.iter_mut() {
+            let emb = sm
+                .mat
+                .and_then(|m| materials.get(m as usize).copied().flatten())
+                .and_then(|slot| colors.get(slot))
+                .map(|t| t.name.as_str());
+            sm.texture = Some(body_slot(emb));
+        }
+    }
+}
+
+/// The viewer slot an embedded texture name belongs to. The `w_` planes are decals the game
+/// composites a rider's name and number onto and carry no look of their own, and skin must
+/// never wear the kit. Everything else keeps its own name, so a paint replaces it by name
+/// and a piece the paint doesn't cover falls back to the model's own texture.
+fn body_slot(name: Option<&str>) -> String {
+    let Some(n) = name else { return "rider".into() };
+    let l = n.to_ascii_lowercase();
+    if l.starts_with("w_") {
+        return "hide".into();
+    }
+    if l.contains("face") {
+        return "face".into();
+    }
+    l
 }
 
 fn tag_body_materials(nodes: &mut [edf::EdfNode]) {
@@ -1042,12 +1295,14 @@ fn tag_body_materials(nodes: &mut [edf::EdfNode]) {
     }
 }
 
-fn pkz_mesh_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<edf::EdfNode>>>
-{
-    static C: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, Vec<edf::EdfNode>>>,
-    > = std::sync::OnceLock::new();
-    C.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+/// Rider bodies and helmets are small next to a bike, and a session cycles through a
+/// handful of them, so this can hold more entries than the bike cache does.
+const MESH_CACHE_CAP: usize = 12;
+
+fn pkz_mesh_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<edf::EdfNode>>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<lru::Lru<Vec<edf::EdfNode>>>> =
+        std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(MESH_CACHE_CAP)))
 }
 
 fn keep_lod0(nodes: &mut Vec<edf::EdfNode>) {
@@ -1055,28 +1310,126 @@ fn keep_lod0(nodes: &mut Vec<edf::EdfNode>) {
     nodes.retain(|n| n.name.is_empty() || seen.insert(n.name.clone()));
 }
 
-fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfNode>> {
-    let key = format!("{}:{}", bike_cache_key(&pkz.to_string_lossy()), entry);
-    if let Some(n) = pkz_mesh_cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
-        return Some(n);
-    }
-    let data = read_pkz_entry(pkz, entry)?;
-    let mut nodes = edf::parse(&data);
+fn cached_mesh(key: &str) -> Option<Vec<edf::EdfNode>> {
+    // `mut` because a hit marks the entry as the warm one — see `lru::Lru`.
+    pkz_mesh_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+}
+
+/// Parse a mesh into viewer space and memoise it. `prepare` runs once, on the parse that
+/// populates the cache, for work that depends on the file rather than on the loadout.
+fn mesh_from_bytes(
+    key: String,
+    data: &[u8],
+    prepare: impl FnOnce(&mut Vec<edf::EdfNode>, &[u8]),
+) -> Option<Vec<edf::EdfNode>> {
+    let mut nodes = edf::parse(data);
     edf::to_right_handed(&mut nodes);
     keep_lod0(&mut nodes);
     if nodes.is_empty() {
         return None;
     }
+    prepare(&mut nodes, data);
     if let Ok(mut c) = pkz_mesh_cache().lock() {
         c.insert(key, nodes.clone());
     }
     Some(nodes)
 }
 
+fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfNode>> {
+    let key = format!("{}:{}", bike_cache_key(&pkz.to_string_lossy()), entry);
+    if let Some(n) = cached_mesh(&key) {
+        return Some(n);
+    }
+    mesh_from_bytes(key, &read_pkz_entry(pkz, entry)?, |_, _| {})
+}
+
+/// The stock rider profiles the game itself ships. They're the fallback for a custom model
+/// that brings a mesh but none of the kits meant to be worn on it.
+const STOCK_RIDER_PROFILES: [&str; 2] = ["default_mx", "default_sm"];
+
+fn rider_profile_or_stock(profile: &str) -> &str {
+    if profile.is_empty() { STOCK_RIDER_PROFILES[0] } else { profile }
+}
+
+/// Where a rider profile's body mesh lives.
+///
+/// A rider model is a whole new `rider.edf`, not a texture — Rider+ and its variants install
+/// as folders under `mods/rider/riders`. The game's own archive is the last place to look,
+/// not the only one: reading only `rider.pkz` left a picked custom profile rendering no body
+/// at all, just gear floating where the rider should be.
+#[derive(Debug, Clone)]
+enum BodySource {
+    /// `mods/rider/riders/<profile>/rider.edf`, installed loose — the shape every rider
+    /// model on mxb-mods ships.
+    Loose(std::path::PathBuf),
+    /// A profile packed as `<profile>.pkz`, or the game's own `rider.pkz`.
+    Packed(std::path::PathBuf),
+}
+
+impl BodySource {
+    fn cache_key(&self, profile: &str) -> String {
+        match self {
+            Self::Loose(p) => bike_cache_key(&p.to_string_lossy()),
+            Self::Packed(p) => format!("{}:{profile}", bike_cache_key(&p.to_string_lossy())),
+        }
+    }
+
+    /// The mesh bytes. A packed profile is read at the entry the game uses, then — for a
+    /// repack that flattened the folder tree — by any `rider.edf` in the archive.
+    fn read(&self, profile: &str) -> Option<Vec<u8>> {
+        match self {
+            Self::Loose(p) => std::fs::read(p).ok(),
+            Self::Packed(p) => read_pkz_entry(p, &format!("rider/riders/{profile}/rider.edf"))
+                .or_else(|| read_pkz_basename(p, "rider.edf")),
+        }
+    }
+}
+
+/// One named file out of an archive wherever it sits in the tree, for repacks that don't
+/// keep the game's layout. Only the wanted entry is inflated.
+fn read_pkz_basename(pkz: &std::path::Path, base: &str) -> Option<Vec<u8>> {
+    let want = |n: &str| {
+        n.replace('\\', "/")
+            .rsplit('/')
+            .next()
+            .is_some_and(|b| b.eq_ignore_ascii_case(base))
+    };
+    pkz::read_selected(pkz, want).ok()?.into_iter().next().map(|(_, d)| d)
+}
+
+fn rider_body_source(cfg: &config::AppConfig, profile: &str) -> Option<BodySource> {
+    let riders = std::path::Path::new(&cfg.mods_path)
+        .join("mods")
+        .join("rider")
+        .join("riders");
+    let loose = riders.join(profile).join("rider.edf");
+    if loose.is_file() {
+        return Some(BodySource::Loose(loose));
+    }
+    let packed = riders.join(format!("{profile}.pkz"));
+    if packed.is_file() {
+        return Some(BodySource::Packed(packed));
+    }
+    resolve_game_pkz(cfg, "rider.pkz").map(BodySource::Packed)
+}
+
+/// The body mesh, submeshes already bound to their textures. Binding depends on the model
+/// and not on the loadout, so it happens on the parse that fills the cache — a paint change
+/// must not re-read a 60 MB body.
+fn rider_body_nodes(src: &BodySource, profile: &str) -> Option<Vec<edf::EdfNode>> {
+    let key = src.cache_key(profile);
+    if let Some(n) = cached_mesh(&key) {
+        return Some(n);
+    }
+    mesh_from_bytes(key, &src.read(profile)?, |nodes, data| {
+        bind_body_submeshes(nodes, data);
+        stand_body_upright(nodes);
+    })
+}
+
 fn load_rider_body_nodes(cfg: &config::AppConfig, profile: &str) -> Option<Vec<edf::EdfNode>> {
-    let profile = if profile.is_empty() { "default_mx" } else { profile };
-    let pkz = resolve_game_pkz(cfg, "rider.pkz")?;
-    load_pkz_mesh(&pkz, &format!("rider/riders/{profile}/rider.edf"))
+    let profile = rider_profile_or_stock(profile);
+    rider_body_nodes(&rider_body_source(cfg, profile)?, profile)
 }
 
 fn resolve_game_pkz(cfg: &config::AppConfig, name: &str) -> Option<std::path::PathBuf> {
@@ -1162,6 +1515,7 @@ async fn load_stock_gear_model(
             .ok_or_else(|| "game path not set or rider.pkz not found".to_string())?;
         let folder = format!("rider/{}/{}", spec.pkz_kind, spec.default_name);
         let nodes = load_pkz_mesh(&pkz, &format!("{folder}/{}", spec.mesh))
+            .or_else(|| stock_gear_entry(&pkz, &folder).and_then(|e| load_pkz_mesh(&pkz, &e)))
             .ok_or_else(|| format!("stock {part} mesh not found in rider.pkz"))?;
         let textures = match paint_path.filter(|s| !s.is_empty()) {
             Some(p) => std::fs::read(&p)
@@ -1205,9 +1559,16 @@ fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
         out
     };
     // Names only — decoding the pixels is the load path's job, and this runs per picker.
+    // Resolved the same way the loader resolves it, so the picker can't offer a stock look
+    // that comes off a different mesh than the one drawn.
+    let scene = gear_mount(&files).scene;
     let embedded: Vec<String> = files
         .iter()
-        .find(|(n, _)| is_visible_gear_mesh(n))
+        .find(|(n, _)| {
+            let base = n.rsplit('/').next().unwrap_or(n);
+            scene.as_deref().is_some_and(|s| base.eq_ignore_ascii_case(s))
+        })
+        .or_else(|| files.iter().find(|(n, _)| is_visible_gear_mesh(n)))
         .map(|(_, d)| edf::embedded_textures(d).iter().map(|t| t.name.clone()).collect())
         .unwrap_or_default();
     Ok(GearPaints {
@@ -1315,9 +1676,12 @@ fn load_gear_model_blocking(
     files.extend(extra);
     let want = paint.filter(|s| !s.is_empty());
     let want_goggles = goggles.filter(|s| !s.is_empty());
-    let mut nodes = Vec::new();
-    // Kept so a stock request can read the mesh's own textures back out of it.
-    let mut mesh: Option<&Vec<u8>> = None;
+    // Which `.edf` is the visible one, in the mod's own words where it says so.
+    let mount = gear_mount(&files);
+    let scene = mount.scene.as_deref();
+    // Kept so a stock side can read the mesh's own textures back out of it.
+    let mut named_mesh: Option<&Vec<u8>> = None;
+    let mut first_mesh: Option<&Vec<u8>> = None;
     // Collect paint/goggle entries up front so we can prefer the requested one but always
     // fall back to the first available: a stale or unknown paint name must still show the
     // gear textured, never bare grey.
@@ -1326,11 +1690,10 @@ fn load_gear_model_blocking(
     for (name, data) in &files {
         let base = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
         if base.ends_with(".edf") {
-            if nodes.is_empty() && is_visible_gear_mesh(name) {
-                mesh = Some(data);
-                nodes = edf::parse(data);
-                edf::to_right_handed(&mut nodes);
-                keep_lod0(&mut nodes);
+            if scene.is_some_and(|s| base.eq_ignore_ascii_case(s)) {
+                named_mesh = Some(data);
+            } else if first_mesh.is_none() && is_visible_gear_mesh(name) {
+                first_mesh = Some(data);
             }
         } else if let Some(pname) = gear_folder_paint_name(name, "paints") {
             paints.push((pname, data));
@@ -1338,9 +1701,29 @@ fn load_gear_model_blocking(
             goggle_paints.push((gname, data));
         }
     }
+    // A mod that names a scene it doesn't ship still has a mesh in the folder; take it.
+    let mesh = named_mesh.or(first_mesh);
+    let mut nodes = mesh.map(|d| edf::parse(d)).unwrap_or_default();
+    edf::to_right_handed(&mut nodes);
+    keep_lod0(&mut nodes);
     if nodes.is_empty() {
         return Err(format!("no gear mesh found in {path}"));
     }
+    // The `.hrc` may seat the piece off its mount — the Leatt neck brace drops 11 cm — and
+    // the viewer draws gear where the mesh puts it, so bake it in rather than pass it on.
+    if let Some(pos) = mount.pos {
+        offset_nodes(&mut nodes, pos);
+    }
+    // With no `.pnt` to offer, the shell wears what the mesh already carries. Helmets and
+    // boots nearly always ship a paint, so this reads as an edge case there — on the
+    // protection slot it's the norm: a chain, a bib or a chest protector bakes its look into
+    // the `.edf` and ships an empty `paints/` folder. Asked for a paint that doesn't exist,
+    // the binder had nothing to hand each piece and the whole item came out bare grey.
+    //
+    // Only the shell. Unpainted goggles already have somewhere to go — they fall back to the
+    // shell's texture, which is where a helmet that doesn't paint them apart drew them — and
+    // a helmet whose shell paint repaints the goggles too would lose that to the mesh's own.
+    let stock = stock || paints.is_empty();
     // A stock side decodes nothing from `paints/` — the mesh already carries that texture.
     let main_pnt = (!stock)
         .then(|| pick_gear_paint(&paints, want.as_deref(), &part))
@@ -1400,6 +1783,56 @@ fn load_gear_model_blocking(
     Ok(RiderPart { part, nodes, textures: out })
 }
 
+/// What a gear item says about its own mesh.
+#[derive(Default)]
+struct GearMount {
+    /// The `.edf` named by `level0 { scene }`.
+    scene: Option<String>,
+    /// The `pos { x y z }` the `.hrc` seats that mesh at, in the game's own frame.
+    pos: Option<[f32; 3]>,
+}
+
+/// Follow `gfx.cfg` → `<piece>.hrc` → `level0 { scene }`, the same chain the game walks and
+/// the bike loader already uses.
+///
+/// Worth following on gear because a gear mesh is named for the piece rather than the slot —
+/// `neckbrace.edf`, `pickaxe.edf`, `protection.edf` all turn up in the protection folder —
+/// so which `.edf` is *the* one is the mod's answer to give, not ours to guess from filenames.
+fn gear_mount(files: &[(String, Vec<u8>)]) -> GearMount {
+    let find = |want: &str| -> Option<&Vec<u8>> {
+        files
+            .iter()
+            .find(|(n, _)| n.rsplit('/').next().unwrap_or(n).eq_ignore_ascii_case(want))
+            .map(|(_, d)| d)
+    };
+    // The `.hrc` sits under a block named for the piece — `armour`, `neckbrace`, whatever
+    // the author called it — so take the first block that names one at all.
+    let hrc_name = find("gfx.cfg")
+        .map(|d| cfg::parse(d))
+        .and_then(|c| c.blocks.values().find_map(|b| b.get("model").map(str::to_string)));
+    let Some(hrc) = hrc_name.as_deref().and_then(find).map(|d| cfg::parse(d)) else {
+        return GearMount::default();
+    };
+    let pos = hrc.block("pos").and_then(|p| {
+        let axis = |k: &str| p.get(k).and_then(|v| v.trim().parse::<f32>().ok());
+        Some([axis("x")?, axis("y")?, axis("z")?])
+    });
+    GearMount { scene: cfg::hrc_level0_scene(&hrc), pos }
+}
+
+/// Shift a mesh onto the mount its `.hrc` names. `pos` is written in the game's own frame,
+/// so it takes the same X flip [`edf::to_right_handed`] gave the vertices.
+fn offset_nodes(nodes: &mut [edf::EdfNode], pos: [f32; 3]) {
+    let d = [-pos[0], pos[1], pos[2]];
+    for n in nodes.iter_mut() {
+        for p in n.positions.chunks_exact_mut(3) {
+            for (v, delta) in p.iter_mut().zip(d) {
+                *v += delta;
+            }
+        }
+    }
+}
+
 /// The gear file carrying the visible mesh — not the `_s` shadow or the `c_` cockpit variant.
 fn is_visible_gear_mesh(name: &str) -> bool {
     let base = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
@@ -1407,10 +1840,13 @@ fn is_visible_gear_mesh(name: &str) -> bool {
 }
 
 /// Normal (`_n`) and reflection (`_r`) maps ride alongside a colour texture and are never
-/// the look itself. Mirrors the filter in `paint::extract_edf_textures`.
+/// the look itself. Mirrors the filter in `paint::extract_edf_textures`, and shares the
+/// exporter-spelled names with [`edf::is_companion_texture`] so the two can't drift.
+/// `_s` is left out on purpose: the mesh-side filter reads it as MX Bikes' specular map,
+/// but a `.pnt` may legitimately name a texture that way.
 fn is_companion_map(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    n.ends_with("_n") || n.ends_with("_r")
+    n.ends_with("_n") || n.ends_with("_r") || edf::is_exporter_companion(&n)
 }
 
 /// Goggles (and their lens) are the one gear part painted separately from the shell —
@@ -1452,7 +1888,7 @@ fn bind_gear_submeshes(
     main: &GearSide,
     goggle: &GearSide,
 ) {
-    let readings = mesh.map(edf::MaterialReadings::new);
+    let colors = mesh.map(edf::color_textures).unwrap_or_default();
     // What this side puts on a piece the mesh draws from `emb`.
     let wear = |emb: Option<&str>, goggles_here: bool| -> Option<String> {
         let (side, other) = if goggles_here { (goggle, main) } else { (main, goggle) };
@@ -1463,31 +1899,40 @@ fn bind_gear_submeshes(
             .or_else(|| goggles_here.then(|| other.primary.clone()).flatten())
     };
     for node in nodes.iter_mut() {
-        let fit = readings.as_ref().map(|r| r.fit(node));
+        // A material id is local to its node — resolve it through that node's own table.
+        let material_texture = |mat: Option<u32>| -> Option<&str> {
+            let slot = node.materials.get(mat? as usize).copied().flatten()?;
+            colors.get(slot).map(|t| t.name.as_str())
+        };
         let node_goggle = is_goggle_name(&node.name);
         if node.submeshes.is_empty() {
             // No submesh table means no material index to look up. Take the mesh's own
             // colour texture for this side, so a goggle node isn't handed the shell's.
-            let emb = readings.as_ref().and_then(|r| {
-                r.color
-                    .iter()
-                    .map(|t| t.name.as_str())
-                    .find(|n| is_goggle_name(n) == node_goggle)
-            });
+            let emb = colors
+                .iter()
+                .map(|t| t.name.as_str())
+                .find(|n| is_goggle_name(n) == node_goggle);
             node.texture = wear(emb, node_goggle);
             continue;
         }
         for sm in &mut node.submeshes {
-            let emb = readings
-                .as_ref()
-                .zip(fit.as_ref())
-                .and_then(|(r, f)| r.texture(sm.mat? as usize, f))
-                .map(|t| t.name.as_str());
+            let emb = material_texture(sm.mat);
             let goggles_here =
                 node_goggle || is_goggle_name(&sm.name) || emb.is_some_and(is_goggle_name);
             sm.texture = wear(emb, goggles_here);
         }
     }
+}
+
+/// One loose file out of an unpacked gear folder, in the form the rest of the loader reads.
+///
+/// A mod that ships as a plain folder may still seal its individual files the way a `.pkz`
+/// seals its entries — the Tactical Vest on mxb-mods does, and read raw its `.edf` isn't a
+/// mesh at all, so the whole item failed with "no gear mesh found". Anything already plain
+/// passes straight through.
+fn read_gear_file(path: &std::path::Path) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(pkz::read_sidecar_blob(&bytes).unwrap_or(bytes))
 }
 
 fn read_gear_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
@@ -1497,8 +1942,8 @@ fn read_gear_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>
         for entry in std::fs::read_dir(p).with_context(|| format!("read dir {p:?}"))? {
             let path = entry?.path();
             if path.is_file() {
-                if let (Some(name), Ok(bytes)) =
-                    (path.file_name().and_then(|n| n.to_str()), std::fs::read(&path))
+                if let (Some(name), Some(bytes)) =
+                    (path.file_name().and_then(|n| n.to_str()), read_gear_file(&path))
                 {
                     out.push((name.to_string(), bytes));
                 }
@@ -1508,8 +1953,8 @@ fn read_gear_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>
             if let Ok(rd) = std::fs::read_dir(p.join(sub)) {
                 for entry in rd.flatten() {
                     let path = entry.path();
-                    if let (Some(name), Ok(bytes)) =
-                        (path.file_name().and_then(|n| n.to_str()), std::fs::read(&path))
+                    if let (Some(name), Some(bytes)) =
+                        (path.file_name().and_then(|n| n.to_str()), read_gear_file(&path))
                     {
                         out.push((format!("{sub}/{name}"), bytes));
                     }
@@ -1590,8 +2035,15 @@ fn load_gear(
     let name = if model.is_empty() { spec.default_name } else { model };
     let pkz = resolve_game_pkz(cfg, "rider.pkz")?;
     let folder = format!("rider/{}/{}", spec.pkz_kind, name);
-    let entry = format!("{folder}/{}", spec.mesh);
-    let mut nodes = load_pkz_mesh(&pkz, &entry)?;
+    let named = format!("{folder}/{}", spec.mesh);
+    let (entry, mut nodes) = match load_pkz_mesh(&pkz, &named) {
+        Some(n) => (named, n),
+        None => {
+            let alt = stock_gear_entry(&pkz, &folder)?;
+            let n = load_pkz_mesh(&pkz, &alt)?;
+            (alt, n)
+        }
+    };
     let mut textures = load_pkz_paint(&pkz, &folder, "paints", paint);
     let main_side = GearSide::new(textures.iter().map(|t| t.name.clone()).collect());
     // Stock gear paints its goggles apart from the shell just as an installed helmet does:
@@ -1623,6 +2075,30 @@ fn load_gear(
         nodes,
         textures,
     })
+}
+
+/// The `.edf` a stock gear folder in `rider.pkz` actually carries, for the folders that
+/// don't answer to the slot's usual name.
+///
+/// Protection is where this bites: the slot expects `armour.edf`, which is the chest
+/// protector's name — the neck brace beside it is its own mesh, and asking for a name that
+/// isn't there left the slot silently empty rather than wrong, which is harder to notice.
+/// Only reached once the expected name has already missed.
+fn stock_gear_entry(pkz: &std::path::Path, folder: &str) -> Option<String> {
+    let prefix = format!("{}/", folder.replace('\\', "/").to_ascii_lowercase());
+    let mut found: Vec<String> = pkz::read_selected(pkz, |n| {
+        let n = n.replace('\\', "/").to_ascii_lowercase();
+        n.starts_with(&prefix) && is_visible_gear_mesh(&n)
+    })
+    .ok()?
+    .into_iter()
+    .map(|(n, _)| n.replace('\\', "/"))
+    .collect();
+    // Deterministic rather than archive-order, so the same folder always resolves the same.
+    found.sort_by_key(|n| n.to_ascii_lowercase());
+    let hit = found.into_iter().next()?;
+    log::info!("[rider] stock '{folder}' doesn't carry the slot's mesh; using '{hit}'");
+    Some(hit)
 }
 
 /// Loose `.pnt` files in a folder, named as a gear archive would carry them so the loader
@@ -1692,6 +2168,7 @@ fn read_pkz_first(pkz: &std::path::Path, prefix: &str, ext: &str) -> Option<Vec<
 }
 
 fn load_rider_paint(
+    cfg: &config::AppConfig,
     base: &std::path::Path,
     part: &str,
     profile: &str,
@@ -1704,8 +2181,8 @@ fn load_rider_paint(
     // With no profile picked the body mesh already falls back to the stock rider
     // (`load_rider_body_nodes`); do the same here so a chosen suit/glove paint still
     // resolves instead of silently dropping off the preview.
-    let profile = if profile.is_empty() { "default_mx" } else { profile };
-    let data = read_paint_file(&base.join("riders").join(profile).join(sub), paint)?;
+    let profile = rider_profile_or_stock(profile);
+    let data = read_rider_paint_file(cfg, base, profile, sub, paint)?;
     let textures: Vec<_> = paint::decode_any(&data).ok()?.iter().map(paint::to_texture).collect();
     if textures.is_empty() {
         return None;
@@ -1715,6 +2192,58 @@ fn load_rider_paint(
         nodes: Vec::new(),
         textures,
     })
+}
+
+/// A kit or glove paint for `profile`, by exact name.
+///
+/// A rider model isn't a wardrobe. Rider+ ships its `paints` and `gloves` folders empty on
+/// purpose — the kits already installed under the stock profile are meant to work on it —
+/// so looking only inside the chosen profile drops every paint the picker offered. Look in
+/// the profile's own folder, then inside its archive where it's packed, then under the
+/// stock profiles.
+///
+/// Exact name at every step, and never the first paint in a folder: reaching past the
+/// chosen profile is only safe while the name still means the same paint.
+fn read_rider_paint_file(
+    cfg: &config::AppConfig,
+    base: &std::path::Path,
+    profile: &str,
+    sub: &str,
+    paint: &str,
+) -> Option<Vec<u8>> {
+    let riders = base.join("riders");
+    let game = resolve_game_pkz(cfg, "rider.pkz");
+    let candidates =
+        std::iter::once(profile).chain(STOCK_RIDER_PROFILES.into_iter().filter(|s| *s != profile));
+
+    for from in candidates {
+        // Installed loose, then packed as `<profile>.pkz`, then — for a stock profile, whose
+        // kits ship inside the game archive and never touch the disk — the game's own copy.
+        let hit = read_paint_file(&riders.join(from).join(sub), paint)
+            .or_else(|| {
+                let packed = riders.join(format!("{from}.pkz"));
+                packed.is_file().then(|| read_pkz_paint_named(&packed, sub, paint)).flatten()
+            })
+            .or_else(|| {
+                let pkz = game.as_ref()?;
+                read_pkz_entry(pkz, &format!("rider/riders/{from}/{sub}/{paint}.pnt"))
+            });
+        if let Some(d) = hit {
+            if from != profile {
+                log::info!("[rider] {sub} '{paint}' for '{profile}' came from '{from}'");
+            }
+            return Some(d);
+        }
+    }
+    None
+}
+
+/// A named paint out of an archive, matched on its folder as well as its name — `red.pnt`
+/// under `gloves` is not the `red.pnt` under `paints`.
+fn read_pkz_paint_named(pkz: &std::path::Path, sub: &str, paint: &str) -> Option<Vec<u8>> {
+    let tail = format!("/{}/{}.pnt", sub.to_ascii_lowercase(), paint.to_ascii_lowercase());
+    let want = |n: &str| n.replace('\\', "/").to_ascii_lowercase().ends_with(&tail);
+    pkz::read_selected(pkz, want).ok()?.into_iter().next().map(|(_, d)| d)
 }
 
 fn read_paint_file(dir: &std::path::Path, paint: &str) -> Option<Vec<u8>> {
@@ -1935,6 +2464,194 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Whether the unfinished multiplayer features should be shown, and whether this build is
+/// a pre-release. The frontend gates the Servers tab and the paint-sync UI on the first and
+/// badges the version with the second.
+#[tauri::command]
+fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let version = app.package_info().version.to_string();
+    serde_json::json!({
+        "enabled": cfg.experimental_enabled(),
+        // Set by the env var rather than the setting, so the UI can explain why the toggle
+        // looks stuck on.
+        "forcedByEnv": std::env::var(config::EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false),
+        "version": version,
+        // A semver pre-release suffix (`0.8.0-beta.1`) is what the release workflow uses to
+        // mark a build as a pre-release, so it is also what makes this build a beta.
+        "prerelease": version.contains('-'),
+        "enrolled": !cfg.cp_token.trim().is_empty(),
+        "riderName": cfg.cp_rider_name,
+        "guid": cfg.cp_guid,
+    })
+}
+
+/// Turn the experimental features on or off.
+#[tauri::command]
+fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.experimental = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Trade an invite code for a control-plane account, and remember the token.
+#[tauri::command]
+async fn enroll_account(
+    app: tauri::AppHandle,
+    code: String,
+    rider_name: String,
+) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        token: String,
+        #[serde(rename = "riderName")]
+        rider_name: String,
+    }
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/enroll", paintsync::CONTROL_PLANE))
+        .json(&serde_json::json!({ "code": code, "riderName": rider_name }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        let detail = resp.text().await.unwrap_or_default();
+        let msg = serde_json::from_str::<serde_json::Value>(&detail)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(detail);
+        return Err(msg);
+    }
+    let body: Resp = resp.json().await.map_err(|e| format!("{e}"))?;
+
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.cp_token = body.token;
+    cfg.cp_rider_name = body.rider_name.clone();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    Ok(body.rider_name)
+}
+
+/// Claim this player's MX Bikes GUID.
+///
+/// The GUID is the stable identity: a rider name is free text that changes between sessions
+/// and two people can pick the same one, while the dedicated server logs a GUID with every
+/// connection. Claiming is first-come on the server side.
+#[tauri::command]
+async fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enrol with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .put(format!("{}/v1/me/guid", paintsync::CONTROL_PLANE))
+        .bearer_auth(&cfg.cp_token)
+        .json(&serde_json::json!({ "guid": guid.trim() }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        let detail = resp.text().await.unwrap_or_default();
+        return Err(serde_json::from_str::<serde_json::Value>(&detail)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(detail));
+    }
+
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.cp_guid = guid.trim().to_string();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Publish this rider's paints so everyone else on the server can see them.
+#[tauri::command]
+async fn publish_paints(
+    app: tauri::AppHandle,
+    profile: String,
+    bike: String,
+) -> Result<paintsync::PublishOutcome, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enrol with an invite code first.".into());
+    }
+    paintsync::publish(&cfg, &cfg.cp_token, &profile, &bike)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Install every other rider's paints, so the grid renders correctly.
+#[tauri::command]
+async fn sync_paints(
+    app: tauri::AppHandle,
+    server_id: String,
+) -> Result<paintsync::PullOutcome, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enrol with an invite code first.".into());
+    }
+    paintsync::pull(&cfg, &cfg.cp_token, &server_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// The dedicated servers this player administers.
+#[tauri::command]
+fn list_servers(app: tauri::AppHandle) -> Vec<servers::ServerRef> {
+    config::load_or_detect(&app).unwrap_or_default().servers
+}
+
+/// Replace the saved server list. The UI owns add/edit/remove and sends the whole list,
+/// which keeps ordering and identity in one place rather than split across three commands.
+#[tauri::command]
+fn save_servers(app: tauri::AppHandle, servers: Vec<servers::ServerRef>) -> Result<(), String> {
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.servers = servers;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Look up one saved server by id, so the commands below take an id rather than having the
+/// frontend hand back a token it was given.
+fn server_by_id(app: &tauri::AppHandle, id: &str) -> Result<servers::ServerRef, String> {
+    config::load_or_detect(app)
+        .unwrap_or_default()
+        .servers
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| "That server isn't in your list any more.".to_string())
+}
+
+#[tauri::command]
+async fn server_status(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, String> {
+    servers::status(&server_by_id(&app, &id)?).await
+}
+
+#[tauri::command]
+async fn server_action(
+    app: tauri::AppHandle,
+    id: String,
+    action: servers::Action,
+) -> Result<serde_json::Value, String> {
+    servers::act(&server_by_id(&app, &id)?, action).await
+}
+
+#[tauri::command]
+async fn server_set_config(
+    app: tauri::AppHandle,
+    id: String,
+    patch: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    servers::set_config(&server_by_id(&app, &id)?, patch).await
+}
+
+/// Start MX Bikes and connect it straight to a server.
+///
+/// The game reads the connect flag only at startup, so this reports `already_running`
+/// rather than trying to steer a copy that's already up.
+#[tauri::command]
+fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))
+}
+
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
 #[tauri::command]
 fn game_running() -> bool {
@@ -2085,7 +2802,7 @@ fn set_watch_mods_reload(
 
 #[tauri::command]
 async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("shop-login") {
+    if let Some(w) = app.get_webview_window(SHOP_LOGIN_WINDOW) {
         let _ = w.set_focus();
         return Ok(());
     }
@@ -2098,7 +2815,7 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
         .parse()
         .map_err(|e| format!("{e}"))?,
     );
-    let window = tauri::WebviewWindowBuilder::new(&app, "shop-login", url)
+    let window = tauri::WebviewWindowBuilder::new(&app, SHOP_LOGIN_WINDOW, url)
         .title("Sign in to MX Bikes Shop")
         .user_agent(shop_session::UA)
         .inner_size(520.0, 760.0)
@@ -2111,7 +2828,7 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
         // ~5 minutes at 500ms intervals, then give up (user can retry).
         for _ in 0..600u32 {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let Some(win) = app.get_webview_window("shop-login") else {
+            let Some(win) = app.get_webview_window(SHOP_LOGIN_WINDOW) else {
                 break; // user closed the window before finishing
             };
             let cookies = shop_session::cookies_from_window(&win);
@@ -2506,6 +3223,17 @@ async fn mods_state_restore_all(app: tauri::AppHandle) -> Result<ModsStateOutcom
     .map_err(|e| format!("mods_state_restore_all task failed: {e}"))?
 }
 
+/// Normally `Info`. `MXB_LOG=debug` turns on the per-request traces that would otherwise
+/// write a line per keystroke in the search box — the switch to flip when chasing a
+/// Cloudflare block on a machine that can reproduce one.
+fn log_level() -> log::LevelFilter {
+    match std::env::var("MXB_LOG").unwrap_or_default().to_lowercase().as_str() {
+        "trace" => log::LevelFilter::Trace,
+        "debug" => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Info,
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         // Thumbnails for both catalogs, served from a disk cache instead of refetched on
@@ -2521,7 +3249,7 @@ fn main() {
         .register_asynchronous_uri_scheme_protocol(imgcache::SCHEME, imgcache::handle)
         .plugin(
             tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Info)
+                .level(log_level())
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
@@ -2545,6 +3273,9 @@ fn main() {
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+            // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
+            // to the UA that earned it — a log about a block should say which one was used.
+            log::info!("mxb-mods.com user-agent: {}", mxb_session::UA);
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
@@ -2627,6 +3358,9 @@ fn main() {
             shop_catalog_session::load(handle);
             mxb_session::load(handle);
             imgcache::start_maintenance(handle);
+            // Only registers the result listener and stashes the handle — the hidden window
+            // isn't built until something is actually refused.
+            mxb_fetch::init(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -2636,6 +3370,10 @@ fn main() {
                 if window.label() == overlay::LABEL {
                     api.prevent_close();
                     let _ = overlay::hide(window.app_handle());
+                    return;
+                }
+                // Everything else — the clearance check, the shop login — closes for real.
+                if !parks_in_tray(window.label()) {
                     return;
                 }
                 let cfg = config::load(window.app_handle()).unwrap_or_default();
@@ -2650,7 +3388,12 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        // Wrapped rather than passed straight in: `ipc_allowed` closes the hole that giving
+        // the hidden mxb-mods.com window a capability would otherwise open. See its doc.
+        .invoke_handler({
+            // The macro is generic over the runtime; naming `Wry` here is what lets the
+            // wrapper below infer what it is wrapping.
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             is_configured,
             get_config,
             create_config,
@@ -2665,6 +3408,7 @@ fn main() {
             get_pkz_meta,
             get_pkz_preview,
             unpack_paint,
+            texture_bytes,
             unpack_pkz,
             load_bike_model,
             load_rider_model,
@@ -2674,6 +3418,7 @@ fn main() {
             list_gear_paints,
             list_installed_gear_paints,
             scan_rider_targets,
+            scan_bike_targets,
             scan_model_swaps,
             apply_model_swap,
             scan_sound_swaps,
@@ -2716,6 +3461,18 @@ fn main() {
             frostmod_start,
             frostmod_stop,
             launch_game,
+            join_server,
+            experimental_state,
+            set_experimental,
+            enroll_account,
+            set_guid,
+            publish_paints,
+            sync_paints,
+            list_servers,
+            save_servers,
+            server_status,
+            server_action,
+            server_set_config,
             game_running,
             shop_login,
             shop_status,
@@ -2746,10 +3503,86 @@ fn main() {
             mods_state_set,
             mods_state_delete,
             mods_state_apply,
-            mods_state_restore_all
-        ])
+                mods_state_restore_all
+            ];
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+                let (label, command) = (
+                    invoke.message.webview().label().to_string(),
+                    invoke.message.command().to_string(),
+                );
+                if !ipc_allowed(&label, &command) {
+                    log::warn!("refused IPC '{command}' from the '{label}' window");
+                    invoke.resolver.reject("not permitted from this window");
+                    return true;
+                }
+                handler(invoke)
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    /// The regression a tester's log caught: the clearance window was being parked in the
+    /// tray on close, which left its label registered, so every handshake after the first
+    /// failed to build a window and Retry silently did nothing for the rest of the session.
+    ///
+    /// Only the main window may park. Every transient window has to close for real.
+    #[test]
+    fn only_the_main_window_parks_in_the_tray() {
+        assert!(parks_in_tray(MAIN_WINDOW));
+
+        for transient in [
+            mxb_fetch::WINDOW,
+            SHOP_LOGIN_WINDOW,
+            overlay::LABEL, // handled earlier by its own branch, but never by this one
+        ] {
+            assert!(
+                !parks_in_tray(transient),
+                "{transient} must be destroyed on close, not hidden — a stranded label \
+                 makes it unopenable for the life of the process"
+            );
+        }
+    }
+
+    /// The security boundary. The fetch window runs a *remote* origin — mxb-mods.com's own
+    /// page — and its capability grants IPC, which `generate_handler!` commands are not
+    /// gated by. So it gets exactly one call and nothing else; if this test ever goes green
+    /// on a second command, script on mxb-mods.com can drive that command.
+    #[test]
+    fn the_remote_fetch_window_may_only_emit_its_result() {
+        assert!(ipc_allowed(mxb_fetch::WINDOW, "plugin:event|emit"));
+
+        for forbidden in [
+            "create_config",
+            "install_mod",
+            "mods_state_delete",
+            "get_config",
+            "plugin:shell|open",
+            "plugin:dialog|open",
+            "plugin:event|listen",
+            "plugin:process|restart",
+        ] {
+            assert!(
+                !ipc_allowed(mxb_fetch::WINDOW, forbidden),
+                "mxb-mods.com script must not be able to call {forbidden}"
+            );
+        }
+    }
+
+    /// ...and the guard must not touch anything else. The app's own windows keep whatever
+    /// their capability files grant.
+    #[test]
+    fn the_apps_own_windows_are_unaffected_by_the_guard() {
+        for label in [MAIN_WINDOW, overlay::LABEL, SHOP_LOGIN_WINDOW] {
+            for command in ["create_config", "install_mod", "plugin:event|emit"] {
+                assert!(ipc_allowed(label, command), "{label} / {command}");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2777,6 +3610,7 @@ mod gear_bind_tests {
             submeshes: subs.iter().map(|s| submesh(s)).collect(),
             texture: None,
             placed: false,
+            materials: Vec::new(),
         }
     }
 
@@ -2849,6 +3683,85 @@ mod gear_bind_tests {
         assert_eq!(s.primary.as_deref(), Some("shell")); // never the companion map
         assert_eq!(s.supplies("STRAP").as_deref(), Some("strap")); // case-insensitive
         assert_eq!(s.supplies("visor"), None);
+    }
+
+    // A paint baked out of Substance names its maps the exporter's way, and one of those
+    // taken for the look leaves the piece wearing a normal map.
+    #[test]
+    fn an_exporter_named_map_is_never_the_primary() {
+        let s = side(&["Vest_Normal", "Vest_BaseColor"]);
+        assert_eq!(s.primary.as_deref(), Some("Vest_BaseColor"));
+    }
+}
+
+#[cfg(test)]
+mod gear_mount_tests {
+    use super::{gear_mount, offset_nodes, edf};
+
+    fn files(entries: &[(&str, &str)]) -> Vec<(String, Vec<u8>)> {
+        entries.iter().map(|(n, d)| (n.to_string(), d.as_bytes().to_vec())).collect()
+    }
+
+    // A protection folder names its mesh for the piece, not the slot, so the loader has to
+    // ask rather than guess: `neckbrace.edf` sits beside the shadow mesh it must not pick.
+    #[test]
+    fn a_mod_names_its_own_mesh() {
+        let f = files(&[
+            ("gfx.cfg", "neckbrace\n{\n\tmodel = neckbrace.hrc\n}\n"),
+            ("neckbrace.hrc", "level0\n{\n\tscene = neckbrace.edf\n\tswitch = 0\n}\n"),
+        ]);
+        let m = gear_mount(&f);
+        assert_eq!(m.scene.as_deref(), Some("neckbrace.edf"));
+        assert_eq!(m.pos, None);
+    }
+
+    // The block in `gfx.cfg` is named for the piece, and authors don't agree on the word —
+    // `armour` and `neckbrace` both turn up on protection mods that ship `protection.edf`.
+    #[test]
+    fn the_block_name_doesnt_matter() {
+        let f = files(&[
+            ("gfx.cfg", "armour\n{\n\tmodel = protection.hrc\n}\n"),
+            ("protection.hrc", "level0\n{\n\tscene = protection.edf\n}\n"),
+        ]);
+        assert_eq!(gear_mount(&f).scene.as_deref(), Some("protection.edf"));
+    }
+
+    #[test]
+    fn an_hrc_can_seat_the_mesh_off_its_mount() {
+        let f = files(&[
+            ("gfx.cfg", "neckbrace\n{\n\tmodel = neckbrace.hrc\n}\n"),
+            (
+                "neckbrace.hrc",
+                "level0\n{\n\tscene = neckbrace.edf\n}\npos\n{\n\tx = 0\n\ty = -0.11\n\tz = 0\n}\n",
+            ),
+        ]);
+        assert_eq!(gear_mount(&f).pos, Some([0.0, -0.11, 0.0]));
+    }
+
+    // Most gear ships neither, and that's not an error — the loader falls back to scanning.
+    #[test]
+    fn a_mod_that_says_nothing_answers_nothing() {
+        let m = gear_mount(&files(&[("protection.edf", "EDF\0")]));
+        assert_eq!(m.scene, None);
+        assert_eq!(m.pos, None);
+    }
+
+    // `pos` is written in the game's frame, so it takes the same X flip the vertices got.
+    #[test]
+    fn the_mount_offset_flips_x_with_the_vertices() {
+        let mut nodes = vec![edf::EdfNode {
+            name: "protection".into(),
+            positions: vec![1.0, 2.0, 3.0],
+            uvs: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+            submeshes: Vec::new(),
+            texture: None,
+            placed: false,
+            materials: Vec::new(),
+        }];
+        offset_nodes(&mut nodes, [0.5, -0.11, 0.25]);
+        assert_eq!(nodes[0].positions, vec![0.5, 1.89, 3.25]);
     }
 }
 
@@ -2924,6 +3837,27 @@ mod viewer_tests {
                 super::edf::color_textures(d).into_iter().map(|t| t.name).collect();
             eprintln!("mesh colour textures: {names:?}");
         }
+        // Where the mesh sits in its own frame. Protection is authored in the rider's own
+        // space, so these bounds say whether a piece is a chest-wide vest or a thin chain
+        // — the difference a one-size fit erases.
+        if let Some((_, d)) = files.iter().find(|(n, _)| super::is_visible_gear_mesh(n)) {
+            let mut nodes = super::edf::parse(d);
+            super::edf::to_right_handed(&mut nodes);
+            for n in &nodes {
+                let mut lo = [f32::INFINITY; 3];
+                let mut hi = [f32::NEG_INFINITY; 3];
+                for v in n.positions.chunks_exact(3) {
+                    for k in 0..3 {
+                        lo[k] = lo[k].min(v[k]);
+                        hi[k] = hi[k].max(v[k]);
+                    }
+                }
+                eprintln!(
+                    "bounds  {:<16} x[{:.3},{:.3}] y[{:.3},{:.3}] z[{:.3},{:.3}]",
+                    n.name, lo[0], hi[0], lo[1], hi[1], lo[2], hi[2],
+                );
+            }
+        }
         // The names each side's first paint supplies — where each can actually land.
         let supplied = |folder: &str| -> std::collections::HashSet<String> {
             files
@@ -2934,26 +3868,48 @@ mod viewer_tests {
                 .unwrap_or_default()
         };
 
-        let part = super::load_gear_model_blocking(path.clone(), "helmet".into(), None, None, false, false, Vec::new())
+        // The slot this item is worn in. Gear behaves differently per slot — protection has
+        // no goggle side, and is the slot where a paintless mod is the norm rather than the
+        // exception — so the run is worth naming honestly.
+        let slot = std::env::var("MXB_REAL_GEAR_PART").unwrap_or_else(|_| "helmet".into());
+        let part = super::load_gear_model_blocking(path.clone(), slot.clone(), None, None, false, false, Vec::new())
             .expect("load gear");
         let have: std::collections::HashSet<String> =
             part.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+        // An item with no paint and nothing baked into its mesh has no look to wear — the
+        // Minecraft pickaxe on mxb-mods ships exactly that. Bare grey is the honest answer
+        // there, and the only case where an unbound piece isn't a bug.
+        let has_look = !paints.is_empty() || !have.is_empty();
         // Which texture each piece ended up wearing, by node so a goggle node that carries
         // no submeshes of its own shows up too.
         let mut worn: Vec<(String, String)> = Vec::new();
+        let mut bare = 0usize;
         for n in &part.nodes {
-            if n.submeshes.is_empty() {
-                let t = n.texture.as_ref().expect("node bound to a texture");
-                eprintln!("node    {:<10} -> {t}", n.name);
-                worn.push((n.name.clone(), t.clone()));
-                continue;
-            }
-            for s in &n.submeshes {
-                let t = s.texture.as_ref().expect("submesh bound to a texture");
-                eprintln!("submesh {:<10} (node {:<10}) -> {t}", s.name, n.name);
-                worn.push((format!("{}/{}", n.name, s.name), t.clone()));
+            let pieces: Vec<(String, &Option<String>)> = if n.submeshes.is_empty() {
+                vec![(n.name.clone(), &n.texture)]
+            } else {
+                n.submeshes
+                    .iter()
+                    .map(|s| (format!("{}/{}", n.name, s.name), &s.texture))
+                    .collect()
+            };
+            for (label, tex) in pieces {
+                match tex {
+                    Some(t) => {
+                        eprintln!("worn    {label:<28} -> {t}");
+                        worn.push((label, t.clone()));
+                    }
+                    None => {
+                        eprintln!("worn    {label:<28} -> (bare)");
+                        bare += 1;
+                    }
+                }
             }
         }
+        assert!(
+            !has_look || bare == 0,
+            "{bare} piece(s) left bare though the item ships a look",
+        );
         for (_, t) in &worn {
             assert!(have.contains(&t.to_ascii_lowercase()), "'{t}' is shipped");
         }
@@ -2984,7 +3940,7 @@ mod viewer_tests {
         let stock =
             super::load_gear_model_blocking(
                 path,
-                "helmet".into(),
+                slot,
                 None,
                 None,
                 true,
@@ -3038,6 +3994,308 @@ mod viewer_tests {
     }
 
     #[test]
+    fn body_slot_reads_the_name_not_the_index() {
+        // The `w_` planes are decals the game composites a name and number onto.
+        for decal in ["w_name", "w_number", "w_plate", "W_Name"] {
+            assert_eq!(super::body_slot(Some(decal)), "hide");
+        }
+        // Skin, whatever the model calls it, must not wear the kit.
+        for skin in ["face_parts", "face", "Face_Parts", "rider_face"] {
+            assert_eq!(super::body_slot(Some(skin)), "face");
+        }
+        // Everything else keeps its own name, so a paint replaces it by name and a piece no
+        // paint covers falls back to the model's own texture.
+        for (name, slot) in [
+            ("rider", "rider"),
+            ("gloves", "gloves"),
+            ("rider_sm", "rider_sm"),
+            ("glovessm", "glovessm"),
+            ("Braces", "braces"),
+        ] {
+            assert_eq!(super::body_slot(Some(name)), slot);
+        }
+        // A material that names no texture still has to render as something.
+        assert_eq!(super::body_slot(None), "rider");
+    }
+
+    /// A material id is LOCAL to the node that owns it, so the same id must resolve to
+    /// different textures in different parts of one mesh.
+    ///
+    /// This is the invariant the per-part material-table fix established, and the one the
+    /// rider binder lost: it was still resolving ids through a whole-model reading, which
+    /// is what put one part's texture on another's geometry.
+    #[test]
+    fn a_body_part_resolves_its_material_through_its_own_table() {
+        fn tex(name: &str) -> super::edf::EmbeddedTexture {
+            super::edf::EmbeddedTexture {
+                name: name.into(),
+                width: 4,
+                height: 4,
+                data_off: 0,
+                data_len: 0,
+            }
+        }
+        fn sm(mat: u32) -> super::edf::Submesh {
+            super::edf::Submesh {
+                name: "range".into(),
+                tri_start: 0,
+                tri_count: 1,
+                texture: None,
+                uv_tile: None,
+                mat: Some(mat),
+            }
+        }
+        fn node(materials: Vec<Option<usize>>, mats: &[u32]) -> super::edf::EdfNode {
+            super::edf::EdfNode {
+                name: "part".into(),
+                positions: Vec::new(),
+                uvs: Vec::new(),
+                normals: Vec::new(),
+                indices: Vec::new(),
+                submeshes: mats.iter().map(|m| sm(*m)).collect(),
+                texture: None,
+                placed: false,
+                materials,
+            }
+        }
+
+        let colors = [tex("rider"), tex("gloves"), tex("w_number")];
+        // Both parts draw on local id 0 — and mean different textures by it.
+        let mut nodes = vec![
+            node(vec![Some(0)], &[0]),           // body  -> rider
+            node(vec![Some(1)], &[0]),           // hands -> gloves
+            node(vec![Some(2), None], &[0, 1]),  // plate -> hidden decal, then untextured
+        ];
+        super::bind_body_to_colors(&mut nodes, &colors);
+
+        assert_eq!(nodes[0].submeshes[0].texture.as_deref(), Some("rider"));
+        assert_eq!(
+            nodes[1].submeshes[0].texture.as_deref(),
+            Some("gloves"),
+            "id 0 read through the first node's table would smear the suit onto the hands"
+        );
+        assert_eq!(nodes[2].submeshes[0].texture.as_deref(), Some("hide"));
+        // An untextured material, and an id past the end of the table, both still render.
+        assert_eq!(nodes[2].submeshes[1].texture.as_deref(), Some("rider"));
+    }
+
+    /// The bug this replaced: material indices count into the model's own texture list, and
+    /// no two rider models write that list in the same order.
+    ///
+    /// `MXB_REAL_BODY=<rider.edf>[,<rider.edf>…] cargo test rider_body_binding -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn rider_body_binding_from_env() {
+        let Ok(paths) = std::env::var("MXB_REAL_BODY") else {
+            eprintln!("set MXB_REAL_BODY to run");
+            return;
+        };
+        for path in paths.split(',').filter(|p| !p.is_empty()) {
+            let bytes = std::fs::read(path).expect("read rider.edf");
+            let order: Vec<String> =
+                crate::edf::color_textures(&bytes).iter().map(|t| t.name.clone()).collect();
+            let mut nodes = crate::edf::parse(&bytes);
+            crate::edf::to_right_handed(&mut nodes);
+            super::keep_lod0(&mut nodes);
+            super::bind_body_submeshes(&mut nodes, &bytes);
+
+            super::stand_body_upright(&mut nodes);
+
+            let bounds = |ns: &[crate::edf::EdfNode], only_face: bool| {
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for n in ns {
+                    for sm in &n.submeshes {
+                        if only_face && sm.texture.as_deref() != Some("face") {
+                            continue;
+                        }
+                        for i in &n.indices[sm.tri_start as usize * 3
+                            ..(sm.tri_start + sm.tri_count) as usize * 3]
+                        {
+                            let v = &n.positions[*i as usize * 3..*i as usize * 3 + 3];
+                            for a in 0..3 {
+                                lo[a] = lo[a].min(v[a]);
+                                hi[a] = hi[a].max(v[a]);
+                            }
+                        }
+                    }
+                }
+                (lo, hi)
+            };
+            let (lo, hi) = bounds(&nodes, false);
+            let (h, d) = (hi[1] - lo[1], hi[2] - lo[2]);
+            eprintln!("  upright bounds x={:.3} y={h:.3} z={d:.3}", hi[0] - lo[0]);
+
+            // A rider is a standing figure, so height is its longest axis. The viewer scales
+            // and anchors every piece of gear off this — a body on its side buries the
+            // helmet and boots in the torso at a fifth of their size.
+            assert!(h > hi[0] - lo[0] && h > d, "the body stands up");
+            // And it stands the right way up. Height alone can't tell a rider from one
+            // hanging upside down, so check the skin: the head is the highest thing on a
+            // rider. Its top, not its bottom — Rider+'s skin texture also covers the bare
+            // wrists of its rolled-sleeve variants, which reach well down the body.
+            let (_, fhi) = bounds(&nodes, true);
+            eprintln!("  skin tops out at {:.3} of {:.3}", fhi[1], hi[1]);
+
+            // Which way does it face? Report the Z centroid of each slot relative to the
+            // body's own centre, plus the head alone (the top eighth of the skin, so
+            // Rider+'s bare wrists don't drag the number toward the bars).
+            let cz = (lo[2] + hi[2]) / 2.0;
+            let mut per: std::collections::BTreeMap<String, (f64, f64, usize)> = Default::default();
+            for n in &nodes {
+                for sm in &n.submeshes {
+                    let slot = sm.texture.clone().unwrap_or_default();
+                    for i in &n.indices
+                        [sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3]
+                    {
+                        let v = &n.positions[*i as usize * 3..*i as usize * 3 + 3];
+                        let e = per.entry(slot.clone()).or_default();
+                        e.0 += (v[2] - cz) as f64;
+                        e.2 += 1;
+                        if slot == "face" && v[1] > hi[1] - 0.125 * h {
+                            let hd = per.entry("face(head)".into()).or_default();
+                            hd.0 += (v[2] - cz) as f64;
+                            hd.2 += 1;
+                        }
+                    }
+                }
+            }
+            for (slot, (sum, _, n)) in &per {
+                eprintln!("  {slot:>12} z-centroid {:+.4} ({n} verts)", sum / *n as f64);
+            }
+            let centroid = |slot: &str| per.get(slot).map(|(s, _, n)| s / *n as f64);
+
+            // And it faces the right way. The viewer nudges the helmet and boots forward in
+            // +Z, so a rider turned around wears its gear through its own back.
+            //
+            // The name and number planes are the tell: they go on a rider's back. Where the
+            // model has none, fall back to the head, which leans forward over the bars —
+            // a weaker signal, so it only decides when the strong one is absent.
+            match centroid("hide") {
+                Some(back) => assert!(back < 0.0, "the name and number sit on the back ({back:+.4})"),
+                None => {
+                    let head = centroid("face(head)").expect("a rider has a head");
+                    assert!(head > 0.0, "the head leans forward ({head:+.4})");
+                }
+            }
+            assert!(
+                fhi[1] > lo[1] + 0.9 * h,
+                "the head is at the top (skin tops at {:.3}, body {:.3}..{:.3})",
+                fhi[1],
+                lo[1],
+                hi[1],
+            );
+
+            let mut slots: Vec<String> = nodes
+                .iter()
+                .flat_map(|n| n.submeshes.iter().filter_map(|s| s.texture.clone()))
+                .collect();
+            slots.sort_unstable();
+            slots.dedup();
+            eprintln!("{path}\n  blob order: {order:?}\n  bound slots: {slots:?}");
+
+            assert!(!slots.is_empty(), "every body binds its submeshes to something");
+            // Whatever the model calls its suit and gloves, the binding must name the
+            // textures the model actually carries — never a slot borrowed from another model.
+            for s in &slots {
+                assert!(
+                    s == "hide"
+                        || s == "face"
+                        || order.iter().any(|t| t.eq_ignore_ascii_case(s)),
+                    "'{s}' is a texture this model carries",
+                );
+            }
+            // Skin is its own slot on every rider model shipped so far; catching its loss
+            // is what tells us a mesh stopped being read and an index map crept back in.
+            assert!(slots.iter().any(|s| s == "face"), "the face binds to bare skin");
+        }
+    }
+
+    /// The whole rider-body path against a real install: a custom model resolves out of
+    /// `mods/rider/riders`, binds, and wears a kit that only the stock profile owns.
+    ///
+    /// `MXB_MODS=~/Documents/PiBoSo/MX\ Bikes MXB_PROFILE=Rider+ cargo test rider_body_end_to_end -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn rider_body_end_to_end() {
+        let Ok(mods) = std::env::var("MXB_MODS") else {
+            eprintln!("set MXB_MODS to run");
+            return;
+        };
+        let profile = std::env::var("MXB_PROFILE").unwrap_or_else(|_| "Rider+".into());
+        let cfg = crate::config::AppConfig { mods_path: mods.clone(), ..Default::default() };
+        let base = std::path::Path::new(&mods).join("mods").join("rider");
+
+        // A model nobody can pick is a model nobody can wear. The scan reports what's on
+        // disk; the two stock riders live in `rider.pkz` and the picker adds them itself.
+        let targets = crate::library::scan_rider_targets(&mods);
+        eprintln!("profiles: {:?}", targets.profiles);
+        assert!(
+            targets.profiles.iter().any(|p| *p == profile)
+                || super::STOCK_RIDER_PROFILES.contains(&profile.as_str()),
+            "'{profile}' is offered",
+        );
+
+        let src = super::rider_body_source(&cfg, &profile).expect("a body source");
+        eprintln!("{profile}: {src:?}");
+
+        {
+            let t = std::time::Instant::now();
+            let data = src.read(&profile).expect("read mesh");
+            eprintln!("  read {} MB in {:?}", data.len() / 1_000_000, t.elapsed());
+            let t = std::time::Instant::now();
+            let mut n = crate::edf::parse(&data);
+            eprintln!("  parse {} nodes in {:?}", n.len(), t.elapsed());
+            let t = std::time::Instant::now();
+            crate::edf::to_right_handed(&mut n);
+            super::keep_lod0(&mut n);
+            eprintln!("  handedness + lod0 in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            super::bind_body_submeshes(&mut n, &data);
+            eprintln!("  bind in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            super::stand_body_upright(&mut n);
+            eprintln!("  stand in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            let texs = super::body_textures(&src, &profile).expect("textures");
+            eprintln!(
+                "  extract {:?} in {:?}",
+                texs.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+                t.elapsed(),
+            );
+        }
+        // A profile folder that carries a mesh is a model, and beats the game archive. One
+        // that only carries paints — which is what installing a kit under `default_mx`
+        // leaves behind — is not, and must still fall through to the stock body.
+        let installed = base.join("riders").join(&profile).join("rider.edf").is_file();
+        assert_eq!(
+            matches!(src, super::BodySource::Loose(_)),
+            installed,
+            "an installed mesh wins, a paints-only folder doesn't",
+        );
+
+        let part = super::load_rider_body(&cfg, &profile, Vec::new()).expect("a body part");
+        let slots: std::collections::BTreeSet<&str> = part
+            .nodes
+            .iter()
+            .flat_map(|n| n.submeshes.iter().filter_map(|s| s.texture.as_deref()))
+            .collect();
+        let texs: std::collections::BTreeSet<String> =
+            part.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+        eprintln!("  slots={slots:?}\n  textures={texs:?}");
+        // With no paint chosen, every slot that draws something is dressed by the model.
+        for s in slots.iter().filter(|s| **s != "hide" && **s != "face") {
+            assert!(texs.contains(*s), "'{s}' is supplied by the mesh when no paint is");
+        }
+
+        // Rider+ ships `paints` empty on purpose — the kit still has to resolve.
+        if let Some(kit) = std::env::var("MXB_KIT").ok().filter(|k| !k.is_empty()) {
+            let found = super::read_rider_paint_file(&cfg, &base, &profile, "paints", &kit);
+            assert!(found.is_some(), "kit '{kit}' resolves for '{profile}'");
+            eprintln!("  kit '{kit}' resolved ({} bytes)", found.unwrap().len());
+        }
+    }
+
+    #[test]
     #[ignore]
     fn lod0_dedup_from_env() {
         let Ok(path) = std::env::var("MXB_REAL_EDF") else {
@@ -3057,6 +4315,157 @@ mod viewer_tests {
         names.dedup();
         assert_eq!(names.len(), unique, "no duplicate node names survive");
         eprintln!("{before} nodes -> {} after LOD dedup", nodes.len());
+    }
+
+    /// Write a bike's raw `.edf` meshes out so the binary layout can be studied directly.
+    ///
+    /// `MXB_REAL_PKZ=<bike.pkz> MXB_EDF_OUT=<dir> \
+    ///   cargo test extract_bike_edfs -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn extract_bike_edfs() {
+        let (Ok(path), Ok(out)) = (std::env::var("MXB_REAL_PKZ"), std::env::var("MXB_EDF_OUT"))
+        else {
+            eprintln!("set MXB_REAL_PKZ and MXB_EDF_OUT to run");
+            return;
+        };
+        let stem = std::path::Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        std::fs::create_dir_all(&out).expect("create out dir");
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("gather");
+        for (name, data) in &files {
+            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+            if !bn.ends_with(".edf") {
+                continue;
+            }
+            let dst = std::path::Path::new(&out).join(format!("{stem}__{bn}"));
+            std::fs::write(&dst, data).expect("write edf");
+            println!("wrote {} ({} bytes)", dst.display(), data.len());
+        }
+    }
+
+    /// Dump, as one JSON object, everything that decides which texture each part of a
+    /// bike wears: the mesh's colour list, what each reading of a material index claims,
+    /// which reading the geometry settled on, and what the viewer finally bound.
+    ///
+    /// `MXB_REAL_PKZ='…/mods/bikes/MX2OEM_2023_Kawasaki_KX250.pkz' \
+    ///   cargo test audit_bike_bindings -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn audit_bike_bindings() {
+        let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
+            eprintln!("set MXB_REAL_PKZ to run");
+            return;
+        };
+        let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let bike = std::path::Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        // What the viewer renders today.
+        let model = super::load_bike_model_blocking(path.clone()).expect("load bike");
+        // Keyed on the triangle range too: one group name can appear twice in a node,
+        // once per material, and those two are exactly the interesting case.
+        let bound: std::collections::HashMap<(String, String, u32), Option<String>> = model
+            .nodes
+            .iter()
+            .flat_map(|n| {
+                n.submeshes.iter().map(move |s| {
+                    (
+                        (n.name.to_ascii_lowercase(), s.name.to_ascii_lowercase(), s.tri_start),
+                        s.texture.clone(),
+                    )
+                })
+            })
+            .collect();
+
+        // The same meshes again, raw, so both readings of every material can be shown
+        // side by side with the fit that chose between them.
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("gather");
+        let mut out = String::new();
+        out.push_str(&format!("{{\"bike\":\"{}\",\"meshes\":[", esc(&bike)));
+        let mut first_mesh = true;
+        for (name, data) in &files {
+            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+            if !bn.ends_with(".edf") {
+                continue;
+            }
+            let nodes = crate::edf::parse_with_levels(data, &[]);
+            if nodes.is_empty() {
+                continue;
+            }
+            let color = crate::edf::color_textures(data);
+            if color.is_empty() {
+                continue; // a shadow mesh carries no colour textures and is never rendered
+            }
+            let colors: Vec<String> =
+                color.iter().map(|t| format!("\"{}\"", esc(&t.name))).collect();
+            if !first_mesh {
+                out.push(',');
+            }
+            first_mesh = false;
+            out.push_str(&format!(
+                "{{\"file\":\"{}\",\"colors\":[{}],\"nodes\":[",
+                esc(&bn),
+                colors.join(",")
+            ));
+            for (i, n) in nodes.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                // The node's OWN material table: local id -> colour texture.
+                let table: Vec<String> = n
+                    .materials
+                    .iter()
+                    .map(|slot| match slot.and_then(|s| color.get(s)) {
+                        Some(t) => format!("\"{}\"", esc(&t.name)),
+                        None => "null".into(),
+                    })
+                    .collect();
+                out.push_str(&format!(
+                    "{{\"node\":\"{}\",\"materials\":[{}],\"submeshes\":[",
+                    esc(&n.name),
+                    table.join(",")
+                ));
+                for (j, s) in n.submeshes.iter().enumerate() {
+                    if j > 0 {
+                        out.push(',');
+                    }
+                    let key =
+                        (n.name.to_ascii_lowercase(), s.name.to_ascii_lowercase(), s.tri_start);
+                    let rendered = bound
+                        .get(&key)
+                        .cloned()
+                        .flatten()
+                        .map(|t| format!("\"{}\"", esc(&t)))
+                        .unwrap_or_else(|| "null".into());
+                    out.push_str(&format!(
+                        "{{\"group\":\"{}\",\"mat\":{},\"tris\":{},\"rendered\":{}}}",
+                        esc(&s.name),
+                        s.mat.map(|m| m.to_string()).unwrap_or_else(|| "null".into()),
+                        s.tri_count,
+                        rendered,
+                    ));
+                }
+                out.push_str("]}");
+            }
+            out.push_str("]}");
+        }
+        let paints: Vec<String> = model
+            .paints
+            .iter()
+            .map(|p| {
+                let mut t: Vec<String> =
+                    p.textures.iter().map(|t| format!("\"{}\"", esc(&t.name))).collect();
+                t.sort_unstable();
+                format!("{{\"paint\":\"{}\",\"textures\":[{}]}}", esc(&p.name), t.join(","))
+            })
+            .collect();
+        out.push_str(&format!("],\"paints\":[{}]}}", paints.join(",")));
+        println!("AUDIT {out}");
     }
 }
 

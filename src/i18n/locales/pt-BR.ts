@@ -52,6 +52,7 @@ export const ptBR: Translation = {
   "nav.locker": "Armário",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
+  "nav.servers": "Servidores",
   "nav.manage": "Gerenciar",
   "nav.settings": "Configurações",
 
@@ -146,6 +147,8 @@ export const ptBR: Translation = {
     "“{{label}}” aplicado em {{bike}} — salvo. Selecione seu perfil de novo no MX Bikes (menu Profile) para carregar o novo visual.",
   "presets.appliedNextTime":
     "“{{label}}” aplicado em {{bike}} — salvo. Carrega na próxima vez que o jogo abrir.",
+  "presets.appliedReselectBike":
+    "“{{label}}” aplicado em {{bike}} — as pinturas já estão valendo; selecione a moto de novo no MX Bikes para ver o modelo.",
   "presets.phaseBundling": "Empacotando os arquivos…",
   "presets.phaseUploading": "Enviando o pacote…",
   "presets.phaseDownloading": "Baixando o pacote…",
@@ -260,6 +263,7 @@ export const ptBR: Translation = {
   "viewer.loadingModel": "Carregando o modelo…",
   "viewer.loadingPaint": "Carregando a pintura…",
   "viewer.loadingRider": "Carregando o piloto…",
+  "viewer.riderLoadFailed": "A prévia está desatualizada — não foi possível atualizá-la",
   "viewer.dragToRotate": "Arraste para girar",
   "viewer.scrollToZoom": "Role para dar zoom",
   "viewer.rightDragToPan": "Arraste com o botão direito para mover",
@@ -578,6 +582,68 @@ export const ptBR: Translation = {
   "game.alreadyRunning": "O MX Bikes já está em execução",
   "game.launching": "Iniciando o MX Bikes…",
   "game.launchFailed": "Não foi possível iniciar o MX Bikes",
+  "join.title": "Entrar em um servidor",
+  "join.desc":
+    "Informe o endereço de um servidor para iniciar o MX Bikes conectado diretamente a ele.",
+  "join.address": "Endereço do servidor",
+  "join.action": "Entrar",
+  "join.joining": "Conectando…",
+  "join.launching": "Conectando a {{address}}…",
+  "join.alreadyRunning":
+    "Feche o MX Bikes primeiro — um jogo em execução não pode ser enviado para um servidor.",
+  "join.failed": "Não foi possível entrar nesse servidor",
+
+  "servers.title": "Servidores",
+  "servers.subtitle":
+    "Gerencie os servidores dedicados que você mantém. Cada um precisa do agente do MXB instalado.",
+  "servers.empty": "Nenhum servidor ainda. Adicione um para gerenciá-lo por aqui.",
+  "servers.add": "Adicionar servidor",
+  "servers.remove": "Remover este servidor",
+  "servers.namePlaceholder": "Nome do servidor",
+  "servers.tokenPlaceholder": "Token do agente",
+  "servers.track": "Pista",
+  "servers.slots": "Vagas",
+  "servers.uptime": "No ar há",
+  "servers.restarts": "Reinícios",
+  "servers.stopped": "Parado",
+  "servers.start": "Iniciar",
+  "servers.stop": "Parar",
+  "servers.restart": "Reiniciar",
+  "servers.setTrack": "Definir pista",
+  "servers.trackPlaceholder": "ID da pista",
+  "servers.actionDone": "Pronto",
+  "servers.actionFailed": "Não deu certo",
+  "servers.trackChanged": "Pista definida como {{track}} — o servidor reiniciou.",
+  "servers.saveFailed": "Não foi possível salvar sua lista de servidores",
+
+  "settings.experimental": "Experimental",
+  "settings.experimentalServers": "Servidores e sincronização de pinturas",
+  "settings.experimentalServersDesc":
+    "Inacabado. Adiciona a aba Servidores, deixa você manter servidores dedicados e sincroniza as pinturas para todo mundo aparecer certo no servidor.",
+  "settings.experimentalForced":
+    "Ativado nesta execução pelo MXB_EXPERIMENTAL — a opção não faz nada enquanto ele estiver definido.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Sincronização de pinturas",
+  "sync.desc":
+    "O MX Bikes nunca envia as pinturas, então os outros pilotos aparecem com as de fábrica se você já não tiver o arquivo exato deles. Publique a sua e baixe a dos outros.",
+  "sync.enroll": "Cadastrar",
+  "sync.enrolled": "Cadastrado como {{name}}",
+  "sync.enrollFailed": "Não foi possível cadastrar",
+  "sync.codePlaceholder": "Código de convite",
+  "sync.riderNamePlaceholder": "Nome do piloto no jogo",
+  "sync.riderNameHint":
+    "Precisa ser exatamente igual ao seu nome de piloto no MX Bikes — é assim que os apps dos outros sabem quais pinturas são suas.",
+  "sync.ridingAs": "Publicando como {{name}}",
+  "sync.pull": "Sincronizar pinturas",
+  "sync.setGuid": "Salvar GUID",
+  "sync.guidPlaceholder": "Seu GUID do MX Bikes",
+  "sync.guidHint":
+    "Seu GUID do MX Bikes (opcional). Ele identifica você mesmo se mudar o nome do piloto, e o servidor registra a cada conexão.",
+  "sync.guidSaved": "GUID salvo",
+  "sync.pulled": "{{installed}} instaladas de {{riders}} pilotos ({{had}} já tinha)",
+  "sync.pullFailed": "Não foi possível sincronizar",
+  "sync.rejected": "{{count}} ignoradas por destino inseguro",
 
   // ── Textos que a primeira varredura não pegou (JSX em várias linhas) ──────
   "libraryDetail.noEmbedded": "Nenhum detalhe embutido foi encontrado para este item.",
@@ -717,8 +783,8 @@ export const ptBR: Translation = {
     "Atualizando no jogo — se for a moto que você tem selecionada, ela muda agora.",
   "locker.modelFrostmodNotRunning":
     "Rode o FrostMod para ver as trocas de modelo ao vivo — por enquanto, selecione a moto de novo no jogo.",
-  "locker.modelFrostmodTooOld":
-    "Atualize o FrostMod para ver as trocas de modelo ao vivo — por enquanto, selecione a moto de novo no jogo.",
+  "locker.modelReselectBike":
+    "Modelo trocado — selecione a moto de novo no MX Bikes para vê-lo.",
   "locker.modelFrostmodUnreachable":
     "Não deu pra falar com o FrostMod — selecione a moto de novo no jogo para carregar.",
   "locker.modelRefreshWindowsOnly":
@@ -891,10 +957,15 @@ export const ptBR: Translation = {
   "manage.contentSaved": "Conteúdo de corrida salvo para “{{name}}”.",
   "manage.contentTitle": "Conteúdo de corrida de “{{name}}”",
   "manage.contentBody":
-    "A pintura, o equipamento e a troca de modelo do preset são encontrados sozinhos. Aqui fica o que um loadout não consegue dizer: a pista e os pacotes que uma corrida precisa de qualquer jeito.",
+    "A pintura, o equipamento e a troca de modelo do preset são encontrados sozinhos. Aqui fica o resto: a pista, os modelos de equipamento extras que valem a pena manter e os pacotes que uma corrida precisa de qualquer jeito.",
   "manage.paneTracks": "Pistas",
+  "manage.paneHelmets": "Capacetes",
+  "manage.paneBoots": "Botas",
+  "manage.paneProtection": "Proteções",
   "manage.paneKeep": "Manter sempre",
   "manage.paneTracksHint": "A pista (ou pistas) para as quais este preset serve.",
+  "manage.paneGearHint":
+    "Modelos extras para deixar no seletor do jogo. O equipamento do próprio preset é mantido sozinho — marque aqui o que você ainda quer poder escolher. Tudo o que ficar desmarcado sai do caminho.",
   "manage.paneKeepHint":
     "Mods que continuam ativos aconteça o que acontecer — o pacote OEM, a moto deste preset, um mod de som.",
   "manage.notInstalled": "não instalado",

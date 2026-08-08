@@ -17,6 +17,7 @@ import {
   shopMyDownloads,
   shopStatus,
   scanLibrary,
+  resolveTrackDest,
   type ShopItem,
 } from "../../api/mods";
 import {
@@ -107,8 +108,10 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   }, [refreshKey, loggedIn]);
 
   const install = useCallback(
-    (item: ShopItem) => {
-      startShopInstall(item);
+    async (item: ShopItem) => {
+      // No picker here, so land it where the Browse dialog would have preselected rather
+      // than always at the tracks root.
+      startShopInstall(item, await resolveTrackDest());
       toast.success(t("browse.queued", { title: item.title }), {
         description: t("shop.queuedDesc"),
       });

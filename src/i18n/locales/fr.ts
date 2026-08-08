@@ -51,6 +51,7 @@ export const fr: Translation = {
   "nav.locker": "Casier",
   "nav.presets": "Presets",
   "nav.rider": "Pilote",
+  "nav.servers": "Serveurs",
   "nav.manage": "Gérer",
   "nav.settings": "Réglages",
 
@@ -148,6 +149,8 @@ export const fr: Translation = {
     "« {{label}} » appliqué à {{bike}} — enregistré. Resélectionnez votre profil dans MX Bikes (menu Profil) pour charger le nouveau look.",
   "presets.appliedNextTime":
     "« {{label}} » appliqué à {{bike}} — enregistré. Il sera chargé à la prochaine ouverture du jeu.",
+  "presets.appliedReselectBike":
+    "« {{label}} » appliqué à {{bike}} — les décos sont en place ; resélectionnez la moto dans MX Bikes pour voir le modèle.",
   "presets.phaseBundling": "Préparation des fichiers…",
   "presets.phaseUploading": "Envoi du paquet…",
   "presets.phaseDownloading": "Téléchargement du paquet…",
@@ -262,6 +265,7 @@ export const fr: Translation = {
   "viewer.loadingModel": "Chargement du modèle…",
   "viewer.loadingPaint": "Chargement de la déco…",
   "viewer.loadingRider": "Chargement du pilote…",
+  "viewer.riderLoadFailed": "Aperçu obsolète — impossible de le mettre à jour",
   "viewer.dragToRotate": "Glisser pour pivoter",
   "viewer.scrollToZoom": "Molette pour zoomer",
   "viewer.rightDragToPan": "Clic droit glissé pour déplacer",
@@ -585,6 +589,68 @@ export const fr: Translation = {
   "game.alreadyRunning": "MX Bikes est déjà en cours d'exécution",
   "game.launching": "Lancement de MX Bikes…",
   "game.launchFailed": "Impossible de lancer MX Bikes",
+  "join.title": "Rejoindre un serveur",
+  "join.desc":
+    "Saisissez l'adresse d'un serveur pour lancer MX Bikes en vous y connectant directement.",
+  "join.address": "Adresse du serveur",
+  "join.action": "Rejoindre",
+  "join.joining": "Connexion…",
+  "join.launching": "Connexion à {{address}}…",
+  "join.alreadyRunning":
+    "Fermez d'abord MX Bikes — un jeu déjà lancé ne peut pas être envoyé vers un serveur.",
+  "join.failed": "Impossible de rejoindre ce serveur",
+
+  "servers.title": "Serveurs",
+  "servers.subtitle":
+    "Gérez les serveurs dédiés que vous hébergez. Chacun doit avoir l'agent MXB installé.",
+  "servers.empty": "Aucun serveur pour l'instant. Ajoutez-en un pour le gérer d'ici.",
+  "servers.add": "Ajouter un serveur",
+  "servers.remove": "Retirer ce serveur",
+  "servers.namePlaceholder": "Nom du serveur",
+  "servers.tokenPlaceholder": "Jeton de l'agent",
+  "servers.track": "Circuit",
+  "servers.slots": "Places",
+  "servers.uptime": "Actif depuis",
+  "servers.restarts": "Redémarrages",
+  "servers.stopped": "Arrêté",
+  "servers.start": "Démarrer",
+  "servers.stop": "Arrêter",
+  "servers.restart": "Redémarrer",
+  "servers.setTrack": "Changer de circuit",
+  "servers.trackPlaceholder": "ID du circuit",
+  "servers.actionDone": "C'est fait",
+  "servers.actionFailed": "Ça n'a pas fonctionné",
+  "servers.trackChanged": "Circuit réglé sur {{track}} — le serveur a redémarré.",
+  "servers.saveFailed": "Impossible d'enregistrer votre liste de serveurs",
+
+  "settings.experimental": "Expérimental",
+  "settings.experimentalServers": "Serveurs et synchronisation des décos",
+  "settings.experimentalServersDesc":
+    "Inachevé. Ajoute l'onglet Serveurs, vous permet d'héberger des serveurs dédiés et synchronise les décos pour que tout le monde s'affiche correctement.",
+  "settings.experimentalForced":
+    "Activé pour cette session par MXB_EXPERIMENTAL — le réglage reste sans effet tant qu'il est défini.",
+  "settings.betaBadge": "Bêta",
+
+  "sync.title": "Synchronisation des décos",
+  "sync.desc":
+    "MX Bikes n'envoie jamais les décos : les autres pilotes apparaissent en déco d'origine si vous n'avez pas déjà leur fichier exact. Publiez la vôtre et récupérez celles des autres.",
+  "sync.enroll": "S'inscrire",
+  "sync.enrolled": "Inscrit en tant que {{name}}",
+  "sync.enrollFailed": "Inscription impossible",
+  "sync.codePlaceholder": "Code d'invitation",
+  "sync.riderNamePlaceholder": "Nom de pilote en jeu",
+  "sync.riderNameHint":
+    "Il doit correspondre exactement à votre nom de pilote dans MX Bikes — c'est ainsi que les apps des autres savent quelles décos sont les vôtres.",
+  "sync.ridingAs": "Publié sous {{name}}",
+  "sync.pull": "Synchroniser les décos",
+  "sync.setGuid": "Enregistrer le GUID",
+  "sync.guidPlaceholder": "Votre GUID MX Bikes",
+  "sync.guidHint":
+    "Votre GUID MX Bikes (facultatif). Il vous identifie même si vous changez de nom de pilote, et le serveur l'enregistre à chaque connexion.",
+  "sync.guidSaved": "GUID enregistré",
+  "sync.pulled": "{{installed}} installées depuis {{riders}} pilotes ({{had}} déjà présentes)",
+  "sync.pullFailed": "Synchronisation impossible",
+  "sync.rejected": "{{count}} ignorées : destination non sûre",
 
   // ── Chaînes manquées par le premier balayage (JSX multi-lignes) ────────────
   "libraryDetail.noEmbedded": "Aucun détail intégré n'a été trouvé pour cet élément.",
@@ -728,8 +794,8 @@ export const fr: Translation = {
     "Actualisation en jeu — si c'est la moto que vous avez sélectionnée, elle change maintenant.",
   "locker.modelFrostmodNotRunning":
     "Lancez FrostMod pour voir les changements de modèle en direct — pour l'instant, resélectionnez la moto en jeu.",
-  "locker.modelFrostmodTooOld":
-    "Mettez FrostMod à jour pour voir les changements de modèle en direct — pour l'instant, resélectionnez la moto en jeu.",
+  "locker.modelReselectBike":
+    "Modèle changé — resélectionnez la moto dans MX Bikes pour le voir.",
   "locker.modelFrostmodUnreachable":
     "Impossible de joindre FrostMod — resélectionnez la moto en jeu pour la charger.",
   "locker.modelRefreshWindowsOnly":
@@ -903,10 +969,15 @@ export const fr: Translation = {
   "manage.contentSaved": "Contenu de course enregistré pour « {{name}} ».",
   "manage.contentTitle": "Contenu de course de « {{name}} »",
   "manage.contentBody":
-    "La déco, l'équipement et le model swap du preset sont trouvés tout seuls. Ceci sert à ce qu'un loadout ne peut pas dire : la piste, et les packs dont une course a besoin de toute façon.",
+    "La déco, l'équipement et le model swap du preset sont trouvés tout seuls. Ceci sert au reste : la piste, les modèles d'équipement à garder en plus, et les packs dont une course a besoin de toute façon.",
   "manage.paneTracks": "Pistes",
+  "manage.paneHelmets": "Casques",
+  "manage.paneBoots": "Bottes",
+  "manage.paneProtection": "Protections",
   "manage.paneKeep": "Toujours garder",
   "manage.paneTracksHint": "La piste (ou les pistes) à laquelle ce preset est destiné.",
+  "manage.paneGearHint":
+    "Modèles supplémentaires à laisser dans le sélecteur du jeu. L'équipement du preset est gardé automatiquement — cochez ici ce que vous voulez encore pouvoir choisir. Tout ce qui n'est pas coché s'écarte.",
   "manage.paneKeepHint":
     "Les mods qui restent actifs quoi qu'il arrive — le pack OEM, la moto de ce preset, un mod de son.",
   "manage.notInstalled": "pas installé",

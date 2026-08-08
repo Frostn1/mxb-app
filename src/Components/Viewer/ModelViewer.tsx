@@ -5,10 +5,56 @@ import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import type { EdfNode, PaintTexture, RiderPart } from "../../types";
+import { textureBytes } from "../../api/mods";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
 
 export type ViewerMode = "bike" | "rider";
+
+/**
+ * Pull a texture's pixels over the binary IPC channel and wrap them in a `DataTexture`.
+ *
+ * The backend hands us raw RGBA rather than an encoded image, so there is no decode step
+ * here — but that also means none of `TextureLoader`'s defaults come along, and every
+ * sampler setting below has to be stated. `DataTexture` starts out nearest-filtered with no
+ * mipmaps, which would read as a hard, aliased livery.
+ */
+async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
+  let buf: ArrayBuffer;
+  try {
+    buf = await textureBytes(t.token);
+  } catch (e) {
+    console.warn(`[ModelViewer] texture '${t.name}' could not be fetched:`, e);
+    return null;
+  }
+  const expected = t.width * t.height * 4;
+  if (buf.byteLength !== expected) {
+    // The store dropped it (or something is badly out of step) — leave the part untextured
+    // rather than hand three.js a buffer it will read past the end of.
+    console.warn(
+      `[ModelViewer] texture '${t.name}' is ${buf.byteLength}B, expected ${expected}B`,
+    );
+    return null;
+  }
+  const tex = new THREE.DataTexture(
+    new Uint8Array(buf),
+    t.width,
+    t.height,
+    THREE.RGBAFormat,
+  );
+  tex.colorSpace = THREE.SRGBColorSpace;
+  // MX Bikes paints use a top-left UV origin, which is `DataTexture`'s own default.
+  tex.flipY = false;
+  // Wrap (not clamp): some islands run outside 0–1 (plates, tiled exhaust) and need it.
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  return tex;
+}
 
 function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
   const [map, setMap] = useState<Map<string, THREE.Texture>>(new Map());
@@ -18,26 +64,28 @@ function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
       return;
     }
     let alive = true;
-    const loaded = new Map<string, THREE.Texture>();
-    let pending = textures.length;
-    const loader = new THREE.TextureLoader();
-    textures.forEach((t) =>
-      loader.load(t.png, (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        // MX Bikes paints use a top-left UV origin, so disable three.js' default flipY.
-        tex.flipY = false;
-        // Wrap (not clamp): some islands run outside 0–1 (plates, tiled exhaust) and need it.
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        tex.anisotropy = 4;
-        loaded.set(t.name.toLowerCase(), tex);
-        pending -= 1;
-        if (pending === 0 && alive) setMap(new Map(loaded));
-      }),
-    );
+    // Disposal hangs off this rather than off each texture as it lands, so every texture
+    // has exactly one owner no matter when the effect is torn down.
+    let settled: Map<string, THREE.Texture> | null = null;
+
+    void Promise.all(
+      // `all`, not a counter: a texture that fails to load used to leave the tally short,
+      // and the model stayed untextured forever instead of losing the one bad part.
+      textures.map(async (t) => [t.name.toLowerCase(), await loadTexture(t)] as const),
+    ).then((pairs) => {
+      const loaded = new Map<string, THREE.Texture>();
+      for (const [name, tex] of pairs) if (tex) loaded.set(name, tex);
+      if (!alive) {
+        loaded.forEach((tex) => tex.dispose());
+        return;
+      }
+      settled = loaded;
+      setMap(loaded);
+    });
+
     return () => {
       alive = false;
-      loaded.forEach((tex) => tex.dispose());
+      settled?.forEach((tex) => tex.dispose());
     };
   }, [textures]);
   return map;
@@ -50,26 +98,26 @@ function submeshTexture(
   return (texture && tex.get(texture.toLowerCase())) || null;
 }
 
-function useDataTexture(uri: string | null | undefined): THREE.Texture | null {
+/** A single texture, for the stand-in body and the loose gear pieces. */
+function useDataTexture(source: PaintTexture | null | undefined): THREE.Texture | null {
   const [tex, setTex] = useState<THREE.Texture | null>(null);
   const current = useRef<THREE.Texture | null>(null);
+  const token = source?.token;
 
   useEffect(() => {
-    if (!uri) {
+    if (!source) {
       current.current?.dispose();
       current.current = null;
       setTex(null);
       return;
     }
     let disposed = false;
-    new THREE.TextureLoader().load(uri, (t) => {
+    void loadTexture(source).then((t) => {
+      if (!t) return;
       if (disposed) {
         t.dispose();
         return;
       }
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.flipY = false; // top-left UV origin — see `useTextureMap`.
-      t.anisotropy = 4;
       current.current?.dispose();
       current.current = t;
       setTex(t);
@@ -77,7 +125,10 @@ function useDataTexture(uri: string | null | undefined): THREE.Texture | null {
     return () => {
       disposed = true;
     };
-  }, [uri]);
+    // Keyed on the token: the same pixels never need re-fetching just because the object
+    // identity around them changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   useEffect(
     () => () => {
@@ -170,10 +221,10 @@ function RiderBody({
   );
 }
 
-function partPng(part: RiderPart | undefined, ...names: string[]): string | null {
+function partTexture(part: RiderPart | undefined, ...names: string[]): PaintTexture | null {
   if (!part?.textures.length) return null;
   const hit = part.textures.find((t) => names.includes(t.name.toLowerCase()));
-  return (hit ?? part.textures[0]).png;
+  return hit ?? part.textures[0];
 }
 
 // Helmet/protection are authored X-up; after to_right_handed negates X, up is −X,
@@ -235,22 +286,31 @@ function useGearMaterials(part: RiderPart, tex: Map<string, THREE.Texture>) {
 function RiderGearMesh({
   part,
   anchor,
-  target,
+  target = 1,
   rot = GEAR_ROT,
   yaw = 0,
   alignY = "center",
   pitch = 0,
+  fit: fitMode = "box",
 }: {
   part: RiderPart;
   anchor: [number, number, number];
-  target: number;
+  /** Longest edge the bounding box is scaled to. Ignored when `fit` is `"native"`. */
+  target?: number;
   rot?: [number, number, number];
   yaw?: number;
   alignY?: "center" | "top" | "bottom";
   pitch?: number;
+  /**
+   * How the piece meets the body. `"box"` scales its bounding box to `target` and centres
+   * it on the anchor — right for a helmet or a boot, each authored around its own origin
+   * in its own frame. `"native"` hangs it off the anchor unscaled, at the size and offset
+   * it was authored at, and ignores `target`.
+   */
+  fit?: "box" | "native";
 }) {
   const texMap = useTextureMap(part.textures);
-  const geoms = useBodyGeometries(part.nodes);
+  const geoms = useNodeGeometries(part.nodes);
   const mats = useGearMaterials(part, texMap);
 
   // Gear is authored around its own origin, so fit it onto the body. Measure in the
@@ -276,16 +336,19 @@ function RiderGearMesh({
   }, [geoms, target, rot, yaw, pitch]);
 
   if (!fit) return null;
-  const s = fit.scale;
+  // Native: the mesh already knows its own size and where it hangs off the mount, so the
+  // only thing left to do is put its origin on the anchor.
+  const s = fitMode === "native" ? 1 : fit.scale;
   // Shift so the requested bbox edge (not just the centre) lands on anchor[1].
   const alignShift =
     alignY === "bottom" ? fit.halfY * s : alignY === "top" ? -fit.halfY * s : 0;
+  const recentre = fitMode === "native" ? new THREE.Vector3() : fit.center;
   return (
     <group
       position={[
-        anchor[0] - fit.center.x * s,
-        anchor[1] - fit.center.y * s + alignShift,
-        anchor[2] - fit.center.z * s,
+        anchor[0] - recentre.x * s,
+        anchor[1] - recentre.y * s + alignShift,
+        anchor[2] - recentre.z * s,
       ]}
       scale={s}
     >
@@ -379,7 +442,14 @@ function straightenYaw(geom: THREE.BufferGeometry, rotM: THREE.Matrix4): number 
   return -Math.atan2(dx, dz);
 }
 
-function useBodyGeometries(nodes: EdfNode[]) {
+/**
+ * Turn parsed nodes into `BufferGeometry`, keyed on the nodes alone.
+ *
+ * Deliberately separate from the materials that dress them: geometry only changes when the
+ * model does, so a paint switch has no business rebuilding vertex buffers and re-uploading
+ * a whole bike to the GPU.
+ */
+function useNodeGeometries(nodes: EdfNode[]) {
   const geoms = useMemo(() => {
     return nodes.map((n) => {
       const g = new THREE.BufferGeometry();
@@ -444,7 +514,7 @@ function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THRE
 
 function RiderBodyMesh({ part }: { part: RiderPart }) {
   const tex = useTextureMap(part.textures);
-  const geoms = useBodyGeometries(part.nodes);
+  const geoms = useNodeGeometries(part.nodes);
   // One material per submesh; a node with no submesh table takes a single suit material.
   const mats = useMemo(
     () =>
@@ -473,7 +543,7 @@ function RiderBodyMesh({ part }: { part: RiderPart }) {
 
 function RiderGearSolo({ part }: { part: RiderPart }) {
   const tex = useTextureMap(part.textures);
-  const geoms = useBodyGeometries(part.nodes);
+  const geoms = useNodeGeometries(part.nodes);
   const mats = useGearMaterials(part, tex);
   const rot =
     part.part === "boots" ? BOOT_ROT : part.part === "protection" ? PROT_ROT : GEAR_ROT;
@@ -539,8 +609,8 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   const helmet = byPart("helmet");
   const boots = byPart("boots");
   const protection = byPart("protection");
-  const suit = useDataTexture(partPng(byPart("suit"), "rider", "suit"));
-  const gloves = useDataTexture(partPng(byPart("gloves"), "gloves"));
+  const suit = useDataTexture(partTexture(byPart("suit"), "rider", "suit"));
+  const gloves = useDataTexture(partTexture(byPart("gloves"), "gloves"));
   const hasBody = !!body?.nodes.length;
   const hasHelmet = !!helmet?.nodes.length;
 
@@ -564,6 +634,10 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   // Boots hang their top edge on the body's floor (alignY="top"), nudged forward in Z.
   const footY = b ? b.lo[1] + 0.08 * h : 0.2;
   const bootZ = b ? cz + 0.16 * depth : cz;
+  // Where a protection's own origin sits on the body. Unlike a helmet or a boot, the whole
+  // slot shares one mount: a chest protector, a neck brace, a chain and a bib are all
+  // authored around the same point in the rider's own frame, so this anchor places every
+  // one of them and their own geometry does the rest.
   const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.62 * h, cz] : [0, 1.16, 0.03];
   const bootTarget = hasBody ? 0.44 * h : 0.32;
 
@@ -586,8 +660,16 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
           alignY={hasBody ? "bottom" : "center"}
         />
       )}
+      {/* Native, not fitted: the protection slot spans a full chest protector and a thin
+          necklace, and scaling each to one size inflated the chain to vest proportions and
+          threw away the offset a piece like a chain or a hood hangs at deliberately. */}
       {!!protection?.nodes.length && (
-        <RiderGearMesh part={protection!} anchor={protAnchor} target={hasBody ? 0.42 * h : 0.62} rot={PROT_ROT} />
+        <RiderGearMesh
+          part={protection!}
+          anchor={protAnchor}
+          rot={PROT_ROT}
+          fit="native"
+        />
       )}
       {/* Two feet as separate nodes → split left/right; a single-node boot renders centred. */}
       {!!boots?.nodes.length &&
@@ -618,65 +700,42 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   );
 }
 
+function makeEdfMaterial(t: THREE.Texture | null) {
+  return new THREE.MeshStandardMaterial({
+    map: t ?? undefined,
+    color: t ? 0xffffff : 0xb7bcc4,
+    metalness: 0.2,
+    roughness: 0.55,
+    // Inconsistent winding — render both sides so the bike isn't see-through.
+    side: THREE.DoubleSide,
+  });
+}
+
 function useEdfMeshes(
   nodes: EdfNode[] | null | undefined,
   tex: Map<string, THREE.Texture>,
 ) {
-  const built = useMemo(() => {
-    if (!nodes?.length) return [];
-    return nodes.map((n) => {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(Float32Array.from(n.positions), 3),
-      );
-      if (n.uvs.length)
-        g.setAttribute("uv", new THREE.Float32BufferAttribute(Float32Array.from(n.uvs), 2));
-      if (n.normals.length)
-        g.setAttribute(
-          "normal",
-          new THREE.Float32BufferAttribute(Float32Array.from(n.normals), 3),
-        );
-      g.setIndex(n.indices);
-      if (!n.normals.length) g.computeVertexNormals();
-      g.computeBoundingBox();
-      g.computeBoundingSphere();
+  const list = useMemo(() => nodes ?? [], [nodes]);
+  const geoms = useNodeGeometries(list);
 
-      const makeMat = (t: THREE.Texture | null) =>
-        new THREE.MeshStandardMaterial({
-          map: t ?? undefined,
-          color: t ? 0xffffff : 0xb7bcc4,
-          metalness: 0.2,
-          roughness: 0.55,
-          // Inconsistent winding — render both sides so the bike isn't see-through.
-          side: THREE.DoubleSide,
-        });
-
-      let materials: THREE.Material[];
-      if (n.submeshes.length) {
-        n.submeshes.forEach((sm, i) =>
-          g.addGroup(sm.triStart * 3, sm.triCount * 3, i),
-        );
-        materials = n.submeshes.map((sm) => makeMat(submeshTexture(sm.texture, tex)));
-      } else {
-        // No submesh table → whole-node binding (the model's primary body texture).
-        materials = [makeMat(submeshTexture(n.texture, tex))];
-      }
-      return { g, materials };
-    });
-  }, [nodes, tex]);
-
+  // Only the materials know about the paint. Building them alongside the geometry meant
+  // every livery switch tore down and rebuilt the bike's vertex buffers to change a map.
+  const materials = useMemo(
+    () =>
+      list.map((n) =>
+        n.submeshes.length
+          ? n.submeshes.map((sm) => makeEdfMaterial(submeshTexture(sm.texture, tex)))
+          : // No submesh table → whole-node binding (the model's primary body texture).
+            [makeEdfMaterial(submeshTexture(n.texture, tex))],
+      ),
+    [list, tex],
+  );
   useEffect(
-    () => () => {
-      built.forEach(({ g, materials }) => {
-        g.dispose();
-        materials.forEach((m) => m.dispose());
-      });
-    },
-    [built],
+    () => () => materials.forEach((a) => a.forEach((m) => m.dispose())),
+    [materials],
   );
 
-  return built;
+  return { geoms, materials };
 }
 
 // MX Bikes meshes are authored Y-up, +Z forward (three.js' convention) — no rotation.
@@ -687,14 +746,14 @@ function EdfMesh({
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
 }) {
-  const built = useEdfMeshes(nodes, textures);
+  const { geoms, materials } = useEdfMeshes(nodes, textures);
   return (
     <group>
-      {built.map(({ g, materials }, i) => (
+      {geoms.map((g, i) => (
         <mesh
           key={i}
           geometry={g}
-          material={materials.length === 1 ? materials[0] : materials}
+          material={materials[i].length === 1 ? materials[i][0] : materials[i]}
           castShadow
           receiveShadow
         />
@@ -711,6 +770,7 @@ function CameraRig({ solo }: { solo: boolean }) {
   const controls = useThree((s) => s.controls) as
     | { target: THREE.Vector3; update: () => void }
     | null;
+  const invalidate = useThree((s) => s.invalidate);
   useEffect(() => {
     const [x, y, z] = solo ? [1.25, 0.35, 1.7] : [2.6, 1.8, 3.2];
     camera.position.set(x, y, z);
@@ -721,7 +781,10 @@ function CameraRig({ solo }: { solo: boolean }) {
     } else {
       camera.lookAt(0, 0, 0);
     }
-  }, [solo, camera, controls]);
+    // Moving the camera by hand changes no React state, so under `frameloop="demand"`
+    // nothing would repaint and the reframe wouldn't show until the next interaction.
+    invalidate();
+  }, [solo, camera, controls, invalidate]);
   return null;
 }
 
@@ -748,7 +811,7 @@ function ControlsHint() {
 
 export interface ModelViewerProps {
   mode: ViewerMode;
-  texture?: string | null;
+  texture?: PaintTexture | null;
   textures?: PaintTexture[];
   nodes?: EdfNode[] | null;
   riderParts?: RiderPart[] | null;
@@ -780,9 +843,15 @@ export function ModelViewer({
         <Canvas
           className="h-full w-full"
           shadows
-          dpr={[1, 2]}
+          // Nothing in this scene animates, so drawing 60 shadowed frames a second at a
+          // parked model was pure burn — and the Rider Studio panel is mounted the whole
+          // time that page is open. On demand, a frame is drawn when React commits, when
+          // OrbitControls moves, and when `CameraRig` reframes; otherwise the GPU idles.
+          frameloop="demand"
+          // 2× on a retina panel quadruples the pixels for a preview-sized model.
+          dpr={[1, 1.5]}
           camera={{ position: [2.6, 1.8, 3.2], fov: 42 }}
-          onCreated={({ gl }) => {
+          onCreated={({ gl, invalidate }) => {
             // A lost GPU context otherwise leaves a black canvas; preventDefault lets the browser restore it.
             gl.domElement.addEventListener(
               "webglcontextlost",
@@ -792,6 +861,9 @@ export function ModelViewer({
               },
               false,
             );
+            // Restoring doesn't touch React state, so on demand nothing would redraw and
+            // the canvas would stay black until the next interaction.
+            gl.domElement.addEventListener("webglcontextrestored", () => invalidate(), false);
           }}
         >
           <color attach="background" args={["#0e0f13"]} />

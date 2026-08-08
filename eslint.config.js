@@ -7,7 +7,16 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   // Vite rewrites its config to a timestamped sibling on reload; it's gitignored
   // build machinery, not source.
-  { ignores: ["dist", "src-tauri/target", "vite.config.ts.timestamp-*.mjs"] },
+  {
+    ignores: [
+      "dist",
+      "src-tauri/target",
+      "vite.config.ts.timestamp-*.mjs",
+      // Separate deployable with its own tsconfig, lint rules and generated types — the
+      // desktop app's browser-oriented config only produces noise against Workers code.
+      "control-plane",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

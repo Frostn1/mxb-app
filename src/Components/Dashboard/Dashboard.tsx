@@ -4,6 +4,7 @@ import Library from "../Library/Library";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
+import Servers from "../Servers/Servers";
 import RiderStudio from "../Rider/RiderStudio";
 import Browse from "../Browse/Browse";
 import ShopCatalog from "../Shop/ShopCatalog";
@@ -146,6 +147,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           ) : view === "rider" ? (
             <RiderStudio initialLoadout={riderPreset} onLoaded={clearRiderPreset} />
+          ) : view === "servers" ? (
+            <Servers />
           ) : view === "manage" ? (
             <Manage />
           ) : (

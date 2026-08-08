@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mxb-fetch",
+  "description": "The hidden mxb-mods.com window that runs catalog fetches in a real browser, for users whose HTTP client Cloudflare refuses. This is the only capability granted to a REMOTE origin, so it is deliberately the narrowest one in the app: permission to emit an event, and nothing else — no shell, dialog, filesystem, updater, process or window control. A central guard in main.rs (`ipc_allowed`) additionally rejects every IPC call from this window except the single event emit, because app commands registered with generate_handler! are not covered by this ACL.",
+  "webviews": ["mxb-fetch"],
+  "remote": {
+    "urls": ["https://mxb-mods.com"]
+  },
+  "permissions": ["core:event:allow-emit"]
+}

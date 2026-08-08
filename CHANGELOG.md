@@ -1,17 +1,52 @@
 # Changelog
 
-## Unreleased
+## 2026-08-08 — everyone on the server finally looks right
 
 ### Added
+- **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
+  whatever file on *your* disk happens to match the name they picked, so a full grid shows
+  up in default liveries. The game can't tell us what they picked either — its plugin API
+  carries rider names, bikes and lap data, and no paint field at all. So the loop is closed
+  outside the game. Your app publishes what your rider is wearing; every other app pulls it
+  back and installs it. Paints are content-addressed by SHA-256, so twenty riders sharing a
+  livery is one stored object and nineteen uploads that never happen, and a second sync
+  installs nothing it already has.
+
+  Everyone on the server needs the app for this to work — that's inherent, not a limitation
+  we chose.
+
+- **A Servers tab**, for running dedicated servers: start, stop and restart the game on a
+  host, watch its uptime and how many times it came back on its own, and change the track.
+  It talks to `mxb-agent` on the host rather than to a cloud provider, because a desktop app
+  that shipped provider credentials could create infrastructure from any machine it ran on.
+
+- **An Experimental switch in Settings**, off by default, gating both of the above. They
+  talk to a live service and write files other players uploaded, so they're opt-in rather
+  than something you find by accident. `MXB_EXPERIMENTAL=1` turns them on for a single run
+  without touching your saved settings — and the switch says so rather than looking stuck.
+
+- **Beta builds now say they're beta**, next to the version in Settings → About. The badge
+  keys off a semver pre-release suffix, which is the same thing the release workflow uses to
+  mark a build as a pre-release, so the two can't disagree.
+
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
+
 - **A Shop tab that browses the mxbikes-shop.com catalog.** The store hands us its whole
   catalog as one JSON document, so the app fetches it once and does the searching, filtering,
   sorting and paging locally — browsing is instant and keeps working with the network down.
   Search by name, creator or category, filter down the store's own category tree (picking a
-  parent includes everything under it), sort by newest, recently updated, price or discount,
-  and flip on **On sale** to see only what's actually discounted right now. Discounted items
-  show the normal price struck through beside the live one with a percentage badge, including
-  the awkward case of an item that has both a price *range* (a paint, or a paint plus the
-  PSD) and a sale on it. Genuinely free downloads say **Free** rather than "$0.00", which is a
+  parent includes everything under it), sort by recently updated, price or discount, and flip
+  on **On sale** to see only what's actually discounted right now. Discounted items show the
+  normal price struck through beside the live one with a percentage badge, including the
+  awkward case of an item that has both a price *range* (a paint, or a paint plus the PSD)
+  and a sale on it. Genuinely free downloads say **Free** rather than "$0.00", which is a
   different thing from the pay-what-you-want items that merely start at zero. The store's
   catalog carries no sale end dates, so the half-hourly conditional refresh is what keeps a
   finished sale from being shown forever — it corrects itself in the background without anyone
@@ -34,26 +69,294 @@
 - The signed-in "All My Downloads" page moved to `MyDownloads.tsx` and the `shop` route now
   goes to the new catalog. That feature is intact and still hidden from the sidebar.
 
-## 2026-08-07 — v0.7.0 — Six languages, an in-game overlay, and bikes wearing the right paint
+### Security
+- A paint carries the destination it should be written to, and that path arrives from
+  another player. It's validated twice — once by the service and again in the app before it
+  becomes a real path — because only the second check actually protects a disk. Anything
+  with a separator, a `..`, a drive letter, a control character or a non-`.pnt` extension is
+  refused outright rather than sanitised: a path we'd have to rewrite is one we don't
+  understand. Downloaded bytes are checked against their digest before being written.
+
+## 2026-08-08 — run a dedicated server from the app
 
 ### Added
-- **A Manage section: race presets, and mods you can switch off.** MX Bikes mounts every
-  archive in your mods folder at startup, so a big library is paid for on every load —
-  even though a race needs one track, one bike, one gear set and a support pack or two.
-  A preset can now carry the content its race needs: give it the track it's ridden on and
-  pin the packs that have to stay (the OEM pack), hit **Race mode**, and the app puts the
-  preset's look on *and* takes everything else out of the game's way in one action. The
-  paint, gear and model swap in the loadout are found automatically — the same resolver
-  that packs a full share bundle — so the only things to pick by hand are the ones a
-  loadout can't express. Nothing is deleted: disabled mods move to
+- **A Servers tab that manages the dedicated servers you run.** Start, stop and restart the
+  game on a host, see whether it's up, how long it's been up, how many times it came back on
+  its own, and switch the track — all without an RDP session or a shell. Each server is added
+  with its agent address and token, and its status refreshes while the tab is open.
+
+- **`mxb-agent`, a supervisor that runs on the game host** (`server-agent/`). It **owns** the
+  `mxbikes.exe` process rather than managing whatever happens to be running, and that
+  ownership is what makes the rest work: exit detection comes from the child handle instead
+  of polling the process table, so a server that crashes is **brought back automatically**;
+  "restart" isn't a race between a kill and someone else's respawn; and a reboot that starts
+  the agent starts the game with it. A deliberate stop is suppressed, so the watcher doesn't
+  fight you by reviving a server you meant to shut down.
+
+  The app talks to this agent, never to a cloud provider — a desktop app that shipped
+  provider credentials could create infrastructure on any machine it ran on. What it holds
+  instead is a bearer token for one server you already administer.
+
+  Settings changes patch the server's `.ini` **in place**: the one operation that matters is
+  changing a single key while leaving every other byte alone, which is what general INI
+  parsers are worst at — a parse/serialise round-trip reorders keys and drops comments, and
+  this is a file server owners edit by hand. Only `track`, `name` and `maxclient` are exposed,
+  values containing newlines are rejected so a caller can't inject unrelated keys, and the
+  game is restarted afterwards because it reads its `.ini` only at startup.
+
+  Note the agent speaks plain HTTP, so its token crosses the network in clear. Terminate TLS
+  in front of it, or keep it on a private network, before exposing it to the open internet.
+
+## 2026-08-07 — join a server by address
+
+### Added
+- **Join a server straight from the app.** A new *Join a server* button in the sidebar takes
+  a server address and starts MX Bikes already connected to it, rather than launching the
+  game and leaving you to find the server in the in-game WORLD list. The game has carried an
+  undocumented `-directconnect` flag all along — PiBoSo documents only `-dedicated` and
+  `-clientport` — which reads the address from the argument that follows it. A bare host gets
+  the dedicated server's default port, 54210.
+
+  The address is validated in the Rust command rather than in the UI, because it ends up on
+  the game's command line: anything that could smuggle a second argument past us — embedded
+  whitespace, a leading `-` — is rejected there, so a pasted address can't quietly turn into
+  a different flag. The connect flag is only read at startup, so asking to join while MX
+  Bikes is already running says so instead of appearing to work.
+
+## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
+## 2026-08-08 — v0.7.1 — Browse works for blocked players, the model-swap crash is gone, and the Rider preview wears a real rider
+
+### Added
+- **Helmets, Boots and Protection tabs in a preset's race content.** Next to Tracks and
+  Always keep, three panes list the gear models you have installed so you can tick the spares
+  worth keeping reachable — picking them by hand instead of leaving it all to what the preset
+  happens to name. Anything unticked steps aside for the race; the preset's own gear is kept
+  for you either way.
+- **Custom rider models show up on the rider.** A rider model is a whole new body mesh, not a
+  texture — Rider+ and its variants install as folders under `mods/rider/riders`, and the
+  preview never looked there. It read the body out of the game's `rider.pkz` and nowhere else,
+  so picking an installed model listed the profile, found nothing to load, and rendered gear
+  floating where the rider should be. The body is now resolved from the installed model first,
+  loose or packed as a `.pkz`, and falls back to the game's own rider only when no model
+  supplies one. A rider packed as `riders/<name>.pkz` is listed in the picker too, as gear
+  already was.
+- **A rider model wears the kits you already own.** Rider+ ships its `paints` and `gloves`
+  folders empty on purpose, because existing gear is meant to work on it. A kit or glove paint
+  is now looked for in the chosen profile, then inside its archive, then under the stock
+  profiles — by exact name at every step, so reaching further never quietly swaps in a
+  different paint. The kit dropdown lists what you own rather than going blank on a fresh
+  model.
+- **The install picker works out which bike a paint is for.** mxb-mods files every livery
+  under a category per bike it fits ("2023 KTM 450 SX-F OEM") — far more precise than the post
+  title it used to guess from. Those categories are now read off the post and matched against
+  your bikes, so the right one is preselected under "Probably" instead of whichever bike you
+  painted last. Checked against the whole catalog: the correct bike comes first for all 107
+  OEM models.
+- **OEM bikes can be picked as a destination at all.** Their files live inside the game's
+  locked archive, so nothing of them is on disk until they're painted and the picker never
+  listed them — a paint for one had to have its bike id typed by hand. Bike folders and the
+  bike ids in your profile are now offered alongside packaged `.pkz` bikes.
+
+### Fixed
+- **Browse loads for players mxb-mods.com was refusing.** Some players got nothing but
+  "mxb-mods.com refused the request (403)", and until now the app's answer was to open a
+  check window, let Cloudflare's challenge clear, and reuse the cookie it earned. A tester's
+  log proved that can't work: the challenge cleared in about a second, the cookie was sent
+  correctly, and the site refused us anyway — Cloudflare ties that cookie to the exact
+  browser connection that earned it, and the app's own downloader isn't that. So the app now
+  moves the *request* into the browser instead of moving the cookie out of it. When
+  mxb-mods.com refuses the fast path, the same request is re-run inside a hidden window on
+  the site's own page and everything carries on from there, for the rest of the session. The
+  visible "Checking with mxb-mods.com…" popup is gone entirely — nothing appears on screen.
+  Mod downloads are untouched: they come from MediaFire, Google Drive and MEGA, never from
+  mxb-mods.com.
+- **Retry works more than once.** Closing the old check window parked it in the tray instead
+  of destroying it, which left its name taken, so every attempt after the first failed to
+  open one and Retry quietly did nothing for the rest of the session. The shop login window
+  had the same fault. Only the main window parks in the tray now.
+- **The game no longer crashes to desktop when you pick a bike after swapping a model or
+  applying a preset.** Since 0.7.0, swapping a bike's model asked FrostMod to re-apply the
+  bike so the new mesh showed without the class-switch away-and-back. FrostMod v0.9.9 does
+  that by replaying a bike-load call it captured earlier — using a descriptor the game had
+  already finished with, never checking the object that call writes into, and swallowing
+  the resulting fault so the game carried on with a half-swapped machine. Nothing looked
+  wrong at the time; the crash landed on the *next* bike selected by hand, which is why it
+  read as "choosing a bike crashes the game" rather than as anything to do with the swap.
+  The app no longer sends that request to any FrostMod below v0.9.11 — the release that
+  stops replaying — and a FrostMod whose version it can't read counts as one to leave
+  alone, where before an unreadable version was given the benefit of the doubt. Model swaps
+  and presets still apply in full; the swapped model now appears when you re-select the
+  bike in the garage, and the toast says so instead of promising a live refresh.
+- **A preset that swaps a model no longer reports a live refresh it didn't get.** The
+  apply toast was derived purely from the paint/gear reload, which never touches the mesh —
+  so a preset carrying a model swap said "refreshed live in-game" while the bike on screen
+  kept its old bodywork. It now says the paints are live and names re-selecting the bike as
+  what shows the model.
+- **Race mode now clears the rider gear too.** Applying a race preset narrowed the bikes and
+  tracks the game could see and left the rider alone — every helmet, every boot, every
+  protection set and every gear livery you have installed still showed up in the game's
+  pickers, including the four hundred liveries sitting under the one helmet the preset
+  actually names. Manage only ever moved archives and extracted tracks, on the reasoning that
+  a loose `.pnt` costs nothing to mount; true, but mounting was never the point — a preset
+  that names one paint means the others should be out of sight. Race mode now takes rider gear
+  models and liveries out of the way alongside the rest, keeps exactly what the preset names,
+  and brings them all back on Restore all.
+- **Protection mods now show what they actually look like.** The protection slot is the
+  busiest and least conventional one on mxb-mods — chains, necklaces, hoodies, bibs,
+  backpacks, hair, the odd pickaxe — and unlike helmets and boots those mods bake their
+  look straight into the mesh instead of shipping a `.pnt`. The preview only ever looked
+  for a paint, so five of eight real mods pulled off the site came out as a featureless
+  grey shape. A piece with no paint to wear now wears the texture its own mesh carries,
+  each part bound to its own: a chest protector's shell and straps, or a chain's four baked
+  maps, land where the model says they go instead of all sharing one.
+- **A protection is drawn at the size it was made.** Every piece was being scaled to a
+  fixed fraction of the rider and re-centred on his chest, which inflated a thin necklace
+  to the proportions of a full vest and threw away the offset a chain or a hood is
+  deliberately authored to hang at. Protection is modelled in the rider's own frame, so
+  it's now placed as authored — its own size, its own offset — and the mount an `.hrc`
+  names is honoured.
+- **Mods that ship sealed loose files load.** A protection folder whose files are sealed
+  the way a `.pkz` seals its entries used to fail outright with "no gear mesh found"; those
+  now read like any other. Gear also follows the `gfx.cfg` → `.hrc` chain to find its mesh,
+  so a mod that names it for the piece (`neckbrace.edf`, `pickaxe.edf`) resolves instead of
+  relying on a guess from filenames, and stock gear whose folder doesn't use the slot's own
+  mesh name no longer comes up empty.
+- **Textures baked in Substance or Blender bind to the right mesh.** Maps exported under
+  the toolchain's names — `Vest_Normal` beside `Vest_BaseColor` — were counted as looks in
+  their own right, and since material indices count that list, every texture after one slid
+  onto the wrong part. That's why the Tactical Vest wore its pouch's normal map.
+- **The rider stands up and faces forward.** Rider meshes don't agree on which axis is up: the stock motocross
+  rider is authored Y-up, while the supermoto rider and Rider+ are Z-up and arrived lying on
+  their back. Every piece of gear is anchored and scaled to a fraction of the body's height,
+  so a body on its side measured a quarter of a metre tall instead of a metre and a bit — the
+  helmet and boots shrank to specks and sank into the torso, which read as gear that never
+  loaded. Standing it up alone left it facing backwards, which matters just as much: the
+  viewer nudges the helmet and boots forward, so a rider turned around wears its gear through
+  its own back. A body whose longest axis isn't its height is now rolled upright *and* turned
+  to face front; one that already stands is left alone.
+- **A rider model loads without decoding pixels nobody sees.** Dressing a body in its own
+  baked textures used to inflate and re-encode every texture the mesh carried, then throw
+  most of them away — skin renders as a flat colour and the name and number planes render as
+  nothing at all. On a rider body that decode cost more than parsing the mesh. Only textures
+  the viewer can actually draw are decoded now, and they're kept per model so changing a
+  dropdown doesn't re-read a 67 MB body.
+- **The rider's textures are read off the model instead of memorised.** Which texture a body
+  part wears was decided by its material number: 1 was gloves, 2 was the face, 3 and 4 were
+  hidden. That is not a rule, it's the stock motocross rider's texture order memorised — and
+  no two rider models write that order the same way. The supermoto rider lists its face second
+  and its gloves third, so it has been wearing its face on its hands; Rider+ lists its gloves
+  first and its suit last, so it would have worn the glove texture over its whole body. Each
+  part now binds to the texture the mesh itself says it was drawn against, the same reading the
+  bike and gear previews already take. Anything a paint doesn't cover falls back to the
+  model's own texture, so a rider that ships no paints — or a model with pieces of its own —
+  renders as it was built rather than in flat grey.
+- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
+  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
+  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
+  so the preview never blanks; but with no error anywhere that is indistinguishable from a
+  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
+  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
+  preview for as long as what you're looking at is out of date, and writes the error to the
+  console. The toast fires once per distinct message rather than once per pick, since a
+  persistent fault is re-hit on every slot edit.
+- **Browse's Cloudflare check works more than once per session.** The clearance window
+  closed into the tray instead of closing, which left its name registered for the life of
+  the process — so the handshake succeeded the first time and every attempt after it failed
+  with "a webview with that label already exists", leaving Retry doing nothing at all for
+  the rest of the session. Only the main window parks in the tray now; the clearance check
+  and the shop login, which had the same latent fault, close for real, and a rebuild waits
+  for the old window to finish tearing down rather than racing it.
+- **A paint with one unreadable texture no longer leaves the whole model untextured.** The
+  viewer waited for a fixed number of textures to arrive and one that failed to load never
+  arrived, so the count never completed and every part stayed grey. A texture that can't be
+  read is now skipped on its own, and the rest of the paint still shows.
+- **A paint dropped on a bike's root folder no longer vanishes.** MX Bikes only loads liveries
+  from `<Bike>/paints/`, but the picker also offers the bike's root (where sounds and model
+  swaps go) and would happily install a `.pnt` there — the install reported success and the
+  paint never appeared in game. It's now redirected into that bike's `paints/`.
+- **The install progress steps read as English again.** The Resolve → Download → Extract →
+  Place → Reload chain printed its raw translation keys (`modDetail.stageResolve`) in every
+  language — the labels were the only `TKey` in the app rendered without going through `t()`.
+  All five locales already had the strings.
+- **Tracks default to a folder you already use instead of the root.** Once the tracks library
+  has any folder, the first one is preselected rather than dumping another `.pkz` loose at the
+  root. Applies to Browse installs and to MX Bikes Shop purchases, which always went to the
+  root.
+
+### Changed
+- **The 3D viewer stops eating the machine.** Every texture a preview showed was compressed
+  to a PNG and then base64'd into a text blob before it could cross to the viewer — seconds
+  of every core per bike, and a multi-megabyte string that then lived in the Rust cache, the
+  message to the frontend and the browser heap all at once. Worse, each paint carried its
+  own copy of the model's base textures, so a bike with several liveries held the same
+  pixels over and over. The pixels now stay put and the viewer is handed a reference,
+  fetching the raw bytes over a binary channel only for the paint it is actually drawing.
+  Nothing is encoded, nothing is turned into text, and a paint costs a handful of bytes
+  instead of a copy of the bike.
+- **The viewer no longer redraws a parked model 60 times a second.** Nothing in the scene
+  moves on its own, but the canvas was rendering continuously anyway, shadows and all — and
+  the Rider tab keeps one on screen for as long as that page is open. It now draws only when
+  something actually changes: you move the camera, a texture arrives, the model is reframed.
+  Rendering also stops oversampling to twice the screen's pixels for a preview-sized model.
+- **Switching paint no longer rebuilds the bike.** Changing livery threw away every part's
+  geometry and re-uploaded the whole model to the graphics card just to swap which image it
+  wore. Geometry and paint are now built separately, so a paint change only changes the
+  paint.
+- **The viewer's caches have a ceiling.** Parsed meshes were kept for the life of the app
+  and never released, and the bike cache emptied itself wholesale on its seventh entry —
+  throwing away the model you were looking at along with the rest. Both now keep the most
+  recently used and drop only the coldest, and a dropped bike releases its texture pixels
+  with it.
+- **Protection is no longer hidden by default in the Rider tab.** It was, back when it
+  rendered as a grey blob spanning the whole torso.
+- **When mxb-mods.com refuses us, the log now says enough to act on.** Browse failing with
+  "mxb-mods.com refused the request (403)" wrote nothing to the log beyond whether the check
+  window earned a cookie — the request that was actually refused went unrecorded, so a report
+  of it and a screenshot of it carried the same information. A refusal now logs which endpoint
+  was blocked (the catalog API and the rendered mod page sit behind different Cloudflare
+  rules), Cloudflare's `cf-ray`, `cf-mitigated` and `retry-after` headers, the block reason
+  from the response body, and which cookies the request actually carried — by name, never by
+  value. The retry is narrated too, so the log distinguishes the two ways this fails: never
+  earning a clearance, versus earning one in a real browser and being refused anyway, which
+  points at the HTTP client's TLS fingerprint rather than at anything a cookie can fix.
+- **The 403 dialog carries a reference id.** The `cf-ray` of the refused request is appended
+  to the error, so a screenshot alone is enough to identify the block.
+- **Two silent failures now speak up.** A catalog response of 400 that isn't "you paged past
+  the end" used to render as an empty listing, and a mod page that yielded no downloads
+  without being a Cloudflare interstitial said nothing at all. Both are logged.
+- **`MXB_LOG=debug` traces every mxb-mods.com request.** Off by default, because search runs
+  on each keystroke and a line per keystroke would bury the failure worth reading.
+- **Release binaries are stripped and hardened against reverse-engineering.** Added a
+  `[profile.release]` that strips the symbol table from every platform's artifact, builds with
+  fat LTO + a single codegen unit (functions inlined/merged so a decompiler can't recover clean
+  structure), and aborts on panic (no unwind tables). `opt-level` stays at 3 so the viewer's hot
+  paths aren't sacrificed. On Windows this also means no PDB is produced. Self-update is
+  unaffected — the updater signs file content after the build.
+- **Sensitive endpoint paths no longer appear in a `strings` dump.** Wired in `obfstr` and
+  XOR-obfuscated the runtime-built API paths and upload/download URLs (WordPress REST/admin-ajax
+  paths, pixeldrain upload, Google Drive resolver). Public host bases stay as-is — they're
+  visible in network traffic regardless and are bound into `const` config.
+- **Source-level format hints kept out of the public repository.** Simplified the `flate2`
+  dependency note and stripped the implementation comments from the `.pnt` decoder, so the
+  committed source no longer documents on-disk container internals. Comment-only change —
+  code, tests, and behavior are unchanged.
+
+## 2026-08-07 — v0.7.0 — Race mode, an in-game overlay, and six languages
+
+### Added
+- **Race mode, and mods you can switch off.** MX Bikes mounts every archive in your mods
+  folder at startup, so a big library is paid for on every load — even though a race needs
+  one track, one bike, one gear set and a support pack or two. Give a preset the track it's
+  ridden on, pin the packs that have to stay, and **Race mode** puts the preset's look on
+  *and* takes everything else out of the game's way in one action. The paint, gear and model
+  swap come from the loadout automatically, so the only things to pick by hand are the ones
+  a loadout can't express. Nothing is deleted — disabled mods move to
   `<MX Bikes>\mxbapp_disabled`, mirroring the folder they came from, and **Enable
-  everything** puts every one of them back in exactly the path it left. The Mods list
-  does the same by hand — a switch per mod, bulk enable/disable of whatever the filter is
-  showing, and delete straight to the recycle bin. Manage sits in the main window's
-  sidebar and as a tab in the in-game overlay, so the next race can be lined up between
-  sessions without leaving the game. Loose paints, model-swap sets and sound folders are
-  left alone — they aren't what a load is waiting on, and moving them would break the
-  Locker's bookkeeping.
+  everything** puts each one back in the exact path it left. The new **Manage** section does
+  it by hand too: a switch per mod, bulk enable/disable of whatever the filter shows, and
+  delete straight to the recycle bin. It's in the sidebar and in the overlay, so the next
+  race can be lined up without leaving the game. Loose paints, model-swap sets and sound
+  folders are left alone — they aren't what a load waits on.
 - **An in-game overlay, on a hotkey.** Ctrl+Shift+X (rebindable in Settings → In-game
   overlay) brings Presets, the Locker and Browse up over MX Bikes in a floating panel; Esc
   hands control straight back to the game, and **Open full app** beside it switches to the
@@ -99,6 +402,42 @@
   own look".
 
 ### Fixed
+- **Every bike now paints the parts a paint is meant to reach.** This is the third pass at
+  the same bug, and the first that goes at what was actually wrong. A part's material was
+  being looked up in a table read from the top of the mesh file, treated as the model's
+  one and only table. It isn't a model-wide table at all — it is simply the *first* node's,
+  because that node's geometry starts exactly where it ends. **Every part carries its own**,
+  and a material id means nothing outside the part it belongs to. Reading one part's ids
+  through another's put the blank number-plate texture — the one the game composites race
+  numbers onto, which no paint can touch — over real bodywork: the Suzuki RM250 and RM125
+  wore it on the fork lowers, triple clamps and both levers, the Honda CR500AF on its entire
+  swingarm and front end, the Husqvarna TC 125/TC 250 on the fork guards, chain guard and
+  front bodywork. Across the 53 stock bikes it covered about 124,000 triangles of bodywork;
+  it now covers about 4,900, all of it geometry the mesh itself marks as number plates.
+  Bikes that share a part with another bike — much of the KTM, Husqvarna and GasGas range —
+  now bind that part identically on every one of them, where 9 such parts previously
+  disagreed.
+- **Swingarms and chain guards wearing each other's texture.** Where one mesh group holds
+  several materials, the ids were assumed to count upward from the group's first. They
+  don't — each range names its own. On the Husqvarna FC 250 and FC 350 that swapped the
+  swingarm body onto the plastics sheet and its chain guard onto the metals one, against
+  fourteen sibling bikes carrying the identical part the right way round.
+- **Bikes no longer look different from one launch to the next.** Choosing between two
+  readings of a material meant scoring a part's UV layout against the textures, and the
+  backdrop colour that scoring rested on was picked by iterating a hash map — so tied
+  colours resolved differently on each run, and sometimes twice within one run. Six bikes
+  bound parts differently between launches; on the Triumph TF 450-RC that was the whole
+  20,570-triangle frame and engine going blank on some runs. With one reading of a material
+  id there is nothing to score and nothing to guess: the scoring machinery is gone.
+- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
+  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
+  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
+  so the preview never blanks; but with no error anywhere that is indistinguishable from a
+  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
+  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
+  preview for as long as what you're looking at is out of date, and writes the error to the
+  console. The toast fires once per distinct message rather than once per pick, since a
+  persistent fault is re-hit on every slot edit.
 - **Bikes wearing the wrong texture on their bodywork.** A part's material was matched to
   the texture list in whatever order the exporter wrote it, which only works on bikes
   written in material order. The Kawasaki KX250/KX450 wore their blank number-plate texture
@@ -109,14 +448,16 @@
 - **The front fender and fork guards rendering in bare metal.** One mesh group can hold
   several materials — a fork leg and the plastic guard on it — and all of them wore the
   first one's texture. Each range now binds its own.
-- **Switching goggles actually changes the goggles.** Two faults stacked: the preview
+- **Goggles: switching a lens now reaches the model.** Two faults stacked: the preview
   watched every rider slot except the goggles, so a new lens only showed once you touched
   some *other* slot — and even then it was worn by nothing, because the goggles were
   identified by mesh-group name, and a helmet's goggles are as often called `mask` or sit
   in a node with no groups at all. The mesh's own materials now say which piece draws from
   which texture, with names as a hint rather than the whole story. Goggle paints that ship
   apart from the helmet are loaded too, and the game's free helmets — which never loaded a
-  goggle paint at all — now wear one like an installed helmet does.
+  goggle paint at all — now wear one like an installed helmet does. Gear this still doesn't
+  cover is being worked on; if a lens won't take, the log now names the paint it couldn't
+  find, which is the thing to send along.
 - **The overlay shortcut no longer defaults to Discord's mute key.** Ctrl+Shift+M is
   Discord's default push-to-mute; Discord registers it globally and gets there first, so on
   many machines the overlay hotkey never bound — invisibly, since a shortcut that was never
@@ -414,6 +755,15 @@
   Vite's gitignored timestamped config copies. Now 0 errors / 3 dependency-array
   warnings, so lint can gate CI.
 
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
+
 ### Security
 - **Bump swiper to 14.0.7** — clears a critical prototype-pollution advisory covering
   6.5.1–12.1.1. Unlike the vite/rollup/esbuild advisories (build-time only), this one
@@ -527,6 +877,15 @@
   already used), so the swap shows up without reselecting your profile. The swap toast now
   reports the refresh result. `apply_model_swap`/`apply_sound_swap` return a
   `SwapApplyOutcome`, and the refresh step is shared with `presets_apply`.
+
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 
 ### Security
 - **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm

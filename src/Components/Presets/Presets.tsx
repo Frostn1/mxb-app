@@ -121,6 +121,14 @@ async function copyText(text: string): Promise<boolean> {
 /** Which whole-sentence toast an apply produced. A key, not a fragment: the
  *  English "Applied X to Y — {note}" shape doesn't survive translation. */
 function applyNoteKey(outcome: PresetApplyOutcome): TKey {
+  // A preset carrying a model swap only shows its new mesh once FrostMod re-applies the
+  // bike. `live_refresh` says nothing about that — it reloads paints and gear, never the
+  // mesh — so when the model didn't refresh, "refreshed live in-game" is a promise the
+  // player can see is false. `model_refresh` is null when the preset swapped no model.
+  const modelStale =
+    outcome.model_refresh !== null && outcome.model_refresh !== "signaled";
+  if (modelStale && outcome.game_running) return "presets.appliedReselectBike";
+
   switch (outcome.live_refresh) {
     case "refreshed":
       return "presets.appliedRefreshed";

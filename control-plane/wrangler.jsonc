@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mxb-control-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mxb-control-plane",
+      "database_id": "c993c497-28b4-480b-8e6e-fb61a0b18c2b"
+    }
+  ],
+
+  // Paints are content-addressed by SHA-256, so an upload of a paint someone else already
+  // shared is a no-op and every rider on a server pulls the same object.
+  "r2_buckets": [
+    {
+      "binding": "PAINTS",
+      "bucket_name": "mxb-paints"
+    }
+  ]
+}

@@ -6,6 +6,10 @@
 //! `<MX Bikes>/mxbapp_disabled`, mirroring its path under `mods` so putting it back is
 //! exact.
 //!
+//! Rider gear paints ride along for a different reason. A loose `.pnt` costs nothing to
+//! mount, but it is a row in the game's own gear pickers — and a preset that names one
+//! helmet paint means the other four hundred should be out of sight, not merely cheap.
+//!
 //! The mirrored path is the whole record. There's no manifest to fall out of step with the
 //! disk when app data is wiped, a folder is moved by hand, or two copies of the app run at
 //! once — restoring is just "walk the shadow tree and move everything back".
@@ -124,13 +128,41 @@ fn rel_of(mods_path: &str, abs: &Path) -> Option<String> {
     Some(rel.to_string_lossy().replace('\\', "/"))
 }
 
+/// Rider gear a player picks a *model* of in-game: helmets, boots, protection. Installed
+/// either as a folder or as a bare `.pkz`, and either way one row in the game's picker.
+pub const GEAR_MODEL_CATEGORIES: [&str; 3] = ["helmet", "boots", "protection"];
+
+/// Loose `.pnt` paints under `mods/rider` — the gear liveries the game lists once each.
+///
+/// Bike liveries are deliberately absent. They sit beside the model-swap and sound
+/// bookkeeping that tracks them by path, and narrowing which bikes exist is already the bike
+/// archive's job.
+const RIDER_PAINT_CATEGORIES: [&str; 6] = [
+    "helmetPaint",
+    "goggles",
+    "bootPaint",
+    "protectionPaint",
+    "gloves",
+    "outfit",
+];
+
 /// Whether a library entry is something we're willing to move.
 ///
-/// Archives and extracted tracks only. A loose `.pnt` paint, a `FrostMod Models` variant or
-/// a sound folder isn't mounted at boot, and moving one would desync the model-swap and
-/// sound bookkeeping that tracks it by path — all cost, no load-time gain.
+/// Three kinds of thing: archives the game mounts at boot, extracted tracks, and the rider
+/// gear (models and their paints) the game offers in its own pickers. The first two are what
+/// a load is waiting on; the third is what a race preset means when it says *this* helmet in
+/// *this* paint — everything else should be out of sight, not merely cheap.
+///
+/// Still excluded: a `FrostMod Models` variant, a sound folder, a bike livery and a rider
+/// profile, all of which are tracked by path elsewhere in the app and would desync if moved.
 fn is_candidate(e: &LibraryEntry) -> bool {
-    e.kind == "pkz" || (e.kind == "folder" && e.category == "track")
+    match e.kind.as_str() {
+        "pkz" => true,
+        "folder" => {
+            e.category == "track" || GEAR_MODEL_CATEGORIES.contains(&e.category.as_str())
+        }
+        _ => RIDER_PAINT_CATEGORIES.contains(&e.category.as_str()),
+    }
 }
 
 fn entry_from_library(mods_path: &str, e: &LibraryEntry, enabled: bool) -> Option<ModEntry> {
@@ -212,7 +244,7 @@ fn keep_keys(cfg: &AppConfig, preset: &Preset) -> (BTreeSet<String>, Vec<bundle:
     let mut keys = BTreeSet::new();
     let mut unresolved = Vec::new();
 
-    if let Ok(plan) = bundle::plan(cfg, &preset.loadout) {
+    if let Ok(plan) = bundle::plan_detailed(cfg, &preset.loadout) {
         for a in &plan.assets {
             keys.insert(key(&format!("mods/{}", a.rel_dest)));
         }
@@ -262,6 +294,12 @@ fn is_kept(keys: &BTreeSet<String>, rel: &str) -> bool {
     let k = key(rel);
     if keys.contains(&k) {
         return true;
+    }
+    // A paint is kept only when it is named outright. Falling through to the folder rule
+    // would let one kept helmet drag in every livery installed under it — the opposite of
+    // what choosing a paint means.
+    if k.ends_with(".pnt") {
+        return false;
     }
     keys.iter().any(|kept| k.starts_with(&format!("{kept}/")))
 }
@@ -465,7 +503,12 @@ pub fn restore_all(cfg: &AppConfig) -> StateOutcome {
     let mut rels: Vec<String> = Vec::new();
     for subpath in SUBPATHS {
         let leaf = subpath.trim_start_matches("mods/");
-        collect_parked(&shadow, &library::resolve_child(&shadow, leaf), &mut rels);
+        collect_parked(
+            &shadow,
+            &cfg.mods_path,
+            &library::resolve_child(&shadow, leaf),
+            &mut rels,
+        );
     }
 
     for rel in &rels {
@@ -483,37 +526,49 @@ pub fn restore_all(cfg: &AppConfig) -> StateOutcome {
     out
 }
 
-/// Collect what's parked under `dir` as `mods/…` rel paths. An extracted track folder is
-/// one item and isn't descended into; everything else yields its archives.
-fn collect_parked(shadow: &Path, dir: &Path, out: &mut Vec<String>) {
+/// Collect what's parked under `dir` as `mods/…` rel paths. A folder parked whole — an
+/// extracted track, a gear model — is one item and isn't descended into; everything else
+/// yields its archives and paints.
+fn collect_parked(shadow: &Path, mods_path: &str, dir: &Path, out: &mut Vec<String>) {
     let Ok(rd) = fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();
-        let is_pkz = p
-            .extension()
-            .and_then(|x| x.to_str())
-            .map(|x| x.eq_ignore_ascii_case("pkz"))
-            .unwrap_or(false);
+        let Some(rel) = rel_of(&shadow.to_string_lossy(), &p) else {
+            continue;
+        };
         if p.is_file() {
-            if is_pkz {
-                if let Some(rel) = rel_of(&shadow.to_string_lossy(), &p) {
-                    out.push(format!("mods/{rel}"));
-                }
+            if is_parked_file(&p) {
+                out.push(format!("mods/{rel}"));
             }
             continue;
         }
-        // A directory holding no subfolders of its own that we parked whole (an extracted
-        // track) is indistinguishable from a grouping folder by name alone — so descend,
-        // and let the leaf test below decide. `dir_is_parked_mod` keeps a track's interior
-        // from being enumerated file by file.
-        if dir_is_parked_mod(&p) {
-            if let Some(rel) = rel_of(&shadow.to_string_lossy(), &p) {
-                out.push(format!("mods/{rel}"));
-            }
+        // A directory we parked whole is indistinguishable from a grouping folder by name
+        // alone — so descend, and let the leaf test below decide. That test is what keeps a
+        // track's interior from being enumerated file by file.
+        //
+        // A gear model is the one folder that can be *half* parked: leave the helmet in
+        // place, park the liveries under it. When the enabled folder is still there, the
+        // shadow copy is only holding paints, so descend for those rather than queueing a
+        // whole-folder move that would collide with it.
+        let whole = if is_gear_model_dir(shadow, &p) {
+            !enabled_path(mods_path, &format!("mods/{rel}")).exists()
         } else {
-            collect_parked(shadow, &p, out);
+            dir_is_parked_mod(&p)
+        };
+        if whole {
+            out.push(format!("mods/{rel}"));
+        } else {
+            collect_parked(shadow, mods_path, &p, out);
         }
     }
+}
+
+/// A file that was parked in its own right: an archive or a gear paint.
+fn is_parked_file(p: &Path) -> bool {
+    p.extension()
+        .and_then(|x| x.to_str())
+        .map(|x| x.eq_ignore_ascii_case("pkz") || x.eq_ignore_ascii_case("pnt"))
+        .unwrap_or(false)
 }
 
 /// An extracted track parked in the shadow tree: a folder carrying the marker files the
@@ -534,6 +589,19 @@ fn dir_is_parked_mod(dir: &Path) -> bool {
         }
     }
     false
+}
+
+/// `<shadow>/rider/helmets/AGV` — a gear model, one level under its area folder.
+fn is_gear_model_dir(shadow: &Path, dir: &Path) -> bool {
+    let Ok(rel) = dir.strip_prefix(shadow) else {
+        return false;
+    };
+    let segs: Vec<String> = rel_segments(&rel.to_string_lossy())
+        .map(|s| s.to_lowercase())
+        .collect();
+    segs.len() == 3
+        && segs[0] == "rider"
+        && matches!(segs[1].as_str(), "helmets" | "boots" | "protection")
 }
 
 #[cfg(test)]
@@ -720,10 +788,10 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// Loose paints and model-swap sets aren't archives the game mounts at boot — Manage
+    /// Bike liveries and model-swap sets are tracked by path elsewhere in the app — Manage
     /// leaves them where they are.
     #[test]
-    fn leaves_loose_paints_and_swap_sets_alone() {
+    fn leaves_bike_liveries_and_swap_sets_alone() {
         let root = tmp("loose");
         touch(&root.join("mods/bikes/KTM450/paints/RedBud.pnt"));
         touch(&root.join("mods/bikes/KTM450/FrostMod Models/2024/bike.edf"));
@@ -732,6 +800,93 @@ mod tests {
 
         let names: Vec<String> = scan(&cfg, &[]).iter().map(|m| m.name.clone()).collect();
         assert_eq!(names, vec!["OEM Pack.pkz"]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn gear_root(name: &str) -> PathBuf {
+        let root = tmp(name);
+        touch(&root.join("mods/rider/helmets/AGV/model.edf"));
+        touch(&root.join("mods/rider/helmets/AGV/paints/Wanted.pnt"));
+        touch(&root.join("mods/rider/helmets/AGV/paints/Other.pnt"));
+        touch(&root.join("mods/rider/helmets/AGV/goggles/Tinted.pnt"));
+        touch(&root.join("mods/rider/helmets/Fox/model.edf"));
+        touch(&root.join("mods/rider/boots/Alpinestars/model.edf"));
+        touch(&root.join("mods/rider/riders/default_mx/paints/Kit.pnt"));
+        root
+    }
+
+    fn helmet_preset(helmet: &str, paint: &str, keep: Vec<String>) -> Preset {
+        let loadout = Loadout {
+            helmet: helmet.into(),
+            helmet_paint: paint.into(),
+            ..Default::default()
+        };
+        preset_with("Race", loadout, PresetContent { tracks: vec![], keep })
+    }
+
+    fn preset_with(name: &str, loadout: Loadout, content: PresetContent) -> Preset {
+        Preset {
+            name: name.into(),
+            loadout,
+            bundle: None,
+            content: Some(content),
+        }
+    }
+
+    /// The gear a preset names is the gear the game should offer. Every other helmet, boot,
+    /// protection set and livery steps aside — including the other liveries of the very
+    /// helmet the preset keeps, which is what a chosen paint means.
+    #[test]
+    fn a_race_preset_leaves_only_the_gear_it_names() {
+        let root = gear_root("gear");
+        let cfg = cfg_at(&root);
+        let p = helmet_preset("AGV", "Wanted", vec![]);
+
+        let plan = plan(&cfg, &p, &[]);
+        let disabled: Vec<&str> = plan.disable.iter().map(|m| m.name.as_str()).collect();
+        for gone in ["Other.pnt", "Tinted.pnt", "Kit.pnt", "Fox", "Alpinestars"] {
+            assert!(disabled.contains(&gone), "{gone} should step aside: {disabled:?}");
+        }
+        assert!(!disabled.contains(&"Wanted.pnt"), "{disabled:?}");
+        assert!(!disabled.contains(&"AGV"), "{disabled:?}");
+
+        let out = apply(&cfg, &plan);
+        assert!(out.failed.is_empty(), "{:?}", out.failed);
+        assert!(root.join("mods/rider/helmets/AGV/paints/Wanted.pnt").is_file());
+        assert!(root.join("mods/rider/helmets/AGV/model.edf").is_file());
+        assert!(!root.join("mods/rider/helmets/AGV/paints/Other.pnt").exists());
+        assert!(!root.join("mods/rider/helmets/Fox").exists());
+        assert!(root
+            .join("mxbapp_disabled/rider/helmets/AGV/paints/Other.pnt")
+            .is_file());
+        assert!(root.join("mxbapp_disabled/rider/helmets/Fox/model.edf").is_file());
+
+        // A half-parked helmet — folder in place, liveries parked — restores its paints
+        // rather than colliding with the folder that never moved.
+        let back = restore_all(&cfg);
+        assert!(back.failed.is_empty(), "{:?}", back.failed);
+        assert!(root.join("mods/rider/helmets/AGV/paints/Other.pnt").is_file());
+        assert!(root.join("mods/rider/helmets/AGV/goggles/Tinted.pnt").is_file());
+        assert!(root.join("mods/rider/helmets/Fox/model.edf").is_file());
+        assert!(root.join("mods/rider/riders/default_mx/paints/Kit.pnt").is_file());
+        assert!(!root.join("mxbapp_disabled").exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Extra models pinned in the content dialog are kept alongside the preset's own, so a
+    /// player can still swap helmets mid-session without leaving race mode.
+    #[test]
+    fn pinned_gear_models_are_kept_too() {
+        let root = gear_root("pinned");
+        let cfg = cfg_at(&root);
+        let p = helmet_preset("AGV", "Wanted", vec!["mods/rider/helmets/Fox".into()]);
+
+        let plan = plan(&cfg, &p, &[]);
+        let disabled: Vec<&str> = plan.disable.iter().map(|m| m.name.as_str()).collect();
+        assert!(!disabled.contains(&"Fox"), "{disabled:?}");
+        assert!(disabled.contains(&"Alpinestars"), "{disabled:?}");
 
         let _ = fs::remove_dir_all(&root);
     }

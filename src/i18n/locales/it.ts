@@ -49,6 +49,7 @@ export const it: Translation = {
   "nav.locker": "Armadietto",
   "nav.presets": "Preset",
   "nav.rider": "Pilota",
+  "nav.servers": "Server",
   "nav.manage": "Gestisci",
   "nav.settings": "Impostazioni",
 
@@ -143,6 +144,8 @@ export const it: Translation = {
     "“{{label}}” applicato a {{bike}} — salvato. Riseleziona il profilo in MX Bikes (menu Profilo) per caricare il nuovo look.",
   "presets.appliedNextTime":
     "“{{label}}” applicato a {{bike}} — salvato. Verrà caricato alla prossima apertura del gioco.",
+  "presets.appliedReselectBike":
+    "“{{label}}” applicato a {{bike}} — le livree sono attive; riseleziona la moto in MX Bikes per vedere il modello.",
   "presets.phaseBundling": "Preparazione dei file…",
   "presets.phaseUploading": "Caricamento del pacchetto…",
   "presets.phaseDownloading": "Download del pacchetto…",
@@ -257,6 +260,7 @@ export const it: Translation = {
   "viewer.loadingModel": "Caricamento modello…",
   "viewer.loadingPaint": "Caricamento grafica…",
   "viewer.loadingRider": "Caricamento pilota…",
+  "viewer.riderLoadFailed": "Anteprima non aggiornata — impossibile aggiornarla",
   "viewer.dragToRotate": "Trascina per ruotare",
   "viewer.scrollToZoom": "Scorri per zoomare",
   "viewer.rightDragToPan": "Trascina col destro per spostare",
@@ -575,6 +579,68 @@ export const it: Translation = {
   "game.alreadyRunning": "MX Bikes è già in esecuzione",
   "game.launching": "Avvio di MX Bikes…",
   "game.launchFailed": "Impossibile avviare MX Bikes",
+  "join.title": "Entra in un server",
+  "join.desc":
+    "Inserisci l'indirizzo di un server per avviare MX Bikes collegandoti direttamente.",
+  "join.address": "Indirizzo del server",
+  "join.action": "Entra",
+  "join.joining": "Connessione…",
+  "join.launching": "Connessione a {{address}}…",
+  "join.alreadyRunning":
+    "Chiudi prima MX Bikes — un gioco già avviato non può essere collegato a un server.",
+  "join.failed": "Impossibile entrare in quel server",
+
+  "servers.title": "Server",
+  "servers.subtitle":
+    "Gestisci i server dedicati che ospiti. Su ognuno serve l'agent MXB installato.",
+  "servers.empty": "Ancora nessun server. Aggiungine uno per gestirlo da qui.",
+  "servers.add": "Aggiungi un server",
+  "servers.remove": "Rimuovi questo server",
+  "servers.namePlaceholder": "Nome del server",
+  "servers.tokenPlaceholder": "Token dell'agent",
+  "servers.track": "Pista",
+  "servers.slots": "Posti",
+  "servers.uptime": "Attivo da",
+  "servers.restarts": "Riavvii",
+  "servers.stopped": "Fermo",
+  "servers.start": "Avvia",
+  "servers.stop": "Ferma",
+  "servers.restart": "Riavvia",
+  "servers.setTrack": "Imposta pista",
+  "servers.trackPlaceholder": "ID pista",
+  "servers.actionDone": "Fatto",
+  "servers.actionFailed": "Non ha funzionato",
+  "servers.trackChanged": "Pista impostata su {{track}} — il server è stato riavviato.",
+  "servers.saveFailed": "Impossibile salvare l'elenco dei server",
+
+  "settings.experimental": "Sperimentale",
+  "settings.experimentalServers": "Server e sincronizzazione livree",
+  "settings.experimentalServersDesc":
+    "Non finito. Aggiunge la scheda Server, ti permette di gestire server dedicati e sincronizza le livree perché tutti sul server si vedano correttamente.",
+  "settings.experimentalForced":
+    "Attivato per questa sessione da MXB_EXPERIMENTAL — l'impostazione non ha effetto finché non lo rimuovi.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Sincronizzazione livree",
+  "sync.desc":
+    "MX Bikes non invia mai le livree, quindi gli altri piloti appaiono con quelle di serie se non hai già il loro file esatto. Pubblica la tua e scarica quelle degli altri.",
+  "sync.enroll": "Registrati",
+  "sync.enrolled": "Registrato come {{name}}",
+  "sync.enrollFailed": "Registrazione non riuscita",
+  "sync.codePlaceholder": "Codice invito",
+  "sync.riderNamePlaceholder": "Nome pilota in gioco",
+  "sync.riderNameHint":
+    "Deve corrispondere esattamente al tuo nome pilota in MX Bikes — è così che le app degli altri sanno quali livree sono tue.",
+  "sync.ridingAs": "Pubblichi come {{name}}",
+  "sync.pull": "Sincronizza livree",
+  "sync.setGuid": "Salva GUID",
+  "sync.guidPlaceholder": "Il tuo GUID di MX Bikes",
+  "sync.guidHint":
+    "Il tuo GUID di MX Bikes (facoltativo). Ti identifica anche se cambi nome pilota, e il server lo registra a ogni connessione.",
+  "sync.guidSaved": "GUID salvato",
+  "sync.pulled": "Installate {{installed}} da {{riders}} piloti ({{had}} già presenti)",
+  "sync.pullFailed": "Sincronizzazione non riuscita",
+  "sync.rejected": "Saltate {{count}} con una destinazione non sicura",
 
   // ── Stringhe sfuggite alla prima scansione (JSX su più righe) ──────────────
   "libraryDetail.noEmbedded": "Nessun dettaglio incorporato trovato per questo elemento.",
@@ -717,8 +783,8 @@ export const it: Translation = {
     "Aggiornamento in gioco — se è la moto che hai selezionata, cambia adesso.",
   "locker.modelFrostmodNotRunning":
     "Avvia FrostMod per vedere i cambi modello in tempo reale — per ora riseleziona la moto in gioco.",
-  "locker.modelFrostmodTooOld":
-    "Aggiorna FrostMod per vedere i cambi modello in tempo reale — per ora riseleziona la moto in gioco.",
+  "locker.modelReselectBike":
+    "Modello cambiato — riseleziona la moto in MX Bikes per vederlo.",
   "locker.modelFrostmodUnreachable":
     "Impossibile raggiungere FrostMod — riseleziona la moto in gioco per caricarla.",
   "locker.modelRefreshWindowsOnly":
@@ -892,10 +958,15 @@ export const it: Translation = {
   "manage.contentSaved": "Contenuti gara salvati per “{{name}}”.",
   "manage.contentTitle": "Contenuti gara di “{{name}}”",
   "manage.contentBody":
-    "Livrea, attrezzatura e model swap del preset vengono trovati da soli. Qui va ciò che un loadout non può dire: la pista e i pacchetti che una gara richiede comunque.",
+    "Livrea, attrezzatura e model swap del preset vengono trovati da soli. Qui va il resto: la pista, i modelli di attrezzatura da tenere in più e i pacchetti che una gara richiede comunque.",
   "manage.paneTracks": "Piste",
+  "manage.paneHelmets": "Caschi",
+  "manage.paneBoots": "Stivali",
+  "manage.paneProtection": "Protezioni",
   "manage.paneKeep": "Sempre attive",
   "manage.paneTracksHint": "La pista (o le piste) per cui è pensato questo preset.",
+  "manage.paneGearHint":
+    "Modelli extra da lasciare nel selettore del gioco. L'attrezzatura del preset viene mantenuta da sola: spunta qui ciò che vuoi ancora poter scegliere. Tutto ciò che resta non spuntato si fa da parte.",
   "manage.paneKeepHint":
     "Mod da tenere attive qualunque cosa accada — il pacchetto OEM, la moto di questo preset, una mod audio.",
   "manage.notInstalled": "non installata",

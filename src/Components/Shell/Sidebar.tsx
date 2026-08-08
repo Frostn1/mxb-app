@@ -12,6 +12,8 @@ import {
   Gamepad2,
   SlidersHorizontal,
   Store,
+  Server as ServerIcon,
+  Plug,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -19,9 +21,10 @@ import { useFrostmod } from "../../Context/FrostmodContext";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
-import { launchGame } from "../../api/mods";
+import { experimentalState, launchGame } from "../../api/mods";
 import { shopCatalogAvailable } from "../../api/shop";
 import { useGameRunning } from "../../lib/useGameRunning";
+import JoinServerDialog from "./JoinServerDialog";
 
 export type DashboardView =
   | "browse"
@@ -30,6 +33,7 @@ export type DashboardView =
   | "locker"
   | "presets"
   | "rider"
+  | "servers"
   | "manage"
   | "settings";
 
@@ -53,8 +57,18 @@ const NAV: NavEntry[] = [
  * The shop catalog needs an API credential baked in at build time, and builds without one
  * (forks, and CI runs with no repo secret) simply can't reach it. Those get no Shop entry at
  * all rather than a permanently-greyed row no user action could ever fix.
+ *
+ * Sits second, next to Browse, because it is the other catalog — unlike the experimental
+ * entry below, which is appended.
  */
 const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store };
+
+/** Shown only when the experimental features are on — see `settings.experimental`. */
+const EXPERIMENTAL_NAV: NavEntry = {
+  id: "servers",
+  label: "nav.servers",
+  icon: ServerIcon,
+};
 
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
 
@@ -67,6 +81,16 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const { active, queueLength } = useInstall();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const [starting, setStarting] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
+  // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
+  // leaving that page is exactly when the nav needs to reflect a change.
+  const [experimental, setExperimental] = useState(false);
+
+  useEffect(() => {
+    experimentalState()
+      .then((s) => setExperimental(s.enabled))
+      .catch(() => {});
+  }, [view]);
 
   // Asked once per mount. It's a compile-time fact on the Rust side, so it can't change
   // under us; the state is only here because the answer arrives over IPC.
@@ -80,7 +104,12 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       cancelled = true;
     };
   }, []);
-  const nav = shopAvailable ? [NAV[0], SHOP_ENTRY, ...NAV.slice(1)] : NAV;
+  // Two independent gates: the shop needs a build-time credential, servers needs the
+  // experimental toggle. Built here rather than inline so the JSX stays one `.map`.
+  const nav = [
+    ...(shopAvailable ? [NAV[0], SHOP_ENTRY, ...NAV.slice(1)] : NAV),
+    ...(experimental ? [EXPERIMENTAL_NAV] : []),
+  ];
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -209,6 +238,27 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
                 : t("game.play")}
           </span>
         </button>
+
+        <button
+          onClick={() => setJoinOpen(true)}
+          disabled={gameRunning}
+          title={gameRunning ? t("game.running") : t("join.title")}
+          className={cn(
+            "flex cursor-default items-center justify-center gap-2 rounded-lg border border-white/[0.07] px-3 py-1.5 text-[12px] font-medium transition-colors",
+            gameRunning
+              ? "text-muted-foreground"
+              : "text-foreground/80 hover:bg-white/[0.04]",
+          )}
+        >
+          <Plug className="size-3.5" />
+          <span>{t("join.title")}</span>
+        </button>
+
+        <JoinServerDialog
+          open={joinOpen}
+          onOpenChange={setJoinOpen}
+          onJoined={refreshGame}
+        />
 
         <div
           data-tour="frostmod"

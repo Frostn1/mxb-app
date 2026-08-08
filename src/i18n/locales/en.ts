@@ -48,6 +48,7 @@ export const en = {
   "nav.locker": "Locker",
   "nav.presets": "Presets",
   "nav.rider": "Rider",
+  "nav.servers": "Servers",
   "nav.manage": "Manage",
   "nav.settings": "Settings",
 
@@ -140,6 +141,8 @@ export const en = {
     "Applied “{{label}}” to {{bike}} — saved. Reselect your profile in MX Bikes (Profile menu) to load the new look.",
   "presets.appliedNextTime":
     "Applied “{{label}}” to {{bike}} — saved. It loads next time the game opens.",
+  "presets.appliedReselectBike":
+    "Applied “{{label}}” to {{bike}} — the paints are live; reselect the bike in MX Bikes to see the model.",
   // Share / import.
   "presets.phaseBundling": "Packaging assets…",
   "presets.phaseUploading": "Uploading bundle…",
@@ -252,6 +255,7 @@ export const en = {
   "viewer.loadingModel": "Loading model…",
   "viewer.loadingPaint": "Loading paint…",
   "viewer.loadingRider": "Loading rider…",
+  "viewer.riderLoadFailed": "Preview is out of date — it couldn't be updated",
   "viewer.dragToRotate": "Drag to rotate",
   "viewer.scrollToZoom": "Scroll to zoom",
   "viewer.rightDragToPan": "Right-drag to pan",
@@ -561,6 +565,68 @@ export const en = {
   "game.alreadyRunning": "MX Bikes is already running",
   "game.launching": "Launching MX Bikes…",
   "game.launchFailed": "Couldn't launch MX Bikes",
+  "join.title": "Join a server",
+  "join.desc":
+    "Enter a server address to start MX Bikes connected straight to it.",
+  "join.address": "Server address",
+  "join.action": "Join",
+  "join.joining": "Joining…",
+  "join.launching": "Joining {{address}}…",
+  "join.alreadyRunning":
+    "Close MX Bikes first — a running game can't be sent to a server.",
+  "join.failed": "Couldn't join that server",
+
+  "servers.title": "Servers",
+  "servers.subtitle":
+    "Manage dedicated servers you run. Each one needs the MXB agent installed on its host.",
+  "servers.empty": "No servers yet. Add one to manage it from here.",
+  "servers.add": "Add a server",
+  "servers.remove": "Remove this server",
+  "servers.namePlaceholder": "Server name",
+  "servers.tokenPlaceholder": "Agent token",
+  "servers.track": "Track",
+  "servers.slots": "Slots",
+  "servers.uptime": "Uptime",
+  "servers.restarts": "Restarts",
+  "servers.stopped": "Stopped",
+  "servers.start": "Start",
+  "servers.stop": "Stop",
+  "servers.restart": "Restart",
+  "servers.setTrack": "Set track",
+  "servers.trackPlaceholder": "Track id",
+  "servers.actionDone": "Done",
+  "servers.actionFailed": "That didn't work",
+  "servers.trackChanged": "Track set to {{track}} — the server restarted.",
+  "servers.saveFailed": "Couldn't save your server list",
+
+  "settings.experimental": "Experimental",
+  "settings.experimentalServers": "Servers and paint sync",
+  "settings.experimentalServersDesc":
+    "Unfinished. Adds the Servers tab, lets you run dedicated servers, and syncs paints so everyone on a server renders correctly.",
+  "settings.experimentalForced":
+    "Turned on for this run by MXB_EXPERIMENTAL — the setting has no effect until you unset it.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Paint sync",
+  "sync.desc":
+    "MX Bikes never sends paints, so other riders show up in default liveries unless you already have their exact file. Publish yours and pull back everyone else's.",
+  "sync.enroll": "Enrol",
+  "sync.enrolled": "Enrolled as {{name}}",
+  "sync.enrollFailed": "Couldn't enrol",
+  "sync.codePlaceholder": "Invite code",
+  "sync.riderNamePlaceholder": "In-game rider name",
+  "sync.riderNameHint":
+    "This has to match your rider name in MX Bikes exactly — it's how other players' apps know which paints are yours.",
+  "sync.ridingAs": "Publishing as {{name}}",
+  "sync.pull": "Sync paints",
+  "sync.setGuid": "Save GUID",
+  "sync.guidPlaceholder": "Your MX Bikes GUID",
+  "sync.guidHint":
+    "Your MX Bikes GUID (optional). It identifies you even if you change your rider name, and the server logs it whenever you connect.",
+  "sync.guidSaved": "GUID saved",
+  "sync.pulled": "Installed {{installed}} from {{riders}} riders ({{had}} already had)",
+  "sync.pullFailed": "Couldn't sync paints",
+  "sync.rejected": "Skipped {{count}} with an unsafe destination",
 
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",
@@ -698,8 +764,8 @@ export const en = {
     "Refreshing in-game — if it's your selected bike, it changes now.",
   "locker.modelFrostmodNotRunning":
     "Run FrostMod to see model swaps live — for now, reselect the bike in-game.",
-  "locker.modelFrostmodTooOld":
-    "Update FrostMod to see model swaps live — for now, reselect the bike in-game.",
+  "locker.modelReselectBike":
+    "Model swapped — reselect the bike in MX Bikes to see it.",
   "locker.modelFrostmodUnreachable":
     "Couldn't reach FrostMod — reselect the bike in-game to load it.",
   "locker.modelRefreshWindowsOnly":
@@ -871,10 +937,15 @@ export const en = {
   "manage.contentSaved": "Saved the race content for “{{name}}”.",
   "manage.contentTitle": "Race content for “{{name}}”",
   "manage.contentBody":
-    "The paint, gear and model swap in the preset are found automatically. This is for what a loadout can't say: the track, and the packs a race needs anyway.",
+    "The paint, gear and model swap in the preset are found automatically. This is for the rest: the track, the spare gear models worth keeping, and the packs a race needs anyway.",
   "manage.paneTracks": "Tracks",
+  "manage.paneHelmets": "Helmets",
+  "manage.paneBoots": "Boots",
+  "manage.paneProtection": "Protection",
   "manage.paneKeep": "Always keep",
   "manage.paneTracksHint": "The track (or tracks) this preset is for.",
+  "manage.paneGearHint":
+    "Extra models to leave in the game's picker. The preset's own gear is kept for you — tick anything else you still want to be able to reach for. Everything unticked steps aside.",
   "manage.paneKeepHint":
     "Mods to keep enabled whatever else goes — the OEM pack, a bike this preset rides, a sound mod.",
   "manage.notInstalled": "not installed",

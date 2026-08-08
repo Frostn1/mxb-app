@@ -54,6 +54,7 @@ export const de: Translation = {
   "nav.locker": "Spind",
   "nav.presets": "Presets",
   "nav.rider": "Fahrer",
+  "nav.servers": "Server",
   "nav.manage": "Verwalten",
   "nav.settings": "Einstellungen",
 
@@ -150,6 +151,8 @@ export const de: Translation = {
     "„{{label}}“ auf {{bike}} angewendet — gespeichert. Wähle dein Profil in MX Bikes (Profilmenü) neu aus, um den neuen Look zu laden.",
   "presets.appliedNextTime":
     "„{{label}}“ auf {{bike}} angewendet — gespeichert. Es wird beim nächsten Start des Spiels geladen.",
+  "presets.appliedReselectBike":
+    "„{{label}}“ auf {{bike}} angewendet — die Lackierungen sind live; wähle das Motorrad in MX Bikes neu aus, um das Modell zu sehen.",
   "presets.phaseBundling": "Dateien werden verpackt…",
   "presets.phaseUploading": "Paket wird hochgeladen…",
   "presets.phaseDownloading": "Paket wird heruntergeladen…",
@@ -264,6 +267,7 @@ export const de: Translation = {
   "viewer.loadingModel": "Modell wird geladen…",
   "viewer.loadingPaint": "Design wird geladen…",
   "viewer.loadingRider": "Fahrer wird geladen…",
+  "viewer.riderLoadFailed": "Vorschau ist veraltet — sie konnte nicht aktualisiert werden",
   "viewer.dragToRotate": "Ziehen zum Drehen",
   "viewer.scrollToZoom": "Scrollen zum Zoomen",
   "viewer.rightDragToPan": "Rechts ziehen zum Verschieben",
@@ -588,6 +592,68 @@ export const de: Translation = {
   "game.alreadyRunning": "MX Bikes läuft bereits",
   "game.launching": "MX Bikes wird gestartet…",
   "game.launchFailed": "MX Bikes konnte nicht gestartet werden",
+  "join.title": "Server beitreten",
+  "join.desc":
+    "Gib eine Serveradresse ein, um MX Bikes direkt damit verbunden zu starten.",
+  "join.address": "Serveradresse",
+  "join.action": "Beitreten",
+  "join.joining": "Verbinden…",
+  "join.launching": "Verbinde mit {{address}}…",
+  "join.alreadyRunning":
+    "Schließe zuerst MX Bikes — ein laufendes Spiel kann nicht zu einem Server geschickt werden.",
+  "join.failed": "Diesem Server konnte nicht beigetreten werden",
+
+  "servers.title": "Server",
+  "servers.subtitle":
+    "Verwalte deine eigenen Dedicated Server. Auf jedem muss der MXB-Agent installiert sein.",
+  "servers.empty": "Noch keine Server. Füge einen hinzu, um ihn von hier aus zu verwalten.",
+  "servers.add": "Server hinzufügen",
+  "servers.remove": "Diesen Server entfernen",
+  "servers.namePlaceholder": "Servername",
+  "servers.tokenPlaceholder": "Agent-Token",
+  "servers.track": "Strecke",
+  "servers.slots": "Plätze",
+  "servers.uptime": "Laufzeit",
+  "servers.restarts": "Neustarts",
+  "servers.stopped": "Gestoppt",
+  "servers.start": "Starten",
+  "servers.stop": "Stoppen",
+  "servers.restart": "Neu starten",
+  "servers.setTrack": "Strecke setzen",
+  "servers.trackPlaceholder": "Strecken-ID",
+  "servers.actionDone": "Erledigt",
+  "servers.actionFailed": "Das hat nicht geklappt",
+  "servers.trackChanged": "Strecke auf {{track}} gesetzt — der Server wurde neu gestartet.",
+  "servers.saveFailed": "Deine Serverliste konnte nicht gespeichert werden",
+
+  "settings.experimental": "Experimentell",
+  "settings.experimentalServers": "Server und Paint-Sync",
+  "settings.experimentalServersDesc":
+    "Unfertig. Fügt den Server-Tab hinzu, lässt dich Dedicated Server betreiben und gleicht Paints ab, damit alle auf einem Server richtig aussehen.",
+  "settings.experimentalForced":
+    "Für diesen Lauf durch MXB_EXPERIMENTAL aktiviert — die Einstellung wirkt erst, wenn du die Variable entfernst.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Paint-Sync",
+  "sync.desc":
+    "MX Bikes überträgt Paints nie, also erscheinen andere Fahrer im Standard-Look, wenn du ihre Datei nicht schon hast. Veröffentliche deine und hol dir die der anderen.",
+  "sync.enroll": "Registrieren",
+  "sync.enrolled": "Registriert als {{name}}",
+  "sync.enrollFailed": "Registrierung fehlgeschlagen",
+  "sync.codePlaceholder": "Einladungscode",
+  "sync.riderNamePlaceholder": "Fahrername im Spiel",
+  "sync.riderNameHint":
+    "Muss exakt deinem Fahrernamen in MX Bikes entsprechen — daran erkennen die Apps der anderen, welche Paints dir gehören.",
+  "sync.ridingAs": "Veröffentlicht als {{name}}",
+  "sync.pull": "Paints abgleichen",
+  "sync.setGuid": "GUID speichern",
+  "sync.guidPlaceholder": "Deine MX-Bikes-GUID",
+  "sync.guidHint":
+    "Deine MX-Bikes-GUID (optional). Sie identifiziert dich auch nach einer Namensänderung, und der Server protokolliert sie bei jeder Verbindung.",
+  "sync.guidSaved": "GUID gespeichert",
+  "sync.pulled": "{{installed}} von {{riders}} Fahrern installiert ({{had}} schon vorhanden)",
+  "sync.pullFailed": "Abgleich fehlgeschlagen",
+  "sync.rejected": "{{count}} mit unsicherem Ziel übersprungen",
 
   // ── Vom ersten Durchlauf übersehene Strings (mehrzeiliges JSX) ─────────────
   "libraryDetail.noEmbedded": "Für dieses Element wurden keine eingebetteten Details gefunden.",
@@ -737,8 +803,8 @@ export const de: Translation = {
     "Wird im Spiel aktualisiert — wenn es dein ausgewähltes Motorrad ist, ändert es sich jetzt.",
   "locker.modelFrostmodNotRunning":
     "Starte FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
-  "locker.modelFrostmodTooOld":
-    "Aktualisiere FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
+  "locker.modelReselectBike":
+    "Modell gewechselt — wähle das Motorrad in MX Bikes neu aus, um es zu sehen.",
   "locker.modelFrostmodUnreachable":
     "FrostMod war nicht erreichbar — wähle das Motorrad im Spiel neu aus, um es zu laden.",
   "locker.modelRefreshWindowsOnly":
@@ -913,10 +979,15 @@ export const de: Translation = {
   "manage.contentSaved": "Renninhalte für „{{name}}“ gespeichert.",
   "manage.contentTitle": "Renninhalte für „{{name}}“",
   "manage.contentBody":
-    "Lackierung, Ausrüstung und Model-Swap des Presets werden von allein gefunden. Hier steht, was ein Loadout nicht sagen kann: die Strecke und die Packs, die ein Rennen ohnehin braucht.",
+    "Lackierung, Ausrüstung und Model-Swap des Presets werden von allein gefunden. Hier steht der Rest: die Strecke, zusätzliche Ausrüstungsmodelle, die bleiben sollen, und die Packs, die ein Rennen ohnehin braucht.",
   "manage.paneTracks": "Strecken",
+  "manage.paneHelmets": "Helme",
+  "manage.paneBoots": "Stiefel",
+  "manage.paneProtection": "Protektoren",
   "manage.paneKeep": "Immer behalten",
   "manage.paneTracksHint": "Die Strecke (oder Strecken), für die dieses Preset gedacht ist.",
+  "manage.paneGearHint":
+    "Zusätzliche Modelle, die in der Auswahl des Spiels bleiben. Die Ausrüstung des Presets wird ohnehin behalten — hake hier an, worauf du sonst noch zugreifen möchtest. Alles ohne Haken tritt zur Seite.",
   "manage.paneKeepHint":
     "Mods, die aktiv bleiben, egal was sonst passiert — das OEM-Pack, das Bike dieses Presets, eine Sound-Mod.",
   "manage.notInstalled": "nicht installiert",

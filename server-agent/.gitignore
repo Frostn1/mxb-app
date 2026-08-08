@@ -1,0 +1,3 @@
+/target
+# Holds the bearer token for a live server — never commit a real one.
+agent.json

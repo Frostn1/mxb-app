@@ -237,6 +237,16 @@ export function scanRiderTargets(): Promise<RiderTargets> {
   return invoke<RiderTargets>("scan_rider_targets");
 }
 
+/**
+ * Every bike a paint can be installed for — folders and `.pkz` packages under `mods/bikes`,
+ * plus the bike ids read out of the player's profiles. OEM bikes only exist inside the game's
+ * locked archive, so the profile is the only place their id can be found until someone
+ * installs a paint for one.
+ */
+export function scanBikeTargets(): Promise<string[]> {
+  return invoke<string[]>("scan_bike_targets");
+}
+
 export function scanModelSwaps(): Promise<BikeModels[]> {
   return invoke<BikeModels[]>("scan_model_swaps");
 }
@@ -307,6 +317,18 @@ export function getPkzPreview(path: string): Promise<string | null> {
 
 export function unpackPaint(path: string): Promise<PaintTexture[]> {
   return invoke<PaintTexture[]>("unpack_paint", { path });
+}
+
+/**
+ * Raw RGBA for a {@link PaintTexture.token}, straight off the binary IPC channel.
+ *
+ * The backend answers with `application/octet-stream`, so this resolves to an
+ * `ArrayBuffer` rather than JSON — no base64 on the wire and no megabyte strings on the
+ * heap. A token whose pixels have been evicted comes back as a single grey pixel, which the
+ * caller spots by checking the length against the texture's declared size.
+ */
+export function textureBytes(token: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("texture_bytes", { token });
 }
 
 export function unpackPkz(path: string, outDir: string): Promise<string[]> {
@@ -455,12 +477,91 @@ const tokens = (s: string) =>
       .filter((t) => t.length >= 2),
   );
 
+/**
+ * Below this many significant words a category is a grouping, not a machine — "KTM", "OEM",
+ * "Beta 18". Matching on those would nominate every bike of the brand.
+ */
+const MIN_CATEGORY_TOKENS = 3;
+
+/**
+ * How much of a category's vocabulary the bike has to account for.
+ *
+ * The two spellings never line up exactly: the site writes `2023 KTM 450 SX-F OEM`, the game
+ * calls the same bike `MX1OEM_2023_KTM_450_SX-F`, and the class prefix swallows the "OEM".
+ * Four words of five is the real shape of a hit. Measured against the live catalog, 0.75 is
+ * also where the near-misses stop: a 250 scores 0.6 against a 450's category, and noise like
+ * "AMA SX 2024" scores 0.67 against any bike of that year.
+ */
+const MIN_CATEGORY_COVERAGE = 0.75;
+
+/** Compare rank tuples element by element; higher is better. */
+function cmpRank(a: number[], b: number[]): number {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+/**
+ * The bikes a post's categories point at, best first.
+ *
+ * mxb-mods files a livery under one category per bike it fits — "2023 KTM 250 SX-F OEM",
+ * "2023 KTM 350 SX-F OEM" — which says outright what the title ("Suzuki made by
+ * KindConcepts") only gestures at. Against the live catalog this puts the right bike first
+ * for every one of the 107 OEM models.
+ */
+export function bikesFromCategories(bikes: string[], categories: string[]): string[] {
+  const ranked = new Map<string, number[]>();
+  for (const cat of categories) {
+    const ct = tokens(cat);
+    if (ct.size < MIN_CATEGORY_TOKENS) continue;
+    // "OEM" is the site's word for stock; the bike spells it into its class prefix instead.
+    const core = normalizeModName(cat.replace(/oem/gi, ""));
+    for (const bike of bikes) {
+      const bt = tokens(bike);
+      let shared = 0;
+      for (const t of ct) if (bt.has(t)) shared++;
+      if (shared / ct.size < MIN_CATEGORY_COVERAGE) continue;
+
+      // Tie-break between siblings that share every word the tokenizer keeps: `250 SX` and
+      // `250 SX-F` differ only by an "F" too short to be a token, but the run-together form
+      // still tells them apart — `…250sxf` contains `…250sx`, not the other way round.
+      const norm = normalizeModName(bike);
+      const rank = [shared, norm.includes(core) ? 1 : 0, -norm.length];
+      const prev = ranked.get(bike);
+      if (!prev || cmpRank(rank, prev) > 0) ranked.set(bike, rank);
+    }
+  }
+  return [...ranked.entries()]
+    .sort(([an, a], [bn, b]) => cmpRank(b, a) || an.localeCompare(bn))
+    .map(([name]) => name);
+}
+
+/**
+ * Every bike the picker can offer, merging what the backend found (folders, packages and
+ * profile bike ids) with the packages this scan saw. Case-insensitive, so a bike reached both
+ * ways is listed once.
+ */
+function bikeNames(installed: InstalledMod[], targets: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const roots = installed.filter((i) => i.folder === "").map((i) => stripExt(i.name));
+  for (const name of [...roots, ...targets]) {
+    const key = name.toLowerCase();
+    if (name && !seen.has(key)) {
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+}
+
 export function buildDestinations(
   modType: ModType,
   title: string,
   installed: InstalledMod[],
   livery = false,
   sound = false,
+  categories: string[] = [],
+  bikeTargets: string[] = [],
 ): { options: DestOption[]; guess: string; suggestions: string[] } {
   const seen = new Set<string>([""]);
   const options: DestOption[] = [
@@ -480,39 +581,51 @@ export function buildDestinations(
   let guess = "";
   const suggestions: string[] = [];
   if (modType.id === "bikes") {
-    const bikes = installed.filter((i) => i.folder === "");
+    const bikes = bikeNames(installed, bikeTargets);
     for (const b of bikes) {
-      add(stripExt(b.name), {
-        label: "",
-        labelKey: "dest.bikeFolder",
-        labelVars: { name: stripExt(b.name) },
-      });
-      add(`${stripExt(b.name)}/paints`, {
-        label: "",
-        labelKey: "dest.bikePaints",
-        labelVars: { name: stripExt(b.name) },
-      });
+      add(b, { label: "", labelKey: "dest.bikeFolder", labelVars: { name: b } });
+      add(`${b}/paints`, { label: "", labelKey: "dest.bikePaints", labelVars: { name: b } });
     }
 
     if (livery || sound) {
+      // A sound replaces the bike itself, so it goes to the bike's root; a paint only ever
+      // loads out of `paints/`.
+      const dest = (bike: string) => (sound ? bike : `${bike}/paints`);
+
+      // The categories name the bike; the title is only ever a hint, so it ranks below them
+      // and stays as the fallback for a post nobody categorised.
+      const named = bikesFromCategories(bikes, categories);
       const tt = tokens(title);
       const scored = bikes
-        .map((b) => {
+        .map((bike) => {
           let score = 0;
-          for (const t of tokens(b.name)) if (tt.has(t)) score++;
-          const value = sound ? stripExt(b.name) : `${stripExt(b.name)}/paints`;
-          return { value, score };
+          for (const t of tokens(bike)) if (tt.has(t)) score++;
+          return { bike, score };
         })
         .filter((s) => s.score >= 1)
         .sort((a, b) => b.score - a.score);
-      suggestions.push(...scored.slice(0, 5).map((s) => s.value));
-      if (scored[0] && scored[0].score >= 2) guess = scored[0].value;
+
+      const ranked = [...named, ...scored.slice(0, 5).map((s) => s.bike)];
+      suggestions.push(...new Set(ranked.map(dest)));
+      guess = named[0]
+        ? dest(named[0])
+        : scored[0] && scored[0].score >= 2
+          ? dest(scored[0].bike)
+          : "";
     }
   }
 
   for (const f of [...new Set(installed.map((i) => i.folder))].sort((a, b) => a.localeCompare(b))) {
     if (f) add(f, { label: f });
   }
+
+  // Tracks live in folders — a series, a season, a pack — and the root is where they're
+  // hardest to find again. Once the library has any folder at all, that's a likelier home
+  // for the next track than the root the picker used to fall back to.
+  if (modType.id === "tracks" && !guess) {
+    guess = options.find((o) => o.value)?.value ?? "";
+  }
+
   return { options, guess, suggestions };
 }
 
@@ -671,11 +784,30 @@ export function resolveInitialFolder(
 ): string {
   const remembered = localStorage.getItem(destStorageKey(modType)) ?? "";
   const rememberedIsPaints = /\/paints$/i.test(remembered);
+  // An empty remembered value can't be told apart from never having chosen — both read as
+  // `""`. For tracks that's the root, the one destination worth talking someone out of, so
+  // let the guess (the first existing folder) have it.
+  if (modType.id === "tracks" && !remembered && guess) return guess;
   if (modType.id === "bikes" && rememberedIsPaints && !livery) return guess;
-  if (modType.id === "bikes" && sound && guess) return guess;
+  // Liveries and sounds are *per bike*, so the folder used last time is the previous bike's,
+  // not this mod's. Whenever we could work out which bike this one is for — its categories
+  // name it — that beats the memory. With no match at all, fall through and keep it.
+  if (modType.id === "bikes" && (livery || sound) && guess) return guess;
   if (paintKind && remembered && !remembered.startsWith(`${paintKind}/`)) return guess;
   if (destOptions.some((o) => o.value === remembered)) return remembered;
   return guess;
+}
+
+/**
+ * Where a track goes when there's no picker to ask — the MX Bikes Shop installs straight from
+ * the purchase list. Same answer the Browse dialog would preselect: the remembered folder, or
+ * the first one the library already has.
+ */
+export async function resolveTrackDest(): Promise<string> {
+  const modType = DEFAULT_MOD_TYPE;
+  const installed = await getInstalledMods(modType.installSubpath).catch(() => []);
+  const { options, guess } = buildDestinations(modType, "", installed);
+  return resolveInitialFolder(modType, options, guess);
 }
 
 export interface QuickInstallParams {
@@ -704,12 +836,24 @@ export async function resolveQuickInstall(
     return { ok: false, reason: "blocked", title: detail.title, host: primary.host };
 
   let installed: InstalledMod[] = [];
+  let bikeTargets: string[] = [];
   try {
     installed = await getInstalledMods(modType.installSubpath);
   } catch {
     installed = [];
   }
-  const { options, guess } = buildDestinations(modType, detail.title, installed, livery);
+  if (modType.id === "bikes") {
+    bikeTargets = await scanBikeTargets().catch(() => []);
+  }
+  const { options, guess } = buildDestinations(
+    modType,
+    detail.title,
+    installed,
+    livery,
+    false,
+    detail.categories,
+    bikeTargets,
+  );
   const destFolder = resolveInitialFolder(modType, options, guess, livery);
 
   return {
@@ -778,6 +922,17 @@ export function isFrostmodRunning(): Promise<boolean> {
 /** Start MX Bikes. Resolves to `already_running` when the game is already up. */
 export function launchGame(): Promise<LaunchOutcome> {
   return invoke<LaunchOutcome>("launch_game");
+}
+
+/**
+ * Start MX Bikes connected straight to `address` (`host` or `host:port`; the port
+ * defaults to 54210).
+ *
+ * Resolves to `already_running` when the game is already up — the connect flag is only
+ * read at startup, so a running copy can't be steered into a server.
+ */
+export function joinServer(address: string): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("join_server", { address });
 }
 
 /** Is MX Bikes currently running? Always false off Windows — the probe is Win32-only. */
@@ -1018,4 +1173,122 @@ export function onPresetBundleProgress(
  *  than guessing from `navigator.userAgent`, which can't tell Windows from Linux. */
 export function appPlatform(): Promise<string> {
   return invoke<string>("app_platform");
+}
+
+// ── Experimental features, beta builds, paint sync ───────────────────────────
+
+export interface ExperimentalState {
+  /** The MX Bikes GUID this account has claimed, if any. */
+  guid?: string;
+  /** Whether the unfinished multiplayer features should be shown at all. */
+  enabled: boolean;
+  /** On because `MXB_EXPERIMENTAL=1` was set, so the toggle can explain itself. */
+  forcedByEnv: boolean;
+  version: string;
+  /** A semver pre-release suffix (`0.8.0-beta.1`) — what makes this build a beta. */
+  prerelease: boolean;
+  /** Whether this install has a control-plane account yet. */
+  enrolled: boolean;
+  riderName: string;
+}
+
+export interface PublishOutcome {
+  published: number;
+  uploaded: number;
+}
+
+export interface PullOutcome {
+  riders: number;
+  installed: number;
+  alreadyHad: number;
+  /** Entries refused because their destination wasn't safe to write. */
+  rejected: number;
+}
+
+export function experimentalState(): Promise<ExperimentalState> {
+  return invoke<ExperimentalState>("experimental_state");
+}
+
+export function setExperimental(enabled: boolean): Promise<void> {
+  return invoke<void>("set_experimental", { enabled });
+}
+
+/** Trade an invite code for an account. The token is stored by the backend, never here. */
+export function enrollAccount(code: string, riderName: string): Promise<string> {
+  return invoke<string>("enroll_account", { code, riderName });
+}
+
+/**
+ * Claim this player's MX Bikes GUID — the identity that survives a rider-name change and
+ * the one the dedicated server logs on every connection. First-come on the server side.
+ */
+export function setGuid(guid: string): Promise<void> {
+  return invoke<void>("set_guid", { guid });
+}
+
+/** Publish this rider's paints so everyone else on the server can see them. */
+export function publishPaints(profile: string, bike: string): Promise<PublishOutcome> {
+  return invoke<PublishOutcome>("publish_paints", { profile, bike });
+}
+
+/** Install every other rider's paints. */
+export function syncPaints(serverId: string): Promise<PullOutcome> {
+  return invoke<PullOutcome>("sync_paints", { serverId });
+}
+
+// ── Dedicated servers ────────────────────────────────────────────────────────
+
+/** A dedicated server the player administers, as stored in the app config. */
+export interface ServerRef {
+  id: string;
+  name: string;
+  /** Base URL of the `mxb-agent` on the host, e.g. `http://203.0.113.10:8787`. */
+  url: string;
+  /** Bearer token from that host's `agent.json`. */
+  token: string;
+}
+
+/** What `mxb-agent` reports about a server. */
+export interface ServerStatus {
+  game: {
+    running: boolean;
+    pid: number | null;
+    uptime_secs: number;
+    /** Times the agent brought the game back after it exited on its own. */
+    restarts: number;
+  };
+  port: number;
+  server: {
+    name: string | null;
+    track: string | null;
+    maxClients: string | null;
+  };
+}
+
+export type ServerAction = "start" | "stop" | "restart";
+
+export function listServers(): Promise<ServerRef[]> {
+  return invoke<ServerRef[]>("list_servers");
+}
+
+/** Replace the whole saved list — the UI owns add/edit/remove and ordering. */
+export function saveServers(servers: ServerRef[]): Promise<void> {
+  return invoke<void>("save_servers", { servers });
+}
+
+/** Commands take an id, not a token: the frontend never hands back a secret it was given. */
+export function serverStatus(id: string): Promise<ServerStatus> {
+  return invoke<ServerStatus>("server_status", { id });
+}
+
+export function serverAction(id: string, action: ServerAction): Promise<unknown> {
+  return invoke<unknown>("server_action", { id, action });
+}
+
+/** Change server settings. The agent restarts the game, which reads its `.ini` only at startup. */
+export function serverSetConfig(
+  id: string,
+  patch: { track?: string; name?: string; maxClients?: number },
+): Promise<unknown> {
+  return invoke<unknown>("server_set_config", { id, patch });
 }

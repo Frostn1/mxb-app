@@ -1,6 +1,7 @@
 use super::{DownloadOption, ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use crate::mxb_session;
 use futures_util::StreamExt;
+use obfstr::obfstr;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -76,29 +77,123 @@ fn worth_retrying(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 429 | 503)
 }
 
+/// One response, read into memory, independent of which transport produced it.
+///
+/// The reqwest client and the WebView bridge return the same shape so everything downstream
+/// — the parsers, the `X-WP-Total` paging, the refusal diagnostics — is transport-agnostic.
+/// Owned rather than borrowed because the WebView hands back a decoded body, not a stream;
+/// that is affordable here because mxb-mods.com only ever serves us JSON and HTML. Actual
+/// mod downloads go to MediaFire/Drive/Mega and never come through this path.
+pub struct Fetched {
+    pub status: u16,
+    /// Lowercased header names. Same-origin `fetch` exposes every header, so this is as
+    /// complete over the bridge as it is over reqwest.
+    pub headers: HashMap<String, String>,
+    pub body: String,
+    /// The URL that actually answered, for the refusal log.
+    pub url: String,
+}
+
+impl Fetched {
+    fn is_success(&self) -> bool {
+        (200..300).contains(&self.status)
+    }
+
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.get(name).map(String::as_str)
+    }
+
+    fn json<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<T> {
+        Ok(serde_json::from_str(&self.body)?)
+    }
+}
+
+/// Which transport this session uses for mxb-mods.com.
+///
+/// Starts on the HTTP client, which is faster and is what nearly every user needs. A
+/// Cloudflare refusal latches it to the WebView for the rest of the session — see
+/// [`use_webview`]. Never latches back: a client that has been refused once on a given IP
+/// and fingerprint will be refused again, and flapping between transports would just
+/// reintroduce the failure on every request.
+static WEBVIEW_TRANSPORT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Route every mxb-mods.com request through the WebView from here on.
+pub fn use_webview() {
+    if !WEBVIEW_TRANSPORT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        log::info!("switching mxb-mods.com traffic to the WebView for the rest of this session");
+    }
+}
+
+/// `MXB_FORCE_WEBVIEW=1` starts on the bridge instead of falling back to it. The only way to
+/// exercise this path on a machine Cloudflare is happy with, and a support switch for a user
+/// who is blocked from the first request.
+fn forced_to_webview() -> bool {
+    static FORCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FORCED.get_or_init(|| {
+        let on = matches!(
+            std::env::var("MXB_FORCE_WEBVIEW").unwrap_or_default().as_str(),
+            "1" | "true" | "yes"
+        );
+        if on {
+            log::info!("MXB_FORCE_WEBVIEW is set — all mxb-mods.com traffic goes via the WebView");
+        }
+        on
+    })
+}
+
+fn on_webview() -> bool {
+    forced_to_webview() || WEBVIEW_TRANSPORT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// `GET` with backoff over the transient blocks above. Transport errors retry too, which
 /// is what `install::get_with_retry` already does for download hosts.
-async fn get_with_retry(
-    url: &str,
-    params: &[(&str, String)],
-) -> anyhow::Result<reqwest::Response> {
+async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<Fetched> {
+    if on_webview() {
+        // No backoff loop here: the bridge is a real browser, so a 429/503 it gets is one
+        // the site means, and it has its own timeout.
+        return crate::mxb_fetch::get(url, params).await;
+    }
+
     const ATTEMPTS: u32 = 3;
     let client = client()?;
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
+        let started = Instant::now();
         match client.get(url).query(params).send().await {
-            Ok(resp) if !worth_retrying(resp.status()) => return Ok(resp),
+            Ok(resp) if !worth_retrying(resp.status()) => {
+                // Debug, not info: search runs on every keystroke, and a line per keystroke
+                // would bury the one failure worth reading. `MXB_LOG=debug` turns it on.
+                let fetched = into_fetched(resp).await;
+                log::debug!(
+                    "GET {} -> {} in {:?}",
+                    path_of(url),
+                    fetched.status,
+                    started.elapsed()
+                );
+                return Ok(fetched);
+            }
             Ok(resp) => {
                 let status = resp.status();
                 if attempt == ATTEMPTS {
-                    return Ok(resp);
+                    return Ok(into_fetched(resp).await);
                 }
+                log::warn!(
+                    "GET {} -> {} (attempt {attempt}/{ATTEMPTS}), retrying in {}ms",
+                    path_of(url),
+                    status.as_u16(),
+                    500 * attempt
+                );
                 last_err = Some(anyhow::anyhow!("{status}"));
             }
             Err(e) => {
                 if attempt == ATTEMPTS {
+                    log::warn!("GET {} failed after {ATTEMPTS} attempts: {e}", path_of(url));
                     return Err(e.into());
                 }
+                log::warn!(
+                    "GET {} failed (attempt {attempt}/{ATTEMPTS}): {e}",
+                    path_of(url)
+                );
                 last_err = Some(e.into());
             }
         }
@@ -107,8 +202,35 @@ async fn get_with_retry(
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("request failed")))
 }
 
-/// Shared with [`super::shop_catalog`] — see [`super::Blocked`]. Re-exported so
-/// `mods::mxb::Blocked` keeps naming it.
+/// Read a reqwest response into the transport-agnostic shape. A body that won't decode
+/// becomes an empty one rather than an error — the status and headers are still worth
+/// having, and that is exactly the case the refusal diagnostics exist to report.
+async fn into_fetched(resp: reqwest::Response) -> Fetched {
+    let status = resp.status().as_u16();
+    let url = resp.url().to_string();
+    let headers = resp
+        .headers()
+        .iter()
+        .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string())))
+        .collect();
+    Fetched {
+        status,
+        headers,
+        body: resp.text().await.unwrap_or_default(),
+        url,
+    }
+}
+
+/// The path part of a URL, for logs. The full URL is mostly a constant prefix plus
+/// percent-encoded query params, and the path is the bit that distinguishes the two
+/// endpoints Cloudflare treats differently — the WP REST API and the rendered mod page.
+fn path_of(url: &str) -> &str {
+    url.strip_prefix(BASE).unwrap_or(url)
+}
+
+/// Cloudflare refusals, shared with [`super::shop_catalog`] — both catalogs sit behind it,
+/// and `main.rs`'s clearance retry downcasts to one type for both. Defined in [`super`] and
+/// re-exported here so `mods::mxb::Blocked` still names it.
 pub use super::Blocked;
 
 /// Turn a blocked response into something a person can act on. The raw reqwest `Display`
@@ -117,8 +239,12 @@ pub use super::Blocked;
 ///
 /// The 403 wording assumes the handshake above it has already been tried and failed, since
 /// that is the only way this message reaches a user.
-fn blocked_error(status: reqwest::StatusCode) -> anyhow::Error {
-    let message = match status.as_u16() {
+///
+/// `ray` is Cloudflare's `cf-ray` id for the refused request. It goes on the end because it
+/// is the one token that identifies this specific block on Cloudflare's side — a screenshot
+/// carrying it can be diagnosed without asking anyone to find their log file.
+fn blocked_error(status: u16, ray: Option<&str>) -> anyhow::Error {
+    let message = match status {
         403 => "mxb-mods.com refused the request (403), and its check window didn't clear \
                 it either. Open mxb-mods.com in your normal browser to confirm the site \
                 loads for you, then hit Retry."
@@ -130,15 +256,92 @@ fn blocked_error(status: reqwest::StatusCode) -> anyhow::Error {
             .to_string(),
         _ => format!("mxb-mods.com returned {status}"),
     };
+    let message = match ray {
+        Some(ray) if !ray.is_empty() && ray != "-" => format!("{message}\n\nRef: {ray}"),
+        _ => message,
+    };
     anyhow::Error::new(Blocked {
-        status: Some(status.as_u16()),
+        status: Some(status),
         message,
     })
 }
 
+/// Everything about a refused response that is worth having in a user's log, written once,
+/// then turned into the error the UI shows.
+///
+/// Takes the whole `Response` rather than its status because the interesting parts are the
+/// bits [`blocked_error`] never saw: the `cf-ray` that identifies the block, `cf-mitigated`
+/// which says *how* Cloudflare decided, the cookies we actually sent, and the error body —
+/// Cloudflare puts the block reason in there ("Sorry, you have been blocked", `Error 1015`),
+/// and we were dropping it on the floor.
+fn refusal(what: &str, resp: &Fetched) -> anyhow::Error {
+    // Just the path: the rest is a constant prefix plus percent-encoded query noise.
+    let path = resp
+        .url
+        .split_once("://")
+        .and_then(|(_, rest)| rest.split_once('/'))
+        .map_or_else(|| resp.url.clone(), |(_, p)| format!("/{p}"));
+    let path = path.split('?').next().unwrap_or(&path).to_string();
+    let ray = resp.header("cf-ray").unwrap_or("-").to_string();
+    log::warn!(
+        "{}",
+        refusal_line(
+            what,
+            &path,
+            resp.status,
+            &resp.headers,
+            &mxb_session::jar_summary(),
+            &resp.body,
+        )
+    );
+    blocked_error(resp.status, Some(&ray))
+}
+
+/// The line itself, built separately from the logging so a test can pin what a user ends up
+/// pasting into Discord — one line, every field a diagnosis needs, no cookie values.
+fn refusal_line(
+    what: &str,
+    path: &str,
+    status: u16,
+    headers: &HashMap<String, String>,
+    jar: &str,
+    body: &str,
+) -> String {
+    let h = |name: &str| headers.get(name).map_or("-", String::as_str);
+    format!(
+        "mxb-mods refused {what} ({path}, {status}) — cf-ray={} cf-mitigated={} server={} \
+         retry-after={}; jar: {jar}; body: {}",
+        h("cf-ray"),
+        h("cf-mitigated"),
+        h("server"),
+        h("retry-after"),
+        snippet(body)
+    )
+}
+
+/// A response body cut down to something that belongs on one log line: whitespace collapsed
+/// (Cloudflare's block pages are mostly indentation) and truncated.
+fn snippet(body: &str) -> String {
+    const MAX: usize = 500;
+    if body.is_empty() {
+        return "(empty)".to_string();
+    }
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= MAX {
+        return format!("\"{flat}\"");
+    }
+    let cut: String = flat.chars().take(MAX).collect();
+    format!("\"{cut}…\" ({} bytes total)", body.len())
+}
+
 /// The interstitial-as-a-200 case. Same handling as a 403 — it is the same refusal, just
 /// dressed as a success.
-fn challenge_error() -> anyhow::Error {
+fn challenge_error(marker: &str, html_len: usize) -> anyhow::Error {
+    log::warn!(
+        "mxb-mods served a Cloudflare interstitial as a 200 (matched '{marker}', {html_len} bytes); \
+         jar: {}",
+        mxb_session::jar_summary()
+    );
     anyhow::Error::new(Blocked {
         status: None,
         message: "mxb-mods.com served a Cloudflare check instead of the mod page, and its \
@@ -155,10 +358,20 @@ fn challenge_error() -> anyhow::Error {
 /// ordinary pages too (verified — it appears once in a normal 212 KB mod page that parses
 /// fine), so matching it would condemn every mod page. The markers below only appear on
 /// the interstitial itself.
-fn is_challenge(html: &str) -> bool {
-    html.contains("cf-browser-verification")
-        || html.contains("cf_chl_opt")
-        || html.to_ascii_lowercase().contains("<title>just a moment")
+///
+/// Returns *which* marker matched, so the log says why we called a 200 a challenge — the next
+/// time Cloudflare reworks its interstitial, that is the difference between "the markers are
+/// stale" and "the page really was a challenge".
+fn challenge_marker(html: &str) -> Option<&'static str> {
+    if html.contains("cf-browser-verification") {
+        Some("cf-browser-verification")
+    } else if html.contains("cf_chl_opt") {
+        Some("cf_chl_opt")
+    } else if html.to_ascii_lowercase().contains("<title>just a moment") {
+        Some("<title>just a moment")
+    } else {
+        None
+    }
 }
 
 pub async fn search(
@@ -196,13 +409,19 @@ enum Page {
 async fn listing(q: &str, category_id: u32, page: Page) -> anyhow::Result<Vec<ModSummary>> {
     let (resp, _) = listing_response(q, category_id, page).await?;
     // WP returns 400 (rest_post_invalid_page_number) once you page past the end.
-    if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+    if resp.status == 400 {
+        // Any *other* 400 also lands here and reads to the user as "no results", so say in
+        // the log which one it was rather than letting a real error look like an empty page.
+        log::info!(
+            "catalog returned 400 — treating as the end of the listing: {}",
+            snippet(&resp.body)
+        );
         return Ok(vec![]);
     }
-    if !resp.status().is_success() {
-        return Err(blocked_error(resp.status()));
+    if !resp.is_success() {
+        return Err(refusal("the catalog listing", &resp));
     }
-    let posts: Vec<Value> = resp.json().await?;
+    let posts: Vec<Value> = resp.json()?;
     Ok(posts
         .iter()
         .filter_map(|p| summary_from_post(p, category_id))
@@ -214,8 +433,8 @@ async fn listing_response(
     q: &str,
     category_id: u32,
     page: Page,
-) -> anyhow::Result<(reqwest::Response, Option<u32>)> {
-    let url = format!("{BASE}/wp-json/wp/v2/posts");
+) -> anyhow::Result<(Fetched, Option<u32>)> {
+    let url = format!("{BASE}{}", obfstr!("/wp-json/wp/v2/posts"));
     let mut params: Vec<(&str, String)> = vec![
         ("categories", category_id.to_string()),
         ("_embed", "wp:featuredmedia".to_string()),
@@ -234,11 +453,7 @@ async fn listing_response(
         params.push(("search", q.to_string()));
     }
     let resp = get_with_retry(&url, &params).await?;
-    let total = resp
-        .headers()
-        .get("x-wp-total")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u32>().ok());
+    let total = resp.header("x-wp-total").and_then(|v| v.parse::<u32>().ok());
     Ok((resp, total))
 }
 
@@ -286,8 +501,8 @@ async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
     }
     // One post is enough to read the header off; the body is discarded.
     let (resp, total) = listing_response(q, category_id, Page::Offset { skip: 0, take: 1 }).await?;
-    if !resp.status().is_success() {
-        return Err(blocked_error(resp.status()));
+    if !resp.is_success() {
+        return Err(refusal("the catalog post count", &resp));
     }
     let total = total.ok_or_else(|| anyhow::anyhow!("the catalog didn't report a post count"))?;
     lock(total_cache()).insert(key, (total, Instant::now()));
@@ -300,7 +515,10 @@ async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
 /// differences are `limit`/`offset` instead of `page`, and that paging past the end
 /// returns an empty list rather than a 400.
 async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec<ModSummary>> {
-    let url = format!("{BASE}/wp-json/wordpress-popular-posts/v1/popular-posts");
+    let url = format!(
+        "{BASE}{}",
+        obfstr!("/wp-json/wordpress-popular-posts/v1/popular-posts")
+    );
     let per_page: u32 = PER_PAGE.parse().unwrap_or(24);
     let params: Vec<(&str, String)> = vec![
         ("taxonomy", "category".to_string()),
@@ -313,10 +531,10 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
     ];
 
     let resp = get_with_retry(&url, &params).await?;
-    if !resp.status().is_success() {
-        return Err(blocked_error(resp.status()));
+    if !resp.is_success() {
+        return Err(refusal("the popular listing", &resp));
     }
-    let posts: Vec<Value> = resp.json().await?;
+    let posts: Vec<Value> = resp.json()?;
     Ok(posts
         .iter()
         .filter_map(|p| summary_from_post(p, category_id))
@@ -325,16 +543,18 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
 
 pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // 1. Post metadata + description via the REST API.
-    let url = format!("{BASE}/wp-json/wp/v2/posts");
+    let url = format!("{BASE}{}", obfstr!("/wp-json/wp/v2/posts"));
+    // `wp:term` rides along in the same request — the categories it brings back are what
+    // tell the install picker which bike a livery is for.
     let params = vec![
         ("slug", slug.to_string()),
-        ("_embed", "wp:featuredmedia".to_string()),
+        ("_embed", "wp:featuredmedia,wp:term".to_string()),
     ];
     let resp = get_with_retry(&url, &params).await?;
-    if !resp.status().is_success() {
-        return Err(blocked_error(resp.status()));
+    if !resp.is_success() {
+        return Err(refusal("mod metadata", &resp));
     }
-    let posts: Vec<Value> = resp.json().await?;
+    let posts: Vec<Value> = resp.json()?;
     let post = posts
         .into_iter()
         .next()
@@ -368,15 +588,21 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // zero downloads — the page then said "No download link was found on this page"
     // rather than "we couldn't read the page". Surface it instead.
     let resp = get_with_retry(&link, &[]).await?;
-    if !resp.status().is_success() {
-        return Err(blocked_error(resp.status()));
+    if !resp.is_success() {
+        return Err(refusal("the mod page", &resp));
     }
-    let html = resp.text().await.unwrap_or_default();
+    let html = resp.body;
     let (downloads, version) = (parse_downloads(&html), parse_version(&html));
     // Only call it a challenge when the page also yielded nothing, so a marker that turns
     // up in a page that actually parsed can never turn a working mod into an error.
-    if downloads.is_empty() && is_challenge(&html) {
-        return Err(challenge_error());
+    if downloads.is_empty() {
+        if let Some(marker) = challenge_marker(&html) {
+            return Err(challenge_error(marker, html.len()));
+        }
+        log::info!(
+            "no downloads parsed from '{slug}' ({} bytes) and it is not a challenge page",
+            html.len()
+        );
     }
 
     Ok(ModDetail {
@@ -389,6 +615,7 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
         images,
         version,
         downloads,
+        categories: term_names(&post),
     })
 }
 
@@ -460,16 +687,22 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The rating plugin has no REST route; its front end reads scores from this admin-ajax
 /// action, which answers unauthenticated with `{voteCount, avgRating}`.
 async fn rating(id: u64) -> anyhow::Result<ModRating> {
-    let url = format!("{BASE}/wp-admin/admin-ajax.php");
-    let resp = client()?
-        .post(&url)
-        .form(&[("action", "load_results".to_string()), ("postID", id.to_string())])
-        .send()
-        .await?;
-    if !resp.status().is_success() {
-        anyhow::bail!("{}", resp.status());
+    let url = format!("{BASE}{}", obfstr!("/wp-admin/admin-ajax.php"));
+    let form = [
+        ("action", "load_results".to_string()),
+        ("postID", id.to_string()),
+    ];
+    // Ratings go over whichever transport the session settled on too — otherwise a blocked
+    // user gets their mods back but every card silently loses its stars.
+    let resp = if on_webview() {
+        crate::mxb_fetch::post(&url, &form).await?
+    } else {
+        into_fetched(client()?.post(&url).form(&form).send().await?).await
+    };
+    if !resp.is_success() {
+        anyhow::bail!("{}", resp.status);
     }
-    let v: Value = resp.json().await?;
+    let v: Value = resp.json()?;
     Ok(ModRating {
         average: number(v.get("avgRating")).unwrap_or(0.0) as f32,
         count: number(v.get("voteCount")).unwrap_or(0.0).max(0.0) as u32,
@@ -516,6 +749,30 @@ fn featured_image(p: &Value) -> Option<String> {
         .get("source_url")?
         .as_str()
         .map(str::to_string)
+}
+
+/// Every term name `_embed=wp:term` brought back, flattened across taxonomies.
+///
+/// The site files a mod under one category per bike it fits ("2023 KTM 450 SX-F OEM") on top
+/// of the browse categories ("Liveries") and the manufacturer ("KTM"), so the caller gets a
+/// mixed bag and decides what's distinctive. Order follows the site's own.
+fn term_names(post: &Value) -> Vec<String> {
+    let mut out: Vec<String> = post
+        .get("_embedded")
+        .and_then(|e| e.get("wp:term"))
+        .and_then(Value::as_array)
+        .map(|groups| {
+            groups
+                .iter()
+                .filter_map(Value::as_array)
+                .flatten()
+                .filter_map(|t| t.get("name").and_then(Value::as_str))
+                .map(decode_entities)
+                .collect()
+        })
+        .unwrap_or_default();
+    dedup(&mut out);
+    out
 }
 
 fn decode_entities(s: &str) -> String {
@@ -666,6 +923,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reads_every_embedded_term_name() {
+        // Shape of `_embed=wp:term` on a real livery post: one group per taxonomy, the
+        // second empty because the site files nothing under tags.
+        let post: Value = serde_json::from_str(
+            r#"{"_embedded":{"wp:term":[[
+                 {"taxonomy":"category","name":"2023 KTM 450 SX-F OEM"},
+                 {"taxonomy":"category","name":"Liveries"},
+                 {"taxonomy":"category","name":"KTM"},
+                 {"taxonomy":"category","name":"Ren&#038;s Bikes"}
+               ],[]]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            term_names(&post),
+            vec![
+                "2023 KTM 450 SX-F OEM",
+                "Liveries",
+                "KTM",
+                // Entities decoded, same as the title.
+                "Ren&s Bikes",
+            ]
+        );
+
+        // A post fetched without `_embed`, or one with no terms, must not blow up.
+        assert!(term_names(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
     fn parses_default_download_container() {
         let html = r#"
             <div id="link1" class="download-container container-default">
@@ -792,7 +1077,7 @@ mod client_tests {
         assert!(!blocked(503).clearable());
         // The interstitial-as-a-200 — the same refusal wearing a success code.
         assert!(matches!(
-            challenge_error().downcast_ref::<Blocked>(),
+            challenge_error("cf_chl_opt", 4096).downcast_ref::<Blocked>(),
             Some(b) if b.clearable()
         ));
     }
@@ -801,7 +1086,7 @@ mod client_tests {
     /// `anyhow` as a `Blocked` and not collapse into a bare message.
     #[test]
     fn a_blocked_error_stays_downcastable() {
-        let err = blocked_error(reqwest::StatusCode::FORBIDDEN);
+        let err = blocked_error(403, None);
         let blocked = err
             .downcast_ref::<Blocked>()
             .expect("the command layer downcasts to decide whether to run the handshake");
@@ -812,9 +1097,12 @@ mod client_tests {
 
     #[test]
     fn spots_a_cloudflare_interstitial() {
-        assert!(is_challenge("<title>Just a moment...</title>"));
-        assert!(is_challenge(r#"<form id="challenge-form" class="cf-browser-verification">"#));
-        assert!(is_challenge("window._cf_chl_opt = {};"));
+        assert!(challenge_marker("<title>Just a moment...</title>").is_some());
+        assert!(
+            challenge_marker(r#"<form id="challenge-form" class="cf-browser-verification">"#)
+                .is_some()
+        );
+        assert!(challenge_marker("window._cf_chl_opt = {};").is_some());
     }
 
     #[test]
@@ -824,16 +1112,148 @@ mod client_tests {
         let real = r#"<title>MXB App - MXB-Mods.com</title>
             <div class="download-container"><a href="https://x/f.pkz">Default</a></div>
             <script src="/cdn-cgi/challenge-platform/h/b/scripts/jsd/main.js"></script>"#;
-        assert!(!is_challenge(real));
+        assert_eq!(challenge_marker(real), None);
         assert!(!parse_downloads(real).is_empty(), "and it still parses");
     }
 
     #[test]
     fn blocked_errors_say_what_to_do() {
-        let msg = blocked_error(reqwest::StatusCode::FORBIDDEN).to_string();
+        let msg = blocked_error(403, None).to_string();
         assert!(msg.contains("403") && msg.contains("Retry"), "{msg}");
         // The old text leaked a percent-encoded URL at the user; make sure we don't.
         assert!(!msg.contains("wp-json"), "{msg}");
+        // Nothing to reference, so nothing dangling on the end.
+        assert!(!msg.contains("Ref:"), "{msg}");
+    }
+
+    /// The ray id is the whole reason it is on screen: it identifies this block on
+    /// Cloudflare's side, so it has to survive into the text the UI renders.
+    #[test]
+    fn a_ray_id_rides_along_on_the_message() {
+        let err = blocked_error(403, Some("8f2a1c9d4e5b6a07"));
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Ref: 8f2a1c9d4e5b6a07"), "{msg}");
+        assert!(msg.contains("403") && msg.contains("Retry"), "{msg}");
+        // An absent header reads as "-" upstream; that must not reach the user as a ref.
+        assert!(!blocked_error(403, Some(""))
+            .to_string()
+            .contains("Ref:"));
+    }
+
+    fn refused(status: u16, headers: &[(&str, &str)], body: &str) -> Fetched {
+        Fetched {
+            status,
+            headers: headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            body: body.to_string(),
+            url: "https://mxb-mods.com/wp-json/wp/v2/posts?categories=22".to_string(),
+        }
+    }
+
+    /// A real 403 can't be provoked locally — it's scored on IP and TLS fingerprint — so
+    /// the response is synthesised. What's under test is that the diagnostic path reads the
+    /// headers, still produces a `Blocked` the command layer can act on, and carries the ray.
+    #[test]
+    fn a_refused_response_becomes_a_blocked_error_with_its_ray() {
+        let resp = refused(
+            403,
+            &[
+                ("cf-ray", "8f2a1c9d4e5b6a07-LHR"),
+                ("cf-mitigated", "challenge"),
+                ("server", "cloudflare"),
+            ],
+            "Sorry, you have been blocked",
+        );
+        let err = refusal("the catalog listing", &resp);
+
+        let blocked = err
+            .downcast_ref::<Blocked>()
+            .expect("a refusal must stay actionable by the command layer");
+        assert_eq!(blocked.status, Some(403));
+        assert!(
+            blocked.clearable(),
+            "a 403 should still send the command layer to the WebView"
+        );
+        assert!(format!("{err:#}").contains("Ref: 8f2a1c9d4e5b6a07-LHR"));
+    }
+
+    /// The refusal log names the endpoint, not the whole URL with its query string — the
+    /// catalog API and the rendered mod page sit behind different Cloudflare rules, and
+    /// that distinction is the first thing to read off a report.
+    #[test]
+    fn the_refused_path_is_reported_without_query_noise() {
+        let err = refusal("the catalog listing", &refused(403, &[], ""));
+        // Nothing to reference, so no dangling Ref.
+        assert!(!format!("{err:#}").contains("Ref:"));
+    }
+
+    /// What a user actually pastes into Discord. Everything a diagnosis needs has to be on
+    /// it, and none of it may be a cookie value.
+    ///
+    /// `cargo test the_refusal_line -- --nocapture` prints it.
+    #[test]
+    fn the_refusal_line_carries_a_whole_diagnosis() {
+        let headers: HashMap<String, String> = [
+            ("cf-ray", "8f2a1c9d4e5b6a07-LHR"),
+            ("cf-mitigated", "challenge"),
+            ("server", "cloudflare"),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+
+        let line = refusal_line(
+            "the catalog listing",
+            "/wp-json/wp/v2/posts",
+            403,
+            &headers,
+            "__cf_bm (no cf_clearance)",
+            "<html>\n  <h1>Sorry, you have been blocked</h1>\n</html>",
+        );
+        eprintln!("{line}");
+
+        for expected in [
+            "the catalog listing",   // which call failed
+            "/wp-json/wp/v2/posts",  // which endpoint — REST and the mod page differ
+            "403",
+            "cf-ray=8f2a1c9d4e5b6a07-LHR", // identifies the block on Cloudflare's side
+            "cf-mitigated=challenge",      // how Cloudflare decided
+            "no cf_clearance",             // did we even have a cookie to send
+            "you have been blocked",       // Cloudflare's own reason, from the body
+            "retry-after=-",               // absent headers read as '-', never as a panic
+        ] {
+            assert!(line.contains(expected), "missing {expected:?} in: {line}");
+        }
+        assert!(!line.contains('\n'), "a log line must stay one line: {line}");
+    }
+
+    /// Named markers, so the log says *why* a 200 was called a challenge.
+    #[test]
+    fn the_challenge_marker_says_which_one_matched() {
+        assert_eq!(
+            challenge_marker("<title>Just a moment...</title>"),
+            Some("<title>just a moment")
+        );
+        assert_eq!(
+            challenge_marker(r#"<div class="cf-browser-verification">"#),
+            Some("cf-browser-verification")
+        );
+        assert_eq!(challenge_marker("window._cf_chl_opt = {};"), Some("cf_chl_opt"));
+        assert_eq!(challenge_marker("<h1>MXB App</h1>"), None);
+    }
+
+    /// Log lines go on one line, and a Cloudflare block page is mostly indentation.
+    #[test]
+    fn snippets_collapse_and_truncate() {
+        assert_eq!(snippet(""), "(empty)");
+        assert_eq!(snippet("  a\n\n   b  "), "\"a b\"");
+
+        let long = "x".repeat(900);
+        let cut = snippet(&long);
+        assert!(cut.contains('…') && cut.contains("900 bytes total"), "{cut}");
+        assert!(cut.chars().count() < 600, "still fits on a log line");
     }
 
     /// Live check against mxb-mods.com — the client this ships, not an approximation.
