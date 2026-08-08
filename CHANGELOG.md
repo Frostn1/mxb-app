@@ -51,6 +51,40 @@
   that names one paint means the others should be out of sight. Race mode now takes rider gear
   models and liveries out of the way alongside the rest, keeps exactly what the preset names,
   and brings them all back on Restore all.
+- **Protection mods now show what they actually look like.** The protection slot is the
+  busiest and least conventional one on mxb-mods — chains, necklaces, hoodies, bibs,
+  backpacks, hair, the odd pickaxe — and unlike helmets and boots those mods bake their
+  look straight into the mesh instead of shipping a `.pnt`. The preview only ever looked
+  for a paint, so five of eight real mods pulled off the site came out as a featureless
+  grey shape. A piece with no paint to wear now wears the texture its own mesh carries,
+  each part bound to its own: a chest protector's shell and straps, or a chain's four baked
+  maps, land where the model says they go instead of all sharing one.
+- **A protection is drawn at the size it was made.** Every piece was being scaled to a
+  fixed fraction of the rider and re-centred on his chest, which inflated a thin necklace
+  to the proportions of a full vest and threw away the offset a chain or a hood is
+  deliberately authored to hang at. Protection is modelled in the rider's own frame, so
+  it's now placed as authored — its own size, its own offset — and the mount an `.hrc`
+  names is honoured.
+- **Mods that ship sealed loose files load.** A protection folder whose files are sealed
+  the way a `.pkz` seals its entries used to fail outright with "no gear mesh found"; those
+  now read like any other. Gear also follows the `gfx.cfg` → `.hrc` chain to find its mesh,
+  so a mod that names it for the piece (`neckbrace.edf`, `pickaxe.edf`) resolves instead of
+  relying on a guess from filenames, and stock gear whose folder doesn't use the slot's own
+  mesh name no longer comes up empty.
+- **Textures baked in Substance or Blender bind to the right mesh.** Maps exported under
+  the toolchain's names — `Vest_Normal` beside `Vest_BaseColor` — were counted as looks in
+  their own right, and since material indices count that list, every texture after one slid
+  onto the wrong part. That's why the Tactical Vest wore its pouch's normal map.
+
+- **Race mode now clears the rider gear too.** Applying a race preset narrowed the bikes and
+  tracks the game could see and left the rider alone — every helmet, every boot, every
+  protection set and every gear livery you have installed still showed up in the game's
+  pickers, including the four hundred liveries sitting under the one helmet the preset
+  actually names. Manage only ever moved archives and extracted tracks, on the reasoning that
+  a loose `.pnt` costs nothing to mount; true, but mounting was never the point — a preset
+  that names one paint means the others should be out of sight. Race mode now takes rider gear
+  models and liveries out of the way alongside the rest, keeps exactly what the preset names,
+  and brings them all back on Restore all.
 - **The rider stands up and faces forward.** Rider meshes don't agree on which axis is up: the stock motocross
   rider is authored Y-up, while the supermoto rider and Rider+ are Z-up and arrived lying on
   their back. Every piece of gear is anchored and scaled to a fraction of the body's height,
@@ -88,6 +122,8 @@
   persistent fault is re-hit on every slot edit.
 
 ### Changed
+- **Protection is no longer hidden by default in the Rider tab.** It was, back when it
+  rendered as a grey blob spanning the whole torso.
 - **When mxb-mods.com refuses us, the log now says enough to act on.** Browse failing with
   "mxb-mods.com refused the request (403)" wrote nothing to the log beyond whether the check
   window earned a cookie — the request that was actually refused went unrecorded, so a report
