@@ -13,6 +13,10 @@
   XOR-obfuscated the runtime-built API paths and upload/download URLs (WordPress REST/admin-ajax
   paths, pixeldrain upload, Google Drive resolver). Public host bases stay as-is — they're
   visible in network traffic regardless and are bound into `const` config.
+- **Source-level format hints kept out of the public repository.** Simplified the `flate2`
+  dependency note and stripped the implementation comments from the `.pnt` decoder, so the
+  committed source no longer documents on-disk container internals. Comment-only change —
+  code, tests, and behavior are unchanged.
 
 ## 2026-08-08 — v0.7.1 — Browse works for blocked players, the model-swap crash is gone, and the Rider preview wears a real rider
 
