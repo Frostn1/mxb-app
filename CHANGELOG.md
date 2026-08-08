@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-07
+
+### Added
+- **A Play button that launches MX Bikes.** Setting a bike up in the Locker meant
+  alt-tabbing to Steam or the desktop to actually ride it, even though the app already
+  knew where the game was installed and whether it was running. The sidebar now carries a
+  Play button above the FrostMod pill, visible from every tab; it flips to "MX Bikes
+  running" while the game is up, so it can't start a second copy. Windows runs
+  `mxbikes.exe` directly, which works for standalone (non-Steam) copies too and doesn't
+  need Steam open; Linux hands `steam://rungameid/655500` to the desktop, because a
+  Proton install is Steam's to set up. If the install folder isn't set or holds no
+  `mxbikes.exe`, the error says so and points at Settings.
+
 ## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
 
 ### Added

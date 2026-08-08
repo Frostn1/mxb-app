@@ -311,6 +311,9 @@ export interface FrostmodReload {
   mods?: string[];
 }
 
+/** Result of pressing Play. `already_running` means we deliberately did nothing. */
+export type LaunchOutcome = "launched" | "already_running";
+
 export type LiveRefresh =
   | "refreshed"
   | "failed"
