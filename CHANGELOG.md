@@ -2,6 +2,32 @@
 
 ## 2026-08-08 — Unreleased
 
+### Added
+- **The install picker works out which bike a paint is for.** mxb-mods files every livery
+  under a category per bike it fits ("2023 KTM 450 SX-F OEM") — far more precise than the post
+  title it used to guess from. Those categories are now read off the post and matched against
+  your bikes, so the right one is preselected under "Probably" instead of whichever bike you
+  painted last. Checked against the whole catalog: the correct bike comes first for all 107
+  OEM models.
+- **OEM bikes can be picked as a destination at all.** Their files live inside the game's
+  locked archive, so nothing of them is on disk until they're painted and the picker never
+  listed them — a paint for one had to have its bike id typed by hand. Bike folders and the
+  bike ids in your profile are now offered alongside packaged `.pkz` bikes.
+
+### Fixed
+- **A paint dropped on a bike's root folder no longer vanishes.** MX Bikes only loads liveries
+  from `<Bike>/paints/`, but the picker also offers the bike's root (where sounds and model
+  swaps go) and would happily install a `.pnt` there — the install reported success and the
+  paint never appeared in game. It's now redirected into that bike's `paints/`.
+- **The install progress steps read as English again.** The Resolve → Download → Extract →
+  Place → Reload chain printed its raw translation keys (`modDetail.stageResolve`) in every
+  language — the labels were the only `TKey` in the app rendered without going through `t()`.
+  All five locales already had the strings.
+- **Tracks default to a folder you already use instead of the root.** Once the tracks library
+  has any folder, the first one is preselected rather than dumping another `.pkz` loose at the
+  root. Applies to Browse installs and to MX Bikes Shop purchases, which always went to the
+  root.
+
 ### Changed
 - **Release binaries are stripped and hardened against reverse-engineering.** Added a
   `[profile.release]` that strips the symbol table from every platform's artifact, builds with

@@ -28,6 +28,7 @@ import {
   riderProfileSub,
   riderPaintKind,
   resolveInitialFolder,
+  scanBikeTargets,
   scanRiderTargets,
   sortMirrors,
   type DestOption,
@@ -143,12 +144,25 @@ export default function ModDetail({
           const inst = await getInstalledMods(modType.installSubpath);
           if (cancelled) return;
           setInstalledFiles(inst);
+          // OEM bikes own no file until they're painted, so the scan of `mods/bikes` can't
+          // see them — the backend reads their ids out of the profile as well.
+          const bikeTargets =
+            modType.id === "bikes" ? await scanBikeTargets().catch(() => []) : [];
+          if (cancelled) return;
           // Rider paints route into a model's/profile's folder; everything else
           // uses the generic (track/bike) destination logic.
           const dest =
             modType.id === "rider"
               ? buildRiderDestinations(await scanRiderTargets(), d.title, profileSub, paintKind)
-              : buildDestinations(modType, d.title, inst, livery, sound);
+              : buildDestinations(
+                  modType,
+                  d.title,
+                  inst,
+                  livery,
+                  sound,
+                  d.categories,
+                  bikeTargets,
+                );
           if (cancelled) return;
           setDestOptions(dest.options);
           setGuess(dest.guess);
@@ -606,7 +620,7 @@ function InstallProgress({
               )}
             >
               {i < idx && "✓ "}
-              {s.label}
+              {t(s.label)}
             </span>
             {i < CHAIN.length - 1 && <span>→</span>}
           </span>
