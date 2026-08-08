@@ -536,6 +536,16 @@ export const ptBR: Translation = {
   "game.alreadyRunning": "O MX Bikes já está em execução",
   "game.launching": "Iniciando o MX Bikes…",
   "game.launchFailed": "Não foi possível iniciar o MX Bikes",
+  "join.title": "Entrar em um servidor",
+  "join.desc":
+    "Informe o endereço de um servidor para iniciar o MX Bikes conectado diretamente a ele.",
+  "join.address": "Endereço do servidor",
+  "join.action": "Entrar",
+  "join.joining": "Conectando…",
+  "join.launching": "Conectando a {{address}}…",
+  "join.alreadyRunning":
+    "Feche o MX Bikes primeiro — um jogo em execução não pode ser enviado para um servidor.",
+  "join.failed": "Não foi possível entrar nesse servidor",
 
   "servers.title": "Servidores",
   "servers.subtitle":

@@ -12,6 +12,7 @@ import {
   Gamepad2,
   SlidersHorizontal,
   Server as ServerIcon,
+  Plug,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
 import { experimentalState, launchGame } from "../../api/mods";
 import { useGameRunning } from "../../lib/useGameRunning";
+import JoinServerDialog from "./JoinServerDialog";
 
 export type DashboardView =
   | "browse"
@@ -66,6 +68,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const { active, queueLength } = useInstall();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const [starting, setStarting] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
   // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
   // leaving that page is exactly when the nav needs to reflect a change.
   const [experimental, setExperimental] = useState(false);
@@ -203,6 +206,27 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
                 : t("game.play")}
           </span>
         </button>
+
+        <button
+          onClick={() => setJoinOpen(true)}
+          disabled={gameRunning}
+          title={gameRunning ? t("game.running") : t("join.title")}
+          className={cn(
+            "flex cursor-default items-center justify-center gap-2 rounded-lg border border-white/[0.07] px-3 py-1.5 text-[12px] font-medium transition-colors",
+            gameRunning
+              ? "text-muted-foreground"
+              : "text-foreground/80 hover:bg-white/[0.04]",
+          )}
+        >
+          <Plug className="size-3.5" />
+          <span>{t("join.title")}</span>
+        </button>
+
+        <JoinServerDialog
+          open={joinOpen}
+          onOpenChange={setJoinOpen}
+          onJoined={refreshGame}
+        />
 
         <div
           data-tour="frostmod"

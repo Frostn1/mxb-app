@@ -533,6 +533,16 @@ export const it: Translation = {
   "game.alreadyRunning": "MX Bikes è già in esecuzione",
   "game.launching": "Avvio di MX Bikes…",
   "game.launchFailed": "Impossibile avviare MX Bikes",
+  "join.title": "Entra in un server",
+  "join.desc":
+    "Inserisci l'indirizzo di un server per avviare MX Bikes collegandoti direttamente.",
+  "join.address": "Indirizzo del server",
+  "join.action": "Entra",
+  "join.joining": "Connessione…",
+  "join.launching": "Connessione a {{address}}…",
+  "join.alreadyRunning":
+    "Chiudi prima MX Bikes — un gioco già avviato non può essere collegato a un server.",
+  "join.failed": "Impossibile entrare in quel server",
 
   "servers.title": "Server",
   "servers.subtitle":

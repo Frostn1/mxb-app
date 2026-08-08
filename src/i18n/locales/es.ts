@@ -539,6 +539,16 @@ export const es: Translation = {
   "game.alreadyRunning": "MX Bikes ya está en ejecución",
   "game.launching": "Iniciando MX Bikes…",
   "game.launchFailed": "No se pudo iniciar MX Bikes",
+  "join.title": "Unirse a un servidor",
+  "join.desc":
+    "Introduce la dirección de un servidor para iniciar MX Bikes conectado directamente a él.",
+  "join.address": "Dirección del servidor",
+  "join.action": "Unirse",
+  "join.joining": "Conectando…",
+  "join.launching": "Conectando a {{address}}…",
+  "join.alreadyRunning":
+    "Cierra MX Bikes primero — un juego ya iniciado no se puede enviar a un servidor.",
+  "join.failed": "No se pudo unir a ese servidor",
 
   "servers.title": "Servidores",
   "servers.subtitle":
