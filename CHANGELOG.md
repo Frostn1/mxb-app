@@ -2,6 +2,18 @@
 
 ## 2026-08-07
 
+### Added
+- **Browse can sort by what people actually ride, not just what landed last.** The page
+  was locked to the catalog's own newest-first order, which buries a track that thousands
+  of people have downloaded for two years under whatever went up this morning. There's now
+  a sort next to the category filters: **Most popular**, **Popular this month**, **Popular
+  this week** (ranked by views on mxb-mods.com — *Trials more pits version* leads tracks
+  all-time at 1.25M) and **Oldest**, for digging back to the 2019 originals. Alphabetical
+  and recently-updated orders aren't offered: the site accepts those requests and then
+  ignores them, and a sort that silently does nothing is worse than one that isn't there.
+  The popular listings can't be searched, so they step aside while the search box has text
+  in it and the order falls back to newest.
+
 ### Fixed
 - **Downloads that Google Drive refuses now say why, instead of "the host returned a web
   page".** Hitting a popular mod (Flow Series #1 FlowiCompound, for one) gave a message

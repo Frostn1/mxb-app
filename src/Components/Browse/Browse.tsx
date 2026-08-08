@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, Download, X } from "lucide-react";
+import { Search, Download, X, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import {
+  MOD_SORTS,
   MOD_TYPES,
   SEARCH_PAGE_SIZE,
   getModRatings,
   isLiveryContext,
   resolveQuickInstall,
   searchMods,
+  type ModSort,
   type ModType,
 } from "../../api/mods";
 import type { InstalledIndex } from "../../lib/installedMatch";
@@ -18,6 +20,13 @@ import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
 import { Skeleton } from "@/Components/ui/skeleton";
+import {
+  Select,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+} from "@/Components/ui/select";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -46,6 +55,7 @@ export default function Browse({
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [categoryId, setCategoryId] = useState(modType.categoryId);
+  const [sort, setSort] = useState<ModSort>("newest");
   const [mods, setMods] = useState<ModSummary[]>([]);
   const [ratings, setRatings] = useState<Map<number, ModRating>>(new Map());
   // Ids we've already asked about, so a mod the site had no answer for isn't re-requested
@@ -67,6 +77,13 @@ export default function Browse({
 
   const { startInstall } = useInstall();
   const selectionActive = selected.size > 0;
+
+  // The popular listings are ranked by views by a part of the site that takes no search
+  // term, so they step aside while the box has text in it and the order falls back to
+  // newest — the control always names the order actually on screen. The pick itself is
+  // kept, so clearing the search puts it back.
+  const sortOptions = MOD_SORTS.filter((s) => !s.noSearch || !debounced);
+  const activeSort = sortOptions.some((s) => s.value === sort) ? sort : "newest";
 
   const isInstalled = useCallback(
     (mod: ModSummary) => installed.has(mod.title),
@@ -198,14 +215,14 @@ export default function Browse({
     return () => clearTimeout(t);
   }, [query]);
 
-  // (Re)load the first page whenever the query or category changes.
+  // (Re)load the first page whenever the query, category or sort changes.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     setPage(1);
     askedForRatings.current = new Set();
-    searchMods(debounced, categoryId, 1)
+    searchMods(debounced, categoryId, 1, activeSort)
       .then((res) => {
         if (cancelled) return;
         setMods(res);
@@ -216,7 +233,7 @@ export default function Browse({
     return () => {
       cancelled = true;
     };
-  }, [debounced, categoryId, reloadKey]);
+  }, [debounced, categoryId, activeSort, reloadKey]);
 
   // Scores aren't part of the search response — they come in a second pass keyed by post
   // id, for whatever is on screen. Never awaited by the grid: cards paint immediately and
@@ -245,7 +262,7 @@ export default function Browse({
     const next = page + 1;
     setLoadingMore(true);
     try {
-      const res = await searchMods(debounced, categoryId, next);
+      const res = await searchMods(debounced, categoryId, next, activeSort);
       setMods((prev) => [...prev, ...res]);
       setHasMore(res.length >= SEARCH_PAGE_SIZE);
       setPage(next);
@@ -254,7 +271,7 @@ export default function Browse({
     } finally {
       setLoadingMore(false);
     }
-  }, [debounced, categoryId, page]);
+  }, [debounced, categoryId, activeSort, page]);
 
   const isBike = modType.id === "bikes";
 
@@ -303,9 +320,21 @@ export default function Browse({
               </button>
             );
           })}
-          <span className="ml-auto self-center text-[11.5px] text-faint">
-            Sorted by newest
-          </span>
+          <div className="ml-auto flex items-center gap-2 self-center">
+            <ArrowUpDown className="size-3.5 text-faint" />
+            <Select value={activeSort} onValueChange={(v) => setSort(v as ModSort)}>
+              <SelectTrigger className="h-8 w-[170px] bg-card">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sortOptions.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </header>
 

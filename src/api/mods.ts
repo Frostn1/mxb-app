@@ -143,12 +143,32 @@ export function bikePreviewAvailable(): Promise<boolean> {
   return invoke<boolean>("bike_preview_available");
 }
 
+/** The order a browse listing comes back in. Mirrors `ModSort` on the Rust side. */
+export type ModSort =
+  | "newest"
+  | "oldest"
+  | "popularAll"
+  | "popularMonth"
+  | "popularWeek";
+
+/** The sort choices Browse offers, in menu order. The popular ones are ranked by view
+ *  count, which comes from a listing that takes no search term — `noSearch` marks those
+ *  so the menu can drop them while the search box has text in it. */
+export const MOD_SORTS: { value: ModSort; label: string; noSearch?: boolean }[] = [
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+  { value: "popularAll", label: "Most popular", noSearch: true },
+  { value: "popularMonth", label: "Popular this month", noSearch: true },
+  { value: "popularWeek", label: "Popular this week", noSearch: true },
+];
+
 export function searchMods(
   query: string,
   categoryId: number,
   page = 1,
+  sort: ModSort = "newest",
 ): Promise<ModSummary[]> {
-  return invoke<ModSummary[]>("search_mods", { query, categoryId, page });
+  return invoke<ModSummary[]>("search_mods", { query, categoryId, page, sort });
 }
 
 export function getModDetail(slug: string): Promise<ModDetail> {
