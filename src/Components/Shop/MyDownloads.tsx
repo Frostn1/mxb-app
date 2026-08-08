@@ -1,3 +1,12 @@
+/**
+ * The signed-in "All My Downloads" page: things a user already bought on
+ * mxbikes-shop.com, scraped from their account and installable from here.
+ *
+ * Distinct from `ShopCatalog` in this same folder, which browses the store's public catalog
+ * and cannot install anything. This one is currently unreachable from the sidebar — the
+ * `shop` route now goes to the catalog — but the whole path (`shop_login`, `shop_status`,
+ * `shop_my_downloads`, `shop_install`) is intact and ready to be re-exposed.
+ */
 import { useCallback, useEffect, useState } from "react";
 import { Store, LogOut, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -21,12 +30,12 @@ import ModCard from "../Browse/ModCard";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
 
-interface ShopProps {
+interface MyDownloadsProps {
   /** Bumped after any install so the "already installed" badges re-scan. */
   refreshKey: number;
 }
 
-export default function Shop({ refreshKey }: ShopProps) {
+export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   const t = useT();
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [items, setItems] = useState<ShopItem[]>([]);

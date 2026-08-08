@@ -29,6 +29,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs-next = "2.0.0"
 walkdir = "2"
+# `imgcache` encodes an image's source URL into the path of its custom-scheme URL, so the
+# handler has to decode it. Already in the tree via reqwest/url; named here because we use it.
+percent-encoding = "2"
+# The custom URI scheme handler builds its own responses. Same crate Tauri re-exports.
+http = "1"
 # rustls: consistent modern TLS across platforms (native SChannel failed on
 # Windows). MediaFire downloads work directly with this client — its CDN no
 # longer blocks the rustls fingerprint (verified against a live 427 MB .pkz).
@@ -44,7 +49,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "brotli",
 ] }
 # `sync` for the mutex that stops two simultaneous 403s opening two clearance windows.
-tokio = { version = "1", features = ["time", "sync"] }
+tokio = { version = "1", features = ["time", "sync", "rt"] }
 futures-util = { version = "0.3", features = ["io"] }
 # Pure-Rust MEGA API client (built on reqwest): downloads + decrypts public
 # shared links in-app, so end users don't need the megatools/MEGAcmd binary.
@@ -58,13 +63,18 @@ unrar = "0.5"
 # Raw DEFLATE (wbits -15) for MX Bikes `.pnt` paint textures and the encrypted
 # `.pkz` entry payloads — both store zlib-less deflate streams.
 flate2 = "1"
-# Decode + downscale in-archive track/bike preview images (TGA/PNG/JPEG/BMP)
-# into small PNG thumbnails for the library cards.
+# Decode + downscale in-archive track/bike preview images (TGA/PNG/JPEG/BMP) into small
+# PNG thumbnails for the library cards, and downscale remote catalog thumbnails in
+# `imgcache` — mxbikes-shop.com serves 1000-1280px originals for cards rendered at a
+# quarter that size. `webp`/`gif` exist for those remote images: a good share of the
+# store's product images are WebP.
 image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",
     "tga",
     "bmp",
+    "webp",
+    "gif",
 ] }
 # Encode PNG thumbnails as `data:` URIs (no asset-protocol wiring needed).
 base64 = "0.22"

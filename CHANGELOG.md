@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **A Shop tab that browses the mxbikes-shop.com catalog.** The store hands us its whole
+  catalog as one JSON document, so the app fetches it once and does the searching, filtering,
+  sorting and paging locally — browsing is instant and keeps working with the network down.
+  Search by name, creator or category, filter down the store's own category tree (picking a
+  parent includes everything under it), sort by newest, recently updated, price or discount,
+  and flip on **On sale** to see only what's actually discounted right now. Discounted items
+  show the normal price struck through beside the live one with a percentage badge, including
+  the awkward case of an item that has both a price *range* (a paint, or a paint plus the
+  PSD) and a sale on it. Genuinely free downloads say **Free** rather than "$0.00", which is a
+  different thing from the pay-what-you-want items that merely start at zero. The store's
+  catalog carries no sale end dates, so the half-hourly conditional refresh is what keeps a
+  finished sale from being shown forever — it corrects itself in the background without anyone
+  pressing anything, and where an end date ever does appear it's honoured against the clock.
+  A catalog served from cache says how old it is, and one that's days old says so in a way you
+  can't wave away. This is browse-only: **Buy** opens the product page in your own browser, and
+  nothing here installs or purchases anything.
+- **Thumbnails are cached on disk, and downscaled to the size they're drawn at.** Both
+  catalogs previously put remote image URLs straight into the page, so every scroll through
+  the grid re-downloaded the same images — and neither store offers a thumbnail size, so a
+  card roughly 300px wide was being handed a 1000–1280px original weighing about half a
+  megabyte. Images now go through an on-disk cache served over the app's own URL scheme,
+  which keeps lazy loading and the webview's native image cache intact, and grid thumbnails
+  are resized on the way in: a page of cards dropped from ~12 MB to ~2 MB, about 85 KB per
+  card instead of 490 KB. Transparency is preserved, and each size is cached separately so
+  opening an item still shows the full-resolution screenshot. Capped at 256 MB, evicted
+  oldest-first, and restricted to the two catalog domains.
+
+### Changed
+- The signed-in "All My Downloads" page moved to `MyDownloads.tsx` and the `shop` route now
+  goes to the new catalog. That feature is intact and still hidden from the sidebar.
+
 ## 2026-08-07 — v0.7.0 — Six languages, an in-game overlay, and bikes wearing the right paint
 
 ### Added

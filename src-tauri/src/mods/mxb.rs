@@ -107,33 +107,9 @@ async fn get_with_retry(
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("request failed")))
 }
 
-/// Cloudflare refused us, as opposed to the site being down or the parse failing.
-///
-/// A type rather than a message because the command layer has to *act* on it — run the
-/// WebView handshake and retry — and matching on error strings to decide that would break
-/// the first time someone reworded a sentence.
-#[derive(Debug, Clone)]
-pub struct Blocked {
-    /// The refusing status, or `None` for an interstitial served as a 200.
-    pub status: Option<u16>,
-    message: String,
-}
-
-impl std::fmt::Display for Blocked {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Blocked {}
-
-impl Blocked {
-    /// True when a `cf_clearance` could plausibly fix it — i.e. we were challenged, rather
-    /// than rate-limited or handed a server error.
-    pub fn clearable(&self) -> bool {
-        matches!(self.status, None | Some(403))
-    }
-}
+/// Shared with [`super::shop_catalog`] — see [`super::Blocked`]. Re-exported so
+/// `mods::mxb::Blocked` keeps naming it.
+pub use super::Blocked;
 
 /// Turn a blocked response into something a person can act on. The raw reqwest `Display`
 /// ("HTTP status client error (403 Forbidden) for url (…)") told users nothing and shipped

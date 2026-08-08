@@ -6,7 +6,7 @@ import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
 import RiderStudio from "../Rider/RiderStudio";
 import Browse from "../Browse/Browse";
-import Shop from "../Shop/Shop";
+import ShopCatalog from "../Shop/ShopCatalog";
 import ModDetail from "../ModDetail/ModDetail";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
@@ -128,7 +128,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onChangeType={changeType}
             />
           ) : view === "shop" ? (
-            <Shop refreshKey={libraryVersion} />
+            <ShopCatalog />
           ) : view === "library" ? (
             <Library
               modType={modType}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ExternalLink,
@@ -7,12 +7,6 @@ import {
   Snowflake,
   FileDown,
 } from "lucide-react";
-import { Swiper, SwiperSlide } from "swiper/react";
-import { Navigation, Pagination } from "swiper/modules";
-import type { Swiper as SwiperClass } from "swiper";
-import "swiper/css";
-import "swiper/css/navigation";
-import "swiper/css/pagination";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { useT, type TKey } from "../../i18n/context";
@@ -39,6 +33,7 @@ import type {
   InstallStage,
   ModDetail as Detail,
 } from "../../types";
+import Gallery from "./Gallery";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
@@ -120,8 +115,6 @@ export default function ModDetail({
   } | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmReinstall, setConfirmReinstall] = useState(false);
-  const [activeImg, setActiveImg] = useState(0);
-  const swiperRef = useRef<SwiperClass | null>(null);
 
   const { active, startInstall, startImport } = useInstall();
   const myActive = active && active.slug === slug ? active : null;
@@ -134,7 +127,6 @@ export default function ModDetail({
     setDestOptions([]);
     setGuess("");
     setSuggestions([]);
-    setActiveImg(0);
     getModDetail(slug)
       .then(async (d) => {
         if (cancelled) return;
@@ -277,50 +269,12 @@ export default function ModDetail({
       <div className="mt-4 flex min-h-0 flex-1 gap-6">
         {/* left: gallery + description */}
         <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-1">
-          {detail.images.length > 0 ? (
-            <>
-              <Swiper
-                className="frost-gallery aspect-video w-full flex-none"
-                modules={[Navigation, Pagination]}
-                navigation
-                pagination={{ clickable: true }}
-                onSwiper={(s) => (swiperRef.current = s)}
-                onSlideChange={(s) => setActiveImg(s.activeIndex)}
-              >
-                {detail.images.map((src) => (
-                  <SwiperSlide key={src}>
-                    <img
-                      src={src}
-                      alt={detail.title}
-                      className="size-full object-cover"
-                    />
-                  </SwiperSlide>
-                ))}
-              </Swiper>
-              {detail.images.length > 1 && (
-                <div className="flex flex-none gap-2 overflow-x-auto pb-1">
-                  {detail.images.slice(0, 8).map((src, i) => (
-                    <button
-                      key={src}
-                      onClick={() => swiperRef.current?.slideTo(i)}
-                      className={cn(
-                        "aspect-video w-24 flex-none overflow-hidden rounded-md border transition-opacity",
-                        i === activeImg
-                          ? "border-primary"
-                          : "border-transparent opacity-60 hover:opacity-100",
-                      )}
-                    >
-                      <img src={src} alt="" className="size-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="grid aspect-video w-full flex-none place-items-center rounded-xl border border-border bg-gradient-to-br from-[#3a3f45] to-[#20242a] text-foreground/20">
-              No screenshots
-            </div>
-          )}
+          <Gallery
+            images={detail.images}
+            title={detail.title}
+            emptyLabel="No screenshots"
+          />
+
 
           <div className="flex flex-col gap-2 pt-1">
             <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">

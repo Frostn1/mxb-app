@@ -1,7 +1,47 @@
 pub mod mxb;
 pub mod mxbshop;
+pub mod shop_catalog;
 
 use serde::{Deserialize, Serialize};
+
+/// Cloudflare refused us, as opposed to the site being down or the parse failing.
+///
+/// A type rather than a message because the command layer has to *act* on it — run the
+/// WebView handshake and retry — and matching on error strings to decide that would break
+/// the first time someone reworded a sentence.
+///
+/// Lives here rather than in [`mxb`] because both catalog sources hit the same wall, and
+/// both want `with_clearance` in `main.rs` to recognise it. [`mxb`] re-exports it, so
+/// `mods::mxb::Blocked` still names this type.
+#[derive(Debug, Clone)]
+pub struct Blocked {
+    /// The refusing status, or `None` for an interstitial served as a 200.
+    pub status: Option<u16>,
+    message: String,
+}
+
+impl std::fmt::Display for Blocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Blocked {}
+
+impl Blocked {
+    pub fn new(status: Option<u16>, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+
+    /// True when a `cf_clearance` could plausibly fix it — i.e. we were challenged, rather
+    /// than rate-limited or handed a server error.
+    pub fn clearable(&self) -> bool {
+        matches!(self.status, None | Some(403))
+    }
+}
 
 /// A mod as it appears in a search/browse listing.
 #[derive(Debug, Clone, Serialize)]

@@ -11,6 +11,7 @@ mod edf;
 mod frostmod;
 mod frostmod_manage;
 mod gameproc;
+mod imgcache;
 mod install;
 mod library;
 mod modelswap;
@@ -24,6 +25,8 @@ mod pkz;
 #[cfg(sidecar)]
 mod sidecar;
 mod presets;
+mod shop_catalog_session;
+mod shop_credentials;
 mod shop_session;
 mod soundmods;
 mod upload;
@@ -84,14 +87,27 @@ fn create_config(
     Ok(true)
 }
 
-/// Run an mxb-mods.com call; if Cloudflare refuses it, earn a `cf_clearance` in a real
-/// browser and try exactly once more.
+/// Which site's check window to open. Both catalogs sit behind Cloudflare, but their
+/// clearances are separate cookies in separate jars, so the retry has to know which one it
+/// is asking for.
+#[derive(Debug, Clone, Copy)]
+enum Clearance {
+    MxbMods,
+    Shop,
+}
+
+/// Run a catalog call; if Cloudflare refuses it, earn a `cf_clearance` in a real browser and
+/// try exactly once more.
 ///
 /// Once, not a loop: the handshake either produced a cookie the client didn't have or it
 /// didn't, and repeating it would just reopen the window at someone who is already stuck.
 /// Only refusals we could plausibly clear get this treatment — a 429 wants patience, not a
 /// browser window.
-async fn with_clearance<T, F, Fut>(app: &tauri::AppHandle, op: F) -> Result<T, String>
+async fn with_clearance<T, F, Fut>(
+    app: &tauri::AppHandle,
+    site: Clearance,
+    op: F,
+) -> Result<T, String>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
@@ -100,11 +116,15 @@ where
         Ok(value) => return Ok(value),
         Err(err) => err,
     };
-    match err.downcast_ref::<mods::mxb::Blocked>() {
+    match err.downcast_ref::<mods::Blocked>() {
         Some(blocked) if blocked.clearable() => {}
         _ => return Err(format!("{err:#}")),
     }
-    if !mxb_session::handshake(app).await {
+    let cleared = match site {
+        Clearance::MxbMods => mxb_session::handshake(app).await,
+        Clearance::Shop => shop_catalog_session::handshake(app).await,
+    };
+    if !cleared {
         return Err(format!("{err:#}"));
     }
     op().await.map_err(|e| format!("{e:#}"))
@@ -118,7 +138,7 @@ async fn search_mods(
     page: u32,
     sort: ModSort,
 ) -> Result<Vec<ModSummary>, String> {
-    with_clearance(&app, || {
+    with_clearance(&app, Clearance::MxbMods, || {
         MxbModsSource.search(&query, category_id, page, sort)
     })
     .await
@@ -133,7 +153,74 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 
 #[tauri::command]
 async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
-    with_clearance(&app, || MxbModsSource.detail(&slug)).await
+    with_clearance(&app, Clearance::MxbMods, || MxbModsSource.detail(&slug)).await
+}
+
+// ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
+//
+// Browsing only. Nothing here installs or buys — the frontend opens the product page in
+// the user's own browser. See `mods::shop_catalog`.
+
+/// Whether this build has a shop credential at all. False hides the Shop tab entirely,
+/// which is what forks and credential-less CI builds get.
+#[tauri::command]
+fn shop_catalog_available() -> bool {
+    mods::shop_catalog::available()
+}
+
+/// Cheap and synchronous — it reports on what's already loaded and never fetches, so the
+/// UI can poll it without cost.
+#[tauri::command]
+fn shop_catalog_status(app: tauri::AppHandle) -> mods::shop_catalog::ShopStatus {
+    mods::shop_catalog::status(&app)
+}
+
+#[tauri::command]
+async fn shop_catalog_categories(
+    app: tauri::AppHandle,
+) -> Result<Vec<mods::shop_catalog::ShopCategory>, String> {
+    with_clearance(&app, Clearance::Shop, || {
+        mods::shop_catalog::categories(&app)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn shop_catalog_search(
+    app: tauri::AppHandle,
+    query: String,
+    category_id: Option<u64>,
+    page: u32,
+    sort: mods::shop_catalog::ShopSort,
+    on_sale_only: bool,
+) -> Result<mods::shop_catalog::ShopPage, String> {
+    with_clearance(&app, Clearance::Shop, || {
+        mods::shop_catalog::search(&app, &query, category_id, page, sort, on_sale_only)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn shop_catalog_detail(
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<mods::shop_catalog::ShopModDetail, String> {
+    with_clearance(&app, Clearance::Shop, || {
+        mods::shop_catalog::detail(&app, id)
+    })
+    .await
+}
+
+/// Ignores the cache age and any `ETag` we hold — "Refresh" has to mean refresh, not
+/// "ask politely and accept a 304".
+#[tauri::command]
+async fn shop_catalog_refresh(
+    app: tauri::AppHandle,
+) -> Result<mods::shop_catalog::ShopStatus, String> {
+    with_clearance(&app, Clearance::Shop, || {
+        mods::shop_catalog::force_refresh(&app)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2421,6 +2508,17 @@ async fn mods_state_restore_all(app: tauri::AppHandle) -> Result<ModsStateOutcom
 
 fn main() {
     tauri::Builder::default()
+        // Thumbnails for both catalogs, served from a disk cache instead of refetched on
+        // every scroll. Registered here rather than per-window so the overlay — which
+        // renders the same `ModCard` — gets it too.
+        //
+        // Asynchronous, so a cache miss that has to reach the origin never blocks the
+        // webview's protocol thread.
+        //
+        // A URI scheme is not a permission subject, so no capability file changes with this.
+        // If a CSP is ever enabled in `tauri.conf.json` (currently `null`), it must allow
+        // `img-src imgcache: http://imgcache.localhost` or every thumbnail goes blank.
+        .register_asynchronous_uri_scheme_protocol(imgcache::SCHEME, imgcache::handle)
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -2526,7 +2624,9 @@ fn main() {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
             shop_session::load_session(handle);
+            shop_catalog_session::load(handle);
             mxb_session::load(handle);
+            imgcache::start_maintenance(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -2622,6 +2722,12 @@ fn main() {
             shop_logout,
             shop_my_downloads,
             shop_install,
+            shop_catalog_available,
+            shop_catalog_status,
+            shop_catalog_categories,
+            shop_catalog_search,
+            shop_catalog_detail,
+            shop_catalog_refresh,
             presets_list_profiles,
             presets_list_bikes,
             presets_read_loadout,
