@@ -1,5 +1,78 @@
 # Changelog
 
+## 2026-08-08 — GP Bikes support
+
+### Added
+- **The app now drives GP Bikes as well as MX Bikes.** First launch asks which game you're
+  setting up before anything else, and the game picker lives in Settings from then on;
+  picking a title points the whole app — Library, Manage, Presets, Browse and the
+  Play button — at that game's folders. The sidebar shows which game you're on. The two
+  games keep their folders separately, so
+  switching back and forth never asks you to find them again, and a game you open for the
+  first time has its folders auto-detected (`Documents\PiBoSo\GP Bikes`, and the Steam
+  install under AppID 848050) exactly as first-run setup does. Switching to a game the app
+  can't locate lands you on the setup screen, with the switcher still there to get back.
+- **GP Bikes' mods tree is read as its own shape.** GP keeps `bikes`, `tracks`, `tyres`,
+  `misc` and a `rider` folder laid out differently from MX Bikes': helmets and riding-style
+  `animations`, with boots, gloves and protection baked into the rider model rather than
+  picked separately. The Library lists riding styles as their own category and no longer
+  offers goggles, boots or protection for a game that has no concept of them.
+- **Browse serves GP Bikes from gpb-mods.com.** The same catalog client, pointed at the
+  matching site — Race and Kart tracks, New Bikes, Liveries, Sounds, Rider Models, Suit
+  Paints, Helmets and Helmet Models, plus Plugins, Tools and Menu Backgrounds. Each site
+  keeps its own cookie jar, since a Cloudflare clearance only works on the host that issued
+  it.
+- **Presets read the slots a profile actually has.** Rather than assuming MX Bikes' fifteen,
+  the editor reads the sections out of the profile's own `profile.ini` and shows those. GP
+  Bikes profiles get their riding-style slot, and don't get pickers that would write nothing.
+
+- **Proton Drive downloads.** `drive.proton.me` links are now recognised and labelled as
+  Proton Drive, and a mod offering one alongside another mirror prefers the other. Proton
+  shares are end-to-end encrypted — the key lives in the part of the URL that never
+  reaches the server — so they can't be fetched automatically; picking one now opens the
+  guided "download it, then choose the file" flow instead of downloading the web page and
+  failing later with "couldn't determine the archive type".
+
+### Fixed
+- **A config written by an older build lost track of which game was active.** Builds that
+  predate multi-game support read the config fine but rewrite it without `activeGame` and
+  `games` — so running one once (a downgrade, or the shipped app alongside a newer build)
+  erased the choice while leaving the folder pointing at that game. Defaulting to MX Bikes
+  there would drive a GP Bikes folder as an MX Bikes one; the game is now re-derived from
+  the folders instead — the install folder's executable if there is one, otherwise the
+  user folder's name.
+- **Switching to a game you don't have installed opened an empty dashboard instead of
+  the setup screen.** The app adopted `Documents\PiBoSo\<game>` whether or not that
+  folder existed, and a non-blank folder reads as "configured" — so you got a working UI
+  scanning nothing. A folder is now only adopted if it's really there, a saved folder
+  that has since been deleted or moved is re-detected rather than trusted, and setup says
+  so plainly when it can't find one instead of silently returning you to the same screen.
+- **The UI named MX Bikes while driving GP Bikes** — "Launch MX Bikes", "MX Bikes is
+  running", the install-folder settings and the overlay's status line among them. Strings
+  now say which game is actually active.
+- **Switching games left the previous game's content on screen.** Library, Manage and the
+  rest load their data when they first appear, so switching titles swapped the folders
+  underneath them without refreshing anything — most visibly Manage, which kept listing
+  the MX Bikes mods. Switching now restarts those views from scratch.
+- **Pages named the wrong site.** "View on mxb-mods.com", the missing-download note and
+  the tour all said mxb-mods.com regardless of which catalog was actually being browsed.
+  They now name the site they link to.
+- **"FrostMod will hot-reload the track list" was shown for GP Bikes,** which has no
+  FrostMod build and so was never going to reload anything. That title now gets the
+  instruction that's actually true — restart the game to pick the new content up. The
+  guided tour likewise no longer walks through steps for features the active game hides.
+
+### Changed
+- **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
+  is a compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for
+  GP Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
+  (Locker and Rider) and Manage are MX Bikes only for now; the overlay and the guided tour
+  follow the same gating, so neither offers a view the main window doesn't.
+- **Existing MX Bikes setups are untouched.** A `config.json` written before this release
+  opens as the MX Bikes config it always was, with the same folders; preset share codes are
+  unchanged. Applying a preset no longer creates `profile.ini` sections that the game
+  doesn't use.
+
 ## 2026-08-08 — everyone on the server finally looks right
 
 ### Added

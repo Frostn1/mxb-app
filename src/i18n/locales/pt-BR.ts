@@ -87,25 +87,24 @@ export const ptBR: Translation = {
 
   // ── Configuração inicial ───────────────────────────────────────────────────
   "setup.title": "Bem-vindo ao MXB App",
-  "setup.tagline":
-    "Explore o mxb-mods, instale com um clique e deixe o FrostMod recarregar o jogo pra você.",
-  "setup.modsFolder": "Pasta do MX Bikes",
+  "setup.tagline": "Explore mods, instale com um clique e volte logo para a moto.",
+  "setup.modsFolder": "Pasta do {{game}}",
   "setup.autoDetect":
     "O MXB App vai detectar sua pasta {{hint}} automaticamente. Você também pode escolher você mesmo.",
   "setup.chooseManually": "Escolher a pasta manualmente…",
   "setup.chooseDifferent": "Escolher outra pasta…",
-  "setup.gameInstall": "Instalação do MX Bikes",
-  "setup.detecting": "Procurando sua instalação do MX Bikes…",
+  "setup.gameInstall": "Instalação do {{game}}",
+  "setup.detecting": "Procurando sua instalação do {{game}}…",
   "setup.found": "Encontrada",
   "setup.detectedAutomatically": "Detectada automaticamente",
   "setup.installNotFound":
-    "Não deu pra encontrar sua instalação do MX Bikes automaticamente — é ela que alimenta a prévia 3D do piloto. Escolha manualmente, ou defina depois nas Configurações.",
+    "Não deu pra encontrar sua instalação do {{game}} automaticamente — é ela que alimenta a prévia 3D do piloto. Escolha manualmente, ou defina depois nas Configurações.",
   "setup.chooseInstallManually":
     "Escolher a pasta de instalação manualmente…",
   "setup.startBrowsing": "Começar a explorar mods",
   "setup.detectAndStart": "Detectar e começar",
-  "setup.pickModsFolder": "Selecione sua pasta do MX Bikes",
-  "setup.pickInstallFolder": "Selecione sua pasta de instalação do MX Bikes",
+  "setup.pickModsFolder": "Selecione sua pasta do {{game}}",
+  "setup.pickInstallFolder": "Selecione a pasta de instalação do {{game}}",
 
   // ── Boas-vindas ────────────────────────────────────────────────────────────
   "welcome.intro.title": "Bem-vindo ao MXB App",
@@ -213,8 +212,7 @@ export const ptBR: Translation = {
   "tour.welcomeTour.body":
     "Alguns segundos para ver onde fica cada coisa. Você pode pular quando quiser.",
   "tour.browse.title": "Explorar mods",
-  "tour.browse.body":
-    "Pesquise no mxb-mods.com aqui mesmo e instale qualquer pista, moto ou pintura com um clique só.",
+  "tour.browse.body": "Pesquise no {{site}} aqui mesmo e instale qualquer pista, moto ou pintura com um clique.",
   "tour.library.title": "Sua biblioteca",
   "tour.library.body":
     "Tudo que você instalou, em um só lugar — atualize ou remova mods sem nunca mexer num arquivo zip.",
@@ -460,8 +458,7 @@ export const ptBR: Translation = {
   "modDetail.addToLibrary": "Adicionar à biblioteca",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Instala em",
-  "modDetail.noDownloadLink":
-    "Nenhum link de download encontrado nesta página — abra no mxb-mods.com.",
+  "modDetail.noDownloadLink": "Nenhum link de download foi encontrado nesta página — abra-a em {{site}}.",
   "modDetail.frostmodHint":
     "O FrostMod vai recarregar a lista de {{kind}} quando isso terminar.",
   "modDetail.kindRider": "piloto",
@@ -476,7 +473,7 @@ export const ptBR: Translation = {
   "modDetail.addingToLibrary": "Adicionando à biblioteca…",
   "modDetail.resolving": "Resolvendo o download…",
   "modDetail.finishInBrowser": "Conclua no seu navegador",
-  "modDetail.viewOnSite": "Ver no mxb-mods.com",
+  "modDetail.viewOnSite": "Ver em {{site}}",
 
   // ── Configurações ──────────────────────────────────────────────────────────
   "settings.help":
@@ -489,7 +486,7 @@ export const ptBR: Translation = {
   "settings.whatsNew": "Novidades",
   "settings.modsFolderDesc":
     "Onde os mods são instalados. Mudar isso faz uma nova varredura da biblioteca.",
-  "settings.insideModsFolder": "Dentro da sua pasta do MX Bikes",
+  "settings.insideModsFolder": "Dentro da sua pasta do {{game}}",
   "settings.notSet": "Não definida",
   "settings.change": "Alterar…",
   "settings.set": "Definir…",
@@ -507,7 +504,7 @@ export const ptBR: Translation = {
     "Abrir o MXB App automaticamente quando você fizer login.",
   "settings.instantRefresh": "Atualização instantânea de presets",
   "settings.instantRefreshDesc":
-    "Quando você aplica um preset com o MX Bikes aberto, atualiza o visual no jogo na hora — sem reiniciar nem reselecionar o perfil. Se não der, você será avisado para selecionar o perfil de novo.",
+    "Quando você aplica um preset com o {{game}} aberto, atualiza o visual no jogo na hora — sem reiniciar nem reselecionar o perfil. Se não der, você será avisado para selecionar o perfil de novo.",
   "settings.instantRefreshWindowsOnly":
     "Atualizar o visual no jogo sem reiniciar precisa do FrostMod, que só existe no Windows — em vez disso você será avisado para selecionar o perfil de novo.",
   "settings.autoRunFrostmod": "Iniciar o FrostMod automaticamente",
@@ -541,23 +538,23 @@ export const ptBR: Translation = {
   "settings.folderUpdated": "Pasta do jogo atualizada",
   "settings.folderUpdatedDesc": "Sua biblioteca será varrida de novo.",
   "settings.setFolderFailed": "Não foi possível definir a pasta",
-  "settings.reDetected": "Pasta do MX Bikes detectada de novo",
+  "settings.reDetected": "Pasta do {{game}} detectada de novo",
   "settings.detectFolderFailed": "Não foi possível detectar a pasta",
   "settings.pickInstallFolder":
-    "Selecione sua pasta de instalação do MX Bikes (contém rider.pkz)",
+    "Selecione sua pasta de instalação do {{game}} (contém rider.pkz)",
   "settings.installSet": "Instalação do jogo definida",
   "settings.installSetDesc":
     "A prévia 3D do piloto já pode carregar o modelo real do corpo.",
   "settings.setInstallFailed":
     "Não foi possível definir a pasta de instalação",
-  "settings.installNotFound": "Não foi possível encontrar o MX Bikes",
+  "settings.installNotFound": "Não foi possível encontrar o {{game}}",
   "settings.installNotFoundDesc":
     "Nenhuma instalação da Steam detectada — defina a pasta manualmente.",
-  "settings.installFound": "Instalação do MX Bikes encontrada",
+  "settings.installFound": "Instalação do {{game}} encontrada",
   "settings.detectInstallFailed":
     "Não foi possível detectar a pasta de instalação",
   "settings.pickProfilesFolder":
-    "Selecione sua pasta de perfis do MX Bikes",
+    "Selecione sua pasta de perfis do {{game}}",
   "settings.profilesSet": "Pasta de perfis definida",
   "settings.profilesFound_one": "{{count}} perfil encontrado.",
   "settings.profilesFound_other": "{{count}} perfis encontrados.",
@@ -577,20 +574,20 @@ export const ptBR: Translation = {
   // ── Início do jogo ─────────────────────────────────────────────────────────
   "game.play": "Jogar",
   "game.starting": "Iniciando…",
-  "game.running": "MX Bikes em execução",
-  "game.launch": "Iniciar o MX Bikes",
-  "game.alreadyRunning": "O MX Bikes já está em execução",
-  "game.launching": "Iniciando o MX Bikes…",
-  "game.launchFailed": "Não foi possível iniciar o MX Bikes",
+  "game.running": "{{game}} em execução",
+  "game.launch": "Iniciar o {{game}}",
+  "game.alreadyRunning": "O {{game}} já está em execução",
+  "game.launching": "Iniciando o {{game}}…",
+  "game.launchFailed": "Não foi possível iniciar o {{game}}",
   "join.title": "Entrar em um servidor",
   "join.desc":
-    "Informe o endereço de um servidor para iniciar o MX Bikes conectado diretamente a ele.",
+    "Informe o endereço de um servidor para iniciar o {{game}} conectado diretamente a ele.",
   "join.address": "Endereço do servidor",
   "join.action": "Entrar",
   "join.joining": "Conectando…",
   "join.launching": "Conectando a {{address}}…",
   "join.alreadyRunning":
-    "Feche o MX Bikes primeiro — um jogo em execução não pode ser enviado para um servidor.",
+    "Feche o {{game}} primeiro — um jogo em execução não pode ser enviado para um servidor.",
   "join.failed": "Não foi possível entrar nesse servidor",
 
   "servers.title": "Servidores",
@@ -661,10 +658,10 @@ export const ptBR: Translation = {
   "presets.shareWarning":
     "Envia para um link público e temporário — isso redistribui arquivos de mods feitos por outras pessoas, então compartilhe com responsabilidade.",
   "settings.profilesDesc":
-    "Os presets leem seus perfis daqui — o caminho abaixo é onde o app está olhando agora. É a pasta {{profiles}} dentro da sua pasta do MX Bikes, ou {{documents}} se você moveu sua pasta de mods. Defina só se a sua estiver em outro lugar.",
+    "Os presets leem seus perfis daqui — o caminho abaixo é onde o app está olhando agora. É a pasta {{profiles}} dentro da sua pasta do {{game}}, ou {{documents}} se você moveu sua pasta de mods. Defina só se a sua estiver em outro lugar.",
   "settings.resetToDefault": "Restaurar o padrão",
   "settings.gameInstallDesc":
-    "Pasta de instalação do jogo (opcional) — onde o MX Bikes está instalado (contém {{file}}). Defina para carregar o corpo real do piloto na prévia 3D.",
+    "Pasta de instalação do jogo (opcional) — onde o {{game}} está instalado (contém {{file}}). Defina para carregar o corpo real do piloto na prévia 3D.",
   "viewer.stockGearNote":
     "Mostrado no {{part}} original do jogo. Uma pintura feita para outro modelo pode não encaixar perfeitamente.",
   "viewer.paintNoChange":
@@ -875,18 +872,18 @@ export const ptBR: Translation = {
   // In-game overlay — the hotkey panel drawn over MX Bikes.
   "overlay.section": "Overlay no jogo",
   "overlay.enable": "Ativar o overlay no jogo",
-  "overlay.enableDesc": "Aperte um atalho com o MX Bikes aberto para abrir Presets, Locker e Browse por cima do jogo — sem alt-tab. Presets e trocas de modelo valem no jogo em andamento.",
+  "overlay.enableDesc": "Aperte um atalho com o {{game}} aberto para abrir Presets, Locker e Browse por cima do jogo — sem alt-tab. Presets e trocas de modelo valem no jogo em andamento.",
   "overlay.shortcut": "Atalho do overlay",
   "overlay.shortcutDesc": "Funciona mesmo com o jogo em foco. Esc fecha o overlay e devolve o controle.",
-  "overlay.borderlessTitle": "Jogue o MX Bikes sem bordas ou em janela",
-  "overlay.borderlessNote": "Nada é desenhado por cima de um jogo que segura a tela em modo exclusivo — nem o overlay. Deixe o MX Bikes em Borderless (ou Windowed) nas Options → Video e ele aparece sobre o jogo como esperado.",
-  "overlay.gameRunning": "O MX Bikes está aberto",
-  "overlay.gameNotRunning": "O MX Bikes não está aberto",
+  "overlay.borderlessTitle": "Jogue o {{game}} sem bordas ou em janela",
+  "overlay.borderlessNote": "Nada é desenhado por cima de um jogo que segura a tela em modo exclusivo — nem o overlay. Deixe o {{game}} em Borderless (ou Windowed) nas Options → Video e ele aparece sobre o jogo como esperado.",
+  "overlay.gameRunning": "O {{game}} está aberto",
+  "overlay.gameNotRunning": "O {{game}} não está aberto",
   "overlay.showNow": "Mostrar o overlay agora",
   "overlay.showFailed": "Não foi possível abrir o overlay",
   "overlay.hotkeyTaken": "Outro app está usando este atalho",
   "overlay.hotkeyTakenDesc": "A combinação fica com o app que pediu primeiro, então o overlay nunca abre. Escolha outra acima — o mudo do Discord costuma ser o culpado.",
-  "overlay.fullscreenNow": "O MX Bikes está em tela cheia exclusiva agora",
+  "overlay.fullscreenNow": "O {{game}} está em tela cheia exclusiva agora",
   "overlay.fullscreenNowDesc": "O overlay abre mesmo assim — é o jogo que é desenhado por cima. Mude para sem bordas ou janela nas Options → Video.",
   "overlay.notWorking": "Apertou e não aconteceu nada?",
   "overlay.notWorkingDesc": "Confira o atalho acima: outro app pode já ter essa combinação, e escolher uma livre é o que resolve.",
@@ -900,9 +897,9 @@ export const ptBR: Translation = {
   "overlay.closeTitle": "Fechar overlay (Esc)",
   "overlay.openMain": "Abrir o app completo",
   "overlay.openMainTitle": "Fecha o overlay e abre a janela principal do MXB App",
-  "overlay.needsSetup": "Termine a configuração do MXB App na janela principal primeiro — ele precisa saber onde fica a sua pasta do MX Bikes.",
+  "overlay.needsSetup": "Termine a configuração do MXB App na janela principal primeiro — ele precisa saber onde fica a sua pasta do {{game}}.",
   "overlay.fullscreenBlocked": "O overlay não aparece por cima da tela cheia exclusiva",
-  "overlay.fullscreenBlockedDesc": "Deixe o MX Bikes em sem bordas ou em janela nas Options → Video e tente o atalho de novo.",
+  "overlay.fullscreenBlockedDesc": "Deixe o {{game}} em sem bordas ou em janela nas Options → Video e tente o atalho de novo.",
 
   // Vitrine da versão — a janela de novidades mostrada uma vez depois de atualizar.
   "showcase.eyebrow": "Recém-atualizado",
@@ -984,9 +981,31 @@ export const ptBR: Translation = {
   "manage.deleteTitle": "Excluir {{name}}?",
   "manage.deleteBody": "Vai para a lixeira, então ainda dá para recuperar de lá.",
   "manage.deleted": "{{name}} excluído.",
+  "game.label": "Jogo",
+  "game.switch": "Trocar de jogo",
+  "game.switchFailed": "Não foi possível trocar de jogo",
+  "settings.instantRefreshMxOnly": "Somente MX Bikes — {{game}} não recarrega perfis em tempo real.",
+  "modType.misc": "Diversos",
+  "modType.miscInline": "extras",
+  "browseCat.raceTracks": "Pistas de corrida",
+  "browseCat.kartTracks": "Pistas de kart",
+  "browseCat.others": "Outros",
+  "browseCat.riderModels": "Modelos de piloto",
+  "browseCat.suitPaints": "Pinturas de macacão",
+  "browseCat.helmetModels": "Modelos de capacete",
+  "browseCat.plugins": "Plugins",
+  "browseCat.tools": "Ferramentas",
+  "browseCat.menuBackgrounds": "Planos de fundo do menu",
+  "category.animation": "Estilo de pilotagem",
+  "section.animation": "Estilos de pilotagem",
+  "modDetail.restartHint": "Reinicie o {{game}} para reconhecer os novos {{kind}}.",
+  "modDetail.protonHint": "Arquivos do Proton Drive são criptografados, então não podem ser baixados automaticamente.",
+  "setup.whichGame": "Qual jogo você está configurando? Você pode adicionar o outro depois.",
+  "setup.switchLater": "Você pode trocar de jogo quando quiser nas Configurações.",
+  "setup.chooseDifferentGame": "Escolher outro jogo",
   // ── Dropzone ───────────────────────────────────────────────────────────────
   "drop.dropHere": "Solte para instalar",
-  "drop.dropHint": "Arquivos, .pkz, pinturas, pastas — qualquer coisa do MX Bikes",
+  "drop.dropHint": "Arquivos, .pkz, pinturas, pastas — qualquer coisa do {{game}}",
   "drop.scanning": "Descobrindo o que é isso…",
   "drop.found_one": "{{count}} item encontrado",
   "drop.found_other": "{{count}} itens encontrados",

@@ -305,7 +305,18 @@ pub(crate) async fn resolve_direct_url(
 ) -> anyhow::Result<String> {
     let h = host.to_lowercase();
     let u = url.to_lowercase();
-    if h.contains("mediafire") || u.contains("mediafire.com") {
+    if h.contains("proton") || u.contains("drive.proton.me") {
+        // Proton Drive shares are end-to-end encrypted: the decryption key lives in the
+        // URL *fragment*, which never reaches the server, and the file arrives as
+        // OpenPGP-encrypted blocks. There is no direct link to resolve to — fetching the
+        // URL returns the web app's HTML, which used to sail through here and fail much
+        // later with "couldn't determine the archive type". Fail here instead, where we
+        // can say what to do; the UI routes these to the manual download-and-pick flow.
+        anyhow::bail!(
+            "Proton Drive links are encrypted and can't be downloaded automatically — \
+             download the file from Proton Drive, then use \"Choose file\" to install it."
+        )
+    } else if h.contains("mediafire") || u.contains("mediafire.com") {
         resolve_mediafire(client, url).await
     } else if h.contains("drive.google") || u.contains("drive.google") {
         // A folder link (…/drive/folders/ID) has no single file to fetch — look
@@ -792,8 +803,10 @@ pub(crate) fn detect_ext(archive: &Path) -> anyhow::Result<String> {
     anyhow::bail!("Could not determine the archive type of the downloaded file.")
 }
 
-/// MX Bikes content categories that live directly under `mods/`.
-pub(crate) const CATEGORY_DIRS: [&str; 5] = ["bikes", "tracks", "rider", "tyres", "misc"];
+/// Content categories that live directly under `mods/`, across every title the app
+/// drives — see [`crate::game::ALL_MODS_DIRS`] for why this is a union rather than the
+/// active game's own list. Re-exported because the dropzone reports on it too.
+pub(crate) use crate::game::ALL_MODS_DIRS as CATEGORY_DIRS;
 
 /// Which rule in [`plan_placement`] decided the destination.
 ///
@@ -1264,6 +1277,26 @@ pub(crate) fn sanitize(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Proton Drive share is end-to-end encrypted, so there is no direct URL to hand
+    /// back. It has to fail *here*, with an explanation — fetching the link returns the
+    /// web app's HTML, which previously sailed through and died much later at extraction
+    /// with "couldn't determine the archive type", which tells the user nothing.
+    #[tokio::test]
+    async fn proton_drive_fails_with_an_explanation_not_a_download() {
+        let client = build_client().unwrap();
+        let err = resolve_direct_url(
+            &client,
+            "https://drive.proton.me/urls/ABC123XYZ#SomeKey",
+            "Proton Drive",
+        )
+        .await
+        .expect_err("an encrypted share can't resolve to a direct link");
+
+        let msg = format!("{err:#}");
+        assert!(msg.contains("encrypted"), "says why: {msg}");
+        assert!(msg.contains("Choose file"), "says what to do instead: {msg}");
+    }
 
     #[test]
     fn gdrive_id_from_share_url() {

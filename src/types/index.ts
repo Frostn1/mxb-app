@@ -1,10 +1,57 @@
+/** A PiBoSo title the app can drive. Stable ids — they key `Config.games`. */
+export type GameId = "mxb" | "gpb";
+
+/** Features that only exist for some titles. Drives nav and settings gating. */
+export interface GameCaps {
+  /** FrostMod, the in-process mod loader. An MX Bikes plugin — no GP Bikes build. */
+  frostmod: boolean;
+  /** Re-run the profile loader in the live game after applying a preset. */
+  instantRefresh: boolean;
+  /** The 3D preview (Locker / Rider / bike preview). */
+  viewer: boolean;
+  /** The authenticated paid-content shop (mxbikes-shop.com). */
+  shop: boolean;
+  /** The Manage view (parking mods to trim what the game loads). */
+  manage: boolean;
+  /** Join a server by address (launches the game with `-directconnect`). */
+  joinByAddress: boolean;
+  /** The Servers tab and paint sync (MX Bikes dedicated servers, MX Bikes GUIDs). */
+  servers: boolean;
+}
+
+/** One title the app can drive, as reported by `listGames()`. */
+export interface GameInfo {
+  id: GameId;
+  /** Product name, shown verbatim — never translated. */
+  display: string;
+  /** Top-level folders under `<modsPath>/mods` for this title. */
+  modsDirs: string[];
+  /** Host of this title's catalog, e.g. `mxb-mods.com`. Shown wherever the UI names
+   *  the site it links out to. */
+  catalogDomain: string;
+  caps: GameCaps;
+}
+
+/** Saved folders for one title. */
+export interface GamePaths {
+  modsPath?: string;
+  gamePath?: string;
+  profilesPath?: string;
+}
+
 export interface Config {
+  /** Which title the app is driving. Absent on configs written before multi-game
+   *  support, which the backend reads as `"mxb"`. */
+  activeGame?: GameId;
+  /** Saved folders per title. The active game's entry mirrors the flat fields below,
+   *  which stay the source of truth for it. */
+  games?: Partial<Record<GameId, GamePaths>>;
   modsPath: string;
-  /** MX Bikes **install** dir (holds core `rider.pkz`) for the 3D rider body. */
+  /** Active game's **install** dir (its executable + core archives). */
   gamePath?: string;
   /**
    * Override for the PiBoSo `profiles` folder. Empty (normal) means it lives at
-   * `<modsPath>/profiles`; set only when profiles sit outside the MX Bikes folder.
+   * `<modsPath>/profiles`; set only when profiles sit outside the game folder.
    */
   profilesPath?: string;
   /** Hide to the tray on close and keep running (default true). */
@@ -117,6 +164,8 @@ export type LibraryCategory =
   | "protectionPaint"
   | "gloves"
   | "outfit"
+  /** GP Bikes riding-style animation. */
+  | "animation"
   | "misc";
 
 export interface LibraryEntry {

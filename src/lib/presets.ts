@@ -43,6 +43,36 @@ export const SLOTS: SlotDef[] = [
   },
 ];
 
+/**
+ * The `profile.ini` section a slot reads and writes, or `null` for a slot that isn't in
+ * the file at all. `modelSwap` is the only one: it's a filesystem swap under
+ * `mods/bikes`, performed at apply time.
+ *
+ * Slot keys are the camelCase `Loadout` fields and the sections are their snake_case
+ * originals, so this is a mechanical conversion rather than a table to keep in sync.
+ */
+export function slotSection(key: SlotDef["key"]): string | null {
+  if (key === "modelSwap") return null;
+  return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+
+/**
+ * The slots a profile actually offers, given the sections its `profile.ini` carries.
+ *
+ * GP Bikes has no goggles, boots or protection — it bakes them into the rider model — so
+ * rendering the full MX Bikes list there would show pickers that write nothing. An empty
+ * or missing `sections` keeps every slot, so a failed read degrades to the old behaviour
+ * rather than to an empty editor.
+ */
+export function slotsFor(sections: string[] | null | undefined): SlotDef[] {
+  if (!sections?.length) return SLOTS;
+  const have = new Set(sections.map((s) => s.toLowerCase()));
+  return SLOTS.filter((s) => {
+    const section = slotSection(s.key);
+    return section === null || have.has(section);
+  });
+}
+
 export const SLOT_GROUPS: { id: SlotDef["group"]; label: TKey }[] = [
   { id: "bike", label: "slotGroup.bike" },
   { id: "rider", label: "slotGroup.rider" },

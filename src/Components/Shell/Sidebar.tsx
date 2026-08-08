@@ -24,6 +24,8 @@ import { useT, type TKey } from "../../i18n/context";
 import { experimentalState, launchGame } from "../../api/mods";
 import { shopCatalogAvailable } from "../../api/shop";
 import { useGameRunning } from "../../lib/useGameRunning";
+import { useConfig } from "../../Context/Config";
+import type { GameCaps } from "../../types";
 import JoinServerDialog from "./JoinServerDialog";
 
 export type DashboardView =
@@ -42,15 +44,27 @@ interface SidebarProps {
   onNavigate: (view: DashboardView) => void;
 }
 
-type NavEntry = { id: DashboardView; label: TKey; icon: typeof Home };
+/**
+ * `cap` names a capability the active game must have for the entry to appear. Gating on a
+ * capability rather than on the game id keeps "why is this hidden" answerable in one
+ * place — and turning a feature on for another title is a single `true` in `game.rs`.
+ */
+type NavEntry = {
+  id: DashboardView;
+  label: TKey;
+  icon: typeof Home;
+  cap?: keyof GameCaps;
+};
 
 const NAV: NavEntry[] = [
   { id: "browse", label: "nav.browse", icon: Home },
   { id: "library", label: "nav.library", icon: LibraryIcon },
-  { id: "locker", label: "nav.locker", icon: Bike },
+  // The Locker and Rider views are the 3D preview; GP Bikes' meshes need their own
+  // part bindings before they can be shown.
+  { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
   { id: "presets", label: "nav.presets", icon: Shirt },
-  { id: "rider", label: "nav.rider", icon: User },
-  { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
+  { id: "rider", label: "nav.rider", icon: User, cap: "viewer" },
+  { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
 /**
@@ -60,14 +74,20 @@ const NAV: NavEntry[] = [
  *
  * Sits second, next to Browse, because it is the other catalog — unlike the experimental
  * entry below, which is appended.
+ *
+ * `cap: "shop"` on top of that: the catalog is mxbikes-shop.com, so it has nothing to sell
+ * a player on another title.
  */
-const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store };
+const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store, cap: "shop" };
 
-/** Shown only when the experimental features are on — see `settings.experimental`. */
+/** Shown only when the experimental features are on — see `settings.experimental`.
+ *  Also capability-gated: it administers MX Bikes dedicated servers and keys riders by
+ *  MX Bikes GUID, neither of which means anything for another title. */
 const EXPERIMENTAL_NAV: NavEntry = {
   id: "servers",
   label: "nav.servers",
   icon: ServerIcon,
+  cap: "servers",
 };
 
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
@@ -80,6 +100,8 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const { running, reload, status, start } = useFrostmod();
   const { active, queueLength } = useInstall();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
+  const { game } = useConfig();
+  const caps = game.caps;
   const [starting, setStarting] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
@@ -104,12 +126,13 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       cancelled = true;
     };
   }, []);
-  // Two independent gates: the shop needs a build-time credential, servers needs the
-  // experimental toggle. Built here rather than inline so the JSX stays one `.map`.
+  // Three independent gates: the shop needs a build-time credential, servers needs the
+  // experimental toggle, and every entry needs the active game to support it. Built here
+  // rather than inline so the JSX stays one `.map`.
   const nav = [
     ...(shopAvailable ? [NAV[0], SHOP_ENTRY, ...NAV.slice(1)] : NAV),
     ...(experimental ? [EXPERIMENTAL_NAV] : []),
-  ];
+  ].filter(({ cap }) => !cap || caps[cap]);
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -154,8 +177,13 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
 
   return (
     <aside className="flex w-[216px] flex-none flex-col border-r border-white/[0.06] bg-window px-2.5 pb-3 pt-3.5">
-      <div className="px-3 pb-3 text-[13px] font-bold tracking-[0.2px]">
-        MXB App
+      <div className="flex flex-col px-3 pb-3">
+        <span className="text-[13px] font-bold tracking-[0.2px]">MXB App</span>
+        {/* The switcher lives in Settings now, but which game you're driving still has
+            to be visible — every list below it is scoped to that choice. */}
+        <span className="text-[11px] font-medium text-muted-foreground">
+          {game.display}
+        </span>
       </div>
 
       <nav className="flex flex-col gap-0.5">
@@ -239,6 +267,11 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           </span>
         </button>
 
+        {/* Join-by-address launches the game with `-directconnect`. Both the argv parser
+            offset it was found at and the default port it assumes are MX Bikes', so it
+            stays behind a capability until GP's are confirmed. */}
+        {caps.joinByAddress && (
+        <>
         <button
           onClick={() => setJoinOpen(true)}
           disabled={gameRunning}
@@ -259,7 +292,12 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           onOpenChange={setJoinOpen}
           onJoined={refreshGame}
         />
+        </>
+        )}
 
+        {/* FrostMod is a compiled MX Bikes plugin — there is nothing to report, start or
+            reload for a title it wasn't built for. */}
+        {caps.frostmod && (
         <div
           data-tour="frostmod"
           className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2"
@@ -297,6 +335,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
             )
           )}
         </div>
+        )}
 
         <button
           data-tour="settings"

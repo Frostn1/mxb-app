@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  MOD_TYPES,
+  modTypesFor,
   scanLibrary,
   moveMod,
   revealInExplorer,
@@ -335,7 +335,8 @@ export default function Library({
     [selectedEntries],
   );
 
-  const { bikePreview } = useConfig();
+  const { bikePreview, game } = useConfig();
+  const modTypes = modTypesFor(game.id);
   const view3dProps = view3d ? entryViewerProps(view3d, entries, bikePreview) : null;
 
   const doMove = async (item: LibraryEntry, toFolder: string) => {
@@ -481,10 +482,10 @@ export default function Library({
         <Segmented
           value={modType.id}
           onChange={(id) => {
-            const next = MOD_TYPES.find((mt) => mt.id === id);
+            const next = modTypes.find((mt) => mt.id === id);
             if (next) onChangeType(next);
           }}
-          options={MOD_TYPES.map((mt) => ({
+          options={modTypes.map((mt) => ({
             value: mt.id,
             label: (
               <span className="flex items-center gap-1.5">
