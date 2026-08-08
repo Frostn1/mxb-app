@@ -185,20 +185,6 @@ pub struct RiderTargets {
 
 pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
     let base = mods_subdir(mods_path, "mods/rider");
-    let dirs_in = |sub: &str| -> Vec<String> {
-        let mut out = Vec::new();
-        if let Ok(rd) = fs::read_dir(base.join(sub)) {
-            for e in rd.flatten() {
-                if e.path().is_dir() {
-                    if let Some(n) = e.file_name().to_str() {
-                        out.push(n.to_string());
-                    }
-                }
-            }
-        }
-        out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
-        out
-    };
     let models_in = |sub: &str| -> Vec<String> {
         let mut out = Vec::new();
         if let Ok(rd) = fs::read_dir(base.join(sub)) {
@@ -223,7 +209,9 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
         helmets: models_in("helmets"),
         boots: models_in("boots"),
         protection: models_in("protection"),
-        profiles: dirs_in("riders"),
+        // A rider model can be packed as `riders/<name>.pkz` just as gear can, and a
+        // profile the picker never lists is a model nobody can wear.
+        profiles: models_in("riders"),
     }
 }
 
