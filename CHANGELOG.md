@@ -2,6 +2,17 @@
 
 ## 2026-08-07
 
+### Added
+- **The 3D preview now offers a gear model's stock paint, not just its liveries.** The
+  paint picker listed only the `.pnt` files a helmet, boots or protection packs, so a
+  piece that ships liveries had no way back to its own look — the textures embedded in
+  the mesh, which the preview ignored entirely. "Stock" now leads the list whenever the
+  mesh carries a texture, with a separate entry for a helmet's goggles, which are picked
+  independently of the shell. A paint reuses the mesh's texture names, so stock shell
+  plus painted goggles (and the reverse) is resolved before the textures reach the
+  viewer, which would otherwise show whichever image finished loading last. Preview only
+  — it never becomes a value in your loadout, since the game names a `.pnt` there and has
+  no word for "the model's own look".
 ### Fixed
 - **Downloads that Google Drive refuses now say why, instead of "the host returned a web
   page".** Hitting a popular mod (Flow Series #1 FlowiCompound, for one) gave a message
