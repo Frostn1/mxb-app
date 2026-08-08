@@ -35,6 +35,7 @@ import {
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
+import GameSwitcher from "../Shell/GameSwitcher";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
@@ -499,10 +500,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
           {/* game folder */}
           <Section
-            title={t("setup.modsFolder")}
+            title={t("setup.modsFolder", { game: game.display })}
             desc={t("settings.modsFolderDesc")}
             innerRef={(el) => (refs.current.folder = el)}
           >
+            {/* Which title everything below belongs to. It sits at the top of this
+                section because it decides which game's folders the rest of it edits. */}
+            <GameSwitcher />
+            <div className="h-px bg-border" />
             <div className="flex gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 <span className="flex-1 truncate" title={config.modsPath}>

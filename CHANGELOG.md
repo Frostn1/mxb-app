@@ -3,9 +3,11 @@
 ## 2026-08-08 — GP Bikes support
 
 ### Added
-- **The app now drives GP Bikes as well as MX Bikes.** A game switcher sits at the top of the
-  sidebar; picking a title points the whole app — Library, Manage, Presets, Browse and the
-  Play button — at that game's folders. The two games keep their folders separately, so
+- **The app now drives GP Bikes as well as MX Bikes.** First launch asks which game you're
+  setting up before anything else, and the game picker lives in Settings from then on;
+  picking a title points the whole app — Library, Manage, Presets, Browse and the
+  Play button — at that game's folders. The sidebar shows which game you're on. The two
+  games keep their folders separately, so
   switching back and forth never asks you to find them again, and a game you open for the
   first time has its folders auto-detected (`Documents\PiBoSo\GP Bikes`, and the Steam
   install under AppID 848050) exactly as first-run setup does. Switching to a game the app

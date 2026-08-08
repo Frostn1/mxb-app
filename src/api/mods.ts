@@ -499,8 +499,10 @@ export function setGamePath(path: string): Promise<void> {
 }
 
 /** Auto-detect the Steam MX Bikes install (holds `rider.pkz`); null if not found. */
-export function detectGamePath(): Promise<string | null> {
-  return invoke<string | null>("detect_game_path");
+/** Scan Steam for a game's install folder. Omit `game` for the active one; setup passes
+ *  it explicitly, since on a first run the pick isn't saved yet. */
+export function detectGamePath(game?: GameId): Promise<string | null> {
+  return invoke<string | null>("detect_game_path", { game });
 }
 
 /**

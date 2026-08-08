@@ -902,4 +902,7 @@ export const fr: Translation = {
   "section.animation": "Styles de pilotage",
   "modDetail.restartHint": "Redémarrez {{game}} pour prendre en compte les nouveaux {{kind}}.",
   "modDetail.protonHint": "Les fichiers Proton Drive sont chiffrés : impossible de les télécharger automatiquement.",
+  "setup.whichGame": "Quel jeu configurez-vous ? Vous pourrez ajouter l'autre plus tard.",
+  "setup.switchLater": "Vous pouvez changer de jeu à tout moment dans les Paramètres.",
+  "setup.chooseDifferentGame": "Choisir un autre jeu",
 };

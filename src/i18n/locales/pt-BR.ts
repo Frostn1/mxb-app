@@ -891,4 +891,7 @@ export const ptBR: Translation = {
   "section.animation": "Estilos de pilotagem",
   "modDetail.restartHint": "Reinicie o {{game}} para reconhecer os novos {{kind}}.",
   "modDetail.protonHint": "Arquivos do Proton Drive são criptografados, então não podem ser baixados automaticamente.",
+  "setup.whichGame": "Qual jogo você está configurando? Você pode adicionar o outro depois.",
+  "setup.switchLater": "Você pode trocar de jogo quando quiser nas Configurações.",
+  "setup.chooseDifferentGame": "Escolher outro jogo",
 };

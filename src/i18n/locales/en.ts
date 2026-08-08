@@ -870,4 +870,7 @@ export const en = {
   "section.animation": "Riding styles",
   "modDetail.restartHint": "Restart {{game}} to pick up the new {{kind}}.",
   "modDetail.protonHint": "Proton Drive files are encrypted, so they can't be downloaded automatically.",
+  "setup.whichGame": "Which game are you setting up? You can add the other one later.",
+  "setup.switchLater": "You can switch games any time in Settings.",
+  "setup.chooseDifferentGame": "Choose a different game",
 } as const;

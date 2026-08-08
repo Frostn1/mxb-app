@@ -166,7 +166,15 @@ const App = () => {
                     {config?.modsPath ? (
                       <Dashboard key={activeGame.id} welcomeActive={showWelcome} />
                     ) : (
-                      <Setup onComplete={reloadConfig} game={activeGame} />
+                      <Setup
+                        onComplete={reloadConfig}
+                        game={activeGame}
+                        games={games}
+                        // No saved config at all = a genuine first run, so ask which
+                        // game before anything else. A blank `modsPath` on an existing
+                        // config means we got here by switching, and that's already answered.
+                        firstRun={!config}
+                      />
                     )}
                   </ConfigContext.Provider>
                 )}

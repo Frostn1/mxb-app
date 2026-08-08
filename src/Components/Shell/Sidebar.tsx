@@ -21,7 +21,6 @@ import { useT, type TKey } from "../../i18n/context";
 import { launchGame } from "../../api/mods";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
-import GameSwitcher from "./GameSwitcher";
 import type { GameCaps } from "../../types";
 
 export type DashboardView =
@@ -118,11 +117,14 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
 
   return (
     <aside className="flex w-[216px] flex-none flex-col border-r border-white/[0.06] bg-window px-2.5 pb-3 pt-3.5">
-      <div className="px-3 pb-3 text-[13px] font-bold tracking-[0.2px]">
-        MXB App
+      <div className="flex flex-col px-3 pb-3">
+        <span className="text-[13px] font-bold tracking-[0.2px]">MXB App</span>
+        {/* The switcher lives in Settings now, but which game you're driving still has
+            to be visible — every list below it is scoped to that choice. */}
+        <span className="text-[11px] font-medium text-muted-foreground">
+          {game.display}
+        </span>
       </div>
-
-      <GameSwitcher />
 
       <nav className="flex flex-col gap-0.5">
         {NAV.filter(({ cap }) => !cap || caps[cap]).map(({ id, label, icon: Icon }) => {

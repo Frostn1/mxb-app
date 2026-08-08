@@ -892,4 +892,7 @@ export const it: Translation = {
   "section.animation": "Stili di guida",
   "modDetail.restartHint": "Riavvia {{game}} per rilevare i nuovi {{kind}}.",
   "modDetail.protonHint": "I file di Proton Drive sono cifrati, quindi non possono essere scaricati automaticamente.",
+  "setup.whichGame": "Quale gioco stai configurando? Potrai aggiungere l'altro più avanti.",
+  "setup.switchLater": "Puoi cambiare gioco quando vuoi nelle Impostazioni.",
+  "setup.chooseDifferentGame": "Scegli un altro gioco",
 };

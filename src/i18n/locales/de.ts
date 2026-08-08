@@ -913,4 +913,7 @@ export const de: Translation = {
   "section.animation": "Fahrstile",
   "modDetail.restartHint": "Starte {{game}} neu, damit die neuen {{kind}} erkannt werden.",
   "modDetail.protonHint": "Proton-Drive-Dateien sind verschlüsselt und lassen sich nicht automatisch herunterladen.",
+  "setup.whichGame": "Welches Spiel richtest du ein? Das andere kannst du später hinzufügen.",
+  "setup.switchLater": "Du kannst jederzeit in den Einstellungen wechseln.",
+  "setup.chooseDifferentGame": "Anderes Spiel wählen",
 };

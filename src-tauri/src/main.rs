@@ -2342,11 +2342,19 @@ fn set_profiles_path(app: tauri::AppHandle, path: String) -> Result<(), String> 
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// Scan Steam for the active game's install folder. `None` if not found.
+/// Scan Steam for a game's install folder. `None` if not found.
+///
+/// `game` names which title to look for. Setup passes it explicitly because on a first
+/// run the user has picked a game but nothing is saved yet — and persisting the pick just
+/// to make detection work would write a config before setup finishes, which would then
+/// look like an upgrade rather than a fresh install. Omitted, it means the active game.
 #[tauri::command]
-fn detect_game_path(app: tauri::AppHandle) -> Option<String> {
-    let cfg = config::load(&app).unwrap_or_default();
-    config::detect_game_path(cfg.game())
+fn detect_game_path(app: tauri::AppHandle, game: Option<game::Game>) -> Option<String> {
+    let profile = match game {
+        Some(g) => g.profile(),
+        None => config::load(&app).unwrap_or_default().game(),
+    };
+    config::detect_game_path(profile)
 }
 
 /// How many profiles (subdirs with a `profile.ini`) live under `path` — lets the
