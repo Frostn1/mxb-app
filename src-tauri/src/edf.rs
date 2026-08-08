@@ -542,9 +542,40 @@ pub fn material_slots(b: &[u8], colors: usize) -> Vec<Option<usize>> {
 
 /// Companion maps ride alongside a colour texture and are never the look itself — MX
 /// Bikes names them `_n` normal, `_s` specular, `_r` reflection.
+///
+/// Mods baked in Substance or Blender keep those maps under the exporter's own names
+/// instead (`Vest_Normal` beside `Vest_BaseColor`). Counting one of those as a colour
+/// texture doesn't just add a stray entry: material indices count this list, so every
+/// texture after it slides onto the wrong mesh — which is how the Tactical Vest came out
+/// wearing its pouch's normal map.
 pub fn is_companion_texture(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    n.ends_with("_n") || n.ends_with("_s") || n.ends_with("_r")
+    // MX Bikes' own single-letter convention, plus the exporter names.
+    n.ends_with("_n") || n.ends_with("_s") || n.ends_with("_r") || is_exporter_companion(&n)
+}
+
+/// Companion maps under the names Substance and Blender give them, shared by every filter
+/// that has to tell a map from the look. Colour channels (`_basecolor`, `_diffuse`,
+/// `_albedo`) are deliberately absent — those ARE the look.
+pub fn is_exporter_companion(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    [
+        "_normal",
+        "_nrm",
+        "_roughness",
+        "_metallic",
+        "_metalness",
+        "_specular",
+        "_glossiness",
+        "_ao",
+        "_ambientocclusion",
+        "_bump",
+        "_height",
+        "_displacement",
+        "_opacity",
+    ]
+    .iter()
+    .any(|suffix| n.ends_with(suffix))
 }
 
 /// A model's COLOUR textures, in file order. Material indices count these — including the
@@ -1174,6 +1205,19 @@ fn submesh_transform(b: &[u8], name_off: usize, block_off: usize) -> Vec<Mat4> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Material indices count the colour textures, so a map counted among them slides every
+    // later texture onto the wrong mesh — the Tactical Vest wore its pouch's normal map.
+    #[test]
+    fn exporter_named_maps_are_companions_not_colour() {
+        for name in ["Vest_Normal", "chest_Roughness", "brace_AO", "pouch_metallic", "shell_n"] {
+            assert!(is_companion_texture(name), "'{name}' is a map");
+        }
+        // The look itself, however it's spelled.
+        for name in ["Vest_BaseColor", "chest_diffuse", "CK_A1", "bake1", "aphair"] {
+            assert!(!is_companion_texture(name), "'{name}' is the look");
+        }
+    }
 
     // Investigation aid: print an .edf's overall vertex bounds + node names.
     // MXB_EDF_FILE=/tmp/rider.edf cargo test edf_bounds -- --ignored --nocapture

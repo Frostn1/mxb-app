@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-08-07
+
+### Fixed
+- **Protection mods now show what they actually look like.** The protection slot is the
+  busiest and least conventional one on mxb-mods — chains, necklaces, hoodies, bibs,
+  backpacks, hair, the odd pickaxe — and unlike helmets and boots those mods bake their
+  look straight into the mesh instead of shipping a `.pnt`. The preview only ever looked
+  for a paint, so five of eight real mods pulled off the site came out as a featureless
+  grey shape. A piece with no paint to wear now wears the texture its own mesh carries,
+  each part bound to its own: a chest protector's shell and straps, or a chain's four baked
+  maps, land where the model says they go instead of all sharing one.
+- **A protection is drawn at the size it was made.** Every piece was being scaled to a
+  fixed fraction of the rider and re-centred on his chest, which inflated a thin necklace
+  to the proportions of a full vest and threw away the offset a chain or a hood is
+  deliberately authored to hang at. Protection is modelled in the rider's own frame, so
+  it's now placed as authored — its own size, its own offset — and the mount an `.hrc`
+  names is honoured.
+- **Mods that ship sealed loose files load.** A protection folder whose files are sealed
+  the way a `.pkz` seals its entries used to fail outright with "no gear mesh found"; those
+  now read like any other. Gear also follows the `gfx.cfg` → `.hrc` chain to find its mesh,
+  so a mod that names it for the piece (`neckbrace.edf`, `pickaxe.edf`) resolves instead of
+  relying on a guess from filenames, and stock gear whose folder doesn't use the slot's own
+  mesh name no longer comes up empty.
+- **Textures baked in Substance or Blender bind to the right mesh.** Maps exported under
+  the toolchain's names — `Vest_Normal` beside `Vest_BaseColor` — were counted as looks in
+  their own right, and since material indices count that list, every texture after one slid
+  onto the wrong part. That's why the Tactical Vest wore its pouch's normal map.
+
+### Changed
+- **Protection is no longer hidden by default in the Rider tab.** It was, back when it
+  rendered as a grey blob spanning the whole torso.
+
 ## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence
 
 ### Fixed
