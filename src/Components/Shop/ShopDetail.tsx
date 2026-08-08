@@ -4,6 +4,7 @@ import type { ShopModDetail } from "../../types";
 import { openShopUrl, shopCatalogDetail } from "../../api/shop";
 import PriceTag, { SaleEnds } from "./PriceTag";
 import Gallery from "../ModDetail/Gallery";
+import RichDescription from "../ModDetail/RichDescription";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
 import { useT } from "../../i18n/context";
@@ -98,12 +99,9 @@ export default function ShopDetail({ id, currency, onBack }: ShopDetailProps) {
               <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
                 {t("shopCatalog.about")}
               </span>
-              <div
-                className="mod-description"
-                // Authored HTML from the store's catalog. Sanitised in Rust before it ever
-                // reaches here — see `sanitize_html` in `mods/shop_catalog.rs`.
-                dangerouslySetInnerHTML={{ __html: detail.descriptionHtml }}
-              />
+              {/* Authored HTML from the store's catalog. Sanitised in Rust before it ever
+                  reaches here — see `sanitize_html` in `mods/shop_catalog.rs`. */}
+              <RichDescription html={detail.descriptionHtml} />
             </div>
           )}
         </div>

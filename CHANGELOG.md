@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-08 — shop product descriptions
+
+### Added
+- **Shop items now show the store's own description.** The catalog started carrying them
+  today — every one of its 1311 products, screenshots and all — and the detail page shows it
+  under **About**, the same way a Browse mod's description reads.
+
+### Fixed
+- **The screenshots inside those descriptions were broken frames.** The store's CDN turns away
+  any request that doesn't come from the store itself, and the app's window asks under its own
+  name, so every embedded shot was refused where it stood. They now come through the same
+  on-disk image cache the grid and gallery already use, which fetches them from the app's own
+  side rather than the page's: they load, they're resized to the width they're actually drawn
+  at, and they're kept rather than re-fetched every time you open the item. The store's second
+  image host is included, which a few dozen products embed from.
+- **A link inside a description replaced the entire app with a website.** These descriptions
+  carry real links — the store's alone hold about 1250, to Discord, YouTube and the store —
+  and the app window has no address bar or Back button to escape with. They now open in your
+  own browser and leave the app where it was. Browse descriptions had the same fault and are
+  fixed with it.
+
+### Changed
+- **The Shop opens faster.** Descriptions are 3.1 MB of the catalog's 4 MB, and every one of
+  them was being cleaned up for display the moment the catalog loaded — before the grid could
+  paint, for 1311 products of which you open maybe two. That work now happens when you open an
+  item.
+
 ## 2026-08-08 — GP Bikes support
 
 ### Added

@@ -272,10 +272,15 @@ struct RawCategory {
 
 /// One item, as permissively as serde will allow.
 ///
-/// Only `id`, `price`, `price_max`, `sale_price`, `sale_price_max`, `updated`, `author` and
-/// `author_url` are confirmed by the store's developer. Everything else is a guess, which is
-/// why every field is optional, why the plausible spellings are covered by `alias`, and why
-/// `extra` keeps whatever we didn't name.
+/// Confirmed against the live dump (`"schema": 4`): `id`, `name`, `url`, `image`,
+/// `description`, `price`, `price_max`, `sale_price`, `sale_price_max`, `free`, `author`,
+/// `author_url`, `categories`, `updated` — and nothing else. The store sends every one of
+/// them on every item.
+///
+/// The rest — `images`, `published`, and the sale window — have never appeared. They are kept
+/// because they cost nothing and the store may add them, exactly as it added `description`.
+/// Every field stays optional and the plausible spellings stay covered by `alias` for the
+/// same reason; `extra` keeps whatever we didn't name so the live canary can report it.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct RawMod {
@@ -290,7 +295,7 @@ struct RawMod {
     author_url: Option<String>,
     free: Option<bool>,
 
-    // ── guessed ──
+    // ── confirmed, under the store's own spelling ──
     #[serde(alias = "name", alias = "post_title")]
     title: Option<String>,
     #[serde(alias = "permalink", alias = "link", alias = "product_url", alias = "href")]
@@ -302,6 +307,8 @@ struct RawMod {
         alias = "img"
     )]
     image: Option<String>,
+    /// Never sent. The store gives one `image` per item; the extra shots live inside the
+    /// description's markup, which is not the same thing as a gallery and isn't mined for one.
     #[serde(alias = "gallery", alias = "screenshots")]
     images: Option<OneOrMany<String>>,
     /// Not `OneOrMany<Value>`: `Value` deserializes from anything, including an array, so
@@ -347,7 +354,9 @@ struct Item {
     images: Vec<String>,
     author: Option<String>,
     author_url: Option<String>,
-    description_html: Option<String>,
+    /// The store's markup, exactly as sent. Sanitised in [`detail`], not here — see
+    /// [`sanitize_html`] for why this one is deliberately lazy.
+    description: Option<String>,
     category_ids: Vec<u64>,
     category_names: Vec<String>,
     updated: Option<i64>,
@@ -544,6 +553,12 @@ fn safe_image_url(raw: &str) -> Option<String> {
 /// `"csp": null`, so an injected `<script>` in this document would run with the app's own
 /// privileges. This is the only place remote HTML enters the app, so it's the only place
 /// that has to be careful — do not move the rendering somewhere that skips it.
+///
+/// Called from [`detail`], once per item the user actually opens — never from [`map_mod`].
+/// The store's descriptions are full product pages (3.1 MB of markup across 1311 items,
+/// ~2 KB median), so sanitising at parse time meant an html5ever parse per item on the load
+/// path that blocks the first paint, to produce markup that all but a handful of items would
+/// never show. One parse on open costs nothing and is invisible next to the click.
 fn sanitize_html(raw: &str) -> Option<String> {
     use scraper::{Html, Selector};
 
@@ -707,7 +722,10 @@ fn map_mod(raw: RawMod, cats: &CategoryIndex) -> Option<Item> {
             .filter(|a| !a.is_empty())
             .map(str::to_string),
         author_url: raw.author_url.as_deref().and_then(safe_shop_url),
-        description_html: raw.description.as_deref().and_then(sanitize_html),
+        description: raw
+            .description
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty()),
         free: raw.free.unwrap_or(false),
         category_ids,
         category_names,
@@ -1675,7 +1693,7 @@ pub async fn detail(app: &tauri::AppHandle, id: u64) -> anyhow::Result<ShopModDe
 
     Ok(ShopModDetail {
         item: summary_of(item, now),
-        description_html: item.description_html.clone(),
+        description_html: item.description.as_deref().and_then(sanitize_html),
         images: if item.images.is_empty() {
             item.image.clone().into_iter().collect()
         } else {
