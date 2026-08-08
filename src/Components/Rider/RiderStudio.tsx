@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, AlertTriangle, Save, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useT, type TKey } from "../../i18n/context";
 import { Button } from "../ui/button";
 import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
@@ -28,10 +29,10 @@ const EMPTY_GEAR_PAINTS: GearPaints = {
 
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
 
-const TOGGLES: { part: RiderPart["part"]; label: string }[] = [
-  { part: "helmet", label: "Helmet" },
-  { part: "protection", label: "Protection" },
-  { part: "boots", label: "Boots" },
+const TOGGLES: { part: RiderPart["part"]; label: TKey }[] = [
+  { part: "helmet", label: "category.helmet" },
+  { part: "protection", label: "category.protection" },
+  { part: "boots", label: "category.boots" },
 ];
 
 interface RiderStudioProps {
@@ -40,6 +41,7 @@ interface RiderStudioProps {
 }
 
 export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioProps) {
+  const t = useT();
   const [scans, setScans] = useState<Scans | null>(null);
   const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
   const [name, setName] = useState("");
@@ -72,7 +74,7 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   const onSave = useCallback(async () => {
     const nm = name.trim();
     if (!nm) {
-      toast.error("Name this rider look first.");
+      toast.error(t("rider.nameFirst"));
       return;
     }
     setBusy(true);
@@ -85,7 +87,7 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
     } finally {
       setBusy(false);
     }
-  }, [name, loadout]);
+  }, [name, loadout, t]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -167,17 +169,19 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
     <div className="flex h-full flex-col">
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
         <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Rider</h1>
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+            {t("nav.rider")}
+          </h1>
           <HelpHint
-            title="Rider"
-            description="Dress the player model — helmet, goggles, outfit and boots together."
+            title={t("nav.rider")}
+            description={t("rider.help")}
           />
         </div>
         <div className="ml-auto flex items-center gap-2">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Name this rider…"
+            placeholder={t("rider.namePlaceholder")}
             className="h-8 w-[180px]"
             onKeyDown={(e) => e.key === "Enter" && void onSave()}
           />
@@ -205,12 +209,12 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
           {/* Show-on-model toggles */}
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-white/[0.07] bg-card/40 p-3.5">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">
-              Show on model
+              {t("rider.showOnModel")}
             </span>
             {TOGGLES.map(({ part, label }) => (
               <label key={part} className="flex items-center gap-2 text-[12px] text-muted-foreground">
                 <Switch checked={!hidden.includes(part)} onCheckedChange={() => toggle(part)} />
-                {label}
+                {t(label)}
               </label>
             ))}
           </div>
@@ -219,7 +223,7 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
           {grouped.map((g) => (
             <div key={g.id} className="flex flex-col gap-2">
               <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
-                {g.label}
+                {t(g.label)}
               </h2>
               <div className="grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2">
                 {g.slots.map((slot) => (

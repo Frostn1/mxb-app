@@ -32,19 +32,26 @@ import type {
   BundlePlan,
   BundleProgress,
 } from "../types";
+import type { TKey } from "../i18n";
 
 /** Results per page (mirrors `PER_PAGE` in the Rust backend). */
 export const SEARCH_PAGE_SIZE = 24;
 
 export interface ModCategory {
   id: number;
-  label: string;
+  label: TKey;
 }
 
 /** A top-level kind of mod, with its filter categories and install folder. */
 export interface ModType {
   id: string;
-  label: string;
+  label: TKey;
+  /**
+   * The same noun as it reads *inside* a sentence ("Search tracks…").
+   * A separate key rather than `label.toLowerCase()` — German capitalizes its
+   * nouns everywhere, so lowercasing a translated label produces broken German.
+   */
+  labelInline: TKey;
   /** Parent WordPress category id (also the "All" filter). */
   categoryId: number;
   categories: ModCategory[];
@@ -55,44 +62,47 @@ export interface ModType {
 export const MOD_TYPES: ModType[] = [
   {
     id: "tracks",
-    label: "Tracks",
+    label: "modType.tracks",
+    labelInline: "modType.tracksInline",
     categoryId: 22,
     installSubpath: "mods/tracks",
     categories: [
-      { id: 22, label: "All" },
-      { id: 300, label: "Beginner" },
-      { id: 301, label: "Intermediate" },
-      { id: 302, label: "Pro" },
-      { id: 119, label: "Assets" },
+      { id: 22, label: "browseCat.all" },
+      { id: 300, label: "browseCat.beginner" },
+      { id: 301, label: "browseCat.intermediate" },
+      { id: 302, label: "browseCat.pro" },
+      { id: 119, label: "browseCat.assets" },
     ],
   },
   {
     id: "bikes",
-    label: "Bikes",
+    label: "modType.bikes",
+    labelInline: "modType.bikesInline",
     categoryId: 29,
     installSubpath: "mods/bikes",
     categories: [
-      { id: 29, label: "All" },
-      { id: 45, label: "New Bikes" },
-      { id: 37, label: "Liveries" },
-      { id: 46, label: "Sounds" },
+      { id: 29, label: "browseCat.all" },
+      { id: 45, label: "browseCat.newBikes" },
+      { id: 37, label: "browseCat.liveries" },
+      { id: 46, label: "browseCat.sounds" },
     ],
   },
   {
     id: "rider",
-    label: "Rider",
+    label: "modType.rider",
+    labelInline: "modType.riderInline",
     categoryId: 30,
     installSubpath: "mods/rider",
     categories: [
-      { id: 30, label: "All" },
-      { id: 35, label: "Rider Kit" },
-      { id: 313, label: "Helmets" },
-      { id: 127, label: "Helmet Paints" },
-      { id: 32, label: "Gloves" },
-      { id: 343, label: "Boots" },
-      { id: 126, label: "Boot Paints" },
-      { id: 36, label: "Protection" },
-      { id: 135, label: "Protection Paints" },
+      { id: 30, label: "browseCat.all" },
+      { id: 35, label: "browseCat.riderKit" },
+      { id: 313, label: "browseCat.helmets" },
+      { id: 127, label: "browseCat.helmetPaints" },
+      { id: 32, label: "browseCat.gloves" },
+      { id: 343, label: "browseCat.boots" },
+      { id: 126, label: "browseCat.bootPaints" },
+      { id: 36, label: "browseCat.protection" },
+      { id: 135, label: "browseCat.protectionPaints" },
     ],
   },
 ];
@@ -396,7 +406,15 @@ export function importFile(
 
 export interface DestOption {
   value: string;
+  /** A real folder name — shown verbatim, never translated. */
   label: string;
+  /**
+   * Set when the label is UI prose rather than a folder name ("Bikes (root)",
+   * "{{name}} — paints"). The folder name, when one is involved, rides in
+   * `labelVars.name` so the translation can put it where its language wants it.
+   */
+  labelKey?: TKey;
+  labelVars?: Record<string, string>;
 }
 
 const stripExt = (s: string) => s.replace(/\.(pkz|zip|rar|7z)$/i, "");
@@ -417,11 +435,15 @@ export function buildDestinations(
 ): { options: DestOption[]; guess: string; suggestions: string[] } {
   const seen = new Set<string>([""]);
   const options: DestOption[] = [
-    { value: "", label: modType.id === "bikes" ? "Bikes (root)" : "Tracks (root)" },
+    {
+      value: "",
+      label: "",
+      labelKey: modType.id === "bikes" ? "dest.bikesRoot" : "dest.tracksRoot",
+    },
   ];
-  const add = (value: string, label: string) => {
+  const add = (value: string, opt: Omit<DestOption, "value">) => {
     if (!seen.has(value)) {
-      options.push({ value, label });
+      options.push({ value, ...opt });
       seen.add(value);
     }
   };
@@ -431,8 +453,16 @@ export function buildDestinations(
   if (modType.id === "bikes") {
     const bikes = installed.filter((i) => i.folder === "");
     for (const b of bikes) {
-      add(stripExt(b.name), `${stripExt(b.name)} — bike folder`);
-      add(`${stripExt(b.name)}/paints`, `${stripExt(b.name)} — paints`);
+      add(stripExt(b.name), {
+        label: "",
+        labelKey: "dest.bikeFolder",
+        labelVars: { name: stripExt(b.name) },
+      });
+      add(`${stripExt(b.name)}/paints`, {
+        label: "",
+        labelKey: "dest.bikePaints",
+        labelVars: { name: stripExt(b.name) },
+      });
     }
 
     if (livery || sound) {
@@ -452,7 +482,7 @@ export function buildDestinations(
   }
 
   for (const f of [...new Set(installed.map((i) => i.folder))].sort((a, b) => a.localeCompare(b))) {
-    if (f) add(f, f);
+    if (f) add(f, { label: f });
   }
   return { options, guess, suggestions };
 }
@@ -496,9 +526,9 @@ export function buildRiderDestinations(
 ): { options: DestOption[]; guess: string; suggestions: string[] } {
   const seen = new Set<string>();
   const options: DestOption[] = [];
-  const add = (value: string, label: string) => {
+  const add = (value: string, labelKey: TKey, labelVars?: Record<string, string>) => {
     if (!seen.has(value)) {
-      options.push({ value, label });
+      options.push({ value, label: "", labelKey, labelVars });
       seen.add(value);
     }
   };
@@ -510,22 +540,22 @@ export function buildRiderDestinations(
     return s;
   };
 
-  add("helmets", "Helmets (new model)");
-  add("boots", "Boots (new model)");
-  add("protection", "Protection (new model)");
+  add("helmets", "dest.helmetsNewModel");
+  add("boots", "dest.bootsNewModel");
+  add("protection", "dest.protectionNewModel");
 
   const scoredPaints: { value: string; score: number; kind: GearPaintKind }[] = [];
   for (const h of targets.helmets) {
-    add(`helmets/${h}/paints`, `${h} · helmet paints`);
-    add(`helmets/${h}/goggles`, `${h} · goggles`);
+    add(`helmets/${h}/paints`, "dest.helmetPaintsFor", { name: h });
+    add(`helmets/${h}/goggles`, "dest.gogglesFor", { name: h });
     scoredPaints.push({ value: `helmets/${h}/paints`, score: score(h), kind: "helmets" });
   }
   for (const b of targets.boots) {
-    add(`boots/${b}/paints`, `${b} · boot paints`);
+    add(`boots/${b}/paints`, "dest.bootPaintsFor", { name: b });
     scoredPaints.push({ value: `boots/${b}/paints`, score: score(b), kind: "boots" });
   }
   for (const p of targets.protection) {
-    add(`protection/${p}/paints`, `${p} · protection paints`);
+    add(`protection/${p}/paints`, "dest.protectionPaintsFor", { name: p });
     scoredPaints.push({ value: `protection/${p}/paints`, score: score(p), kind: "protection" });
   }
 
@@ -533,8 +563,8 @@ export function buildRiderDestinations(
     (a, b) => a.toLowerCase().localeCompare(b.toLowerCase()),
   );
   for (const prof of profiles) {
-    add(`riders/${prof}/paints`, `${prof} · outfit / kit`);
-    add(`riders/${prof}/gloves`, `${prof} · gloves`);
+    add(`riders/${prof}/paints`, "dest.outfitFor", { name: prof });
+    add(`riders/${prof}/gloves`, "dest.glovesFor", { name: prof });
   }
 
   const kindPaints = paintKind

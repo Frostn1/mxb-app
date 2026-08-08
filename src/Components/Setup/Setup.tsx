@@ -3,6 +3,8 @@ import { Snowflake, FolderOpen, Gamepad2, Loader2, Check } from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { createConfig, detectGamePath } from "../../api/mods";
 import { usePlatform } from "../../lib/usePlatform";
+import { Trans } from "../../i18n";
+import { useT } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
 
 interface SetupProps {
@@ -21,6 +23,7 @@ function hintFor(platform: string | null): string {
 }
 
 export default function Setup({ onComplete }: SetupProps) {
+  const t = useT();
   const defaultHint = hintFor(usePlatform());
   const [chosen, setChosen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,7 +70,7 @@ export default function Setup({ onComplete }: SetupProps) {
     const picked = await pickFolder({
       directory: true,
       multiple: false,
-      title: "Select your MX Bikes folder",
+      title: t("setup.pickModsFolder"),
     });
     if (typeof picked === "string") setChosen(picked);
   };
@@ -76,7 +79,7 @@ export default function Setup({ onComplete }: SetupProps) {
     const picked = await pickFolder({
       directory: true,
       multiple: false,
-      title: "Select your MX Bikes install folder",
+      title: t("setup.pickInstallFolder"),
     });
     if (typeof picked === "string") {
       setGamePath(picked);
@@ -93,18 +96,17 @@ export default function Setup({ onComplete }: SetupProps) {
           </div>
           <div className="flex flex-col items-center gap-1.5">
             <h1 className="text-[26px] font-extrabold tracking-[-0.4px]">
-              Welcome to MXB App
+              {t("setup.title")}
             </h1>
             <p className="max-w-[380px] text-center text-[13.5px] leading-relaxed text-muted-foreground">
-              Browse mxb-mods, install with one click, and let FrostMod reload the
-              game for you.
+              {t("setup.tagline")}
             </p>
           </div>
         </div>
 
         <div className="flex w-full flex-col gap-2.5">
           <span className="text-[11.5px] font-bold uppercase tracking-[1px] text-faint">
-            MX Bikes folder
+            {t("setup.modsFolder")}
           </span>
           {chosen ? (
             <div className="flex items-center gap-2.5 rounded-[10px] border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">
@@ -115,27 +117,32 @@ export default function Setup({ onComplete }: SetupProps) {
             </div>
           ) : (
             <p className="text-[12.5px] text-muted-foreground">
-              MXB App will auto-detect your{" "}
-              <span className="font-mono text-foreground/80">{defaultHint}</span> folder.
-              You can also pick it yourself.
+              <Trans
+                k="setup.autoDetect"
+                values={{
+                  hint: (
+                    <span className="font-mono text-foreground/80">{defaultHint}</span>
+                  ),
+                }}
+              />
             </p>
           )}
           <button
             onClick={choose}
             className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
           >
-            {chosen ? "Choose a different folder…" : "Choose the folder manually…"}
+            {chosen ? t("setup.chooseDifferent") : t("setup.chooseManually")}
           </button>
         </div>
 
         <div className="flex w-full flex-col gap-2.5">
           <span className="text-[11.5px] font-bold uppercase tracking-[1px] text-faint">
-            MX Bikes install
+            {t("setup.gameInstall")}
           </span>
           {detecting ? (
             <div className="flex items-center gap-2.5 rounded-[10px] border border-input bg-card px-3.5 py-3 text-[12.5px] text-muted-foreground">
               <Loader2 className="size-4 flex-none animate-spin text-primary" />
-              <span>Looking for your MX Bikes install…</span>
+              <span>{t("setup.detecting")}</span>
             </div>
           ) : gamePath ? (
             <>
@@ -147,10 +154,10 @@ export default function Setup({ onComplete }: SetupProps) {
                 {gameAuto && (
                   <span
                     className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-primary"
-                    title="Detected automatically"
+                    title={t("setup.detectedAutomatically")}
                   >
                     <Check className="size-3.5" strokeWidth={2.5} />
-                    Found
+                    {t("setup.found")}
                   </span>
                 )}
               </div>
@@ -158,21 +165,19 @@ export default function Setup({ onComplete }: SetupProps) {
                 onClick={chooseGame}
                 className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
               >
-                Choose a different folder…
+                {t("setup.chooseDifferent")}
               </button>
             </>
           ) : (
             <>
               <p className="text-[12.5px] text-muted-foreground">
-                Couldn&apos;t find your MX Bikes install automatically — it powers
-                the
-                3D rider preview. Pick it manually, or set it later in Settings.
+                {t("setup.installNotFound")}
               </p>
               <button
                 onClick={chooseGame}
                 className="cursor-default self-start text-[12px] font-semibold text-primary hover:brightness-110"
               >
-                Choose the install folder manually…
+                {t("setup.chooseInstallManually")}
               </button>
             </>
           )}
@@ -189,7 +194,7 @@ export default function Setup({ onComplete }: SetupProps) {
           disabled={busy}
           onClick={() => finish(chosen ?? "")}
         >
-          {chosen ? "Start browsing mods" : "Detect & start browsing"}
+          {chosen ? t("setup.startBrowsing") : t("setup.detectAndStart")}
         </Button>
       </div>
     </div>

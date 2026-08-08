@@ -27,6 +27,7 @@ import {
 } from "../../api/mods";
 import type { LibraryEntry, PkzMeta } from "../../types";
 import { displayName, folderLabel, formatBytes, formatLength } from "../../lib/mods";
+import { useT, type TFunc } from "../../i18n/context";
 import { metaKey, peekMeta, primeMetaCache, requestMeta } from "../../lib/pkzMeta";
 import {
   CATEGORY_LABEL,
@@ -91,6 +92,7 @@ function LibraryCardBody({
   item: LibraryEntry;
   typeIcon: LucideIcon;
 }) {
+  const t = useT();
   const cacheKey = metaKey(item);
   const [meta, setMeta] = useState<PkzMeta | null>(() => peekMeta(cacheKey) ?? null);
   // The thumbnail tile doubles as the visibility probe for the card.
@@ -129,10 +131,13 @@ function LibraryCardBody({
 
   const title = meta?.name?.trim() || displayName(item.name);
   const parts: string[] = [];
-  if (meta?.author) parts.push(`by ${meta.author}`);
+  if (meta?.author) parts.push(t("library.byAuthor", { author: meta.author }));
   if (meta?.length) parts.push(formatLength(meta.length));
   if (item.size) parts.push(formatBytes(item.size));
-  const subtitle = parts.join(" · ") || CATEGORY_LABEL[item.category] || folderLabel(item.folder);
+  const categoryKey = CATEGORY_LABEL[item.category];
+  const subtitle =
+    parts.join(" · ") ||
+    (categoryKey ? t(categoryKey) : folderLabel(item.folder));
 
   return (
     <>
@@ -148,7 +153,7 @@ function LibraryCardBody({
         {meta?.locked && (
           <span
             className="absolute bottom-0.5 right-0.5 rounded bg-black/60 p-0.5 text-white/75"
-            title="Locked — contents can't be read"
+            title={t("library.locked")}
           >
             <Lock className="size-3" />
           </span>
@@ -179,6 +184,7 @@ function buildSections(
   modType: ModType,
   entries: LibraryEntry[],
   search: string,
+  t: TFunc,
 ): Section[] {
   const q = search.trim().toLowerCase();
   const filtered = q
@@ -206,7 +212,7 @@ function buildSections(
       })
       .map((cat) => ({
         key: cat,
-        label: SECTION_LABEL[cat] ?? cat,
+        label: SECTION_LABEL[cat] ? t(SECTION_LABEL[cat]) : cat,
         items: byCat.get(cat)!,
       }));
   }
@@ -239,6 +245,7 @@ export default function Library({
   refreshKey,
   onChanged,
 }: LibraryProps) {
+  const t = useT();
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -288,8 +295,8 @@ export default function Library({
   );
 
   const sections = useMemo(
-    () => buildSections(modType, entries, search),
-    [modType, entries, search],
+    () => buildSections(modType, entries, search, t),
+    [modType, entries, search, t],
   );
 
   const visibleItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
@@ -330,7 +337,7 @@ export default function Library({
       await load();
       onChanged();
     } catch (e) {
-      toast.error("Couldn't move mod", { description: String(e) });
+      toast.error(t("library.moveFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -344,11 +351,11 @@ export default function Library({
       if (detail?.path === item.path) setDetail(null);
       await load();
       onChanged();
-      toast.success(`${displayName(item.name)} uninstalled`, {
-        description: "Moved to the Recycle Bin.",
+      toast.success(t("library.uninstalledOne", { name: displayName(item.name) }), {
+        description: t("library.movedToBin"),
       });
     } catch (e) {
-      toast.error("Couldn't uninstall", { description: String(e) });
+      toast.error(t("library.uninstallFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -373,12 +380,12 @@ export default function Library({
     onChanged();
     exitSelect();
     if (fail)
-      toast.error(`Uninstalled ${ok}, ${fail} failed`, {
-        description: "Some items couldn't be removed.",
+      toast.error(t("library.bulkUninstallPartial", { ok, fail }), {
+        description: t("library.someNotRemoved"),
       });
     else
-      toast.success(`${ok} item${ok === 1 ? "" : "s"} uninstalled`, {
-        description: "Moved to the Recycle Bin.",
+      toast.success(t("library.bulkUninstalled", { count: ok }), {
+        description: t("library.movedToBin"),
       });
     setBusy(false);
   };
@@ -400,14 +407,17 @@ export default function Library({
     await load();
     onChanged();
     exitSelect();
-    if (fail) toast.error(`Moved ${ok}, ${fail} failed`);
-    else toast.success(`Moved ${ok} item${ok === 1 ? "" : "s"} to ${folderLabel(toFolder)}`);
+    if (fail) toast.error(t("library.bulkMovePartial", { ok, fail }));
+    else
+      toast.success(
+        t("library.bulkMoved", { count: ok, folder: folderLabel(toFolder) }),
+      );
     setBusy(false);
   };
 
   const reveal = (item: LibraryEntry) =>
     revealInExplorer(item.path).catch((e) =>
-      toast.error("Couldn't open", { description: String(e) }),
+      toast.error(t("library.openFailed"), { description: String(e) }),
     );
 
   const rowActions = (item: LibraryEntry): RowAction[] => [
@@ -416,7 +426,7 @@ export default function Library({
           {
             key: "move",
             icon: FolderInput,
-            label: "Move to folder…",
+            label: t("library.moveToFolder"),
             onSelect: () => setMoveTarget(item),
           },
         ]
@@ -424,13 +434,13 @@ export default function Library({
     {
       key: "reveal",
       icon: FolderOpen,
-      label: "Show in Explorer",
+      label: t("library.showInExplorer"),
       onSelect: () => reveal(item),
     },
     {
       key: "uninstall",
       icon: Trash2,
-      label: "Uninstall…",
+      label: t("library.uninstallAction"),
       destructive: true,
       separatorBefore: true,
       onSelect: () => setUninstallTarget(item),
@@ -454,24 +464,23 @@ export default function Library({
         <>
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
         <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Library</h1>
-          <HelpHint
-            title="Library"
-            description="Your installed mods. Review what's installed and remove ones you no longer want."
-          />
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+            {t("nav.library")}
+          </h1>
+          <HelpHint title={t("nav.library")} description={t("library.help")} />
         </div>
         <Segmented
           value={modType.id}
           onChange={(id) => {
-            const next = MOD_TYPES.find((t) => t.id === id);
+            const next = MOD_TYPES.find((mt) => mt.id === id);
             if (next) onChangeType(next);
           }}
-          options={MOD_TYPES.map((t) => ({
-            value: t.id,
+          options={MOD_TYPES.map((mt) => ({
+            value: mt.id,
             label: (
               <span className="flex items-center gap-1.5">
-                {t.label}
-                {t.id === modType.id && (
+                {t(mt.label)}
+                {mt.id === modType.id && (
                   <span className="text-muted-foreground">{visibleCount}</span>
                 )}
               </span>
@@ -483,7 +492,7 @@ export default function Library({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search installed…"
+            placeholder={t("library.searchPlaceholder")}
             className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
           />
         </div>
@@ -493,10 +502,12 @@ export default function Library({
           onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
           disabled={loading}
         >
-          <ListChecks className="size-3.5" /> {selectMode ? "Done" : "Select"}
+          <ListChecks className="size-3.5" />{" "}
+          {selectMode ? t("common.done") : t("common.select")}
         </Button>
         <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} /> Rescan
+          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />{" "}
+          {t("locker.rescan")}
         </Button>
       </header>
 
@@ -507,13 +518,13 @@ export default function Library({
           </p>
         ) : loading ? (
           <p className="py-16 text-center text-[13px] text-muted-foreground">
-            Scanning your library…
+            {t("library.scanning")}
           </p>
         ) : sections.length === 0 ? (
           <p className="py-16 text-center text-[13px] text-muted-foreground">
             {entries.length === 0
-              ? `No ${modType.label.toLowerCase()} installed yet — head to Browse and add one.`
-              : "No matches."}
+              ? t("library.empty", { type: t(modType.labelInline) })
+              : t("library.noMatches")}
           </p>
         ) : (
           <div className="flex flex-col gap-6">
@@ -563,8 +574,8 @@ export default function Library({
                             <LibraryCardBody item={item} typeIcon={Icon} />
                             {!selectMode && canView3d && (
                               <button
-                                title="Quick 3D view"
-                                aria-label="Quick 3D view"
+                                title={t("library.quick3d")}
+                                aria-label={t("library.quick3d")}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setView3d(item);
@@ -632,10 +643,10 @@ export default function Library({
             disabled={visibleCount === 0}
             className="cursor-default text-[12px] font-semibold text-primary transition-colors hover:brightness-110 disabled:opacity-40"
           >
-            {allSelected ? "Select none" : "Select all"}
+            {allSelected ? t("library.selectNone") : t("common.selectAll")}
           </button>
           <span className="text-[12.5px] text-muted-foreground">
-            {selected.size} selected
+            {t("browse.selectedCount", { count: selected.size })}
           </span>
           <div className="ml-auto flex items-center gap-2">
             <Button
@@ -644,7 +655,7 @@ export default function Library({
               disabled={selectedMovable.length === 0 || busy}
               onClick={() => setBulkMoveOpen(true)}
             >
-              <FolderInput className="size-3.5" /> Move
+              <FolderInput className="size-3.5" /> {t("library.move")}
               {selectedMovable.length > 0 ? ` (${selectedMovable.length})` : ""}
             </Button>
             <Button
@@ -653,7 +664,7 @@ export default function Library({
               disabled={selected.size === 0 || busy}
               onClick={() => setBulkUninstallOpen(true)}
             >
-              <Trash2 className="size-3.5" /> Uninstall
+              <Trash2 className="size-3.5" /> {t("library.uninstall")}
             </Button>
           </div>
         </div>
@@ -675,7 +686,7 @@ export default function Library({
 
       <MoveDialog
         open={Boolean(moveTarget)}
-        title="Move to folder"
+        title={t("library.moveDialogTitle")}
         subtitle={moveTarget ? displayName(moveTarget.name) : undefined}
         folders={allFolders}
         modType={modType}
@@ -686,8 +697,8 @@ export default function Library({
 
       <MoveDialog
         open={bulkMoveOpen}
-        title={`Move ${selectedMovable.length} item${selectedMovable.length === 1 ? "" : "s"}`}
-        subtitle="Choose a destination folder"
+        title={t("library.moveCount", { count: selectedMovable.length })}
+        subtitle={t("library.chooseDestination")}
         folders={allFolders}
         modType={modType}
         onClose={() => setBulkMoveOpen(false)}
@@ -701,16 +712,16 @@ export default function Library({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Uninstall {selected.size} item{selected.size === 1 ? "" : "s"}?
+              {t("library.confirmBulkUninstall", { count: selected.size })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Each item is moved to the Recycle Bin — you can restore them from there.
+              {t("library.confirmBulkUninstallBody")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={doBulkUninstall}>
-              Uninstall {selected.size}
+              {t("library.uninstallCount", { count: selected.size })}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -723,19 +734,21 @@ export default function Library({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Uninstall {uninstallTarget && displayName(uninstallTarget.name)}?
+              {t("library.confirmUninstall", {
+                name: uninstallTarget ? displayName(uninstallTarget.name) : "",
+              })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              The item is moved to the Recycle Bin — you can restore it from there.
+              {t("library.confirmUninstallBody")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => uninstallTarget && doUninstall(uninstallTarget)}
             >
-              Uninstall
+              {t("library.uninstall")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -768,6 +781,7 @@ function MoveDialog({
   onClose: () => void;
   onPick: (folder: string) => void;
 }) {
+  const t = useT();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
 
@@ -811,7 +825,9 @@ function MoveDialog({
                 if (e.key === "Escape") setCreating(false);
               }}
               placeholder={
-                modType.id === "bikes" ? "KTM450/paints" : "New folder name"
+                modType.id === "bikes"
+                  ? "KTM450/paints"
+                  : t("library.newFolderName")
               }
               className="rounded-md bg-transparent px-3 py-2 text-[12.5px] placeholder:text-faint focus:outline-none"
             />
@@ -820,13 +836,13 @@ function MoveDialog({
               onClick={() => setCreating(true)}
               className="flex cursor-default items-center gap-1.5 rounded-md px-3 py-2 text-[12.5px] font-semibold text-primary hover:bg-foreground/[0.06]"
             >
-              <Plus className="size-3.5" /> New folder…
+              <Plus className="size-3.5" /> {t("library.newFolder")}
             </button>
           )}
         </div>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           {creating && (
             <Button
@@ -834,7 +850,7 @@ function MoveDialog({
               disabled={!name.trim()}
               onClick={() => name.trim() && onPick(name.trim())}
             >
-              Create &amp; move
+              {t("library.createAndMove")}
             </Button>
           )}
         </DialogFooter>

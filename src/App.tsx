@@ -18,6 +18,7 @@ import {
   setIntroSeen,
 } from "./api/mods";
 import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
+import { useI18n } from "./i18n/context";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config } from "./types";
@@ -33,6 +34,7 @@ import type { Config } from "./types";
 const WELCOME_SEEN_KEY = "mxb:welcomeSeen:v1";
 
 const App = () => {
+  const { t } = useI18n();
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<Config | null>(null);
   // Whether this build can decode real bike geometry (optional local module). Fixed
@@ -83,15 +85,14 @@ const App = () => {
   // moment they alt-tab to find out why nothing happened.
   useEffect(() => {
     const unlisten = onOverlayFullscreenBlocked(() =>
-      toast.warning("The overlay can't show over exclusive fullscreen", {
-        description:
-          "Set MX Bikes to borderless or windowed in Options → Video, then try the shortcut again.",
+      toast.warning(t("overlay.fullscreenBlocked"), {
+        description: t("overlay.fullscreenBlockedDesc"),
       }),
     );
     return () => {
       void unlisten.then((off) => off()).catch(() => {});
     };
-  }, []);
+  }, [t]);
 
   // Block the webview's browser refresh/find shortcuts.
   useEffect(() => {

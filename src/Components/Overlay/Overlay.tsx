@@ -8,6 +8,8 @@ import Locker from "../Locker/Locker";
 import ModDetail from "../ModDetail/ModDetail";
 import Presets from "../Presets/Presets";
 import { ThemeProvider } from "../../Context/Theme";
+import { useI18n } from "../../i18n/context";
+import type { TKey } from "../../i18n/core";
 import { FrostmodProvider } from "../../Context/Frostmod";
 import { ConfigContext } from "../../Context/Config";
 import { InstallProvider } from "../../Context/Install";
@@ -36,10 +38,10 @@ import type { Config } from "../../types";
 
 type OverlayTab = "presets" | "locker" | "browse";
 
-const TABS: { id: OverlayTab; label: string; icon: typeof Home }[] = [
-  { id: "presets", label: "Presets", icon: Shirt },
-  { id: "locker", label: "Locker", icon: Bike },
-  { id: "browse", label: "Browse", icon: Home },
+const TABS: { id: OverlayTab; label: TKey; icon: typeof Home }[] = [
+  { id: "presets", label: "nav.presets", icon: Shirt },
+  { id: "locker", label: "nav.locker", icon: Bike },
+  { id: "browse", label: "nav.browse", icon: Home },
 ];
 
 /** Human-readable form of a Tauri accelerator, for the header hint. */
@@ -54,6 +56,7 @@ function prettyHotkey(accelerator: string) {
 }
 
 export default function Overlay() {
+  const { t } = useI18n();
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<Config | null>(null);
   const [bikePreview, setBikePreview] = useState(false);
@@ -152,7 +155,7 @@ export default function Overlay() {
                       )}
                     >
                       <Icon className="size-3.5" />
-                      <span>{label}</span>
+                      <span>{t(label)}</span>
                     </button>
                   ))}
                 </nav>
@@ -163,12 +166,12 @@ export default function Overlay() {
                       data-tauri-drag-region
                       className="hidden text-[11px] text-muted-foreground sm:inline"
                     >
-                      {prettyHotkey(hotkey)} to close
+                      {t("overlay.toClose", { hotkey: prettyHotkey(hotkey) })}
                     </span>
                   )}
                   <button
                     onClick={dismiss}
-                    title="Close overlay (Esc)"
+                    title={t("overlay.closeTitle")}
                     className="grid size-8 cursor-default place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
                   >
                     <X className="size-4" />
@@ -209,8 +212,7 @@ export default function Overlay() {
                     // No config means the player never finished first-run setup. That
                     // wizard belongs in the main window, not over a running game.
                     <div className="grid flex-1 place-items-center px-8 text-center text-[13px] text-muted-foreground">
-                      Finish setting up MXB App in its main window first — it needs to
-                      know where your MX Bikes folder is.
+                      {t("overlay.needsSetup")}
                     </div>
                   ))}
               </main>

@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import type { EdfNode, PaintTexture, RiderPart } from "../../types";
 import { ErrorBoundary } from "../ErrorBoundary";
+import { useT } from "../../i18n/context";
 
 export type ViewerMode = "bike" | "rider";
 
@@ -727,10 +728,11 @@ function CameraRig({ solo }: { solo: boolean }) {
 // Legend for the OrbitControls gestures below — the canvas gives no other clue
 // that it's draggable. Kept muted so it reads as chrome, never competing with the model.
 function ControlsHint() {
+  const t = useT();
   const items = [
-    { Icon: Rotate3d, label: "Drag to rotate" },
-    { Icon: ZoomIn, label: "Scroll to zoom" },
-    { Icon: Move, label: "Right-drag to pan" },
+    { Icon: Rotate3d, label: t("viewer.dragToRotate") },
+    { Icon: ZoomIn, label: t("viewer.scrollToZoom") },
+    { Icon: Move, label: t("viewer.rightDragToPan") },
   ];
   return (
     <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45">

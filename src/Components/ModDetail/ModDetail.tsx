@@ -15,6 +15,7 @@ import "swiper/css/navigation";
 import "swiper/css/pagination";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
+import { useT, type TKey } from "../../i18n/context";
 import {
   buildDestinations,
   buildRiderDestinations,
@@ -65,12 +66,12 @@ interface ModDetailProps {
   onBack: () => void;
 }
 
-const CHAIN: { key: string; label: string }[] = [
-  { key: "resolving", label: "Resolve" },
-  { key: "downloading", label: "Download" },
-  { key: "extracting", label: "Extract" },
-  { key: "placing", label: "Place" },
-  { key: "reload", label: "Reload" },
+const CHAIN: { key: string; label: TKey }[] = [
+  { key: "resolving", label: "modDetail.stageResolve" },
+  { key: "downloading", label: "modDetail.stageDownload" },
+  { key: "extracting", label: "modDetail.stageExtract" },
+  { key: "placing", label: "modDetail.stagePlace" },
+  { key: "reload", label: "modDetail.stageReload" },
 ];
 
 function stageIndex(stage: InstallStage): number {
@@ -97,6 +98,7 @@ export default function ModDetail({
   installed,
   onBack,
 }: ModDetailProps) {
+  const t = useT();
   const livery = isLiveryContext(modType, categoryId);
   const sound = isSoundContext(modType, categoryId);
   // For rider kit/gloves, which profile sub-folder to target (`null` for gear paints).
@@ -212,7 +214,9 @@ export default function ModDetail({
   const chooseAndImport = async () => {
     const picked = await pickFile({
       multiple: false,
-      filters: [{ name: "Mod files", extensions: ["pkz", "zip", "rar", "7z"] }],
+      filters: [
+        { name: t("modDetail.modFiles"), extensions: ["pkz", "zip", "rar", "7z"] },
+      ],
     });
     if (typeof picked !== "string" || !detail) return;
     setBlocked(null);
@@ -375,10 +379,10 @@ export default function ModDetail({
                     className="flex-1"
                     onClick={() => setDialogOpen(true)}
                   >
-                    Try again
+                    {t("common.tryAgain")}
                   </Button>
                   <Button size="sm" variant="outline" onClick={copyError}>
-                    <Copy className="size-3.5" /> {copied ? "Copied" : "Copy"}
+                    <Copy className="size-3.5" /> {copied ? t("modDetail.copied") : t("modDetail.copy")}
                   </Button>
                 </div>
               </div>
@@ -395,18 +399,18 @@ export default function ModDetail({
             ) : primary ? (
               <>
                 <Button className="h-11 w-full text-[14px]" onClick={openInstall}>
-                  {isInstalled ? "Reinstall" : "Add to Library"}
+                  {isInstalled ? t("browse.reinstall") : t("modDetail.addToLibrary")}
                 </Button>
-                <Row label="Host" value={primary.host} />
+                <Row label={t("modDetail.host")} value={primary.host} />
                 <Row
-                  label="Installs to"
+                  label={t("modDetail.installsTo")}
                   value={`${modType.installSubpath.replace(/\//g, "\\")}\\`}
                   mono
                 />
               </>
             ) : (
               <p className="text-[12.5px] text-muted-foreground">
-                No download link was found on this page — open it on mxb-mods.com.
+                {t("modDetail.noDownloadLink")}
               </p>
             )}
           </div>
@@ -415,19 +419,25 @@ export default function ModDetail({
           <div className="flex items-center gap-2.5 rounded-[10px] border border-success/25 bg-success/[0.06] px-3 py-2.5">
             <span className="size-[7px] flex-none rounded-full bg-success" />
             <span className="text-[12px] text-success/90">
-              FrostMod will hot-reload the {modType.id === "rider" ? "rider" : modType.id === "bikes" ? "bike" : "track"} list
-              when this finishes.
+              {t("modDetail.frostmodHint", {
+                kind:
+                  modType.id === "rider"
+                    ? t("modDetail.kindRider")
+                    : modType.id === "bikes"
+                      ? t("modDetail.kindBike")
+                      : t("modDetail.kindTrack"),
+              })}
             </span>
           </div>
 
           {/* details */}
           <div className="flex flex-col gap-2.5 rounded-xl border border-white/[0.07] bg-card px-4 py-3.5">
             <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
-              Details
+              {t("modDetail.details")}
             </span>
-            {format && <Row label="Format" value={format} mono />}
-            {mirrorNames && <Row label="Mirrors" value={mirrorNames} />}
-            <Row label="Type" value={modType.label} />
+            {format && <Row label={t("modDetail.format")} value={format} mono />}
+            {mirrorNames && <Row label={t("modDetail.mirrors")} value={mirrorNames} />}
+            <Row label={t("modDetail.type")} value={t(modType.label)} />
           </div>
         </div>
       </div>
@@ -450,21 +460,22 @@ export default function ModDetail({
       <AlertDialog open={confirmReinstall} onOpenChange={setConfirmReinstall}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reinstall “{detail.title}”?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("browse.reinstallOne", { title: detail.title })}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This mod is already in your library. Reinstalling downloads it again
-              and overwrites the installed files.
+              {t("browse.reinstallOneBody")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setConfirmReinstall(false);
                 setDialogOpen(true);
               }}
             >
-              Reinstall
+              {t("browse.reinstall")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -484,16 +495,17 @@ function Breadcrumb({
   onBack: () => void;
   link: string | null;
 }) {
+  const t = useT();
   return (
     <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
       <button
         onClick={onBack}
         className="flex cursor-default items-center gap-1 font-semibold text-primary hover:brightness-110"
       >
-        <ArrowLeft className="size-3.5" /> Browse
+        <ArrowLeft className="size-3.5" /> {t("nav.browse")}
       </button>
       <span className="text-faint">/</span>
-      <span>{modType.label}</span>
+      <span>{t(modType.label)}</span>
       <span className="text-faint">/</span>
       <span className="truncate text-foreground/85">{title}</span>
       {link && (
@@ -501,7 +513,7 @@ function Breadcrumb({
           onClick={() => open(link)}
           className="ml-auto flex cursor-default items-center gap-1 text-[12px] text-primary hover:brightness-110"
         >
-          View on mxb-mods.com <ExternalLink className="size-3" />
+          {t("modDetail.viewOnSite")} <ExternalLink className="size-3" />
         </button>
       )}
     </div>
@@ -545,17 +557,18 @@ function InstallProgress({
   received?: number;
   total?: number;
 }) {
+  const t = useT();
   const mb = (n?: number) => (n ? Math.round(n / 1e6) : 0);
   const label =
     stage === "done"
-      ? "Added to your library"
+      ? t("modDetail.addedToLibrary")
       : stage === "downloading"
-        ? "Downloading…"
+        ? t("update.downloading")
         : stage === "extracting"
-          ? "Extracting…"
+          ? t("modDetail.extracting")
           : stage === "placing"
-            ? "Adding to library…"
-            : "Resolving download…";
+            ? t("modDetail.addingToLibrary")
+            : t("modDetail.resolving");
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
@@ -614,10 +627,13 @@ function BlockedHost({
   onOpen: () => void;
   onChoose: () => void;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-3.5">
       <div className="flex flex-col gap-1">
-        <span className="text-[14px] font-bold">Finish in your browser</span>
+        <span className="text-[14px] font-bold">
+          {t("modDetail.finishInBrowser")}
+        </span>
         <span className="text-[12px] leading-relaxed text-muted-foreground">
           {host} only allows browser downloads. Download it, then point MXB App at
           the file to finish the install.
@@ -632,15 +648,15 @@ function BlockedHost({
         <div className="flex flex-1 flex-col gap-3.5">
           <div className="flex flex-col gap-2">
             <span className="text-[12.5px] text-foreground/85">
-              Download from {host}
+              {t("modDetail.downloadFromHost", { host })}
             </span>
             <Button size="sm" className="w-full" onClick={onOpen}>
-              Open {host} <ExternalLink className="size-3.5" />
+              {t("modDetail.openHost", { host })} <ExternalLink className="size-3.5" />
             </Button>
           </div>
           <div className="flex flex-col gap-2">
             <span className="text-[12.5px] text-muted-foreground">
-              Then add the file
+              {t("modDetail.thenAddFile")}
             </span>
             <button
               onClick={onChoose}
@@ -648,7 +664,7 @@ function BlockedHost({
             >
               <FileDown className="size-4 text-muted-foreground" />
               <span className="text-[12px] font-semibold text-primary">
-                Choose the downloaded file
+                {t("modDetail.chooseDownloaded")}
               </span>
             </button>
           </div>
