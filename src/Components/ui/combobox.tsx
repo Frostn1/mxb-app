@@ -25,7 +25,8 @@ interface ComboboxProps {
 /**
  * A searchable **creatable** combobox: click the trigger to see every option, type
  * to filter, and — since the value can be a free-text font or a captured mod name not
- * in the list — commit whatever you typed via the "Use …" row. Built on the shadcn
+ * in the list — commit whatever you typed via the "Use …" row. The first row clears the
+ * slot back to the empty/stock value, which no amount of typing can produce. Built on the shadcn
  * Popover + Command (cmdk) primitives. cmdk lowercases the value it hands `onSelect`,
  * so each item commits its own original-cased string from the closure instead.
  */
@@ -85,6 +86,22 @@ export function Combobox({
           <CommandList>
             {!canCreate && <CommandEmpty>No matches.</CommandEmpty>}
             <CommandGroup>
+              {/*
+                Empty is a real value — it's what the game writes for an unmodded slot,
+                and the trigger already renders it as the placeholder. Without this row
+                a slot is one-way: once set, nothing typeable commits "" again.
+                The extra words in `value` are just cmdk filter fodder.
+              */}
+              <CommandItem
+                value={`__stock__ ${placeholder} none clear`}
+                onSelect={() => commit("")}
+                className="text-[12.5px]"
+              >
+                <Check
+                  className={cn("mr-2 h-3.5 w-3.5 flex-none", !value ? "opacity-100" : "opacity-0")}
+                />
+                <span className="truncate text-muted-foreground">{placeholder} (none)</span>
+              </CommandItem>
               {options.map((o) => (
                 <CommandItem
                   key={o}
