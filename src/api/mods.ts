@@ -1019,3 +1019,60 @@ export function onPresetBundleProgress(
 export function appPlatform(): Promise<string> {
   return invoke<string>("app_platform");
 }
+
+// ── Dedicated servers ────────────────────────────────────────────────────────
+
+/** A dedicated server the player administers, as stored in the app config. */
+export interface ServerRef {
+  id: string;
+  name: string;
+  /** Base URL of the `mxb-agent` on the host, e.g. `http://203.0.113.10:8787`. */
+  url: string;
+  /** Bearer token from that host's `agent.json`. */
+  token: string;
+}
+
+/** What `mxb-agent` reports about a server. */
+export interface ServerStatus {
+  game: {
+    running: boolean;
+    pid: number | null;
+    uptime_secs: number;
+    /** Times the agent brought the game back after it exited on its own. */
+    restarts: number;
+  };
+  port: number;
+  server: {
+    name: string | null;
+    track: string | null;
+    maxClients: string | null;
+  };
+}
+
+export type ServerAction = "start" | "stop" | "restart";
+
+export function listServers(): Promise<ServerRef[]> {
+  return invoke<ServerRef[]>("list_servers");
+}
+
+/** Replace the whole saved list — the UI owns add/edit/remove and ordering. */
+export function saveServers(servers: ServerRef[]): Promise<void> {
+  return invoke<void>("save_servers", { servers });
+}
+
+/** Commands take an id, not a token: the frontend never hands back a secret it was given. */
+export function serverStatus(id: string): Promise<ServerStatus> {
+  return invoke<ServerStatus>("server_status", { id });
+}
+
+export function serverAction(id: string, action: ServerAction): Promise<unknown> {
+  return invoke<unknown>("server_action", { id, action });
+}
+
+/** Change server settings. The agent restarts the game, which reads its `.ini` only at startup. */
+export function serverSetConfig(
+  id: string,
+  patch: { track?: string; name?: string; maxClients?: number },
+): Promise<unknown> {
+  return invoke<unknown>("server_set_config", { id, patch });
+}

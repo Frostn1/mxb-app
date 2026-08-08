@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-08-08 — run a dedicated server from the app
+
+### Added
+- **A Servers tab that manages the dedicated servers you run.** Start, stop and restart the
+  game on a host, see whether it's up, how long it's been up, how many times it came back on
+  its own, and switch the track — all without an RDP session or a shell. Each server is added
+  with its agent address and token, and its status refreshes while the tab is open.
+
+- **`mxb-agent`, a supervisor that runs on the game host** (`server-agent/`). It **owns** the
+  `mxbikes.exe` process rather than managing whatever happens to be running, and that
+  ownership is what makes the rest work: exit detection comes from the child handle instead
+  of polling the process table, so a server that crashes is **brought back automatically**;
+  "restart" isn't a race between a kill and someone else's respawn; and a reboot that starts
+  the agent starts the game with it. A deliberate stop is suppressed, so the watcher doesn't
+  fight you by reviving a server you meant to shut down.
+
+  The app talks to this agent, never to a cloud provider — a desktop app that shipped
+  provider credentials could create infrastructure on any machine it ran on. What it holds
+  instead is a bearer token for one server you already administer.
+
+  Settings changes patch the server's `.ini` **in place**: the one operation that matters is
+  changing a single key while leaving every other byte alone, which is what general INI
+  parsers are worst at — a parse/serialise round-trip reorders keys and drops comments, and
+  this is a file server owners edit by hand. Only `track`, `name` and `maxclient` are exposed,
+  values containing newlines are rejected so a caller can't inject unrelated keys, and the
+  game is restarted afterwards because it reads its `.ini` only at startup.
+
+  Note the agent speaks plain HTTP, so its token crosses the network in clear. Terminate TLS
+  in front of it, or keep it on a private network, before exposing it to the open internet.
+
 ## 2026-08-08 — v0.7.1 — Browse works for blocked players, the model-swap crash is gone, and the Rider preview wears a real rider
 
 ### Added

@@ -49,6 +49,7 @@ export const es: Translation = {
   "nav.locker": "Taquilla",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
+  "nav.servers": "Servidores",
   "nav.manage": "Gestionar",
   "nav.settings": "Ajustes",
 
@@ -538,6 +539,29 @@ export const es: Translation = {
   "game.alreadyRunning": "MX Bikes ya está en ejecución",
   "game.launching": "Iniciando MX Bikes…",
   "game.launchFailed": "No se pudo iniciar MX Bikes",
+
+  "servers.title": "Servidores",
+  "servers.subtitle":
+    "Gestiona los servidores dedicados que tengas. Cada uno necesita el agente de MXB instalado.",
+  "servers.empty": "Aún no hay servidores. Añade uno para gestionarlo desde aquí.",
+  "servers.add": "Añadir un servidor",
+  "servers.remove": "Quitar este servidor",
+  "servers.namePlaceholder": "Nombre del servidor",
+  "servers.tokenPlaceholder": "Token del agente",
+  "servers.track": "Pista",
+  "servers.slots": "Plazas",
+  "servers.uptime": "Tiempo activo",
+  "servers.restarts": "Reinicios",
+  "servers.stopped": "Parado",
+  "servers.start": "Iniciar",
+  "servers.stop": "Parar",
+  "servers.restart": "Reiniciar",
+  "servers.setTrack": "Cambiar pista",
+  "servers.trackPlaceholder": "ID de la pista",
+  "servers.actionDone": "Hecho",
+  "servers.actionFailed": "No funcionó",
+  "servers.trackChanged": "Pista cambiada a {{track}} — el servidor se reinició.",
+  "servers.saveFailed": "No se pudo guardar tu lista de servidores",
 
   // ── Cadenas que el primer barrido no vio (JSX multilínea) ─────────────────
   "libraryDetail.noEmbedded": "No se encontraron detalles incrustados para este elemento.",

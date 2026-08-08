@@ -41,6 +41,10 @@ pub struct AppConfig {
     /// A *fresh* install is stamped with the running version at setup (see
     /// `create_config`), because nothing in a version you just installed is new to you.
     pub seen_version: String,
+    /// Dedicated servers this player administers, each with its agent address and bearer
+    /// token. Stored here in clear, like the rest of the config — worth knowing before
+    /// adding a server whose token protects anything beyond the game process it runs.
+    pub servers: Vec<crate::servers::ServerRef>,
 }
 
 /// Toggle combo used until the player picks another one.
@@ -75,6 +79,7 @@ impl Default for AppConfig {
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
             seen_version: String::new(),
+            servers: Vec::new(),
         }
     }
 }

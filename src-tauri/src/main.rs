@@ -25,6 +25,7 @@ mod pkz;
 #[cfg(sidecar)]
 mod sidecar;
 mod presets;
+mod servers;
 mod shop_session;
 mod soundmods;
 mod upload;
@@ -2349,6 +2350,55 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// The dedicated servers this player administers.
+#[tauri::command]
+fn list_servers(app: tauri::AppHandle) -> Vec<servers::ServerRef> {
+    config::load_or_detect(&app).unwrap_or_default().servers
+}
+
+/// Replace the saved server list. The UI owns add/edit/remove and sends the whole list,
+/// which keeps ordering and identity in one place rather than split across three commands.
+#[tauri::command]
+fn save_servers(app: tauri::AppHandle, servers: Vec<servers::ServerRef>) -> Result<(), String> {
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.servers = servers;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Look up one saved server by id, so the commands below take an id rather than having the
+/// frontend hand back a token it was given.
+fn server_by_id(app: &tauri::AppHandle, id: &str) -> Result<servers::ServerRef, String> {
+    config::load_or_detect(app)
+        .unwrap_or_default()
+        .servers
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| "That server isn't in your list any more.".to_string())
+}
+
+#[tauri::command]
+async fn server_status(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, String> {
+    servers::status(&server_by_id(&app, &id)?).await
+}
+
+#[tauri::command]
+async fn server_action(
+    app: tauri::AppHandle,
+    id: String,
+    action: servers::Action,
+) -> Result<serde_json::Value, String> {
+    servers::act(&server_by_id(&app, &id)?, action).await
+}
+
+#[tauri::command]
+async fn server_set_config(
+    app: tauri::AppHandle,
+    id: String,
+    patch: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    servers::set_config(&server_by_id(&app, &id)?, patch).await
+}
+
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
 #[tauri::command]
 fn game_running() -> bool {
@@ -3143,6 +3193,11 @@ fn main() {
             frostmod_start,
             frostmod_stop,
             launch_game,
+            list_servers,
+            save_servers,
+            server_status,
+            server_action,
+            server_set_config,
             game_running,
             shop_login,
             shop_status,

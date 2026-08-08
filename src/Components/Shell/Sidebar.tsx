@@ -11,6 +11,7 @@ import {
   Loader2,
   Gamepad2,
   SlidersHorizontal,
+  Server as ServerIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ export type DashboardView =
   | "locker"
   | "presets"
   | "rider"
+  | "servers"
   | "manage"
   | "settings";
 
@@ -43,6 +45,7 @@ const NAV: { id: DashboardView; label: TKey; icon: typeof Home }[] = [
   { id: "locker", label: "nav.locker", icon: Bike },
   { id: "presets", label: "nav.presets", icon: Shirt },
   { id: "rider", label: "nav.rider", icon: User },
+  { id: "servers", label: "nav.servers", icon: ServerIcon },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
 ];
 

@@ -49,6 +49,7 @@ export const it: Translation = {
   "nav.locker": "Armadietto",
   "nav.presets": "Preset",
   "nav.rider": "Pilota",
+  "nav.servers": "Server",
   "nav.manage": "Gestisci",
   "nav.settings": "Impostazioni",
 
@@ -532,6 +533,29 @@ export const it: Translation = {
   "game.alreadyRunning": "MX Bikes è già in esecuzione",
   "game.launching": "Avvio di MX Bikes…",
   "game.launchFailed": "Impossibile avviare MX Bikes",
+
+  "servers.title": "Server",
+  "servers.subtitle":
+    "Gestisci i server dedicati che ospiti. Su ognuno serve l'agent MXB installato.",
+  "servers.empty": "Ancora nessun server. Aggiungine uno per gestirlo da qui.",
+  "servers.add": "Aggiungi un server",
+  "servers.remove": "Rimuovi questo server",
+  "servers.namePlaceholder": "Nome del server",
+  "servers.tokenPlaceholder": "Token dell'agent",
+  "servers.track": "Pista",
+  "servers.slots": "Posti",
+  "servers.uptime": "Attivo da",
+  "servers.restarts": "Riavvii",
+  "servers.stopped": "Fermo",
+  "servers.start": "Avvia",
+  "servers.stop": "Ferma",
+  "servers.restart": "Riavvia",
+  "servers.setTrack": "Imposta pista",
+  "servers.trackPlaceholder": "ID pista",
+  "servers.actionDone": "Fatto",
+  "servers.actionFailed": "Non ha funzionato",
+  "servers.trackChanged": "Pista impostata su {{track}} — il server è stato riavviato.",
+  "servers.saveFailed": "Impossibile salvare l'elenco dei server",
 
   // ── Stringhe sfuggite alla prima scansione (JSX su più righe) ──────────────
   "libraryDetail.noEmbedded": "Nessun dettaglio incorporato trovato per questo elemento.",

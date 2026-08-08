@@ -54,6 +54,7 @@ export const de: Translation = {
   "nav.locker": "Spind",
   "nav.presets": "Presets",
   "nav.rider": "Fahrer",
+  "nav.servers": "Server",
   "nav.manage": "Verwalten",
   "nav.settings": "Einstellungen",
 
@@ -545,6 +546,29 @@ export const de: Translation = {
   "game.alreadyRunning": "MX Bikes läuft bereits",
   "game.launching": "MX Bikes wird gestartet…",
   "game.launchFailed": "MX Bikes konnte nicht gestartet werden",
+
+  "servers.title": "Server",
+  "servers.subtitle":
+    "Verwalte deine eigenen Dedicated Server. Auf jedem muss der MXB-Agent installiert sein.",
+  "servers.empty": "Noch keine Server. Füge einen hinzu, um ihn von hier aus zu verwalten.",
+  "servers.add": "Server hinzufügen",
+  "servers.remove": "Diesen Server entfernen",
+  "servers.namePlaceholder": "Servername",
+  "servers.tokenPlaceholder": "Agent-Token",
+  "servers.track": "Strecke",
+  "servers.slots": "Plätze",
+  "servers.uptime": "Laufzeit",
+  "servers.restarts": "Neustarts",
+  "servers.stopped": "Gestoppt",
+  "servers.start": "Starten",
+  "servers.stop": "Stoppen",
+  "servers.restart": "Neu starten",
+  "servers.setTrack": "Strecke setzen",
+  "servers.trackPlaceholder": "Strecken-ID",
+  "servers.actionDone": "Erledigt",
+  "servers.actionFailed": "Das hat nicht geklappt",
+  "servers.trackChanged": "Strecke auf {{track}} gesetzt — der Server wurde neu gestartet.",
+  "servers.saveFailed": "Deine Serverliste konnte nicht gespeichert werden",
 
   // ── Vom ersten Durchlauf übersehene Strings (mehrzeiliges JSX) ─────────────
   "libraryDetail.noEmbedded": "Für dieses Element wurden keine eingebetteten Details gefunden.",

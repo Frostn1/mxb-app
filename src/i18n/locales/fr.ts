@@ -51,6 +51,7 @@ export const fr: Translation = {
   "nav.locker": "Casier",
   "nav.presets": "Presets",
   "nav.rider": "Pilote",
+  "nav.servers": "Serveurs",
   "nav.manage": "Gérer",
   "nav.settings": "Réglages",
 
@@ -542,6 +543,29 @@ export const fr: Translation = {
   "game.alreadyRunning": "MX Bikes est déjà en cours d'exécution",
   "game.launching": "Lancement de MX Bikes…",
   "game.launchFailed": "Impossible de lancer MX Bikes",
+
+  "servers.title": "Serveurs",
+  "servers.subtitle":
+    "Gérez les serveurs dédiés que vous hébergez. Chacun doit avoir l'agent MXB installé.",
+  "servers.empty": "Aucun serveur pour l'instant. Ajoutez-en un pour le gérer d'ici.",
+  "servers.add": "Ajouter un serveur",
+  "servers.remove": "Retirer ce serveur",
+  "servers.namePlaceholder": "Nom du serveur",
+  "servers.tokenPlaceholder": "Jeton de l'agent",
+  "servers.track": "Circuit",
+  "servers.slots": "Places",
+  "servers.uptime": "Actif depuis",
+  "servers.restarts": "Redémarrages",
+  "servers.stopped": "Arrêté",
+  "servers.start": "Démarrer",
+  "servers.stop": "Arrêter",
+  "servers.restart": "Redémarrer",
+  "servers.setTrack": "Changer de circuit",
+  "servers.trackPlaceholder": "ID du circuit",
+  "servers.actionDone": "C'est fait",
+  "servers.actionFailed": "Ça n'a pas fonctionné",
+  "servers.trackChanged": "Circuit réglé sur {{track}} — le serveur a redémarré.",
+  "servers.saveFailed": "Impossible d'enregistrer votre liste de serveurs",
 
   // ── Chaînes manquées par le premier balayage (JSX multi-lignes) ────────────
   "libraryDetail.noEmbedded": "Aucun détail intégré n'a été trouvé pour cet élément.",

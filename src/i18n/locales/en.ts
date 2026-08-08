@@ -48,6 +48,7 @@ export const en = {
   "nav.locker": "Locker",
   "nav.presets": "Presets",
   "nav.rider": "Rider",
+  "nav.servers": "Servers",
   "nav.manage": "Manage",
   "nav.settings": "Settings",
 
@@ -517,6 +518,29 @@ export const en = {
   "game.alreadyRunning": "MX Bikes is already running",
   "game.launching": "Launching MX Bikes…",
   "game.launchFailed": "Couldn't launch MX Bikes",
+
+  "servers.title": "Servers",
+  "servers.subtitle":
+    "Manage dedicated servers you run. Each one needs the MXB agent installed on its host.",
+  "servers.empty": "No servers yet. Add one to manage it from here.",
+  "servers.add": "Add a server",
+  "servers.remove": "Remove this server",
+  "servers.namePlaceholder": "Server name",
+  "servers.tokenPlaceholder": "Agent token",
+  "servers.track": "Track",
+  "servers.slots": "Slots",
+  "servers.uptime": "Uptime",
+  "servers.restarts": "Restarts",
+  "servers.stopped": "Stopped",
+  "servers.start": "Start",
+  "servers.stop": "Stop",
+  "servers.restart": "Restart",
+  "servers.setTrack": "Set track",
+  "servers.trackPlaceholder": "Track id",
+  "servers.actionDone": "Done",
+  "servers.actionFailed": "That didn't work",
+  "servers.trackChanged": "Track set to {{track}} — the server restarted.",
+  "servers.saveFailed": "Couldn't save your server list",
 
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",
