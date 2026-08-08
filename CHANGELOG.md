@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-08 — v0.8.0-beta.1 — everyone on the server finally looks right
+## 2026-08-08 — everyone on the server finally looks right
 
 ### Added
 - **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
