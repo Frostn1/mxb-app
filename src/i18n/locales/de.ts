@@ -54,6 +54,7 @@ export const de: Translation = {
   "nav.locker": "Spind",
   "nav.presets": "Presets",
   "nav.rider": "Fahrer",
+  "nav.servers": "Server",
   "nav.manage": "Verwalten",
   "nav.settings": "Einstellungen",
 
@@ -555,6 +556,58 @@ export const de: Translation = {
   "join.alreadyRunning":
     "Schließe zuerst MX Bikes — ein laufendes Spiel kann nicht zu einem Server geschickt werden.",
   "join.failed": "Diesem Server konnte nicht beigetreten werden",
+
+  "servers.title": "Server",
+  "servers.subtitle":
+    "Verwalte deine eigenen Dedicated Server. Auf jedem muss der MXB-Agent installiert sein.",
+  "servers.empty": "Noch keine Server. Füge einen hinzu, um ihn von hier aus zu verwalten.",
+  "servers.add": "Server hinzufügen",
+  "servers.remove": "Diesen Server entfernen",
+  "servers.namePlaceholder": "Servername",
+  "servers.tokenPlaceholder": "Agent-Token",
+  "servers.track": "Strecke",
+  "servers.slots": "Plätze",
+  "servers.uptime": "Laufzeit",
+  "servers.restarts": "Neustarts",
+  "servers.stopped": "Gestoppt",
+  "servers.start": "Starten",
+  "servers.stop": "Stoppen",
+  "servers.restart": "Neu starten",
+  "servers.setTrack": "Strecke setzen",
+  "servers.trackPlaceholder": "Strecken-ID",
+  "servers.actionDone": "Erledigt",
+  "servers.actionFailed": "Das hat nicht geklappt",
+  "servers.trackChanged": "Strecke auf {{track}} gesetzt — der Server wurde neu gestartet.",
+  "servers.saveFailed": "Deine Serverliste konnte nicht gespeichert werden",
+
+  "settings.experimental": "Experimentell",
+  "settings.experimentalServers": "Server und Paint-Sync",
+  "settings.experimentalServersDesc":
+    "Unfertig. Fügt den Server-Tab hinzu, lässt dich Dedicated Server betreiben und gleicht Paints ab, damit alle auf einem Server richtig aussehen.",
+  "settings.experimentalForced":
+    "Für diesen Lauf durch MXB_EXPERIMENTAL aktiviert — die Einstellung wirkt erst, wenn du die Variable entfernst.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Paint-Sync",
+  "sync.desc":
+    "MX Bikes überträgt Paints nie, also erscheinen andere Fahrer im Standard-Look, wenn du ihre Datei nicht schon hast. Veröffentliche deine und hol dir die der anderen.",
+  "sync.enroll": "Registrieren",
+  "sync.enrolled": "Registriert als {{name}}",
+  "sync.enrollFailed": "Registrierung fehlgeschlagen",
+  "sync.codePlaceholder": "Einladungscode",
+  "sync.riderNamePlaceholder": "Fahrername im Spiel",
+  "sync.riderNameHint":
+    "Muss exakt deinem Fahrernamen in MX Bikes entsprechen — daran erkennen die Apps der anderen, welche Paints dir gehören.",
+  "sync.ridingAs": "Veröffentlicht als {{name}}",
+  "sync.pull": "Paints abgleichen",
+  "sync.setGuid": "GUID speichern",
+  "sync.guidPlaceholder": "Deine MX-Bikes-GUID",
+  "sync.guidHint":
+    "Deine MX-Bikes-GUID (optional). Sie identifiziert dich auch nach einer Namensänderung, und der Server protokolliert sie bei jeder Verbindung.",
+  "sync.guidSaved": "GUID gespeichert",
+  "sync.pulled": "{{installed}} von {{riders}} Fahrern installiert ({{had}} schon vorhanden)",
+  "sync.pullFailed": "Abgleich fehlgeschlagen",
+  "sync.rejected": "{{count}} mit unsicherem Ziel übersprungen",
 
   // ── Vom ersten Durchlauf übersehene Strings (mehrzeiliges JSX) ─────────────
   "libraryDetail.noEmbedded": "Für dieses Element wurden keine eingebetteten Details gefunden.",

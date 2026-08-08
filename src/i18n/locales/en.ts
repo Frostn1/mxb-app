@@ -48,6 +48,7 @@ export const en = {
   "nav.locker": "Locker",
   "nav.presets": "Presets",
   "nav.rider": "Rider",
+  "nav.servers": "Servers",
   "nav.manage": "Manage",
   "nav.settings": "Settings",
 
@@ -527,6 +528,58 @@ export const en = {
   "join.alreadyRunning":
     "Close MX Bikes first — a running game can't be sent to a server.",
   "join.failed": "Couldn't join that server",
+
+  "servers.title": "Servers",
+  "servers.subtitle":
+    "Manage dedicated servers you run. Each one needs the MXB agent installed on its host.",
+  "servers.empty": "No servers yet. Add one to manage it from here.",
+  "servers.add": "Add a server",
+  "servers.remove": "Remove this server",
+  "servers.namePlaceholder": "Server name",
+  "servers.tokenPlaceholder": "Agent token",
+  "servers.track": "Track",
+  "servers.slots": "Slots",
+  "servers.uptime": "Uptime",
+  "servers.restarts": "Restarts",
+  "servers.stopped": "Stopped",
+  "servers.start": "Start",
+  "servers.stop": "Stop",
+  "servers.restart": "Restart",
+  "servers.setTrack": "Set track",
+  "servers.trackPlaceholder": "Track id",
+  "servers.actionDone": "Done",
+  "servers.actionFailed": "That didn't work",
+  "servers.trackChanged": "Track set to {{track}} — the server restarted.",
+  "servers.saveFailed": "Couldn't save your server list",
+
+  "settings.experimental": "Experimental",
+  "settings.experimentalServers": "Servers and paint sync",
+  "settings.experimentalServersDesc":
+    "Unfinished. Adds the Servers tab, lets you run dedicated servers, and syncs paints so everyone on a server renders correctly.",
+  "settings.experimentalForced":
+    "Turned on for this run by MXB_EXPERIMENTAL — the setting has no effect until you unset it.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Paint sync",
+  "sync.desc":
+    "MX Bikes never sends paints, so other riders show up in default liveries unless you already have their exact file. Publish yours and pull back everyone else's.",
+  "sync.enroll": "Enrol",
+  "sync.enrolled": "Enrolled as {{name}}",
+  "sync.enrollFailed": "Couldn't enrol",
+  "sync.codePlaceholder": "Invite code",
+  "sync.riderNamePlaceholder": "In-game rider name",
+  "sync.riderNameHint":
+    "This has to match your rider name in MX Bikes exactly — it's how other players' apps know which paints are yours.",
+  "sync.ridingAs": "Publishing as {{name}}",
+  "sync.pull": "Sync paints",
+  "sync.setGuid": "Save GUID",
+  "sync.guidPlaceholder": "Your MX Bikes GUID",
+  "sync.guidHint":
+    "Your MX Bikes GUID (optional). It identifies you even if you change your rider name, and the server logs it whenever you connect.",
+  "sync.guidSaved": "GUID saved",
+  "sync.pulled": "Installed {{installed}} from {{riders}} riders ({{had}} already had)",
+  "sync.pullFailed": "Couldn't sync paints",
+  "sync.rejected": "Skipped {{count}} with an unsafe destination",
 
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",

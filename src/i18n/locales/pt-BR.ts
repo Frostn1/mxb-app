@@ -52,6 +52,7 @@ export const ptBR: Translation = {
   "nav.locker": "Armário",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
+  "nav.servers": "Servidores",
   "nav.manage": "Gerenciar",
   "nav.settings": "Configurações",
 
@@ -545,6 +546,58 @@ export const ptBR: Translation = {
   "join.alreadyRunning":
     "Feche o MX Bikes primeiro — um jogo em execução não pode ser enviado para um servidor.",
   "join.failed": "Não foi possível entrar nesse servidor",
+
+  "servers.title": "Servidores",
+  "servers.subtitle":
+    "Gerencie os servidores dedicados que você mantém. Cada um precisa do agente do MXB instalado.",
+  "servers.empty": "Nenhum servidor ainda. Adicione um para gerenciá-lo por aqui.",
+  "servers.add": "Adicionar servidor",
+  "servers.remove": "Remover este servidor",
+  "servers.namePlaceholder": "Nome do servidor",
+  "servers.tokenPlaceholder": "Token do agente",
+  "servers.track": "Pista",
+  "servers.slots": "Vagas",
+  "servers.uptime": "No ar há",
+  "servers.restarts": "Reinícios",
+  "servers.stopped": "Parado",
+  "servers.start": "Iniciar",
+  "servers.stop": "Parar",
+  "servers.restart": "Reiniciar",
+  "servers.setTrack": "Definir pista",
+  "servers.trackPlaceholder": "ID da pista",
+  "servers.actionDone": "Pronto",
+  "servers.actionFailed": "Não deu certo",
+  "servers.trackChanged": "Pista definida como {{track}} — o servidor reiniciou.",
+  "servers.saveFailed": "Não foi possível salvar sua lista de servidores",
+
+  "settings.experimental": "Experimental",
+  "settings.experimentalServers": "Servidores e sincronização de pinturas",
+  "settings.experimentalServersDesc":
+    "Inacabado. Adiciona a aba Servidores, deixa você manter servidores dedicados e sincroniza as pinturas para todo mundo aparecer certo no servidor.",
+  "settings.experimentalForced":
+    "Ativado nesta execução pelo MXB_EXPERIMENTAL — a opção não faz nada enquanto ele estiver definido.",
+  "settings.betaBadge": "Beta",
+
+  "sync.title": "Sincronização de pinturas",
+  "sync.desc":
+    "O MX Bikes nunca envia as pinturas, então os outros pilotos aparecem com as de fábrica se você já não tiver o arquivo exato deles. Publique a sua e baixe a dos outros.",
+  "sync.enroll": "Cadastrar",
+  "sync.enrolled": "Cadastrado como {{name}}",
+  "sync.enrollFailed": "Não foi possível cadastrar",
+  "sync.codePlaceholder": "Código de convite",
+  "sync.riderNamePlaceholder": "Nome do piloto no jogo",
+  "sync.riderNameHint":
+    "Precisa ser exatamente igual ao seu nome de piloto no MX Bikes — é assim que os apps dos outros sabem quais pinturas são suas.",
+  "sync.ridingAs": "Publicando como {{name}}",
+  "sync.pull": "Sincronizar pinturas",
+  "sync.setGuid": "Salvar GUID",
+  "sync.guidPlaceholder": "Seu GUID do MX Bikes",
+  "sync.guidHint":
+    "Seu GUID do MX Bikes (opcional). Ele identifica você mesmo se mudar o nome do piloto, e o servidor registra a cada conexão.",
+  "sync.guidSaved": "GUID salvo",
+  "sync.pulled": "{{installed}} instaladas de {{riders}} pilotos ({{had}} já tinha)",
+  "sync.pullFailed": "Não foi possível sincronizar",
+  "sync.rejected": "{{count}} ignoradas por destino inseguro",
 
   // ── Textos que a primeira varredura não pegou (JSX em várias linhas) ──────
   "libraryDetail.noEmbedded": "Nenhum detalhe embutido foi encontrado para este item.",

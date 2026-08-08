@@ -26,6 +26,8 @@ mod pkz;
 #[cfg(sidecar)]
 mod sidecar;
 mod presets;
+mod paintsync;
+mod servers;
 mod shop_session;
 mod soundmods;
 mod texstore;
@@ -2396,6 +2398,184 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Whether the unfinished multiplayer features should be shown, and whether this build is
+/// a pre-release. The frontend gates the Servers tab and the paint-sync UI on the first and
+/// badges the version with the second.
+#[tauri::command]
+fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let version = app.package_info().version.to_string();
+    serde_json::json!({
+        "enabled": cfg.experimental_enabled(),
+        // Set by the env var rather than the setting, so the UI can explain why the toggle
+        // looks stuck on.
+        "forcedByEnv": std::env::var(config::EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false),
+        "version": version,
+        // A semver pre-release suffix (`0.8.0-beta.1`) is what the release workflow uses to
+        // mark a build as a pre-release, so it is also what makes this build a beta.
+        "prerelease": version.contains('-'),
+        "enrolled": !cfg.cp_token.trim().is_empty(),
+        "riderName": cfg.cp_rider_name,
+        "guid": cfg.cp_guid,
+    })
+}
+
+/// Turn the experimental features on or off.
+#[tauri::command]
+fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.experimental = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Trade an invite code for a control-plane account, and remember the token.
+#[tauri::command]
+async fn enroll_account(
+    app: tauri::AppHandle,
+    code: String,
+    rider_name: String,
+) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        token: String,
+        #[serde(rename = "riderName")]
+        rider_name: String,
+    }
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/v1/enroll", paintsync::CONTROL_PLANE))
+        .json(&serde_json::json!({ "code": code, "riderName": rider_name }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        let detail = resp.text().await.unwrap_or_default();
+        let msg = serde_json::from_str::<serde_json::Value>(&detail)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(detail);
+        return Err(msg);
+    }
+    let body: Resp = resp.json().await.map_err(|e| format!("{e}"))?;
+
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.cp_token = body.token;
+    cfg.cp_rider_name = body.rider_name.clone();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    Ok(body.rider_name)
+}
+
+/// Claim this player's MX Bikes GUID.
+///
+/// The GUID is the stable identity: a rider name is free text that changes between sessions
+/// and two people can pick the same one, while the dedicated server logs a GUID with every
+/// connection. Claiming is first-come on the server side.
+#[tauri::command]
+async fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enrol with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .put(format!("{}/v1/me/guid", paintsync::CONTROL_PLANE))
+        .bearer_auth(&cfg.cp_token)
+        .json(&serde_json::json!({ "guid": guid.trim() }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        let detail = resp.text().await.unwrap_or_default();
+        return Err(serde_json::from_str::<serde_json::Value>(&detail)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(detail));
+    }
+
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.cp_guid = guid.trim().to_string();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Publish this rider's paints so everyone else on the server can see them.
+#[tauri::command]
+async fn publish_paints(
+    app: tauri::AppHandle,
+    profile: String,
+    bike: String,
+) -> Result<paintsync::PublishOutcome, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enrol with an invite code first.".into());
+    }
+    paintsync::publish(&cfg, &cfg.cp_token, &profile, &bike)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Install every other rider's paints, so the grid renders correctly.
+#[tauri::command]
+async fn sync_paints(
+    app: tauri::AppHandle,
+    server_id: String,
+) -> Result<paintsync::PullOutcome, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enrol with an invite code first.".into());
+    }
+    paintsync::pull(&cfg, &cfg.cp_token, &server_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// The dedicated servers this player administers.
+#[tauri::command]
+fn list_servers(app: tauri::AppHandle) -> Vec<servers::ServerRef> {
+    config::load_or_detect(&app).unwrap_or_default().servers
+}
+
+/// Replace the saved server list. The UI owns add/edit/remove and sends the whole list,
+/// which keeps ordering and identity in one place rather than split across three commands.
+#[tauri::command]
+fn save_servers(app: tauri::AppHandle, servers: Vec<servers::ServerRef>) -> Result<(), String> {
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.servers = servers;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Look up one saved server by id, so the commands below take an id rather than having the
+/// frontend hand back a token it was given.
+fn server_by_id(app: &tauri::AppHandle, id: &str) -> Result<servers::ServerRef, String> {
+    config::load_or_detect(app)
+        .unwrap_or_default()
+        .servers
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| "That server isn't in your list any more.".to_string())
+}
+
+#[tauri::command]
+async fn server_status(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, String> {
+    servers::status(&server_by_id(&app, &id)?).await
+}
+
+#[tauri::command]
+async fn server_action(
+    app: tauri::AppHandle,
+    id: String,
+    action: servers::Action,
+) -> Result<serde_json::Value, String> {
+    servers::act(&server_by_id(&app, &id)?, action).await
+}
+
+#[tauri::command]
+async fn server_set_config(
+    app: tauri::AppHandle,
+    id: String,
+    patch: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    servers::set_config(&server_by_id(&app, &id)?, patch).await
+}
+
 /// Start MX Bikes and connect it straight to a server.
 ///
 /// The game reads the connect flag only at startup, so this reports `already_running`
@@ -3203,6 +3383,17 @@ fn main() {
             frostmod_stop,
             launch_game,
             join_server,
+            experimental_state,
+            set_experimental,
+            enroll_account,
+            set_guid,
+            publish_paints,
+            sync_paints,
+            list_servers,
+            save_servers,
+            server_status,
+            server_action,
+            server_set_config,
             game_running,
             shop_login,
             shop_status,
