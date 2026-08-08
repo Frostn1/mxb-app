@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-08-08 — content behind a folder link is found
+
+### Fixed
+- **Paint folders shared between models with a junction or symlink are read again.** If you
+  keep one set of liveries and point several rider models at it — `mklink /J` on Windows, a
+  symlink on Linux and macOS — the app walked straight past the shared folder and showed
+  nothing in it, while the game loaded it fine. The only way to use the app was a copy of
+  every rider and glove paint per model. It now follows the link, so one folder can serve
+  all six of your rider models, and the paint is listed under each of them.
+
+  The cause is the same everywhere it bit: a junction is a *link*, and a directory listing
+  reports it as one rather than as a folder, so a scan that trusted the listing never
+  looked inside. That affected every content scan, not just paints — the Library, Manage,
+  the mod-detail panel, preset bundles and paint sync all shared it.
+- **A content folder that lives on another drive and is linked into place is scanned.** The
+  split layout — `mods\tracks` (or `bikes`, or `rider`) junctioned to somewhere with room
+  for it — used to come up empty.
+- **Auto-reload notices changes made behind a link.** A recursive watch stops at a
+  junction, so dropping a paint into the shared folder never pulsed FrostMod. The folders
+  those links point at are now watched too, and a change in one names every mod pointing
+  at it.
+- **Bundling a preset whose gear folder contains a link no longer fails.** The linked
+  folder's contents are copied into the bundle as real files, since the far end of your
+  junction doesn't exist on the machine that opens it.
+
+Extracted archives are deliberately left alone: a link inside a download you didn't make is
+still refused, which is what stops an archive writing outside the folder it unpacks into.
+
 ## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
 
 ### Added
