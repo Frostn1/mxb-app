@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-08 — FrostMod works on GP Bikes
+## 2026-08-08 — v0.8.0 — GP Bikes, dedicated servers, and paint sync
 
 ### Added
 - **FrostMod's live mod reload now works for GP Bikes.** FrostMod v0.10.0 attaches to
@@ -8,14 +8,6 @@
   are all available when GP Bikes is the active game — they were hidden before because
   FrostMod only knew about MX Bikes. The app launches it with the game it's driving, which
   is what makes it attach; without that it would sit running and never hook anything.
-
-### Notes
-- Instant profile refresh stays MX Bikes only. Unlike FrostMod's reload, it calls a
-  hardcoded `mxbikes.exe` function offset, and there's no GP equivalent yet.
-
-## 2026-08-08 — GP Bikes support
-
-### Added
 - **The app now drives GP Bikes as well as MX Bikes.** First launch asks which game you're
   setting up before anything else, and the game picker lives in Settings from then on;
   picking a title points the whole app — Library, Manage, Presets, Browse and the
@@ -38,57 +30,12 @@
 - **Presets read the slots a profile actually has.** Rather than assuming MX Bikes' fifteen,
   the editor reads the sections out of the profile's own `profile.ini` and shows those. GP
   Bikes profiles get their riding-style slot, and don't get pickers that would write nothing.
-
 - **Proton Drive downloads.** `drive.proton.me` links are now recognised and labelled as
   Proton Drive, and a mod offering one alongside another mirror prefers the other. Proton
   shares are end-to-end encrypted — the key lives in the part of the URL that never
   reaches the server — so they can't be fetched automatically; picking one now opens the
   guided "download it, then choose the file" flow instead of downloading the web page and
   failing later with "couldn't determine the archive type".
-
-### Fixed
-- **A config written by an older build lost track of which game was active.** Builds that
-  predate multi-game support read the config fine but rewrite it without `activeGame` and
-  `games` — so running one once (a downgrade, or the shipped app alongside a newer build)
-  erased the choice while leaving the folder pointing at that game. Defaulting to MX Bikes
-  there would drive a GP Bikes folder as an MX Bikes one; the game is now re-derived from
-  the folders instead — the install folder's executable if there is one, otherwise the
-  user folder's name.
-- **Switching to a game you don't have installed opened an empty dashboard instead of
-  the setup screen.** The app adopted `Documents\PiBoSo\<game>` whether or not that
-  folder existed, and a non-blank folder reads as "configured" — so you got a working UI
-  scanning nothing. A folder is now only adopted if it's really there, a saved folder
-  that has since been deleted or moved is re-detected rather than trusted, and setup says
-  so plainly when it can't find one instead of silently returning you to the same screen.
-- **The UI named MX Bikes while driving GP Bikes** — "Launch MX Bikes", "MX Bikes is
-  running", the install-folder settings and the overlay's status line among them. Strings
-  now say which game is actually active.
-- **Switching games left the previous game's content on screen.** Library, Manage and the
-  rest load their data when they first appear, so switching titles swapped the folders
-  underneath them without refreshing anything — most visibly Manage, which kept listing
-  the MX Bikes mods. Switching now restarts those views from scratch.
-- **Pages named the wrong site.** "View on mxb-mods.com", the missing-download note and
-  the tour all said mxb-mods.com regardless of which catalog was actually being browsed.
-  They now name the site they link to.
-- **"FrostMod will hot-reload the track list" was shown for GP Bikes,** which has no
-  FrostMod build and so was never going to reload anything. That title now gets the
-  instruction that's actually true — restart the game to pick the new content up. The
-  guided tour likewise no longer walks through steps for features the active game hides.
-
-### Changed
-- **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
-  is a compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for
-  GP Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
-  (Locker and Rider) and Manage are MX Bikes only for now; the overlay and the guided tour
-  follow the same gating, so neither offers a view the main window doesn't.
-- **Existing MX Bikes setups are untouched.** A `config.json` written before this release
-  opens as the MX Bikes config it always was, with the same folders; preset share codes are
-  unchanged. Applying a preset no longer creates `profile.ini` sections that the game
-  doesn't use.
-
-## 2026-08-08 — everyone on the server finally looks right
-
-### Added
 - **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
   whatever file on *your* disk happens to match the name they picked, so a full grid shows
   up in default liveries. The game can't tell us what they picked either — its plugin API
@@ -100,21 +47,17 @@
 
   Everyone on the server needs the app for this to work — that's inherent, not a limitation
   we chose.
-
 - **A Servers tab**, for running dedicated servers: start, stop and restart the game on a
   host, watch its uptime and how many times it came back on its own, and change the track.
   It talks to `mxb-agent` on the host rather than to a cloud provider, because a desktop app
   that shipped provider credentials could create infrastructure from any machine it ran on.
-
 - **An Experimental switch in Settings**, off by default, gating both of the above. They
   talk to a live service and write files other players uploaded, so they're opt-in rather
   than something you find by accident. `MXB_EXPERIMENTAL=1` turns them on for a single run
   without touching your saved settings — and the switch says so rather than looking stuck.
-
 - **Beta builds now say they're beta**, next to the version in Settings → About. The badge
   keys off a semver pre-release suffix, which is the same thing the release workflow uses to
   mark a build as a pre-release, so the two can't disagree.
-
 - **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
   free text you can change between sessions and two people can pick the same one; a GUID is
   stable per install, and the dedicated server writes it next to the name on every
@@ -123,7 +66,6 @@
   UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
   GUID is first-come, so nobody can assert someone else's identity and have their paints
   served under it. Rider-name matching stays as the fallback until a GUID is supplied.
-
 - **A Shop tab that browses the mxbikes-shop.com catalog.** The store hands us its whole
   catalog as one JSON document, so the app fetches it once and does the searching, filtering,
   sorting and paging locally — browsing is instant and keeps working with the network down.
@@ -173,54 +115,10 @@
   expandable, exactly which existing files it would overwrite — so re-dropping an updated mod
   no longer silently replaces a bike's configs. Nothing installs until you press Install, and
   rows can be unticked individually.
-
-### Changed
-- The signed-in "All My Downloads" page moved to `MyDownloads.tsx` and the `shop` route now
-  goes to the new catalog. That feature is intact and still hidden from the sidebar.
-- **Placement decides once, then acts.** Split `place_mod` into `plan_placement` (decide) and
-  an apply step driven by a single enumeration of the files to write, so the destination shown
-  in the review sheet is by construction the destination written to disk. Existing placement
-  behaviour and all of its tests are unchanged.
-- **Identifying a `.pkz` no longer reads it.** The question is answered from the archive's
-  file list alone; it used to parse the `[info]` block and decode and rescale the preview
-  image, which on a large track was seconds of work before anything appeared on screen.
-- **Staging directories are per-operation.** They used to be one path per process, wiped on
-  entry — safe only while installs were strictly serial. A staged drop awaiting review would
-  have had its files deleted by the next one.
-
-### Security
-- A paint carries the destination it should be written to, and that path arrives from
-  another player. It's validated twice — once by the service and again in the app before it
-  becomes a real path — because only the second check actually protects a disk. Anything
-  with a separator, a `..`, a drive letter, a control character or a non-`.pnt` extension is
-  refused outright rather than sanitised: a path we'd have to rewrite is one we don't
-  understand. Downloaded bytes are checked against their digest before being written.
-
-### Fixed
-- **The mxb-mods.com fetch window is properly hidden now.** When Cloudflare refuses the app's
-  own downloader, Browse re-runs the request inside a WebView parked on the site — and that
-  window was built one pixel wide and thrown 32,000 pixels off the desktop rather than hidden,
-  because a hidden window was thought to risk having its timers throttled. Off the desktop
-  still leaves a real window behind, though: the system lists it, and it can be surfaced with
-  no titlebar to close it by. It's built hidden outright now. The throttling that was being
-  avoided isn't reachable that way — the webview inside keeps its own visibility, and that is
-  what the browser engine reads — so Browse behaves exactly as before, minus the window.
-- **A hostile archive can no longer write outside the staging folder.** `.7z` extraction
-  joined entry names to the destination without filtering `..`; `.7z` and `.rar` extractions
-  are now swept for escapees (symlinks included), which deletes them and fails the install.
-- **A destination can no longer climb out of the MX Bikes folder.** Path segments are checked
-  for `..` before any write, and the resolved targets are verified to sit under `mods/`.
-- **A dropped bike folder keeps its own folder.** A bike shipped without a `paints/` subfolder
-  had its `.ini`/`.cfg` scattered loose into `mods/bikes` instead of `mods/bikes/<Bike>/`.
-
-## 2026-08-08 — run a dedicated server from the app
-
-### Added
 - **A Servers tab that manages the dedicated servers you run.** Start, stop and restart the
   game on a host, see whether it's up, how long it's been up, how many times it came back on
   its own, and switch the track — all without an RDP session or a shell. Each server is added
   with its agent address and token, and its status refreshes while the tab is open.
-
 - **`mxb-agent`, a supervisor that runs on the game host** (`server-agent/`). It **owns** the
   `mxbikes.exe` process rather than managing whatever happens to be running, and that
   ownership is what makes the rest work: exit detection comes from the child handle instead
@@ -242,10 +140,6 @@
 
   Note the agent speaks plain HTTP, so its token crosses the network in clear. Terminate TLS
   in front of it, or keep it on a private network, before exposing it to the open internet.
-
-## 2026-08-07 — join a server by address
-
-### Added
 - **Join a server straight from the app.** A new *Join a server* button in the sidebar takes
   a server address and starts MX Bikes already connected to it, rather than launching the
   game and leaving you to find the server in the in-game WORLD list. The game has carried an
@@ -259,7 +153,86 @@
   a different flag. The connect flag is only read at startup, so asking to join while MX
   Bikes is already running says so instead of appearing to work.
 
-## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
+### Changed
+- **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
+  is a compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for
+  GP Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
+  (Locker and Rider) and Manage are MX Bikes only for now; the overlay and the guided tour
+  follow the same gating, so neither offers a view the main window doesn't.
+- **Existing MX Bikes setups are untouched.** A `config.json` written before this release
+  opens as the MX Bikes config it always was, with the same folders; preset share codes are
+  unchanged. Applying a preset no longer creates `profile.ini` sections that the game
+  doesn't use.
+
+- The signed-in "All My Downloads" page moved to `MyDownloads.tsx` and the `shop` route now
+  goes to the new catalog. That feature is intact and still hidden from the sidebar.
+- **Placement decides once, then acts.** Split `place_mod` into `plan_placement` (decide) and
+  an apply step driven by a single enumeration of the files to write, so the destination shown
+  in the review sheet is by construction the destination written to disk. Existing placement
+  behaviour and all of its tests are unchanged.
+- **Identifying a `.pkz` no longer reads it.** The question is answered from the archive's
+  file list alone; it used to parse the `[info]` block and decode and rescale the preview
+  image, which on a large track was seconds of work before anything appeared on screen.
+- **Staging directories are per-operation.** They used to be one path per process, wiped on
+  entry — safe only while installs were strictly serial. A staged drop awaiting review would
+  have had its files deleted by the next one.
+
+### Fixed
+- **A config written by an older build lost track of which game was active.** Builds that
+  predate multi-game support read the config fine but rewrite it without `activeGame` and
+  `games` — so running one once (a downgrade, or the shipped app alongside a newer build)
+  erased the choice while leaving the folder pointing at that game. Defaulting to MX Bikes
+  there would drive a GP Bikes folder as an MX Bikes one; the game is now re-derived from
+  the folders instead — the install folder's executable if there is one, otherwise the
+  user folder's name.
+- **Switching to a game you don't have installed opened an empty dashboard instead of
+  the setup screen.** The app adopted `Documents\PiBoSo\<game>` whether or not that
+  folder existed, and a non-blank folder reads as "configured" — so you got a working UI
+  scanning nothing. A folder is now only adopted if it's really there, a saved folder
+  that has since been deleted or moved is re-detected rather than trusted, and setup says
+  so plainly when it can't find one instead of silently returning you to the same screen.
+- **The UI named MX Bikes while driving GP Bikes** — "Launch MX Bikes", "MX Bikes is
+  running", the install-folder settings and the overlay's status line among them. Strings
+  now say which game is actually active.
+- **Switching games left the previous game's content on screen.** Library, Manage and the
+  rest load their data when they first appear, so switching titles swapped the folders
+  underneath them without refreshing anything — most visibly Manage, which kept listing
+  the MX Bikes mods. Switching now restarts those views from scratch.
+- **Pages named the wrong site.** "View on mxb-mods.com", the missing-download note and
+  the tour all said mxb-mods.com regardless of which catalog was actually being browsed.
+  They now name the site they link to.
+- **"FrostMod will hot-reload the track list" was shown for GP Bikes,** which has no
+  FrostMod build and so was never going to reload anything. That title now gets the
+  instruction that's actually true — restart the game to pick the new content up. The
+  guided tour likewise no longer walks through steps for features the active game hides.
+- **The mxb-mods.com fetch window is properly hidden now.** When Cloudflare refuses the app's
+  own downloader, Browse re-runs the request inside a WebView parked on the site — and that
+  window was built one pixel wide and thrown 32,000 pixels off the desktop rather than hidden,
+  because a hidden window was thought to risk having its timers throttled. Off the desktop
+  still leaves a real window behind, though: the system lists it, and it can be surfaced with
+  no titlebar to close it by. It's built hidden outright now. The throttling that was being
+  avoided isn't reachable that way — the webview inside keeps its own visibility, and that is
+  what the browser engine reads — so Browse behaves exactly as before, minus the window.
+- **A hostile archive can no longer write outside the staging folder.** `.7z` extraction
+  joined entry names to the destination without filtering `..`; `.7z` and `.rar` extractions
+  are now swept for escapees (symlinks included), which deletes them and fails the install.
+- **A destination can no longer climb out of the MX Bikes folder.** Path segments are checked
+  for `..` before any write, and the resolved targets are verified to sit under `mods/`.
+- **A dropped bike folder keeps its own folder.** A bike shipped without a `paints/` subfolder
+  had its `.ini`/`.cfg` scattered loose into `mods/bikes` instead of `mods/bikes/<Bike>/`.
+
+### Notes
+- Instant profile refresh stays MX Bikes only. Unlike FrostMod's reload, it calls a
+  hardcoded `mxbikes.exe` function offset, and there's no GP equivalent yet.
+
+### Security
+- A paint carries the destination it should be written to, and that path arrives from
+  another player. It's validated twice — once by the service and again in the app before it
+  becomes a real path — because only the second check actually protects a disk. Anything
+  with a separator, a `..`, a drive letter, a control character or a non-`.pnt` extension is
+  refused outright rather than sanitised: a path we'd have to rewrite is one we don't
+  understand. Downloaded bytes are checked against their digest before being written.
+
 ## 2026-08-08 — v0.7.1 — Browse works for blocked players, the model-swap crash is gone, and the Rider preview wears a real rider
 
 ### Added
