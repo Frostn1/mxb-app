@@ -9,20 +9,10 @@ import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
 import Settings from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
-import { InstallProvider, type ModTarget } from "../../Context/Install";
+import { InstallProvider } from "../../Context/Install";
 import { useConfig } from "../../Context/Config";
-import {
-  DEFAULT_MOD_TYPE,
-  MOD_TYPES,
-  scanLibrary,
-  setIntroSeen,
-  type ModType,
-} from "../../api/mods";
-import {
-  EMPTY_INSTALLED_INDEX,
-  buildInstalledIndex,
-  type InstalledIndex,
-} from "../../lib/installedMatch";
+import { setIntroSeen } from "../../api/mods";
+import { useModBrowsing } from "../../lib/useModBrowsing";
 import type { Loadout } from "../../types";
 
 interface DashboardProps {
@@ -34,72 +24,43 @@ interface DashboardProps {
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const { config } = useConfig();
   const [view, setView] = useState<DashboardView>("browse");
-  const [modType, setModType] = useState<ModType>(DEFAULT_MOD_TYPE);
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  // The browse category the opened mod was found under (drives livery routing).
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
-  // Bumped after an install so the library re-scans.
-  const [libraryVersion, setLibraryVersion] = useState(0);
-  // What's on disk for the active type, as a fuzzy lookup (for "in library" badges).
-  const [installed, setInstalled] = useState<InstalledIndex>(EMPTY_INSTALLED_INDEX);
   // A preset handed off from the Presets tab to load in the Rider tab (its
   // "View in Rider" button). Consumed once by the Rider view, then cleared.
   const [riderPreset, setRiderPreset] = useState<Loadout | null>(null);
 
-  // The full library scan, not `getInstalledMods` — that one sees `.pkz` files only, so
-  // extracted track folders and every `.pnt` paint/livery counted as "not installed".
-  useEffect(() => {
-    let cancelled = false;
-    scanLibrary(modType.installSubpath)
-      .then((entries) => {
-        if (cancelled) return;
-        setInstalled(buildInstalledIndex(entries.map((e) => e.name)));
-      })
-      .catch(() => !cancelled && setInstalled(EMPTY_INSTALLED_INDEX));
-    return () => {
-      cancelled = true;
-    };
-  }, [modType, libraryVersion]);
+  const showBrowse = useCallback(() => setView("browse"), []);
+  const {
+    modType,
+    changeType,
+    selectedSlug,
+    selectedCategoryId,
+    installed,
+    libraryVersion,
+    onInstalled,
+    openMod,
+    openModTarget,
+    closeMod,
+  } = useModBrowsing(showBrowse);
 
   // FrostMod installs itself silently on first run (see FrostmodProvider) —
   // no prompt here.
 
-  const onInstalled = useCallback(() => setLibraryVersion((v) => v + 1), []);
-
-  const openMod = useCallback((slug: string, categoryId: number) => {
-    setSelectedSlug(slug);
-    setSelectedCategoryId(categoryId);
-  }, []);
-
-  // Jump straight to a mod's detail page from anywhere (the failed-install
-  // banner) — restores the mod type its install targeted, so Browse and the
-  // detail page agree on folders and livery routing.
-  const openModTarget = useCallback(({ slug, subpath, categoryId }: ModTarget) => {
-    const type = MOD_TYPES.find((t) => t.installSubpath === subpath);
-    if (type) setModType(type);
-    setSelectedCategoryId(categoryId ?? type?.categoryId ?? null);
-    setSelectedSlug(slug);
-    setView("browse");
-  }, []);
-
-  const changeType = useCallback((t: ModType) => {
-    setModType(t);
-    setSelectedSlug(null);
-  }, []);
-
-  const navigate = useCallback((v: DashboardView) => {
-    setView(v);
-    setSelectedSlug(null);
-  }, []);
+  const navigate = useCallback(
+    (v: DashboardView) => {
+      setView(v);
+      closeMod();
+    },
+    [closeMod],
+  );
 
   // First-run interactive tour — shown once, gated on a localStorage flag. Also
   // re-triggerable from Settings via the TourContext below.
   const [tourRun, setTourRun] = useState(false);
   const startTour = useCallback(() => {
     setView("browse");
-    setSelectedSlug(null);
+    closeMod();
     setTourRun(true);
-  }, []);
+  }, [closeMod]);
   const endTour = useCallback(() => {
     localStorage.setItem(TOUR_DONE_KEY, "1");
     // The config is the durable record — localStorage above is just the immediate
@@ -136,7 +97,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               modType={modType}
               categoryId={selectedCategoryId ?? modType.categoryId}
               installed={installed}
-              onBack={() => setSelectedSlug(null)}
+              onBack={closeMod}
             />
           ) : view === "browse" ? (
             <Browse
