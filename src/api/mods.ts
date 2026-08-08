@@ -309,6 +309,18 @@ export function unpackPaint(path: string): Promise<PaintTexture[]> {
   return invoke<PaintTexture[]>("unpack_paint", { path });
 }
 
+/**
+ * Raw RGBA for a {@link PaintTexture.token}, straight off the binary IPC channel.
+ *
+ * The backend answers with `application/octet-stream`, so this resolves to an
+ * `ArrayBuffer` rather than JSON — no base64 on the wire and no megabyte strings on the
+ * heap. A token whose pixels have been evicted comes back as a single grey pixel, which the
+ * caller spots by checking the length against the texture's declared size.
+ */
+export function textureBytes(token: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("texture_bytes", { token });
+}
+
 export function unpackPkz(path: string, outDir: string): Promise<string[]> {
   return invoke<string[]>("unpack_pkz", { path, outDir });
 }

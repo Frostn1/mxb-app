@@ -308,7 +308,7 @@ export function ViewerDialog({
         <div className="relative min-h-0 flex-1">
           <ModelViewer
             mode={mode}
-            texture={standInTex?.png ?? null}
+            texture={standInTex ?? null}
             textures={activeTextures}
             nodes={nodes}
             riderParts={riderParts}
