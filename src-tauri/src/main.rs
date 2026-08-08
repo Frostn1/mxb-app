@@ -271,6 +271,56 @@ async fn unbind_sound(app: tauri::AppHandle, bike: String, model: String) -> Res
     .map_err(|e| format!("unbind_sound task failed: {e}"))?
 }
 
+/// Outcome of assigning liveries to a model swap: the same live-refresh feedback a swap
+/// gives, plus what the reconcile couldn't do.
+#[derive(serde::Serialize)]
+struct PaintAssignOutcome {
+    /// Liveries that couldn't be moved. MX Bikes holds its bike files open while it runs,
+    /// so a reconcile mid-session leaves some liveries visible in-game — say so rather
+    /// than report a clean filter.
+    stuck: usize,
+    #[serde(flatten)]
+    swap: SwapApplyOutcome,
+}
+
+/// Every livery the bike owns, loose or shelved — the set the assignment picker offers.
+#[tauri::command]
+async fn list_bike_liveries(app: tauri::AppHandle, bike: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(modelswap::bike_liveries(&cfg.mods_path, &bike))
+    })
+    .await
+    .map_err(|e| format!("list_bike_liveries task failed: {e}"))?
+}
+
+/// Replace the liveries a model swap owns, then move the bike's `paints/` folder to match
+/// — the liveries of an inactive model go to the shelf, where the game can't list them.
+#[tauri::command]
+async fn set_model_paints(
+    app: tauri::AppHandle,
+    bike: String,
+    model: String,
+    paints: Vec<String>,
+) -> Result<PaintAssignOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let stuck = modelswap::set_model_paints(&cfg.mods_path, &bike, &model, &paints)
+            .map_err(|e| format!("{e:#}"))?;
+        Ok(PaintAssignOutcome {
+            stuck,
+            swap: SwapApplyOutcome {
+                content_reload: frostmod::signal_reload(),
+                game_running: gameproc::is_game_running(),
+                live_refresh: live_refresh(cfg.instant_refresh),
+                model_refresh: None, // the mesh didn't change, only which paints are there
+            },
+        })
+    })
+    .await
+    .map_err(|e| format!("set_model_paints task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn detect_loose_swaps(app: tauri::AppHandle) -> Result<Vec<modelswap::LooseSwapBike>, String> {
     tauri::async_runtime::spawn_blocking(move || detect_loose_swaps_blocking(app))
@@ -2042,6 +2092,8 @@ fn main() {
             apply_sound_swap,
             bind_sound,
             unbind_sound,
+            list_bike_liveries,
+            set_model_paints,
             detect_loose_swaps,
             register_loose_swaps,
             detect_orphaned_setup,

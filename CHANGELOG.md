@@ -3,6 +3,20 @@
 ## 2026-08-07
 
 ### Added
+- **A model swap can say which liveries are its own.** MX Bikes gives a bike one flat
+  `paints/` folder and has no idea model swaps exist, so a Yami mesh running on a KTM
+  offered every KTM livery alongside the Yami ones — a long list where most entries were
+  drawn for a mesh that isn't on the bike. Each model in the Locker now has a livery
+  picker: tick the ones drawn for it and they become the only liveries the bike livery
+  slot offers while that model is active. Switching models switches the list. The liveries
+  belonging to an inactive model are also moved out of `paints/` into
+  `FrostMod Models/_paints/`, so MX Bikes' own paint picker stops listing them too — which
+  does mean a livery assigned to a model you've swapped away from renders as stock in-game
+  until you swap back. A livery no model claims stays on offer under every model, so a
+  bike you haven't assigned anything on behaves exactly as it did before, and shelved
+  liveries still show in the Library. The game holds its bike files open while it runs, so
+  assigning during a session reports the files it couldn't move rather than claiming a
+  clean filter.
 - **Star ratings on browse thumbnails.** A mod that people have rated on mxb-mods.com now
   shows its score on the card the same way the site does — five stars filled to the
   nearest half, the average, and the vote count — so a good mod is recognisable before you

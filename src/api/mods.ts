@@ -28,6 +28,7 @@ import type {
   Preset,
   PresetApplyOutcome,
   SwapApplyOutcome,
+  PaintAssignOutcome,
   ReloadOutcome,
   BundlePlan,
   BundleProgress,
@@ -204,6 +205,23 @@ export function scanModelSwaps(): Promise<BikeModels[]> {
 
 export function applyModelSwap(bike: string, target: string): Promise<SwapApplyOutcome> {
   return invoke<SwapApplyOutcome>("apply_model_swap", { bike, target });
+}
+
+/** Every livery the bike owns, whether loose in `paints/` or shelved by an assignment. */
+export function listBikeLiveries(bike: string): Promise<string[]> {
+  return invoke<string[]>("list_bike_liveries", { bike });
+}
+
+/**
+ * Replace the liveries a model swap owns. The bike's `paints/` folder is moved to match —
+ * an inactive model's liveries go to the shelf, out of the game's paint list too.
+ */
+export function setModelPaints(
+  bike: string,
+  model: string,
+  paints: string[],
+): Promise<PaintAssignOutcome> {
+  return invoke<PaintAssignOutcome>("set_model_paints", { bike, model, paints });
 }
 
 export function scanSoundSwaps(): Promise<BikeSounds[]> {

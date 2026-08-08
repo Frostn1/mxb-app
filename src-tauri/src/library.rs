@@ -423,6 +423,27 @@ fn dir_has_sound_markers(dir: &Path) -> bool {
     found.iter().all(|&f| f)
 }
 
+/// Whether these folder segments name a bike livery, and which bike owns it — `Some(None)`
+/// for a livery loose at the bikes root, `None` when it isn't a livery at all.
+///
+/// Liveries normally live in `<Bike>/paints/`. One assigned to a model swap waits in the
+/// shelf, `<Bike>/FrostMod Models/_paints/`, while that model is inactive — still the
+/// bike's livery, so still listed, or assigning one would make it vanish from the Library.
+fn paint_owner(segs: &[&str]) -> Option<Option<String>> {
+    let owner_at = |i: usize| segs.get(i).map(|s| s.to_string());
+    if let Some(pos) = segs.iter().position(|s| s.eq_ignore_ascii_case("paints")) {
+        return Some(pos.checked_sub(1).and_then(owner_at));
+    }
+    let pos = segs
+        .iter()
+        .position(|s| s.eq_ignore_ascii_case(crate::modelswap::PAINT_SHELF))?;
+    let parent = segs.get(pos.checked_sub(1)?)?;
+    if !parent.eq_ignore_ascii_case(crate::modelswap::LIB_DIR) {
+        return None;
+    }
+    Some(pos.checked_sub(2).and_then(owner_at))
+}
+
 fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
 
@@ -445,12 +466,9 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
         }
         let folder = rel_folder(dir, p);
         let segs: Vec<&str> = folder.split('/').filter(|s| !s.is_empty()).collect();
-        let paints_pos = segs.iter().position(|s| s.eq_ignore_ascii_case("paints"));
 
-        if let Some(pos) = paints_pos {
-            // `<Bike>/paints/…` livery — owner is the segment before `paints`.
-            let parent = if pos > 0 { Some(segs[pos - 1].to_string()) } else { None };
-            out.push(make_entry(dir, p, "bikePaint", parent));
+        if let Some(owner) = paint_owner(&segs) {
+            out.push(make_entry(dir, p, "bikePaint", owner));
         } else if is_pkz {
             out.push(make_entry(dir, p, "bike", None));
         }
@@ -627,6 +645,23 @@ mod tests {
         let swap = cat(&v, "OEM2024.pkz").unwrap();
         assert_eq!(swap.category, "bikeModelSwap");
         assert_eq!(swap.parent.as_deref(), Some("KTM450"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_shelved_livery_is_still_the_bikes_livery() {
+        // Assigned to an inactive model swap, so parked out of `paints/` — the Library
+        // must still list it, or assigning a livery would look like losing it.
+        let root = tmp("lib-shelved-paint");
+        let base = root.join("mods/bikes");
+        touch(&base.join("KTM450/model.edf"));
+        touch(&base.join("KTM450/paints/Red.pnt"));
+        touch(&base.join("KTM450/FrostMod Models/_paints/Yami Redbud.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[]).unwrap();
+        let shelved = cat(&v, "Yami Redbud.pnt").unwrap();
+        assert_eq!(shelved.category, "bikePaint");
+        assert_eq!(shelved.parent.as_deref(), Some("KTM450"));
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -11,6 +11,7 @@ import {
   Link2,
   Link2Off,
   Wrench,
+  Palette,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ import type {
   SwapApplyOutcome,
 } from "../../types";
 import RegisterSwapsDialog from "./RegisterSwapsDialog";
+import AssignPaintsDialog from "./AssignPaintsDialog";
 
 /**
  * Locker — the app-side bike **model & sound swap** manager, twinned with FrostMod's
@@ -130,6 +132,8 @@ export default function Locker() {
   const [registerOpen, setRegisterOpen] = useState(false);
   // Bikes gutted by a pre-0.6.3 swap — their setup files are in a swap folder.
   const [orphaned, setOrphaned] = useState<OrphanedSetup[]>([]);
+  // The model swap whose liveries are being assigned, if the dialog is open.
+  const [assigning, setAssigning] = useState<{ bike: string; model: string } | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -163,6 +167,9 @@ export default function Locker() {
   }, [load]);
 
   const looseCount = loose.reduce((n, b) => n + b.candidates.length, 0);
+  // Re-read from `rows` rather than snapshotting, so a save's refresh reaches the dialog.
+  const assigningModels =
+    (assigning && rows?.find((r) => r.bike === assigning.bike)?.models) || null;
 
   // Runs a mutation for `bike`, toasting success/failure and refreshing every scan.
   // `note` optionally appends live-refresh feedback derived from the result.
@@ -314,6 +321,7 @@ export default function Locker() {
                 onSoundSwap={onSoundSwap}
                 onBind={onBind}
                 onUnbind={onUnbind}
+                onAssignPaints={(model) => setAssigning({ bike: r.bike, model })}
               />
             ))}
           </div>
@@ -326,6 +334,18 @@ export default function Locker() {
         bikes={loose}
         onDone={() => void load()}
       />
+
+      {assigning && assigningModels && (
+        <AssignPaintsDialog
+          key={`${assigning.bike}:${assigning.model}`}
+          open
+          onOpenChange={(o) => !o && setAssigning(null)}
+          bike={assigning.bike}
+          model={assigning.model}
+          models={assigningModels}
+          onDone={() => void load()}
+        />
+      )}
     </div>
   );
 }
@@ -338,6 +358,7 @@ function BikeCard({
   onSoundSwap,
   onBind,
   onUnbind,
+  onAssignPaints,
 }: {
   row: Row;
   busy: boolean;
@@ -346,6 +367,7 @@ function BikeCard({
   onSoundSwap: (bike: string, target: string) => void;
   onBind: (bike: string, model: string, sound: string) => void;
   onUnbind: (bike: string, model: string, sound: string) => void;
+  onAssignPaints: (model: string) => void;
 }) {
   const { bike, models, sounds } = row;
   const modelCount = models?.variants.length ?? 0;
@@ -372,14 +394,22 @@ function BikeCard({
           hint={modelCount <= 1 ? "Only one model — install more to swap" : undefined}
         >
           {models.variants.map((v) => (
-            <VariantButton
-              key={v.name}
-              variant={v}
-              kind="model"
-              busy={busy}
-              disabled={disabled}
-              onClick={() => onModelSwap(bike, v.name)}
-            />
+            <div key={v.name} className="flex items-stretch gap-1.5">
+              <VariantButton
+                variant={v}
+                kind="model"
+                busy={busy}
+                disabled={disabled}
+                className="min-w-0 flex-1"
+                onClick={() => onModelSwap(bike, v.name)}
+              />
+              <PaintsButton
+                count={v.paints.length}
+                model={v.name}
+                disabled={disabled}
+                onClick={() => onAssignPaints(v.name)}
+              />
+            </div>
           ))}
         </SwapSection>
       )}
@@ -449,12 +479,51 @@ function SwapSection({
   );
 }
 
+/**
+ * Opens the livery assignment for one model swap. A separate control from the swap button
+ * beside it — assigning is not switching, and a button can't live inside a button.
+ */
+function PaintsButton({
+  count,
+  model,
+  disabled,
+  onClick,
+}: {
+  count: number;
+  model: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={
+        count > 0
+          ? `${count} liver${count === 1 ? "y" : "ies"} assigned to “${model}” — only these show while it's active`
+          : `Pick the liveries drawn for “${model}”, so the others don't show while it's active`
+      }
+      className={cn(
+        "flex flex-none flex-col items-center justify-center gap-0.5 rounded-lg border px-2.5 transition-colors",
+        count > 0
+          ? "border-primary/30 bg-primary/[0.06] text-primary/80 hover:border-primary/50"
+          : "border-white/[0.07] text-muted-foreground hover:border-white/20 hover:text-foreground",
+        disabled && "pointer-events-none opacity-60",
+      )}
+    >
+      <Palette className="size-3.5" strokeWidth={1.75} />
+      {count > 0 && <span className="text-[10px] font-semibold leading-none">{count}</span>}
+    </button>
+  );
+}
+
 function VariantButton({
   variant: v,
   kind,
   busy,
   disabled,
   boundModels = [],
+  className,
   onClick,
 }: {
   variant: ModelVariant | SoundVariant;
@@ -462,6 +531,7 @@ function VariantButton({
   busy: boolean;
   disabled: boolean;
   boundModels?: string[];
+  className?: string;
   onClick: () => void;
 }) {
   const emptyLabel = kind === "model" ? "No model" : "Stock";
@@ -494,6 +564,7 @@ function VariantButton({
             ? "cursor-pointer border-white/[0.07] hover:border-white/20"
             : "border-white/[0.05] opacity-50",
         disabled && !v.active && "pointer-events-none opacity-60",
+        className,
       )}
     >
       <span className="flex size-4 flex-none items-center justify-center">
