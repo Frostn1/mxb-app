@@ -685,11 +685,9 @@ fn bind_textures(
     node_part: &std::collections::HashMap<String, String>,
 ) {
     let embedded = edf::embedded_textures(edf_bytes);
-    // A submesh's material index selects its colour texture by position in the model's
-    // COLOUR-texture pool, in file order (verified against every OEM bike: plastics=0,
-    // metals=1, w_plate=2, …). The pool is every embedded texture that isn't a companion
-    // map — MX Bikes names those `_n` (normal), `_s` (specular) and `_r` (reflection).
-    // The pool must include gfx-referenced textures (chain, w_plate): the index counts
+    // The model's COLOUR textures, in file order — every embedded texture that isn't a
+    // companion map (MX Bikes names those `_n` normal, `_s` specular, `_r` reflection).
+    // The list keeps gfx-referenced textures (chain, w_plate): material indices count
     // them, so dropping any shifts every later material onto the wrong texture.
     let color: Vec<&edf::EmbeddedTexture> = embedded
         .iter()
@@ -698,12 +696,89 @@ fn bind_textures(
             !n.ends_with("_n") && !n.ends_with("_s") && !n.ends_with("_r")
         })
         .collect();
+    // Two readings of a material index compete: its position in the blob list above, and
+    // whatever the header's material table maps it to. Neither is right everywhere — blob
+    // order puts the number plate over the KX250's bodywork, the table puts the KTM 125
+    // SX's cables on it — so the mesh itself breaks the tie below, per part.
+    let slots = match std::env::var("MXB_MAT_TABLE").as_deref() {
+        Ok("0") => Vec::new(),
+        _ => edf::material_slots(edf_bytes, color.len()),
+    };
+    let disputed: Vec<usize> = (0..color.len())
+        .filter(|i| matches!(slots.get(*i), Some(Some(j)) if j != i))
+        .collect();
+    // Only the disputed textures get inflated, and only on the bikes that disagree.
+    let ink: std::collections::HashMap<usize, Vec<bool>> = disputed
+        .iter()
+        .flat_map(|i| [*i, slots[*i].unwrap_or(*i)])
+        .collect::<std::collections::BTreeSet<usize>>()
+        .into_iter()
+        .filter_map(|slot| {
+            let mask = color.get(slot).and_then(|t| edf::content_mask(edf_bytes, t))?;
+            Some((slot, mask))
+        })
+        .collect();
 
     for n in nodes.iter_mut() {
         let part = node_part.get(&n.name.to_ascii_lowercase());
         let overrides = part.and_then(|p| gfx.get(p)).map(|p| &p.textures);
-        // A node with no submesh table is a single material — the primary body texture
-        // (plastics, by convention the first colour texture).
+        // A part that draws on ONE material numbers it 0 whichever material that is, so
+        // the index says nothing to look up — the YZ125 numbers its chassis' plastics 0
+        // and, in the rear suspension, its metals 0 too. Only a part that distinguishes
+        // materials at all is worth resolving.
+        let spread: std::collections::HashSet<u32> =
+            n.submeshes.iter().filter_map(|s| s.mat).collect();
+        // Ask the geometry which reading it was drawn for: for every disputed material,
+        // how much of what this part samples lands on texels the artist actually inked.
+        // The parts of one bike need not agree — the YZ125's chassis reads through the
+        // table while its steering reads straight off the blob list.
+        let mut table_fit = 0f64;
+        let mut blob_fit = 0f64;
+        if spread.len() > 1 {
+            for mat in spread.iter().map(|m| *m as usize).filter(|m| disputed.contains(m)) {
+                let mut seen = vec![false; edf::FIT_RES * edf::FIT_RES];
+                for sm in n.submeshes.iter().filter(|s| s.mat == Some(mat as u32)) {
+                    for (dst, src) in seen
+                        .iter_mut()
+                        .zip(edf::uv_coverage(n, sm.tri_start, sm.tri_count))
+                    {
+                        *dst |= src;
+                    }
+                }
+                let area = seen.iter().filter(|s| **s).count();
+                if area == 0 {
+                    continue;
+                }
+                // A blank overlay (`w_plate`, which the game composites numbers onto) has
+                // no islands to land on and so scores nothing — it can only ever lose a
+                // comparison, never win one.
+                let landed = |slot: usize| {
+                    ink.get(&slot).map_or(0.0, |m| {
+                        seen.iter().zip(m).filter(|(s, i)| **s && **i).count() as f64
+                    })
+                };
+                let Some(Some(via_table)) = slots.get(mat).copied() else { continue };
+                table_fit += landed(via_table);
+                blob_fit += landed(mat);
+            }
+        }
+        let by_table = spread.len() > 1 && table_fit > blob_fit;
+        if table_fit != blob_fit {
+            log::info!(
+                "[viewer] node '{}' reads its materials through the {} (fit {:.0} vs {:.0})",
+                n.name,
+                if by_table { "material table" } else { "texture order" },
+                table_fit.max(blob_fit),
+                table_fit.min(blob_fit),
+            );
+        }
+        let texture_for = |mat: usize| -> Option<&edf::EmbeddedTexture> {
+            match slots.get(mat).filter(|_| by_table) {
+                Some(slot) => slot.and_then(|s| color.get(s)).copied(),
+                None => color.get(mat).copied(),
+            }
+        };
+        // A node with no submesh table is a single material — the first colour texture.
         n.texture = color.first().map(|t| t.name.clone());
         for sm in n.submeshes.iter_mut() {
             let group = sm.name.to_ascii_lowercase();
@@ -715,8 +790,8 @@ fn bind_textures(
                 sm.texture = Some(tex.clone());
                 continue;
             }
-            // 2. Ground truth: the material index picks the colour texture in file order.
-            if let Some(t) = sm.mat.and_then(|i| color.get(i as usize)) {
+            // 2. The material index picks its colour texture, via the table where usable.
+            if let Some(t) = sm.mat.and_then(|i| texture_for(i as usize)) {
                 sm.texture = Some(t.name.clone());
                 continue;
             }

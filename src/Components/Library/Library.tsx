@@ -35,6 +35,7 @@ import {
   RIDER_SECTION_ORDER,
   categoryIcon,
 } from "./categories";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import LibraryDetail from "./LibraryDetail";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
@@ -130,6 +131,8 @@ function LibraryCardBody({
   }, [item.path, cacheKey, tile]);
 
   const title = meta?.name?.trim() || displayName(item.name);
+  const folder = item.name;
+  const location = meta?.location?.trim();
   const parts: string[] = [];
   if (meta?.author) parts.push(t("library.byAuthor", { author: meta.author }));
   if (meta?.length) parts.push(formatLength(meta.length));
@@ -160,12 +163,18 @@ function LibraryCardBody({
         )}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span
-          className="truncate text-[13px] font-semibold"
-          title={meta?.location?.trim() || item.name}
-        >
-          {title}
-        </span>
+        {/* The row truncates hard at this width, so the hover carries the full name and
+            the folder it actually lives in — the id you need when matching paints. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="w-fit max-w-full truncate text-[13px] font-semibold">{title}</span>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="start" className="max-w-sm">
+            <p className="font-semibold">{title}</p>
+            {folder !== title && <p className="text-muted-foreground">{folder}</p>}
+            {location && <p className="text-muted-foreground">{location}</p>}
+          </TooltipContent>
+        </Tooltip>
         <span className="truncate text-[11px] text-muted-foreground" title={subtitle}>
           {subtitle}
         </span>

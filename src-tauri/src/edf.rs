@@ -410,6 +410,136 @@ pub struct EmbeddedTexture {
     pub data_len: usize, // compressed byte length
 }
 
+// Material table, right after the file header: | u32 count @ 0x1c | count records |,
+// each 56 bytes holding six 1.0f shading terms and, at +44, a ONE-BASED index into the
+// model's colour textures (0 = untextured). The mesh data starts where the table ends.
+const MAT_COUNT_OFF: usize = 0x1c;
+const MAT_TABLE_OFF: usize = 0x20;
+const MAT_STRIDE: usize = 56;
+const MAT_TEX_FROM_REC: usize = 44;
+const MAX_MATERIALS: usize = 64;
+
+/// Side of the square grid the UV-fit test works on. Coarse on purpose: it asks which
+/// atlas a part was drawn against, not where exactly, and stays cheap on a 4096² texture.
+pub const FIT_RES: usize = 128;
+
+/// The texels an artist actually drew on: those differing from the texture's dominant
+/// colour, which for a bike atlas is the flat backdrop its islands are laid out on.
+/// None when the texture won't inflate, or is so uniform there's nothing to match
+/// against — MX Bikes' `w_plate` is a blank overlay the game composites numbers onto.
+pub fn content_mask(b: &[u8], t: &EmbeddedTexture) -> Option<Vec<bool>> {
+    let rgba = inflate_texture(b, t)?;
+    let (w, h) = (t.width as usize, t.height as usize);
+    if w == 0 || h == 0 || rgba.len() < w * h * 4 {
+        return None;
+    }
+    // Nearest-neighbour down to FIT_RES, quantised so near-identical backdrop shades
+    // land in one bucket.
+    let mut cell = Vec::with_capacity(FIT_RES * FIT_RES);
+    let mut hist: std::collections::HashMap<(u8, u8, u8), usize> = Default::default();
+    for y in 0..FIT_RES {
+        for x in 0..FIT_RES {
+            let sx = x * w / FIT_RES;
+            let sy = y * h / FIT_RES;
+            let p = (sy * w + sx) * 4;
+            let q = (rgba[p] / 24, rgba[p + 1] / 24, rgba[p + 2] / 24);
+            *hist.entry(q).or_default() += 1;
+            cell.push(q);
+        }
+    }
+    let bg = hist.into_iter().max_by_key(|(_, n)| *n)?.0;
+    let mask: Vec<bool> = cell
+        .iter()
+        .map(|q| {
+            q.0.abs_diff(bg.0) as u32 + q.1.abs_diff(bg.1) as u32 + q.2.abs_diff(bg.2) as u32 > 1
+        })
+        .collect();
+    let inked = mask.iter().filter(|m| **m).count();
+    (inked * 20 > mask.len()).then_some(mask)
+}
+
+/// Which texels a triangle range samples, on the same grid. UVs wrap; a triangle that
+/// straddles a tile edge is skipped rather than smeared across the atlas.
+pub fn uv_coverage(node: &EdfNode, tri_start: u32, tri_count: u32) -> Vec<bool> {
+    let mut hit = vec![false; FIT_RES * FIT_RES];
+    let lo = tri_start as usize * 3;
+    let hi = (lo + tri_count as usize * 3).min(node.indices.len());
+    let at = |i: u32| -> (f32, f32) {
+        let k = i as usize * 2;
+        let (u, v) = (node.uvs[k], node.uvs[k + 1]);
+        (u.rem_euclid(1.0) * (FIT_RES - 1) as f32, v.rem_euclid(1.0) * (FIT_RES - 1) as f32)
+    };
+    for t in node.indices[lo..hi].chunks_exact(3) {
+        if t.iter().any(|i| (*i as usize) * 2 + 1 >= node.uvs.len()) {
+            continue;
+        }
+        let p = [at(t[0]), at(t[1]), at(t[2])];
+        let (x0, x1) = (
+            p.iter().fold(f32::MAX, |a, q| a.min(q.0)),
+            p.iter().fold(f32::MIN, |a, q| a.max(q.0)),
+        );
+        let (y0, y1) = (
+            p.iter().fold(f32::MAX, |a, q| a.min(q.1)),
+            p.iter().fold(f32::MIN, |a, q| a.max(q.1)),
+        );
+        let half = (FIT_RES / 2) as f32;
+        if x1 - x0 > half || y1 - y0 > half {
+            continue; // wrapped across the seam
+        }
+        let area = (p[1].0 - p[0].0) * (p[2].1 - p[0].1) - (p[2].0 - p[0].0) * (p[1].1 - p[0].1);
+        if area.abs() < 1e-6 {
+            continue;
+        }
+        for y in y0.floor().max(0.0) as usize..=(y1.ceil() as usize).min(FIT_RES - 1) {
+            for x in x0.floor().max(0.0) as usize..=(x1.ceil() as usize).min(FIT_RES - 1) {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let w0 = (p[1].0 - p[0].0) * (py - p[0].1) - (px - p[0].0) * (p[1].1 - p[0].1);
+                let w1 = (p[2].0 - p[1].0) * (py - p[1].1) - (px - p[1].0) * (p[2].1 - p[1].1);
+                let w2 = (p[0].0 - p[2].0) * (py - p[2].1) - (px - p[2].0) * (p[0].1 - p[2].1);
+                let inside = if area > 0.0 {
+                    w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0
+                } else {
+                    w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0
+                };
+                if inside {
+                    hit[y * FIT_RES + x] = true;
+                }
+            }
+        }
+    }
+    hit
+}
+
+/// PARTIALLY VERIFIED — which colour texture each material draws from, by position in
+/// `embedded_textures`' colour list; None where the material carries no texture.
+///
+/// Texture blobs are written in the exporter's order, not the material order — the
+/// KX250/KX450 store `w_plate` between `metals` and `plastics`, so reading a material
+/// index as a blob position puts the number plate over the bodywork. This table reads as
+/// a permutation on all 60 OEM bikes and is confirmed against UV layouts on the KX250,
+/// KX450 and YZ125 — but it disagrees with them on the KTM 125 SX, where material 0 is
+/// `plastics` and this claims `125_metals`. Empty when the header doesn't parse.
+pub fn material_slots(b: &[u8], colors: usize) -> Vec<Option<usize>> {
+    if b.len() < MAT_COUNT_OFF + 4 {
+        return Vec::new();
+    }
+    let count = u32le(b, MAT_COUNT_OFF) as usize;
+    if count == 0 || count > MAX_MATERIALS || MAT_TABLE_OFF + MAT_STRIDE * count > b.len() {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(count);
+    for k in 0..count {
+        let one_based = u32le(b, MAT_TABLE_OFF + MAT_STRIDE * k + MAT_TEX_FROM_REC) as usize;
+        // Past the colour list means this isn't the table we think it is — refuse the lot
+        // rather than bind half a bike from a misread header.
+        if one_based > colors {
+            return Vec::new();
+        }
+        out.push(one_based.checked_sub(1));
+    }
+    out
+}
+
 // Record layout from `width`: | width u32 | height u32 | md5[16] | u32 | data_size u32 | pad[8] | data |
 // data_size counts the 8 pad bytes, so payload = data_size - 8.
 const TEX_SIZE_FROM_W: usize = 28;
@@ -528,29 +658,36 @@ fn read_node(
         normals.push(f32le(b, normal_base + i * 12 + 8));
     }
 
-    let mut raw_subs = detect_submeshes(b, cands, iend, raw_tris, vc);
-    // A skinned mesh (rider body) is ONE group whose contiguous ranges are distinct
-    // materials; split it back out so each material can bind its own texture.
-    if raw_subs.len() == 1 && raw_subs[0].tri_count == raw_tris {
-        if let Some(ranges) = read_sub_group_ranges(b, raw_subs[0].block_off, raw_tris, vc) {
-            if ranges.len() > 1 {
-                let (name, block_off) = (raw_subs[0].name.clone(), raw_subs[0].block_off);
-                raw_subs = ranges
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, (ts, tc, vs2, vc2))| RawSub {
-                        name: name.clone(),
-                        tri_start: ts,
-                        tri_count: tc,
-                        block_off,
-                        vert_start: vs2,
-                        vert_count: vc2,
-                        mat: Some(i as u32),
-                    })
-                    .collect();
-            }
-        }
-    }
+    // A group can carry SEVERAL materials as contiguous ranges — a fork leg and the
+    // plastic guard strapped to it, a triple clamp and the front fender, a skinned rider
+    // body and its kit. Merging those into one submesh makes every range wear the first
+    // range's texture (the KX250's front fender comes out in bare metal), so split them
+    // back out and let each bind its own. Ranges number upward from the group's material.
+    let raw_subs: Vec<RawSub> = detect_submeshes(b, cands, iend, raw_tris, vc)
+        .into_iter()
+        .flat_map(|s| {
+            let ranges = read_sub_group_ranges(b, s.block_off, raw_tris, vc)
+                .filter(|r| r.len() > 1);
+            let Some(ranges) = ranges else { return vec![s] };
+            let base = s
+                .mat
+                .or_else(|| s.block_off.checked_sub(4).map(|o| u32le(b, o)))
+                .unwrap_or(0);
+            ranges
+                .into_iter()
+                .enumerate()
+                .map(|(i, (ts, tc, vs2, vc2))| RawSub {
+                    name: s.name.clone(),
+                    tri_start: ts,
+                    tri_count: tc,
+                    block_off: s.block_off,
+                    vert_start: vs2,
+                    vert_count: vc2,
+                    mat: Some(base + i as u32),
+                })
+                .collect()
+        })
+        .collect();
     // Covers the node when the submesh triangle counts sum to the raw total.
     let covers = !raw_subs.is_empty() && raw_subs.iter().map(|s| s.tri_count).sum::<usize>() == raw_tris;
 

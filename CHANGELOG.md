@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-08
+
+### Fixed
+- **Bikes whose bodywork came out in the wrong texture.** A part's material index was read
+  as a position in the model's texture list in the order the exporter happened to write
+  them, which only matches on bikes that were written in material order. The 2023 Kawasaki
+  KX250/KX450 store `w_plate` between `metals` and `plastics`, so their entire bodywork
+  wore the blank number-plate texture and an installed paint changed nothing visible. The
+  model's own material table now decides, which also fixes the Yamaha YZ125/YZ250, where
+  the chassis and the engine had swapped textures. Neither reading is right on every bike,
+  so where they disagree the mesh breaks the tie: a part's UV layout only lines up with
+  the atlas it was drawn against, and each part is asked separately, since a bike's parts
+  need not agree — the YZ125's chassis reads through the table while its steering reads
+  straight off the texture order. That puts the KTM 125 SX back on its plastics too.
+- **The front fender and fork guards rendering in bare metal.** A mesh group can hold
+  several materials as contiguous ranges — a fork leg and the plastic guard on it, a
+  triple clamp and the fender — and we merged each group into one submesh, so every range
+  wore the first one's texture. Each range now binds its own.
+
+### Changed
+- **Library thumbnails show a bike's manufacturer logo.** A bike's 250x250 `logo.tga` was
+  losing a scoring tie to `team.tga`, a 32x64 strip, so bikes showed a coloured sliver. A
+  real preview image still wins where a mod ships one. Cached thumbnails are rebuilt.
+- **Hovering a name in the Library shows the full name, folder and location.** The row
+  truncates hard, and the folder id is what you need when matching a paint to its bike.
+
+## 2026-08-07
 ## 2026-08-07 — six languages, a Play button, live model swaps
 
 ### Added
