@@ -85,6 +85,10 @@ pub struct ModDetail {
     pub images: Vec<String>,
     pub version: Option<String>,
     pub downloads: Vec<DownloadOption>,
+    /// The post's category names, verbatim ("2023 KTM 450 SX-F OEM", "Liveries", "KTM").
+    /// A livery's model category names the bike it's for far more precisely than its title
+    /// does, which is what the install picker ranks destinations by.
+    pub categories: Vec<String>,
 }
 
 #[allow(async_fn_in_trait)]
