@@ -10,6 +10,7 @@ import {
   Play,
   Loader2,
   Gamepad2,
+  SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,7 @@ export type DashboardView =
   | "locker"
   | "presets"
   | "rider"
+  | "manage"
   | "settings";
 
 interface SidebarProps {
@@ -41,6 +43,7 @@ const NAV: { id: DashboardView; label: TKey; icon: typeof Home }[] = [
   { id: "locker", label: "nav.locker", icon: Bike },
   { id: "presets", label: "nav.presets", icon: Shirt },
   { id: "rider", label: "nav.rider", icon: User },
+  { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
 ];
 
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);

@@ -15,6 +15,7 @@ mod install;
 mod library;
 mod modelswap;
 mod mods;
+mod modstate;
 mod modwatch;
 mod mxb_session;
 mod overlay;
@@ -159,11 +160,7 @@ fn scan_library_blocking(
     subpath: String,
 ) -> Result<Vec<library::LibraryEntry>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    let sound_bikes = app
-        .path()
-        .app_local_data_dir()
-        .map(|d| soundmods::known_bikes(&d))
-        .unwrap_or_default();
+    let sound_bikes = sound_bikes_of(&app);
     library::scan_library(&cfg.mods_path, &subpath, &sound_bikes).map_err(|e| format!("{e:#}"))
 }
 
@@ -2155,16 +2152,32 @@ fn presets_apply(
     make_active: bool,
 ) -> Result<PresetApplyOutcome, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    presets::apply_loadout(&cfg.profiles_dir(), &profile, &bikeid, &loadout, make_active)
+    apply_loadout_now(&app, &cfg, &profile, &bikeid, &loadout, make_active)
+}
+
+/// Write a loadout into `profile.ini`, perform its model swap if it asks for one, and tell
+/// a running game to pick it all up.
+///
+/// Shared by `presets_apply` and the Manage tab's race apply, which does this *and* takes
+/// every mod the preset doesn't need out of the game's way — one action, not two.
+fn apply_loadout_now(
+    app: &tauri::AppHandle,
+    cfg: &AppConfig,
+    profile: &str,
+    bikeid: &str,
+    loadout: &presets::Loadout,
+    make_active: bool,
+) -> Result<PresetApplyOutcome, String> {
+    presets::apply_loadout(&cfg.profiles_dir(), profile, bikeid, loadout, make_active)
         .map_err(|e| format!("{e:#}"))?;
     let want = loadout.model_swap.trim();
     let mut model_refresh = None;
-    if !want.is_empty() && !want.eq_ignore_ascii_case(&modelswap::current_active(&cfg.mods_path, &bikeid))
+    if !want.is_empty() && !want.eq_ignore_ascii_case(&modelswap::current_active(&cfg.mods_path, bikeid))
     {
-        modelswap::apply_model_swap(&cfg.mods_path, &bikeid, want)
+        modelswap::apply_model_swap(&cfg.mods_path, bikeid, want)
             .map_err(|e| format!("Cosmetics applied, but the model swap failed: {e:#}"))?;
         // Same reason as the Locker path: the look loader won't reload the mesh.
-        model_refresh = model_refresh_cmd(&app, cfg.instant_refresh, &bikeid);
+        model_refresh = model_refresh_cmd(app, cfg.instant_refresh, bikeid);
     }
     let content_reload = frostmod::signal_reload();
     Ok(PresetApplyOutcome {
@@ -2233,6 +2246,177 @@ async fn preset_bundle_import(
     bundle::import(&app, &cfg, &dir, &text)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+/// Every mod Manage can act on, enabled and disabled alike.
+#[tauri::command]
+async fn mods_state_scan(app: tauri::AppHandle) -> Result<Vec<modstate::ModEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let sound_bikes = sound_bikes_of(&app);
+        Ok(modstate::scan(&cfg, &sound_bikes))
+    })
+    .await
+    .map_err(|e| format!("mods_state_scan task failed: {e}"))?
+}
+
+/// Sound-swap bookkeeping the bike scan needs to tell a sound folder from a bike folder.
+fn sound_bikes_of(app: &tauri::AppHandle) -> Vec<String> {
+    app.path()
+        .app_local_data_dir()
+        .map(|d| soundmods::known_bikes(&d))
+        .unwrap_or_default()
+}
+
+fn preset_by_name(app: &tauri::AppHandle, name: &str) -> Result<presets::Preset, String> {
+    presets::find_preset(&presets_dir(app)?, name)
+        .ok_or_else(|| format!("no preset named '{name}'"))
+}
+
+/// What racing this preset would enable and disable — the numbers the confirm dialog shows,
+/// worked out before anything moves.
+#[tauri::command]
+async fn mods_state_plan(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<modstate::StatePlan, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let preset = preset_by_name(&app, &name)?;
+        Ok(modstate::plan(&cfg, &preset, &sound_bikes_of(&app)))
+    })
+    .await
+    .map_err(|e| format!("mods_state_plan task failed: {e}"))?
+}
+
+/// Outcome of a Manage operation: what moved, and what the game was told about it.
+#[derive(serde::Serialize)]
+struct ModsStateOutcome {
+    #[serde(flatten)]
+    state: modstate::StateOutcome,
+    content_reload: ReloadOutcome,
+    game_running: bool,
+    /// Present only on a race apply, when a preset's cosmetics went in alongside the
+    /// content shuffle.
+    look: Option<PresetApplyOutcome>,
+}
+
+/// Run a bulk file shuffle with the mods watcher parked.
+///
+/// Moving hundreds of archives is hundreds of filesystem events, and the watcher would
+/// answer them with its own reload on top of the one we send deliberately. Stop it, move,
+/// start it again — the folder it watches hasn't changed, only its contents.
+fn with_watcher_parked<T>(
+    app: &tauri::AppHandle,
+    cfg: &AppConfig,
+    op: impl FnOnce() -> T,
+) -> T {
+    let watcher = app.state::<ModWatcher>();
+    modwatch::stop(&watcher);
+    let out = op();
+    if cfg.watch_mods_reload {
+        modwatch::start(app, &watcher, &cfg.mods_path);
+    }
+    out
+}
+
+fn finish_state_op(
+    state: modstate::StateOutcome,
+    look: Option<PresetApplyOutcome>,
+) -> ModsStateOutcome {
+    // One deliberate reload for the whole batch, the same signal a preset apply sends.
+    let content_reload = if state.touched() > 0 {
+        frostmod::signal_reload()
+    } else {
+        ReloadOutcome::NotRunning
+    };
+    ModsStateOutcome {
+        state,
+        content_reload,
+        game_running: gameproc::is_game_running(),
+        look,
+    }
+}
+
+/// Enable or disable a hand-picked set of mods.
+#[tauri::command]
+async fn mods_state_set(
+    app: tauri::AppHandle,
+    rels: Vec<String>,
+    enabled: bool,
+) -> Result<ModsStateOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let out = with_watcher_parked(&app, &cfg, || modstate::set_many(&cfg, &rels, enabled));
+        Ok(finish_state_op(out, None))
+    })
+    .await
+    .map_err(|e| format!("mods_state_set task failed: {e}"))?
+}
+
+/// Race mode: put on the preset's look and leave the game with only the content it needs.
+///
+/// `profile`/`bikeid` are optional — blank means "just do the content", for a preset used
+/// purely as a content list.
+#[tauri::command]
+async fn mods_state_apply(
+    app: tauri::AppHandle,
+    name: String,
+    profile: String,
+    bikeid: String,
+) -> Result<ModsStateOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let preset = preset_by_name(&app, &name)?;
+
+        // Cosmetics first: they're the part that can fail loudly (a missing profile), and
+        // failing before anything has moved leaves the library untouched.
+        let look = if profile.trim().is_empty() || bikeid.trim().is_empty() {
+            None
+        } else {
+            Some(apply_loadout_now(
+                &app,
+                &cfg,
+                profile.trim(),
+                bikeid.trim(),
+                &preset.loadout,
+                true,
+            )?)
+        };
+
+        let plan = modstate::plan(&cfg, &preset, &sound_bikes_of(&app));
+        let out = with_watcher_parked(&app, &cfg, || modstate::apply(&cfg, &plan));
+        Ok(finish_state_op(out, look))
+    })
+    .await
+    .map_err(|e| format!("mods_state_apply task failed: {e}"))?
+}
+
+/// Send mods to the recycle bin, enabled or parked.
+#[tauri::command]
+async fn mods_state_delete(
+    app: tauri::AppHandle,
+    rels: Vec<String>,
+) -> Result<ModsStateOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let out = with_watcher_parked(&app, &cfg, || modstate::delete_many(&cfg, &rels));
+        Ok(finish_state_op(out, None))
+    })
+    .await
+    .map_err(|e| format!("mods_state_delete task failed: {e}"))?
+}
+
+/// Put everything back the way it was.
+#[tauri::command]
+async fn mods_state_restore_all(app: tauri::AppHandle) -> Result<ModsStateOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let out = with_watcher_parked(&app, &cfg, || modstate::restore_all(&cfg));
+        Ok(finish_state_op(out, None))
+    })
+    .await
+    .map_err(|e| format!("mods_state_restore_all task failed: {e}"))?
 }
 
 fn main() {
@@ -2450,7 +2634,13 @@ fn main() {
             presets_import,
             preset_bundle_stats,
             preset_bundle_create,
-            preset_bundle_import
+            preset_bundle_import,
+            mods_state_scan,
+            mods_state_plan,
+            mods_state_set,
+            mods_state_delete,
+            mods_state_apply,
+            mods_state_restore_all
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

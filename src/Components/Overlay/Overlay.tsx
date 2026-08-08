@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bike, ExternalLink, Home, Shirt, X } from "lucide-react";
+import { Bike, ExternalLink, Home, Shirt, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/Components/ui/sonner";
 import { TooltipProvider } from "@/Components/ui/tooltip";
 import Browse from "../Browse/Browse";
 import Locker from "../Locker/Locker";
 import ModDetail from "../ModDetail/ModDetail";
+import Manage from "../Manage/Manage";
 import Presets from "../Presets/Presets";
 import { ThemeProvider } from "../../Context/Theme";
 import { useI18n } from "../../i18n/context";
@@ -28,21 +29,23 @@ import type { Config } from "../../types";
  * The in-game overlay: a compact, frameless panel drawn over MX Bikes and summoned by
  * a global hotkey (registered in `src-tauri/src/overlay.rs`).
  *
- * It reuses Presets, Locker and Browse unchanged rather than reimplementing them —
+ * It reuses Presets, Locker, Browse and Manage unchanged rather than reimplementing them —
  * Presets and the Locker's model swaps are the two things that apply to a *running*
  * game via the loader re-run in `gameproc::refresh_look`, which is the whole reason
- * this window is worth having. Browse rides along so a mod can be queued mid-session.
+ * this window is worth having. Browse rides along so a mod can be queued mid-session, and
+ * Manage so the next race can be lined up between sessions without leaving the game.
  *
  * Rider, Library and Settings stay in the main window: they're either GPU-hungry next
  * to a running game or not something you reach for from the pits.
  */
 
-type OverlayTab = "presets" | "locker" | "browse";
+type OverlayTab = "presets" | "locker" | "browse" | "manage";
 
 const TABS: { id: OverlayTab; label: TKey; icon: typeof Home }[] = [
   { id: "presets", label: "nav.presets", icon: Shirt },
   { id: "locker", label: "nav.locker", icon: Bike },
   { id: "browse", label: "nav.browse", icon: Home },
+  { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
 ];
 
 /** Human-readable form of a Tauri accelerator, for the header hint. */
@@ -204,6 +207,8 @@ export default function Overlay() {
                             <Presets onOpenLocker={() => setTab("locker")} />
                           ) : tab === "locker" ? (
                             <Locker />
+                          ) : tab === "manage" ? (
+                            <Manage />
                           ) : selectedSlug ? (
                             <ModDetail
                               slug={selectedSlug}
