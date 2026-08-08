@@ -1,18 +1,127 @@
 # Changelog
 
-## 2026-08-07 — the app speaks six languages
+## 2026-08-07 — six languages, a Play button, live model swaps
 
 ### Added
 - **MXB App is translated into Italian, Spanish, French, German and Brazilian
   Portuguese.** Pick a language under Settings → Appearance; the choice persists, and
   `System` follows the OS (a bare `pt` resolves to Brazilian, the only Portuguese we
-  ship). Every screen, dialog, toast and empty state is covered — 535 keys per language.
+  ship). Every screen, dialog, toast and empty state is covered — 540 keys per language.
   Terminology follows what the MX Bikes community actually says rather than dictionary
   equivalents: `mod`, `setup`, `preset` and `Stock` stay as loanwords in every language,
   while gear is translated (`casco`/`casque`/`Helm`, `maschera`/`masque`/`Brille` for
   goggles, `livrea`/`déco`/`Lackierung` for a bike paint).
 - **Dates follow the app's language, not the OS's.** Picking Italian on an English
   machine moves the Library's dates too, instead of leaving half the UI in English.
+- **The 3D preview now offers a gear model's stock paint, not just its liveries.** The
+  paint picker listed only the `.pnt` files a helmet, boots or protection packs, so a
+  piece that ships liveries had no way back to its own look — the textures embedded in
+  the mesh, which the preview ignored entirely. "Stock" now leads the list whenever the
+  mesh carries a texture, with a separate entry for a helmet's goggles, which are picked
+  independently of the shell. A paint reuses the mesh's texture names, so stock shell
+  plus painted goggles (and the reverse) is resolved before the textures reach the
+  viewer, which would otherwise show whichever image finished loading last. Preview only
+  — it never becomes a value in your loadout, since the game names a `.pnt` there and has
+  no word for "the model's own look".
+### Fixed
+- **Downloads that Google Drive refuses now say why, instead of "the host returned a web
+  page".** Hitting a popular mod (Flow Series #1 FlowiCompound, for one) gave a message
+  that blamed the page and told you to download it manually — but Drive was answering the
+  virus-scan confirm with a *Quota exceeded* page, so a browser hit the exact same wall
+  and the advice sent people in circles. The three Drive refusals we can name — download
+  limit, private file, deleted file — now come through with what actually happened and
+  what to do about it (for a quota block: copy the file to your own Drive and download
+  the copy, or wait a day). Anything unrecognised keeps the old wording.
+
+### Added
+- **Star ratings on browse thumbnails.** A mod that people have rated on mxb-mods.com now
+  shows its score on the card the same way the site does — five stars filled to the
+  nearest half, the average, and the vote count — so a good mod is recognisable before you
+  open it. Unrated mods show nothing rather than five empty stars, which would read as a
+  bad score instead of "nobody has voted yet". The scores aren't in the REST API the
+  listing comes from, so they're fetched separately per page (six requests at a time,
+  cached for ten minutes) after the cards have painted: browsing never waits on them, and
+  a score that fails to load simply doesn't appear.
+- **A Play button that launches MX Bikes.** Setting a bike up in the Locker meant
+  alt-tabbing to Steam or the desktop to actually ride it, even though the app already
+  knew where the game was installed and whether it was running. The sidebar now carries a
+  Play button above the FrostMod pill, visible from every tab; it flips to "MX Bikes
+  running" while the game is up, so it can't start a second copy. Windows runs
+  `mxbikes.exe` directly, which works for standalone (non-Steam) copies too and doesn't
+  need Steam open; Linux hands `steam://rungameid/655500` to the desktop, because a
+  Proton install is Steam's to set up. If the install folder isn't set or holds no
+  `mxbikes.exe`, the error says so and points at Settings.
+- **Swapping a model now changes it in-game instantly, on the bike you have selected.**
+  A model swap moved the files and re-ran the game's *customization* loader — which
+  reloads paints and gear but never the bike mesh, so the garage kept showing the old
+  model until you switched bike class away and back. The Locker now also asks FrostMod
+  to re-apply the bike (new `refresh_bike_model` command), which re-reads it from disk
+  and brings the new model up immediately. FrostMod acts only on the bike you currently
+  have selected, so swapping any other bike never disturbs what you're looking at.
+  Presets get the same treatment when they carry a model swap. Gated on the existing
+  **Instant refresh** setting, since it reaches into the running game.
+
+### Fixed
+- **Browse now clears mxb-mods.com's bot protection with a real browser instead of trying
+  to impersonate one.** A user on v0.6.3 still hit `403 Forbidden` on every browse, which
+  ruled out the header work shipped for v0.6.3 — that build already sent Chrome's exact
+  header set. What it couldn't send is Chrome's TLS and HTTP/2 fingerprint, which no header
+  can disguise, and Cloudflare weighs that against the caller's IP. That's why the same
+  binary is fine on one connection and refused on another; the site itself is not blocking
+  the app, and the affected user's normal browser loads mxb-mods.com fine.
+
+  So when the site refuses us, the app now opens a small mxb-mods.com window, lets
+  Cloudflare's check clear, keeps the `cf_clearance` it hands out, and retries the request
+  with it. The cookie is saved, so being blocked once doesn't mean being blocked again on
+  every launch. This is the mechanism the app already used to sign into the MX Bikes Shop,
+  now shared by both sites rather than written twice.
+  - A 403 no longer retries in place. Three identical requests from the same fingerprint
+    earn the same refusal, so the old loop only failed three times slower; 429 and 503 do
+    still retry, since those genuinely pass on their own.
+  - A Cloudflare interstitial served as a `200` now takes the same route as a 403 — it is
+    the same refusal wearing a success code.
+  - If the check window never gets a clearance, the log says so specifically. That
+    distinguishes "the browser was never challenged either" from "we got a cookie and it
+    still failed", which are different problems with different fixes.
+
+  Honest caveat, same as last time: this is still not reproducible here, so it's verified
+  by construction and tests rather than by watching it cure the reported fault.
+- **The Locker no longer claims a model swap "Refreshed live in-game" when it didn't.**
+  The note was derived purely from the look-loader call succeeding, which says nothing
+  about whether the mesh reloaded — so it read as done while the garage still showed the
+  old model. Model and sound swaps now report separately, and the model note reflects
+  what actually happened: refreshing now, FrostMod not running, or instant refresh off.
+### Fixed
+- **Browse knows what you already have.** The "Installed" badge almost never appeared —
+  one reporter's library scored 19 of 96 tracks and **0 of 96** bikes and rider items,
+  all of them installed and working in-game. Two causes. Browse asked for installed mods
+  with a scan that keeps `.pkz` files only, so extracted track folders and every `.pnt`
+  paint were invisible; since the Bikes and Rider categories are mostly liveries and gear
+  paints, nothing in them could ever be badged. And it compared the site's post title to
+  the packaged filename as exact strings, which post titles never survive — they carry
+  author credits, release tags and notes like "(READ INSTRUCTIONS)". Browse now reads the
+  same full library scan the Library tab uses, and matches titles the way a person would:
+  one name spelled inside the other, or enough distinctive words in common. Careful
+  enough to still tell two colourways of the same bike apart. (#26)
+- **Presets no longer comes up blank when your mods folder lives somewhere else.**
+  `mxbikes.ini` lets you point the mods folder at another drive, but the game has no
+  equivalent redirect for profiles — it keeps writing those to
+  `Documents\PiBoSo\MX Bikes\profiles`. The app only ever looked at
+  `<mods folder>\profiles`, found nothing, and rendered an empty Presets tab with no
+  hint that a path was involved. It now falls back to the stock `Documents` folder when
+  the one beside your mods isn't there, and Settings shows the path it actually resolved
+  to instead of the one it assumed (#27).
+- **The empty Presets tab explains itself.** Instead of "launch the game once", it names
+  the folder it read, says outright when that folder doesn't exist, points at the
+  `mxbikes.ini` split as the likely cause, and offers a button straight to the Settings
+  picker.
+- **A slot can be cleared back to stock again.** Empty is what the game writes for an
+  unmodded slot, and every layer already handled it — the trigger renders it as "Stock",
+  a cleared slot isn't flagged missing, and applying writes it through. Only the picker
+  couldn't produce it: there was no "none" option, no clear button, and an empty search
+  box commits nothing. Pick `full` for Protection once and the only ways back were the
+  game's own UI or hand-editing `profile.ini`. Every slot dropdown now leads with a
+  "Stock (none)" row that clears it. (#28)
 
 ### Changed
 - **Translations can't silently go missing.** Each locale is typed as
@@ -27,8 +136,8 @@
 - **Sentences that wrap markup are translated whole.** A `<Trans>` component splices
   React nodes into placeholders, so word order stays the translator's choice — splitting
   such a sentence into prefix/suffix strings would have hard-coded English grammar into
-  German and French. The same applies to the preset-apply toasts, which were an English
-  fragment ("Applied X to Y — {note}") and are now four complete sentences.
+  German and French. The same applies to the preset-apply and swap toasts, which were
+  English fragments and are now complete sentences.
 - **Nouns that read differently mid-sentence get their own key.** "Search tracks…" used
   `label.toLowerCase()`, which produces broken German — its nouns are capitalized
   everywhere — so mod types now carry a separate inline form.

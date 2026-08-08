@@ -12,9 +12,11 @@ import type {
   FrostmodStatus,
   InstalledMod,
   InstallProgress,
+  LaunchOutcome,
   LibraryEntry,
   Loadout,
   ModDetail,
+  ModRating,
   ModSummary,
   PkzMeta,
   PaintTexture,
@@ -107,11 +109,12 @@ export const MOD_TYPES: ModType[] = [
 
 export const DEFAULT_MOD_TYPE = MOD_TYPES[0];
 
-/** Normalize a mod title or filename for fuzzy "already installed" matching. */
+/** Normalize a mod title or filename into a comparison key. `.pnt` is in the list
+ *  because paints and liveries are installed files too — see `lib/installedMatch`. */
 export function normalizeModName(s: string): string {
   return s
     .toLowerCase()
-    .replace(/\.(pkz|zip|rar|7z)$/i, "")
+    .replace(/\.(pkz|zip|rar|7z|pnt)$/i, "")
     .replace(/[^a-z0-9]+/g, "");
 }
 
@@ -160,6 +163,12 @@ export function searchMods(
 
 export function getModDetail(slug: string): Promise<ModDetail> {
   return invoke<ModDetail>("get_mod_detail", { slug });
+}
+
+/** Community scores for the given post ids, keyed by id. Ids the site didn't answer for
+ *  are absent — ratings decorate a card, so a miss shows no stars rather than an error. */
+export function getModRatings(ids: number[]): Promise<Record<string, ModRating>> {
+  return invoke<Record<string, ModRating>>("get_mod_ratings", { ids });
 }
 
 export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {
@@ -292,8 +301,18 @@ export function loadGearModel(
   part: RiderPart["part"],
   paint?: string,
   goggles?: string,
+  /** Show the mesh's own texture instead of a `.pnt` — the stock look, per side. */
+  stock = false,
+  stockGoggles = false,
 ): Promise<RiderPart> {
-  return invoke<RiderPart>("load_gear_model", { path, part, paint, goggles });
+  return invoke<RiderPart>("load_gear_model", {
+    path,
+    part,
+    paint,
+    goggles,
+    stock,
+    stockGoggles,
+  });
 }
 
 export function listGearPaints(path: string): Promise<GearPaints> {
@@ -348,8 +367,8 @@ export function detectGamePath(): Promise<string | null> {
 }
 
 /**
- * Override the PiBoSo `profiles` folder for the split-folder edge case. Pass an
- * empty string to clear it (falls back to `<modsPath>/profiles`).
+ * Override the PiBoSo `profiles` folder. Pass an empty string to clear it (back to
+ * the resolved default — see {@link presetsListProfiles}).
  */
 export function setProfilesPath(path: string): Promise<void> {
   return invoke<void>("set_profiles_path", { path });
@@ -727,6 +746,16 @@ export function isFrostmodRunning(): Promise<boolean> {
   return invoke<boolean>("frostmod_running");
 }
 
+/** Start MX Bikes. Resolves to `already_running` when the game is already up. */
+export function launchGame(): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("launch_game");
+}
+
+/** Is MX Bikes currently running? Always false off Windows — the probe is Win32-only. */
+export function isGameRunning(): Promise<boolean> {
+  return invoke<boolean>("game_running");
+}
+
 /** Install/version/running snapshot (hits GitHub for the latest tag). */
 export function frostmodStatus(): Promise<FrostmodStatus> {
   return invoke<FrostmodStatus>("frostmod_status");
@@ -780,8 +809,18 @@ export function onModsChanged(cb: () => void): Promise<UnlistenFn> {
   return onFrostmodReload(() => cb());
 }
 
-export function presetsListProfiles(): Promise<string[]> {
-  return invoke<string[]>("presets_list_profiles");
+/** The profiles folder as the backend resolved it, and what it holds. */
+export type ProfilesScan = {
+  /** Absolute path the profiles were read from. */
+  dir: string;
+  /** Whether that folder is actually there — an empty list means something different
+   *  when it isn't (wrong path) than when it is (game never made a profile). */
+  exists: boolean;
+  profiles: string[];
+};
+
+export function presetsListProfiles(): Promise<ProfilesScan> {
+  return invoke<ProfilesScan>("presets_list_profiles");
 }
 
 /** Bike ids present in a profile — the targets a loadout can be applied to. */

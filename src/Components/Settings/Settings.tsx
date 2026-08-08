@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   countProfilesIn,
   detectGamePath,
+  presetsListProfiles,
   setAutoRunFrostmod,
   setGamePath,
   setInstantRefresh,
@@ -20,6 +21,7 @@ import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
+import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
 import { LOCALE_OPTIONS } from "../../i18n/core";
 import { useFrostmod } from "../../Context/FrostmodContext";
@@ -71,12 +73,28 @@ export default function Settings() {
     about: null,
   });
 
-  // The profiles folder normally lives *inside* the mods folder — surface that
-  // derived default path so the override reads as a customization of it.
+  // The folder the backend *actually* reads profiles from when there's no override.
+  // Usually `<modsPath>/profiles`, but it falls back to `Documents\PiBoSo\MX Bikes\
+  // profiles` when that one doesn't exist — show the resolved path so a fallback is
+  // visible here rather than something the player has to infer.
+  const [resolvedProfilesPath, setResolvedProfilesPath] = useState("");
+  useEffect(() => {
+    if (config.profilesPath) {
+      // An override is shown verbatim; nothing to resolve.
+      setResolvedProfilesPath("");
+      return;
+    }
+    presetsListProfiles()
+      .then((scan) => setResolvedProfilesPath(scan.dir))
+      .catch(() => setResolvedProfilesPath(""));
+  }, [config.modsPath, config.profilesPath]);
+
   const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
-  const defaultProfilesPath = config.modsPath
-    ? `${config.modsPath}${profilesSep}profiles`
-    : t("settings.insideModsFolder");
+  const defaultProfilesPath =
+    resolvedProfilesPath ||
+    (config.modsPath
+      ? `${config.modsPath}${profilesSep}profiles`
+      : t("settings.insideModsFolder"));
 
   const runInBackground = config.runInBackground ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
@@ -338,9 +356,15 @@ export default function Settings() {
                 </span>
               </div>
               <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-                Presets read your profiles from here. By default it&apos;s the{" "}
-                <span className="font-mono">profiles</span> folder inside your MX Bikes
-                folder — only change it if yours lives somewhere else.
+                <Trans
+                  k="settings.profilesDesc"
+                  values={{
+                    profiles: <span className="font-mono">profiles</span>,
+                    documents: (
+                      <span className="font-mono">Documents\PiBoSo\MX Bikes</span>
+                    ),
+                  }}
+                />
               </p>
               <div className="mt-2 flex gap-2">
                 <div
@@ -375,7 +399,7 @@ export default function Settings() {
                   disabled={busy}
                   className="mt-2 cursor-default self-start text-[11.5px] font-semibold text-primary hover:brightness-110 disabled:opacity-50"
                 >
-                  Reset to default
+                  {t("settings.resetToDefault")}
                 </button>
               )}
             </div>
@@ -385,9 +409,10 @@ export default function Settings() {
             {/* Optional game *install* folder (holds core rider.pkz) — powers the
                 real 3D rider body in the preset preview. */}
             <p className="text-[12px] text-muted-foreground">
-              Game install folder (optional) — where MX Bikes is installed (holds{" "}
-              <span className="font-mono">rider.pkz</span>). Set it to load the real
-              rider body in the 3D preview.
+              <Trans
+                k="settings.gameInstallDesc"
+                values={{ file: <span className="font-mono">rider.pkz</span> }}
+              />
             </p>
             <div className="flex gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">

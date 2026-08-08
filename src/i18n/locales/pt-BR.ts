@@ -513,6 +513,41 @@ export const ptBR: Translation = {
   "settings.reloadUnavailable":
     "Recarregar não está disponível nesta plataforma.",
 
+  // ── Início do jogo ─────────────────────────────────────────────────────────
+  "game.play": "Jogar",
+  "game.starting": "Iniciando…",
+  "game.running": "MX Bikes em execução",
+  "game.launch": "Iniciar o MX Bikes",
+  "game.alreadyRunning": "O MX Bikes já está em execução",
+  "game.launching": "Iniciando o MX Bikes…",
+  "game.launchFailed": "Não foi possível iniciar o MX Bikes",
+
+  // ── Textos que a primeira varredura não pegou (JSX em várias linhas) ──────
+  "libraryDetail.noEmbedded": "Nenhum detalhe embutido foi encontrado para este item.",
+  "modDetail.downloadFromHost": "Baixar de {{host}}",
+  "modDetail.openHost": "Abrir {{host}}",
+  "modDetail.thenAddFile": "Depois adicione o arquivo",
+  "modDetail.chooseDownloaded": "Escolha o arquivo baixado",
+  "presets.chooseProfilesFolder": "Escolher a pasta de perfis…",
+  "presets.viewInRider": "Ver no Piloto",
+  "presets.noModelSwapsHere": "Nenhuma troca de modelo registrada para esta moto —",
+  "presets.setUpInLocker": "configure no Armário",
+  "presets.makeActiveBike": "Tornar esta a moto ativa",
+  "presets.nameClash":
+    "Já existe outro preset chamado “{{name}}” — salvar vai sobrescrever ele também.",
+  "presets.shareWarning":
+    "Envia para um link público e temporário — isso redistribui arquivos de mods feitos por outras pessoas, então compartilhe com responsabilidade.",
+  "settings.profilesDesc":
+    "Os presets leem seus perfis daqui — o caminho abaixo é onde o app está olhando agora. É a pasta {{profiles}} dentro da sua pasta do MX Bikes, ou {{documents}} se você moveu sua pasta de mods. Defina só se a sua estiver em outro lugar.",
+  "settings.resetToDefault": "Restaurar o padrão",
+  "settings.gameInstallDesc":
+    "Pasta de instalação do jogo (opcional) — onde o MX Bikes está instalado (contém {{file}}). Defina para carregar o corpo real do piloto na prévia 3D.",
+  "viewer.stockGearNote":
+    "Mostrado no {{part}} original do jogo. Uma pintura feita para outro modelo pode não encaixar perfeitamente.",
+  "viewer.paintNoChange":
+    "Nenhuma das texturas desta pintura é usada pelas peças mostradas aqui, então a prévia não muda. Ela ainda pode pintar as rodas ou a corrente, que esta visão não renderiza.",
+  "viewer.noPaintPreview": "Sem prévia da pintura ({{err}})",
+
   // ── Biblioteca ─────────────────────────────────────────────────────────────
   "library.help":
     "Seus mods instalados. Veja o que está instalado e remova o que não quiser mais.",
@@ -621,6 +656,16 @@ export const ptBR: Translation = {
   "locker.reselectProfile":
     "Selecione seu perfil de novo no MX Bikes para carregar a troca.",
   "locker.loadsNextTime": "Carrega na próxima vez que o jogo abrir.",
+  "locker.modelRefreshing":
+    "Atualizando no jogo — se for a moto que você tem selecionada, ela muda agora.",
+  "locker.modelFrostmodNotRunning":
+    "Rode o FrostMod para ver as trocas de modelo ao vivo — por enquanto, selecione a moto de novo no jogo.",
+  "locker.modelFrostmodUnreachable":
+    "Não deu pra falar com o FrostMod — selecione a moto de novo no jogo para carregar.",
+  "locker.modelRefreshWindowsOnly":
+    "A atualização de modelo ao vivo é só no Windows — selecione a moto de novo no jogo.",
+  "locker.modelInstantRefreshOff":
+    "Selecione a moto de novo no MX Bikes para carregar (a atualização instantânea está desligada).",
 
   // ── Registro de sets soltos ────────────────────────────────────────────────
   "swaps.model": "modelo",

@@ -523,6 +523,41 @@ export const de: Translation = {
   "settings.reloadUnavailable":
     "Neu laden ist auf dieser Plattform nicht verfügbar.",
 
+  // ── Spielstart ─────────────────────────────────────────────────────────────
+  "game.play": "Spielen",
+  "game.starting": "Wird gestartet…",
+  "game.running": "MX Bikes läuft",
+  "game.launch": "MX Bikes starten",
+  "game.alreadyRunning": "MX Bikes läuft bereits",
+  "game.launching": "MX Bikes wird gestartet…",
+  "game.launchFailed": "MX Bikes konnte nicht gestartet werden",
+
+  // ── Vom ersten Durchlauf übersehene Strings (mehrzeiliges JSX) ─────────────
+  "libraryDetail.noEmbedded": "Für dieses Element wurden keine eingebetteten Details gefunden.",
+  "modDetail.downloadFromHost": "Von {{host}} herunterladen",
+  "modDetail.openHost": "{{host}} öffnen",
+  "modDetail.thenAddFile": "Füge dann die Datei hinzu",
+  "modDetail.chooseDownloaded": "Heruntergeladene Datei auswählen",
+  "presets.chooseProfilesFolder": "Profilordner auswählen…",
+  "presets.viewInRider": "Im Fahrer ansehen",
+  "presets.noModelSwapsHere": "Für dieses Motorrad sind keine Modellwechsel registriert —",
+  "presets.setUpInLocker": "richte sie im Spind ein",
+  "presets.makeActiveBike": "Dieses Motorrad aktiv setzen",
+  "presets.nameClash":
+    "Ein anderes Preset heißt bereits „{{name}}“ — beim Speichern wird es ebenfalls überschrieben.",
+  "presets.shareWarning":
+    "Lädt zu einem öffentlichen, temporären Link hoch — dabei werden Mod-Dateien anderer weiterverbreitet, also teile verantwortungsvoll.",
+  "settings.profilesDesc":
+    "Presets lesen deine Profile von hier — der Pfad unten ist der, in dem die App gerade nachsieht. Das ist der Ordner {{profiles}} in deinem MX-Bikes-Ordner, oder {{documents}}, wenn du deinen Mod-Ordner verschoben hast. Setze ihn nur, wenn deiner woanders liegt.",
+  "settings.resetToDefault": "Auf Standard zurücksetzen",
+  "settings.gameInstallDesc":
+    "Spiel-Installationsordner (optional) — wo MX Bikes installiert ist (enthält {{file}}). Setze ihn, um den echten Fahrerkörper in der 3D-Vorschau zu laden.",
+  "viewer.stockGearNote":
+    "Auf dem Standard-{{part}} des Spiels gezeigt. Ein Design für ein anderes Modell passt möglicherweise nicht exakt.",
+  "viewer.paintNoChange":
+    "Keine der Texturen dieses Designs wird von den hier gezeigten Teilen verwendet, deshalb ändert sich die Vorschau nicht. Es kann trotzdem Räder oder Kette einfärben, die diese Ansicht nicht darstellt.",
+  "viewer.noPaintPreview": "Keine Design-Vorschau ({{err}})",
+
   // ── Bibliothek ─────────────────────────────────────────────────────────────
   "library.help":
     "Deine installierten Mods. Sieh nach, was installiert ist, und entferne, was du nicht mehr willst.",
@@ -641,6 +676,16 @@ export const de: Translation = {
     "Wähle dein Profil in MX Bikes neu aus, um den Tausch zu laden.",
   "locker.loadsNextTime":
     "Wird beim nächsten Start des Spiels geladen.",
+  "locker.modelRefreshing":
+    "Wird im Spiel aktualisiert — wenn es dein ausgewähltes Motorrad ist, ändert es sich jetzt.",
+  "locker.modelFrostmodNotRunning":
+    "Starte FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
+  "locker.modelFrostmodUnreachable":
+    "FrostMod war nicht erreichbar — wähle das Motorrad im Spiel neu aus, um es zu laden.",
+  "locker.modelRefreshWindowsOnly":
+    "Die Live-Modellaktualisierung gibt es nur unter Windows — wähle das Motorrad im Spiel neu aus.",
+  "locker.modelInstantRefreshOff":
+    "Wähle das Motorrad in MX Bikes neu aus, um es zu laden (die sofortige Aktualisierung ist aus).",
 
   // ── Registrierung loser Sets ───────────────────────────────────────────────
   "swaps.model": "Modell",

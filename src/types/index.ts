@@ -40,6 +40,13 @@ export interface ModSummary {
   categoryId: number;
 }
 
+/** A mod's community score on mxb-mods.com, as shown under the site's own thumbnails. */
+export interface ModRating {
+  /** Mean score out of 5 — only meaningful when `count` is above zero. */
+  average: number;
+  count: number;
+}
+
 /** One download choice on a mod page (hosts vary: Google Drive, MediaFire, …). */
 export interface DownloadOption {
   url: string;
@@ -265,6 +272,10 @@ export interface RiderModel {
 export interface GearPaints {
   paints: string[];
   goggles: string[];
+  /** The mesh carries its own texture, so the preview can offer a "Stock" entry
+   *  alongside the packed paints. Preview-only — never a loadout value. */
+  hasStock: boolean;
+  hasStockGoggles: boolean;
 }
 
 export interface PkzMeta {
@@ -311,6 +322,9 @@ export interface FrostmodReload {
   mods?: string[];
 }
 
+/** Result of pressing Play. `already_running` means we deliberately did nothing. */
+export type LaunchOutcome = "launched" | "already_running";
+
 export type LiveRefresh =
   | "refreshed"
   | "failed"
@@ -318,10 +332,19 @@ export type LiveRefresh =
   | "disabled"
   | "unsupported";
 
+/** Result of a payload-carrying command sent to FrostMod (see `frostmod.rs`). */
+export type CommandOutcome =
+  | "signaled"
+  | "not_running"
+  | "write_failed"
+  | "unsupported";
+
 export interface PresetApplyOutcome {
   content_reload: ReloadOutcome;
   game_running: boolean;
   live_refresh: LiveRefresh;
+  /** Set only when the preset performed a model swap. See `SwapApplyOutcome`. */
+  model_refresh: CommandOutcome | null;
 }
 
 /** Outcome of a Locker model/sound swap — same shape/feedback as a preset apply. */
@@ -329,6 +352,13 @@ export interface SwapApplyOutcome {
   content_reload: ReloadOutcome;
   game_running: boolean;
   live_refresh: LiveRefresh;
+  /**
+   * Model swaps only (`null` for sound). `live_refresh` re-runs the game's
+   * *customization* loader — that reloads paints/gear but never the mesh, so the
+   * model needs FrostMod to re-apply the bike. `signaled` means FrostMod was asked;
+   * it still no-ops unless the swapped bike is the one currently selected in-game.
+   */
+  model_refresh: CommandOutcome | null;
 }
 
 /** Install/version/running snapshot for the FrostMod settings panel. */

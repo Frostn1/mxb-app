@@ -472,14 +472,17 @@ pub(crate) async fn download(
     dir: &Path,
 ) -> anyhow::Result<PathBuf> {
     let mut resp = get_with_retry(client, url).await?;
+    let is_gdrive = url.contains("google");
 
     // Large Google Drive files return a virus-scan HTML page with a confirm form; submit it.
-    if content_type(&resp).starts_with("text/html") && url.contains("google") {
+    if content_type(&resp).starts_with("text/html") && is_gdrive {
         let html = resp.text().await?;
         let (action, params) = parse_gdrive_confirm(&html).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Google Drive returned an unexpected page — open the mod page to download it manually."
-            )
+            anyhow::anyhow!(gdrive_page_error(&html).unwrap_or_else(|| {
+                "Google Drive returned an unexpected page — open the mod page to download it \
+                 manually."
+                    .to_string()
+            }))
         })?;
         resp = client
             .get(&action)
@@ -490,6 +493,14 @@ pub(crate) async fn download(
     }
 
     if content_type(&resp).starts_with("text/html") {
+        // Passing the virus-scan form doesn't mean Drive will hand over the bytes — it
+        // answers quota and permission refusals with another 200 HTML page.
+        if is_gdrive {
+            let html = resp.text().await.unwrap_or_default();
+            if let Some(msg) = gdrive_page_error(&html) {
+                anyhow::bail!(msg);
+            }
+        }
         anyhow::bail!(
             "The host returned a web page instead of a file — open the mod page to download it manually."
         );
@@ -523,6 +534,36 @@ fn content_type(resp: &reqwest::Response) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_lowercase()
+}
+
+/// Drive serves its refusals as ordinary 200 HTML pages whose `<title>` names the
+/// reason ("Google Drive - Quota exceeded"). Translate the ones we recognise into
+/// advice that's actually true — the catch-all "download it manually" is wrong for a
+/// quota block, where a browser hits exactly the same wall.
+fn gdrive_page_error(html: &str) -> Option<String> {
+    let title = page_title(html)?.to_lowercase();
+    let msg = if title.contains("quota") {
+        "Google Drive has hit this file's download limit — too many people grabbed it recently. \
+         Downloading it in a browser will fail the same way. Open the file in Drive, use \"Make a \
+         copy\" to save it to your own Drive, then download your copy — or try again in a day."
+    } else if title.contains("access denied") || title.contains("permission") {
+        "This Google Drive file isn't shared publicly, so it can't be downloaded — the uploader \
+         needs to fix its sharing settings."
+    } else if title.contains("not found") {
+        "This Google Drive file no longer exists — the uploader probably removed it. Check the mod \
+         page for an updated link."
+    } else {
+        return None;
+    };
+    Some(msg.to_string())
+}
+
+fn page_title(html: &str) -> Option<String> {
+    let doc = Html::parse_document(html);
+    let sel = Selector::parse("title").ok()?;
+    let title = doc.select(&sel).next()?.text().collect::<String>();
+    let title = title.trim();
+    (!title.is_empty()).then(|| title.to_string())
 }
 
 fn parse_gdrive_confirm(html: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -957,6 +998,27 @@ mod tests {
         assert!(params
             .iter()
             .any(|(k, v)| k == "uuid" && v == "2b32fee2-d9c8-48a0-be9a-51d4b1dea839"));
+    }
+
+    #[test]
+    fn names_the_reason_drive_refused_the_file() {
+        // Verbatim shape of the page Drive returns after the virus-scan confirm when a
+        // file has been downloaded too often (seen on Flow Series #1 FlowiCompound).
+        let quota = r#"<!DOCTYPE html><html><head><title>Google Drive - Quota exceeded</title></head>
+            <body><p class="uc-error-caption">Sorry, you can't view or download this file at this time.</p></body></html>"#;
+        let msg = gdrive_page_error(quota).expect("quota page should be recognised");
+        assert!(msg.contains("download limit"), "{msg}");
+        assert!(msg.contains("Make a copy"), "{msg}");
+
+        let denied = r#"<html><head><title>Google Drive - Access Denied</title></head><body></body></html>"#;
+        assert!(gdrive_page_error(denied)
+            .expect("denied page should be recognised")
+            .contains("shared publicly"));
+
+        // The virus-scan interstitial is handled by the confirm form, not by this.
+        let scan = r#"<html><head><title>Google Drive - Virus scan warning</title></head><body></body></html>"#;
+        assert!(gdrive_page_error(scan).is_none());
+        assert!(gdrive_page_error("<html><body>no title</body></html>").is_none());
     }
 
     #[test]

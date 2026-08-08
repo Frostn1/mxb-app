@@ -53,20 +53,45 @@ import { useT, type TFunc } from "../../i18n/context";
  * **bound** to a model swap, so activating that model pulls its sound along.
  */
 
-/** Trailing feedback for a swap toast — mirrors the presets "refreshed live in-game" note. */
-function swapNote(outcome: SwapApplyOutcome, t: TFunc): string {
+/**
+ * Trailing feedback for a swap toast.
+ *
+ * Models and sounds get different notes because they refresh by different routes.
+ * `live_refresh` re-runs the game's *customization* loader — that reloads paints and
+ * gear but never the bike mesh, so it says nothing about whether a swapped model is
+ * visible. A model only appears live if FrostMod re-applies the bike (`model_refresh`),
+ * which it does solely for the bike you currently have selected.
+ */
+function swapNote(
+  kind: "model" | "sound",
+  outcome: SwapApplyOutcome,
+  t: TFunc,
+): string {
+  if (!outcome.game_running) return t("locker.loadsNextTime");
+
+  if (kind === "model") {
+    switch (outcome.model_refresh) {
+      case "signaled":
+        return t("locker.modelRefreshing");
+      case "not_running":
+        return t("locker.modelFrostmodNotRunning");
+      case "write_failed":
+        return t("locker.modelFrostmodUnreachable");
+      case "unsupported":
+        return t("locker.modelRefreshWindowsOnly");
+      default: // null — instant refresh is switched off in Settings
+        return t("locker.modelInstantRefreshOff");
+    }
+  }
+
   switch (outcome.live_refresh) {
     case "refreshed":
       return t("locker.refreshedLive");
     case "failed":
       return t("locker.refreshFailed");
     default:
-      break;
+      return t("locker.reselectProfile");
   }
-  if (outcome.game_running) {
-    return t("locker.reselectProfile");
-  }
-  return t("locker.loadsNextTime");
 }
 
 /** One bike's row: its models (null for sound-only bikes) and its sounds (always present). */
@@ -182,14 +207,14 @@ export default function Locker() {
       bike,
       t("locker.switchedModel", { bike, target }),
       () => applyModelSwap(bike, target),
-      (o) => swapNote(o, t),
+      (r) => swapNote("model", r, t),
     );
   const onSoundSwap = (bike: string, target: string) =>
     run(
       bike,
       t("locker.switchedSound", { bike, target }),
       () => applySoundSwap(bike, target),
-      (o) => swapNote(o, t),
+      (r) => swapNote("sound", r, t),
     );
   const onBind = (bike: string, model: string, sound: string) =>
     run(bike, t("locker.tied", { sound, model }), () => bindSound(bike, model, sound));

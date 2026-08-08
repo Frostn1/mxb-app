@@ -27,7 +27,6 @@ import {
   isSoundContext,
   riderProfileSub,
   riderPaintKind,
-  normalizeModName,
   resolveInitialFolder,
   scanRiderTargets,
   sortMirrors,
@@ -42,6 +41,7 @@ import type {
 } from "../../types";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
+import type { InstalledIndex } from "../../lib/installedMatch";
 import { fileFormat, formatDate } from "../../lib/mods";
 import { Badge } from "@/Components/ui/badge";
 import { Button } from "@/Components/ui/button";
@@ -62,7 +62,7 @@ interface ModDetailProps {
   modType: ModType;
   /** Browse category the mod was opened under — drives bike-livery routing. */
   categoryId: number;
-  installedNames: Set<string>;
+  installed: InstalledIndex;
   onBack: () => void;
 }
 
@@ -95,7 +95,7 @@ export default function ModDetail({
   slug,
   modType,
   categoryId,
-  installedNames,
+  installed,
   onBack,
 }: ModDetailProps) {
   const t = useT();
@@ -107,7 +107,9 @@ export default function ModDetail({
   const paintKind = riderPaintKind(modType, categoryId);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [installed, setInstalled] = useState<InstalledMod[]>([]);
+  // The raw file list — only for destination folders and their counts. The badge uses
+  // the `installed` index prop, which also sees folders and paints.
+  const [installedFiles, setInstalledFiles] = useState<InstalledMod[]>([]);
   const [destOptions, setDestOptions] = useState<DestOption[]>([]);
   const [guess, setGuess] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -140,7 +142,7 @@ export default function ModDetail({
         try {
           const inst = await getInstalledMods(modType.installSubpath);
           if (cancelled) return;
-          setInstalled(inst);
+          setInstalledFiles(inst);
           // Rider paints route into a model's/profile's folder; everything else
           // uses the generic (track/bike) destination logic.
           const dest =
@@ -152,7 +154,7 @@ export default function ModDetail({
           setGuess(dest.guess);
           setSuggestions(dest.suggestions);
         } catch {
-          setInstalled([]);
+          setInstalledFiles([]);
           setDestOptions([]);
         }
       })
@@ -164,9 +166,9 @@ export default function ModDetail({
 
   const folderCounts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const it of installed) m.set(it.folder, (m.get(it.folder) ?? 0) + 1);
+    for (const it of installedFiles) m.set(it.folder, (m.get(it.folder) ?? 0) + 1);
     return m;
-  }, [installed]);
+  }, [installedFiles]);
 
   // "Official" mirror + metadata for the collapsed install panel.
   const mirrors = useMemo(() => (detail ? sortMirrors(detail) : []), [detail]);
@@ -181,8 +183,7 @@ export default function ModDetail({
     [modType, destOptions, guess, livery, sound, paintKind],
   );
 
-  const isInstalled =
-    detail !== null && installedNames.has(normalizeModName(detail.title));
+  const isInstalled = detail !== null && installed.has(detail.title);
 
   // Already have it? Confirm before overwriting; otherwise open the dialog.
   const openInstall = () => {
@@ -647,15 +648,15 @@ function BlockedHost({
         <div className="flex flex-1 flex-col gap-3.5">
           <div className="flex flex-col gap-2">
             <span className="text-[12.5px] text-foreground/85">
-              Download from {host}
+              {t("modDetail.downloadFromHost", { host })}
             </span>
             <Button size="sm" className="w-full" onClick={onOpen}>
-              Open {host} <ExternalLink className="size-3.5" />
+              {t("modDetail.openHost", { host })} <ExternalLink className="size-3.5" />
             </Button>
           </div>
           <div className="flex flex-col gap-2">
             <span className="text-[12.5px] text-muted-foreground">
-              Then add the file
+              {t("modDetail.thenAddFile")}
             </span>
             <button
               onClick={onChoose}
@@ -663,7 +664,7 @@ function BlockedHost({
             >
               <FileDown className="size-4 text-muted-foreground" />
               <span className="text-[12px] font-semibold text-primary">
-                Choose the downloaded file
+                {t("modDetail.chooseDownloaded")}
               </span>
             </button>
           </div>

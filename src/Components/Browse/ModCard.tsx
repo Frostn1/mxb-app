@@ -8,7 +8,8 @@ import {
   SquareCheck,
   Square,
 } from "lucide-react";
-import type { ModSummary } from "../../types";
+import type { ModRating, ModSummary } from "../../types";
+import RatingStars from "./RatingStars";
 import { Badge } from "@/Components/ui/badge";
 import {
   ContextMenu,
@@ -23,6 +24,8 @@ import { useT } from "../../i18n/context";
 
 interface ModCardProps {
   mod: ModSummary;
+  /** The site's score, when it has one. Undefined until the ratings request lands. */
+  rating?: ModRating;
   installed: boolean;
   isBike: boolean;
   selected: boolean;
@@ -35,6 +38,7 @@ interface ModCardProps {
 
 export default function ModCard({
   mod,
+  rating,
   installed,
   isBike,
   selected,
@@ -92,6 +96,13 @@ export default function ModCard({
             >
               <Check className="size-3.5" strokeWidth={3} />
             </span>
+            {/* Unrated mods get nothing at all — five empty stars would read as a bad
+                score rather than as "nobody has voted yet". */}
+            {rating && rating.count > 0 && (
+              <span className="absolute bottom-1.5 left-1.5 rounded-md bg-black/65 px-1.5 py-[3px] shadow-sm backdrop-blur-[2px]">
+                <RatingStars rating={rating} />
+              </span>
+            )}
           </div>
           <div className="flex flex-col gap-1 px-3 py-2.5">
             <div className="flex items-center gap-1.5">

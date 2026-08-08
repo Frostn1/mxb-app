@@ -293,7 +293,7 @@ export default function LibraryDetail({
               !meta?.author &&
               !meta?.length && (
                 <p className="text-[12.5px] text-muted-foreground">
-                  No embedded details were found for this item.
+                  {t("libraryDetail.noEmbedded")}
                 </p>
               )}
           </div>

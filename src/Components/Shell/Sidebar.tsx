@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Home,
   Library as LibraryIcon,
@@ -7,6 +8,8 @@ import {
   Settings,
   RefreshCw,
   Play,
+  Loader2,
+  Gamepad2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -14,6 +17,8 @@ import { useFrostmod } from "../../Context/FrostmodContext";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
+import { launchGame } from "../../api/mods";
+import { useGameRunning } from "../../lib/useGameRunning";
 
 export type DashboardView =
   | "browse"
@@ -40,10 +45,44 @@ const NAV: { id: DashboardView; label: TKey; icon: typeof Home }[] = [
 
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
 
+/** MX Bikes takes a while to show up in the process list; stop saying "Starting…" after this. */
+const STARTING_TIMEOUT_MS = 15000;
+
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const t = useT();
   const { running, reload, status, start } = useFrostmod();
   const { active, queueLength } = useInstall();
+  const { running: gameRunning, refresh: refreshGame } = useGameRunning();
+  const [starting, setStarting] = useState(false);
+
+  // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
+  // to, so a launch that failed silently doesn't leave the button stuck.
+  useEffect(() => {
+    if (!starting) return;
+    if (gameRunning) {
+      setStarting(false);
+      return;
+    }
+    const id = setTimeout(() => setStarting(false), STARTING_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [starting, gameRunning]);
+
+  const onPlay = async () => {
+    setStarting(true);
+    try {
+      const outcome = await launchGame();
+      if (outcome === "already_running") {
+        toast.info(t("game.alreadyRunning"));
+        setStarting(false);
+      } else {
+        toast.success(t("game.launching"));
+      }
+    } catch (e) {
+      toast.error(t("game.launchFailed"), { description: String(e) });
+      setStarting(false);
+    }
+    refreshGame();
+  };
 
   const installing = active && IN_PROGRESS.has(active.stage);
   const pct =
@@ -115,6 +154,34 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
             </div>
           </div>
         )}
+
+        <button
+          data-tour="play"
+          onClick={onPlay}
+          disabled={gameRunning || starting}
+          title={gameRunning ? t("game.running") : t("game.launch")}
+          className={cn(
+            "flex cursor-default items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[13.5px] font-semibold transition-colors",
+            gameRunning || starting
+              ? "border border-white/[0.07] text-muted-foreground"
+              : "bg-primary text-primary-foreground hover:brightness-105 active:brightness-95",
+          )}
+        >
+          {gameRunning ? (
+            <Gamepad2 className="size-4 text-success" />
+          ) : starting ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Play className="size-4" />
+          )}
+          <span>
+            {gameRunning
+              ? t("game.running")
+              : starting
+                ? t("game.starting")
+                : t("game.play")}
+          </span>
+        </button>
 
         <div
           data-tour="frostmod"

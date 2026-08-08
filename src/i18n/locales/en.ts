@@ -495,6 +495,41 @@ export const en = {
     "FrostMod isn't running — start it to hot-reload mods.",
   "settings.reloadUnavailable": "Reload isn't available on this platform.",
 
+  // ── Launching the game ─────────────────────────────────────────────────────
+  "game.play": "Play",
+  "game.starting": "Starting…",
+  "game.running": "MX Bikes running",
+  "game.launch": "Launch MX Bikes",
+  "game.alreadyRunning": "MX Bikes is already running",
+  "game.launching": "Launching MX Bikes…",
+  "game.launchFailed": "Couldn't launch MX Bikes",
+
+  // ── Strings the multi-line JSX sweep initially missed ──────────────────────
+  "libraryDetail.noEmbedded": "No embedded details were found for this item.",
+  "modDetail.downloadFromHost": "Download from {{host}}",
+  "modDetail.openHost": "Open {{host}}",
+  "modDetail.thenAddFile": "Then add the file",
+  "modDetail.chooseDownloaded": "Choose the downloaded file",
+  "presets.chooseProfilesFolder": "Choose profiles folder…",
+  "presets.viewInRider": "View in Rider",
+  "presets.noModelSwapsHere": "No model swaps registered for this bike —",
+  "presets.setUpInLocker": "set them up in the Locker",
+  "presets.makeActiveBike": "Make this the active bike",
+  "presets.nameClash":
+    "Another preset is already named “{{name}}” — saving will overwrite it too.",
+  "presets.shareWarning":
+    "Uploads to a public, temporary link — it redistributes mod files made by others, so share responsibly.",
+  "settings.profilesDesc":
+    "Presets read your profiles from here — the path below is where the app is looking right now. It's the {{profiles}} folder inside your MX Bikes folder, or your {{documents}} one if you moved your mods folder. Set it only if yours is somewhere else.",
+  "settings.resetToDefault": "Reset to default",
+  "settings.gameInstallDesc":
+    "Game install folder (optional) — where MX Bikes is installed (holds {{file}}). Set it to load the real rider body in the 3D preview.",
+  "viewer.stockGearNote":
+    "Shown on the game's stock {{part}}. A paint made for a different model may not line up perfectly.",
+  "viewer.paintNoChange":
+    "None of this paint's textures are used by the parts shown here, so the preview doesn't change. It may still paint the wheels or chain, which this view doesn't render.",
+  "viewer.noPaintPreview": "No paint preview ({{err}})",
+
   // ── Library (installed mods) ───────────────────────────────────────────────
   "library.help":
     "Your installed mods. Review what's installed and remove ones you no longer want.",
@@ -601,6 +636,16 @@ export const en = {
     "Instant refresh failed — reselect your profile in-game to load it.",
   "locker.reselectProfile": "Reselect your profile in MX Bikes to load the swap.",
   "locker.loadsNextTime": "Loads next time the game opens.",
+  "locker.modelRefreshing":
+    "Refreshing in-game — if it's your selected bike, it changes now.",
+  "locker.modelFrostmodNotRunning":
+    "Run FrostMod to see model swaps live — for now, reselect the bike in-game.",
+  "locker.modelFrostmodUnreachable":
+    "Couldn't reach FrostMod — reselect the bike in-game to load it.",
+  "locker.modelRefreshWindowsOnly":
+    "Live model refresh is Windows-only — reselect the bike in-game.",
+  "locker.modelInstantRefreshOff":
+    "Reselect the bike in MX Bikes to load it (instant refresh is off).",
 
   // ── Loose model/sound swap registration ────────────────────────────────────
   "swaps.model": "model",
