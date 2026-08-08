@@ -41,6 +41,30 @@
   **Instant refresh** setting, since it reaches into the running game.
 
 ### Fixed
+- **Browse now clears mxb-mods.com's bot protection with a real browser instead of trying
+  to impersonate one.** A user on v0.6.3 still hit `403 Forbidden` on every browse, which
+  ruled out the header work shipped for v0.6.3 — that build already sent Chrome's exact
+  header set. What it couldn't send is Chrome's TLS and HTTP/2 fingerprint, which no header
+  can disguise, and Cloudflare weighs that against the caller's IP. That's why the same
+  binary is fine on one connection and refused on another; the site itself is not blocking
+  the app, and the affected user's normal browser loads mxb-mods.com fine.
+
+  So when the site refuses us, the app now opens a small mxb-mods.com window, lets
+  Cloudflare's check clear, keeps the `cf_clearance` it hands out, and retries the request
+  with it. The cookie is saved, so being blocked once doesn't mean being blocked again on
+  every launch. This is the mechanism the app already used to sign into the MX Bikes Shop,
+  now shared by both sites rather than written twice.
+  - A 403 no longer retries in place. Three identical requests from the same fingerprint
+    earn the same refusal, so the old loop only failed three times slower; 429 and 503 do
+    still retry, since those genuinely pass on their own.
+  - A Cloudflare interstitial served as a `200` now takes the same route as a 403 — it is
+    the same refusal wearing a success code.
+  - If the check window never gets a clearance, the log says so specifically. That
+    distinguishes "the browser was never challenged either" from "we got a cookie and it
+    still failed", which are different problems with different fixes.
+
+  Honest caveat, same as last time: this is still not reproducible here, so it's verified
+  by construction and tests rather than by watching it cure the reported fault.
 - **The Locker no longer claims a model swap "Refreshed live in-game" when it didn't.**
   The note was derived purely from the look-loader call succeeding, which says nothing
   about whether the mesh reloaded — so it read as done while the garage still showed the

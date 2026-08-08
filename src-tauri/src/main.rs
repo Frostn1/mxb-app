@@ -6,6 +6,7 @@ mod bikeswap;
 mod bundle;
 mod cfg;
 mod config;
+mod cookie_session;
 mod edf;
 mod frostmod;
 mod frostmod_manage;
@@ -15,6 +16,7 @@ mod library;
 mod modelswap;
 mod mods;
 mod modwatch;
+mod mxb_session;
 mod paint;
 mod pkz;
 #[cfg(sidecar)]
@@ -73,16 +75,40 @@ fn create_config(
     Ok(true)
 }
 
+/// Run an mxb-mods.com call; if Cloudflare refuses it, earn a `cf_clearance` in a real
+/// browser and try exactly once more.
+///
+/// Once, not a loop: the handshake either produced a cookie the client didn't have or it
+/// didn't, and repeating it would just reopen the window at someone who is already stuck.
+/// Only refusals we could plausibly clear get this treatment — a 429 wants patience, not a
+/// browser window.
+async fn with_clearance<T, F, Fut>(app: &tauri::AppHandle, op: F) -> Result<T, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let err = match op().await {
+        Ok(value) => return Ok(value),
+        Err(err) => err,
+    };
+    match err.downcast_ref::<mods::mxb::Blocked>() {
+        Some(blocked) if blocked.clearable() => {}
+        _ => return Err(format!("{err:#}")),
+    }
+    if !mxb_session::handshake(app).await {
+        return Err(format!("{err:#}"));
+    }
+    op().await.map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 async fn search_mods(
+    app: tauri::AppHandle,
     query: String,
     category_id: u32,
     page: u32,
 ) -> Result<Vec<ModSummary>, String> {
-    MxbModsSource
-        .search(&query, category_id, page)
-        .await
-        .map_err(|e| format!("{e:#}"))
+    with_clearance(&app, || MxbModsSource.search(&query, category_id, page)).await
 }
 
 /// Community scores for the mods currently on screen, keyed by post id. Ids the site
@@ -93,8 +119,8 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 }
 
 #[tauri::command]
-async fn get_mod_detail(slug: String) -> Result<ModDetail, String> {
-    MxbModsSource.detail(&slug).await.map_err(|e| format!("{e:#}"))
+async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
+    with_clearance(&app, || MxbModsSource.detail(&slug)).await
 }
 
 #[tauri::command]
@@ -1996,6 +2022,7 @@ fn main() {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
             shop_session::load_session(handle);
+            mxb_session::load(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
