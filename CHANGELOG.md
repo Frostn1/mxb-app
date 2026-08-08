@@ -1,108 +1,23 @@
 # Changelog
 
-## 2026-08-08
-
-### Fixed
-- **The Locker no longer promises a live model swap that an older FrostMod can't do.**
-  Swapping a model asks FrostMod to re-apply the selected bike so the new mesh shows
-  without the class-switch away-and-back — but that command only exists in FrostMod
-  v0.9.9 and up. An older build takes the message, logs "unknown verb" and drops it,
-  which from this side looks exactly like success, so the toast said "Refreshing
-  in-game" while nothing changed. The app now reads the release tag its own installer
-  recorded and says "Update FrostMod to see model swaps live" instead. A tag it can't
-  read is assumed new enough — telling someone on the latest build to update is the
-  worse mistake — and the version is compared numerically, so v0.9.10 doesn't read as
-  older than v0.9.9.
-## 2026-08-07
-
-### Added
-- **New versions now show what's new in them.** An update used to land silently: the banner
-  said a version was available, the app restarted, and the same screen came back. The
-  overlay was the worst case — a feature that doesn't exist until you know its shortcut, in
-  a release nobody had a reason to read about. After an update the app now shows the
-  release's headline feature (for 0.7.0, the overlay, with your own shortcut on it and a
-  link straight to its settings), a line each for the rest, and a link to the full release
-  notes for everything the list leaves out. Once per version, never on a fresh install —
-  a first run gets the intro and the tour instead, and nothing in a version you just
-  installed is news to you. It's re-openable any time from Settings → About & updates →
-  What's new.
-
-### Changed
-- **Settings → In-game overlay explains itself.** The section was a switch, a key field and
-  one grey line, which left the two things that actually decide whether the overlay works
-  looking optional. It now shows whether MX Bikes is running, offers **Show overlay now** so
-  you can see the thing without launching a race, and says plainly that a game holding the
-  screen in exclusive fullscreen can't be drawn over — set it to Borderless or Windowed in
-  Options → Video. When the screen is being held exclusively *right now*, it says so, since
-  that means the overlay is already open behind the game. And if the shortcut does nothing,
-  it points at the shortcut: another app owning the combo is the usual cause.
-
-### Fixed
-- **The overlay shortcut no longer defaults to Discord's mute key.** Ctrl+Shift+M is
-  Discord's default mute toggle; Discord registers it globally and gets there first, so on
-  a lot of machines our hotkey never bound at all — invisibly, because a shortcut that was
-  never registered has nothing to report at the moment you press it. The default is now
-  **Ctrl+Shift+X**, and an install still carrying the old default is moved to it on the next
-  launch. A combo you picked yourself is left alone. When registration does fail, Settings
-  now names the reason instead of leaving you with "I pressed it and nothing happened".
-## 2026-08-08
-
-### Fixed
-- **Switching goggles finally changes the goggles.** Picking a lens still did nothing on
-  the rider or in the Library's 3D view even once the preview started re-resolving for it
-  (yesterday's fix), because the preview decided which piece *was* the goggles from the
-  name of the mesh group — and a helmet's goggles are as often called `mask`, or live in a
-  node of their own with no groups to name, so the goggle paint was decoded, shipped to
-  the viewer and worn by nothing. The mesh's own materials now say which piece draws
-  from which texture, the same reading the bike viewer uses, with the names as a hint on
-  top rather than the whole story. Goggle paints that ship apart from the helmet — under
-  your rider profile, or loose beside a `.pkz` — are now loaded too, instead of silently
-  falling back to whichever goggle the helmet happened to pack first; a name that really
-  can't be found says so in the log. And the game's own free helmets, which never loaded a
-  goggle paint at all, now wear one like an installed helmet does.
-- **Bikes whose bodywork came out in the wrong texture.** A part's material index was read
-  as a position in the model's texture list in the order the exporter happened to write
-  them, which only matches on bikes that were written in material order. The 2023 Kawasaki
-  KX250/KX450 store `w_plate` between `metals` and `plastics`, so their entire bodywork
-  wore the blank number-plate texture and an installed paint changed nothing visible. The
-  model's own material table now decides, which also fixes the Yamaha YZ125/YZ250, where
-  the chassis and the engine had swapped textures. Neither reading is right on every bike,
-  so where they disagree the mesh breaks the tie: a part's UV layout only lines up with
-  the atlas it was drawn against, and each part is asked separately, since a bike's parts
-  need not agree — the YZ125's chassis reads through the table while its steering reads
-  straight off the texture order. That puts the KTM 125 SX back on its plastics too.
-- **The front fender and fork guards rendering in bare metal.** A mesh group can hold
-  several materials as contiguous ranges — a fork leg and the plastic guard on it, a
-  triple clamp and the fender — and we merged each group into one submesh, so every range
-  wore the first one's texture. Each range now binds its own.
-
-### Changed
-- **Library thumbnails show a bike's manufacturer logo.** A bike's 250x250 `logo.tga` was
-  losing a scoring tie to `team.tga`, a 32x64 strip, so bikes showed a coloured sliver. A
-  real preview image still wins where a mod ships one. Cached thumbnails are rebuilt.
-- **Hovering a name in the Library shows the full name, folder and location.** The row
-  truncates hard, and the folder id is what you need when matching a paint to its bike.
-
-## 2026-08-07 — six languages, a Play button, live model swaps
-## 2026-08-07 — a way out of the overlay that isn't the game
-
-### Added
-- **"Open full app" in the in-game overlay.** The overlay carries Presets, the Locker and
-  Browse; Rider, the Library and Settings only exist in the main window, and the only way
-  there was to close the overlay — which drops you back into the game — and then alt-tab.
-  A button next to the close X now puts the overlay away and brings the main window
-  forward instead, keeping the focus where you asked for it rather than handing it back to
-  MX Bikes on the way out.
-
 ## 2026-08-07 — v0.7.0 — Six languages, an in-game overlay, and bikes wearing the right paint
 
 ### Added
-- **An in-game overlay, on a hotkey.** Ctrl+Shift+M (rebindable in Settings → In-game
+- **An in-game overlay, on a hotkey.** Ctrl+Shift+X (rebindable in Settings → In-game
   overlay) brings Presets, the Locker and Browse up over MX Bikes in a floating panel; Esc
-  hands control straight back to the game. It's the same UI as the main window, and it pays
-  off because presets and model swaps already apply to a *running* game — pick a gear set
-  from the pits and it's on you, no restart. One limit: nothing can draw over a game in
-  exclusive fullscreen, so run MX Bikes borderless or windowed.
+  hands control straight back to the game, and **Open full app** beside it switches to the
+  main window instead, for Rider, the Library and Settings. It's the same UI as the main
+  window, and it pays off because presets and model swaps already apply to a *running* game
+  — pick a gear set from the pits and it's on you, no restart. One limit: nothing can draw
+  over a game in exclusive fullscreen, so run MX Bikes borderless or windowed. Settings →
+  In-game overlay says whether the game is running, offers **Show overlay now**, and names
+  the reason if the shortcut didn't bind (another app owning the combo is the usual cause).
+- **New versions show what's new in them.** An update used to land silently — the banner
+  said a version was available, the app restarted, and the same screen came back, which is
+  no way to find out about a feature you have to know a shortcut to use. After an update
+  the app now shows the release's headline feature, a line each for the rest, and a link to
+  the full notes. Once per version, never on a fresh install, and re-openable from
+  Settings → About & updates → What's new.
 - **MXB App speaks six languages** — English, Italian, Spanish, French, German and
   Brazilian Portuguese. Pick one under Settings → Appearance, or leave it on `System` to
   follow the OS. Every screen, dialog, toast and empty state is covered, and the wording
@@ -143,9 +58,27 @@
 - **The front fender and fork guards rendering in bare metal.** One mesh group can hold
   several materials — a fork leg and the plastic guard on it — and all of them wore the
   first one's texture. Each range now binds its own.
-- **Picking a goggle paint updates the 3D preview on its own.** The preview watched every
-  rider slot except the goggles, so a new lens only appeared once you touched some *other*
-  slot. The paint was being read correctly all along; the preview was simply never asked.
+- **Switching goggles actually changes the goggles.** Two faults stacked: the preview
+  watched every rider slot except the goggles, so a new lens only showed once you touched
+  some *other* slot — and even then it was worn by nothing, because the goggles were
+  identified by mesh-group name, and a helmet's goggles are as often called `mask` or sit
+  in a node with no groups at all. The mesh's own materials now say which piece draws from
+  which texture, with names as a hint rather than the whole story. Goggle paints that ship
+  apart from the helmet are loaded too, and the game's free helmets — which never loaded a
+  goggle paint at all — now wear one like an installed helmet does.
+- **The overlay shortcut no longer defaults to Discord's mute key.** Ctrl+Shift+M is
+  Discord's default push-to-mute; Discord registers it globally and gets there first, so on
+  many machines the overlay hotkey never bound — invisibly, since a shortcut that was never
+  registered has nothing to report when you press it. The default is now **Ctrl+Shift+X**,
+  and an install still carrying the old default is moved across on next launch. A combo you
+  picked yourself is left alone.
+- **The Locker stops claiming a swap "Refreshed live in-game" when it didn't.** The note came
+  from the look-loader call succeeding, which says nothing about whether the mesh reloaded.
+  Model and sound swaps now report separately, and the model note says what actually
+  happened: refreshing, FrostMod not running, or instant refresh off. It also catches a
+  FrostMod too old to do it — re-applying the bike needs v0.9.9 or newer, and an older build
+  takes the message, logs "unknown verb" and drops it, which from here looks exactly like
+  success; that now reads "Update FrostMod to see model swaps live".
 - **Installing a new version by hand no longer loops back to the "already installed"
   page.** MXB App sits in the tray after you close its window, so an installer you started
   yourself nearly always finds it running — and when the old uninstaller can't close it,
@@ -188,9 +121,6 @@
 - **A slot can be cleared back to stock.** Every slot dropdown now leads with a "Stock
   (none)" row. Before, picking `full` for Protection could only be undone in the game's own
   UI or by hand-editing `profile.ini`. (#28)
-- **The Locker stops saying a swap "Refreshed live in-game" when it didn't.** Model and
-  sound swaps report separately now, and the model note says what actually happened:
-  refreshing, FrostMod not running, or instant refresh off.
 
 ### Changed
 - **Library thumbnails show a bike's manufacturer logo** instead of a coloured sliver — its
