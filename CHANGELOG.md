@@ -15,6 +15,13 @@
   the folder it read, says outright when that folder doesn't exist, points at the
   `mxbikes.ini` split as the likely cause, and offers a button straight to the Settings
   picker.
+- **A slot can be cleared back to stock again.** Empty is what the game writes for an
+  unmodded slot, and every layer already handled it — the trigger renders it as "Stock",
+  a cleared slot isn't flagged missing, and applying writes it through. Only the picker
+  couldn't produce it: there was no "none" option, no clear button, and an empty search
+  box commits nothing. Pick `full` for Protection once and the only ways back were the
+  game's own UI or hand-editing `profile.ini`. Every slot dropdown now leads with a
+  "Stock (none)" row that clears it. (#28)
 
 ## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
 
