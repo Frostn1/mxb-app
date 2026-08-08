@@ -339,7 +339,7 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
 
 const TRACK_MARKERS: [&str; 5] = ["map", "trh", "tsc", "rdf", "ssc"];
 
-fn dir_has_track_markers(dir: &Path) -> bool {
+pub(crate) fn dir_has_track_markers(dir: &Path) -> bool {
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             let p = e.path();

@@ -309,6 +309,104 @@ export interface PkzMeta {
   thumbnail: string | null;
 }
 
+/** What the dropzone decided a dropped item is. Mirrors `dropzone::ContentKind`. */
+export type DropKind =
+  | "modsTree"
+  | "track"
+  | "bike"
+  | "bikePaint"
+  | "soundSet"
+  | "riderGear"
+  | "unknown";
+
+/** Why it decided that. A key, not prose — the UI translates it. */
+export type DropReason =
+  | "modsTree"
+  | "categoryDirs"
+  | "paintsBundle"
+  | "soundMarkers"
+  | "trackMarkers"
+  | "trackPackage"
+  | "bikeConfig"
+  | "loosePaint"
+  | "gearFolders"
+  | "riderTexture"
+  | "gearTexture"
+  | "unrecognised";
+
+export interface DropChoice {
+  /** Written straight into `destFolder`, e.g. `MX1OEM_2023_KTM_450/paints`. */
+  value: string;
+  /** A real bike or folder name — shown verbatim, never translated. */
+  label: string;
+  /** The category this destination lives under, so the UI never infers it from the path. */
+  subpath: string;
+}
+
+export interface DropItem {
+  id: string;
+  name: string;
+  kind: DropKind;
+  reason: DropReason;
+  /** `mods/<x>`. Empty while `needsChoice` and the user hasn't picked. */
+  subpath: string;
+  destFolder: string;
+  /** The structural part of `destFolder`, which survives re-filing: a bike stays in its own
+   *  folder, so choosing "MX2" means `MX2/<Bike>` rather than replacing it. */
+  keepFolder: string;
+  /** The content doesn't say where it belongs — the user must choose. */
+  needsChoice: boolean;
+  choices: DropChoice[];
+  /** Existing files this would replace, relative to the mods folder. */
+  collisions: string[];
+  fileCount: number;
+  bytes: number;
+  /** Extra detail worth showing — a bike's real name and class, a track's name. */
+  detail?: string;
+}
+
+export interface DropSkipped {
+  name: string;
+  reason: string;
+}
+
+export interface DropPlan {
+  id: string;
+  items: DropItem[];
+  skipped: DropSkipped[];
+  totalBytes: number;
+}
+
+export interface DropPreview {
+  fileCount: number;
+  bytes: number;
+  collisions: string[];
+}
+
+export interface DropCommitItem {
+  id: string;
+  subpath: string;
+  destFolder: string;
+}
+
+export interface DropInstalled {
+  id: string;
+  name: string;
+  files: number;
+  dest: string;
+}
+
+export interface DropFailed {
+  id: string;
+  name: string;
+  error: string;
+}
+
+export interface DropOutcome {
+  installed: DropInstalled[];
+  failed: DropFailed[];
+}
+
 export type InstallStage =
   | "resolving"
   | "downloading"
