@@ -901,6 +901,8 @@ fn friendly_host(url: &str) -> String {
         "ShareMods".to_string()
     } else if has("pixeldrain") {
         "Pixeldrain".to_string()
+    } else if has("drive.proton.me") || has("proton.me") {
+        "Proton Drive".to_string()
     } else if has("1drv.ms") || has("onedrive") {
         "OneDrive".to_string()
     } else if host.is_empty() {

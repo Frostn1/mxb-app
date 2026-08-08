@@ -157,9 +157,14 @@ const App = () => {
                     }}
                   >
                     {/* A config with no mods folder means setup hasn't finished — either a
-                        first run, or a switch to a game we couldn't locate. */}
+                        first run, or a switch to a game we couldn't locate.
+
+                        The dashboard is keyed by game: switching titles changes every
+                        folder it reads, and its views fetch on mount. Remounting is what
+                        makes "switch game" mean "start over here" rather than leaving the
+                        previous game's library and Manage list on screen. */}
                     {config?.modsPath ? (
-                      <Dashboard welcomeActive={showWelcome} />
+                      <Dashboard key={activeGame.id} welcomeActive={showWelcome} />
                     ) : (
                       <Setup onComplete={reloadConfig} game={activeGame} />
                     )}

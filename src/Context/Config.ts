@@ -14,6 +14,7 @@ const MXB_FALLBACK: GameInfo = {
   id: "mxb",
   display: "MX Bikes",
   modsDirs: ["bikes", "tracks", "rider", "tyres", "misc"],
+  catalogDomain: "mxb-mods.com",
   caps: MXB_CAPS,
 };
 

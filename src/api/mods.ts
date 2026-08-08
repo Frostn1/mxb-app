@@ -726,7 +726,16 @@ export function buildRiderDestinations(
   return { options, guess, suggestions };
 }
 
-const BLOCKED_HOST_PATTERNS: string[] = [];
+/**
+ * Hosts we can't download from unattended, so the UI routes them to the
+ * download-it-yourself-then-pick-the-file flow instead of failing mid-install.
+ *
+ * Proton Drive shares are end-to-end encrypted: the decryption key is in the URL
+ * fragment, which never reaches the server, and the file arrives as OpenPGP-encrypted
+ * blocks. There is no direct link to resolve. Listing it here also sorts it *below* any
+ * other mirror on the same mod, so a MediaFire alternative is preferred automatically.
+ */
+const BLOCKED_HOST_PATTERNS: string[] = ["drive.proton.me", "proton.me"];
 
 export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   const s = `${opt.url} ${opt.host}`.toLowerCase();

@@ -56,6 +56,7 @@ import {
   AlertDialogAction,
 } from "@/Components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useConfig } from "../../Context/Config";
 
 interface ModDetailProps {
   slug: string;
@@ -99,6 +100,7 @@ export default function ModDetail({
   onBack,
 }: ModDetailProps) {
   const t = useT();
+  const { game } = useConfig();
   const livery = isLiveryContext(modType, categoryId);
   const sound = isSoundContext(modType, categoryId);
   // For rider kit/gloves, which profile sub-folder to target (`null` for gear paints).
@@ -410,16 +412,19 @@ export default function ModDetail({
               </>
             ) : (
               <p className="text-[12.5px] text-muted-foreground">
-                {t("modDetail.noDownloadLink")}
+                {t("modDetail.noDownloadLink", { site: game.catalogDomain })}
               </p>
             )}
           </div>
 
-          {/* frostmod hint */}
+          {/* What happens once the install finishes. FrostMod hot-reloads the game, but
+              it's an MX Bikes plugin — promising a reload for a title that has none is
+              worse than saying nothing, so that case gets the honest instruction. */}
           <div className="flex items-center gap-2.5 rounded-[10px] border border-success/25 bg-success/[0.06] px-3 py-2.5">
             <span className="size-[7px] flex-none rounded-full bg-success" />
             <span className="text-[12px] text-success/90">
-              {t("modDetail.frostmodHint", {
+              {t(game.caps.frostmod ? "modDetail.frostmodHint" : "modDetail.restartHint", {
+                game: game.display,
                 kind:
                   modType.id === "rider"
                     ? t("modDetail.kindRider")
@@ -496,6 +501,7 @@ function Breadcrumb({
   link: string | null;
 }) {
   const t = useT();
+  const { game } = useConfig();
   return (
     <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
       <button
@@ -513,7 +519,8 @@ function Breadcrumb({
           onClick={() => open(link)}
           className="ml-auto flex cursor-default items-center gap-1 text-[12px] text-primary hover:brightness-110"
         >
-          {t("modDetail.viewOnSite")} <ExternalLink className="size-3" />
+          {t("modDetail.viewOnSite", { site: game.catalogDomain })}{" "}
+          <ExternalLink className="size-3" />
         </button>
       )}
     </div>
@@ -635,8 +642,11 @@ function BlockedHost({
           {t("modDetail.finishInBrowser")}
         </span>
         <span className="text-[12px] leading-relaxed text-muted-foreground">
-          {host} only allows browser downloads. Download it, then point MXB App at
-          the file to finish the install.
+          {/* Proton Drive isn't a browser-only *policy* — the file is encrypted with a
+              key that never leaves the URL fragment, so say what's actually true. */}
+          {/proton/i.test(host)
+            ? `${t("modDetail.protonHint")} ${t("modDetail.thenAddFile")}`
+            : `${host} only allows browser downloads. Download it, then point MXB App at the file to finish the install.`}
         </span>
       </div>
       <div className="flex items-start gap-3">

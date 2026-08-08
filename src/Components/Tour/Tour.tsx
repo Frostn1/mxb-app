@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -23,6 +24,8 @@ import type { LucideIcon } from "lucide-react";
 import { Button } from "@/Components/ui/button";
 import { cn } from "@/lib/utils";
 import { useT, type TKey } from "../../i18n/context";
+import { useConfig } from "../../Context/Config";
+import type { GameCaps } from "../../types";
 import type { DashboardView } from "../Shell/Sidebar";
 
 /** Bumped when the tour changes enough to warrant showing it again. */
@@ -44,6 +47,9 @@ interface Step {
   icon: LucideIcon;
   title: TKey;
   body: TKey;
+  /** Capability the active game must have for this step to apply. A step that
+   *  spotlights a nav item the game doesn't show would highlight nothing. */
+  cap?: keyof GameCaps;
 }
 
 const STEPS: Step[] = [
@@ -68,6 +74,7 @@ const STEPS: Step[] = [
   },
   {
     view: "locker",
+    cap: "viewer",
     selector: '[data-tour="locker"]',
     icon: Bike,
     title: "tour.locker.title",
@@ -86,12 +93,14 @@ const STEPS: Step[] = [
     icon: User,
     title: "tour.rider.title",
     body: "tour.rider.body",
+    cap: "viewer",
   },
   {
     selector: '[data-tour="frostmod"]',
     icon: RefreshCw,
     title: "tour.frostmod.title",
     body: "tour.frostmod.body",
+    cap: "frostmod",
   },
   {
     view: "settings",
@@ -143,14 +152,20 @@ interface TourProps {
 }
 
 export default function Tour({ navigate, onDone }: TourProps) {
+  const { game } = useConfig();
+  // Only the steps whose target this game actually shows.
+  const steps = useMemo(
+    () => STEPS.filter((s) => !s.cap || game.caps[s.cap]),
+    [game],
+  );
   const t = useT();
   const [index, setIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [bubbleH, setBubbleH] = useState(0);
-  const step = STEPS[index];
+  const step = steps[index];
   const Icon = step.icon;
-  const isLast = index === STEPS.length - 1;
+  const isLast = index === steps.length - 1;
 
   // Switch to the step's view first, so the correct screen renders behind the spotlight.
   useLayoutEffect(() => {
@@ -226,13 +241,13 @@ export default function Tour({ navigate, onDone }: TourProps) {
               {t(step.title)}
             </h2>
             <p className="text-[13px] leading-relaxed text-muted-foreground">
-              {t(step.body)}
+              {t(step.body, { site: game.catalogDomain, game: game.display })}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
-          {STEPS.map((_, i) => (
+          {steps.map((_, i) => (
             <span
               key={i}
               className={cn(

@@ -85,8 +85,7 @@ export const fr: Translation = {
 
   // ── Configuration initiale ─────────────────────────────────────────────────
   "setup.title": "Bienvenue dans MXB App",
-  "setup.tagline":
-    "Parcourez mxb-mods, installez en un clic, et laissez FrostMod recharger le jeu pour vous.",
+  "setup.tagline": "Parcourez les mods, installez-les en un clic et remontez vite en selle.",
   "setup.modsFolder": "Dossier {{game}}",
   "setup.autoDetect":
     "MXB App détectera automatiquement votre dossier {{hint}}. Vous pouvez aussi le choisir vous-même.",
@@ -213,8 +212,7 @@ export const fr: Translation = {
   "tour.welcomeTour.body":
     "Quelques secondes pour voir où se trouve chaque chose. Vous pouvez passer à tout moment.",
   "tour.browse.title": "Parcourir les mods",
-  "tour.browse.body":
-    "Cherchez sur mxb-mods.com directement ici et installez n'importe quel circuit, moto ou déco en un seul clic.",
+  "tour.browse.body": "Cherchez sur {{site}} directement ici et installez circuits, motos ou peintures en un clic.",
   "tour.library.title": "Votre bibliothèque",
   "tour.library.body":
     "Tout ce que vous avez installé, au même endroit — mettez à jour ou supprimez des mods sans jamais toucher un fichier zip.",
@@ -417,8 +415,7 @@ export const fr: Translation = {
   "modDetail.addToLibrary": "Ajouter à la bibliothèque",
   "modDetail.host": "Hébergeur",
   "modDetail.installsTo": "Installe dans",
-  "modDetail.noDownloadLink":
-    "Aucun lien de téléchargement trouvé sur cette page — ouvrez-la sur mxb-mods.com.",
+  "modDetail.noDownloadLink": "Aucun lien de téléchargement trouvé sur cette page — ouvrez-la sur {{site}}.",
   "modDetail.frostmodHint":
     "FrostMod rechargera la liste des {{kind}} une fois terminé.",
   "modDetail.kindRider": "pilotes",
@@ -433,7 +430,7 @@ export const fr: Translation = {
   "modDetail.addingToLibrary": "Ajout à la bibliothèque…",
   "modDetail.resolving": "Résolution du téléchargement…",
   "modDetail.finishInBrowser": "Terminez dans votre navigateur",
-  "modDetail.viewOnSite": "Voir sur mxb-mods.com",
+  "modDetail.viewOnSite": "Voir sur {{site}}",
 
   // ── Réglages ───────────────────────────────────────────────────────────────
   "settings.help":
@@ -903,4 +900,6 @@ export const fr: Translation = {
   "browseCat.menuBackgrounds": "Fonds de menu",
   "category.animation": "Style de pilotage",
   "section.animation": "Styles de pilotage",
+  "modDetail.restartHint": "Redémarrez {{game}} pour prendre en compte les nouveaux {{kind}}.",
+  "modDetail.protonHint": "Les fichiers Proton Drive sont chiffrés : impossible de les télécharger automatiquement.",
 };

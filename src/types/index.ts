@@ -20,6 +20,9 @@ export interface GameInfo {
   display: string;
   /** Top-level folders under `<modsPath>/mods` for this title. */
   modsDirs: string[];
+  /** Host of this title's catalog, e.g. `mxb-mods.com`. Shown wherever the UI names
+   *  the site it links out to. */
+  catalogDomain: string;
   caps: GameCaps;
 }
 

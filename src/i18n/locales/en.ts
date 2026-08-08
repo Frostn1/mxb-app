@@ -82,8 +82,7 @@ export const en = {
 
   // ── First-run setup ────────────────────────────────────────────────────────
   "setup.title": "Welcome to MXB App",
-  "setup.tagline":
-    "Browse mxb-mods, install with one click, and let FrostMod reload the game for you.",
+  "setup.tagline": "Browse mods, install with one click, and get straight back on the bike.",
   "setup.modsFolder": "{{game}} folder",
   "setup.autoDetect":
     "MXB App will auto-detect your {{hint}} folder. You can also pick it yourself.",
@@ -206,8 +205,7 @@ export const en = {
   "tour.welcomeTour.body":
     "A few seconds to see where everything lives. You can skip at any point.",
   "tour.browse.title": "Browse mods",
-  "tour.browse.body":
-    "Search mxb-mods.com right here and install any track, bike or paint with a single click.",
+  "tour.browse.body": "Search {{site}} right here and install any track, bike or paint with a single click.",
   "tour.library.title": "Your library",
   "tour.library.body":
     "Everything you've installed, in one place — update or remove mods without ever touching a zip file.",
@@ -402,8 +400,7 @@ export const en = {
   "modDetail.addToLibrary": "Add to Library",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installs to",
-  "modDetail.noDownloadLink":
-    "No download link was found on this page — open it on mxb-mods.com.",
+  "modDetail.noDownloadLink": "No download link was found on this page — open it on {{site}}.",
   "modDetail.frostmodHint":
     "FrostMod will hot-reload the {{kind}} list when this finishes.",
   "modDetail.kindRider": "rider",
@@ -418,7 +415,7 @@ export const en = {
   "modDetail.addingToLibrary": "Adding to library…",
   "modDetail.resolving": "Resolving download…",
   "modDetail.finishInBrowser": "Finish in your browser",
-  "modDetail.viewOnSite": "View on mxb-mods.com",
+  "modDetail.viewOnSite": "View on {{site}}",
 
   // ── Settings ───────────────────────────────────────────────────────────────
   "settings.help": "Configure your game folder, updates, and app preferences.",
@@ -871,4 +868,6 @@ export const en = {
   "browseCat.menuBackgrounds": "Menu Backgrounds",
   "category.animation": "Riding style",
   "section.animation": "Riding styles",
+  "modDetail.restartHint": "Restart {{game}} to pick up the new {{kind}}.",
+  "modDetail.protonHint": "Proton Drive files are encrypted, so they can't be downloaded automatically.",
 } as const;

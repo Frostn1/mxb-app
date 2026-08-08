@@ -88,8 +88,7 @@ export const de: Translation = {
 
   // ── Ersteinrichtung ────────────────────────────────────────────────────────
   "setup.title": "Willkommen bei MXB App",
-  "setup.tagline":
-    "Durchstöbere mxb-mods, installiere mit einem Klick und lass FrostMod das Spiel für dich neu laden.",
+  "setup.tagline": "Mods durchsuchen, mit einem Klick installieren und direkt wieder aufs Motorrad.",
   "setup.modsFolder": "Ordner von {{game}}",
   "setup.autoDetect":
     "MXB App erkennt deinen Ordner {{hint}} automatisch. Du kannst ihn auch selbst auswählen.",
@@ -216,8 +215,7 @@ export const de: Translation = {
   "tour.welcomeTour.body":
     "Ein paar Sekunden, um zu sehen, wo alles liegt. Du kannst jederzeit abbrechen.",
   "tour.browse.title": "Mods entdecken",
-  "tour.browse.body":
-    "Durchsuche mxb-mods.com direkt hier und installiere jede Strecke, jedes Motorrad und jede Lackierung mit einem einzigen Klick.",
+  "tour.browse.body": "Durchsuche {{site}} direkt hier und installiere Strecken, Motorräder oder Designs mit einem Klick.",
   "tour.library.title": "Deine Bibliothek",
   "tour.library.body":
     "Alles, was du installiert hast, an einem Ort — Mods aktualisieren oder entfernen, ohne je eine ZIP-Datei anzufassen.",
@@ -422,8 +420,7 @@ export const de: Translation = {
   "modDetail.addToLibrary": "Zur Bibliothek hinzufügen",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installiert nach",
-  "modDetail.noDownloadLink":
-    "Auf dieser Seite wurde kein Download-Link gefunden — öffne sie auf mxb-mods.com.",
+  "modDetail.noDownloadLink": "Auf dieser Seite wurde kein Download-Link gefunden — öffne sie auf {{site}}.",
   "modDetail.frostmodHint":
     "FrostMod lädt die Liste ({{kind}}) neu, sobald das fertig ist.",
   "modDetail.kindRider": "Fahrer",
@@ -438,7 +435,7 @@ export const de: Translation = {
   "modDetail.addingToLibrary": "Wird zur Bibliothek hinzugefügt…",
   "modDetail.resolving": "Download wird aufgelöst…",
   "modDetail.finishInBrowser": "Im Browser abschließen",
-  "modDetail.viewOnSite": "Auf mxb-mods.com ansehen",
+  "modDetail.viewOnSite": "Auf {{site}} ansehen",
 
   // ── Einstellungen ──────────────────────────────────────────────────────────
   "settings.help":
@@ -914,4 +911,6 @@ export const de: Translation = {
   "browseCat.menuBackgrounds": "Menü-Hintergründe",
   "category.animation": "Fahrstil",
   "section.animation": "Fahrstile",
+  "modDetail.restartHint": "Starte {{game}} neu, damit die neuen {{kind}} erkannt werden.",
+  "modDetail.protonHint": "Proton-Drive-Dateien sind verschlüsselt und lassen sich nicht automatisch herunterladen.",
 };

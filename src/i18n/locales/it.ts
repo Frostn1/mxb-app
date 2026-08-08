@@ -83,8 +83,7 @@ export const it: Translation = {
 
   // ── Configurazione iniziale ────────────────────────────────────────────────
   "setup.title": "Benvenuto in MXB App",
-  "setup.tagline":
-    "Sfoglia mxb-mods, installa con un clic e lascia che sia FrostMod a ricaricare il gioco per te.",
+  "setup.tagline": "Sfoglia le mod, installale con un clic e torna subito in sella.",
   "setup.modsFolder": "Cartella di {{game}}",
   "setup.autoDetect":
     "MXB App rileverà automaticamente la tua cartella {{hint}}. Puoi anche sceglierla tu.",
@@ -209,8 +208,7 @@ export const it: Translation = {
   "tour.welcomeTour.body":
     "Bastano pochi secondi per vedere dov'è ogni cosa. Puoi saltare quando vuoi.",
   "tour.browse.title": "Sfoglia le mod",
-  "tour.browse.body":
-    "Cerca su mxb-mods.com direttamente da qui e installa qualsiasi pista, moto o grafica con un solo clic.",
+  "tour.browse.body": "Cerca su {{site}} direttamente da qui e installa piste, moto o livree con un clic.",
   "tour.library.title": "La tua libreria",
   "tour.library.body":
     "Tutto ciò che hai installato, in un unico posto — aggiorna o rimuovi le mod senza mai toccare un file zip.",
@@ -409,8 +407,7 @@ export const it: Translation = {
   "modDetail.addToLibrary": "Aggiungi alla libreria",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installa in",
-  "modDetail.noDownloadLink":
-    "Nessun link di download trovato in questa pagina — aprila su mxb-mods.com.",
+  "modDetail.noDownloadLink": "Nessun link di download trovato in questa pagina — aprila su {{site}}.",
   "modDetail.frostmodHint":
     "FrostMod ricaricherà l'elenco {{kind}} al termine.",
   "modDetail.kindRider": "pilota",
@@ -425,7 +422,7 @@ export const it: Translation = {
   "modDetail.addingToLibrary": "Aggiunta alla libreria…",
   "modDetail.resolving": "Risoluzione del download…",
   "modDetail.finishInBrowser": "Completa nel browser",
-  "modDetail.viewOnSite": "Vedi su mxb-mods.com",
+  "modDetail.viewOnSite": "Apri su {{site}}",
 
   // ── Impostazioni ───────────────────────────────────────────────────────────
   "settings.help":
@@ -893,4 +890,6 @@ export const it: Translation = {
   "browseCat.menuBackgrounds": "Sfondi del menu",
   "category.animation": "Stile di guida",
   "section.animation": "Stili di guida",
+  "modDetail.restartHint": "Riavvia {{game}} per rilevare i nuovi {{kind}}.",
+  "modDetail.protonHint": "I file di Proton Drive sono cifrati, quindi non possono essere scaricati automaticamente.",
 };

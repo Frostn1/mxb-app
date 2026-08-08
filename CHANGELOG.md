@@ -24,6 +24,26 @@
   the editor reads the sections out of the profile's own `profile.ini` and shows those. GP
   Bikes profiles get their riding-style slot, and don't get pickers that would write nothing.
 
+- **Proton Drive downloads.** `drive.proton.me` links are now recognised and labelled as
+  Proton Drive, and a mod offering one alongside another mirror prefers the other. Proton
+  shares are end-to-end encrypted — the key lives in the part of the URL that never
+  reaches the server — so they can't be fetched automatically; picking one now opens the
+  guided "download it, then choose the file" flow instead of downloading the web page and
+  failing later with "couldn't determine the archive type".
+
+### Fixed
+- **Switching games left the previous game's content on screen.** Library, Manage and the
+  rest load their data when they first appear, so switching titles swapped the folders
+  underneath them without refreshing anything — most visibly Manage, which kept listing
+  the MX Bikes mods. Switching now restarts those views from scratch.
+- **Pages named the wrong site.** "View on mxb-mods.com", the missing-download note and
+  the tour all said mxb-mods.com regardless of which catalog was actually being browsed.
+  They now name the site they link to.
+- **"FrostMod will hot-reload the track list" was shown for GP Bikes,** which has no
+  FrostMod build and so was never going to reload anything. That title now gets the
+  instruction that's actually true — restart the game to pick the new content up. The
+  guided tour likewise no longer walks through steps for features the active game hides.
+
 ### Changed
 - **Features with no GP Bikes build say so instead of failing quietly.** FrostMod is a
   compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for GP

@@ -258,6 +258,9 @@ pub struct GameInfo {
     pub id: &'static str,
     pub display: &'static str,
     pub mods_dirs: &'static [&'static str],
+    /// Host of the catalog this title browses, e.g. `mxb-mods.com`. The UI names the site
+    /// it is linking to, and naming the wrong one is worse than naming none.
+    pub catalog_domain: &'static str,
     pub caps: Caps,
 }
 
@@ -267,6 +270,7 @@ impl GameProfile {
             id: self.id,
             display: self.display,
             mods_dirs: self.mods_dirs,
+            catalog_domain: self.catalog.domain,
             caps: self.caps,
         }
     }
