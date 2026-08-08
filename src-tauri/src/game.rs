@@ -108,11 +108,12 @@ pub struct RiderLayout {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Caps {
-    /// FrostMod, the in-process mod loader. It is a compiled **MX Bikes** plugin; there
-    /// is no GP Bikes build, so hot reload and its status panel don't apply there.
+    /// FrostMod, the in-process mod loader. Attaches to either title as of FrostMod
+    /// v0.10.0 — launched with `--game <id>`, see `frostmod_manage::start`.
     pub frostmod: bool,
     /// Re-run the game's profile loader in place after applying a preset. Implemented by
-    /// poking `mxbikes.exe` memory, so it is as MX-Bikes-specific as FrostMod.
+    /// calling a hardcoded `mxbikes.exe` function offset (`gameproc::LOADER_OFFSET`), which
+    /// is that binary's alone — unlike FrostMod's reload, this has no GP equivalent yet.
     pub instant_refresh: bool,
     /// The 3D preview (Locker / Rider / bike preview). GP Bikes uses the same `.edf`
     /// meshes, but its bike part names and rider rig need their own bindings — not in
@@ -248,7 +249,7 @@ pub static GPB: GameProfile = GameProfile {
     },
     catalog: &crate::mxb_session::GPB_SITE,
     caps: Caps {
-        frostmod: false,
+        frostmod: true,
         instant_refresh: false,
         viewer: false,
         shop: false,
@@ -308,6 +309,16 @@ mod tests {
         }
     }
 
+    /// These ids are passed to FrostMod as `frostmod.exe --game <id>`, so they are a
+    /// cross-repo contract: they must match the `id` field on FrostMod's `GameOffsets`
+    /// (frostmod `src/offsets.h`). Renaming one here silently stops FrostMod attaching —
+    /// it would fall back to its MX Bikes default and look "running" but do nothing.
+    #[test]
+    fn ids_match_what_frostmod_expects() {
+        assert_eq!(Game::Mxb.id(), "mxb");
+        assert_eq!(Game::Gpb.id(), "gpb");
+    }
+
     /// A config naming a title this build doesn't have must still open — on MX Bikes,
     /// the title every existing install is already using.
     #[test]
@@ -341,8 +352,7 @@ mod tests {
     #[test]
     fn gp_bikes_has_no_mx_only_features() {
         let caps = Game::Gpb.profile().caps;
-        assert!(!caps.frostmod, "FrostMod is an MX Bikes plugin");
-        assert!(!caps.instant_refresh, "instant refresh pokes mxbikes.exe");
+        assert!(!caps.instant_refresh, "instant refresh calls an mxbikes.exe offset");
         assert!(!caps.shop, "mxbikes-shop.com is MX Bikes only");
         assert!(!caps.manage, "Manage is MX Bikes only for now");
         assert!(!caps.join_by_address, "GP's connect flag and port are unconfirmed");

@@ -442,8 +442,15 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     // Nothing holds the previous binaries once the game that mapped them is gone,
     // so a start is a good moment to clear what the last update had to leave behind.
     sweep_retired(&frostmod_dir(app));
+    // Tell FrostMod which game to wait for. Without this it defaults to `mxbikes.exe`, so
+    // on GP Bikes it would sit running and never attach — the status pill would say
+    // "running" while reload silently did nothing. `--game` landed in FrostMod v0.10.0;
+    // older binaries ignore an unknown flag and keep their MX Bikes default, which is the
+    // right fallback for the only game they support.
+    let game = crate::config::load(app).map(|c| c.active_game).unwrap_or_default();
     let child = std::process::Command::new(&exe)
         .current_dir(frostmod_dir(app))
+        .args(["--game", game.id()])
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
     *state.0.lock().unwrap() = Some(child);
