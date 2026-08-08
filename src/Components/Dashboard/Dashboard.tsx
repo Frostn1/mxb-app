@@ -3,6 +3,7 @@ import Sidebar, { type DashboardView } from "../Shell/Sidebar";
 import Library from "../Library/Library";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
+import Manage from "../Manage/Manage";
 import RiderStudio from "../Rider/RiderStudio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
@@ -145,6 +146,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           ) : view === "rider" ? (
             <RiderStudio initialLoadout={riderPreset} onLoaded={clearRiderPreset} />
+          ) : view === "manage" ? (
+            <Manage />
           ) : (
             <Settings
               initialSection={settingsSection}
