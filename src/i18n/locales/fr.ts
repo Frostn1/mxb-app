@@ -492,6 +492,9 @@ export const fr: Translation = {
     "Là où les mods sont installés. Choisissez le dossier qui contient les dossiers mods et profiles \u2014 celui au-dessus de mods, pas le dossier mods lui-même. Le modifier relance l'analyse de votre bibliothèque.",
   "settings.insideModsFolder": "Dans votre dossier {{game}}",
   "settings.notSet": "Non défini",
+  "settings.selectFolderFor": "Sélectionnez un dossier pour {{game}}",
+  "settings.gameDesc":
+    "Le jeu que MXB App pilote. Vos dossiers, votre bibliothèque et vos presets appartiennent tous au jeu choisi ici.",
   "settings.change": "Modifier…",
   "settings.set": "Définir…",
   "settings.theme": "Thème",

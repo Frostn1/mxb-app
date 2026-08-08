@@ -14,8 +14,29 @@ fn main() {
     println!("cargo::rerun-if-changed=src/sidecar.rs");
 
     shop_credentials();
+    release_tag();
 
     tauri_build::build()
+}
+
+/// Bake in the git tag this build came from, when there is one.
+///
+/// `tauri.conf.json` carries a plain `x.y.z` and the release workflow never rewrites it, so
+/// `package_info().version` can't tell a `v0.8.0-beta.1` build from the `v0.8.0` that follows
+/// it. The tag is the only place that distinction exists — see `experimental_state`, which
+/// prefers this over the packaged version so a beta names itself.
+///
+/// Absent is the normal case (every local build), and `option_env!` then yields `None`.
+fn release_tag() {
+    // Without this, `Swatinem/rust-cache` in CI would reuse an object file compiled against
+    // the previous tag — same reason the shop credentials declare it below.
+    println!("cargo::rerun-if-env-changed=MXB_RELEASE_TAG");
+    if let Some(tag) = std::env::var("MXB_RELEASE_TAG")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
+        println!("cargo::rustc-env=MXB_RELEASE_TAG={}", tag.trim());
+    }
 }
 
 /// Bake the shop-catalog API credential in, when the build has one.
