@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-07 — a Cloudflare block on Browse can finally be diagnosed
+
+### Changed
+- **When mxb-mods.com refuses us, the log now says enough to act on.** Browse failing with
+  "mxb-mods.com refused the request (403)" wrote nothing to the log beyond whether the check
+  window earned a cookie — the request that was actually refused went unrecorded, so a report
+  of it and a screenshot of it carried the same information. A refusal now logs which endpoint
+  was blocked (the catalog API and the rendered mod page sit behind different Cloudflare
+  rules), Cloudflare's `cf-ray`, `cf-mitigated` and `retry-after` headers, the block reason
+  from the response body, and which cookies the request actually carried — by name, never by
+  value. The retry is narrated too, so the log distinguishes the two ways this fails: never
+  earning a clearance, versus earning one in a real browser and being refused anyway, which
+  points at the HTTP client's TLS fingerprint rather than at anything a cookie can fix.
+- **The 403 dialog carries a reference id.** The `cf-ray` of the refused request is appended
+  to the error, so a screenshot alone is enough to identify the block.
+- **Two silent failures now speak up.** A catalog response of 400 that isn't "you paged past
+  the end" used to render as an empty listing, and a mod page that yielded no downloads
+  without being a Cloudflare interstitial said nothing at all. Both are logged.
+- **`MXB_LOG=debug` traces every mxb-mods.com request.** Off by default, because search runs
+  on each keystroke and a line per keystroke would bury the failure worth reading.
+
 ## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence
 
 ### Fixed

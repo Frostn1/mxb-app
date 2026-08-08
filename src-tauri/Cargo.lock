@@ -1348,6 +1348,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "html-escape",
+ "http",
  "image",
  "log",
  "mega",

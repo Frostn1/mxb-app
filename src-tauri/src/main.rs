@@ -91,7 +91,11 @@ fn create_config(
 /// didn't, and repeating it would just reopen the window at someone who is already stuck.
 /// Only refusals we could plausibly clear get this treatment — a 429 wants patience, not a
 /// browser window.
-async fn with_clearance<T, F, Fut>(app: &tauri::AppHandle, op: F) -> Result<T, String>
+async fn with_clearance<T, F, Fut>(
+    app: &tauri::AppHandle,
+    what: &str,
+    op: F,
+) -> Result<T, String>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
@@ -101,13 +105,37 @@ where
         Err(err) => err,
     };
     match err.downcast_ref::<mods::mxb::Blocked>() {
-        Some(blocked) if blocked.clearable() => {}
-        _ => return Err(format!("{err:#}")),
+        Some(blocked) if blocked.clearable() => {
+            log::info!(
+                "{what} blocked ({}) — trying to earn a cf_clearance",
+                blocked
+                    .status
+                    .map_or_else(|| "interstitial".to_string(), |s| s.to_string())
+            );
+        }
+        // Not clearable, or not a block at all — a parse failure, a timeout, a 429.
+        _ => {
+            log::warn!("{what} failed and a browser window wouldn't help: {err:#}");
+            return Err(format!("{err:#}"));
+        }
     }
     if !mxb_session::handshake(app).await {
+        log::warn!("{what} stays blocked — no cf_clearance to retry with");
         return Err(format!("{err:#}"));
     }
-    op().await.map_err(|e| format!("{e:#}"))
+    match op().await {
+        Ok(value) => {
+            log::info!("{what} succeeded on the retry with a fresh cf_clearance");
+            Ok(value)
+        }
+        // The interesting failure: we passed the challenge in a real browser, replayed the
+        // cookie it earned, and were refused anyway. That is a fingerprint refusal aimed at
+        // the HTTP client, not something another window would fix.
+        Err(e) => {
+            log::warn!("{what} refused again even with a fresh cf_clearance: {e:#}");
+            Err(format!("{e:#}"))
+        }
+    }
 }
 
 #[tauri::command]
@@ -118,7 +146,7 @@ async fn search_mods(
     page: u32,
     sort: ModSort,
 ) -> Result<Vec<ModSummary>, String> {
-    with_clearance(&app, || {
+    with_clearance(&app, "search", || {
         MxbModsSource.search(&query, category_id, page, sort)
     })
     .await
@@ -133,7 +161,7 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 
 #[tauri::command]
 async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
-    with_clearance(&app, || MxbModsSource.detail(&slug)).await
+    with_clearance(&app, "mod detail", || MxbModsSource.detail(&slug)).await
 }
 
 #[tauri::command]
@@ -2419,11 +2447,22 @@ async fn mods_state_restore_all(app: tauri::AppHandle) -> Result<ModsStateOutcom
     .map_err(|e| format!("mods_state_restore_all task failed: {e}"))?
 }
 
+/// Normally `Info`. `MXB_LOG=debug` turns on the per-request traces that would otherwise
+/// write a line per keystroke in the search box — the switch to flip when chasing a
+/// Cloudflare block on a machine that can reproduce one.
+fn log_level() -> log::LevelFilter {
+    match std::env::var("MXB_LOG").unwrap_or_default().to_lowercase().as_str() {
+        "trace" => log::LevelFilter::Trace,
+        "debug" => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Info,
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Info)
+                .level(log_level())
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
@@ -2447,6 +2486,9 @@ fn main() {
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+            // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
+            // to the UA that earned it — a log about a block should say which one was used.
+            log::info!("mxb-mods.com user-agent: {}", mxb_session::UA);
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
