@@ -1076,7 +1076,9 @@ fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
 /// the gloves first and the suit last. So a fixed index→slot map is one model memorised —
 /// it already swaps face and gloves on the supermoto rider, and on a custom model it smears
 /// the glove texture across the whole body. Read the name the model was drawn against
-/// instead, the same reading the bike and gear viewers take.
+/// instead, the same reading the bike and gear viewers take — through each node's own
+/// material table, since an id counts into the table of the part that owns it and means
+/// nothing outside it (see `bind_textures`).
 fn bind_body_submeshes(nodes: &mut [edf::EdfNode], mesh: &[u8]) {
     let colors = edf::color_textures(mesh);
     if colors.is_empty() {
@@ -1084,15 +1086,23 @@ fn bind_body_submeshes(nodes: &mut [edf::EdfNode], mesh: &[u8]) {
         // still right for the model the app has always shown.
         return tag_body_materials(nodes);
     }
+    bind_body_to_colors(nodes, &colors);
+}
+
+/// The binding itself, split out so a test can drive it without a mesh blob: reading a
+/// material id through the wrong node's table is the failure worth pinning down, and it
+/// needs two nodes whose tables disagree, not a parseable `.edf`.
+fn bind_body_to_colors(nodes: &mut [edf::EdfNode], colors: &[edf::EmbeddedTexture]) {
     for node in nodes.iter_mut() {
-        // A material id is local to its node — resolve it through that node's own table,
-        // the same reading the bike and gear binders take.
-        let material_texture = |mat: Option<u32>| -> Option<&str> {
-            let slot = node.materials.get(mat? as usize).copied().flatten()?;
-            colors.get(slot).map(|t| t.name.as_str())
-        };
-        for sm in &mut node.submeshes {
-            sm.texture = Some(body_slot(material_texture(sm.mat)));
+        // Disjoint field borrows: the node's table is read while its submeshes are written.
+        let materials = &node.materials;
+        for sm in node.submeshes.iter_mut() {
+            let emb = sm
+                .mat
+                .and_then(|m| materials.get(m as usize).copied().flatten())
+                .and_then(|slot| colors.get(slot))
+                .map(|t| t.name.as_str());
+            sm.texture = Some(body_slot(emb));
         }
     }
 }
@@ -3538,6 +3548,67 @@ mod viewer_tests {
         }
         // A material that names no texture still has to render as something.
         assert_eq!(super::body_slot(None), "rider");
+    }
+
+    /// A material id is LOCAL to the node that owns it, so the same id must resolve to
+    /// different textures in different parts of one mesh.
+    ///
+    /// This is the invariant the per-part material-table fix established, and the one the
+    /// rider binder lost: it was still resolving ids through a whole-model reading, which
+    /// is what put one part's texture on another's geometry.
+    #[test]
+    fn a_body_part_resolves_its_material_through_its_own_table() {
+        fn tex(name: &str) -> super::edf::EmbeddedTexture {
+            super::edf::EmbeddedTexture {
+                name: name.into(),
+                width: 4,
+                height: 4,
+                data_off: 0,
+                data_len: 0,
+            }
+        }
+        fn sm(mat: u32) -> super::edf::Submesh {
+            super::edf::Submesh {
+                name: "range".into(),
+                tri_start: 0,
+                tri_count: 1,
+                texture: None,
+                uv_tile: None,
+                mat: Some(mat),
+            }
+        }
+        fn node(materials: Vec<Option<usize>>, mats: &[u32]) -> super::edf::EdfNode {
+            super::edf::EdfNode {
+                name: "part".into(),
+                positions: Vec::new(),
+                uvs: Vec::new(),
+                normals: Vec::new(),
+                indices: Vec::new(),
+                submeshes: mats.iter().map(|m| sm(*m)).collect(),
+                texture: None,
+                placed: false,
+                materials,
+            }
+        }
+
+        let colors = [tex("rider"), tex("gloves"), tex("w_number")];
+        // Both parts draw on local id 0 — and mean different textures by it.
+        let mut nodes = vec![
+            node(vec![Some(0)], &[0]),           // body  -> rider
+            node(vec![Some(1)], &[0]),           // hands -> gloves
+            node(vec![Some(2), None], &[0, 1]),  // plate -> hidden decal, then untextured
+        ];
+        super::bind_body_to_colors(&mut nodes, &colors);
+
+        assert_eq!(nodes[0].submeshes[0].texture.as_deref(), Some("rider"));
+        assert_eq!(
+            nodes[1].submeshes[0].texture.as_deref(),
+            Some("gloves"),
+            "id 0 read through the first node's table would smear the suit onto the hands"
+        );
+        assert_eq!(nodes[2].submeshes[0].texture.as_deref(), Some("hide"));
+        // An untextured material, and an id past the end of the table, both still render.
+        assert_eq!(nodes[2].submeshes[1].texture.as_deref(), Some("rider"));
     }
 
     /// The bug this replaced: material indices count into the model's own texture list, and

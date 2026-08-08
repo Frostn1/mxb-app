@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-08
+
+### Fixed
+- **The app builds again, and the rider wears the right textures.** Two changes landed
+  together that couldn't both be right: one gave every mesh part its own material table,
+  because an id counts into the table of the part that owns it and means nothing outside
+  it; the other added the custom-rider binder, written against the whole-model reading
+  that the first change deleted. The merge kept both, so `main` stopped compiling. The
+  rider binder now reads each part's id through its own node's table, the same way the
+  bike and gear viewers do — which is also the correct behaviour, not just the compiling
+  one: under the old reading every part resolved its ids through the first node's table,
+  which is what smeared one part's texture across another's geometry. Covered by a test
+  that pins two parts using the same local id to mean different textures.
+
 ## 2026-08-07 — the protection slot shows what the mod actually is
 
 ### Fixed
@@ -32,7 +46,7 @@
 - **Protection is no longer hidden by default in the Rider tab.** It was, back when it
   rendered as a grey blob spanning the whole torso.
 
-## 2026-08-07 — race mode clears the rider gear
+## 2026-08-07
 
 ### Fixed
 - **Race mode now clears the rider gear too.** Applying a race preset narrowed the bikes and
