@@ -3,6 +3,19 @@
 ## 2026-08-08
 
 ### Fixed
+- **Switching goggles finally changes the goggles.** Picking a lens did nothing on the
+  rider or in the Library's 3D view, for four separate reasons, all now fixed. The Rider
+  tab never re-resolved the model on a goggles change at all, so the pick sat there until
+  you touched some other slot. The preview then decided which piece was the goggles from
+  the name of the mesh group — and a helmet's goggles are as often called `mask`, or live
+  in a node of their own with no groups to name, so the goggle paint was decoded, shipped
+  to the viewer and worn by nothing. The mesh's own materials now say which piece draws
+  from which texture, the same reading the bike viewer uses, with the names as a hint on
+  top rather than the whole story. Goggle paints that ship apart from the helmet — under
+  your rider profile, or loose beside a `.pkz` — are now loaded too, instead of silently
+  falling back to whichever goggle the helmet happened to pack first; a name that really
+  can't be found says so in the log. And the game's own free helmets, which never loaded a
+  goggle paint at all, now wear one like an installed helmet does.
 - **Bikes whose bodywork came out in the wrong texture.** A part's material index was read
   as a position in the model's texture list in the order the exporter happened to write
   them, which only matches on bikes that were written in material order. The 2023 Kawasaki
@@ -29,6 +42,16 @@
 ## 2026-08-07
 
 ### Added
+- **The 3D preview now offers a gear model's stock paint, not just its liveries.** The
+  paint picker listed only the `.pnt` files a helmet, boots or protection packs, so a
+  piece that ships liveries had no way back to its own look — the textures embedded in
+  the mesh, which the preview ignored entirely. "Stock" now leads the list whenever the
+  mesh carries a texture, with a separate entry for a helmet's goggles, which are picked
+  independently of the shell. A paint reuses the mesh's texture names, so stock shell
+  plus painted goggles (and the reverse) is resolved before the textures reach the
+  viewer, which would otherwise show whichever image finished loading last. Preview only
+  — it never becomes a value in your loadout, since the game names a `.pnt` there and has
+  no word for "the model's own look".
 - **A Play button that launches MX Bikes.** Setting a bike up in the Locker meant
   alt-tabbing to Steam or the desktop to actually ride it, even though the app already
   knew where the game was installed and whether it was running. The sidebar now carries a

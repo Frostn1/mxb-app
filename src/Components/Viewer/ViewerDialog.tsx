@@ -24,9 +24,21 @@ interface ViewerDialogProps {
   stockGearPart?: RiderPart["part"];
 }
 
+const EMPTY_GEAR_PAINTS: GearPaints = {
+  paints: [],
+  goggles: [],
+  hasStock: false,
+  hasStockGoggles: false,
+};
+
 function paintLabel(path: string): string {
   const base = path.replace(/\\/g, "/").split("/").pop() ?? path;
   return base.replace(/\.pnt$/i, "");
+}
+
+/** The model's own look leads the picker, ahead of the paints it packs. */
+function withStock(names: string[], hasStock: boolean): string[] {
+  return hasStock ? ["Stock", ...names] : names;
 }
 
 export function ViewerDialog({
@@ -50,7 +62,7 @@ export function ViewerDialog({
   const [loadingPaint, setLoadingPaint] = useState(false);
   const [bodyNodes, setBodyNodes] = useState<EdfNode[] | null>(null);
   const [gear, setGear] = useState<RiderPart | null>(null);
-  const [gearPaints, setGearPaints] = useState<GearPaints>({ paints: [], goggles: [] });
+  const [gearPaints, setGearPaints] = useState<GearPaints>(EMPTY_GEAR_PAINTS);
   const [gogglesIdx, setGogglesIdx] = useState(0);
   const [err, setErr] = useState<string | null>(null);
 
@@ -135,21 +147,26 @@ export function ViewerDialog({
   // Gear ships paints inside the archive — read them out for the picker.
   useEffect(() => {
     if (!open || !gearSource) {
-      setGearPaints({ paints: [], goggles: [] });
+      setGearPaints(EMPTY_GEAR_PAINTS);
       return;
     }
     let alive = true;
     listGearPaints(gearSource)
       .then((p) => alive && setGearPaints(p))
-      .catch(() => alive && setGearPaints({ paints: [], goggles: [] }));
+      .catch(() => alive && setGearPaints(EMPTY_GEAR_PAINTS));
     return () => {
       alive = false;
     };
   }, [open, gearSource]);
 
+  // A gear model's own textures are a choice of their own next to its packed paints, so
+  // "Stock" leads each list when the mesh carries one — and shifts the packed names by one.
+  const gearStock = gearPaints.hasStock && paintIdx === 0;
+  const gearStockGoggles = gearPaints.hasStockGoggles && gogglesIdx === 0;
+
   // The gear item to show: an installed gear model, or the stock model for a loose paint.
-  const gearPaint = gearPaints.paints[paintIdx];
-  const gogglePaint = gearPaints.goggles[gogglesIdx];
+  const gearPaint = gearPaints.paints[paintIdx - (gearPaints.hasStock ? 1 : 0)];
+  const gogglePaint = gearPaints.goggles[gogglesIdx - (gearPaints.hasStockGoggles ? 1 : 0)];
   useEffect(() => {
     if (!open || isBike) {
       setGear(null);
@@ -157,7 +174,14 @@ export function ViewerDialog({
     }
     let load: Promise<RiderPart> | null = null;
     if (gearSource && gearPart) {
-      load = loadGearModel(gearSource, gearPart, gearPaint, gogglePaint);
+      load = loadGearModel(
+        gearSource,
+        gearPart,
+        gearPaint,
+        gogglePaint,
+        gearStock,
+        gearStockGoggles,
+      );
     } else if (stockGearPart && gearPath) {
       load = loadStockGearModel(stockGearPart, gearPath);
     }
@@ -174,7 +198,18 @@ export function ViewerDialog({
     return () => {
       alive = false;
     };
-  }, [open, isBike, gearSource, gearPart, gearPaint, gogglePaint, stockGearPart, gearPath]);
+  }, [
+    open,
+    isBike,
+    gearSource,
+    gearPart,
+    gearPaint,
+    gogglePaint,
+    gearStock,
+    gearStockGoggles,
+    stockGearPart,
+    gearPath,
+  ]);
 
   // Rider parts for the viewer: the real body (skinned when previewing a paint) plus any gear.
   const riderParts = useMemo<RiderPart[] | null>(() => {
@@ -203,10 +238,12 @@ export function ViewerDialog({
   const paintOptions = isBike
     ? paints.map((p) => (p.changesPreview ? p.name : `${p.name} — no change here`))
     : gearSource
-      ? gearPaints.paints
+      ? withStock(gearPaints.paints, gearPaints.hasStock)
       : paintPaths.map(paintLabel);
   // A helmet's goggles carry their own paint set (lens/strap) — a second picker.
-  const goggleOptions = gearSource ? gearPaints.goggles : [];
+  const goggleOptions = gearSource
+    ? withStock(gearPaints.goggles, gearPaints.hasStockGoggles)
+    : [];
   const paintNoChange = isBike && paints[paintIdx]?.changesPreview === false;
 
   const loading = loadingModel || loadingPaint;
