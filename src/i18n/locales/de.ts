@@ -870,10 +870,15 @@ export const de: Translation = {
   "manage.contentSaved": "Renninhalte für „{{name}}“ gespeichert.",
   "manage.contentTitle": "Renninhalte für „{{name}}“",
   "manage.contentBody":
-    "Lackierung, Ausrüstung und Model-Swap des Presets werden von allein gefunden. Hier steht, was ein Loadout nicht sagen kann: die Strecke und die Packs, die ein Rennen ohnehin braucht.",
+    "Lackierung, Ausrüstung und Model-Swap des Presets werden von allein gefunden. Hier steht der Rest: die Strecke, zusätzliche Ausrüstungsmodelle, die bleiben sollen, und die Packs, die ein Rennen ohnehin braucht.",
   "manage.paneTracks": "Strecken",
+  "manage.paneHelmets": "Helme",
+  "manage.paneBoots": "Stiefel",
+  "manage.paneProtection": "Protektoren",
   "manage.paneKeep": "Immer behalten",
   "manage.paneTracksHint": "Die Strecke (oder Strecken), für die dieses Preset gedacht ist.",
+  "manage.paneGearHint":
+    "Zusätzliche Modelle, die in der Auswahl des Spiels bleiben. Die Ausrüstung des Presets wird ohnehin behalten — hake hier an, worauf du sonst noch zugreifen möchtest. Alles ohne Haken tritt zur Seite.",
   "manage.paneKeepHint":
     "Mods, die aktiv bleiben, egal was sonst passiert — das OEM-Pack, das Bike dieses Presets, eine Sound-Mod.",
   "manage.notInstalled": "nicht installiert",

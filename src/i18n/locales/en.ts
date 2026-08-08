@@ -827,10 +827,15 @@ export const en = {
   "manage.contentSaved": "Saved the race content for “{{name}}”.",
   "manage.contentTitle": "Race content for “{{name}}”",
   "manage.contentBody":
-    "The paint, gear and model swap in the preset are found automatically. This is for what a loadout can't say: the track, and the packs a race needs anyway.",
+    "The paint, gear and model swap in the preset are found automatically. This is for the rest: the track, the spare gear models worth keeping, and the packs a race needs anyway.",
   "manage.paneTracks": "Tracks",
+  "manage.paneHelmets": "Helmets",
+  "manage.paneBoots": "Boots",
+  "manage.paneProtection": "Protection",
   "manage.paneKeep": "Always keep",
   "manage.paneTracksHint": "The track (or tracks) this preset is for.",
+  "manage.paneGearHint":
+    "Extra models to leave in the game's picker. The preset's own gear is kept for you — tick anything else you still want to be able to reach for. Everything unticked steps aside.",
   "manage.paneKeepHint":
     "Mods to keep enabled whatever else goes — the OEM pack, a bike this preset rides, a sound mod.",
   "manage.notInstalled": "not installed",

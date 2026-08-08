@@ -19,7 +19,8 @@ pub struct Submesh {
     pub texture: Option<String>,
     // floor(u): which UV tile the group samples (sampled at u - tile). None when it straddles tiles.
     pub uv_tile: Option<i32>,
-    // u32 at block_off - 4 = material index into the model's colour textures in FILE order.
+    // Material id, LOCAL to the owning node — look it up in that node's `materials`, never
+    // in the model's colour list directly. Range i reads it at block_off + 24*i - 4.
     pub mat: Option<u32>,
 }
 
@@ -36,6 +37,11 @@ pub struct EdfNode {
     // True once positions are in the part's .geom LOCAL frame rather than raw authored space.
     #[serde(skip)]
     pub placed: bool,
+    // This node's OWN material table: local material id -> position in the model's colour
+    // textures, None where the material is untextured. Every node carries its own, so the
+    // same id means different textures in different parts of one mesh.
+    #[serde(skip)]
+    pub materials: Vec<Option<usize>>,
 }
 
 // Parse the .geom's `key = x, y, z` vector mount points (ignores non-vector lines).
@@ -169,6 +175,8 @@ fn parse_impl(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
     }
     let mut nodes = Vec::new();
     let cands = collect_sub_cands(b);
+    // Only needed to sanity-check a material's texture index, so count them once.
+    let colors = color_textures(b).len();
     let mut o = HEADER_START;
 
     while o + 8 <= n {
@@ -196,7 +204,9 @@ fn parse_impl(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
                     // Name anchor @ ic+8+tc*12 (past the indices and submesh_count).
                     let iend = ic + 8 + tc * 12;
                     if let (true, Some(name)) = (ok, plausible_name(b, iend)) {
-                        nodes.push(read_node(b, &cands, vs, vc, raw, iend, tc, name));
+                        // `o` is the node's vertex-count word — its material table ends there.
+                        let mats = node_material_table(b, o, colors);
+                        nodes.push(read_node(b, &cands, vs, vc, raw, iend, tc, name, mats));
                         o = iend; // jump past this block
                         continue;
                     }
@@ -410,135 +420,67 @@ pub struct EmbeddedTexture {
     pub data_len: usize, // compressed byte length
 }
 
-// Material table, right after the file header: | u32 count @ 0x1c | count records |,
-// each 56 bytes holding six 1.0f shading terms and, at +44, a ONE-BASED index into the
-// model's colour textures (0 = untextured). The mesh data starts where the table ends.
-const MAT_COUNT_OFF: usize = 0x1c;
-const MAT_TABLE_OFF: usize = 0x20;
+// A node's OWN material table sits immediately before its vertex block, with no padding:
+// | u32 count | count records |, each 56 bytes holding six shading terms in (0,1] and, at
+// +44, a ONE-BASED index into the model's COLOUR textures (0 = untextured).
+//
+// There is no global table. What looks like one at 0x1c is simply the FIRST node's, because
+// node 0's vertex block starts right where it ends — reading it as the whole model's put the
+// blank number-plate overlay over other parts' bodywork. Material ids are LOCAL to their
+// node, so the same id means different textures in different parts of one mesh: the Alta's
+// chassis reads material 3 as its battery pack where its steering reads 3 as something else,
+// and the Husqvarna TC 250 and KTM 125 SX share a swingarm yet embed their textures in
+// different orders, which only a per-node table can express.
 const MAT_STRIDE: usize = 56;
 const MAT_TEX_FROM_REC: usize = 44;
 const MAX_MATERIALS: usize = 64;
 
-/// Side of the square grid the UV-fit test works on. Coarse on purpose: it asks which
-/// atlas a part was drawn against, not where exactly, and stays cheap on a 4096² texture.
-pub const FIT_RES: usize = 128;
-
-/// The texels an artist actually drew on: those differing from the texture's dominant
-/// colour, which for a bike atlas is the flat backdrop its islands are laid out on.
-/// None when the texture won't inflate, or is so uniform there's nothing to match
-/// against — MX Bikes' `w_plate` is a blank overlay the game composites numbers onto.
-pub fn content_mask(b: &[u8], t: &EmbeddedTexture) -> Option<Vec<bool>> {
-    let rgba = inflate_texture(b, t)?;
-    let (w, h) = (t.width as usize, t.height as usize);
-    if w == 0 || h == 0 || rgba.len() < w * h * 4 {
-        return None;
+// A 56-byte material record: two bracketing 0.0 floats around six shading terms, a run of
+// zeroed words, and the one-based texture index. Strict on purpose — the table is found by
+// walking backwards, so a loose test would latch onto compressed texture bytes.
+fn valid_material_record(b: &[u8], o: usize, colors: usize) -> bool {
+    if o + MAT_STRIDE > b.len() {
+        return false;
     }
-    // Nearest-neighbour down to FIT_RES, quantised so near-identical backdrop shades
-    // land in one bucket.
-    let mut cell = Vec::with_capacity(FIT_RES * FIT_RES);
-    let mut hist: std::collections::HashMap<(u8, u8, u8), usize> = Default::default();
-    for y in 0..FIT_RES {
-        for x in 0..FIT_RES {
-            let sx = x * w / FIT_RES;
-            let sy = y * h / FIT_RES;
-            let p = (sy * w + sx) * 4;
-            let q = (rgba[p] / 24, rgba[p + 1] / 24, rgba[p + 2] / 24);
-            *hist.entry(q).or_default() += 1;
-            cell.push(q);
-        }
+    let w = |i: usize| u32le(b, o + i * 4);
+    let f = |i: usize| f32le(b, o + i * 4);
+    if w(0) != 0 || w(7) != 0 {
+        return false;
     }
-    let bg = hist.into_iter().max_by_key(|(_, n)| *n)?.0;
-    let mask: Vec<bool> = cell
-        .iter()
-        .map(|q| {
-            q.0.abs_diff(bg.0) as u32 + q.1.abs_diff(bg.1) as u32 + q.2.abs_diff(bg.2) as u32 > 1
-        })
-        .collect();
-    let inked = mask.iter().filter(|m| **m).count();
-    (inked * 20 > mask.len()).then_some(mask)
+    if (1..7).any(|k| !(f(k) > 0.0 && f(k) <= 1.0)) {
+        return false;
+    }
+    if w(8) != 0 || w(9) != 0 || w(10) != 0 || w(12) != 0 || w(13) != 0 {
+        return false;
+    }
+    w(11) as usize <= colors
 }
 
-/// Which texels a triangle range samples, on the same grid. UVs wrap; a triangle that
-/// straddles a tile edge is skipped rather than smeared across the atlas.
-pub fn uv_coverage(node: &EdfNode, tri_start: u32, tri_count: u32) -> Vec<bool> {
-    let mut hit = vec![false; FIT_RES * FIT_RES];
-    let lo = tri_start as usize * 3;
-    let hi = (lo + tri_count as usize * 3).min(node.indices.len());
-    let at = |i: u32| -> (f32, f32) {
-        let k = i as usize * 2;
-        let (u, v) = (node.uvs[k], node.uvs[k + 1]);
-        (u.rem_euclid(1.0) * (FIT_RES - 1) as f32, v.rem_euclid(1.0) * (FIT_RES - 1) as f32)
-    };
-    for t in node.indices[lo..hi].chunks_exact(3) {
-        if t.iter().any(|i| (*i as usize) * 2 + 1 >= node.uvs.len()) {
-            continue;
-        }
-        let p = [at(t[0]), at(t[1]), at(t[2])];
-        let (x0, x1) = (
-            p.iter().fold(f32::MAX, |a, q| a.min(q.0)),
-            p.iter().fold(f32::MIN, |a, q| a.max(q.0)),
-        );
-        let (y0, y1) = (
-            p.iter().fold(f32::MAX, |a, q| a.min(q.1)),
-            p.iter().fold(f32::MIN, |a, q| a.max(q.1)),
-        );
-        let half = (FIT_RES / 2) as f32;
-        if x1 - x0 > half || y1 - y0 > half {
-            continue; // wrapped across the seam
-        }
-        let area = (p[1].0 - p[0].0) * (p[2].1 - p[0].1) - (p[2].0 - p[0].0) * (p[1].1 - p[0].1);
-        if area.abs() < 1e-6 {
-            continue;
-        }
-        for y in y0.floor().max(0.0) as usize..=(y1.ceil() as usize).min(FIT_RES - 1) {
-            for x in x0.floor().max(0.0) as usize..=(x1.ceil() as usize).min(FIT_RES - 1) {
-                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-                let w0 = (p[1].0 - p[0].0) * (py - p[0].1) - (px - p[0].0) * (p[1].1 - p[0].1);
-                let w1 = (p[2].0 - p[1].0) * (py - p[1].1) - (px - p[1].0) * (p[2].1 - p[1].1);
-                let w2 = (p[0].0 - p[2].0) * (py - p[2].1) - (px - p[2].0) * (p[0].1 - p[2].1);
-                let inside = if area > 0.0 {
-                    w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0
-                } else {
-                    w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0
-                };
-                if inside {
-                    hit[y * FIT_RES + x] = true;
-                }
-            }
-        }
-    }
-    hit
-}
-
-/// PARTIALLY VERIFIED — which colour texture each material draws from, by position in
-/// `embedded_textures`' colour list; None where the material carries no texture.
+/// One node's material table: LOCAL material id -> position in the model's colour textures,
+/// None where that material carries no texture. Empty when the node has no readable table
+/// (shadow meshes, which are never painted).
 ///
-/// Texture blobs are written in the exporter's order, not the material order — the
-/// KX250/KX450 store `w_plate` between `metals` and `plastics`, so reading a material
-/// index as a blob position puts the number plate over the bodywork. This table reads as
-/// a permutation on all 60 OEM bikes and is confirmed against UV layouts on the KX250,
-/// KX450 and YZ125 — but it disagrees with them on the KTM 125 SX, where material 0 is
-/// `plastics` and this claims `125_metals`. Empty when the header doesn't parse.
-pub fn material_slots(b: &[u8], colors: usize) -> Vec<Option<usize>> {
-    if b.len() < MAT_COUNT_OFF + 4 {
-        return Vec::new();
-    }
-    let count = u32le(b, MAT_COUNT_OFF) as usize;
-    if count == 0 || count > MAX_MATERIALS || MAT_TABLE_OFF + MAT_STRIDE * count > b.len() {
-        return Vec::new();
-    }
-    let mut out = Vec::with_capacity(count);
-    for k in 0..count {
-        let one_based = u32le(b, MAT_TABLE_OFF + MAT_STRIDE * k + MAT_TEX_FROM_REC) as usize;
-        // Past the colour list means this isn't the table we think it is — refuse the lot
-        // rather than bind half a bike from a misread header.
-        if one_based > colors {
-            return Vec::new();
+/// `node_start` is the offset of the node's `u32` vertex count; the table ends exactly there.
+pub fn node_material_table(b: &[u8], node_start: usize, colors: usize) -> Vec<Option<usize>> {
+    for count in 1..=MAX_MATERIALS {
+        let Some(o) = node_start.checked_sub(4 + MAT_STRIDE * count) else {
+            break;
+        };
+        if u32le(b, o) as usize != count {
+            continue;
         }
-        out.push(one_based.checked_sub(1));
+        if (0..count).all(|k| valid_material_record(b, o + 4 + MAT_STRIDE * k, colors)) {
+            return (0..count)
+                .map(|k| {
+                    let one = u32le(b, o + 4 + MAT_STRIDE * k + MAT_TEX_FROM_REC) as usize;
+                    one.checked_sub(1)
+                })
+                .collect();
+        }
     }
-    out
+    Vec::new()
 }
+
 
 /// Companion maps ride alongside a colour texture and are never the look itself — MX
 /// Bikes names them `_n` normal, `_s` specular, `_r` reflection.
@@ -555,98 +497,6 @@ pub fn color_textures(b: &[u8]) -> Vec<EmbeddedTexture> {
         .into_iter()
         .filter(|t| !is_companion_texture(&t.name))
         .collect()
-}
-
-/// Which colour texture each material draws from, ready to answer part by part.
-///
-/// Two readings of a material index compete: its position in the colour list above, and
-/// whatever the header's material table maps it to. Neither is right on every model —
-/// blob order puts the number plate over the KX250's bodywork, the table puts the KTM
-/// 125 SX's cables on it — so where they disagree the mesh breaks the tie, per part.
-pub struct MaterialReadings {
-    pub color: Vec<EmbeddedTexture>,
-    slots: Vec<Option<usize>>,
-    disputed: Vec<usize>,
-    /// Inked-texel masks, held only for the textures a dispute actually turns on.
-    ink: std::collections::HashMap<usize, Vec<bool>>,
-}
-
-/// Which reading one part was drawn for, and how strongly its geometry said so.
-pub struct MaterialFit {
-    pub by_table: bool,
-    pub table_fit: f64,
-    pub blob_fit: f64,
-}
-
-impl MaterialReadings {
-    pub fn new(b: &[u8]) -> Self {
-        let color = color_textures(b);
-        let slots = match std::env::var("MXB_MAT_TABLE").as_deref() {
-            Ok("0") => Vec::new(),
-            _ => material_slots(b, color.len()),
-        };
-        let disputed: Vec<usize> = (0..color.len())
-            .filter(|i| matches!(slots.get(*i), Some(Some(j)) if j != i))
-            .collect();
-        // Only the disputed textures get inflated, and only on the models that disagree.
-        let ink = disputed
-            .iter()
-            .flat_map(|i| [*i, slots[*i].unwrap_or(*i)])
-            .collect::<std::collections::BTreeSet<usize>>()
-            .into_iter()
-            .filter_map(|slot| Some((slot, content_mask(b, color.get(slot)?)?)))
-            .collect();
-        Self { color, slots, disputed, ink }
-    }
-
-    /// Ask one part's geometry which reading it was drawn for: for every disputed
-    /// material, how much of what the part samples lands on texels the artist actually
-    /// inked. The parts of one model need not agree — the YZ125's chassis reads through
-    /// the table while its steering reads straight off the blob list.
-    pub fn fit(&self, node: &EdfNode) -> MaterialFit {
-        // A part that draws on ONE material numbers it 0 whichever material that is, so
-        // the index says nothing to look up — the YZ125 numbers its chassis' plastics 0
-        // and, in the rear suspension, its metals 0 too. Only a part that distinguishes
-        // materials at all is worth resolving.
-        let spread: std::collections::HashSet<u32> =
-            node.submeshes.iter().filter_map(|s| s.mat).collect();
-        let (mut table_fit, mut blob_fit) = (0f64, 0f64);
-        if spread.len() > 1 {
-            for mat in spread.iter().map(|m| *m as usize).filter(|m| self.disputed.contains(m)) {
-                let mut seen = vec![false; FIT_RES * FIT_RES];
-                for sm in node.submeshes.iter().filter(|s| s.mat == Some(mat as u32)) {
-                    for (dst, src) in
-                        seen.iter_mut().zip(uv_coverage(node, sm.tri_start, sm.tri_count))
-                    {
-                        *dst |= src;
-                    }
-                }
-                if !seen.iter().any(|s| *s) {
-                    continue;
-                }
-                // A blank overlay (`w_plate`, which the game composites numbers onto) has
-                // no islands to land on and so scores nothing — it can only ever lose a
-                // comparison, never win one.
-                let landed = |slot: usize| {
-                    self.ink.get(&slot).map_or(0.0, |m| {
-                        seen.iter().zip(m).filter(|(s, i)| **s && **i).count() as f64
-                    })
-                };
-                let Some(Some(via_table)) = self.slots.get(mat).copied() else { continue };
-                table_fit += landed(via_table);
-                blob_fit += landed(mat);
-            }
-        }
-        MaterialFit { by_table: spread.len() > 1 && table_fit > blob_fit, table_fit, blob_fit }
-    }
-
-    /// The colour texture a material draws from, under the reading `fit` settled on.
-    pub fn texture(&self, mat: usize, fit: &MaterialFit) -> Option<&EmbeddedTexture> {
-        match self.slots.get(mat).filter(|_| fit.by_table) {
-            Some(slot) => slot.and_then(|s| self.color.get(s)),
-            None => self.color.get(mat),
-        }
-    }
 }
 
 // Record layout from `width`: | width u32 | height u32 | md5[16] | u32 | data_size u32 | pad[8] | data |
@@ -748,6 +598,7 @@ fn read_node(
     iend: usize,
     raw_tris: usize,
     name: String,
+    materials: Vec<Option<usize>>,
 ) -> EdfNode {
     // Positions: contiguous vc*3 f32.
     let mut positions = Vec::with_capacity(vc * 3);
@@ -778,10 +629,11 @@ fn read_node(
             let ranges = read_sub_group_ranges(b, s.block_off, raw_tris, vc)
                 .filter(|r| r.len() > 1);
             let Some(ranges) = ranges else { return vec![s] };
-            let base = s
-                .mat
-                .or_else(|| s.block_off.checked_sub(4).map(|o| u32le(b, o)))
-                .unwrap_or(0);
+            // Each range names its own material in the word just BEFORE its 24-byte entry:
+            // range 0 takes the word at `block_off - 4`, and every later range takes the
+            // second word of the previous entry's tail. They do NOT simply count upward from
+            // the group's first material — assuming they did put the swingarm's guard on the
+            // metals sheet and its body on the plastics one, exactly swapped.
             ranges
                 .into_iter()
                 .enumerate()
@@ -792,7 +644,7 @@ fn read_node(
                     block_off: s.block_off,
                     vert_start: vs2,
                     vert_count: vc2,
-                    mat: Some(base + i as u32),
+                    mat: (s.block_off + 24 * i).checked_sub(4).map(|o| u32le(b, o)),
                 })
                 .collect()
         })
@@ -888,6 +740,7 @@ fn read_node(
         submeshes,
         texture: None,
         placed,
+        materials,
     }
 }
 
@@ -1174,6 +1027,47 @@ fn submesh_transform(b: &[u8], name_off: usize, block_off: usize) -> Vec<Mat4> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Build a material table of `tex` one-based texture indices, ending at `node_start`.
+    fn material_table_bytes(tex: &[u32], node_start: usize) -> Vec<u8> {
+        let mut b = vec![0u8; node_start + 4];
+        let o = node_start - 4 - MAT_STRIDE * tex.len();
+        b[o..o + 4].copy_from_slice(&(tex.len() as u32).to_le_bytes());
+        for (k, one_based) in tex.iter().enumerate() {
+            let r = o + 4 + MAT_STRIDE * k;
+            for s in 1..7 {
+                b[r + s * 4..r + s * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+            }
+            b[r + MAT_TEX_FROM_REC..r + MAT_TEX_FROM_REC + 4]
+                .copy_from_slice(&one_based.to_le_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn a_nodes_material_table_is_read_back_off_its_vertex_count() {
+        let b = material_table_bytes(&[3, 1, 0], 512);
+        // One-based into the colour list, and 0 means the material carries no texture.
+        assert_eq!(node_material_table(&b, 512, 3), vec![Some(2), Some(0), None]);
+    }
+
+    #[test]
+    fn a_material_table_is_refused_when_it_overruns_the_colour_list() {
+        // Index 4 with only 3 colours isn't this node's table — better no table than a
+        // part bound from a misread one.
+        let b = material_table_bytes(&[4], 512);
+        assert!(node_material_table(&b, 512, 3).is_empty());
+        assert_eq!(node_material_table(&b, 512, 4), vec![Some(3)]);
+    }
+
+    #[test]
+    fn each_node_keeps_its_own_material_table() {
+        // Two nodes, two tables: the same local id must resolve differently.
+        let a = material_table_bytes(&[1, 2], 512);
+        let c = material_table_bytes(&[2, 1], 512);
+        assert_eq!(node_material_table(&a, 512, 2), vec![Some(0), Some(1)]);
+        assert_eq!(node_material_table(&c, 512, 2), vec![Some(1), Some(0)]);
+    }
 
     // Investigation aid: print an .edf's overall vertex bounds + node names.
     // MXB_EDF_FILE=/tmp/rider.edf cargo test edf_bounds -- --ignored --nocapture
