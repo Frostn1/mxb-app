@@ -19,7 +19,12 @@ import {
   type SlotDef,
 } from "../../lib/presets";
 
-const EMPTY_GEAR_PAINTS: GearPaints = { paints: [], goggles: [] };
+const EMPTY_GEAR_PAINTS: GearPaints = {
+  paints: [],
+  goggles: [],
+  hasStock: false,
+  hasStockGoggles: false,
+};
 
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
 

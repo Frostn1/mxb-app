@@ -265,6 +265,10 @@ export interface RiderModel {
 export interface GearPaints {
   paints: string[];
   goggles: string[];
+  /** The mesh carries its own texture, so the preview can offer a "Stock" entry
+   *  alongside the packed paints. Preview-only — never a loadout value. */
+  hasStock: boolean;
+  hasStockGoggles: boolean;
 }
 
 export interface PkzMeta {
