@@ -52,6 +52,15 @@
 - **Picking a goggle paint updates the 3D preview on its own.** The preview watched every
   rider slot except the goggles, so a new lens only appeared once you touched some *other*
   slot. The paint was being read correctly all along; the preview was simply never asked.
+- **Installing a new version by hand no longer loops back to the "already installed"
+  page.** MXB App sits in the tray after you close its window, so an installer you started
+  yourself nearly always finds it running — and when the old uninstaller can't close it,
+  the installer bounces you back to that page instead of installing. It now closes the app
+  itself, WebView2 children and all, before anything is written or removed. The in-app
+  updater was never affected, which is why this only turned up on a manual install.
+  **Upgrading from 0.6.3 by hand?** That version's uninstaller predates the fix, so quit
+  MXB App from the tray first (right-click the tray icon → Quit) — once you're on 0.7.0,
+  it takes care of itself.
 - **Updating FrostMod with MX Bikes open no longer fails** with "the process cannot access
   the file… (os error 32)". Windows won't let a loaded `frostmod.dll` be overwritten, so no
   amount of retrying could outlast a running game. The old binaries are renamed aside
