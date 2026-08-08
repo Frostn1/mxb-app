@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, RefreshCw, ExternalLink, Play, Compass, MessagesSquare } from "lucide-react";
+import {
+  Check,
+  RefreshCw,
+  ExternalLink,
+  Play,
+  Compass,
+  MessagesSquare,
+  Monitor,
+  TriangleAlert,
+  Sparkles,
+} from "lucide-react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
@@ -7,6 +17,8 @@ import { toast } from "sonner";
 import {
   countProfilesIn,
   detectGamePath,
+  getOverlayState,
+  overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
   setGamePath,
@@ -18,6 +30,7 @@ import {
   setProfilesPath,
   setRunInBackground,
   setWatchModsReload,
+  type OverlayState,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
@@ -27,6 +40,7 @@ import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
 import { LOCALE_OPTIONS } from "../../i18n/core";
 import { useFrostmod } from "../../Context/FrostmodContext";
+import { prettyHotkey } from "../../lib/hotkey";
 import { useTour } from "../Tour/Tour";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
@@ -46,7 +60,7 @@ const REPO_URL = "https://github.com/Frostn1/mxb-app";
 // in a shipped build, and the app can't be told about a new one without an update.
 const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
-type SectionId =
+export type SectionId =
   | "folder"
   | "general"
   | "overlay"
@@ -63,7 +77,12 @@ const SECTIONS: { id: SectionId; label: TKey }[] = [
 ];
 
 /** Default shown before the backend answers, so the field is never blank. */
-const FALLBACK_HOTKEY = "CommandOrControl+Shift+M";
+const FALLBACK_HOTKEY = "CommandOrControl+Shift+X";
+
+/** How often the overlay's live state (game up? screen owned?) is re-read while
+ *  Settings is on screen. Slow enough to be free, quick enough that alt-tabbing out of
+ *  a race and looking here shows what the game is actually doing. */
+const OVERLAY_POLL_MS = 4000;
 
 /** Turn a `KeyboardEvent.code` into the token Tauri's accelerator parser expects. */
 function acceleratorKey(code: string): string | null {
@@ -90,10 +109,7 @@ function HotkeyField({
   const [recording, setRecording] = useState(false);
   const isMac = usePlatform() === "macos";
 
-  const pretty = value
-    .split("+")
-    .map((p) => (p === "CommandOrControl" ? (isMac ? "Cmd" : "Ctrl") : p))
-    .join(" + ");
+  const pretty = prettyHotkey(value, isMac);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
@@ -143,17 +159,27 @@ function HotkeyField({
   );
 }
 
-export default function Settings() {
+interface SettingsProps {
+  /** Section to scroll to on open — set when something sent the player here for a
+   *  specific setting (the release showcase, the empty Presets tab). */
+  initialSection?: SectionId;
+  /** Re-open the release showcase for the current version, from About. */
+  onShowWhatsNew?: () => void;
+}
+
+export default function Settings({ initialSection, onShowWhatsNew }: SettingsProps) {
   const { t, locale, setLocale } = useI18n();
   const { config, reloadConfig } = useConfig();
-  const isWindows = usePlatform() === "windows";
+  const platform = usePlatform();
+  const isWindows = platform === "windows";
+  const isMac = platform === "macos";
   const { theme, setTheme } = useTheme();
   const { running, reload, status, installing, checking, statusError, install, start, refreshStatus } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
   const [version, setVersion] = useState("");
-  const [active, setActive] = useState<SectionId>("folder");
+  const [active, setActive] = useState<SectionId>(initialSection ?? "folder");
   const [busy, setBusy] = useState(false);
   const refs = useRef<Record<SectionId, HTMLDivElement | null>>({
     folder: null,
@@ -195,6 +221,35 @@ export default function Settings() {
 
   const overlayEnabled = config.overlayEnabled ?? true;
   const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
+
+  // What the overlay is doing right now: is the game up, does something else own the
+  // screen, and did the hotkey actually bind. A shortcut that never registered has
+  // nothing to say at the moment it isn't pressed, so this is the only place the
+  // player can find out why "nothing happens".
+  const [overlayLive, setOverlayLive] = useState<OverlayState | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const poll = () =>
+      getOverlayState()
+        .then((s) => {
+          if (alive) setOverlayLive(s);
+        })
+        .catch(() => {});
+    void poll();
+    const id = setInterval(poll, OVERLAY_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [config.overlayEnabled, config.overlayHotkey]);
+
+  const showOverlayNow = async () => {
+    try {
+      await overlayToggle();
+    } catch (e) {
+      toast.error(t("overlay.showFailed"), { description: String(e) });
+    }
+  };
 
   const toggleOverlay = async (v: boolean) => {
     try {
@@ -274,6 +329,14 @@ export default function Settings() {
     setActive(id);
     refs.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  // Sent here for one setting in particular — scroll to it rather than making them
+  // find it. Runs after the first paint, when the section refs exist.
+  useEffect(() => {
+    if (!initialSection) return;
+    setActive(initialSection);
+    refs.current[initialSection]?.scrollIntoView({ block: "start" });
+  }, [initialSection]);
 
   const changeFolder = async () => {
     const picked = await pickFolder({
@@ -609,14 +672,61 @@ export default function Settings() {
                 disabled={!overlayEnabled}
               />
             </div>
-            {isWindows && (
-              <>
-                <div className="h-px bg-border" />
-                <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-                  {t("overlay.borderlessNote")}
-                </p>
-              </>
+            <div className="h-px bg-border" />
+
+            {/* Live state, and a way to see the thing without launching a race. */}
+            <div className="flex items-center justify-between gap-4">
+              <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                <span
+                  className={cn(
+                    "size-[7px] rounded-full",
+                    overlayLive?.gameRunning ? "bg-success" : "bg-muted-foreground/50",
+                  )}
+                />
+                {overlayLive?.gameRunning
+                  ? t("overlay.gameRunning")
+                  : t("overlay.gameNotRunning")}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={showOverlayNow}
+                disabled={!overlayEnabled}
+              >
+                <Monitor className="size-3.5" /> {t("overlay.showNow")}
+              </Button>
+            </div>
+
+            {/* The hotkey never bound — almost always another app holding the combo.
+                Named here because the overlay can't report it when it fails to open. */}
+            {overlayLive?.hotkeyError && (
+              <Callout tone="warning" title={t("overlay.hotkeyTaken")}>
+                {t("overlay.hotkeyTakenDesc")}
+              </Callout>
             )}
+
+            {/* Right now, not in general — worth its own line, because it means the
+                overlay is already open behind the game. */}
+            {overlayLive?.fullscreenBlocked && (
+              <Callout tone="warning" title={t("overlay.fullscreenNow")}>
+                {t("overlay.fullscreenNowDesc")}
+              </Callout>
+            )}
+
+            {/* Not macOS: there's no MX Bikes to run borderless there. Linux gets it —
+                Proton hands the game the same exclusive swapchain Windows does. */}
+            {!isMac && (
+              <Callout tone="info" title={t("overlay.borderlessTitle")}>
+                {t("overlay.borderlessNote")}
+              </Callout>
+            )}
+
+            <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+              <span className="font-semibold text-foreground/80">
+                {t("overlay.notWorking")}
+              </span>{" "}
+              {t("overlay.notWorkingDesc")}
+            </p>
           </Section>
 
           {/* appearance */}
@@ -828,6 +938,11 @@ export default function Settings() {
               >
                 <RefreshCw className="size-3.5" /> Check for updates
               </Button>
+              {onShowWhatsNew && (
+                <Button variant="outline" size="sm" onClick={onShowWhatsNew}>
+                  <Sparkles className="size-3.5" /> {t("settings.whatsNew")}
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={startTour}>
                 <Compass className="size-3.5" /> Replay tour
               </Button>
@@ -876,6 +991,41 @@ function ToggleRow({
       </div>
       <div className="pt-0.5">
         <Switch checked={checked} onCheckedChange={onChange} />
+      </div>
+    </div>
+  );
+}
+
+/** A boxed note inside a section — for the things that decide whether a feature works
+ *  at all, which read as optional when they're set in the same grey as everything else. */
+function Callout({
+  tone,
+  title,
+  children,
+}: {
+  tone: "info" | "warning";
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2.5 rounded-lg border p-3",
+        tone === "warning"
+          ? "border-warning/30 bg-warning/[0.08]"
+          : "border-input bg-foreground/[0.03]",
+      )}
+    >
+      {tone === "warning" ? (
+        <TriangleAlert className="mt-[1px] size-4 flex-none text-warning" />
+      ) : (
+        <Monitor className="mt-[1px] size-4 flex-none text-muted-foreground" />
+      )}
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[12px] font-semibold text-foreground/85">{title}</span>
+        <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+          {children}
+        </span>
       </div>
     </div>
   );
