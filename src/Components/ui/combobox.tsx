@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n/context";
 import { Button } from "./button";
 import {
   Command,
@@ -33,10 +34,11 @@ export function Combobox({
   value,
   options,
   onChange,
-  placeholder = "Stock",
+  placeholder,
   invalid,
   className,
 }: ComboboxProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -70,20 +72,20 @@ export function Combobox({
             className,
           )}
         >
-          <span className="truncate">{value || placeholder}</span>
+          <span className="truncate">{value || placeholder || t("locker.stock")}</span>
           <ChevronsUpDown className="ml-1 h-3.5 w-3.5 flex-none opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
         <Command>
           <CommandInput
-            placeholder="Search…"
+            placeholder={t("combobox.search")}
             value={query}
             onValueChange={setQuery}
             className="text-[12.5px]"
           />
           <CommandList>
-            {!canCreate && <CommandEmpty>No matches.</CommandEmpty>}
+            {!canCreate && <CommandEmpty>{t("library.noMatches")}</CommandEmpty>}
             <CommandGroup>
               {options.map((o) => (
                 <CommandItem
@@ -106,7 +108,7 @@ export function Combobox({
                   className="text-[12.5px]"
                 >
                   <Check className="mr-2 h-3.5 w-3.5 flex-none opacity-0" />
-                  Use “{q}”
+                  {t("combobox.use", { value: q })}
                 </CommandItem>
               )}
             </CommandGroup>

@@ -12,6 +12,7 @@ import {
 } from "../../api/mods";
 import type { ModSummary } from "../../types";
 import { useInstall } from "../../Context/Install";
+import { useT } from "../../i18n/context";
 import ModCard from "./ModCard";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
@@ -42,6 +43,7 @@ export default function Browse({
   onOpenMod,
   onChangeType,
 }: BrowseProps) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [categoryId, setCategoryId] = useState(modType.categoryId);
@@ -96,23 +98,25 @@ export default function Browse({
         );
         if (res.ok) {
           startInstall({ ...res.params, categoryId });
-          toast.success(`Queued “${res.params.title}”`, {
-            description: `Installing to ${res.params.destFolder || "root"}.`,
+          toast.success(t("browse.queued", { title: res.params.title }), {
+            description: t("browse.queuedDesc", {
+              folder: res.params.destFolder || t("browse.rootFolder"),
+            }),
           });
         } else if (res.reason === "blocked") {
-          toast.error(`“${res.title}” needs a browser download`, {
-            description: `${res.host} blocks in-app downloads — open its page to finish.`,
+          toast.error(t("browse.needsBrowser", { title: res.title }), {
+            description: t("browse.needsBrowserDesc", { host: res.host ?? "" }),
           });
         } else {
-          toast.error(`No download found for “${res.title}”`);
+          toast.error(t("browse.noDownload", { title: res.title }));
         }
       } catch (e) {
-        toast.error(`Couldn't quick-install “${mod.title}”`, {
+        toast.error(t("browse.quickInstallFailed", { title: mod.title }), {
           description: String(e),
         });
       }
     },
-    [modType, categoryId, startInstall],
+    [modType, categoryId, startInstall, t],
   );
 
   // Guard: if the mod is already installed, confirm before overwriting.
@@ -149,18 +153,18 @@ export default function Browse({
       setBulkBusy(false);
       clearSelection();
       if (queued > 0) {
-        toast.success(`Queued ${queued} mod${queued > 1 ? "s" : ""}`, {
+        toast.success(t("browse.queuedBulk", { count: queued }), {
           description: skipped.length
-            ? `${skipped.length} skipped — browser-only host.`
-            : "They'll install one after another.",
+            ? t("browse.queuedBulkSkipped", { count: skipped.length })
+            : t("browse.queuedBulkDesc"),
         });
       } else if (skipped.length) {
-        toast.error("Couldn't quick-install the selection", {
-          description: `All ${skipped.length} need a browser download.`,
+        toast.error(t("browse.bulkFailed"), {
+          description: t("browse.bulkFailedDesc", { count: skipped.length }),
         });
       }
     },
-    [modType, categoryId, startInstall, clearSelection],
+    [modType, categoryId, startInstall, clearSelection, t],
   );
 
   const bulkInstall = useCallback(() => {
@@ -232,25 +236,32 @@ export default function Browse({
     <div className="flex h-full flex-col">
       <header className="flex flex-none flex-col gap-4 px-7 pb-3.5 pt-5">
         <div className="flex items-center gap-3.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Browse</h1>
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+            {t("nav.browse")}
+          </h1>
           <HelpHint
-            title="Browse"
-            description="Discover and install mods from the online catalog — search, filter by type, and open a mod to download it into the game."
+            title={t("nav.browse")}
+            description={t("browse.help")}
           />
           <Segmented
             value={modType.id}
             onChange={(id) => {
-              const next = MOD_TYPES.find((t) => t.id === id);
+              const next = MOD_TYPES.find((mt) => mt.id === id);
               if (next) onChangeType(next);
             }}
-            options={MOD_TYPES.map((t) => ({ value: t.id, label: t.label }))}
+            options={MOD_TYPES.map((mt) => ({
+              value: mt.id,
+              label: t(mt.label),
+            }))}
           />
           <div className="ml-auto flex w-[280px] items-center gap-2 rounded-lg border border-input bg-card px-3 py-2">
             <Search className="size-3.5 text-faint" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${modType.label.toLowerCase()}…`}
+              placeholder={t("browse.searchPlaceholder", {
+                type: t(modType.labelInline),
+              })}
               className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
             />
           </div>
@@ -269,12 +280,12 @@ export default function Browse({
                     : "border border-input text-muted-foreground hover:text-foreground",
                 )}
               >
-                {c.label}
+                {t(c.label)}
               </button>
             );
           })}
           <span className="ml-auto self-center text-[11.5px] text-faint">
-            Sorted by newest
+            {t("browse.sortedByNewest")}
           </span>
         </div>
       </header>
@@ -283,7 +294,7 @@ export default function Browse({
         {error ? (
           <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
             <p className="text-[13px] font-semibold text-destructive">
-              Couldn&apos;t load mods
+              {t("browse.loadFailed")}
             </p>
             {/* The backend now explains blocks in plain words; show that on its own line
                 rather than glued to the heading, and keep it selectable for bug reports. */}
@@ -291,7 +302,7 @@ export default function Browse({
               {error.replace(/^Error:\s*/, "")}
             </p>
             <Button variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)}>
-              Retry
+              {t("common.retry")}
             </Button>
           </div>
         ) : loading ? (
@@ -302,7 +313,7 @@ export default function Browse({
           </div>
         ) : mods.length === 0 ? (
           <p className="py-20 text-center text-[13px] text-muted-foreground">
-            No {modType.label.toLowerCase()} found.
+            {t("browse.empty", { type: t(modType.labelInline) })}
           </p>
         ) : (
           <>
@@ -324,7 +335,7 @@ export default function Browse({
             {hasMore && (
               <div className="flex justify-center pt-4">
                 <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? "Loading…" : "Load more"}
+                  {loadingMore ? t("common.loading") : t("browse.loadMore")}
                 </Button>
               </div>
             )}
@@ -335,14 +346,16 @@ export default function Browse({
       {selectionActive && (
         <div className="flex flex-none items-center gap-3 border-t border-white/[0.08] bg-window px-7 py-3">
           <span className="text-[12.5px] font-semibold">
-            {selected.size} selected
+            {t("browse.selectedCount", { count: selected.size })}
           </span>
           <Button size="sm" onClick={bulkInstall} disabled={bulkBusy}>
             <Download className="size-3.5" />
-            {bulkBusy ? "Queuing…" : `Quick install ${selected.size}`}
+            {bulkBusy
+              ? t("browse.queuing")
+              : t("browse.quickInstallCount", { count: selected.size })}
           </Button>
           <Button size="sm" variant="outline" onClick={selectAll} disabled={bulkBusy}>
-            Select all
+            {t("common.selectAll")}
           </Button>
           <Button
             size="sm"
@@ -351,7 +364,7 @@ export default function Browse({
             disabled={bulkBusy}
             className="ml-auto"
           >
-            <X className="size-3.5" /> Clear
+            <X className="size-3.5" /> {t("common.clear")}
           </Button>
         </div>
       )}
@@ -361,21 +374,24 @@ export default function Browse({
           <AlertDialogHeader>
             <AlertDialogTitle>
               {reinstall?.kind === "single"
-                ? `Reinstall “${reinstall.mod.title}”?`
-                : "Reinstall mods you already have?"}
+                ? t("browse.reinstallOne", { title: reinstall.mod.title })
+                : t("browse.reinstallMany")}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {reinstall?.kind === "single"
-                ? "This mod is already in your library. Reinstalling downloads it again and overwrites the installed files."
-                : `${reinstall?.mods.filter(isInstalled).length ?? 0} of the ${
-                    reinstall?.mods.length ?? 0
-                  } selected are already installed. Continuing reinstalls and overwrites them.`}
+                ? t("browse.reinstallOneBody")
+                : t("browse.reinstallManyBody", {
+                    installed: reinstall?.mods.filter(isInstalled).length ?? 0,
+                    total: reinstall?.mods.length ?? 0,
+                  })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={confirmReinstall}>
-              {reinstall?.kind === "single" ? "Reinstall" : "Reinstall all"}
+              {reinstall?.kind === "single"
+                ? t("browse.reinstall")
+                : t("browse.reinstallAll")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

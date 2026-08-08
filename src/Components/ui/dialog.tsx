@@ -2,6 +2,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n/context";
 
 const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
@@ -27,7 +28,9 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showClose?: boolean;
   }
->(({ className, children, showClose = true, ...props }, ref) => (
+>(({ className, children, showClose = true, ...props }, ref) => {
+  const t = useT();
+  return (
   <DialogPrimitive.Portal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -43,12 +46,13 @@ const DialogContent = React.forwardRef<
       {showClose && (
         <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
           <X className="size-4" />
-          <span className="sr-only">Close</span>
+          <span className="sr-only">{t("common.close")}</span>
         </DialogPrimitive.Close>
       )}
     </DialogPrimitive.Content>
   </DialogPrimitive.Portal>
-));
+  );
+});
 DialogContent.displayName = "DialogContent";
 
 function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

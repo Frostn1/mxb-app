@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
+import { useT, type TKey } from "../../i18n/context";
 
 export type DashboardView =
   | "browse"
@@ -28,18 +29,19 @@ interface SidebarProps {
   onNavigate: (view: DashboardView) => void;
 }
 
-const NAV: { id: DashboardView; label: string; icon: typeof Home }[] = [
-  { id: "browse", label: "Browse", icon: Home },
-  // { id: "shop", label: "Shop", icon: Store }, // hidden for now
-  { id: "library", label: "Library", icon: LibraryIcon },
-  { id: "locker", label: "Locker", icon: Bike },
-  { id: "presets", label: "Presets", icon: Shirt },
-  { id: "rider", label: "Rider", icon: User },
+const NAV: { id: DashboardView; label: TKey; icon: typeof Home }[] = [
+  { id: "browse", label: "nav.browse", icon: Home },
+  // { id: "shop", label: "nav.shop", icon: Store }, // hidden for now
+  { id: "library", label: "nav.library", icon: LibraryIcon },
+  { id: "locker", label: "nav.locker", icon: Bike },
+  { id: "presets", label: "nav.presets", icon: Shirt },
+  { id: "rider", label: "nav.rider", icon: User },
 ];
 
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
 
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
+  const t = useT();
   const { running, reload, status, start } = useFrostmod();
   const { active, queueLength } = useInstall();
 
@@ -51,8 +53,8 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
 
   const onReload = async () => {
     const outcome = await reload();
-    if (outcome === "signaled") toast.success("FrostMod reloaded the game.");
-    else if (outcome === "not_running") toast.info("FrostMod isn't running.");
+    if (outcome === "signaled") toast.success(t("frostmod.reloadedGame"));
+    else if (outcome === "not_running") toast.info(t("frostmod.notRunningToast"));
   };
 
   return (
@@ -77,7 +79,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
               )}
             >
               <Icon className="size-4" />
-              <span>{label}</span>
+              <span>{t(label)}</span>
             </button>
           );
         })}
@@ -88,7 +90,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           <div className="flex flex-col gap-[7px] rounded-[10px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="truncate text-[11.5px] font-semibold text-foreground/85">
-                Installing “{displayName(active.title)}”
+                {t("sidebar.installing", { name: displayName(active.title) })}
               </span>
               {pct !== undefined && (
                 <span className="flex-none text-[10.5px] text-muted-foreground">
@@ -98,7 +100,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
             </div>
             {queueLength > 0 && (
               <span className="text-[10.5px] text-muted-foreground">
-                +{queueLength} queued
+                {t("sidebar.queued", { count: queueLength })}
               </span>
             )}
             <div className="h-[3px] overflow-hidden rounded-full bg-foreground/[0.08]">
@@ -126,15 +128,15 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           />
           <span className="flex-1 text-[11.5px] text-muted-foreground">
             {running === null
-              ? "Checking FrostMod…"
+              ? t("frostmod.checking")
               : running
-                ? "FrostMod running"
-                : "FrostMod not running"}
+                ? t("frostmod.running")
+                : t("frostmod.notRunning")}
           </span>
           {running ? (
             <button
               onClick={onReload}
-              title="Reload game"
+              title={t("frostmod.reloadGame")}
               className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
             >
               <RefreshCw className="size-3.5" />
@@ -143,7 +145,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
             status?.installed && (
               <button
                 onClick={start}
-                title="Start FrostMod"
+                title={t("frostmod.start")}
                 className="cursor-default text-primary transition-colors hover:brightness-110"
               >
                 <Play className="size-3.5" />
@@ -163,7 +165,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           )}
         >
           <Settings className="size-4" />
-          <span>Settings</span>
+          <span>{t("nav.settings")}</span>
         </button>
       </div>
     </aside>

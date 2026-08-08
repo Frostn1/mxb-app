@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Plus, Check, X, Search } from "lucide-react";
 import { Dialog, DialogContent } from "@/Components/ui/dialog";
 import { Button } from "@/Components/ui/button";
+import { useT } from "../../i18n/context";
+import { labelOf } from "../../i18n/core";
 import { Badge } from "@/Components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
@@ -53,6 +55,7 @@ export default function InstallDialog({
   sound = false,
   onConfirm,
 }: InstallDialogProps) {
+  const t = useT();
   const mirrors = useMirrors(detail);
   const [folder, setFolder] = useState(initialFolder);
   const [folderOpen, setFolderOpen] = useState(false);
@@ -87,8 +90,10 @@ export default function InstallDialog({
 
   const folderLabel = useMemo(() => {
     if (creating && newFolder.trim()) return newFolder.trim();
-    return destOptions.find((o) => o.value === folder)?.label ?? folder ?? "(root)";
-  }, [creating, newFolder, destOptions, folder]);
+    const opt = destOptions.find((o) => o.value === folder);
+    if (opt) return labelOf(opt, t);
+    return folder || t("library.rootFolder");
+  }, [creating, newFolder, destOptions, folder, t]);
 
   // Probable destinations (ranked) resolved to options, best first.
   const suggestedOptions = useMemo(() => {
@@ -102,8 +107,8 @@ export default function InstallDialog({
   const filteredOptions = useMemo(() => {
     const q = folderSearch.trim().toLowerCase();
     if (!q) return destOptions;
-    return destOptions.filter((o) => o.label.toLowerCase().includes(q));
-  }, [folderSearch, destOptions]);
+    return destOptions.filter((o) => labelOf(o, t).toLowerCase().includes(q));
+  }, [folderSearch, destOptions, t]);
 
   const suggestedValues = useMemo(
     () => new Set(suggestedOptions.map((o) => o.value)),
@@ -113,7 +118,11 @@ export default function InstallDialog({
   const selectedMirror = mirrors[mirrorIdx];
   const thumb = detail.images[0];
   const subtitleType =
-    modType.id === "bikes" ? "Bike" : modType.id === "rider" ? "Rider" : "Track";
+    modType.id === "bikes"
+      ? t("category.bike")
+      : modType.id === "rider"
+        ? t("modType.rider")
+        : t("category.track");
 
   const commitNewFolder = () => {
     const v = newFolder.trim();
@@ -144,7 +153,7 @@ export default function InstallDialog({
             : "text-foreground/90 hover:bg-foreground/[0.06]",
         )}
       >
-        <span className="min-w-0 flex-1 truncate text-left">{o.label}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{labelOf(o, t)}</span>
         <span className="flex flex-none items-center gap-2 text-[11px] text-faint">
           <span>{count} mods</span>
           {on && <Check className="size-3.5 text-primary" />}
@@ -195,7 +204,7 @@ export default function InstallDialog({
           {/* destination */}
           <section className="flex flex-col gap-2">
             <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
-              Install to
+              {t("installDialog.installTo")}
             </span>
             <button
               onClick={() => setFolderOpen((v) => !v)}
@@ -207,7 +216,7 @@ export default function InstallDialog({
                 <b className="text-foreground">{folderLabel}</b>
               </span>
               <span className="flex flex-none items-center gap-1 text-[11px] text-muted-foreground">
-                Change <ChevronDown className="size-3" />
+                {t("installDialog.change")} <ChevronDown className="size-3" />
               </span>
             </button>
 
@@ -221,7 +230,9 @@ export default function InstallDialog({
                     value={folderSearch}
                     onChange={(e) => setFolderSearch(e.target.value)}
                     placeholder={
-                      modType.id === "bikes" ? "Search bikes…" : "Search folders…"
+                      modType.id === "bikes"
+                        ? t("installDialog.searchBikes")
+                        : t("installDialog.searchFolders")
                     }
                     className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
                   />
@@ -232,12 +243,12 @@ export default function InstallDialog({
                   {!folderSearch && suggestedOptions.length > 0 && (
                     <>
                       <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-faint">
-                        Probably
+                        {t("installDialog.probably")}
                       </div>
                       {suggestedOptions.map(renderRow)}
                       <div className="mx-1.5 my-1 h-px bg-border" />
                       <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-faint">
-                        All folders
+                        {t("installDialog.allFolders")}
                       </div>
                     </>
                   )}
@@ -247,7 +258,7 @@ export default function InstallDialog({
                   ).map(renderRow)}
                   {folderSearch && filteredOptions.length === 0 && (
                     <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
-                      No folder matches — create it below.
+                      {t("installDialog.noFolderMatch")}
                     </div>
                   )}
                 </div>
@@ -265,7 +276,9 @@ export default function InstallDialog({
                       }}
                       onBlur={commitNewFolder}
                       placeholder={
-                        modType.id === "bikes" ? "KTM450/paints" : "New folder name"
+                        modType.id === "bikes"
+                          ? "KTM450/paints"
+                          : t("library.newFolderName")
                       }
                       className="w-full rounded-md bg-transparent px-3 py-2 text-[12.5px] text-foreground placeholder:text-faint focus:outline-none"
                     />
@@ -277,14 +290,14 @@ export default function InstallDialog({
                       }}
                       className="flex w-full cursor-default items-center gap-1.5 rounded-md px-3 py-2 text-[12.5px] font-semibold text-primary hover:bg-foreground/[0.06]"
                     >
-                      <Plus className="size-3.5" /> New folder…
+                      <Plus className="size-3.5" /> {t("library.newFolder")}
                     </button>
                   )}
                 </div>
               </div>
             )}
             <span className="text-[11px] text-faint">
-              Remembered for {modType.label}
+              {t("installDialog.rememberedFor", { type: t(modType.label) })}
             </span>
           </section>
 
@@ -292,7 +305,9 @@ export default function InstallDialog({
           {mirrors.length > 0 && (
             <section className="flex flex-col gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
-                {sound ? "Download (per bike)" : "Download from"}
+                {sound
+                  ? t("installDialog.downloadPerBike")
+                  : t("installDialog.downloadFrom")}
               </span>
               <div className="flex flex-col gap-1.5">
                 {shownMirrors.map((m) => {
@@ -320,14 +335,14 @@ export default function InstallDialog({
                         <span className="text-[12.5px] font-semibold">{m.host}</span>
                         <span className="text-[11px] text-muted-foreground">
                           {blocked
-                            ? "Opens in browser — MXB App finishes the install"
+                            ? t("installDialog.opensInBrowser")
                             : sound
                               ? on
-                                ? "Matched to your bike"
-                                : "Different bike / pack"
+                                ? t("installDialog.matchedBike")
+                                : t("installDialog.differentBike")
                               : m.isDefault
-                                ? "Direct · fastest"
-                                : "Direct"}
+                                ? t("installDialog.directFastest")
+                                : t("installDialog.direct")}
                         </span>
                       </span>
                       {blocked ? (
@@ -355,8 +370,8 @@ export default function InstallDialog({
               {mirrors.length > 1 && (
                 <span className="text-[11px] text-faint">
                   {sound
-                    ? "Each download is a different bike — auto-selected to match your pick. Choose the “all bikes” pack for every bike at once."
-                    : "All mirrors contain the same file. If one fails, try the next."}
+                    ? t("installDialog.perBikeHint")
+                    : t("installDialog.mirrorsHint")}
                 </span>
               )}
             </section>
@@ -370,10 +385,12 @@ export default function InstallDialog({
             onClick={confirm}
             disabled={!selectedMirror}
           >
-            <span className="truncate">Install to {folderLabel}</span>
+            <span className="truncate">
+              {t("installDialog.installToFolder", { folder: folderLabel })}
+            </span>
           </Button>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       </DialogContent>

@@ -62,6 +62,8 @@ import type {
   PresetApplyOutcome,
 } from "../../types";
 import { SlotField } from "./SlotField";
+import { Trans } from "../../i18n";
+import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
   SLOTS,
   SLOT_GROUPS,
@@ -80,18 +82,18 @@ function humanSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-function phaseLabel(phase: BundlePhase): string {
+function phaseLabel(phase: BundlePhase, t: TFunc): string {
   switch (phase) {
     case "bundling":
-      return "Packaging assets…";
+      return t("presets.phaseBundling");
     case "uploading":
-      return "Uploading bundle…";
+      return t("presets.phaseUploading");
     case "downloading":
-      return "Downloading bundle…";
+      return t("presets.phaseDownloading");
     case "installing":
-      return "Installing assets…";
+      return t("presets.phaseInstalling");
     case "done":
-      return "Done";
+      return t("common.done");
   }
 }
 
@@ -116,19 +118,20 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function applyNote(outcome: PresetApplyOutcome): string {
+/** Which whole-sentence toast an apply produced. A key, not a fragment: the
+ *  English "Applied X to Y — {note}" shape doesn't survive translation. */
+function applyNoteKey(outcome: PresetApplyOutcome): TKey {
   switch (outcome.live_refresh) {
     case "refreshed":
-      return "refreshed live in-game.";
+      return "presets.appliedRefreshed";
     case "failed":
-      return "saved — instant refresh failed, so reselect your profile in-game to load it.";
+      return "presets.appliedRefreshFailed";
     default:
       break;
   }
-  if (outcome.game_running) {
-    return "saved — reselect your profile in MX Bikes (Profile menu) to load the new look.";
-  }
-  return "saved — it loads next time the game opens.";
+  return outcome.game_running
+    ? "presets.appliedGameRunning"
+    : "presets.appliedNextTime";
 }
 
 interface PresetsProps {
@@ -138,6 +141,7 @@ interface PresetsProps {
 }
 
 export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = {}) {
+  const t = useT();
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState<string>("");
   const [bikes, setBikes] = useState<string[]>([]);
@@ -244,8 +248,8 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
     setLoadout(preset.loadout);
     // Bring the builder (left column) into view on smaller layouts.
     window.scrollTo({ top: 0, behavior: "smooth" });
-    toast.info(`Editing “${preset.name}” — change anything, then Save changes.`);
-  }, []);
+    toast.info(t("presets.editing", { name: preset.name }));
+  }, [t]);
 
   const cancelEdit = useCallback(() => {
     setEditing(null);
@@ -255,7 +259,7 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
   const onSave = useCallback(() => {
     const nm = name.trim();
     if (!nm) {
-      toast.error("Give the preset a name first.");
+      toast.error(t("presets.nameFirst"));
       return;
     }
     // Always confirm an edit (it rewrites a saved preset) or a name clash (it would
@@ -265,7 +269,7 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
       return;
     }
     void commitSave();
-  }, [name, editing, nameClash]);
+  }, [name, editing, nameClash, t]);
 
   const commitSave = useCallback(async () => {
     const nm = name.trim();
@@ -285,34 +289,34 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
       toast.success(
         wasEditing
           ? eq(wasEditing, nm)
-            ? `Updated preset “${nm}”.`
-            : `Renamed to “${nm}” and saved changes.`
-          : `Saved preset “${nm}”.`,
+            ? t("presets.updated", { name: nm })
+            : t("presets.renamed", { name: nm })
+          : t("presets.saved", { name: nm }),
       );
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setBusy(false);
     }
-  }, [name, loadout, editing, refreshSaved]);
+  }, [name, loadout, editing, refreshSaved, t]);
 
   const applyLoadout = useCallback(
     async (lo: Loadout, id: string, label: string) => {
       if (!profile || !bike) {
-        toast.error("Pick a profile and bike to apply to.");
+        toast.error(t("presets.pickProfileAndBike"));
         return;
       }
       setApplyingId(id);
       try {
         const outcome = await presetsApply(profile, bike, lo, makeActive);
-        toast.success(`Applied “${label}” to ${bike} — ${applyNote(outcome)}`);
+        toast.success(t(applyNoteKey(outcome), { label, bike }));
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
       } finally {
         setApplyingId(null);
       }
     },
-    [profile, bike, makeActive],
+    [profile, bike, makeActive, t],
   );
 
   const onShare = useCallback((preset: Preset) => {
@@ -348,10 +352,12 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
     <div className="flex h-full flex-col">
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
         <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Presets</h1>
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+            {t("nav.presets")}
+          </h1>
           <HelpHint
-            title="Presets"
-            description="Save a full rider look and load it onto a bike on command."
+            title={t("nav.presets")}
+            description={t("presets.help")}
           />
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -385,10 +391,12 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
             {/* Target row */}
             <div className="flex flex-wrap items-end gap-3 rounded-xl border border-white/[0.07] bg-card/40 p-3.5">
               <label className="flex min-w-[140px] flex-col gap-1">
-                <span className="text-[11px] font-medium text-muted-foreground">Profile</span>
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {t("presets.profile")}
+                </span>
                 <Select value={profile} onValueChange={setProfile}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Profile" />
+                    <SelectValue placeholder={t("presets.profile")} />
                   </SelectTrigger>
                   <SelectContent>
                     {profiles.map((p) => (
@@ -400,10 +408,12 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
                 </Select>
               </label>
               <label className="flex min-w-[180px] flex-1 flex-col gap-1">
-                <span className="text-[11px] font-medium text-muted-foreground">Bike</span>
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {t("slotGroup.bike")}
+                </span>
                 <Select value={bike} onValueChange={setBike}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Bike" />
+                    <SelectValue placeholder={t("slotGroup.bike")} />
                   </SelectTrigger>
                   <SelectContent>
                     {bikes.map((b) => (
@@ -425,7 +435,7 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
               <div key={g.id} className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
-                    {g.label}
+                    {t(g.label)}
                   </h2>
                   {g.id === "rider" && onOpenInRider && (
                     <Button
@@ -487,8 +497,17 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
                 <div className="flex items-center gap-2 text-[12px]">
                   <Pencil className="size-3.5 flex-none text-primary" />
                   <span className="min-w-0 flex-1">
-                    Editing <span className="font-semibold">“{editing}”</span> — change
-                    the name or any slot, then <span className="font-semibold">Save changes</span>.
+                    <Trans
+                      k="presets.editingBanner"
+                      values={{
+                        name: <span className="font-semibold">“{editing}”</span>,
+                        save: (
+                          <span className="font-semibold">
+                            {t("presets.saveChanges")}
+                          </span>
+                        ),
+                      }}
+                    />
                   </span>
                   <button
                     onClick={cancelEdit}
@@ -524,13 +543,13 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Preset name…"
+                  placeholder={t("presets.namePlaceholder")}
                   className="h-9 max-w-[220px]"
                   onKeyDown={(e) => e.key === "Enter" && void onSave()}
                 />
                 <Button size="sm" onClick={() => onSave()} disabled={busy}>
                   {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-                  {editing ? "Save changes" : "Save preset"}
+                  {editing ? t("presets.saveChanges") : t("presets.savePreset")}
                 </Button>
                 <Button
                   variant="outline"
@@ -629,6 +648,7 @@ function PresetCard({
   onDelete: () => void;
   onViewInRider?: () => void;
 }) {
+  const t = useT();
   return (
     <div
       className={cn(
@@ -639,7 +659,7 @@ function PresetCard({
       <div className="flex items-start justify-between gap-2">
         <button
           onClick={onLoad}
-          title="Load a copy into the builder"
+          title={t("presets.loadCopy")}
           className="min-w-0 flex-1 cursor-default text-left"
         >
           <div className="flex items-center gap-1.5">
@@ -656,17 +676,17 @@ function PresetCard({
         </button>
         <div className="flex flex-none items-center gap-0.5">
           {onViewInRider && (
-            <IconBtn title="View on rider" onClick={onViewInRider}>
+            <IconBtn title={t("presets.viewOnRider")} onClick={onViewInRider}>
               <User className="size-3.5" />
             </IconBtn>
           )}
-          <IconBtn title="Edit name or options" onClick={onEdit}>
+          <IconBtn title={t("presets.editNameOrOptions")} onClick={onEdit}>
             <Pencil className="size-3.5" />
           </IconBtn>
-          <IconBtn title="Share" onClick={onShare}>
+          <IconBtn title={t("presets.share")} onClick={onShare}>
             <Share2 className="size-3.5" />
           </IconBtn>
-          <IconBtn title="Delete" onClick={onDelete}>
+          <IconBtn title={t("common.delete")} onClick={onDelete}>
             <Trash2 className="size-3.5" />
           </IconBtn>
         </div>
@@ -718,8 +738,9 @@ function ConfirmSaveDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const renamed = !!editing && editing.toLowerCase() !== newName.toLowerCase();
-  const title = editing ? "Save changes?" : "Replace preset?";
+  const title = editing ? t("presets.saveChangesQ") : t("presets.replaceQ");
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
@@ -755,7 +776,7 @@ function ConfirmSaveDialog({
           </Button>
           <Button onClick={onConfirm} disabled={busy}>
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-            {editing ? "Save changes" : "Replace"}
+            {editing ? t("presets.saveChanges") : t("presets.replace")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -764,6 +785,7 @@ function ConfirmSaveDialog({
 }
 
 function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () => void }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const [configCode, setConfigCode] = useState<string | null>(null);
   const [fullCode, setFullCode] = useState<string | null>(null);
@@ -802,7 +824,7 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
       const c = await presetBundleCreate(preset.name);
       setFullCode(c);
       setCopied(false);
-      toast.success("Full bundle uploaded — the code now includes the assets.");
+      toast.success(t("presets.bundleUploaded"));
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -810,7 +832,7 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
       setCreating(false);
       setPhase(null);
     }
-  }, [preset]);
+  }, [preset, t]);
 
   return (
     <Dialog open={!!preset} onOpenChange={(o) => !o && onClose()}>
@@ -819,8 +841,8 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
           <DialogTitle>Share “{preset?.name}”</DialogTitle>
           <DialogDescription>
             {isFull
-              ? "This code includes a downloadable asset bundle — the recipient picks Full import and gets everything, even with no mods installed."
-              : "Send this code to anyone. They import it under Presets → Import. They'll need the same mods installed for every part to show."}
+              ? t("presets.shareHintFull")
+              : t("presets.shareHintConfig")}
           </DialogDescription>
         </DialogHeader>
 
@@ -828,7 +850,7 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
           readOnly
           value={code ?? ""}
           onFocus={(e) => e.currentTarget.select()}
-          placeholder="Generating code…"
+          placeholder={t("presets.generatingCode")}
           className="h-24 w-full resize-none rounded-lg border border-input bg-transparent p-2.5 font-mono text-[11px] leading-snug"
         />
 
@@ -842,7 +864,7 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
             {plan && (
               <p className="mt-1 text-muted-foreground">
                 {plan.assets.length === 0
-                  ? "No installed assets to bundle — this look is all stock/fonts."
+                  ? t("presets.nothingToBundle")
                   : `Packages ${plan.assets.length} asset${plan.assets.length > 1 ? "s" : ""} (~${humanSize(plan.totalSize)}) so a recipient needs nothing installed.`}
                 {plan.unresolved.length > 0 && plan.assets.length > 0 && (
                   <>
@@ -868,7 +890,11 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
               ) : (
                 <UploadCloud className="size-3.5" />
               )}
-              {creating ? (phase ? phaseLabel(phase) : "Working…") : "Create full bundle"}
+              {creating
+                ? phase
+                  ? phaseLabel(phase, t)
+                  : t("settings.working")
+                : t("presets.createFullBundle")}
             </Button>
           </div>
         )}
@@ -879,14 +905,20 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
             onClick={async () => {
               if (code && (await copyText(code))) {
                 setCopied(true);
-                toast.success(isFull ? "Copied full-bundle code." : "Copied share code.");
+                toast.success(
+                  isFull ? t("presets.copiedFull") : t("presets.copiedShare"),
+                );
               } else {
-                toast.error("Couldn't copy — select the code and copy manually.");
+                toast.error(t("presets.copyFailed"));
               }
             }}
           >
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-            {copied ? "Copied" : isFull ? "Copy full code" : "Copy code"}
+            {copied
+              ? t("modDetail.copied")
+              : isFull
+                ? t("presets.copyFullCode")
+                : t("presets.copyCode")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -907,6 +939,7 @@ function ImportDialog({
   onClose: () => void;
   onImported: () => void;
 }) {
+  const t = useT();
   const [text, setText] = useState("");
   const [preview, setPreview] = useState<Preset | null>(null);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
@@ -989,8 +1022,8 @@ function ImportDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Import preset</DialogTitle>
-          <DialogDescription>Paste a share code someone sent you.</DialogDescription>
+          <DialogTitle>{t("presets.importTitle")}</DialogTitle>
+          <DialogDescription>{t("presets.importBody")}</DialogDescription>
         </DialogHeader>
         <textarea
           value={text}
@@ -1012,9 +1045,14 @@ function ImportDialog({
               <p className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-emerald-500">
                 <Package className="mt-px size-3.5 flex-none" />
                 <span>
-                  Includes a full asset bundle (~{humanSize(preview.bundle!.size)} from{" "}
-                  {preview.bundle!.host}). Use <strong>Full import</strong> to download
-                  and install everything — no mods needed first.
+                  <Trans
+                    k="presets.bundleNotice"
+                    values={{
+                      size: humanSize(preview.bundle!.size),
+                      host: preview.bundle!.host,
+                      fullImport: <strong>{t("presets.fullImport")}</strong>,
+                    }}
+                  />
                 </span>
               </p>
             )}
@@ -1022,8 +1060,9 @@ function ImportDialog({
               <p className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-amber-500">
                 <AlertTriangle className="mt-px size-3.5 flex-none" />
                 <span>
-                  Missing mods: {missing.map((s) => s.label).join(", ")}. Install
-                  them for those parts to show.
+                  {t("presets.missingMods", {
+                    mods: missing.map((s) => t(s.label)).join(", "),
+                  })}
                 </span>
               </p>
             )}
@@ -1043,7 +1082,7 @@ function ImportDialog({
             ) : (
               <Download className="size-4" />
             )}
-            {hasBundle ? "Config only" : "Import"}
+            {hasBundle ? t("presets.configOnly") : t("presets.import")}
           </Button>
           {hasBundle && (
             <Button onClick={() => void onFullImport()} disabled={!preview || busy}>
@@ -1052,7 +1091,7 @@ function ImportDialog({
               ) : (
                 <Package className="size-4" />
               )}
-              {busy && phase ? phaseLabel(phase) : "Full import"}
+              {busy && phase ? phaseLabel(phase, t) : t("presets.fullImport")}
             </Button>
           )}
         </DialogFooter>
