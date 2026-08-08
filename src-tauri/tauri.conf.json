@@ -25,6 +25,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["mxb"]
+      }
+    },
     "updater": {
       "endpoints": [
         "https://github.com/Frostn1/mxb-app/releases/latest/download/latest.json"

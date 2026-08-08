@@ -93,6 +93,7 @@ sha2 = "0.10"
 # Compile-time string obfuscation: sensitive endpoints/hosts are XOR-encoded in the
 # binary and decoded on the stack at use, so they don't show up in a `strings` dump.
 obfstr = "0.4"
+tauri-plugin-deep-link = "2.4.9"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

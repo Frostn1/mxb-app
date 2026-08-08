@@ -8,9 +8,11 @@ import {
   Trash2,
   Plus,
   Download,
+  MessagesSquare,
   Shirt,
   Server as ServerIcon,
 } from "lucide-react";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Button } from "@/Components/ui/button";
 import { Input } from "@/Components/ui/input";
 import { cn } from "@/lib/utils";
@@ -18,10 +20,15 @@ import {
   enrollAccount,
   experimentalState,
   listServers,
+  onEnrollLink,
+  parsePairing,
+  presetsListProfiles,
   saveServers,
   serverAction,
+  serverProbe,
   serverSetConfig,
   serverStatus,
+  serverTracks,
   setGuid as setGuidApi,
   syncPaints,
   type ExperimentalState,
@@ -33,6 +40,9 @@ import { useT } from "../../i18n/context";
 
 /** How often a server's status refreshes while the page is open. */
 const POLL_MS = 10000;
+
+/** Invite codes are issued by hand, and this is where they're handed out. */
+const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
 /** `93784` -> `1d 2h`, `3720` -> `1h 2m`, `45` -> `45s`. */
 function uptime(secs: number): string {
@@ -55,6 +65,22 @@ const ServerRow = ({ server, onRemove }: RowProps) => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [track, setTrack] = useState("");
+  // What the *host* has installed, not what this PC has — the operator's machine and the
+  // server box are different installs, and offering a track the host lacks restarts the
+  // server into nothing. `null` while we're still asking.
+  const [tracks, setTracks] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    serverTracks(server.id)
+      .then((list) => !cancelled && setTracks(list))
+      // An agent too old to know `/tracks` shouldn't break the row; the field falls back
+      // to free text, which is exactly what it was before.
+      .catch(() => !cancelled && setTracks([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [server.id]);
 
   const refresh = useCallback(async () => {
     try {
@@ -169,13 +195,32 @@ const ServerRow = ({ server, onRemove }: RowProps) => {
         </Button>
 
         <div className="ml-auto flex items-center gap-2">
-          <Input
-            value={track}
-            onChange={(e) => setTrack(e.target.value)}
-            placeholder={t("servers.trackPlaceholder")}
-            spellCheck={false}
-            className="h-8 w-40 text-[12.5px]"
-          />
+          {tracks === null ? (
+            <span className="text-[12px] text-muted-foreground">{t("servers.trackLoading")}</span>
+          ) : tracks.length > 0 ? (
+            <select
+              value={track}
+              onChange={(e) => setTrack(e.target.value)}
+              className="h-8 w-40 rounded-md border border-white/[0.07] bg-transparent px-2 text-[12.5px]"
+            >
+              <option value="">{t("servers.trackPlaceholder")}</option>
+              {tracks.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            // Nothing to list — an older agent, or a host with no tracks yet. Typing still
+            // works, so this degrades to what the field always was.
+            <Input
+              value={track}
+              onChange={(e) => setTrack(e.target.value)}
+              placeholder={t("servers.trackPlaceholder")}
+              spellCheck={false}
+              className="h-8 w-40 text-[12.5px]"
+            />
+          )}
           {/* Changing the track restarts the game — the .ini is only read at startup. */}
           <Button size="sm" disabled={busy || !track.trim()} onClick={applyTrack}>
             {t("servers.setTrack")}
@@ -187,7 +232,7 @@ const ServerRow = ({ server, onRemove }: RowProps) => {
 };
 
 /**
- * Enrolment and paint sync.
+ * Enrollment and paint sync.
  *
  * MX Bikes sends no custom content, so other riders render in default liveries unless you
  * already hold their exact paint file. This is the panel that fixes that: publish what
@@ -200,6 +245,11 @@ const PaintSync = () => {
   const [riderName, setRiderName] = useState("");
   const [guid, setGuid] = useState("");
   const [busy, setBusy] = useState(false);
+  // The profiles the game itself wrote. The rider name has to match one of these exactly,
+  // so picking from the list is both less typing and the only way to be sure it's right.
+  // `null` while scanning; empty means the scan found nothing and we fall back to typing.
+  const [profiles, setProfiles] = useState<string[] | null>(null);
+  const [manualGuid, setManualGuid] = useState(false);
 
   const refresh = useCallback(() => {
     experimentalState()
@@ -207,6 +257,26 @@ const PaintSync = () => {
       .catch(() => {});
   }, []);
   useEffect(refresh, [refresh]);
+
+  useEffect(() => {
+    presetsListProfiles()
+      .then((scan) => {
+        setProfiles(scan.profiles);
+        // One profile is the overwhelmingly common case — preselect it so enrolling is the
+        // invite code and nothing else.
+        if (scan.profiles.length > 0) setRiderName((cur) => cur || scan.profiles[0]);
+      })
+      .catch(() => setProfiles([]));
+  }, []);
+
+  // An invite arriving as a clicked `mxb://` link rather than a code to transcribe. This
+  // fills the field and stops there — enrolling stays a button the player presses.
+  useEffect(() => {
+    const pending = onEnrollLink(setCode);
+    return () => {
+      void pending.then((unlisten) => unlisten());
+    };
+  }, []);
 
   const enroll = async () => {
     setBusy(true);
@@ -237,7 +307,7 @@ const PaintSync = () => {
   const pull = async () => {
     setBusy(true);
     try {
-      const r = await syncPaints("eu-frankfurt-1");
+      const r = await syncPaints();
       toast.success(
         t("sync.pulled", { installed: r.installed, riders: r.riders, had: r.alreadyHad }),
       );
@@ -272,52 +342,102 @@ const PaintSync = () => {
             </Button>
           </div>
 
-          {/* The GUID is the identity that survives a name change, and it's what the
-              server logs on every connection — so it's worth claiming even though the
-              rider name works on its own for a small group. */}
-          <div className="mt-3 flex flex-wrap items-end gap-2">
-            <label className="flex-1 text-[11.5px] text-muted-foreground">
-              {t("sync.guidHint")}
-              <Input
-                value={guid}
-                onChange={(e) => setGuid(e.target.value)}
-                placeholder={state.guid || t("sync.guidPlaceholder")}
-                spellCheck={false}
-                className="mt-1.5 h-8 text-[12.5px]"
-              />
-            </label>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy || !guid.trim()}
-              onClick={() => void claimGuid()}
-            >
-              {t("sync.setGuid")}
-            </Button>
-          </div>
+          <p className="mt-2 text-[11.5px] text-muted-foreground">{t("sync.autoNote")}</p>
+
+          {/* The GUID is the identity that survives a name change. A player can't read it
+              off their own machine, so this is no longer something to type: the app takes
+              it from the server log the first time one of their servers sees them connect.
+              The manual field stays for anyone who doesn't run a server. */}
+          {state.guid ? (
+            <p className="mt-3 text-[11.5px] text-muted-foreground">
+              {t("sync.guidClaimed", { guid: state.guid })}
+            </p>
+          ) : manualGuid ? (
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="flex-1 text-[11.5px] text-muted-foreground">
+                {t("sync.guidHint")}
+                <Input
+                  value={guid}
+                  onChange={(e) => setGuid(e.target.value)}
+                  placeholder={t("sync.guidPlaceholder")}
+                  spellCheck={false}
+                  className="mt-1.5 h-8 text-[12.5px]"
+                />
+              </label>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || !guid.trim()}
+                onClick={() => void claimGuid()}
+              >
+                {t("sync.setGuid")}
+              </Button>
+            </div>
+          ) : (
+            <p className="mt-3 text-[11.5px] text-muted-foreground">
+              {t("sync.guidPending")}{" "}
+              <button
+                onClick={() => setManualGuid(true)}
+                className="cursor-default underline underline-offset-2 hover:text-foreground"
+              >
+                {t("sync.guidManual")}
+              </button>
+            </p>
+          )}
         </>
       ) : (
         <div className="mt-4 space-y-2">
-          <Input
-            value={riderName}
-            onChange={(e) => setRiderName(e.target.value)}
-            placeholder={t("sync.riderNamePlaceholder")}
-            spellCheck={false}
-          />
+          {profiles === null ? (
+            <div className="h-9 animate-pulse rounded-md bg-white/[0.04]" />
+          ) : profiles.length > 0 ? (
+            <label className="block text-[11.5px] text-muted-foreground">
+              {t("sync.pickProfile")}
+              <select
+                value={riderName}
+                onChange={(e) => setRiderName(e.target.value)}
+                className="mt-1.5 h-9 w-full rounded-md border border-white/[0.07] bg-transparent px-2 text-[13px] text-foreground"
+              >
+                {profiles.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            // No profiles on disk — a fresh install, or the profiles folder is set wrong.
+            // Typing is the only option left, so the exact-match warning still matters.
+            <Input
+              value={riderName}
+              onChange={(e) => setRiderName(e.target.value)}
+              placeholder={t("sync.riderNamePlaceholder")}
+              spellCheck={false}
+            />
+          )}
           <Input
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder={t("sync.codePlaceholder")}
             spellCheck={false}
           />
-          <p className="text-[11.5px] text-muted-foreground">{t("sync.riderNameHint")}</p>
-          <Button
-            size="sm"
-            disabled={busy || !code.trim() || !riderName.trim()}
-            onClick={() => void enroll()}
-          >
-            {t("sync.enroll")}
-          </Button>
+          <p className="text-[11.5px] text-muted-foreground">
+            {profiles && profiles.length === 0 ? t("sync.noProfiles") : t("sync.pickProfileHint")}
+          </p>
+          {/* Where the code comes from. Invites are issued by hand, so without this the
+              field is a box with no answer anywhere in the app. */}
+          <p className="text-[11.5px] text-muted-foreground">{t("sync.whereCode")}</p>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              disabled={busy || !code.trim() || !riderName.trim()}
+              onClick={() => void enroll()}
+            >
+              {t("sync.enroll")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void openUrl(DISCORD_URL)}>
+              <MessagesSquare className="size-3.5" /> {t("sync.getCode")}
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -328,7 +448,30 @@ const Servers = () => {
   const t = useT();
   const [servers, setServers] = useState<ServerRef[]>([]);
   const [adding, setAdding] = useState(false);
+  const [probing, setProbing] = useState(false);
   const [draft, setDraft] = useState({ name: "", url: "", token: "" });
+  const [pairingBlob, setPairingBlob] = useState("");
+  const [manualServer, setManualServer] = useState(false);
+
+  /**
+   * Fill the address and token from a pasted pairing code.
+   *
+   * Decoded as it's typed rather than behind a button: a pairing code is only ever pasted
+   * whole, so the moment it parses there's nothing left to confirm. A partial value — the
+   * first keystroke of a paste on a slow machine — simply doesn't parse, and says nothing
+   * until the operator stops.
+   */
+  const onPairingPaste = async (value: string) => {
+    setPairingBlob(value);
+    if (!value.trim()) return;
+    try {
+      const { url, token } = await parsePairing(value);
+      setDraft((d) => ({ ...d, url, token }));
+    } catch {
+      // Silent: this fires on every keystroke, and a half-pasted code is not an error the
+      // operator needs to be told about. `add` reports it if they try to submit anyway.
+    }
+  };
 
   useEffect(() => {
     void listServers().then(setServers).catch(() => {});
@@ -343,19 +486,50 @@ const Servers = () => {
     }
   };
 
+  /**
+   * Add a server, naming it from the host rather than from the operator.
+   *
+   * The agent already knows what the server is called — it's in the `.ini` it manages — so
+   * the name field is a fallback, not a requirement. Probing first also means a wrong
+   * address or token fails here, with a message, instead of being saved as a row that
+   * never loads.
+   */
   const add = async () => {
     const { name, url, token } = draft;
-    if (!name.trim() || !url.trim() || !token.trim()) return;
+    if (!url.trim() || !token.trim()) return;
+    setProbing(true);
+
+    let resolved = name.trim();
+    try {
+      const status = await serverProbe(url.trim(), token.trim());
+      const fromHost = status.server.name?.trim();
+      if (!resolved && fromHost) {
+        resolved = fromHost;
+        toast.success(t("servers.probed", { name: fromHost }));
+      }
+    } catch (e) {
+      // Refuse rather than saving something we couldn't reach: a dead row is the failure
+      // mode this probe exists to prevent. A name typed by hand doesn't rescue it.
+      toast.error(t("servers.probeFailed"), { description: String(e) });
+      setProbing(false);
+      return;
+    }
+
     // crypto.randomUUID keeps ids unique without a counter that a reordered or partially
     // removed list could collide with.
     const entry: ServerRef = {
       id: crypto.randomUUID(),
-      name: name.trim(),
+      // The host had no name set and the operator gave none — fall back to the address, so
+      // the row is still identifiable in a list of several.
+      name: resolved || url.trim(),
       url: url.trim(),
       token: token.trim(),
     };
     await persist([...servers, entry]);
     setDraft({ name: "", url: "", token: "" });
+    setPairingBlob("");
+    setManualServer(false);
+    setProbing(false);
     setAdding(false);
   };
 
@@ -387,31 +561,58 @@ const Servers = () => {
 
       {adding ? (
         <div className="mt-4 space-y-2 rounded-xl border border-white/[0.07] p-4">
+          {/* One field, not four. The pairing code carries the address and the token, and
+              the name comes off the host — so the manual fields are collapsed behind a
+              disclosure rather than sitting here implying they all need filling in. */}
           <Input
             autoFocus
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            placeholder={t("servers.namePlaceholder")}
-          />
-          <Input
-            value={draft.url}
-            onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-            placeholder="http://203.0.113.10:8787"
+            value={pairingBlob}
+            onChange={(e) => void onPairingPaste(e.target.value)}
+            placeholder={t("servers.pairingPlaceholder")}
             spellCheck={false}
           />
-          <Input
-            type="password"
-            value={draft.token}
-            onChange={(e) => setDraft({ ...draft, token: e.target.value })}
-            placeholder={t("servers.tokenPlaceholder")}
-            spellCheck={false}
-          />
+          <p className="text-[11.5px] text-muted-foreground">{t("servers.pairingWhere")}</p>
+
+          {manualServer ? (
+            <>
+              <Input
+                value={draft.url}
+                onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+                placeholder="http://203.0.113.10:8787"
+                spellCheck={false}
+              />
+              <Input
+                type="password"
+                value={draft.token}
+                onChange={(e) => setDraft({ ...draft, token: e.target.value })}
+                placeholder={t("servers.tokenPlaceholder")}
+                spellCheck={false}
+              />
+              <Input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder={t("servers.nameOptional")}
+              />
+            </>
+          ) : (
+            <button
+              onClick={() => setManualServer(true)}
+              className="cursor-default text-left text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              {t("servers.manualEntry")}
+            </button>
+          )}
           <div className="flex justify-end gap-2 pt-1">
-            <Button size="sm" variant="outline" onClick={() => setAdding(false)}>
+            <Button size="sm" variant="outline" disabled={probing} onClick={() => setAdding(false)}>
               {t("common.cancel")}
             </Button>
-            <Button size="sm" onClick={() => void add()}>
-              {t("servers.add")}
+            <Button
+              size="sm"
+              disabled={probing || !draft.url.trim() || !draft.token.trim()}
+              onClick={() => void add()}
+            >
+              {probing && <Loader2 className="size-3.5 animate-spin" />}
+              {probing ? t("servers.probing") : t("servers.add")}
             </Button>
           </div>
         </div>

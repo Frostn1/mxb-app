@@ -239,26 +239,32 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           </span>
         </button>
 
-        <button
-          onClick={() => setJoinOpen(true)}
-          disabled={gameRunning}
-          title={gameRunning ? t("game.running") : t("join.title")}
-          className={cn(
-            "flex cursor-default items-center justify-center gap-2 rounded-lg border border-white/[0.07] px-3 py-1.5 text-[12px] font-medium transition-colors",
-            gameRunning
-              ? "text-muted-foreground"
-              : "text-foreground/80 hover:bg-white/[0.04]",
-          )}
-        >
-          <Plug className="size-3.5" />
-          <span>{t("join.title")}</span>
-        </button>
+        {/* Joining by address rides on an undocumented connect flag, so it stays behind
+            the same gate as the Servers page rather than sitting under Play for everyone. */}
+        {experimental && (
+          <>
+            <button
+              onClick={() => setJoinOpen(true)}
+              disabled={gameRunning}
+              title={gameRunning ? t("game.running") : t("join.title")}
+              className={cn(
+                "flex cursor-default items-center justify-center gap-2 rounded-lg border border-white/[0.07] px-3 py-1.5 text-[12px] font-medium transition-colors",
+                gameRunning
+                  ? "text-muted-foreground"
+                  : "text-foreground/80 hover:bg-white/[0.04]",
+              )}
+            >
+              <Plug className="size-3.5" />
+              <span>{t("join.title")}</span>
+            </button>
 
-        <JoinServerDialog
-          open={joinOpen}
-          onOpenChange={setJoinOpen}
-          onJoined={refreshGame}
-        />
+            <JoinServerDialog
+              open={joinOpen}
+              onOpenChange={setJoinOpen}
+              onJoined={refreshGame}
+            />
+          </>
+        )}
 
         <div
           data-tour="frostmod"

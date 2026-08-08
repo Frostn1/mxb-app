@@ -575,6 +575,8 @@ export const en = {
   "join.alreadyRunning":
     "Close MX Bikes first — a running game can't be sent to a server.",
   "join.failed": "Couldn't join that server",
+  "join.manual": "Join a server that isn't listed",
+  "join.noServers": "No servers listed yet — type an address you were given instead.",
 
   "servers.title": "Servers",
   "servers.subtitle":
@@ -598,6 +600,18 @@ export const en = {
   "servers.actionFailed": "That didn't work",
   "servers.trackChanged": "Track set to {{track}} — the server restarted.",
   "servers.saveFailed": "Couldn't save your server list",
+  "servers.trackLoading": "Reading tracks…",
+  "servers.trackEmpty": "No tracks on that host",
+  "servers.nameOptional": "Server name (optional — read from the host)",
+  "servers.probing": "Checking that agent…",
+  "servers.probeFailed": "Couldn't reach that agent",
+  "servers.probed": "Found {{name}}",
+  "servers.pairingPlaceholder": "Paste the pairing code",
+  "servers.pairingHint":
+    "The agent prints this line when it starts. Paste it here and the address and token fill themselves in — or enter them by hand below.",
+  "servers.pairingWhere":
+    "Run mxb-agent on the machine hosting your server. It prints this line every time it starts — copy the whole thing.",
+  "servers.manualEntry": "I don't have a pairing code — enter the details by hand",
 
   "settings.experimental": "Experimental",
   "settings.experimentalServers": "Servers and paint sync",
@@ -610,9 +624,9 @@ export const en = {
   "sync.title": "Paint sync",
   "sync.desc":
     "MX Bikes never sends paints, so other riders show up in default liveries unless you already have their exact file. Publish yours and pull back everyone else's.",
-  "sync.enroll": "Enrol",
+  "sync.enroll": "Enroll",
   "sync.enrolled": "Enrolled as {{name}}",
-  "sync.enrollFailed": "Couldn't enrol",
+  "sync.enrollFailed": "Couldn't enroll",
   "sync.codePlaceholder": "Invite code",
   "sync.riderNamePlaceholder": "In-game rider name",
   "sync.riderNameHint":
@@ -627,6 +641,20 @@ export const en = {
   "sync.pulled": "Installed {{installed}} from {{riders}} riders ({{had}} already had)",
   "sync.pullFailed": "Couldn't sync paints",
   "sync.rejected": "Skipped {{count}} with an unsafe destination",
+  "sync.pickProfile": "Ride as",
+  "sync.pickProfileHint":
+    "Your MX Bikes profiles, as the app found them. Picking one here is what tells other players' apps which paints are yours.",
+  "sync.noProfiles":
+    "No MX Bikes profiles found, so type your rider name exactly as it appears in the game.",
+  "sync.guidClaimed": "Identified by GUID {{guid}}",
+  "sync.guidPending":
+    "Your GUID is picked up on its own the first time one of your servers sees you connect. Until then your rider name identifies you.",
+  "sync.guidManual": "Enter it manually",
+  "sync.whereCode":
+    "Paint sync is invite-only for now. Codes are handed out in the Discord — ask there and paste the one you're given above.",
+  "sync.getCode": "Ask in the Discord",
+  "sync.autoNote":
+    "Your paints publish themselves whenever you change your look, and everyone else's arrive when you launch the game.",
 
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",

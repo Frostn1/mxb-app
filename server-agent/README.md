@@ -18,12 +18,30 @@ someone else's respawn, and a reboot that starts the agent starts the server wit
   "listen": "0.0.0.0:8787",
   "game_dir": "C:\\mxb\\game",
   "ini": "dedicated.ini",
-  "game_port": 54210
+  "game_port": 54210,
+  "public_url": "http://203.0.113.10:8787"
 }
 ```
 
 `token` is required and must not be blank — an agent listening without one hands process
 control to anyone who portscans the box.
+
+`public_url` is optional. It only affects the pairing line below: `listen` is a *bind*
+address, so `0.0.0.0` tells nobody how to reach the box, and the agent falls back to the
+address of the interface it would use to reach the internet. Behind NAT or a reverse proxy
+that guess is wrong and only you know the right answer — set it here.
+
+## Pairing
+
+On every start the agent prints one line to stdout:
+
+```
+mxb-agent:eyJ1cmwiOiJodHRwOi8vMjAzLjAuMTEzLjEwOjg3ODciLCJ0b2tlbiI6Ii4uLiJ9
+```
+
+Paste it into the app's **Add a server** field and the address and token fill themselves in;
+the app then asks the agent for the server's name. Lost it? Restart the agent — it prints
+again. It carries the token, so treat it like the token.
 
 ## API
 
@@ -33,6 +51,8 @@ Every endpoint except `/health` requires `Authorization: Bearer <token>`.
 |---|---|---|
 | GET | `/health` | Liveness. Unauthenticated, reveals nothing. |
 | GET | `/status` | Game process state plus name/track/maxClients from the `.ini`. |
+| GET | `/players` | Who is connected, with the GUID that identifies them, read from the server's log. |
+| GET | `/tracks` | Track names this host has installed — the only values `PUT /config` will usefully accept. |
 | POST | `/start` | Start the game if it isn't up. Idempotent. |
 | POST | `/stop` | Stop it. Idempotent, and suppresses the crash watcher. |
 | POST | `/restart` | Stop then start. |

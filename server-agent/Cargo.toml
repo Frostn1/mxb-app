@@ -8,6 +8,9 @@ description = "Supervises an MX Bikes dedicated server and exposes it over an au
 tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Only for the pairing blob. Encoding it by hand would be a dozen lines of bit-twiddling
+# nobody should have to review to trust the agent.
+base64 = "0.22"
 
 [profile.release]
 strip = true

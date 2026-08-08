@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-08-08 — paint sync stops being a form
+
+### Added
+- **Your paints publish themselves.** Whenever you change your look, the app sends it up a
+  second or so later — one publish for a burst of preset-flipping, not one per click. This
+  closes the loop: publishing had a command but no button anywhere in the app, so nothing
+  was ever uploaded and every roster was empty by construction.
+- **Everyone else's paints arrive on their own**, pulled when you launch the game. Joining
+  by address syncs that server; pressing Play syncs every server in the registry, since the
+  game you're about to pick from the in-game browser never passes through us. Rosters are
+  merged and de-duplicated first, so two servers sharing riders is one pass over the disk.
+- **`GET /tracks` on the agent**, so setting a track is a list of what that host actually
+  has instead of a text box you spell a track name into from memory. Your own PC's library
+  can't answer this — the operator's machine and the server box are different installs.
+- **One-line pairing.** `mxb-agent` prints a code at startup carrying its own address and
+  token; paste it into Add a server and both fields fill in. `public_url` in `agent.json`
+  overrides the address for hosts behind NAT or a proxy.
+- **`mxb://enroll?code=…` links**, so an invite can be clicked instead of transcribed. The
+  link only prefills the field — enrolling is still a button you press, because a URL any
+  website can open must not be able to spend an invite on its own.
+
+### Changed
+- **Join a server offers the servers we know about**, instead of an empty box wanting an IP
+  address. The control plane has held a registry of them since the first migration and
+  nothing ever showed it, so the answer to "where do I get the address" was nowhere in the
+  app. Typing one is still there, for a server that isn't listed.
+- **The server registry is public.** It was bearer-only, which meant the players most in
+  need of a list — the ones who have never joined a server and have no address to type —
+  were the only ones who couldn't see it. It returns the same name, region and address a
+  server browser shows; `agent_url` is still withheld, so no admin API is advertised.
+- **The enroll panel says where an invite code comes from**, with a button through to the
+  Discord. Invites are issued by hand and the field previously explained none of that.
+- **Adding a server shows one field, not four.** The pairing code carries the address and
+  the token and the host supplies the name, so the manual fields sit behind a disclosure
+  rather than implying they all need filling in — and the form now says where the code is
+  printed.
+- **Your rider name is picked from your MX Bikes profiles**, not typed. It had to match the
+  game exactly and nothing checked that it did, which made a silent no-op the most likely
+  outcome of enrolling. Typing is still there when no profiles are found.
+- **Your GUID is claimed automatically** the first time one of your servers sees you
+  connect — the app reads it from the server's log, where the game writes it next to your
+  name. You can't read it off your own machine, so asking you to type it never made sense.
+  The manual field is still there, one click away, for anyone not running a server.
+- **Adding a server checks it before saving it**, and takes the server's name from the host
+  rather than asking you to invent one. A wrong address or token now fails at the form
+  instead of becoming a row that never loads.
+- **Join a server is behind the Experimental switch**, with the rest of the multiplayer
+  work. It rides on an undocumented connect flag, so it shouldn't sit under Play for
+  everyone while that's still unconfirmed.
+
+### Fixed
+- **The agent's track list no longer offers things that aren't tracks.** A folder tracks are
+  filed into (`EU`) and the interior of an extracted one (`data`) both came back as
+  selectable names, and picking either would have restarted the server into nothing. It now
+  uses the same marker files the app's own library scanner keys on, and stops descending
+  once it has found a track.
+- **Paint sync no longer syncs one hard-coded server.** The Servers page asked for
+  `eu-frankfurt-1` by name regardless of where you were riding; it now resolves the server
+  you actually joined, matching a registered one by address or falling back to the address
+  itself.
+
 ## 2026-08-08 — everyone on the server finally looks right
 
 ### Added
