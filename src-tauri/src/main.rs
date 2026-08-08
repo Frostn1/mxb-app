@@ -1726,10 +1726,13 @@ fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|e| format!("{e:#}"))
 }
 
+/// The player's profiles, plus the folder they were read from and whether it exists —
+/// so an empty Presets tab can say *which* folder came up empty instead of leaving the
+/// player to guess that a path is involved at all.
 #[tauri::command]
-fn presets_list_profiles(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+fn presets_list_profiles(app: tauri::AppHandle) -> Result<presets::ProfilesScan, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    Ok(presets::list_profiles(&cfg.profiles_dir()))
+    Ok(presets::scan_profiles(&cfg.profiles_dir()))
 }
 
 #[tauri::command]

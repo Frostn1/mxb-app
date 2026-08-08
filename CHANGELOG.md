@@ -14,6 +14,18 @@
   same full library scan the Library tab uses, and matches titles the way a person would:
   one name spelled inside the other, or enough distinctive words in common. Careful
   enough to still tell two colourways of the same bike apart. (#26)
+- **Presets no longer comes up blank when your mods folder lives somewhere else.**
+  `mxbikes.ini` lets you point the mods folder at another drive, but the game has no
+  equivalent redirect for profiles — it keeps writing those to
+  `Documents\PiBoSo\MX Bikes\profiles`. The app only ever looked at
+  `<mods folder>\profiles`, found nothing, and rendered an empty Presets tab with no
+  hint that a path was involved. It now falls back to the stock `Documents` folder when
+  the one beside your mods isn't there, and Settings shows the path it actually resolved
+  to instead of the one it assumed (#27).
+- **The empty Presets tab explains itself.** Instead of "launch the game once", it names
+  the folder it read, says outright when that folder doesn't exist, points at the
+  `mxbikes.ini` split as the likely cause, and offers a button straight to the Settings
+  picker.
 - **A slot can be cleared back to stock again.** Empty is what the game writes for an
   unmodded slot, and every layer already handled it — the trigger renders it as "Stock",
   a cleared slot isn't flagged missing, and applying writes it through. Only the picker
