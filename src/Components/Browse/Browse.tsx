@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, Download, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   MOD_TYPES,
   SEARCH_PAGE_SIZE,
+  getModRatings,
   isLiveryContext,
   resolveQuickInstall,
   searchMods,
   type ModType,
 } from "../../api/mods";
 import type { InstalledIndex } from "../../lib/installedMatch";
-import type { ModSummary } from "../../types";
+import type { ModRating, ModSummary } from "../../types";
 import { useInstall } from "../../Context/Install";
 import ModCard from "./ModCard";
 import { Segmented } from "@/Components/ui/segmented";
@@ -46,6 +47,11 @@ export default function Browse({
   const [debounced, setDebounced] = useState("");
   const [categoryId, setCategoryId] = useState(modType.categoryId);
   const [mods, setMods] = useState<ModSummary[]>([]);
+  const [ratings, setRatings] = useState<Map<number, ModRating>>(new Map());
+  // Ids we've already asked about, so a mod the site had no answer for isn't re-requested
+  // on every render. Cleared when the listing is rebuilt (the Rust side caches, so asking
+  // again after a category switch costs nothing).
+  const askedForRatings = useRef<Set<number>>(new Set());
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -198,6 +204,7 @@ export default function Browse({
     setLoading(true);
     setError(null);
     setPage(1);
+    askedForRatings.current = new Set();
     searchMods(debounced, categoryId, 1)
       .then((res) => {
         if (cancelled) return;
@@ -210,6 +217,29 @@ export default function Browse({
       cancelled = true;
     };
   }, [debounced, categoryId, reloadKey]);
+
+  // Scores aren't part of the search response — they come in a second pass keyed by post
+  // id, for whatever is on screen. Never awaited by the grid: cards paint immediately and
+  // stars appear a moment later, and a failure just leaves them off.
+  useEffect(() => {
+    const wanted = mods.map((m) => m.id).filter((id) => !askedForRatings.current.has(id));
+    if (wanted.length === 0) return;
+    for (const id of wanted) askedForRatings.current.add(id);
+    let cancelled = false;
+    getModRatings(wanted)
+      .then((res) => {
+        if (cancelled) return;
+        setRatings((prev) => {
+          const next = new Map(prev);
+          for (const [id, rating] of Object.entries(res)) next.set(Number(id), rating);
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [mods]);
 
   const loadMore = useCallback(async () => {
     const next = page + 1;
@@ -311,6 +341,7 @@ export default function Browse({
                 <ModCard
                   key={m.id}
                   mod={m}
+                  rating={ratings.get(m.id)}
                   isBike={isBike}
                   installed={isInstalled(m)}
                   selected={selected.has(m.slug)}

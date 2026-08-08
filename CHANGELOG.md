@@ -3,6 +3,14 @@
 ## 2026-08-07
 
 ### Added
+- **Star ratings on browse thumbnails.** A mod that people have rated on mxb-mods.com now
+  shows its score on the card the same way the site does — five stars filled to the
+  nearest half, the average, and the vote count — so a good mod is recognisable before you
+  open it. Unrated mods show nothing rather than five empty stars, which would read as a
+  bad score instead of "nobody has voted yet". The scores aren't in the REST API the
+  listing comes from, so they're fetched separately per page (six requests at a time,
+  cached for ten minutes) after the cards have painted: browsing never waits on them, and
+  a score that fails to load simply doesn't appear.
 - **A Play button that launches MX Bikes.** Setting a bike up in the Locker meant
   alt-tabbing to Steam or the desktop to actually ride it, even though the app already
   knew where the game was installed and whether it was running. The sidebar now carries a

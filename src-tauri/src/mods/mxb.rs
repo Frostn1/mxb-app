@@ -1,8 +1,12 @@
-use super::{DownloadOption, ModDetail, ModSource, ModSummary};
+use super::{DownloadOption, ModDetail, ModRating, ModSource, ModSummary};
+use futures_util::StreamExt;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const BASE: &str = "https://mxb-mods.com";
 /// A full four-part version, unlike the `Chrome/126.0` form used elsewhere — real Chrome
@@ -245,6 +249,100 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
         version,
         downloads,
     })
+}
+
+/// How long a fetched rating is trusted. Votes trickle in over days, so a stale score is
+/// harmless — but re-browsing a category shouldn't re-ask the site for the same 24 posts.
+const RATING_TTL: Duration = Duration::from_secs(10 * 60);
+
+/// Ratings cost one request each, so a page of results is a burst. Six at a time keeps
+/// that burst well under what the REST search already does in one shot.
+const RATING_CONCURRENCY: usize = 6;
+
+fn rating_cache() -> &'static Mutex<HashMap<u64, (ModRating, Instant)>> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<u64, (ModRating, Instant)>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Scores for a batch of post ids, as the site's rating plugin reports them.
+///
+/// Ids we couldn't fetch are simply absent from the map: a rating is decoration on a mod
+/// card, so a blocked or slow request must never surface as a browsing error. That's also
+/// why this skips `get_with_retry` — one attempt each, no piling on a site that's already
+/// unhappy.
+pub async fn ratings(ids: &[u64]) -> HashMap<u64, ModRating> {
+    let mut out = HashMap::new();
+    let mut missing = Vec::new();
+    {
+        let cache = lock(rating_cache());
+        let now = Instant::now();
+        for &id in ids {
+            match cache.get(&id) {
+                Some((r, at)) if now.duration_since(*at) < RATING_TTL => {
+                    out.insert(id, *r);
+                }
+                _ => missing.push(id),
+            }
+        }
+    }
+    missing.sort_unstable();
+    missing.dedup();
+
+    let fetched: Vec<(u64, ModRating)> = futures_util::stream::iter(
+        missing
+            .into_iter()
+            .map(|id| async move { rating(id).await.ok().map(|r| (id, r)) }),
+    )
+    .buffer_unordered(RATING_CONCURRENCY)
+    .filter_map(|r| async move { r })
+    .collect()
+    .await;
+
+    {
+        let mut cache = lock(rating_cache());
+        let now = Instant::now();
+        for (id, r) in &fetched {
+            cache.insert(*id, (*r, now));
+        }
+    }
+    out.extend(fetched);
+    out
+}
+
+/// A poisoned rating cache is not worth taking the app down for — the worst case is one
+/// stale entry written by a thread that panicked mid-insert.
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The rating plugin has no REST route; its front end reads scores from this admin-ajax
+/// action, which answers unauthenticated with `{voteCount, avgRating}`.
+async fn rating(id: u64) -> anyhow::Result<ModRating> {
+    let url = format!("{BASE}/wp-admin/admin-ajax.php");
+    let resp = client()?
+        .post(&url)
+        .form(&[("action", "load_results".to_string()), ("postID", id.to_string())])
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("{}", resp.status());
+    }
+    let v: Value = resp.json().await?;
+    Ok(ModRating {
+        average: number(v.get("avgRating")).unwrap_or(0.0) as f32,
+        count: number(v.get("voteCount")).unwrap_or(0.0).max(0.0) as u32,
+    })
+}
+
+/// WordPress plugins are casual about JSON types — the same field comes back as a number
+/// on one post and a string on another.
+fn number(v: Option<&Value>) -> Option<f64> {
+    match v? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
 }
 
 fn summary_from_post(p: &Value, category_id: u32) -> Option<ModSummary> {

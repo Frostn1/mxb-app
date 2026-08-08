@@ -40,6 +40,13 @@ export interface ModSummary {
   categoryId: number;
 }
 
+/** A mod's community score on mxb-mods.com, as shown under the site's own thumbnails. */
+export interface ModRating {
+  /** Mean score out of 5 — only meaningful when `count` is above zero. */
+  average: number;
+  count: number;
+}
+
 /** One download choice on a mod page (hosts vary: Google Drive, MediaFire, …). */
 export interface DownloadOption {
   url: string;
