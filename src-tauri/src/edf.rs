@@ -419,6 +419,97 @@ const MAT_STRIDE: usize = 56;
 const MAT_TEX_FROM_REC: usize = 44;
 const MAX_MATERIALS: usize = 64;
 
+/// Side of the square grid the UV-fit test works on. Coarse on purpose: it asks which
+/// atlas a part was drawn against, not where exactly, and stays cheap on a 4096² texture.
+pub const FIT_RES: usize = 128;
+
+/// The texels an artist actually drew on: those differing from the texture's dominant
+/// colour, which for a bike atlas is the flat backdrop its islands are laid out on.
+/// None when the texture won't inflate, or is so uniform there's nothing to match
+/// against — MX Bikes' `w_plate` is a blank overlay the game composites numbers onto.
+pub fn content_mask(b: &[u8], t: &EmbeddedTexture) -> Option<Vec<bool>> {
+    let rgba = inflate_texture(b, t)?;
+    let (w, h) = (t.width as usize, t.height as usize);
+    if w == 0 || h == 0 || rgba.len() < w * h * 4 {
+        return None;
+    }
+    // Nearest-neighbour down to FIT_RES, quantised so near-identical backdrop shades
+    // land in one bucket.
+    let mut cell = Vec::with_capacity(FIT_RES * FIT_RES);
+    let mut hist: std::collections::HashMap<(u8, u8, u8), usize> = Default::default();
+    for y in 0..FIT_RES {
+        for x in 0..FIT_RES {
+            let sx = x * w / FIT_RES;
+            let sy = y * h / FIT_RES;
+            let p = (sy * w + sx) * 4;
+            let q = (rgba[p] / 24, rgba[p + 1] / 24, rgba[p + 2] / 24);
+            *hist.entry(q).or_default() += 1;
+            cell.push(q);
+        }
+    }
+    let bg = hist.into_iter().max_by_key(|(_, n)| *n)?.0;
+    let mask: Vec<bool> = cell
+        .iter()
+        .map(|q| {
+            q.0.abs_diff(bg.0) as u32 + q.1.abs_diff(bg.1) as u32 + q.2.abs_diff(bg.2) as u32 > 1
+        })
+        .collect();
+    let inked = mask.iter().filter(|m| **m).count();
+    (inked * 20 > mask.len()).then_some(mask)
+}
+
+/// Which texels a triangle range samples, on the same grid. UVs wrap; a triangle that
+/// straddles a tile edge is skipped rather than smeared across the atlas.
+pub fn uv_coverage(node: &EdfNode, tri_start: u32, tri_count: u32) -> Vec<bool> {
+    let mut hit = vec![false; FIT_RES * FIT_RES];
+    let lo = tri_start as usize * 3;
+    let hi = (lo + tri_count as usize * 3).min(node.indices.len());
+    let at = |i: u32| -> (f32, f32) {
+        let k = i as usize * 2;
+        let (u, v) = (node.uvs[k], node.uvs[k + 1]);
+        (u.rem_euclid(1.0) * (FIT_RES - 1) as f32, v.rem_euclid(1.0) * (FIT_RES - 1) as f32)
+    };
+    for t in node.indices[lo..hi].chunks_exact(3) {
+        if t.iter().any(|i| (*i as usize) * 2 + 1 >= node.uvs.len()) {
+            continue;
+        }
+        let p = [at(t[0]), at(t[1]), at(t[2])];
+        let (x0, x1) = (
+            p.iter().fold(f32::MAX, |a, q| a.min(q.0)),
+            p.iter().fold(f32::MIN, |a, q| a.max(q.0)),
+        );
+        let (y0, y1) = (
+            p.iter().fold(f32::MAX, |a, q| a.min(q.1)),
+            p.iter().fold(f32::MIN, |a, q| a.max(q.1)),
+        );
+        let half = (FIT_RES / 2) as f32;
+        if x1 - x0 > half || y1 - y0 > half {
+            continue; // wrapped across the seam
+        }
+        let area = (p[1].0 - p[0].0) * (p[2].1 - p[0].1) - (p[2].0 - p[0].0) * (p[1].1 - p[0].1);
+        if area.abs() < 1e-6 {
+            continue;
+        }
+        for y in y0.floor().max(0.0) as usize..=(y1.ceil() as usize).min(FIT_RES - 1) {
+            for x in x0.floor().max(0.0) as usize..=(x1.ceil() as usize).min(FIT_RES - 1) {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let w0 = (p[1].0 - p[0].0) * (py - p[0].1) - (px - p[0].0) * (p[1].1 - p[0].1);
+                let w1 = (p[2].0 - p[1].0) * (py - p[1].1) - (px - p[1].0) * (p[2].1 - p[1].1);
+                let w2 = (p[0].0 - p[2].0) * (py - p[2].1) - (px - p[2].0) * (p[0].1 - p[2].1);
+                let inside = if area > 0.0 {
+                    w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0
+                } else {
+                    w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0
+                };
+                if inside {
+                    hit[y * FIT_RES + x] = true;
+                }
+            }
+        }
+    }
+    hit
+}
+
 /// PARTIALLY VERIFIED — which colour texture each material draws from, by position in
 /// `embedded_textures`' colour list; None where the material carries no texture.
 ///
