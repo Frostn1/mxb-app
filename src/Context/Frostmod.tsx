@@ -135,15 +135,23 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const install = useCallback(async () => {
     setInstalling(true);
     try {
-      // The backend stops a running FrostMod before overwriting (its exe/dll are
-      // locked while running) and restarts it after — so we don't start it here,
-      // which would race that restart and spawn a second instance.
-      const version = await frostmodInstall();
+      // The backend stops a running FrostMod before replacing it and restarts it
+      // after — so we don't start it here, which would race that restart and spawn
+      // a second instance.
+      const { version, needsGameRestart } = await frostmodInstall();
       await refreshStatus();
       toast.success(t("frostmod.installedToast", { version }), {
-        description: t("frostmod.installedToastDesc"),
+        // The update landed either way; when the game had the old FrostMod loaded,
+        // it keeps running that until restarted, and saying so beats leaving people
+        // to wonder why the new version isn't doing anything.
+        description: needsGameRestart
+          ? t("frostmod.installedToastRestart")
+          : t("frostmod.installedToastDesc"),
       });
     } catch (e) {
+      // Re-read the real state: a failed install leaves the previous one in place,
+      // and the panel shouldn't keep showing whatever it had guessed before.
+      await refreshStatus();
       toast.error(t("frostmod.installFailed"), { description: String(e) });
     } finally {
       setInstalling(false);
@@ -152,14 +160,20 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
 
   // FrostMod is core to the app, so set it up automatically on first run instead
   // of prompting: once we learn it isn't installed, download + start it silently.
-  // Runs at most once; a failed status check (`statusError`) is skipped so we only
-  // auto-install off a confirmed "not installed" snapshot, never an offline guess.
+  //
+  // `needsRepair` gets the same treatment. An install that recorded a version it never
+  // finished applying looks current to every version check, so nobody would think to
+  // press anything — and the binaries it's short of are the ones the game actually
+  // loads. Repairing it unasked is the only thing that reaches those players.
+  //
+  // Runs at most once per session; a failed status check (`statusError`) is skipped so
+  // we only act on a confirmed snapshot, never an offline guess.
   const autoInstallTried = useRef(false);
   useEffect(() => {
     if (
       !autoInstallTried.current &&
       status &&
-      !status.installed &&
+      (!status.installed || status.needsRepair) &&
       !statusError &&
       !installing
     ) {

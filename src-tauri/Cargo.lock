@@ -1360,6 +1360,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sevenz-rust",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

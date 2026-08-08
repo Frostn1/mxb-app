@@ -71,6 +71,8 @@ export const ptBR: Translation = {
   "frostmod.installedToast": "FrostMod {{version}} instalado",
   "frostmod.installedToastDesc":
     "Ele recarrega o jogo na hora quando você adiciona mods.",
+  "frostmod.installedToastRestart":
+    "Reinicie o MX Bikes para valer — o jogo aberto ainda está com o FrostMod antigo.",
   "frostmod.installFailed": "Não foi possível instalar o FrostMod",
   "frostmod.newModsAdded": "Novos mods adicionados",
   "frostmod.modsAdded_one": "Novo mod adicionado",
@@ -471,6 +473,9 @@ export const ptBR: Translation = {
   "settings.updateCheckFailed":
     "Não foi possível verificar as atualizações — sem conexão ou GitHub indisponível.",
   "settings.latestVersion": "Última: {{version}}",
+  "settings.frostmodNeedsRepair":
+    "Os arquivos instalados não batem com esta versão — reinstalar resolve.",
+  "settings.frostmodRepair": "Reparar instalação",
   "settings.checkNewer": "Procurar uma versão mais nova do FrostMod",
   "settings.working": "Processando…",
   "settings.installFrostmod": "Instalar o FrostMod",

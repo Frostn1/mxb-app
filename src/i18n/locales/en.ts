@@ -67,6 +67,8 @@ export const en = {
   "frostmod.installedToast": "FrostMod {{version}} installed",
   "frostmod.installedToastDesc":
     "It'll live-reload the game when you add mods.",
+  "frostmod.installedToastRestart":
+    "Restart MX Bikes to switch over — the running game is still on the old FrostMod.",
   "frostmod.installFailed": "Couldn't install FrostMod",
   // Folder-watcher notifications.
   "frostmod.newModsAdded": "New mods added",
@@ -459,6 +461,9 @@ export const en = {
   "settings.updateCheckFailed":
     "Couldn't check for updates — offline or GitHub unavailable.",
   "settings.latestVersion": "Latest: {{version}}",
+  "settings.frostmodNeedsRepair":
+    "The installed files don't match this version — reinstalling fixes it.",
+  "settings.frostmodRepair": "Repair install",
   "settings.checkNewer": "Check for a newer FrostMod",
   "settings.working": "Working…",
   "settings.installFrostmod": "Install FrostMod",

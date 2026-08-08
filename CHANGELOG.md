@@ -52,6 +52,16 @@
 - **Picking a goggle paint updates the 3D preview on its own.** The preview watched every
   rider slot except the goggles, so a new lens only appeared once you touched some *other*
   slot. The paint was being read correctly all along; the preview was simply never asked.
+- **Updating FrostMod with MX Bikes open no longer fails** with "the process cannot access
+  the file… (os error 32)". Windows won't let a loaded `frostmod.dll` be overwritten, so no
+  amount of retrying could outlast a running game. The old binaries are renamed aside
+  instead and the new ones take their place, so the update lands with the game still up —
+  and the toast says to restart MX Bikes if the old FrostMod is the one still loaded.
+- **A half-applied FrostMod update can't strand you on a version you never installed.**
+  Both binaries now stage together and move into place as one unit, so a failure puts the
+  previous install back and the version is recorded only once both files are really on
+  disk. An install already carrying the wrong version number is caught by checksum rather
+  than assumed fine, and repaired on next launch — or on demand with **Repair install**.
 - **Browse gets past mxb-mods.com's bot protection.** When the site refuses the app, it now
   opens a small mxb-mods.com window, lets the Cloudflare check clear, and reuses the
   clearance afterwards — the same route already used to sign into the MX Bikes Shop.
