@@ -7,11 +7,14 @@ import { toast } from "sonner";
 import {
   countProfilesIn,
   detectGamePath,
+  presetsListProfiles,
   setAutoRunFrostmod,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
   setModsPath,
+  setOverlayEnabled,
+  setOverlayHotkey,
   setProfilesPath,
   setRunInBackground,
   setWatchModsReload,
@@ -20,11 +23,21 @@ import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
+import { Trans } from "../../i18n";
+import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
+import { LOCALE_OPTIONS } from "../../i18n/core";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { useTour } from "../Tour/Tour";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
 import { Segmented } from "@/Components/ui/segmented";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/Components/ui/select";
 import { Switch } from "@/Components/ui/switch";
 import { cn } from "@/lib/utils";
 
@@ -33,16 +46,105 @@ const REPO_URL = "https://github.com/Frostn1/mxb-app";
 // in a shipped build, and the app can't be told about a new one without an update.
 const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
-type SectionId = "folder" | "general" | "appearance" | "frostmod" | "about";
-const SECTIONS: { id: SectionId; label: string }[] = [
-  { id: "folder", label: "Game folder" },
-  { id: "general", label: "General" },
-  { id: "appearance", label: "Appearance" },
-  { id: "frostmod", label: "FrostMod" },
-  { id: "about", label: "About & updates" },
+type SectionId =
+  | "folder"
+  | "general"
+  | "overlay"
+  | "appearance"
+  | "frostmod"
+  | "about";
+const SECTIONS: { id: SectionId; label: TKey }[] = [
+  { id: "folder", label: "settings.gameFolder" },
+  { id: "general", label: "settings.general" },
+  { id: "overlay", label: "overlay.section" },
+  { id: "appearance", label: "settings.appearance" },
+  { id: "frostmod", label: "settings.frostmod" },
+  { id: "about", label: "settings.about" },
 ];
 
+/** Default shown before the backend answers, so the field is never blank. */
+const FALLBACK_HOTKEY = "CommandOrControl+Shift+M";
+
+/** Turn a `KeyboardEvent.code` into the token Tauri's accelerator parser expects. */
+function acceleratorKey(code: string): string | null {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+  return null;
+}
+
+/** Modifier-plus-key capture field for the overlay hotkey.
+ *
+ * A modifier is required: a bare `M` would be swallowed globally, including while the
+ * player is typing a server chat message. */
+function HotkeyField({
+  value,
+  onCapture,
+  disabled,
+}: {
+  value: string;
+  onCapture: (accelerator: string) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useI18n();
+  const [recording, setRecording] = useState(false);
+  const isMac = usePlatform() === "macos";
+
+  const pretty = value
+    .split("+")
+    .map((p) => (p === "CommandOrControl" ? (isMac ? "Cmd" : "Ctrl") : p))
+    .join(" + ");
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    if (e.code === "Escape") {
+      setRecording(false);
+      return;
+    }
+    const key = acceleratorKey(e.code);
+    if (!key) return; // a modifier on its own — keep waiting for the real key
+    const mods: string[] = [];
+    // Cmd on macOS and Ctrl elsewhere are the same accelerator token. The Windows key
+    // is its own thing, so it must not be folded into it.
+    if (e.ctrlKey || (isMac && e.metaKey)) mods.push("CommandOrControl");
+    if (!isMac && e.metaKey) mods.push("Super");
+    if (e.altKey) mods.push("Alt");
+    if (e.shiftKey) mods.push("Shift");
+    if (mods.length === 0) {
+      toast.error(t("overlay.needModifier"), {
+        description: t("overlay.needModifierDesc"),
+      });
+      return;
+    }
+    setRecording(false);
+    onCapture([...mods, key].join("+"));
+  };
+
+  return (
+    <button
+      disabled={disabled}
+      onClick={(e) => {
+        // WebKit doesn't focus a button on click, and an unfocused button never sees
+        // the keydown we're about to wait for.
+        e.currentTarget.focus();
+        setRecording(true);
+      }}
+      onBlur={() => setRecording(false)}
+      onKeyDown={recording ? onKeyDown : undefined}
+      className={cn(
+        "min-w-[148px] cursor-default rounded-lg border px-3 py-1.5 text-center font-mono text-[12px] transition-colors disabled:opacity-50",
+        recording
+          ? "border-primary text-primary"
+          : "border-white/[0.09] text-foreground/85 hover:bg-foreground/[0.05]",
+      )}
+    >
+      {recording ? t("overlay.pressKeys") : pretty}
+    </button>
+  );
+}
+
 export default function Settings() {
+  const { t, locale, setLocale } = useI18n();
   const { config, reloadConfig } = useConfig();
   const isWindows = usePlatform() === "windows";
   const { theme, setTheme } = useTheme();
@@ -56,17 +158,34 @@ export default function Settings() {
   const refs = useRef<Record<SectionId, HTMLDivElement | null>>({
     folder: null,
     general: null,
+    overlay: null,
     appearance: null,
     frostmod: null,
     about: null,
   });
 
-  // The profiles folder normally lives *inside* the mods folder — surface that
-  // derived default path so the override reads as a customization of it.
+  // The folder the backend *actually* reads profiles from when there's no override.
+  // Usually `<modsPath>/profiles`, but it falls back to `Documents\PiBoSo\MX Bikes\
+  // profiles` when that one doesn't exist — show the resolved path so a fallback is
+  // visible here rather than something the player has to infer.
+  const [resolvedProfilesPath, setResolvedProfilesPath] = useState("");
+  useEffect(() => {
+    if (config.profilesPath) {
+      // An override is shown verbatim; nothing to resolve.
+      setResolvedProfilesPath("");
+      return;
+    }
+    presetsListProfiles()
+      .then((scan) => setResolvedProfilesPath(scan.dir))
+      .catch(() => setResolvedProfilesPath(""));
+  }, [config.modsPath, config.profilesPath]);
+
   const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
-  const defaultProfilesPath = config.modsPath
-    ? `${config.modsPath}${profilesSep}profiles`
-    : "Inside your MX Bikes folder";
+  const defaultProfilesPath =
+    resolvedProfilesPath ||
+    (config.modsPath
+      ? `${config.modsPath}${profilesSep}profiles`
+      : t("settings.insideModsFolder"));
 
   const runInBackground = config.runInBackground ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
@@ -74,12 +193,37 @@ export default function Settings() {
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
 
+  const overlayEnabled = config.overlayEnabled ?? true;
+  const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
+
+  const toggleOverlay = async (v: boolean) => {
+    try {
+      await setOverlayEnabled(v);
+      await reloadConfig();
+    } catch (e) {
+      // The setting saved but the hotkey didn't register — say so rather than
+      // leaving a switch that looks on and does nothing.
+      toast.error(t("overlay.registerFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
+  const rebindOverlay = async (accelerator: string) => {
+    try {
+      await setOverlayHotkey(accelerator);
+      await reloadConfig();
+      toast.success(t("overlay.shortcutUpdated"));
+    } catch (e) {
+      toast.error(t("overlay.shortcutRejected"), { description: String(e) });
+    }
+  };
+
   const toggleInstantRefresh = async (v: boolean) => {
     try {
       await setInstantRefresh(v);
       await reloadConfig();
     } catch (e) {
-      toast.error("Couldn't update setting", { description: String(e) });
+      toast.error(t("settings.updateFailed"), { description: String(e) });
     }
   };
 
@@ -88,7 +232,7 @@ export default function Settings() {
       await setWatchModsReload(v);
       await reloadConfig();
     } catch (e) {
-      toast.error("Couldn't update setting", { description: String(e) });
+      toast.error(t("settings.updateFailed"), { description: String(e) });
     }
   };
 
@@ -97,7 +241,7 @@ export default function Settings() {
       await setAutoRunFrostmod(v);
       await reloadConfig();
     } catch (e) {
-      toast.error("Couldn't update setting", { description: String(e) });
+      toast.error(t("settings.updateFailed"), { description: String(e) });
     }
   };
 
@@ -106,7 +250,7 @@ export default function Settings() {
       await setRunInBackground(v);
       await reloadConfig();
     } catch (e) {
-      toast.error("Couldn't update setting", { description: String(e) });
+      toast.error(t("settings.updateFailed"), { description: String(e) });
     }
   };
 
@@ -115,7 +259,7 @@ export default function Settings() {
       await setLaunchAtStartup(v);
       await reloadConfig();
     } catch (e) {
-      toast.error("Couldn't update startup setting", { description: String(e) });
+      toast.error(t("settings.startupUpdateFailed"), { description: String(e) });
     }
   };
 
@@ -135,16 +279,18 @@ export default function Settings() {
     const picked = await pickFolder({
       directory: true,
       multiple: false,
-      title: "Select your MX Bikes folder",
+      title: t("setup.pickModsFolder"),
     });
     if (typeof picked !== "string") return;
     setBusy(true);
     try {
       await setModsPath(picked);
       await reloadConfig();
-      toast.success("Game folder updated", { description: "Your library will re-scan." });
+      toast.success(t("settings.folderUpdated"), {
+        description: t("settings.folderUpdatedDesc"),
+      });
     } catch (e) {
-      toast.error("Couldn't set folder", { description: String(e) });
+      toast.error(t("settings.setFolderFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -155,9 +301,9 @@ export default function Settings() {
     try {
       await setModsPath("");
       await reloadConfig();
-      toast.success("Re-detected your MX Bikes folder");
+      toast.success(t("settings.reDetected"));
     } catch (e) {
-      toast.error("Couldn't detect folder", { description: String(e) });
+      toast.error(t("settings.detectFolderFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -167,18 +313,18 @@ export default function Settings() {
     const picked = await pickFolder({
       directory: true,
       multiple: false,
-      title: "Select your MX Bikes install folder (contains rider.pkz)",
+      title: t("settings.pickInstallFolder"),
     });
     if (typeof picked !== "string") return;
     setBusy(true);
     try {
       await setGamePath(picked);
       await reloadConfig();
-      toast.success("Game install set", {
-        description: "The 3D rider preview can now load the real body model.",
+      toast.success(t("settings.installSet"), {
+        description: t("settings.installSetDesc"),
       });
     } catch (e) {
-      toast.error("Couldn't set install folder", { description: String(e) });
+      toast.error(t("settings.setInstallFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -189,16 +335,16 @@ export default function Settings() {
     try {
       const found = await detectGamePath();
       if (!found) {
-        toast.info("Couldn't find MX Bikes", {
-          description: "No Steam install detected — set the folder manually.",
+        toast.info(t("settings.installNotFound"), {
+          description: t("settings.installNotFoundDesc"),
         });
         return;
       }
       await setGamePath(found);
       await reloadConfig();
-      toast.success("Found your MX Bikes install", { description: found });
+      toast.success(t("settings.installFound"), { description: found });
     } catch (e) {
-      toast.error("Couldn't detect install folder", { description: String(e) });
+      toast.error(t("settings.detectInstallFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -208,7 +354,7 @@ export default function Settings() {
     const picked = await pickFolder({
       directory: true,
       multiple: false,
-      title: "Select your MX Bikes profiles folder",
+      title: t("settings.pickProfilesFolder"),
     });
     if (typeof picked !== "string") return;
     setBusy(true);
@@ -217,17 +363,17 @@ export default function Settings() {
       await reloadConfig();
       const count = await countProfilesIn(picked).catch(() => 0);
       if (count > 0) {
-        toast.success("Profiles folder set", {
-          description: `Found ${count} profile${count === 1 ? "" : "s"}.`,
+        toast.success(t("settings.profilesSet"), {
+          description: t("settings.profilesFound", { count }),
         });
       } else {
         // Warn but keep the pick (per design) — they may be mid-setup.
-        toast.warning("No profiles found there", {
-          description: "Saved anyway, but preset creation needs a folder that holds your profile.ini folders.",
+        toast.warning(t("settings.noProfilesThere"), {
+          description: t("settings.noProfilesThereDesc"),
         });
       }
     } catch (e) {
-      toast.error("Couldn't set profiles folder", { description: String(e) });
+      toast.error(t("settings.setProfilesFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -238,9 +384,9 @@ export default function Settings() {
     try {
       await setProfilesPath("");
       await reloadConfig();
-      toast.success("Reverted to the default profiles folder");
+      toast.success(t("settings.profilesReverted"));
     } catch (e) {
-      toast.error("Couldn't reset profiles folder", { description: String(e) });
+      toast.error(t("settings.resetProfilesFailed"), { description: String(e) });
     } finally {
       setBusy(false);
     }
@@ -248,10 +394,10 @@ export default function Settings() {
 
   const reloadGame = async () => {
     const outcome = await reload();
-    if (outcome === "signaled") toast.success("FrostMod reloaded the game.");
+    if (outcome === "signaled") toast.success(t("frostmod.reloadedGame"));
     else if (outcome === "not_running")
-      toast.info("FrostMod isn't running — start it to hot-reload mods.");
-    else toast.info("Reload isn't available on this platform.");
+      toast.info(t("settings.frostmodNotRunningHint"));
+    else toast.info(t("settings.reloadUnavailable"));
   };
 
   return (
@@ -268,7 +414,7 @@ export default function Settings() {
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {s.label}
+            {t(s.label)}
           </button>
         ))}
       </nav>
@@ -276,23 +422,25 @@ export default function Settings() {
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-5">
         <div className="flex max-w-[640px] flex-col gap-[18px]">
           <div className="flex items-center gap-1.5">
-            <h1 className="text-[21px] font-bold tracking-[-0.2px]">Settings</h1>
+            <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+              {t("nav.settings")}
+            </h1>
             <HelpHint
-              title="Settings"
-              description="Configure your game folder, updates, and app preferences."
+              title={t("nav.settings")}
+              description={t("settings.help")}
             />
           </div>
 
           {/* game folder */}
           <Section
-            title="MX Bikes folder"
-            desc="Where mods are installed. Changing it re-scans your library."
+            title={t("setup.modsFolder")}
+            desc={t("settings.modsFolderDesc")}
             innerRef={(el) => (refs.current.folder = el)}
           >
             <div className="flex gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 <span className="flex-1 truncate" title={config.modsPath}>
-                  {config.modsPath || "Not set"}
+                  {config.modsPath || t("settings.notSet")}
                 </span>
                 {config.modsPath && (
                   <span className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-success">
@@ -324,9 +472,15 @@ export default function Settings() {
                 </span>
               </div>
               <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-                Presets read your profiles from here. By default it&apos;s the{" "}
-                <span className="font-mono">profiles</span> folder inside your MX Bikes
-                folder — only change it if yours lives somewhere else.
+                <Trans
+                  k="settings.profilesDesc"
+                  values={{
+                    profiles: <span className="font-mono">profiles</span>,
+                    documents: (
+                      <span className="font-mono">Documents\PiBoSo\MX Bikes</span>
+                    ),
+                  }}
+                />
               </p>
               <div className="mt-2 flex gap-2">
                 <div
@@ -352,7 +506,7 @@ export default function Settings() {
                   )}
                 </div>
                 <Button variant="outline" size="sm" onClick={changeProfilesFolder} disabled={busy}>
-                  {config.profilesPath ? "Change…" : "Set…"}
+                  {config.profilesPath ? t("settings.change") : t("settings.set")}
                 </Button>
               </div>
               {config.profilesPath && (
@@ -361,7 +515,7 @@ export default function Settings() {
                   disabled={busy}
                   className="mt-2 cursor-default self-start text-[11.5px] font-semibold text-primary hover:brightness-110 disabled:opacity-50"
                 >
-                  Reset to default
+                  {t("settings.resetToDefault")}
                 </button>
               )}
             </div>
@@ -371,14 +525,15 @@ export default function Settings() {
             {/* Optional game *install* folder (holds core rider.pkz) — powers the
                 real 3D rider body in the preset preview. */}
             <p className="text-[12px] text-muted-foreground">
-              Game install folder (optional) — where MX Bikes is installed (holds{" "}
-              <span className="font-mono">rider.pkz</span>). Set it to load the real
-              rider body in the 3D preview.
+              <Trans
+                k="settings.gameInstallDesc"
+                values={{ file: <span className="font-mono">rider.pkz</span> }}
+              />
             </p>
             <div className="flex gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 <span className="flex-1 truncate" title={config.gamePath}>
-                  {config.gamePath || "Not set"}
+                  {config.gamePath || t("settings.notSet")}
                 </span>
                 {config.gamePath && (
                   <span className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-success">
@@ -387,7 +542,7 @@ export default function Settings() {
                 )}
               </div>
               <Button variant="outline" size="sm" onClick={changeGameFolder} disabled={busy}>
-                {config.gamePath ? "Change…" : "Set…"}
+                {config.gamePath ? t("settings.change") : t("settings.set")}
               </Button>
             </div>
             <button
@@ -400,50 +555,115 @@ export default function Settings() {
           </Section>
 
           {/* general / background */}
-          <Section title="General" innerRef={(el) => (refs.current.general = el)}>
+          <Section title={t("settings.general")} innerRef={(el) => (refs.current.general = el)}>
             <ToggleRow
-              label="Keep running in the background"
-              desc="Closing the window hides MXB App to the tray so FrostMod stays connected. Quit from the tray icon."
+              label={t("settings.runInBackground")}
+              desc={t("settings.runInBackgroundDesc")}
               checked={runInBackground}
               onChange={toggleBackground}
             />
             <div className="h-px bg-border" />
             <ToggleRow
-              label="Launch at startup"
-              desc="Start MXB App automatically when you log in."
+              label={t("settings.launchAtStartup")}
+              desc={t("settings.launchAtStartupDesc")}
               checked={launchAtStartup}
               onChange={toggleStartup}
             />
             <div className="h-px bg-border" />
             <ToggleRow
-              label="Instant preset refresh"
+              label={t("settings.instantRefresh")}
               desc={
                 isWindows
-                  ? "When you apply a preset while MX Bikes is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile."
-                  : "Refreshing the look in-game without a restart needs FrostMod, which is Windows-only — you'll be told to reselect your profile instead."
+                  ? t("settings.instantRefreshDesc")
+                  : t("settings.instantRefreshWindowsOnly")
               }
               checked={instantRefresh}
               onChange={toggleInstantRefresh}
             />
           </Section>
 
+          {/* in-game overlay */}
+          <Section
+            title={t("overlay.section")}
+            innerRef={(el) => (refs.current.overlay = el)}
+          >
+            <ToggleRow
+              label={t("overlay.enable")}
+              desc={t("overlay.enableDesc")}
+              checked={overlayEnabled}
+              onChange={toggleOverlay}
+            />
+            <div className="h-px bg-border" />
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col gap-1">
+                <span className="text-[12.5px] text-foreground/85">
+                  {t("overlay.shortcut")}
+                </span>
+                <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {t("overlay.shortcutDesc")}
+                </span>
+              </div>
+              <HotkeyField
+                value={overlayHotkey}
+                onCapture={rebindOverlay}
+                disabled={!overlayEnabled}
+              />
+            </div>
+            {isWindows && (
+              <>
+                <div className="h-px bg-border" />
+                <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {t("overlay.borderlessNote")}
+                </p>
+              </>
+            )}
+          </Section>
+
           {/* appearance */}
           <Section
-            title="Appearance"
+            title={t("settings.appearance")}
             innerRef={(el) => (refs.current.appearance = el)}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[12.5px] text-foreground/85">Theme</span>
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.theme")}
+              </span>
               <Segmented
                 size="sm"
                 value={theme}
                 onChange={(v) => setTheme(v as ThemeMode)}
                 options={[
-                  { value: "light", label: "Light" },
-                  { value: "dark", label: "Dark" },
-                  { value: "system", label: "System" },
+                  { value: "light", label: t("settings.themeLight") },
+                  { value: "dark", label: t("settings.themeDark") },
+                  { value: "system", label: t("settings.themeSystem") },
                 ]}
               />
+            </div>
+
+            {/* A Select, not a Segmented control — seven options don't fit the
+                segmented track, and each is named in its own language so someone
+                who lands in a script they can't read can still get back out. */}
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.language")}
+              </span>
+              <Select
+                value={locale}
+                onValueChange={(v) => setLocale(v as LocalePref)}
+              >
+                <SelectTrigger className="h-8 w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LOCALE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.value === "system"
+                        ? t("settings.languageSystem")
+                        : opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </Section>
 
@@ -452,7 +672,7 @@ export default function Settings() {
               would fail, including one that downloads two Windows binaries. */}
           {isWindows && (
           <Section
-            title="FrostMod"
+            title={t("settings.frostmod")}
             innerRef={(el) => (refs.current.frostmod = el)}
             titleRight={
               <span
@@ -468,10 +688,10 @@ export default function Settings() {
                   )}
                 />
                 {running === null
-                  ? "Checking…"
+                  ? t("settings.checking")
                   : running
-                    ? "Running · game connected"
-                    : "Not running"}
+                    ? t("settings.runningConnected")
+                    : t("settings.notRunning")}
               </span>
             }
           >
@@ -484,16 +704,18 @@ export default function Settings() {
               <div className="flex flex-col">
                 <span className="text-[12.5px] text-foreground/85">
                   {status?.installed
-                    ? `Installed${status.version ? ` · ${status.version}` : ""}`
-                    : "Not installed"}
+                    ? t("settings.frostmodInstalled", {
+                        suffix: status.version ? ` · ${status.version}` : "",
+                      })
+                    : t("settings.notInstalled")}
                 </span>
                 <span className="text-[11px] text-muted-foreground">
                   {checking
-                    ? "Checking GitHub for the latest release…"
+                    ? t("settings.checkingGitHub")
                     : statusError
-                      ? "Couldn't check for updates — offline or GitHub unavailable."
+                      ? t("settings.updateCheckFailed")
                       : status?.latest
-                        ? `Latest: ${status.latest}`
+                        ? t("settings.latestVersion", { version: status.latest })
                         : null}
                 </span>
               </div>
@@ -504,7 +726,7 @@ export default function Settings() {
                     size="icon"
                     onClick={() => refreshStatus()}
                     disabled={checking || installing}
-                    title="Check for a newer FrostMod"
+                    title={t("settings.checkNewer")}
                   >
                     <RefreshCw className={cn("size-3.5", checking && "animate-spin")} />
                   </Button>
@@ -525,14 +747,14 @@ export default function Settings() {
                       disabled={installing || checking || Boolean(confirmedCurrent)}
                     >
                       {installing
-                        ? "Working…"
+                        ? t("settings.working")
                         : !status?.installed
-                          ? "Install FrostMod"
+                          ? t("settings.installFrostmod")
                           : updatable
-                            ? `Update to ${status.latest}`
+                            ? t("settings.updateTo", { version: status.latest ?? "" })
                             : statusError || !status?.latest
-                              ? "Reinstall latest"
-                              : "Up to date"}
+                              ? t("settings.reinstallLatest")
+                              : t("settings.upToDate")}
                     </Button>
                   );
                 })()}
@@ -540,15 +762,15 @@ export default function Settings() {
             </div>
 
             <ToggleRow
-              label="Run FrostMod automatically"
-              desc="Start FrostMod in the background whenever MXB App opens."
+              label={t("settings.autoRunFrostmod")}
+              desc={t("settings.autoRunFrostmodDesc")}
               checked={autoRunFrostmod}
               onChange={toggleAutoRun}
             />
 
             <ToggleRow
-              label="Auto-reload on folder changes"
-              desc="Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App."
+              label={t("settings.watchModsReload")}
+              desc={t("settings.watchModsReloadDesc")}
               checked={watchModsReload}
               onChange={toggleWatchModsReload}
             />
@@ -567,7 +789,7 @@ export default function Settings() {
           )}
 
           {/* about */}
-          <Section title="About & updates" innerRef={(el) => (refs.current.about = el)}>
+          <Section title={t("settings.about")} innerRef={(el) => (refs.current.about = el)}>
             <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
               <span>mxb-app {version && `v${version}`}</span>
               <button
@@ -603,7 +825,7 @@ export default function Settings() {
             </div>
             <div className="flex flex-col gap-1 pt-1 text-[11.5px] text-faint">
               <div className="flex items-center gap-1.5">
-                <span>Made with</span>
+                <span>{t("settings.madeWith")}</span>
                 <span className="text-primary">❄</span>
                 <span>by</span>
                 <button

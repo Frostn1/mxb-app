@@ -37,6 +37,8 @@ import type {
   SwapApplyOutcome,
 } from "../../types";
 import RegisterSwapsDialog from "./RegisterSwapsDialog";
+import { Trans } from "../../i18n";
+import { useT, type TFunc } from "../../i18n/context";
 
 /**
  * Locker — the app-side bike **model & sound swap** manager, twinned with FrostMod's
@@ -51,20 +53,45 @@ import RegisterSwapsDialog from "./RegisterSwapsDialog";
  * **bound** to a model swap, so activating that model pulls its sound along.
  */
 
-/** Trailing feedback for a swap toast — mirrors the presets "refreshed live in-game" note. */
-function swapNote(outcome: SwapApplyOutcome): string {
+/**
+ * Trailing feedback for a swap toast.
+ *
+ * Models and sounds get different notes because they refresh by different routes.
+ * `live_refresh` re-runs the game's *customization* loader — that reloads paints and
+ * gear but never the bike mesh, so it says nothing about whether a swapped model is
+ * visible. A model only appears live if FrostMod re-applies the bike (`model_refresh`),
+ * which it does solely for the bike you currently have selected.
+ */
+function swapNote(
+  kind: "model" | "sound",
+  outcome: SwapApplyOutcome,
+  t: TFunc,
+): string {
+  if (!outcome.game_running) return t("locker.loadsNextTime");
+
+  if (kind === "model") {
+    switch (outcome.model_refresh) {
+      case "signaled":
+        return t("locker.modelRefreshing");
+      case "not_running":
+        return t("locker.modelFrostmodNotRunning");
+      case "write_failed":
+        return t("locker.modelFrostmodUnreachable");
+      case "unsupported":
+        return t("locker.modelRefreshWindowsOnly");
+      default: // null — instant refresh is switched off in Settings
+        return t("locker.modelInstantRefreshOff");
+    }
+  }
+
   switch (outcome.live_refresh) {
     case "refreshed":
-      return "Refreshed live in-game.";
+      return t("locker.refreshedLive");
     case "failed":
-      return "Instant refresh failed — reselect your profile in-game to load it.";
+      return t("locker.refreshFailed");
     default:
-      break;
+      return t("locker.reselectProfile");
   }
-  if (outcome.game_running) {
-    return "Reselect your profile in MX Bikes to load the swap.";
-  }
-  return "Loads next time the game opens.";
 }
 
 /** One bike's row: its models (null for sound-only bikes) and its sounds (always present). */
@@ -100,6 +127,7 @@ function mergeRows(models: BikeModels[], sounds: BikeSounds[]): Row[] {
 }
 
 export default function Locker() {
+  const t = useT();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Bike name currently being mutated (disables its rows + spins the target).
@@ -167,35 +195,47 @@ export default function Locker() {
   );
 
   const onRepair = (bike: string) =>
-    run(bike, `Restored ${bike}'s setup files.`, () => repairOrphanedSetup(bike), (n) =>
-      `${n} file${n === 1 ? "" : "s"} put back — the bike should load again.`,
+    run(
+      bike,
+      t("locker.restored", { bike }),
+      () => repairOrphanedSetup(bike),
+      (n) => t("locker.restoredNote", { count: n }),
     );
 
   const onModelSwap = (bike: string, target: string) =>
-    run(bike, `Switched ${bike} model to “${target}”.`, () => applyModelSwap(bike, target), swapNote);
+    run(
+      bike,
+      t("locker.switchedModel", { bike, target }),
+      () => applyModelSwap(bike, target),
+      (r) => swapNote("model", r, t),
+    );
   const onSoundSwap = (bike: string, target: string) =>
-    run(bike, `Switched ${bike} sound to “${target}”.`, () => applySoundSwap(bike, target), swapNote);
+    run(
+      bike,
+      t("locker.switchedSound", { bike, target }),
+      () => applySoundSwap(bike, target),
+      (r) => swapNote("sound", r, t),
+    );
   const onBind = (bike: string, model: string, sound: string) =>
-    run(bike, `Tied “${sound}” to model “${model}”.`, () => bindSound(bike, model, sound));
+    run(bike, t("locker.tied", { sound, model }), () => bindSound(bike, model, sound));
   const onUnbind = (bike: string, model: string, sound: string) =>
-    run(bike, `Untied “${sound}” from model “${model}”.`, () => unbindSound(bike, model));
+    run(bike, t("locker.untied", { sound, model }), () => unbindSound(bike, model));
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
         <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">Locker</h1>
-          <HelpHint
-            title="Locker"
-            description="Swap each bike's model and engine sound between the sets you've installed."
-          />
+          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
+            {t("nav.locker")}
+          </h1>
+          <HelpHint title={t("nav.locker")} description={t("locker.help")} />
         </div>
         <button
           onClick={() => void load()}
           className="ml-auto flex items-center gap-1.5 rounded-lg border border-input bg-card px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground"
         >
           <RefreshCw className={cn("size-3.5", rows === null && "animate-spin")} />
-          Rescan
+          {t("locker.rescan")}
         </button>
       </header>
 
@@ -206,10 +246,15 @@ export default function Locker() {
         >
           <Wrench className="size-4 flex-none text-destructive/80" />
           <span className="min-w-0 flex-1 text-[12.5px] text-foreground/90">
-            <span className="font-semibold">{o.bike}</span> is missing its setup files — an
-            earlier version moved them into a swap folder, which stops the bike loading
-            in-game at all.{" "}
-            <span className="font-mono text-faint">{o.files.join(", ")}</span>
+            <Trans
+              k="locker.orphanBanner"
+              values={{
+                bike: <span className="font-semibold">{o.bike}</span>,
+                files: (
+                  <span className="font-mono text-faint">{o.files.join(", ")}</span>
+                ),
+              }}
+            />
           </span>
           <button
             onClick={() => void onRepair(o.bike)}
@@ -221,7 +266,7 @@ export default function Locker() {
             ) : (
               <Wrench className="size-3.5" />
             )}
-            Restore
+            {t("locker.restore")}
           </button>
         </div>
       ))}
@@ -233,14 +278,20 @@ export default function Locker() {
         >
           <AlertTriangle className="size-4 flex-none text-amber-500/80" />
           <span className="min-w-0 flex-1 text-[12.5px] text-foreground/90">
-            {looseCount} model / sound set{looseCount === 1 ? "" : "s"} found loose in your
-            bikes — register {looseCount === 1 ? "it" : "them"} into{" "}
-            <span className="font-mono text-faint">FrostMod Models</span> /{" "}
-            <span className="font-mono text-faint">Sounds</span>.
+            <Trans
+              k="locker.looseBanner"
+              count={looseCount}
+              values={{
+                modelsFolder: (
+                  <span className="font-mono text-faint">FrostMod Models</span>
+                ),
+                soundsFolder: <span className="font-mono text-faint">Sounds</span>,
+              }}
+            />
           </span>
           <span className="flex flex-none items-center gap-1.5 text-[12px] font-semibold text-amber-500/90">
             <FolderInput className="size-3.5" />
-            Register
+            {t("locker.register")}
           </span>
         </button>
       )}
@@ -249,24 +300,46 @@ export default function Locker() {
         {error ? (
           <p className="select-text py-16 text-center text-[13px] text-destructive">{error}</p>
         ) : rows === null ? (
-          <p className="py-16 text-center text-[13px] text-muted-foreground">Scanning bikes…</p>
+          <p className="py-16 text-center text-[13px] text-muted-foreground">
+            {t("locker.scanning")}
+          </p>
         ) : rows.length === 0 ? (
           <div className="mx-auto max-w-md py-14 text-[13px] text-muted-foreground">
-            <p className="mb-3 text-center text-foreground/90">No swappable bikes yet.</p>
-            <p className="mb-3">Two things have to be true before a swap can happen:</p>
+            <p className="mb-3 text-center text-foreground/90">
+              {t("locker.emptyTitle")}
+            </p>
+            <p className="mb-3">{t("locker.emptyIntro")}</p>
             <ol className="mb-4 list-decimal space-y-2 pl-5">
               <li>
-                The bike is <span className="text-foreground/90">unpacked</span> into
-                <span className="mx-1 font-mono text-faint">mods/bikes/&lt;Bike&gt;/</span>—
-                a packed <span className="font-mono text-faint">.pkz</span> can&apos;t be
-                swapped.
-                Unpack one from the Library.
+                <Trans
+                  k="locker.emptyRuleUnpacked"
+                  values={{
+                    unpacked: (
+                      <span className="text-foreground/90">
+                        {t("locker.unpacked")}
+                      </span>
+                    ),
+                    path: (
+                      <span className="mx-1 font-mono text-faint">
+                        mods/bikes/&lt;Bike&gt;/
+                      </span>
+                    ),
+                    pkz: <span className="font-mono text-faint">.pkz</span>,
+                  }}
+                />
               </li>
               <li>
-                Each alternate model sits in its own folder inside that bike, holding a mesh
-                (<span className="font-mono text-faint">.edf</span>). Drop it anywhere in the
-                bike folder and hit Scan below — we&apos;ll offer to file it under
-                <span className="mx-1 font-mono text-faint">FrostMod Models/</span>.
+                <Trans
+                  k="locker.emptyRuleMesh"
+                  values={{
+                    edf: <span className="font-mono text-faint">.edf</span>,
+                    folder: (
+                      <span className="mx-1 font-mono text-faint">
+                        FrostMod Models/
+                      </span>
+                    ),
+                  }}
+                />
               </li>
             </ol>
             <button
@@ -274,7 +347,7 @@ export default function Locker() {
               className="mx-auto flex items-center gap-1.5 rounded-lg border border-input bg-card px-3 py-2 text-[12.5px] transition-colors hover:text-foreground"
             >
               <RefreshCw className="size-3.5" />
-              Scan for swaps
+              {t("locker.scanForSwaps")}
             </button>
           </div>
         ) : (
@@ -322,6 +395,7 @@ function BikeCard({
   onBind: (bike: string, model: string, sound: string) => void;
   onUnbind: (bike: string, model: string, sound: string) => void;
 }) {
+  const t = useT();
   const { bike, models, sounds } = row;
   const modelCount = models?.variants.length ?? 0;
   const soundCount = sounds.variants.length;
@@ -335,7 +409,12 @@ function BikeCard({
         <div className="min-w-0">
           <div className="truncate text-[14px] font-semibold">{bike}</div>
           <div className="truncate text-[11px] text-muted-foreground">
-            {models ? `model “${models.active}”` : "no model swaps"} · sound “{sounds.active}”
+            {t("locker.summary", {
+              model: models
+                ? t("locker.modelNamed", { name: models.active })
+                : t("locker.noModelSwaps"),
+              sound: sounds.active,
+            })}
           </div>
         </div>
       </div>
@@ -343,8 +422,8 @@ function BikeCard({
       {models && (
         <SwapSection
           icon={<Bike className="size-3.5" strokeWidth={1.75} />}
-          label="Models"
-          hint={modelCount <= 1 ? "Only one model — install more to swap" : undefined}
+          label={t("locker.models")}
+          hint={modelCount <= 1 ? t("locker.onlyOneModel") : undefined}
         >
           {models.variants.map((v) => (
             <VariantButton
@@ -361,8 +440,8 @@ function BikeCard({
 
       <SwapSection
         icon={<Volume2 className="size-3.5" strokeWidth={1.75} />}
-        label="Sounds"
-        hint={soundCount <= 1 ? "Only Stock — install a sound mod to swap" : undefined}
+        label={t("locker.sounds")}
+        hint={soundCount <= 1 ? t("locker.onlyStock") : undefined}
       >
         {sounds.variants.map((v) => {
           // Models that pull this sound in when activated (a sound may back several).
@@ -439,7 +518,8 @@ function VariantButton({
   boundModels?: string[];
   onClick: () => void;
 }) {
-  const emptyLabel = kind === "model" ? "No model" : "Stock";
+  const t = useT();
+  const emptyLabel = kind === "model" ? t("locker.noModel") : t("locker.stock");
   // An empty set is applicable (revert to no-model / Stock); a set with files but
   // missing its required file is incomplete and stays disabled.
   const applicable = v.valid || v.empty;
@@ -450,16 +530,18 @@ function VariantButton({
       onClick={onClick}
       title={
         v.active
-          ? `Active ${kind}`
+          ? kind === "model"
+            ? t("locker.activeModel")
+            : t("locker.activeSound")
           : v.empty
             ? kind === "model"
-              ? "Switch to no model — removes the current model files"
-              : "Switch to Stock — removes the sound mod (built-in sound plays)"
+              ? t("locker.switchToNoModel")
+              : t("locker.switchToStock")
             : !v.valid
               ? kind === "model"
-                ? "This set has no model.edf"
-                : "This set is missing engine.scl or sfx.cfg"
-              : `Switch to ${v.name}`
+                ? t("locker.missingModelEdf")
+                : t("locker.missingSoundFiles")
+              : t("locker.switchTo", { name: v.name })
       }
       className={cn(
         "flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
@@ -497,14 +579,14 @@ function VariantButton({
         </span>
         <span className="flex items-center gap-1 text-[10.5px] text-faint">
           {v.active
-            ? "Active"
+            ? t("common.active")
             : v.empty
               ? emptyLabel
-              : `${v.fileCount} file${v.fileCount === 1 ? "" : "s"}`}
+              : t("swaps.fileCount", { count: v.fileCount })}
           {boundModels.length > 0 && (
             <span
               className="flex items-center gap-0.5 text-primary/70"
-              title={`Tied to model ${boundModels.join(", ")}`}
+              title={t("locker.tiedToModel", { models: boundModels.join(", ") })}
             >
               <Link2 className="size-3" />
               {boundModels.join(", ")}
@@ -533,6 +615,7 @@ function BindControl({
   onBind: (bike: string, model: string, sound: string) => void;
   onUnbind: (bike: string, model: string, sound: string) => void;
 }) {
+  const t = useT();
   return (
     <button
       disabled={disabled}
@@ -546,12 +629,14 @@ function BindControl({
       )}
       title={
         bound
-          ? `“${sound}” is tied to model “${model}” — it travels with that model. Click to untie.`
-          : `Tie the active sound “${sound}” to model “${model}” so switching to it pulls the sound in.`
+          ? t("locker.boundHint", { sound, model })
+          : t("locker.unboundHint", { sound, model })
       }
     >
       {bound ? <Link2Off className="size-3.5" /> : <Link2 className="size-3.5" />}
-      {bound ? `Untie “${sound}” from “${model}”` : `Tie “${sound}” to “${model}”`}
+      {bound
+        ? t("locker.untieAction", { sound, model })
+        : t("locker.tieAction", { sound, model })}
     </button>
   );
 }

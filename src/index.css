@@ -148,6 +148,14 @@
     height: 100%;
   }
 
+  /* The in-game overlay is a transparent window: the page itself must not paint a
+     background, or the game behind it is hidden by a black rectangle. The panel
+     inside draws its own. Set by `Overlay.tsx` on the root element. */
+  html.overlay-window,
+  html.overlay-window body {
+    background: transparent;
+  }
+
   body {
     @apply bg-background text-foreground;
     margin: 0;

@@ -6,6 +6,7 @@ import { Dialog, DialogContent } from "../ui/dialog";
 import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import { loadRiderModel } from "../../api/mods";
 import type { Loadout, RiderPart } from "../../types";
+import { useT } from "../../i18n/context";
 
 interface ViewerPanelProps {
   texture?: string | null;
@@ -22,12 +23,13 @@ function ModeToggle({
   mode: ViewerMode;
   onChange: (m: ViewerMode) => void;
 }) {
+  const t = useT();
   return (
     <div className="inline-flex rounded-md border border-border bg-background/60 p-0.5">
       {(
         [
-          { m: "bike" as const, icon: Bike, label: "Bike" },
-          { m: "rider" as const, icon: User, label: "Rider" },
+          { m: "bike" as const, icon: Bike, label: t("category.bike") },
+          { m: "rider" as const, icon: User, label: t("nav.rider") },
         ]
       ).map(({ m, icon: Icon, label }) => (
         <button
@@ -56,6 +58,7 @@ export function ViewerPanel({
   hiddenParts,
   className,
 }: ViewerPanelProps) {
+  const t = useT();
   const [mode, setMode] = useState<ViewerMode>(riderOnly ? "rider" : "bike");
   const [expanded, setExpanded] = useState(false);
   const [riderParts, setRiderParts] = useState<RiderPart[] | null>(null);
@@ -119,13 +122,13 @@ export function ViewerPanel({
   const overlay = riderFirstLoad ? (
     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
       <Loader2 className="h-6 w-6 animate-spin" />
-      <span className="text-[12.5px]">Loading rider…</span>
+      <span className="text-[12.5px]">{t("viewer.loadingRider")}</span>
     </div>
   ) : (
     loading && (
       <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-[11px] text-white/85">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        Loading…
+        {t("common.loading")}
       </div>
     )
   );
@@ -141,7 +144,7 @@ export function ViewerPanel({
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Box className="h-4 w-4 text-muted-foreground" />
-            3D Preview
+            {t("viewer.preview3d")}
           </div>
           <div className="flex items-center gap-2">
             {!riderOnly && <ModeToggle mode={mode} onChange={setMode} />}
@@ -149,7 +152,7 @@ export function ViewerPanel({
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              title="Expand"
+              title={t("viewer.expand")}
               onClick={() => setExpanded(true)}
             >
               <Maximize2 className="h-4 w-4" />
@@ -173,7 +176,7 @@ export function ViewerPanel({
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Box className="h-4 w-4 text-muted-foreground" />
-              3D Preview
+              {t("viewer.preview3d")}
             </div>
             {!riderOnly && <ModeToggle mode={mode} onChange={setMode} />}
           </div>

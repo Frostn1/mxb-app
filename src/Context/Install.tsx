@@ -19,6 +19,7 @@ import {
   type ShopItem,
 } from "../api/mods";
 import type { InstallStage, ReloadOutcome } from "../types";
+import { useT } from "../i18n/context";
 
 /** Where the bytes come from — a resolvable host, a file the user picked, or a
  * purchased item from the authenticated MX Bikes Shop. */
@@ -88,6 +89,11 @@ export function InstallProvider({
   onInstalledRef.current = onInstalled;
   const onOpenModRef = useRef(onOpenMod);
   onOpenModRef.current = onOpenMod;
+  // Held in a ref, like the callbacks above, so `run` keeps its empty dep list —
+  // switching language mid-transfer must not rebuild the installer.
+  const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
   const clearTimer = useRef<number | null>(null);
   // Installs run one at a time (the engine handles a single transfer); extra
   // requests wait in this queue and are drained sequentially.
@@ -144,11 +150,11 @@ export function InstallProvider({
         cur && cur.slug === slug ? { ...cur, stage: "done" } : cur,
       );
       onInstalledRef.current?.();
-      toast.success(`${title} installed`, {
+      toast.success(tRef.current("install.installed", { title }), {
         description:
           frostOutcome === "signaled"
-            ? "Game reloaded via FrostMod — it's live now."
-            : "Added to your library.",
+            ? tRef.current("install.reloadedDesc")
+            : tRef.current("install.addedDesc"),
       });
       // Auto-retire the sidebar/detail card a few seconds after success.
       clearTimer.current = window.setTimeout(() => {
@@ -167,10 +173,13 @@ export function InstallProvider({
           ? null
           : { slug, subpath, categoryId: params.categoryId };
       if (!target) {
-        toast.error(`Install failed — ${title}`, {
+        toast.error(tRef.current("install.failed", { title }), {
           description: message,
           duration: Infinity,
-          action: { label: "Retry", onClick: () => void run(params) },
+          action: {
+            label: tRef.current("common.retry"),
+            onClick: () => void run(params),
+          },
         });
       } else {
         toast.custom(
@@ -284,6 +293,7 @@ function InstallFailedToast({
   onRetry: () => void;
   onDismiss: () => void;
 }) {
+  const t = useT();
   return (
     <div
       role="button"
@@ -292,20 +302,20 @@ function InstallFailedToast({
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") onOpen();
       }}
-      title="Open the mod's page"
+      title={t("install.openModPage")}
       className="group flex w-full cursor-default flex-col gap-1 rounded-xl px-4 py-3 transition-colors hover:bg-foreground/[0.04]"
     >
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-px size-3.5 flex-none text-destructive" />
         <span className="flex-1 font-bold text-destructive">
-          Install failed — {title}
+          {t("install.failed", { title })}
         </span>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onDismiss();
           }}
-          aria-label="Dismiss"
+          aria-label={t("common.dismiss")}
           className="-mr-1 -mt-0.5 flex-none cursor-default rounded-full p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
         >
           <X className="size-3.5" />
@@ -316,7 +326,7 @@ function InstallFailedToast({
       </span>
       <div className="mt-1.5 flex items-center justify-between gap-2 pl-[22px]">
         <span className="text-[11px] text-muted-foreground">
-          Click to open the mod’s page
+          {t("install.clickToOpen")}
         </span>
         <button
           onClick={(e) => {
@@ -325,7 +335,7 @@ function InstallFailedToast({
           }}
           className="flex-none cursor-default rounded-md bg-primary px-2 py-1 text-[11.5px] font-semibold text-primary-foreground transition-[filter] hover:brightness-110"
         >
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     </div>

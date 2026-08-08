@@ -12,13 +12,17 @@ import {
 import { Button } from "@/Components/ui/button";
 import { registerLooseSwaps } from "../../api/mods";
 import type { LooseSwapBike, LooseSwapCandidate } from "../../types";
+import { Trans } from "../../i18n";
+import { useT, type TFunc } from "../../i18n/context";
 
-/** "2 model swaps and 1 sound mod" — omits a kind with zero, "sets" if somehow both are 0. */
-function summarize(models: number, sounds: number): string {
+/** "2 model swaps and 1 sound mod" — omits a kind with zero, "sets" if somehow both are 0.
+ *  The joiner is a key too; " and " is English, not punctuation. */
+function summarize(models: number, sounds: number, t: TFunc): string {
   const parts: string[] = [];
-  if (models) parts.push(`${models} model swap${models === 1 ? "" : "s"}`);
-  if (sounds) parts.push(`${sounds} sound mod${sounds === 1 ? "" : "s"}`);
-  return parts.join(" and ") || "0 sets";
+  if (models) parts.push(t("swaps.modelSets", { count: models }));
+  if (sounds) parts.push(t("swaps.soundSets", { count: sounds }));
+  if (parts.length === 2) return t("swaps.and", { a: parts[0], b: parts[1] });
+  return parts[0] ?? t("swaps.noSets");
 }
 
 /**
@@ -40,6 +44,7 @@ export default function RegisterSwapsDialog({
   /** Called after a successful register so callers can refresh their view. */
   onDone?: () => void;
 }) {
+  const t = useT();
   // Which action is running ("move" | "folders"), so we can spin the right button.
   const [busy, setBusy] = useState<"move" | "folders" | null>(null);
 
@@ -54,17 +59,16 @@ export default function RegisterSwapsDialog({
       if (move) {
         toast.success(
           r.registered > 0
-            ? `Registered ${r.registered} set${r.registered === 1 ? "" : "s"}.`
-            : "Nothing was moved.",
+            ? t("swaps.registered", { count: r.registered })
+            : t("swaps.nothingMoved"),
           r.skipped > 0
-            ? { description: `${r.skipped} skipped (name already in use).` }
+            ? { description: t("swaps.skipped", { count: r.skipped }) }
             : undefined,
         );
       } else {
-        toast.success(
-          `Created the library folder${r.foldersCreated === 1 ? "" : "s"} for ${r.bikes} bike${r.bikes === 1 ? "" : "s"}.`,
-          { description: "Your model / sound folders were left where they are." },
-        );
+        toast.success(t("swaps.foldersCreated", { count: r.bikes }), {
+          description: t("swaps.foldersCreatedDesc"),
+        });
       }
       onOpenChange(false);
       onDone?.();
@@ -79,13 +83,21 @@ export default function RegisterSwapsDialog({
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
       <DialogContent className="max-w-lg" showClose={!busy}>
         <DialogHeader>
-          <DialogTitle>Found {summarize(models, sounds)}</DialogTitle>
+          <DialogTitle>
+            {t("swaps.foundTitle", { summary: summarize(models, sounds, t) })}
+          </DialogTitle>
           <DialogDescription>
-            These folders are sitting loose inside your bikes. Register them to move each
-            into the right library —{" "}
-            <span className="font-mono text-faint">FrostMod Models</span> for models,{" "}
-            <span className="font-mono text-faint">FrostMod Sounds</span> for sounds — so
-            they show up in the Locker.
+            <Trans
+              k="swaps.description"
+              values={{
+                modelsFolder: (
+                  <span className="font-mono text-faint">FrostMod Models</span>
+                ),
+                soundsFolder: (
+                  <span className="font-mono text-faint">FrostMod Sounds</span>
+                ),
+              }}
+            />
           </DialogDescription>
         </DialogHeader>
 
@@ -115,7 +127,7 @@ export default function RegisterSwapsDialog({
             disabled={!!busy}
             onClick={() => onOpenChange(false)}
           >
-            Later
+            {t("common.later")}
           </Button>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button
@@ -129,11 +141,11 @@ export default function RegisterSwapsDialog({
               ) : (
                 <FolderPlus />
               )}
-              Just create folders
+              {t("swaps.justCreateFolders")}
             </Button>
             <Button size="sm" disabled={!!busy} onClick={() => void run(true)}>
               {busy === "move" ? <Loader2 className="animate-spin" /> : <FolderInput />}
-              Register &amp; move
+              {t("swaps.registerAndMove")}
             </Button>
           </div>
         </DialogFooter>
@@ -144,16 +156,17 @@ export default function RegisterSwapsDialog({
 
 /** One candidate: a model (bike icon) or sound (speaker icon) set, name + file count. */
 function Chip({ candidate: c }: { candidate: LooseSwapCandidate }) {
+  const t = useT();
   const Icon = c.kind === "sound" ? Volume2 : Bike;
   return (
     <span
-      title={`${c.source} · ${c.kind}`}
+      title={`${c.source} · ${c.kind === "sound" ? t("category.sound") : t("swaps.model")}`}
       className="flex items-center gap-1.5 rounded-md bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-foreground/80"
     >
       <Icon className="size-3 text-foreground/40" strokeWidth={1.5} />
       {c.name}
       <span className="text-faint">
-        {c.fileCount} file{c.fileCount === 1 ? "" : "s"}
+        {t("swaps.fileCount", { count: c.fileCount })}
       </span>
     </span>
   );

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n/context";
 import { Button } from "./button";
 import {
   Command,
@@ -25,7 +26,8 @@ interface ComboboxProps {
 /**
  * A searchable **creatable** combobox: click the trigger to see every option, type
  * to filter, and — since the value can be a free-text font or a captured mod name not
- * in the list — commit whatever you typed via the "Use …" row. Built on the shadcn
+ * in the list — commit whatever you typed via the "Use …" row. The first row clears the
+ * slot back to the empty/stock value, which no amount of typing can produce. Built on the shadcn
  * Popover + Command (cmdk) primitives. cmdk lowercases the value it hands `onSelect`,
  * so each item commits its own original-cased string from the closure instead.
  */
@@ -33,10 +35,11 @@ export function Combobox({
   value,
   options,
   onChange,
-  placeholder = "Stock",
+  placeholder,
   invalid,
   className,
 }: ComboboxProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -70,21 +73,37 @@ export function Combobox({
             className,
           )}
         >
-          <span className="truncate">{value || placeholder}</span>
+          <span className="truncate">{value || placeholder || t("locker.stock")}</span>
           <ChevronsUpDown className="ml-1 h-3.5 w-3.5 flex-none opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
         <Command>
           <CommandInput
-            placeholder="Search…"
+            placeholder={t("combobox.search")}
             value={query}
             onValueChange={setQuery}
             className="text-[12.5px]"
           />
           <CommandList>
-            {!canCreate && <CommandEmpty>No matches.</CommandEmpty>}
+            {!canCreate && <CommandEmpty>{t("library.noMatches")}</CommandEmpty>}
             <CommandGroup>
+              {/*
+                Empty is a real value — it's what the game writes for an unmodded slot,
+                and the trigger already renders it as the placeholder. Without this row
+                a slot is one-way: once set, nothing typeable commits "" again.
+                The extra words in `value` are just cmdk filter fodder.
+              */}
+              <CommandItem
+                value={`__stock__ ${placeholder} none clear`}
+                onSelect={() => commit("")}
+                className="text-[12.5px]"
+              >
+                <Check
+                  className={cn("mr-2 h-3.5 w-3.5 flex-none", !value ? "opacity-100" : "opacity-0")}
+                />
+                <span className="truncate text-muted-foreground">{placeholder} (none)</span>
+              </CommandItem>
               {options.map((o) => (
                 <CommandItem
                   key={o}
@@ -106,7 +125,7 @@ export function Combobox({
                   className="text-[12.5px]"
                 >
                   <Check className="mr-2 h-3.5 w-3.5 flex-none opacity-0" />
-                  Use “{q}”
+                  {t("combobox.use", { value: q })}
                 </CommandItem>
               )}
             </CommandGroup>
