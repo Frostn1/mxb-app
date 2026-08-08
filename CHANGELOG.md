@@ -152,6 +152,9 @@
   whitespace, a leading `-` — is rejected there, so a pasted address can't quietly turn into
   a different flag. The connect flag is only read at startup, so asking to join while MX
   Bikes is already running says so instead of appearing to work.
+- **Shop items now show the store's own description.** The catalog started carrying them
+  today — every one of its 1311 products, screenshots and all — and the detail page shows it
+  under **About**, the same way a Browse mod's description reads.
 
 ### Changed
 - **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
@@ -176,6 +179,10 @@
 - **Staging directories are per-operation.** They used to be one path per process, wiped on
   entry — safe only while installs were strictly serial. A staged drop awaiting review would
   have had its files deleted by the next one.
+- **The Shop opens faster.** Descriptions are 3.1 MB of the catalog's 4 MB, and every one of
+  them was being cleaned up for display the moment the catalog loaded — before the grid could
+  paint, for 1311 products of which you open maybe two. That work now happens when you open an
+  item.
 
 ### Fixed
 - **A config written by an older build lost track of which game was active.** Builds that
@@ -220,6 +227,18 @@
   for `..` before any write, and the resolved targets are verified to sit under `mods/`.
 - **A dropped bike folder keeps its own folder.** A bike shipped without a `paints/` subfolder
   had its `.ini`/`.cfg` scattered loose into `mods/bikes` instead of `mods/bikes/<Bike>/`.
+- **The screenshots inside those descriptions were broken frames.** The store's CDN turns away
+  any request that doesn't come from the store itself, and the app's window asks under its own
+  name, so every embedded shot was refused where it stood. They now come through the same
+  on-disk image cache the grid and gallery already use, which fetches them from the app's own
+  side rather than the page's: they load, they're resized to the width they're actually drawn
+  at, and they're kept rather than re-fetched every time you open the item. The store's second
+  image host is included, which a few dozen products embed from.
+- **A link inside a description replaced the entire app with a website.** These descriptions
+  carry real links — the store's alone hold about 1250, to Discord, YouTube and the store —
+  and the app window has no address bar or Back button to escape with. They now open in your
+  own browser and leave the app where it was. Browse descriptions had the same fault and are
+  fixed with it.
 
 ### Notes
 - Instant profile refresh stays MX Bikes only. Unlike FrostMod's reload, it calls a

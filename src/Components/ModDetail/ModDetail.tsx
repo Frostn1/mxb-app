@@ -35,6 +35,7 @@ import type {
   ModDetail as Detail,
 } from "../../types";
 import Gallery from "./Gallery";
+import RichDescription from "./RichDescription";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
@@ -296,11 +297,8 @@ export default function ModDetail({
             <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
               About this {modType.id === "bikes" ? "bike" : modType.id === "rider" ? "rider gear" : "track"}
             </span>
-            <div
-              className="mod-description"
-              // Authored HTML from mxb-mods.com's REST API.
-              dangerouslySetInnerHTML={{ __html: detail.descriptionHtml }}
-            />
+            {/* Authored HTML from mxb-mods.com's REST API. */}
+            <RichDescription html={detail.descriptionHtml} />
           </div>
         </div>
 

@@ -6,6 +6,11 @@ import path from "node:path";
 // @tauri-apps/cli sets TAURI_DEV_HOST when developing against a physical device.
 const host = process.env.TAURI_DEV_HOST;
 
+// Several worktrees of this repo get run at once, and `strictPort` means the second one to
+// start just dies. `MXB_DEV_PORT` moves this instance out of the way; Tauri has to be told
+// the same number, so it travels with a matching `--config '{"build":{"devUrl":…}}'`.
+const port = Number(process.env.MXB_DEV_PORT) || 1420;
+
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
@@ -22,14 +27,14 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. Tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
+    port,
     strictPort: true,
     host: host || false,
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1421,
+          port: port + 1,
         }
       : undefined,
     watch: {

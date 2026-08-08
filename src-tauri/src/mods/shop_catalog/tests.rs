@@ -457,13 +457,54 @@ fn an_unsafe_url_disables_the_link_rather_than_the_item() {
     assert!(golf.author_url.is_none(), "its off-origin author url was dropped");
 }
 
+/// The catalog holds the store's markup verbatim and sanitises it in `detail`, once, for the
+/// one item being opened — see [`sanitize_html`]. That makes the raw HTML reachable from
+/// [`Item`], so this pins the contract: `detail` is the only path to the webview, and
+/// anything else that grows a use for `Item::description` has to sanitise it too.
+#[test]
+fn an_item_holds_the_stores_markup_unsanitised_until_it_is_opened() {
+    let (catalog, _) = sample();
+    let raw = item(&catalog, 110)
+        .description
+        .as_deref()
+        .expect("the fixture has a description");
+    assert!(
+        raw.to_ascii_lowercase().contains("<script"),
+        "the parse step should not have cleaned this — sanitising is detail's job"
+    );
+    assert!(
+        sanitize_html(raw).is_some_and(|h| !h.to_ascii_lowercase().contains("<script")),
+        "and detail's sanitiser should then remove it"
+    );
+}
+
+/// A real product description, byte for byte from the live dump. Every one of the store's
+/// 1311 items is markup like this — a linked screenshot and a paragraph — so if sanitising
+/// ever strips `src` or `href`, the shop's detail page silently loses its images and this
+/// fails first.
+#[test]
+fn real_store_markup_keeps_its_images_and_links() {
+    let raw = r#"<p><a href="https://cdn.mxbikes-shop.com/wp-content/uploads/edd/2022/06/20220630113016_1.jpg"><img class="aligncenter size-full wp-image-50692" src="https://cdn.mxbikes-shop.com/wp-content/uploads/edd/2022/06/20220630113016_1.jpg" alt="" width="1920" height="1080" /></a></p>
+<p>Here's Round 4 of the 2022 ARL MX Championship.</p>"#;
+
+    let html = sanitize_html(raw).expect("a real description should survive");
+    assert!(
+        html.contains(r#"src="https://cdn.mxbikes-shop.com/wp-content/uploads/edd/2022/06/20220630113016_1.jpg""#),
+        "the screenshot must keep its src"
+    );
+    assert!(html.contains("<a href=\"https://cdn.mxbikes-shop.com"), "the link must keep its href");
+    assert!(html.contains("Round 4 of the 2022 ARL MX Championship"), "the text must survive");
+}
+
 #[test]
 fn description_html_is_stripped_of_anything_executable() {
     let (catalog, _) = sample();
-    let html = item(&catalog, 110)
-        .description_html
+    let raw = item(&catalog, 110)
+        .description
         .as_deref()
         .expect("the fixture has a description");
+    let html = sanitize_html(raw).expect("the fixture description should survive sanitising");
+    let html = html.as_str();
     let lower = html.to_ascii_lowercase();
     assert!(!lower.contains("<script"), "script element must be gone");
     assert!(!lower.contains("alert("), "script contents must be gone");
@@ -624,6 +665,15 @@ async fn live_shop_catalog_shape() {
             > catalog.items.len() * 9,
         "most items should have a usable product URL"
     );
+    // Descriptions arrived with schema 4 and the detail page is built around them, so their
+    // disappearance should be as loud as a price field moving.
+    let described = catalog.items.iter().filter(|i| i.description.is_some()).count();
+    assert!(
+        described * 10 >= catalog.items.len() * 9,
+        "only {described} of {} items carry a description — the field moved or the store \
+         stopped sending it",
+        catalog.items.len()
+    );
 
     // A spot-check that the category filter actually selects things through the slug link.
     let tracks = index
@@ -694,3 +744,4 @@ fn ordering_survives_a_catalog_with_no_published_dates() {
     );
     assert_eq!(ordered, vec![2, 1], "newest falls back to `updated`");
 }
+

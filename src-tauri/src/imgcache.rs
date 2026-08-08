@@ -33,7 +33,14 @@ const CACHE_DIR: &str = "img-v1";
 ///
 /// Not paranoia: the scheme handler will fetch whatever URL it's handed, so without this it
 /// would be a general-purpose proxy that any injected markup could aim anywhere.
-const ALLOWED_HOSTS: [&str; 2] = ["mxb-mods.com", "mxbikes-shop.com"];
+/// `mxbikes-shop.b-cdn.net` is the store's own Bunny pull zone, named in full rather than as
+/// `b-cdn.net` — that suffix is shared by every Bunny customer, and matching it would open the
+/// proxy to all of them. A few dozen product descriptions embed images from it.
+const ALLOWED_HOSTS: [&str; 3] = [
+    "mxb-mods.com",
+    "mxbikes-shop.com",
+    "mxbikes-shop.b-cdn.net",
+];
 
 /// Roughly a few thousand thumbnails. Generous, because the whole point is not refetching.
 const MAX_CACHE_BYTES: u64 = 256 * 1024 * 1024;
@@ -518,8 +525,23 @@ mod tests {
             "https://mxb-mods.com/wp-content/uploads/a.jpg",
             "https://mxbikes-shop.com/img/1.png",
             "https://cdn.mxbikes-shop.com/img/1.png",
+            // The store's Bunny pull zone — where some product descriptions embed from.
+            "https://mxbikes-shop.b-cdn.net/wp-content/uploads/2024/05/a.jpg",
         ] {
             assert_eq!(source_url(&encoded(url)).as_deref(), Some(url), "{url}");
+        }
+    }
+
+    /// The pull zone is allowed by its full name. `b-cdn.net` is Bunny's shared domain, so
+    /// letting the suffix through would hand the proxy to every other Bunny customer.
+    #[test]
+    fn another_bunny_customer_is_not_covered_by_the_pull_zone() {
+        for url in [
+            "https://someone-else.b-cdn.net/x.png",
+            "https://b-cdn.net/x.png",
+            "https://evil-mxbikes-shop.b-cdn.net/x.png",
+        ] {
+            assert!(source_url(&encoded(url)).is_none(), "{url} must be refused");
         }
     }
 

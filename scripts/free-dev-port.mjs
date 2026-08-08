@@ -5,7 +5,8 @@
 // die. This clears it so `tauri dev` reliably starts on the first try.
 import { execSync } from "node:child_process";
 
-const PORT = 1420;
+// Kept in step with `vite.config.ts`, which reads the same variable.
+const PORT = Number(process.env.MXB_DEV_PORT) || 1420;
 
 function pidsOnPort(port) {
   try {
