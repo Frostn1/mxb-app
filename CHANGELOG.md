@@ -26,6 +26,27 @@
   (`boot_l` / `boot_r`), with the old measurement kept for meshes that don't say. The preview
   and the on-body render share the rule, so a boot can't look right in one and wrong in the
   other.
+## 2026-08-08 — FrostMod follows the game you're on
+
+### Fixed
+- **FrostMod now reads the mods folder of the game you're actually playing.** It was told
+  which game to attach to but not where that game's mods live, and its own default was MX
+  Bikes' folder whatever it attached to — so on GP Bikes its track manager, inactive-tracks
+  store and model swap all worked against MX Bikes' folders. The app knows the real folder
+  (including a moved one), so it now sends it.
+- **Switching game restarts FrostMod.** FrostMod reads which game to watch once, at launch,
+  and the app skips starting one when a FrostMod is already running — so switching to GP
+  Bikes left it waiting for MX Bikes forever while the status pill still read "running".
+  This also clears a FrostMod the app didn't launch, which is the case that made it look
+  like nothing was wrong.
+
+### Changed
+- **FrostMod builds that aren't safe on the current game are no longer offered for it.**
+  FrostMod v0.10.0 is the first that attaches to GP Bikes, but its mod reload runs MX
+  Bikes' internals there and takes the game down the first time it's used. On GP Bikes the
+  app now requires v0.11.0 or newer, updates to it automatically, and says so instead of
+  starting a build that would crash. MX Bikes is unaffected — every FrostMod ever released
+  was built for it.
 
 ## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
 

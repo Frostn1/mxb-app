@@ -232,6 +232,34 @@ pub fn model_refresh_is_safe(tag: Option<&str>) -> bool {
     }
 }
 
+/// The oldest FrostMod that is safe to run against GP Bikes.
+///
+/// Same shape as [`MODEL_REFRESH_MIN_VERSION`], and the same kind of reason. FrostMod
+/// v0.10.0 is the first build that attaches to `gpbikes.exe` at all — but its reload ran
+/// MX Bikes' step table inside GP Bikes, calling arbitrary functions and zeroing arbitrary
+/// globals, which crashed the game on the first reload. v0.11.0 gives GP Bikes its own
+/// table and refuses the reload outright for any title that has none.
+///
+/// So the floor is not "does this build know about GP Bikes" (v0.10.0 does) but "will this
+/// build avoid taking the game down" — which starts at v0.11.0.
+pub const GPB_MIN_VERSION: &str = "v0.11.0";
+
+/// Is the installed FrostMod, tagged `tag`, safe to offer for `game`?
+///
+/// MX Bikes is unaffected: every FrostMod that ever shipped was built for it. An
+/// unreadable tag is treated as unsafe for the same reason as `model_refresh_is_safe` —
+/// the cost of guessing wrong is a crash to desktop, not an over-cautious toast.
+pub fn supported_for_game(game: crate::game::Game, tag: Option<&str>) -> bool {
+    let min = match game {
+        crate::game::Game::Mxb => return true,
+        crate::game::Game::Gpb => GPB_MIN_VERSION,
+    };
+    match (tag.and_then(version_parts), version_parts(min)) {
+        (Some(have), Some(floor)) => have >= floor,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +321,48 @@ mod tests {
         assert!(!model_refresh_is_safe(Some("")));
         assert!(!model_refresh_is_safe(Some("nightly")));
         assert!(!model_refresh_is_safe(Some("v-broken-")));
+    }
+
+    /// Every FrostMod ever released was built for MX Bikes, so the GP floor must not
+    /// touch it — including builds too old to have heard of GP Bikes, and unreadable ones.
+    #[test]
+    fn mx_bikes_accepts_every_build() {
+        for tag in [Some("v0.9.9"), Some("v0.10.0"), Some("v0.11.0"), Some("nightly"), None] {
+            assert!(
+                supported_for_game(crate::game::Game::Mxb, tag),
+                "MX Bikes should accept {tag:?}"
+            );
+        }
+    }
+
+    /// The case this floor exists for: v0.10.0 is the first build that attaches to GP
+    /// Bikes, and its reload runs MX Bikes' offsets there. "Knows about GP Bikes" and
+    /// "is safe on GP Bikes" are different versions, and this is the gap between them.
+    #[test]
+    fn gp_bikes_rejects_the_build_that_crashes_it() {
+        assert!(!supported_for_game(crate::game::Game::Gpb, Some("v0.10.0")));
+        assert!(!supported_for_game(crate::game::Game::Gpb, Some("v0.10.0-rc1")));
+        assert!(!supported_for_game(crate::game::Game::Gpb, Some("v0.9.11")));
+        assert!(supported_for_game(crate::game::Game::Gpb, Some("v0.11.0")));
+        assert!(supported_for_game(crate::game::Game::Gpb, Some("v0.11.0-rc1")));
+        assert!(supported_for_game(crate::game::Game::Gpb, Some("v1.0.0")));
+    }
+
+    /// Same numeric-not-lexical trap the model-refresh floor documents: "v0.11.0" sorts
+    /// below "v0.9.11" as a string, and a GP floor is exactly where that would bite.
+    #[test]
+    fn the_gp_floor_compares_numerically() {
+        assert!(supported_for_game(crate::game::Game::Gpb, Some("v0.11.0")));
+        assert!(!supported_for_game(crate::game::Game::Gpb, Some("v0.9.99")));
+    }
+
+    /// An unreadable tag is a build we can't vouch for, and the cost of guessing wrong
+    /// here is the game going down — so GP Bikes withholds, as the model refresh does.
+    #[test]
+    fn gp_bikes_withholds_from_a_version_it_cannot_read() {
+        assert!(!supported_for_game(crate::game::Game::Gpb, None));
+        assert!(!supported_for_game(crate::game::Game::Gpb, Some("")));
+        assert!(!supported_for_game(crate::game::Game::Gpb, Some("nightly")));
     }
 
     #[test]

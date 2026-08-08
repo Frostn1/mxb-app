@@ -34,6 +34,11 @@ pub struct FrostmodStatus {
     pub needs_repair: bool,
     /// Whether FrostMod is currently running (its reload event exists).
     pub running: bool,
+    /// Whether the installed build is safe to run against the active game. False means
+    /// "installed, but too old for this title" — see `frostmod::supported_for_game`. The
+    /// UI offers an update instead of a start; starting it anyway is what crashed GP
+    /// Bikes, so `start` refuses too.
+    pub supported_for_game: bool,
 }
 
 fn frostmod_dir(app: &AppHandle) -> PathBuf {
@@ -205,12 +210,19 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         _ => false,
     };
 
+    let active_game = crate::config::load(app)
+        .map(|c| c.active_game)
+        .unwrap_or_default();
+    let supported_for_game =
+        crate::frostmod::supported_for_game(active_game, version.as_deref());
+
     FrostmodStatus {
         installed,
         version,
         latest: rel.map(|r| r.tag_name),
         needs_repair,
         running: crate::frostmod::is_running(),
+        supported_for_game,
     }
 }
 
@@ -437,6 +449,19 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     if !exe.exists() {
         anyhow::bail!("FrostMod isn't installed yet");
     }
+    // Refuse to point a build at a title it isn't safe on. v0.10.0 attaches to GP Bikes
+    // and then offers an in-game reload that runs MX Bikes' offsets — starting it there
+    // hands the player a crash behind an F8 keypress. Updating is the fix, so say so.
+    let active_game = crate::config::load(app)
+        .map(|c| c.active_game)
+        .unwrap_or_default();
+    if !crate::frostmod::supported_for_game(active_game, installed_version(app).as_deref()) {
+        anyhow::bail!(
+            "This FrostMod build isn't safe on {} — update FrostMod to {} or newer.",
+            active_game.profile().display,
+            crate::frostmod::GPB_MIN_VERSION,
+        );
+    }
     // Refresh the curated filter before FrostMod loads it.
     ensure_serverfilter(app);
     // Nothing holds the previous binaries once the game that mapped them is gone,
@@ -447,10 +472,20 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     // "running" while reload silently did nothing. `--game` landed in FrostMod v0.10.0;
     // older binaries ignore an unknown flag and keep their MX Bikes default, which is the
     // right fallback for the only game they support.
-    let game = crate::config::load(app).map(|c| c.active_game).unwrap_or_default();
+    //
+    // `--mods` matters for the same reason and then some: FrostMod's own default was
+    // `Documents\PiBoSo\MX Bikes\mods` whatever `--game` said, so on GP Bikes its track
+    // manager and model swap operated on the wrong game's folders. We already know the
+    // real folder — the user may well have moved it — so send it rather than let FrostMod
+    // guess. Harmless on every FrostMod that ever shipped: `--mods` predates `--game`.
+    let cfg = crate::config::load(app).unwrap_or_default();
+    let mut args: Vec<&str> = vec!["--game", cfg.active_game.id()];
+    if !cfg.mods_path.is_empty() {
+        args.extend(["--mods", cfg.mods_path.as_str()]);
+    }
     let child = std::process::Command::new(&exe)
         .current_dir(frostmod_dir(app))
-        .args(["--game", game.id()])
+        .args(&args)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
     *state.0.lock().unwrap() = Some(child);
