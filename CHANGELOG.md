@@ -184,6 +184,14 @@
   understand. Downloaded bytes are checked against their digest before being written.
 
 ### Fixed
+- **The mxb-mods.com fetch window is properly hidden now.** When Cloudflare refuses the app's
+  own downloader, Browse re-runs the request inside a WebView parked on the site — and that
+  window was built one pixel wide and thrown 32,000 pixels off the desktop rather than hidden,
+  because a hidden window was thought to risk having its timers throttled. Off the desktop
+  still leaves a real window behind, though: the system lists it, and it can be surfaced with
+  no titlebar to close it by. It's built hidden outright now. The throttling that was being
+  avoided isn't reachable that way — the webview inside keeps its own visibility, and that is
+  what the browser engine reads — so Browse behaves exactly as before, minus the window.
 - **A hostile archive can no longer write outside the staging folder.** `.7z` extraction
   joined entry names to the destination without filtering `..`; `.7z` and `.rar` extractions
   are now swept for escapees (symlinks included), which deletes them and fails the install.
