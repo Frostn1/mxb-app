@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence
+
+### Fixed
+- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
+  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
+  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
+  so the preview never blanks; but with no error anywhere that is indistinguishable from a
+  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
+  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
+  preview for as long as what you're looking at is out of date, and writes the error to the
+  console. The toast fires once per distinct message rather than once per pick, since a
+  persistent fault is re-hit on every slot edit.
+
 ## 2026-08-07 — v0.7.0 — Race mode, an in-game overlay, and six languages
 
 ### Added
@@ -61,15 +74,6 @@
   own look".
 
 ### Fixed
-- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
-  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
-  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
-  so the preview never blanks; but with no error anywhere that is indistinguishable from a
-  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
-  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
-  preview for as long as what you're looking at is out of date, and writes the error to the
-  console. The toast fires once per distinct message rather than once per pick, since a
-  persistent fault is re-hit on every slot edit.
 - **Bikes wearing the wrong texture on their bodywork.** A part's material was matched to
   the texture list in whatever order the exporter wrote it, which only works on bikes
   written in material order. The Kawasaki KX250/KX450 wore their blank number-plate texture
