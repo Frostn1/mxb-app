@@ -14,6 +14,15 @@
   same full library scan the Library tab uses, and matches titles the way a person would:
   one name spelled inside the other, or enough distinctive words in common. Careful
   enough to still tell two colourways of the same bike apart. (#26)
+- **A slot can be cleared back to stock again.** Empty is what the game writes for an
+  unmodded slot, and every layer already handled it — the trigger renders it as "Stock",
+  a cleared slot isn't flagged missing, and applying writes it through. Only the picker
+  couldn't produce it: there was no "none" option, no clear button, and an empty search
+  box commits nothing. Pick `full` for Protection once and the only ways back were the
+  game's own UI or hand-editing `profile.ini`. Every slot dropdown now leads with a
+  "Stock (none)" row that clears it. (#28)
+
+## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
 
 ### Added
 - **Releases now say which file to download.** The release body led with "See the assets
