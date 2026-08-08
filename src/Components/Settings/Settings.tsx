@@ -13,6 +13,8 @@ import {
   setInstantRefresh,
   setLaunchAtStartup,
   setModsPath,
+  setOverlayEnabled,
+  setOverlayHotkey,
   setProfilesPath,
   setRunInBackground,
   setWatchModsReload,
@@ -44,14 +46,102 @@ const REPO_URL = "https://github.com/Frostn1/mxb-app";
 // in a shipped build, and the app can't be told about a new one without an update.
 const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
-type SectionId = "folder" | "general" | "appearance" | "frostmod" | "about";
+type SectionId =
+  | "folder"
+  | "general"
+  | "overlay"
+  | "appearance"
+  | "frostmod"
+  | "about";
 const SECTIONS: { id: SectionId; label: TKey }[] = [
   { id: "folder", label: "settings.gameFolder" },
   { id: "general", label: "settings.general" },
+  { id: "overlay", label: "overlay.section" },
   { id: "appearance", label: "settings.appearance" },
   { id: "frostmod", label: "settings.frostmod" },
   { id: "about", label: "settings.about" },
 ];
+
+/** Default shown before the backend answers, so the field is never blank. */
+const FALLBACK_HOTKEY = "CommandOrControl+Shift+M";
+
+/** Turn a `KeyboardEvent.code` into the token Tauri's accelerator parser expects. */
+function acceleratorKey(code: string): string | null {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+  return null;
+}
+
+/** Modifier-plus-key capture field for the overlay hotkey.
+ *
+ * A modifier is required: a bare `M` would be swallowed globally, including while the
+ * player is typing a server chat message. */
+function HotkeyField({
+  value,
+  onCapture,
+  disabled,
+}: {
+  value: string;
+  onCapture: (accelerator: string) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useI18n();
+  const [recording, setRecording] = useState(false);
+  const isMac = usePlatform() === "macos";
+
+  const pretty = value
+    .split("+")
+    .map((p) => (p === "CommandOrControl" ? (isMac ? "Cmd" : "Ctrl") : p))
+    .join(" + ");
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    if (e.code === "Escape") {
+      setRecording(false);
+      return;
+    }
+    const key = acceleratorKey(e.code);
+    if (!key) return; // a modifier on its own — keep waiting for the real key
+    const mods: string[] = [];
+    // Cmd on macOS and Ctrl elsewhere are the same accelerator token. The Windows key
+    // is its own thing, so it must not be folded into it.
+    if (e.ctrlKey || (isMac && e.metaKey)) mods.push("CommandOrControl");
+    if (!isMac && e.metaKey) mods.push("Super");
+    if (e.altKey) mods.push("Alt");
+    if (e.shiftKey) mods.push("Shift");
+    if (mods.length === 0) {
+      toast.error(t("overlay.needModifier"), {
+        description: t("overlay.needModifierDesc"),
+      });
+      return;
+    }
+    setRecording(false);
+    onCapture([...mods, key].join("+"));
+  };
+
+  return (
+    <button
+      disabled={disabled}
+      onClick={(e) => {
+        // WebKit doesn't focus a button on click, and an unfocused button never sees
+        // the keydown we're about to wait for.
+        e.currentTarget.focus();
+        setRecording(true);
+      }}
+      onBlur={() => setRecording(false)}
+      onKeyDown={recording ? onKeyDown : undefined}
+      className={cn(
+        "min-w-[148px] cursor-default rounded-lg border px-3 py-1.5 text-center font-mono text-[12px] transition-colors disabled:opacity-50",
+        recording
+          ? "border-primary text-primary"
+          : "border-white/[0.09] text-foreground/85 hover:bg-foreground/[0.05]",
+      )}
+    >
+      {recording ? t("overlay.pressKeys") : pretty}
+    </button>
+  );
+}
 
 export default function Settings() {
   const { t, locale, setLocale } = useI18n();
@@ -68,6 +158,7 @@ export default function Settings() {
   const refs = useRef<Record<SectionId, HTMLDivElement | null>>({
     folder: null,
     general: null,
+    overlay: null,
     appearance: null,
     frostmod: null,
     about: null,
@@ -101,6 +192,31 @@ export default function Settings() {
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
+
+  const overlayEnabled = config.overlayEnabled ?? true;
+  const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
+
+  const toggleOverlay = async (v: boolean) => {
+    try {
+      await setOverlayEnabled(v);
+      await reloadConfig();
+    } catch (e) {
+      // The setting saved but the hotkey didn't register — say so rather than
+      // leaving a switch that looks on and does nothing.
+      toast.error(t("overlay.registerFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
+  const rebindOverlay = async (accelerator: string) => {
+    try {
+      await setOverlayHotkey(accelerator);
+      await reloadConfig();
+      toast.success(t("overlay.shortcutUpdated"));
+    } catch (e) {
+      toast.error(t("overlay.shortcutRejected"), { description: String(e) });
+    }
+  };
 
   const toggleInstantRefresh = async (v: boolean) => {
     try {
@@ -464,6 +580,43 @@ export default function Settings() {
               checked={instantRefresh}
               onChange={toggleInstantRefresh}
             />
+          </Section>
+
+          {/* in-game overlay */}
+          <Section
+            title={t("overlay.section")}
+            innerRef={(el) => (refs.current.overlay = el)}
+          >
+            <ToggleRow
+              label={t("overlay.enable")}
+              desc={t("overlay.enableDesc")}
+              checked={overlayEnabled}
+              onChange={toggleOverlay}
+            />
+            <div className="h-px bg-border" />
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col gap-1">
+                <span className="text-[12.5px] text-foreground/85">
+                  {t("overlay.shortcut")}
+                </span>
+                <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {t("overlay.shortcutDesc")}
+                </span>
+              </div>
+              <HotkeyField
+                value={overlayHotkey}
+                onCapture={rebindOverlay}
+                disabled={!overlayEnabled}
+              />
+            </div>
+            {isWindows && (
+              <>
+                <div className="h-px bg-border" />
+                <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {t("overlay.borderlessNote")}
+                </p>
+              </>
+            )}
           </Section>
 
           {/* appearance */}

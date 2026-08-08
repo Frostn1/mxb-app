@@ -19,6 +19,9 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 # Launch on login (Discord-style always-on companion).
 tauri-plugin-autostart = "2"
+# System-wide hotkey for the in-game overlay: the game has keyboard focus when the
+# player presses it, so a webview-level listener would never see it.
+tauri-plugin-global-shortcut = "2"
 # File logging to the app log dir (Windows: %LOCALAPPDATA%\com.frost.mxbikes\logs).
 tauri-plugin-log = "2"
 log = "0.4"
@@ -84,6 +87,10 @@ sha2 = "0.10"
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
+# Tauri's mock runtime, so the overlay's window lifecycle (create → show → hide) can be
+# exercised without a display or a real webview. Dev-only — dev-dependencies aren't part
+# of a normal build, so the shipped binary never gets the `test` feature.
+tauri = { version = "2", features = ["test"] }
 # `#[tokio::test]` for the live network checks against mxb-mods.com. Dev-only, so the
 # shipped binary keeps the minimal `time`-only tokio it already had.
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }

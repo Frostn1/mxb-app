@@ -154,12 +154,32 @@ export function bikePreviewAvailable(): Promise<boolean> {
   return invoke<boolean>("bike_preview_available");
 }
 
+/** The order a browse listing comes back in. Mirrors `ModSort` on the Rust side. */
+export type ModSort =
+  | "newest"
+  | "oldest"
+  | "popularAll"
+  | "popularMonth"
+  | "popularWeek";
+
+/** The sort choices Browse offers, in menu order. The popular ones are ranked by view
+ *  count, which comes from a listing that takes no search term — `noSearch` marks those
+ *  so the menu can drop them while the search box has text in it. */
+export const MOD_SORTS: { value: ModSort; label: TKey; noSearch?: boolean }[] = [
+  { value: "newest", label: "browseSort.newest" },
+  { value: "oldest", label: "browseSort.oldest" },
+  { value: "popularAll", label: "browseSort.popularAll", noSearch: true },
+  { value: "popularMonth", label: "browseSort.popularMonth", noSearch: true },
+  { value: "popularWeek", label: "browseSort.popularWeek", noSearch: true },
+];
+
 export function searchMods(
   query: string,
   categoryId: number,
   page = 1,
+  sort: ModSort = "newest",
 ): Promise<ModSummary[]> {
-  return invoke<ModSummary[]>("search_mods", { query, categoryId, page });
+  return invoke<ModSummary[]>("search_mods", { query, categoryId, page, sort });
 }
 
 export function getModDetail(slug: string): Promise<ModDetail> {
@@ -785,6 +805,44 @@ export function setAutoRunFrostmod(enabled: boolean): Promise<void> {
 
 export function setInstantRefresh(enabled: boolean): Promise<void> {
   return invoke<void>("set_instant_refresh", { enabled });
+}
+
+/** The in-game overlay's settings, plus what the game is doing right now. */
+export interface OverlayState {
+  enabled: boolean;
+  /** Tauri accelerator string, e.g. `"CommandOrControl+Shift+M"`. */
+  hotkey: string;
+  gameRunning: boolean;
+  /** A DirectX app owns the screen exclusively — nothing can be drawn over it. */
+  fullscreenBlocked: boolean;
+}
+
+export function getOverlayState(): Promise<OverlayState> {
+  return invoke<OverlayState>("overlay_state");
+}
+
+/** Show or hide the overlay. The global hotkey does the same thing. */
+export function overlayToggle(): Promise<void> {
+  return invoke<void>("overlay_toggle");
+}
+
+/** Dismiss the overlay and hand keyboard focus back to MX Bikes. */
+export function overlayHide(): Promise<void> {
+  return invoke<void>("overlay_hide");
+}
+
+export function setOverlayEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_overlay_enabled", { enabled });
+}
+
+/** Rebind the overlay hotkey. Rejects (leaving the old one live) if the combo is taken. */
+export function setOverlayHotkey(hotkey: string): Promise<void> {
+  return invoke<void>("set_overlay_hotkey", { hotkey });
+}
+
+/** Fires when the overlay was summoned while the game held the screen exclusively. */
+export function onOverlayFullscreenBlocked(cb: () => void): Promise<UnlistenFn> {
+  return listen("overlay-fullscreen-blocked", () => cb());
 }
 
 /** Toggle watching the mods folder to reload the game on external changes. */
