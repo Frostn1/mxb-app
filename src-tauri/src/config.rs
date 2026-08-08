@@ -229,13 +229,64 @@ pub fn exists(app: &AppHandle) -> bool {
     config_path(app).exists()
 }
 
+/// Which game a set of folders belongs to, judged only by the folders themselves.
+///
+/// Used to recover from a config that has folders but no `activeGame` — see [`load`].
+/// The evidence is ordered strongest first: an install folder holding a particular
+/// executable is conclusive, while the user folder's name is merely conventional (it's
+/// `Documents\PiBoSo\<game>` unless someone moved it).
+fn infer_game(cfg: &AppConfig) -> Option<Game> {
+    let install = cfg.game_path.trim();
+    if !install.is_empty() {
+        for g in Game::ALL {
+            if crate::library::resolve_child(Path::new(install), g.profile().exe).is_file() {
+                return Some(g);
+            }
+        }
+    }
+    let leaf = Path::new(cfg.mods_path.trim()).file_name()?.to_string_lossy().to_string();
+    Game::ALL.into_iter().find(|g| leaf.eq_ignore_ascii_case(g.profile().user_dir))
+}
+
 pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
     let path = config_path(app);
     let text = std::fs::read_to_string(path)?;
     // A truncated/corrupt file is an error, not a silent empty config: callers that
     // can rebuild one (see `load_or_detect`) get the chance to, instead of the app
     // coming up pointed at nothing.
-    let cfg = migrate(serde_json::from_str(&text)?);
+    let mut cfg: AppConfig = serde_json::from_str(&text)?;
+
+    // Recover the active game when the file doesn't name one.
+    //
+    // Builds that predate multi-game support don't have `activeGame`/`games` on their
+    // `AppConfig` and don't set `deny_unknown_fields`, so they read such a config fine
+    // but *rewrite it without those keys*. Running an older build once — a downgrade, a
+    // second install, the shipped app alongside a dev build — therefore erases which
+    // game was active while leaving `modsPath` pointing at that game's folder.
+    //
+    // Defaulting to MX Bikes there is actively harmful: a GP Bikes folder would be
+    // driven as if it were an MX Bikes one. `activeGame` absent is not the same as
+    // `activeGame: "mxb"`, so check the raw JSON rather than the deserialized value,
+    // and re-derive the game from the folders instead of assuming.
+    let names_game = serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|v| v.get("activeGame").cloned())
+        .is_some();
+    if !names_game {
+        if let Some(g) = infer_game(&cfg) {
+            if g != cfg.active_game {
+                log::warn!(
+                    "config.json has no activeGame (an older build rewrote it) — folders \
+                     look like {}, adopting that instead of the {} default",
+                    g.profile().display,
+                    cfg.active_game.profile().display,
+                );
+            }
+            cfg.active_game = g;
+        }
+    }
+
+    let cfg = migrate(cfg);
     crate::game::set_active(cfg.active_game);
     Ok(cfg)
 }
@@ -546,6 +597,51 @@ mod tests {
             "either blank, or a folder that actually exists — got {:?}",
             out.mods_path,
         );
+    }
+
+    /// A released build with no knowledge of `activeGame` rewrites `config.json` without
+    /// it, leaving folders that belong to one game and no record of which. Defaulting to
+    /// MX Bikes there would drive a GP Bikes folder as an MX Bikes one, so the game is
+    /// re-derived from the folders.
+    #[test]
+    fn a_config_stripped_of_its_game_is_recovered_from_the_folders() {
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = "/Users/x/Documents/PiBoSo/GP Bikes".into();
+        assert_eq!(infer_game(&cfg), Some(Game::Gpb), "the user folder names the game");
+
+        cfg.mods_path = "/Users/x/Documents/PiBoSo/MX Bikes".into();
+        assert_eq!(infer_game(&cfg), Some(Game::Mxb));
+
+        // Trailing separators and case shouldn't matter.
+        cfg.mods_path = "/Users/x/Documents/PiBoSo/gp bikes/".into();
+        assert_eq!(infer_game(&cfg), Some(Game::Gpb));
+    }
+
+    /// The install folder is the stronger signal, so it wins over a mods folder whose
+    /// name says otherwise — that's the moved-mods-folder case.
+    #[test]
+    fn the_executable_outranks_the_folder_name_when_inferring() {
+        let root = std::env::temp_dir().join(format!("frost-infer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(crate::game::GPB.exe), b"stub").unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.game_path = root.to_string_lossy().into_owned();
+        cfg.mods_path = "/somewhere/custom/my mods".into();
+        assert_eq!(infer_game(&cfg), Some(Game::Gpb), "gpbikes.exe is conclusive");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Nothing to go on must stay `None` so the caller keeps its existing value rather
+    /// than being handed a guess.
+    #[test]
+    fn inference_gives_up_rather_than_guessing() {
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = "/somewhere/custom/mods".into();
+        assert_eq!(infer_game(&cfg), None);
+        assert_eq!(infer_game(&AppConfig::default()), None, "blank config");
     }
 
     /// Each title resolves its own `Documents\PiBoSo\<game>` folder.

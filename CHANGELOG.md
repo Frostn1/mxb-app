@@ -34,6 +34,13 @@
   failing later with "couldn't determine the archive type".
 
 ### Fixed
+- **A config written by an older build lost track of which game was active.** Builds that
+  predate multi-game support read the config fine but rewrite it without `activeGame` and
+  `games` — so running one once (a downgrade, or the shipped app alongside a newer build)
+  erased the choice while leaving the folder pointing at that game. Defaulting to MX Bikes
+  there would drive a GP Bikes folder as an MX Bikes one; the game is now re-derived from
+  the folders instead — the install folder's executable if there is one, otherwise the
+  user folder's name.
 - **Switching to a game you don't have installed opened an empty dashboard instead of
   the setup screen.** The app adopted `Documents\PiBoSo\<game>` whether or not that
   folder existed, and a non-blank folder reads as "configured" — so you got a working UI
