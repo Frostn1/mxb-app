@@ -783,6 +783,8 @@ export const fr: Translation = {
   "overlay.registerFailed": "Impossible d'enregistrer le raccourci de l'overlay",
   "overlay.toClose": "{{hotkey}} pour fermer",
   "overlay.closeTitle": "Fermer l'overlay (Esc)",
+  "overlay.openMain": "Ouvrir l'app complète",
+  "overlay.openMainTitle": "Ferme l'overlay et ouvre la fenêtre principale de MXB App",
   "overlay.needsSetup": "Termine d'abord la configuration de MXB App dans sa fenêtre principale — elle doit savoir où se trouve ton dossier MX Bikes.",
   "overlay.fullscreenBlocked": "L'overlay ne peut pas s'afficher par-dessus le plein écran exclusif",
   "overlay.fullscreenBlockedDesc": "Passe MX Bikes en sans bordure ou en fenêtre dans Options → Video, puis réessaie le raccourci.",
