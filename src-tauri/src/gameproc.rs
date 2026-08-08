@@ -116,6 +116,7 @@ mod ffi {
         ) -> Handle;
         pub fn WaitForSingleObject(handle: Handle, ms: u32) -> u32;
         pub fn CloseHandle(handle: Handle) -> i32;
+        pub fn GetCurrentProcessId() -> u32;
     }
 
     /// `EnumWindows` callback: return 0 to stop the walk, non-zero to continue.
@@ -133,6 +134,7 @@ mod ffi {
     #[link(name = "user32")]
     extern "system" {
         pub fn EnumWindows(callback: EnumWindowsProc, lparam: isize) -> i32;
+        pub fn GetForegroundWindow() -> Handle;
         pub fn GetWindowRect(hwnd: Handle, rect: *mut Rect) -> i32;
         pub fn GetWindowThreadProcessId(hwnd: Handle, process_id: *mut u32) -> u32;
         pub fn IsWindowVisible(hwnd: Handle) -> i32;
@@ -282,6 +284,26 @@ pub fn focus_game() -> bool {
     }
 }
 
+/// Is the window the player is working in owned by some *other* process?
+///
+/// The overlay asks this after it loses focus, to tell "clicked back into the game"
+/// (or into any other app) apart from "opened our own file picker" — both take focus
+/// off the overlay, only the first means the player is done with it.
+#[cfg(windows)]
+pub fn foreground_is_another_app() -> bool {
+    // SAFETY: both calls are reads. No foreground window at all (the desktop is
+    // mid-switch) leaves `pid` at 0, which belongs to nobody and counts as neither.
+    unsafe {
+        let hwnd = ffi::GetForegroundWindow();
+        if hwnd.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        ffi::GetWindowThreadProcessId(hwnd, &mut pid);
+        pid != 0 && pid != ffi::GetCurrentProcessId()
+    }
+}
+
 /// Where the game's window sits on the desktop, in physical pixels
 /// (`left, top, right, bottom`).
 ///
@@ -376,6 +398,13 @@ pub fn focus_game() -> bool {
 /// Only Windows has an exclusive-fullscreen mode to be blocked by.
 #[cfg(not(windows))]
 pub fn is_exclusive_fullscreen() -> bool {
+    false
+}
+
+/// A dev machine has no game to click back into, and the overlay there is an ordinary
+/// window that behaves itself when it loses focus — so it never dismisses itself.
+#[cfg(not(windows))]
+pub fn foreground_is_another_app() -> bool {
     false
 }
 

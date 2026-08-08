@@ -3622,6 +3622,15 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // The overlay is a HUD over a running game, so clicking back into the game
+            // has to put it away — an unfocused webview stops repainting and leaves an
+            // empty frame over the game that still eats clicks.
+            if let WindowEvent::Focused(false) = event {
+                if window.label() == overlay::LABEL {
+                    overlay::on_focus_lost(window.app_handle());
+                    return;
+                }
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 // Closing the overlay (Alt+F4, its own button) parks it rather than
                 // destroying it, so the next hotkey press doesn't rebuild the webview.

@@ -9,7 +9,9 @@
 //! What it deliberately does *not* do is draw inside the game's swapchain. Exclusive
 //! fullscreen therefore covers it — see [`fullscreen_hint`].
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -30,6 +32,19 @@ const HEIGHT: f64 = 720.0;
 /// Emitted to the main window when the overlay is summoned but the game owns the
 /// screen exclusively, so the player finds out why nothing appeared.
 const FULLSCREEN_EVENT: &str = "overlay-fullscreen-blocked";
+
+/// How long to let a focus loss settle before deciding the player clicked away.
+///
+/// Windows deactivates us *before* it settles the new foreground window, so an
+/// immediate check still reads our own window and would never hide anything.
+const BLUR_SETTLE: Duration = Duration::from_millis(150);
+
+/// Counts the times the overlay has been put on screen.
+///
+/// A pending blur check reads this to tell "still the same showing" from "hidden and
+/// summoned again while we were waiting" — otherwise a fast hotkey press right after a
+/// click away would be answered by an overlay that closes itself 150ms later.
+static SHOWINGS: AtomicU64 = AtomicU64::new(0);
 
 /// What the Settings panel needs to describe the overlay's current state.
 #[derive(Debug, Clone, Serialize)]
@@ -131,8 +146,63 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     }
     center_over_game(&window);
     window.show().map_err(|e| format!("{e:#}"))?;
+    SHOWINGS.fetch_add(1, Ordering::SeqCst);
     let _ = window.set_focus();
     Ok(())
+}
+
+/// What the desktop looked like once a focus loss had settled.
+#[derive(Debug, Clone, Copy)]
+struct Blur {
+    /// The overlay is still on the same showing it was when focus left.
+    same_showing: bool,
+    /// It's still on the screen — something else may have put it away already.
+    visible: bool,
+    /// The player came back to it during the settle window.
+    refocused: bool,
+    /// Another process owns the foreground now.
+    foreground_is_another_app: bool,
+}
+
+/// Should a blurred overlay take itself off the screen?
+///
+/// Kept separate from the timing and the window handles so the rules can be tested:
+/// they're the whole reason this isn't just "hide on blur".
+fn should_dismiss(blur: Blur) -> bool {
+    blur.same_showing && blur.visible && !blur.refocused && blur.foreground_is_another_app
+}
+
+/// Put the overlay away when the player clicks back into the game.
+///
+/// Without this the window stays up unfocused, and an unfocused webview over a game
+/// that's repainting the screen stops being drawn — leaving its frame sitting on top of
+/// the game as an empty box that still swallows clicks. The window has to actually go.
+///
+/// Deliberately not fired on every blur: our own file picker (Browse → import) takes
+/// focus off the overlay too, and closing the window out from under a dialog it opened
+/// is worse than the bug. Hence the wait, and the check for *whose* window took over.
+pub fn on_focus_lost<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window(LABEL) else {
+        return;
+    };
+    let showing = SHOWINGS.load(Ordering::SeqCst);
+    std::thread::spawn(move || {
+        std::thread::sleep(BLUR_SETTLE);
+        let blur = Blur {
+            same_showing: SHOWINGS.load(Ordering::SeqCst) == showing,
+            visible: window.is_visible().unwrap_or(false),
+            refocused: window.is_focused().unwrap_or(false),
+            foreground_is_another_app: gameproc::foreground_is_another_app(),
+        };
+        if !should_dismiss(blur) {
+            return;
+        }
+        // `dismiss`, not `hide`: focus is already wherever the player sent it, and
+        // dragging MX Bikes forward would fight the app they just switched to.
+        if let Err(e) = dismiss(window.app_handle()) {
+            log::warn!("overlay didn't close after losing focus: {e}");
+        }
+    });
 }
 
 /// Put the overlay over the game's window, wherever that is.
@@ -326,5 +396,66 @@ mod tests {
         let app = mock_app();
         dismiss(app.handle()).expect("nothing to dismiss is not a failure");
         assert!(app.get_webview_window(LABEL).is_none());
+    }
+
+    /// A blur with nothing else going on: the player clicked back into the game.
+    fn clicked_away() -> Blur {
+        Blur {
+            same_showing: true,
+            visible: true,
+            refocused: false,
+            foreground_is_another_app: true,
+        }
+    }
+
+    #[test]
+    fn clicking_back_into_the_game_closes_the_overlay() {
+        assert!(
+            should_dismiss(clicked_away()),
+            "an overlay left up unfocused is the empty box over the game",
+        );
+    }
+
+    /// Browse's import picker is a window of *our* process, and it deactivates the
+    /// overlay exactly like a click into the game does. Closing the overlay while its
+    /// own dialog is up would strand the player in a file picker with nothing behind it.
+    #[test]
+    fn our_own_file_picker_does_not_close_it() {
+        let blur = Blur {
+            foreground_is_another_app: false,
+            ..clicked_away()
+        };
+        assert!(!should_dismiss(blur));
+    }
+
+    #[test]
+    fn coming_back_during_the_settle_keeps_it_open() {
+        let blur = Blur {
+            refocused: true,
+            ..clicked_away()
+        };
+        assert!(!should_dismiss(blur));
+    }
+
+    /// The hotkey, Esc and the close button all hide the window themselves, and each
+    /// one blurs it on the way out. The pending check must not fire into that.
+    #[test]
+    fn an_already_hidden_overlay_is_left_alone() {
+        let blur = Blur {
+            visible: false,
+            ..clicked_away()
+        };
+        assert!(!should_dismiss(blur));
+    }
+
+    /// Click into the game, then hit the hotkey before the settle is up: the overlay
+    /// the player just summoned must not be closed by the previous showing's blur.
+    #[test]
+    fn a_resummon_during_the_settle_survives() {
+        let blur = Blur {
+            same_showing: false,
+            ..clicked_away()
+        };
+        assert!(!should_dismiss(blur));
     }
 }
