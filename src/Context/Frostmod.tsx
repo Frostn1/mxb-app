@@ -18,6 +18,7 @@ import {
 } from "../api/mods";
 import type { FrostmodStatus } from "../types";
 import { displayName } from "../lib/mods";
+import { useT, type TFunc } from "../i18n/context";
 import { FrostmodContext } from "./FrostmodContext";
 
 const POLL_MS = 5000;
@@ -26,17 +27,22 @@ const POLL_MS = 5000;
  * Name what the folder watcher picked up. The watcher reports mods as `<type>/<name>`;
  * showing them beats a generic "your folder changed", which left people unsure whether
  * the drop had been seen at all.
+ *
+ * Takes `t` rather than lowercasing a translated sentence to splice it mid-phrase —
+ * that only works in languages that lowercase mid-sentence, which German doesn't.
  */
-function watchDescription(mods: string[]): string {
-  const asked = "Asked FrostMod to reload the game.";
-  if (mods.length === 0) return asked;
+function watchDescription(mods: string[], t: TFunc): string {
+  if (mods.length === 0) return t("frostmod.askedReload");
   const names = mods.map((m) => displayName(m.split("/").pop() ?? m));
   const shown = names.slice(0, 3).join(", ");
   const rest = names.length - 3;
-  return `${rest > 0 ? `${shown} and ${rest} more` : shown} — ${asked.toLowerCase()}`;
+  const list =
+    rest > 0 ? t("frostmod.andMore", { names: shown, count: rest }) : shown;
+  return t("frostmod.watchDesc", { names: list });
 }
 
 export function FrostmodProvider({ children }: { children: ReactNode }) {
+  const t = useT();
   const [running, setRunning] = useState<boolean | null>(null);
   const [status, setStatus] = useState<FrostmodStatus | null>(null);
   const [installing, setInstalling] = useState(false);
@@ -96,8 +102,10 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
         // report, and claiming otherwise is what makes a failed reload so confusing.
         const mods = p.mods ?? [];
         toast.success(
-          mods.length === 1 ? "New mod added" : `${mods.length || "New"} mods added`,
-          { description: watchDescription(mods) },
+          mods.length === 0
+            ? t("frostmod.newModsAdded")
+            : t("frostmod.modsAdded", { count: mods.length }),
+          { description: watchDescription(mods, t) },
         );
       }
       void probe();
@@ -105,7 +113,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       unlisten = fn;
     });
     return () => unlisten?.();
-  }, [probe]);
+  }, [probe, t]);
 
   const reload = useCallback(async () => {
     const outcome = await reloadFrostmod();
@@ -117,12 +125,12 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     try {
       const started = await frostmodStart();
       await probe();
-      if (started) toast.success("FrostMod started");
-      else toast.info("FrostMod is already running");
+      if (started) toast.success(t("frostmod.started"));
+      else toast.info(t("frostmod.alreadyRunning"));
     } catch (e) {
-      toast.error("Couldn't start FrostMod", { description: String(e) });
+      toast.error(t("frostmod.startFailed"), { description: String(e) });
     }
-  }, [probe]);
+  }, [probe, t]);
 
   const install = useCallback(async () => {
     setInstalling(true);
@@ -132,15 +140,15 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       // which would race that restart and spawn a second instance.
       const version = await frostmodInstall();
       await refreshStatus();
-      toast.success(`FrostMod ${version} installed`, {
-        description: "It'll live-reload the game when you add mods.",
+      toast.success(t("frostmod.installedToast", { version }), {
+        description: t("frostmod.installedToastDesc"),
       });
     } catch (e) {
-      toast.error("Couldn't install FrostMod", { description: String(e) });
+      toast.error(t("frostmod.installFailed"), { description: String(e) });
     } finally {
       setInstalling(false);
     }
-  }, [refreshStatus]);
+  }, [refreshStatus, t]);
 
   // FrostMod is core to the app, so set it up automatically on first run instead
   // of prompting: once we learn it isn't installed, download + start it silently.

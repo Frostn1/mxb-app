@@ -1,4 +1,5 @@
 /** Shared display helpers for mod names, dates, and folders. */
+import { getLocale, translate } from "../i18n/core";
 
 const MOD_EXT = /\.(pkz|zip|rar|7z|pnt)$/i;
 
@@ -9,14 +10,14 @@ export function displayName(name: string): string {
 
 /** Human folder label; the type root shows as "(root)". */
 export function folderLabel(folder: string): string {
-  return folder || "(root)";
+  return folder || translate(getLocale(), "library.rootFolder");
 }
 
-/** Compact "Jul 8, 2026" date. */
+/** Compact "Jul 8, 2026" date, in the app's language — not the OS's. */
 export function formatDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString(getLocale(), {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -27,7 +28,7 @@ export function formatDate(iso: string): string {
 export function formatDateShort(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(getLocale(), { month: "short", day: "numeric" });
 }
 
 /** Best-guess file format (e.g. ".pkz") from a download URL. */

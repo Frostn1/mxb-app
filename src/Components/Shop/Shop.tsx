@@ -2,16 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 import { Store, LogOut, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
-  getInstalledMods,
-  normalizeModName,
   onShopAuth,
   shopLogin,
   shopLogout,
   shopMyDownloads,
   shopStatus,
+  scanLibrary,
   type ShopItem,
 } from "../../api/mods";
+import {
+  EMPTY_INSTALLED_INDEX,
+  buildInstalledIndex,
+  type InstalledIndex,
+} from "../../lib/installedMatch";
 import { useInstall } from "../../Context/Install";
+import { useT, type TFunc } from "../../i18n/context";
 import ModCard from "../Browse/ModCard";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
@@ -22,9 +27,10 @@ interface ShopProps {
 }
 
 export default function Shop({ refreshKey }: ShopProps) {
+  const t = useT();
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [items, setItems] = useState<ShopItem[]>([]);
-  const [installedNames, setInstalledNames] = useState<Set<string>>(new Set());
+  const [installed, setInstalled] = useState<InstalledIndex>(EMPTY_INSTALLED_INDEX);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,26 +72,26 @@ export default function Shop({ refreshKey }: ShopProps) {
     const unlisten = onShopAuth((ok) => {
       if (ok) {
         setLoggedIn(true);
-        toast.success("Signed in to MX Bikes Shop");
+        toast.success(t("shop.signedIn"));
         void loadDownloads();
       } else {
-        toast.error("Couldn't capture your MX Bikes Shop session");
+        toast.error(t("shop.sessionFailed"));
       }
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [loadDownloads]);
+  }, [loadDownloads, t]);
 
   // Keep the "installed" badges in sync with the tracks library.
   useEffect(() => {
     let cancelled = false;
-    getInstalledMods("mods/tracks")
-      .then((installed) => {
+    scanLibrary("mods/tracks")
+      .then((entries) => {
         if (cancelled) return;
-        setInstalledNames(new Set(installed.map((m) => normalizeModName(m.name))));
+        setInstalled(buildInstalledIndex(entries.map((e) => e.name)));
       })
-      .catch(() => !cancelled && setInstalledNames(new Set()));
+      .catch(() => !cancelled && setInstalled(EMPTY_INSTALLED_INDEX));
     return () => {
       cancelled = true;
     };
@@ -94,11 +100,11 @@ export default function Shop({ refreshKey }: ShopProps) {
   const install = useCallback(
     (item: ShopItem) => {
       startShopInstall(item);
-      toast.success(`Queued “${item.title}”`, {
-        description: "Installing to your tracks folder.",
+      toast.success(t("browse.queued", { title: item.title }), {
+        description: t("shop.queuedDesc"),
       });
     },
-    [startShopInstall],
+    [startShopInstall, t],
   );
 
   const logout = useCallback(async () => {
@@ -112,21 +118,19 @@ export default function Shop({ refreshKey }: ShopProps) {
   if (loggedIn === false) {
     return (
       <div className="flex h-full flex-col">
-        <Header />
+        <Header t={t} />
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-7 text-center">
           <div className="grid size-14 place-items-center rounded-2xl bg-foreground/[0.06] text-foreground/50">
             <Store className="size-7" strokeWidth={1.5} />
           </div>
           <div className="flex max-w-sm flex-col gap-1.5">
-            <h2 className="text-[15px] font-semibold">Sign in to MX Bikes Shop</h2>
+            <h2 className="text-[15px] font-semibold">{t("shop.signInTitle")}</h2>
             <p className="text-[12.5px] text-muted-foreground">
-              Log in to mxbikes-shop.com to see and install the tracks
-              you&apos;ve purchased. We open the real site — your password never
-              touches this app.
+              {t("shop.signInBody")}
             </p>
           </div>
           <Button onClick={() => void shopLogin()}>
-            <Store className="size-4" /> Sign in
+            <Store className="size-4" /> {t("shop.signIn")}
           </Button>
         </div>
       </div>
@@ -136,6 +140,7 @@ export default function Shop({ refreshKey }: ShopProps) {
   return (
     <div className="flex h-full flex-col">
       <Header
+        t={t}
         right={
           loggedIn ? (
             <div className="ml-auto flex items-center gap-2">
@@ -145,10 +150,10 @@ export default function Shop({ refreshKey }: ShopProps) {
                 onClick={() => void loadDownloads()}
                 disabled={loading}
               >
-                <RefreshCw className="size-3.5" /> Refresh
+                <RefreshCw className="size-3.5" /> {t("common.refresh")}
               </Button>
               <Button variant="outline" size="sm" onClick={() => void logout()}>
-                <LogOut className="size-3.5" /> Log out
+                <LogOut className="size-3.5" /> {t("shop.logOut")}
               </Button>
             </div>
           ) : undefined
@@ -159,10 +164,10 @@ export default function Shop({ refreshKey }: ShopProps) {
         {error ? (
           <div className="flex flex-col items-center gap-3 py-20 text-center">
             <p className="text-[13px] text-destructive">
-              Couldn&apos;t load your downloads: {error}
+              {t("shop.loadFailed", { error })}
             </p>
             <Button variant="outline" size="sm" onClick={() => void loadDownloads()}>
-              Retry
+              {t("common.retry")}
             </Button>
           </div>
         ) : loading || loggedIn === null ? (
@@ -173,7 +178,7 @@ export default function Shop({ refreshKey }: ShopProps) {
           </div>
         ) : items.length === 0 ? (
           <p className="py-20 text-center text-[13px] text-muted-foreground">
-            No purchased downloads found on your account yet.
+            {t("shop.empty")}
           </p>
         ) : (
           <div className="grid grid-cols-4 gap-3.5">
@@ -182,7 +187,7 @@ export default function Shop({ refreshKey }: ShopProps) {
                 key={item.id}
                 mod={item}
                 isBike={false}
-                installed={installedNames.has(normalizeModName(item.title))}
+                installed={installed.has(item.title)}
                 selected={false}
                 selectionActive={false}
                 onOpen={() => install(item)}
@@ -197,11 +202,13 @@ export default function Shop({ refreshKey }: ShopProps) {
   );
 }
 
-function Header({ right }: { right?: React.ReactNode }) {
+function Header({ t, right }: { t: TFunc; right?: React.ReactNode }) {
   return (
     <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-      <h1 className="text-[21px] font-bold tracking-[-0.2px]">Shop</h1>
-      <span className="text-[12.5px] text-muted-foreground">My Downloads</span>
+      <h1 className="text-[21px] font-bold tracking-[-0.2px]">{t("nav.shop")}</h1>
+      <span className="text-[12.5px] text-muted-foreground">
+        {t("shop.myDownloads")}
+      </span>
       {right}
     </header>
   );

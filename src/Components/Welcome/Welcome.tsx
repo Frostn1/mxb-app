@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Snowflake, ArrowLeft, ArrowRight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useT, type TKey } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -11,8 +12,8 @@ interface WelcomeProps {
 
 interface Slide {
   icon: LucideIcon;
-  title: string;
-  body: string;
+  title: TKey;
+  body: TKey;
 }
 
 // Just the intro. The per-feature walkthrough (Browse, Library, FrostMod, …) is
@@ -21,12 +22,13 @@ interface Slide {
 const SLIDES: Slide[] = [
   {
     icon: Snowflake,
-    title: "Welcome to MXB App",
-    body: "Your mod manager for MX Bikes. Keep your tracks, bikes and paints organized in one place — no more zip files scattered across your desktop. We'll show you around in a few seconds.",
+    title: "welcome.intro.title",
+    body: "welcome.intro.body",
   },
 ];
 
 export default function Welcome({ onDone }: WelcomeProps) {
+  const t = useT();
   const [index, setIndex] = useState(0);
   const slide = SLIDES[index];
   const Icon = slide.icon;
@@ -44,10 +46,10 @@ export default function Welcome({ onDone }: WelcomeProps) {
           </div>
           <div className="flex flex-col items-center gap-2">
             <h1 className="text-center text-[24px] font-extrabold tracking-[-0.4px]">
-              {slide.title}
+              {t(slide.title)}
             </h1>
             <p className="min-h-[72px] max-w-[400px] text-center text-[13.5px] leading-relaxed text-muted-foreground">
-              {slide.body}
+              {t(slide.body)}
             </p>
           </div>
         </div>
@@ -68,21 +70,21 @@ export default function Welcome({ onDone }: WelcomeProps) {
 
         {SLIDES.length === 1 ? (
           <Button className="w-full" onClick={onDone}>
-            Get started
+            {t("welcome.getStarted")}
           </Button>
         ) : (
           <div className="flex w-full items-center justify-between gap-3">
             {index > 0 ? (
               <Button variant="ghost" onClick={back}>
-                <ArrowLeft /> Back
+                <ArrowLeft /> {t("common.back")}
               </Button>
             ) : (
               <Button variant="ghost" onClick={onDone}>
-                Skip
+                {t("common.skip")}
               </Button>
             )}
             <Button onClick={next}>
-              {isLast ? "Get started" : "Next"}
+              {isLast ? t("welcome.getStarted") : t("common.next")}
               {!isLast && <ArrowRight />}
             </Button>
           </div>
