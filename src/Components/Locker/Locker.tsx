@@ -75,8 +75,8 @@ function swapNote(
         return t("locker.modelRefreshing");
       case "not_running":
         return t("locker.modelFrostmodNotRunning");
-      case "too_old":
-        return t("locker.modelFrostmodTooOld");
+      case "withheld":
+        return t("locker.modelReselectBike");
       case "write_failed":
         return t("locker.modelFrostmodUnreachable");
       case "unsupported":

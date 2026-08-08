@@ -150,6 +150,8 @@ export const de: Translation = {
     "„{{label}}“ auf {{bike}} angewendet — gespeichert. Wähle dein Profil in MX Bikes (Profilmenü) neu aus, um den neuen Look zu laden.",
   "presets.appliedNextTime":
     "„{{label}}“ auf {{bike}} angewendet — gespeichert. Es wird beim nächsten Start des Spiels geladen.",
+  "presets.appliedReselectBike":
+    "„{{label}}“ auf {{bike}} angewendet — die Lackierungen sind live; wähle das Motorrad in MX Bikes neu aus, um das Modell zu sehen.",
   "presets.phaseBundling": "Dateien werden verpackt…",
   "presets.phaseUploading": "Paket wird hochgeladen…",
   "presets.phaseDownloading": "Paket wird heruntergeladen…",
@@ -692,8 +694,8 @@ export const de: Translation = {
     "Wird im Spiel aktualisiert — wenn es dein ausgewähltes Motorrad ist, ändert es sich jetzt.",
   "locker.modelFrostmodNotRunning":
     "Starte FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
-  "locker.modelFrostmodTooOld":
-    "Aktualisiere FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
+  "locker.modelReselectBike":
+    "Modell gewechselt — wähle das Motorrad in MX Bikes neu aus, um es zu sehen.",
   "locker.modelFrostmodUnreachable":
     "FrostMod war nicht erreichbar — wähle das Motorrad im Spiel neu aus, um es zu laden.",
   "locker.modelRefreshWindowsOnly":
@@ -868,10 +870,15 @@ export const de: Translation = {
   "manage.contentSaved": "Renninhalte für „{{name}}“ gespeichert.",
   "manage.contentTitle": "Renninhalte für „{{name}}“",
   "manage.contentBody":
-    "Lackierung, Ausrüstung und Model-Swap des Presets werden von allein gefunden. Hier steht, was ein Loadout nicht sagen kann: die Strecke und die Packs, die ein Rennen ohnehin braucht.",
+    "Lackierung, Ausrüstung und Model-Swap des Presets werden von allein gefunden. Hier steht der Rest: die Strecke, zusätzliche Ausrüstungsmodelle, die bleiben sollen, und die Packs, die ein Rennen ohnehin braucht.",
   "manage.paneTracks": "Strecken",
+  "manage.paneHelmets": "Helme",
+  "manage.paneBoots": "Stiefel",
+  "manage.paneProtection": "Protektoren",
   "manage.paneKeep": "Immer behalten",
   "manage.paneTracksHint": "Die Strecke (oder Strecken), für die dieses Preset gedacht ist.",
+  "manage.paneGearHint":
+    "Zusätzliche Modelle, die in der Auswahl des Spiels bleiben. Die Ausrüstung des Presets wird ohnehin behalten — hake hier an, worauf du sonst noch zugreifen möchtest. Alles ohne Haken tritt zur Seite.",
   "manage.paneKeepHint":
     "Mods, die aktiv bleiben, egal was sonst passiert — das OEM-Pack, das Bike dieses Presets, eine Sound-Mod.",
   "manage.notInstalled": "nicht installiert",

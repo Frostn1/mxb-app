@@ -1,8 +1,137 @@
 # Changelog
 
+## 2026-08-08
+
+### Fixed
+- **The app builds again, and the rider wears the right textures.** Two changes landed
+  together that couldn't both be right: one gave every mesh part its own material table,
+  because an id counts into the table of the part that owns it and means nothing outside
+  it; the other added the custom-rider binder, written against the whole-model reading
+  that the first change deleted. The merge kept both, so `main` stopped compiling. The
+  rider binder now reads each part's id through its own node's table, the same way the
+  bike and gear viewers do — which is also the correct behaviour, not just the compiling
+  one: under the old reading every part resolved its ids through the first node's table,
+  which is what smeared one part's texture across another's geometry. Covered by a test
+  that pins two parts using the same local id to mean different textures.
+
+## 2026-08-07 — the protection slot shows what the mod actually is
+
+### Fixed
+- **Protection mods now show what they actually look like.** The protection slot is the
+  busiest and least conventional one on mxb-mods — chains, necklaces, hoodies, bibs,
+  backpacks, hair, the odd pickaxe — and unlike helmets and boots those mods bake their
+  look straight into the mesh instead of shipping a `.pnt`. The preview only ever looked
+  for a paint, so five of eight real mods pulled off the site came out as a featureless
+  grey shape. A piece with no paint to wear now wears the texture its own mesh carries,
+  each part bound to its own: a chest protector's shell and straps, or a chain's four baked
+  maps, land where the model says they go instead of all sharing one.
+- **A protection is drawn at the size it was made.** Every piece was being scaled to a
+  fixed fraction of the rider and re-centred on his chest, which inflated a thin necklace
+  to the proportions of a full vest and threw away the offset a chain or a hood is
+  deliberately authored to hang at. Protection is modelled in the rider's own frame, so
+  it's now placed as authored — its own size, its own offset — and the mount an `.hrc`
+  names is honoured.
+- **Mods that ship sealed loose files load.** A protection folder whose files are sealed
+  the way a `.pkz` seals its entries used to fail outright with "no gear mesh found"; those
+  now read like any other. Gear also follows the `gfx.cfg` → `.hrc` chain to find its mesh,
+  so a mod that names it for the piece (`neckbrace.edf`, `pickaxe.edf`) resolves instead of
+  relying on a guess from filenames, and stock gear whose folder doesn't use the slot's own
+  mesh name no longer comes up empty.
+- **Textures baked in Substance or Blender bind to the right mesh.** Maps exported under
+  the toolchain's names — `Vest_Normal` beside `Vest_BaseColor` — were counted as looks in
+  their own right, and since material indices count that list, every texture after one slid
+  onto the wrong part. That's why the Tactical Vest wore its pouch's normal map.
+
+### Changed
+- **Protection is no longer hidden by default in the Rider tab.** It was, back when it
+  rendered as a grey blob spanning the whole torso.
+
+## 2026-08-07
+
+### Fixed
+- **Race mode now clears the rider gear too.** Applying a race preset narrowed the bikes and
+  tracks the game could see and left the rider alone — every helmet, every boot, every
+  protection set and every gear livery you have installed still showed up in the game's
+  pickers, including the four hundred liveries sitting under the one helmet the preset
+  actually names. Manage only ever moved archives and extracted tracks, on the reasoning that
+  a loose `.pnt` costs nothing to mount; true, but mounting was never the point — a preset
+  that names one paint means the others should be out of sight. Race mode now takes rider gear
+  models and liveries out of the way alongside the rest, keeps exactly what the preset names,
+  and brings them all back on Restore all.
+
+### Added
+- **Helmets, Boots and Protection tabs in a preset's race content.** Next to Tracks and
+  Always keep, three panes list the gear models you have installed so you can tick the spares
+  worth keeping reachable — picking them by hand instead of leaving it all to what the preset
+  happens to name. Anything unticked steps aside for the race; the preset's own gear is kept
+  for you either way.
+
+## 2026-08-07 — the Rider preview can wear a rider model
+
+### Added
+- **Custom rider models show up on the rider.** A rider model is a whole new body mesh, not a
+  texture — Rider+ and its variants install as folders under `mods/rider/riders`, and the
+  preview never looked there. It read the body out of the game's `rider.pkz` and nowhere else,
+  so picking an installed model listed the profile, found nothing to load, and rendered gear
+  floating where the rider should be. The body is now resolved from the installed model first,
+  loose or packed as a `.pkz`, and falls back to the game's own rider only when no model
+  supplies one. A rider packed as `riders/<name>.pkz` is listed in the picker too, as gear
+  already was.
+- **A rider model wears the kits you already own.** Rider+ ships its `paints` and `gloves`
+  folders empty on purpose, because existing gear is meant to work on it. A kit or glove paint
+  is now looked for in the chosen profile, then inside its archive, then under the stock
+  profiles — by exact name at every step, so reaching further never quietly swaps in a
+  different paint. The kit dropdown lists what you own rather than going blank on a fresh
+  model.
+
+### Fixed
+- **The rider stands up and faces forward.** Rider meshes don't agree on which axis is up: the stock motocross
+  rider is authored Y-up, while the supermoto rider and Rider+ are Z-up and arrived lying on
+  their back. Every piece of gear is anchored and scaled to a fraction of the body's height,
+  so a body on its side measured a quarter of a metre tall instead of a metre and a bit — the
+  helmet and boots shrank to specks and sank into the torso, which read as gear that never
+  loaded. Standing it up alone left it facing backwards, which matters just as much: the
+  viewer nudges the helmet and boots forward, so a rider turned around wears its gear through
+  its own back. A body whose longest axis isn't its height is now rolled upright *and* turned
+  to face front; one that already stands is left alone.
+- **A rider model loads without decoding pixels nobody sees.** Dressing a body in its own
+  baked textures used to inflate and re-encode every texture the mesh carried, then throw
+  most of them away — skin renders as a flat colour and the name and number planes render as
+  nothing at all. On a rider body that decode cost more than parsing the mesh. Only textures
+  the viewer can actually draw are decoded now, and they're kept per model so changing a
+  dropdown doesn't re-read a 67 MB body.
+- **The rider's textures are read off the model instead of memorised.** Which texture a body
+  part wears was decided by its material number: 1 was gloves, 2 was the face, 3 and 4 were
+  hidden. That is not a rule, it's the stock motocross rider's texture order memorised — and
+  no two rider models write that order the same way. The supermoto rider lists its face second
+  and its gloves third, so it has been wearing its face on its hands; Rider+ lists its gloves
+  first and its suit last, so it would have worn the glove texture over its whole body. Each
+  part now binds to the texture the mesh itself says it was drawn against, the same reading the
+  bike and gear previews already take. Anything a paint doesn't cover falls back to the
+  model's own texture, so a rider that ships no paints — or a model with pieces of its own —
+  renders as it was built rather than in flat grey.
+
 ## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
 
 ### Fixed
+- **The game no longer crashes to desktop when you pick a bike after swapping a model or
+  applying a preset.** Since 0.7.0, swapping a bike's model asked FrostMod to re-apply the
+  bike so the new mesh showed without the class-switch away-and-back. FrostMod v0.9.9 does
+  that by replaying a bike-load call it captured earlier — using a descriptor the game had
+  already finished with, never checking the object that call writes into, and swallowing
+  the resulting fault so the game carried on with a half-swapped machine. Nothing looked
+  wrong at the time; the crash landed on the *next* bike selected by hand, which is why it
+  read as "choosing a bike crashes the game" rather than as anything to do with the swap.
+  The app no longer sends that request to any FrostMod below v0.9.11 — the release that
+  stops replaying — and a FrostMod whose version it can't read counts as one to leave
+  alone, where before an unreadable version was given the benefit of the doubt. Model swaps
+  and presets still apply in full; the swapped model now appears when you re-select the
+  bike in the garage, and the toast says so instead of promising a live refresh.
+- **A preset that swaps a model no longer reports a live refresh it didn't get.** The
+  apply toast was derived purely from the paint/gear reload, which never touches the mesh —
+  so a preset carrying a model swap said "refreshed live in-game" while the bike on screen
+  kept its old bodywork. It now says the paints are live and names re-selecting the bike as
+  what shows the model.
 - **The Rider preview no longer goes quiet when it fails to update.** If resolving the
   rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
   tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
@@ -93,6 +222,42 @@
   own look".
 
 ### Fixed
+- **Every bike now paints the parts a paint is meant to reach.** This is the third pass at
+  the same bug, and the first that goes at what was actually wrong. A part's material was
+  being looked up in a table read from the top of the mesh file, treated as the model's
+  one and only table. It isn't a model-wide table at all — it is simply the *first* node's,
+  because that node's geometry starts exactly where it ends. **Every part carries its own**,
+  and a material id means nothing outside the part it belongs to. Reading one part's ids
+  through another's put the blank number-plate texture — the one the game composites race
+  numbers onto, which no paint can touch — over real bodywork: the Suzuki RM250 and RM125
+  wore it on the fork lowers, triple clamps and both levers, the Honda CR500AF on its entire
+  swingarm and front end, the Husqvarna TC 125/TC 250 on the fork guards, chain guard and
+  front bodywork. Across the 53 stock bikes it covered about 124,000 triangles of bodywork;
+  it now covers about 4,900, all of it geometry the mesh itself marks as number plates.
+  Bikes that share a part with another bike — much of the KTM, Husqvarna and GasGas range —
+  now bind that part identically on every one of them, where 9 such parts previously
+  disagreed.
+- **Swingarms and chain guards wearing each other's texture.** Where one mesh group holds
+  several materials, the ids were assumed to count upward from the group's first. They
+  don't — each range names its own. On the Husqvarna FC 250 and FC 350 that swapped the
+  swingarm body onto the plastics sheet and its chain guard onto the metals one, against
+  fourteen sibling bikes carrying the identical part the right way round.
+- **Bikes no longer look different from one launch to the next.** Choosing between two
+  readings of a material meant scoring a part's UV layout against the textures, and the
+  backdrop colour that scoring rested on was picked by iterating a hash map — so tied
+  colours resolved differently on each run, and sometimes twice within one run. Six bikes
+  bound parts differently between launches; on the Triumph TF 450-RC that was the whole
+  20,570-triangle frame and engine going blank on some runs. With one reading of a material
+  id there is nothing to score and nothing to guess: the scoring machinery is gone.
+- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
+  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
+  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
+  so the preview never blanks; but with no error anywhere that is indistinguishable from a
+  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
+  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
+  preview for as long as what you're looking at is out of date, and writes the error to the
+  console. The toast fires once per distinct message rather than once per pick, since a
+  persistent fault is re-hit on every slot edit.
 - **Bikes wearing the wrong texture on their bodywork.** A part's material was matched to
   the texture list in whatever order the exporter wrote it, which only works on bikes
   written in material order. The Kawasaki KX250/KX450 wore their blank number-plate texture
