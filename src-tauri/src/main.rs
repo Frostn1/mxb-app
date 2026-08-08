@@ -15,6 +15,7 @@ mod library;
 mod modelswap;
 mod mods;
 mod modwatch;
+mod overlay;
 mod paint;
 mod pkz;
 #[cfg(sidecar)]
@@ -1642,6 +1643,52 @@ fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), Strin
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Show or hide the in-game overlay. Also reachable from its global hotkey.
+#[tauri::command]
+fn overlay_toggle(app: tauri::AppHandle) -> Result<(), String> {
+    overlay::toggle(&app)
+}
+
+/// Dismiss the overlay (its close button and Esc) and hand focus back to the game.
+#[tauri::command]
+fn overlay_hide(app: tauri::AppHandle) -> Result<(), String> {
+    overlay::hide(&app)
+}
+
+#[tauri::command]
+fn overlay_state(app: tauri::AppHandle) -> overlay::OverlayState {
+    overlay::state(&config::load(&app).unwrap_or_default())
+}
+
+#[tauri::command]
+fn set_overlay_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.overlay_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Turning it off should also take the overlay off the screen, not just stop the
+    // hotkey from re-summoning it.
+    if !enabled {
+        let _ = overlay::hide(&app);
+    }
+    overlay::register(&app, &cfg)
+}
+
+/// Rebind the overlay hotkey. Validates and registers before saving, so a combo that
+/// another app already owns leaves the working one in place.
+#[tauri::command]
+fn set_overlay_hotkey(app: tauri::AppHandle, hotkey: String) -> Result<(), String> {
+    let previous = config::load(&app).unwrap_or_default();
+    let mut cfg = previous.clone();
+    cfg.overlay_hotkey = hotkey;
+    if let Err(e) = overlay::register(&app, &cfg) {
+        // Put the old binding back — a rejected combo must not leave the player with
+        // no way to open the overlay.
+        let _ = overlay::register(&app, &previous);
+        return Err(e);
+    }
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn set_watch_mods_reload(
     app: tauri::AppHandle,
@@ -1917,6 +1964,8 @@ fn main() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        // The overlay's hotkey has to fire while MX Bikes holds keyboard focus.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(FrostmodProcess::default())
         .manage(ModWatcher::default())
         .manage(shop_session::ShopSession::default())
@@ -1992,6 +2041,11 @@ fn main() {
                     let watcher = handle.state::<ModWatcher>();
                     modwatch::start(handle, &watcher, &cfg.mods_path);
                 }
+                // A combo another app already owns shouldn't stop the app from starting
+                // — Settings reports the state and lets the player pick another.
+                if let Err(e) = overlay::register(handle, &cfg) {
+                    log::warn!("overlay hotkey not registered: {e}");
+                }
             } else {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
@@ -2000,6 +2054,13 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                // Closing the overlay (Alt+F4, its own button) parks it rather than
+                // destroying it, so the next hotkey press doesn't rebuild the webview.
+                if window.label() == overlay::LABEL {
+                    api.prevent_close();
+                    let _ = overlay::hide(window.app_handle());
+                    return;
+                }
                 let cfg = config::load(window.app_handle()).unwrap_or_default();
                 // Never on Linux: the tray runs through libayatana-appindicator, which
                 // doesn't deliver click events to Tauri and isn't present at all on a
@@ -2061,6 +2122,11 @@ fn main() {
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_instant_refresh,
+            overlay_toggle,
+            overlay_hide,
+            overlay_state,
+            set_overlay_enabled,
+            set_overlay_hotkey,
             set_watch_mods_reload,
             frostmod_reload,
             frostmod_running,

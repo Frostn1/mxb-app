@@ -745,6 +745,44 @@ export function setInstantRefresh(enabled: boolean): Promise<void> {
   return invoke<void>("set_instant_refresh", { enabled });
 }
 
+/** The in-game overlay's settings, plus what the game is doing right now. */
+export interface OverlayState {
+  enabled: boolean;
+  /** Tauri accelerator string, e.g. `"CommandOrControl+Shift+M"`. */
+  hotkey: string;
+  gameRunning: boolean;
+  /** A DirectX app owns the screen exclusively — nothing can be drawn over it. */
+  fullscreenBlocked: boolean;
+}
+
+export function getOverlayState(): Promise<OverlayState> {
+  return invoke<OverlayState>("overlay_state");
+}
+
+/** Show or hide the overlay. The global hotkey does the same thing. */
+export function overlayToggle(): Promise<void> {
+  return invoke<void>("overlay_toggle");
+}
+
+/** Dismiss the overlay and hand keyboard focus back to MX Bikes. */
+export function overlayHide(): Promise<void> {
+  return invoke<void>("overlay_hide");
+}
+
+export function setOverlayEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_overlay_enabled", { enabled });
+}
+
+/** Rebind the overlay hotkey. Rejects (leaving the old one live) if the combo is taken. */
+export function setOverlayHotkey(hotkey: string): Promise<void> {
+  return invoke<void>("set_overlay_hotkey", { hotkey });
+}
+
+/** Fires when the overlay was summoned while the game held the screen exclusively. */
+export function onOverlayFullscreenBlocked(cb: () => void): Promise<UnlistenFn> {
+  return listen("overlay-fullscreen-blocked", () => cb());
+}
+
 /** Toggle watching the mods folder to reload the game on external changes. */
 export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });

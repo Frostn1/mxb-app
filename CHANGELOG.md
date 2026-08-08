@@ -3,6 +3,16 @@
 ## 2026-08-07
 
 ### Added
+- **An in-game overlay, on a hotkey.** Everything the app does still meant leaving the
+  game to do it. Ctrl+Shift+M (rebindable in Settings → In-game overlay) now brings
+  Presets, the Locker and Browse up over MX Bikes in a floating panel; Esc closes it and
+  hands control straight back to the game. It's the same UI the main window uses, not a
+  cut-down copy, and it pays off because presets and model swaps already apply to a
+  *running* game — pick a gear set from the pits and it's on you, no restart, no alt-tab.
+  Mods downloaded from Browse still need the usual content reload before the game sees
+  them. One real limit: nothing can be drawn over a game in exclusive fullscreen, so set
+  MX Bikes to borderless or windowed — if you summon the overlay and it can't appear, the
+  main window tells you why rather than leaving you guessing.
 - **Star ratings on browse thumbnails.** A mod that people have rated on mxb-mods.com now
   shows its score on the card the same way the site does — five stars filled to the
   nearest half, the average, and the vote count — so a good mod is recognisable before you

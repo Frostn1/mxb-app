@@ -24,6 +24,10 @@ export interface Config {
   welcomeSeen?: boolean;
   /** First-run guided tour already finished or skipped. */
   tourDone?: boolean;
+  /** Register the global hotkey that summons the in-game overlay (default true). */
+  overlayEnabled?: boolean;
+  /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+M"`. */
+  overlayHotkey?: string;
 }
 
 /** A track-mod as it appears in search results / browse grid. */

@@ -46,6 +46,14 @@ mod ffi {
 
     pub const WAIT_TIMEOUT_MS: u32 = 5_000;
 
+    /// `SHQueryUserNotificationState` — a DirectX app owns the screen exclusively.
+    /// Deliberately *not* `QUNS_BUSY` (2): a borderless-fullscreen game reports that
+    /// too, and borderless is exactly the case the overlay works in.
+    pub const QUNS_RUNNING_D3D_FULL_SCREEN: i32 = 3;
+
+    /// `ShowWindow` — un-minimize without changing the restored size/position.
+    pub const SW_RESTORE: i32 = 9;
+
     #[repr(C)]
     pub struct ProcessEntry32 {
         pub dw_size: u32,
@@ -92,6 +100,34 @@ mod ffi {
         ) -> Handle;
         pub fn WaitForSingleObject(handle: Handle, ms: u32) -> u32;
         pub fn CloseHandle(handle: Handle) -> i32;
+    }
+
+    /// `EnumWindows` callback: return 0 to stop the walk, non-zero to continue.
+    pub type EnumWindowsProc = unsafe extern "system" fn(hwnd: Handle, lparam: isize) -> i32;
+
+    #[repr(C)]
+    #[derive(Default)]
+    pub struct Rect {
+        pub left: i32,
+        pub top: i32,
+        pub right: i32,
+        pub bottom: i32,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        pub fn EnumWindows(callback: EnumWindowsProc, lparam: isize) -> i32;
+        pub fn GetWindowRect(hwnd: Handle, rect: *mut Rect) -> i32;
+        pub fn GetWindowThreadProcessId(hwnd: Handle, process_id: *mut u32) -> u32;
+        pub fn IsWindowVisible(hwnd: Handle) -> i32;
+        pub fn IsIconic(hwnd: Handle) -> i32;
+        pub fn ShowWindow(hwnd: Handle, cmd: i32) -> i32;
+        pub fn SetForegroundWindow(hwnd: Handle) -> i32;
+    }
+
+    #[link(name = "shell32")]
+    extern "system" {
+        pub fn SHQueryUserNotificationState(state: *mut i32) -> i32;
     }
 
     /// Compare a fixed-size NUL-padded ANSI field against `name`, case-insensitively.
@@ -174,6 +210,91 @@ pub fn is_game_running() -> bool {
     find_game_pid().is_some()
 }
 
+/// State threaded through the `EnumWindows` walk: the pid we want, the handle we found.
+#[cfg(windows)]
+struct WindowSearch {
+    pid: u32,
+    hwnd: Option<ffi::Handle>,
+}
+
+/// `EnumWindows` callback — keep the first visible top-level window owned by `pid`.
+///
+/// SAFETY: called by the OS with a live window handle and the `lparam` we passed to
+/// `EnumWindows`, which is a pointer to a `WindowSearch` that outlives the walk.
+#[cfg(windows)]
+unsafe extern "system" fn collect_game_window(hwnd: ffi::Handle, lparam: isize) -> i32 {
+    let search = &mut *(lparam as *mut WindowSearch);
+    let mut pid = 0u32;
+    ffi::GetWindowThreadProcessId(hwnd, &mut pid);
+    if pid == search.pid && ffi::IsWindowVisible(hwnd) != 0 {
+        search.hwnd = Some(hwnd);
+        return 0; // found it — stop walking
+    }
+    1
+}
+
+/// The game's main window handle, if the game is up and has drawn one.
+#[cfg(windows)]
+fn game_hwnd() -> Option<ffi::Handle> {
+    let pid = find_game_pid()?;
+    let mut search = WindowSearch { pid, hwnd: None };
+    // SAFETY: `search` lives for the whole (synchronous) walk, and the callback only
+    // ever dereferences the pointer we hand it here.
+    unsafe {
+        ffi::EnumWindows(collect_game_window, &mut search as *mut WindowSearch as isize);
+    }
+    search.hwnd
+}
+
+/// Hand keyboard focus back to MX Bikes after the overlay closes.
+///
+/// Windows only grants foreground rights to a process that "owns" the last input —
+/// which we do, because the caller got here through our registered global hotkey.
+/// Best-effort: a refused activation just leaves the player one alt-tab away.
+#[cfg(windows)]
+pub fn focus_game() -> bool {
+    let Some(hwnd) = game_hwnd() else {
+        return false;
+    };
+    // SAFETY: `hwnd` came from an `EnumWindows` walk in this same call; both calls
+    // are read/activate-only and safe on a stale handle (they simply fail).
+    unsafe {
+        if ffi::IsIconic(hwnd) != 0 {
+            ffi::ShowWindow(hwnd, ffi::SW_RESTORE);
+        }
+        ffi::SetForegroundWindow(hwnd) != 0
+    }
+}
+
+/// Where the game's window sits on the desktop, in physical pixels
+/// (`left, top, right, bottom`).
+///
+/// Used to put the overlay over the game rather than wherever the primary monitor is —
+/// a triple-screen sim rig would otherwise get it on the wrong display.
+#[cfg(windows)]
+pub fn game_window_rect() -> Option<(i32, i32, i32, i32)> {
+    let hwnd = game_hwnd()?;
+    let mut rect = ffi::Rect::default();
+    // SAFETY: `hwnd` is a live handle from the walk above; `GetWindowRect` only writes
+    // the four ints of the `RECT` we own.
+    let ok = unsafe { ffi::GetWindowRect(hwnd, &mut rect) != 0 };
+    ok.then_some((rect.left, rect.top, rect.right, rect.bottom))
+}
+
+/// Is a DirectX app holding the screen in *exclusive* fullscreen right now?
+///
+/// Nothing can be drawn over that, overlay included — the player has to switch the
+/// game to borderless/windowed. Advisory only: we still try to show the overlay, and
+/// let the caller surface guidance alongside it.
+#[cfg(windows)]
+pub fn is_exclusive_fullscreen() -> bool {
+    let mut state = 0i32;
+    // SAFETY: shell32 writes one `QUNS_*` value through the pointer; a failed call
+    // (non-zero HRESULT) leaves it at our initial 0, which matches no state.
+    let hr = unsafe { ffi::SHQueryUserNotificationState(&mut state) };
+    hr == 0 && state == ffi::QUNS_RUNNING_D3D_FULL_SCREEN
+}
+
 /// Experimental: re-run the game's profile-load routine in the live process. Best-effort.
 #[cfg(windows)]
 pub fn refresh_look() -> LiveRefresh {
@@ -228,6 +349,24 @@ pub fn is_game_running() -> bool {
 #[cfg(not(windows))]
 pub fn refresh_look() -> LiveRefresh {
     LiveRefresh::Unsupported
+}
+
+/// No game to focus on a dev machine — the overlay just stays a normal window.
+#[cfg(not(windows))]
+pub fn focus_game() -> bool {
+    false
+}
+
+/// Only Windows has an exclusive-fullscreen mode to be blocked by.
+#[cfg(not(windows))]
+pub fn is_exclusive_fullscreen() -> bool {
+    false
+}
+
+/// No game window to sit over — the overlay stays where Tauri centred it.
+#[cfg(not(windows))]
+pub fn game_window_rect() -> Option<(i32, i32, i32, i32)> {
+    None
 }
 
 /// What happened when the user pressed Play.

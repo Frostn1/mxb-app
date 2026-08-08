@@ -7,9 +7,16 @@ import LooseSwapPrompt from "./Components/Locker/LooseSwapPrompt";
 import { ThemeProvider } from "./Context/Theme";
 import { FrostmodProvider } from "./Context/Frostmod";
 import { ConfigContext } from "./Context/Config";
+import { toast } from "sonner";
 import { Toaster } from "@/Components/ui/sonner";
 import { TooltipProvider } from "@/Components/ui/tooltip";
-import { bikePreviewAvailable, getConfig, isConfigured, setIntroSeen } from "./api/mods";
+import {
+  bikePreviewAvailable,
+  getConfig,
+  isConfigured,
+  onOverlayFullscreenBlocked,
+  setIntroSeen,
+} from "./api/mods";
 import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
@@ -70,6 +77,21 @@ const App = () => {
       }
     })();
   }, [reloadConfig]);
+
+  // The overlay can't draw over a game in exclusive fullscreen, and it can't say so
+  // itself — it's behind the game. The message waits here, where the player lands the
+  // moment they alt-tab to find out why nothing happened.
+  useEffect(() => {
+    const unlisten = onOverlayFullscreenBlocked(() =>
+      toast.warning("The overlay can't show over exclusive fullscreen", {
+        description:
+          "Set MX Bikes to borderless or windowed in Options → Video, then try the shortcut again.",
+      }),
+    );
+    return () => {
+      void unlisten.then((off) => off()).catch(() => {});
+    };
+  }, []);
 
   // Block the webview's browser refresh/find shortcuts.
   useEffect(() => {
