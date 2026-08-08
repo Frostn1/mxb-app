@@ -1,6 +1,19 @@
 # Changelog
 
-## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
+## 2026-08-07
+
+### Fixed
+- **Browse knows what you already have.** The "Installed" badge almost never appeared —
+  one reporter's library scored 19 of 96 tracks and **0 of 96** bikes and rider items,
+  all of them installed and working in-game. Two causes. Browse asked for installed mods
+  with a scan that keeps `.pkz` files only, so extracted track folders and every `.pnt`
+  paint were invisible; since the Bikes and Rider categories are mostly liveries and gear
+  paints, nothing in them could ever be badged. And it compared the site's post title to
+  the packaged filename as exact strings, which post titles never survive — they carry
+  author credits, release tags and notes like "(READ INSTRUCTIONS)". Browse now reads the
+  same full library scan the Library tab uses, and matches titles the way a person would:
+  one name spelled inside the other, or enough distinctive words in common. Careful
+  enough to still tell two colourways of the same bike apart. (#26)
 
 ### Added
 - **Releases now say which file to download.** The release body led with "See the assets

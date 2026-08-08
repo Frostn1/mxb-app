@@ -14,11 +14,15 @@ import { useConfig } from "../../Context/Config";
 import {
   DEFAULT_MOD_TYPE,
   MOD_TYPES,
-  getInstalledMods,
-  normalizeModName,
+  scanLibrary,
   setIntroSeen,
   type ModType,
 } from "../../api/mods";
+import {
+  EMPTY_INSTALLED_INDEX,
+  buildInstalledIndex,
+  type InstalledIndex,
+} from "../../lib/installedMatch";
 import type { Loadout } from "../../types";
 
 interface DashboardProps {
@@ -36,22 +40,22 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   // Bumped after an install so the library re-scans.
   const [libraryVersion, setLibraryVersion] = useState(0);
-  // Normalized names of installed mods for the active type (for "in library" badges).
-  const [installedNames, setInstalledNames] = useState<Set<string>>(new Set());
+  // What's on disk for the active type, as a fuzzy lookup (for "in library" badges).
+  const [installed, setInstalled] = useState<InstalledIndex>(EMPTY_INSTALLED_INDEX);
   // A preset handed off from the Presets tab to load in the Rider tab (its
   // "View in Rider" button). Consumed once by the Rider view, then cleared.
   const [riderPreset, setRiderPreset] = useState<Loadout | null>(null);
 
+  // The full library scan, not `getInstalledMods` — that one sees `.pkz` files only, so
+  // extracted track folders and every `.pnt` paint/livery counted as "not installed".
   useEffect(() => {
     let cancelled = false;
-    getInstalledMods(modType.installSubpath)
-      .then((installed) => {
+    scanLibrary(modType.installSubpath)
+      .then((entries) => {
         if (cancelled) return;
-        setInstalledNames(
-          new Set(installed.map((m) => normalizeModName(m.name))),
-        );
+        setInstalled(buildInstalledIndex(entries.map((e) => e.name)));
       })
-      .catch(() => !cancelled && setInstalledNames(new Set()));
+      .catch(() => !cancelled && setInstalled(EMPTY_INSTALLED_INDEX));
     return () => {
       cancelled = true;
     };
@@ -131,13 +135,13 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               slug={selectedSlug}
               modType={modType}
               categoryId={selectedCategoryId ?? modType.categoryId}
-              installedNames={installedNames}
+              installed={installed}
               onBack={() => setSelectedSlug(null)}
             />
           ) : view === "browse" ? (
             <Browse
               modType={modType}
-              installedNames={installedNames}
+              installed={installed}
               onOpenMod={openMod}
               onChangeType={changeType}
             />

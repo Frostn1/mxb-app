@@ -5,11 +5,11 @@ import {
   MOD_TYPES,
   SEARCH_PAGE_SIZE,
   isLiveryContext,
-  normalizeModName,
   resolveQuickInstall,
   searchMods,
   type ModType,
 } from "../../api/mods";
+import type { InstalledIndex } from "../../lib/installedMatch";
 import type { ModSummary } from "../../types";
 import { useInstall } from "../../Context/Install";
 import ModCard from "./ModCard";
@@ -31,14 +31,14 @@ import { cn } from "@/lib/utils";
 
 interface BrowseProps {
   modType: ModType;
-  installedNames: Set<string>;
+  installed: InstalledIndex;
   onOpenMod: (slug: string, categoryId: number) => void;
   onChangeType: (type: ModType) => void;
 }
 
 export default function Browse({
   modType,
-  installedNames,
+  installed,
   onOpenMod,
   onChangeType,
 }: BrowseProps) {
@@ -63,8 +63,8 @@ export default function Browse({
   const selectionActive = selected.size > 0;
 
   const isInstalled = useCallback(
-    (mod: ModSummary) => installedNames.has(normalizeModName(mod.title)),
-    [installedNames],
+    (mod: ModSummary) => installed.has(mod.title),
+    [installed],
   );
 
   // Reset the category filter (and any selection) when the mod type changes —
