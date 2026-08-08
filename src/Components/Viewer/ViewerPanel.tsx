@@ -6,11 +6,11 @@ import { Button } from "../ui/button";
 import { Dialog, DialogContent } from "../ui/dialog";
 import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import { loadRiderModel } from "../../api/mods";
-import type { Loadout, RiderPart } from "../../types";
+import type { Loadout, PaintTexture, RiderPart } from "../../types";
 import { useT } from "../../i18n/context";
 
 interface ViewerPanelProps {
-  texture?: string | null;
+  texture?: PaintTexture | null;
   loadout?: Loadout;
   riderOnly?: boolean;
   hiddenParts?: RiderPart["part"][];

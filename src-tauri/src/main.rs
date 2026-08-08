@@ -13,6 +13,7 @@ mod frostmod_manage;
 mod gameproc;
 mod install;
 mod library;
+mod lru;
 mod modelswap;
 mod mods;
 mod modstate;
@@ -26,6 +27,7 @@ mod sidecar;
 mod presets;
 mod shop_session;
 mod soundmods;
+mod texstore;
 mod upload;
 
 use config::AppConfig;
@@ -457,6 +459,17 @@ fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, Strin
     paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
+/// Raw RGBA for a texture the viewer was handed a token for.
+///
+/// Returns an `ipc::Response`, which travels as `application/octet-stream` and lands in the
+/// webview as an `ArrayBuffer` — the pixels are never encoded, base64'd, or parsed as JSON
+/// on the way. The frontend feeds the buffer straight to a `THREE.DataTexture`. `async`
+/// keeps the copy off the main thread, as with every other command here.
+#[tauri::command]
+async fn texture_bytes(token: String) -> tauri::ipc::Response {
+    tauri::ipc::Response::new(texstore::bytes_or_missing(&token))
+}
+
 #[tauri::command]
 async fn unpack_pkz(path: String, out_dir: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || unpack_pkz_blocking(path, out_dir))
@@ -484,10 +497,23 @@ struct BikeModel {
     paints: Vec<BikePaint>,
 }
 
-fn bike_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, BikeModel>> {
-    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, BikeModel>>> =
+impl BikeModel {
+    /// Every texture token the model holds, so evicting it can free the pixels too.
+    fn tokens(&self) -> Vec<String> {
+        self.paints
+            .iter()
+            .flat_map(|p| p.textures.iter().map(|t| t.token.clone()))
+            .collect()
+    }
+}
+
+/// Bikes are big (geometry plus every paint's pixels), so hold only the few most recent.
+const BIKE_CACHE_CAP: usize = 3;
+
+fn bike_cache() -> &'static std::sync::Mutex<lru::Lru<BikeModel>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<lru::Lru<BikeModel>>> =
         std::sync::OnceLock::new();
-    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+    CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(BIKE_CACHE_CAP)))
 }
 
 fn bike_cache_key(source: &str) -> String {
@@ -511,7 +537,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     use rayon::prelude::*;
     let t0 = std::time::Instant::now();
     let key = bike_cache_key(&source);
-    if let Some(m) = bike_cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
+    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         log::info!("load_bike_model {source}: cache hit ({:?})", t0.elapsed());
         return Ok(m);
     }
@@ -642,7 +668,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
         })
         .collect();
     let base_count = base.len();
-    let t_encode = t0.elapsed();
+    let t_textures = t0.elapsed();
 
     let bound: std::collections::HashSet<String> = nodes
         .iter()
@@ -687,12 +713,18 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
         });
     }
 
+    let distinct_tex: std::collections::HashSet<&str> = paints
+        .iter()
+        .flat_map(|p| p.textures.iter().map(|t| t.token.as_str()))
+        .collect();
     log::info!(
-        "load_bike_model {source}: {} paint(s) + {base_count} base tex | read {t_read:?}, parse {:?}, encode {:?}, total {:?}",
+        "load_bike_model {source}: {} paint(s) + {base_count} base tex | read {t_read:?}, parse {:?}, decode {:?}, total {:?} | {} distinct texture(s), {:.1} MB resident in the texture store",
         paints.len(),
         t_parse - t_read,
-        t_encode - t_parse,
+        t_textures - t_parse,
         t0.elapsed(),
+        distinct_tex.len(),
+        texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
     );
     for p in &paints {
         let mut names: Vec<&str> = p.textures.iter().map(|t| t.name.as_str()).collect();
@@ -720,10 +752,10 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
 
     let model = BikeModel { nodes, paints };
     if let Ok(mut c) = bike_cache().lock() {
-        if c.len() >= 6 {
-            c.clear();
+        // The evicted bike's pixels go with it — nothing else references them.
+        if let Some(dropped) = c.insert(key, model.clone()) {
+            texstore::release(&dropped.tokens());
         }
-        c.insert(key, model.clone());
     }
     Ok(model)
 }
@@ -983,12 +1015,14 @@ fn tag_body_materials(nodes: &mut [edf::EdfNode]) {
     }
 }
 
-fn pkz_mesh_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<edf::EdfNode>>>
-{
-    static C: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, Vec<edf::EdfNode>>>,
-    > = std::sync::OnceLock::new();
-    C.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+/// Rider bodies and helmets are small next to a bike, and a session cycles through a
+/// handful of them, so this can hold more entries than the bike cache does.
+const MESH_CACHE_CAP: usize = 12;
+
+fn pkz_mesh_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<edf::EdfNode>>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<lru::Lru<Vec<edf::EdfNode>>>> =
+        std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(MESH_CACHE_CAP)))
 }
 
 fn keep_lod0(nodes: &mut Vec<edf::EdfNode>) {
@@ -998,7 +1032,7 @@ fn keep_lod0(nodes: &mut Vec<edf::EdfNode>) {
 
 fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfNode>> {
     let key = format!("{}:{}", bike_cache_key(&pkz.to_string_lossy()), entry);
-    if let Some(n) = pkz_mesh_cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
+    if let Some(n) = pkz_mesh_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         return Some(n);
     }
     let data = read_pkz_entry(pkz, entry)?;
@@ -2607,6 +2641,7 @@ fn main() {
             get_pkz_meta,
             get_pkz_preview,
             unpack_paint,
+            texture_bytes,
             unpack_pkz,
             load_bike_model,
             load_rider_model,

@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-08-08
+
+### Changed
+- **The 3D viewer stops eating the machine.** Every texture a preview showed was compressed
+  to a PNG and then base64'd into a text blob before it could cross to the viewer — seconds
+  of every core per bike, and a multi-megabyte string that then lived in the Rust cache, the
+  message to the frontend and the browser heap all at once. Worse, each paint carried its
+  own copy of the model's base textures, so a bike with several liveries held the same
+  pixels over and over. The pixels now stay put and the viewer is handed a reference,
+  fetching the raw bytes over a binary channel only for the paint it is actually drawing.
+  Nothing is encoded, nothing is turned into text, and a paint costs a handful of bytes
+  instead of a copy of the bike.
+- **The viewer no longer redraws a parked model 60 times a second.** Nothing in the scene
+  moves on its own, but the canvas was rendering continuously anyway, shadows and all — and
+  the Rider tab keeps one on screen for as long as that page is open. It now draws only when
+  something actually changes: you move the camera, a texture arrives, the model is reframed.
+  Rendering also stops oversampling to twice the screen's pixels for a preview-sized model.
+- **Switching paint no longer rebuilds the bike.** Changing livery threw away every part's
+  geometry and re-uploaded the whole model to the graphics card just to swap which image it
+  wore. Geometry and paint are now built separately, so a paint change only changes the
+  paint.
+- **The viewer's caches have a ceiling.** Parsed meshes were kept for the life of the app
+  and never released, and the bike cache emptied itself wholesale on its seventh entry —
+  throwing away the model you were looking at along with the rest. Both now keep the most
+  recently used and drop only the coldest, and a dropped bike releases its texture pixels
+  with it.
+
+### Fixed
+- **A paint with one unreadable texture no longer leaves the whole model untextured.** The
+  viewer waited for a fixed number of textures to arrive and one that failed to load never
+  arrived, so the count never completed and every part stayed grey. A texture that can't be
+  read is now skipped on its own, and the rest of the paint still shows.
+
 ## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
 
 ### Fixed

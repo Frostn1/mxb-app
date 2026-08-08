@@ -7,10 +7,7 @@
 //! ```
 
 use anyhow::{bail, Context, Result};
-use base64::Engine;
 use flate2::read::DeflateDecoder;
-use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use image::{ExtendedColorType, ImageEncoder};
 use serde::Serialize;
 use std::io::{Cursor, Read};
 use std::path::Path;
@@ -36,7 +33,9 @@ pub struct PaintTexture {
     pub name: String,
     pub width: u32,
     pub height: u32,
-    pub png: String,
+    /// Names the pixels in [`crate::texstore`]. Cloning this struct is cheap, which is why
+    /// a paint can carry the model's whole base texture set without duplicating megabytes.
+    pub token: String,
 }
 
 fn read_u32(buf: &[u8], off: usize) -> Result<u32> {
@@ -116,15 +115,21 @@ pub fn decode_any(buf: &[u8]) -> Result<Vec<PntTexture>> {
     decode(buf) // not PNT and no sidecar reader for it → report bad magic
 }
 
-fn to_png_uri(tex: &PntTexture) -> Result<String> {
-    // Fast deflate + no row filter: encode speed over size.
-    let mut png = Vec::new();
-    PngEncoder::new_with_quality(&mut png, CompressionType::Fast, FilterType::NoFilter)
-        .write_image(&tex.rgba, tex.width, tex.height, ExtendedColorType::Rgba8)
-        .context("encode PNG")?;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
-    Ok(format!("data:image/png;base64,{b64}"))
+/// Hand pixels to the store and describe them. The viewer reads RGBA straight into a
+/// `DataTexture`, so nothing is encoded here — this used to be a PNG compress plus a base64
+/// pass per texture, which is what made loading a bike peg every core for seconds.
+fn store_rgba(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> PaintTexture {
+    PaintTexture {
+        name: name.to_string(),
+        width,
+        height,
+        token: crate::texstore::put(rgba),
+    }
 }
+
+/// Longest edge the viewer is given. Beyond this the extra pixels cost memory without
+/// showing on a preview-sized model.
+const MAX_EDGE: u32 = 1024;
 
 pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
     crate::edf::embedded_textures(edf)
@@ -139,49 +144,30 @@ pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
             let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
                 t.width, t.height, rgba,
             )?);
-            let scaled = img.thumbnail(1024, 1024);
-            let (sw, sh) = (scaled.width(), scaled.height());
-            let mut jpg = Vec::new();
-            image::DynamicImage::ImageRgb8(scaled.to_rgb8())
-                .write_to(&mut Cursor::new(&mut jpg), image::ImageFormat::Jpeg)
-                .ok()?;
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&jpg);
-            Some(PaintTexture {
-                name: t.name.clone(),
-                width: sw,
-                height: sh,
-                png: format!("data:image/jpeg;base64,{b64}"),
-            })
+            let scaled = img.thumbnail(MAX_EDGE, MAX_EDGE);
+            Some(store_rgba(
+                &t.name,
+                scaled.width(),
+                scaled.height(),
+                scaled.to_rgba8().into_raw(),
+            ))
         })
         .collect()
 }
 
 pub fn to_texture(t: &PntTexture) -> PaintTexture {
-    const MAX: u32 = 1024;
-    if t.width.max(t.height) > MAX {
+    if t.width.max(t.height) > MAX_EDGE {
         if let Some(img) = image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone()) {
-            let scaled = image::DynamicImage::ImageRgba8(img).thumbnail(MAX, MAX);
-            let (w, h) = (scaled.width(), scaled.height());
-            let scaled = PntTexture {
-                name: t.name.clone(),
-                width: w,
-                height: h,
-                rgba: scaled.to_rgba8().into_raw(),
-            };
-            return PaintTexture {
-                name: t.name.clone(),
-                width: w,
-                height: h,
-                png: to_png_uri(&scaled).unwrap_or_default(),
-            };
+            let scaled = image::DynamicImage::ImageRgba8(img).thumbnail(MAX_EDGE, MAX_EDGE);
+            return store_rgba(
+                &t.name,
+                scaled.width(),
+                scaled.height(),
+                scaled.to_rgba8().into_raw(),
+            );
         }
     }
-    PaintTexture {
-        name: t.name.clone(),
-        width: t.width,
-        height: t.height,
-        png: to_png_uri(t).unwrap_or_default(),
-    }
+    store_rgba(&t.name, t.width, t.height, t.rgba.clone())
 }
 
 pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
@@ -191,33 +177,13 @@ pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
         .and_then(|d| image::DynamicImage::from_decoder(d).ok())
         .or_else(|| image::load_from_memory(bytes).ok())?;
     let rgba = img.to_rgba8();
-    let tex = PntTexture {
-        name: name.to_string(),
-        width: rgba.width(),
-        height: rgba.height(),
-        rgba: rgba.into_raw(),
-    };
-    to_png_uri(&tex).ok().map(|png| PaintTexture {
-        name: tex.name,
-        width: tex.width,
-        height: tex.height,
-        png,
-    })
+    let (w, h) = (rgba.width(), rgba.height());
+    Some(store_rgba(name, w, h, rgba.into_raw()))
 }
 
 pub fn unpack_file(path: &Path) -> Result<Vec<PaintTexture>> {
     let bytes = std::fs::read(path).with_context(|| format!("read {path:?}"))?;
-    decode_any(&bytes)?
-        .iter()
-        .map(|t| {
-            Ok(PaintTexture {
-                name: t.name.clone(),
-                width: t.width,
-                height: t.height,
-                png: to_png_uri(t)?,
-            })
-        })
-        .collect()
+    Ok(decode_any(&bytes)?.iter().map(to_texture).collect())
 }
 
 #[cfg(test)]
@@ -276,8 +242,10 @@ mod tests {
         eprintln!("extracted {} texture(s) in {:?}", texs.len(), t.elapsed());
         assert!(!texs.is_empty(), "the model packs its own textures");
         for x in &texs {
-            eprintln!("  '{}' {}x{} uri_len={}", x.name, x.width, x.height, x.png.len());
-            assert!(x.width <= 1024 && x.height <= 1024 && x.png.len() > 100);
+            let px = crate::texstore::get(&x.token).expect("token resolves to pixels");
+            eprintln!("  '{}' {}x{} bytes={}", x.name, x.width, x.height, px.len());
+            assert!(x.width <= MAX_EDGE && x.height <= MAX_EDGE);
+            assert_eq!(px.len() as u32, x.width * x.height * 4, "RGBA, no padding");
         }
     }
 
@@ -287,10 +255,15 @@ mod tests {
     }
 
     #[test]
-    fn encodes_png_uri() {
+    fn to_texture_stores_pixels_verbatim() {
         let texs = decode(FIXTURE_PNT).unwrap();
-        let uri = to_png_uri(&texs[0]).unwrap();
-        assert!(uri.starts_with("data:image/png;base64,"));
+        let out = to_texture(&texs[0]);
+        assert_eq!((out.width, out.height), (4, 4));
+        // Under MAX_EDGE, so the pixels reach the viewer untouched — no resample, no encode.
+        assert_eq!(
+            *crate::texstore::get(&out.token).expect("token resolves"),
+            fixture_stored_pixels()
+        );
     }
 
     #[test]
