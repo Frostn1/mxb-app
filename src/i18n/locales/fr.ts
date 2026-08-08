@@ -858,10 +858,15 @@ export const fr: Translation = {
   "manage.contentSaved": "Contenu de course enregistré pour « {{name}} ».",
   "manage.contentTitle": "Contenu de course de « {{name}} »",
   "manage.contentBody":
-    "La déco, l'équipement et le model swap du preset sont trouvés tout seuls. Ceci sert à ce qu'un loadout ne peut pas dire : la piste, et les packs dont une course a besoin de toute façon.",
+    "La déco, l'équipement et le model swap du preset sont trouvés tout seuls. Ceci sert au reste : la piste, les modèles d'équipement à garder en plus, et les packs dont une course a besoin de toute façon.",
   "manage.paneTracks": "Pistes",
+  "manage.paneHelmets": "Casques",
+  "manage.paneBoots": "Bottes",
+  "manage.paneProtection": "Protections",
   "manage.paneKeep": "Toujours garder",
   "manage.paneTracksHint": "La piste (ou les pistes) à laquelle ce preset est destiné.",
+  "manage.paneGearHint":
+    "Modèles supplémentaires à laisser dans le sélecteur du jeu. L'équipement du preset est gardé automatiquement — cochez ici ce que vous voulez encore pouvoir choisir. Tout ce qui n'est pas coché s'écarte.",
   "manage.paneKeepHint":
     "Les mods qui restent actifs quoi qu'il arrive — le pack OEM, la moto de ce preset, un mod de son.",
   "manage.notInstalled": "pas installé",

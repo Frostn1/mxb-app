@@ -846,10 +846,15 @@ export const ptBR: Translation = {
   "manage.contentSaved": "Conteúdo de corrida salvo para “{{name}}”.",
   "manage.contentTitle": "Conteúdo de corrida de “{{name}}”",
   "manage.contentBody":
-    "A pintura, o equipamento e a troca de modelo do preset são encontrados sozinhos. Aqui fica o que um loadout não consegue dizer: a pista e os pacotes que uma corrida precisa de qualquer jeito.",
+    "A pintura, o equipamento e a troca de modelo do preset são encontrados sozinhos. Aqui fica o resto: a pista, os modelos de equipamento extras que valem a pena manter e os pacotes que uma corrida precisa de qualquer jeito.",
   "manage.paneTracks": "Pistas",
+  "manage.paneHelmets": "Capacetes",
+  "manage.paneBoots": "Botas",
+  "manage.paneProtection": "Proteções",
   "manage.paneKeep": "Manter sempre",
   "manage.paneTracksHint": "A pista (ou pistas) para as quais este preset serve.",
+  "manage.paneGearHint":
+    "Modelos extras para deixar no seletor do jogo. O equipamento do próprio preset é mantido sozinho — marque aqui o que você ainda quer poder escolher. Tudo o que ficar desmarcado sai do caminho.",
   "manage.paneKeepHint":
     "Mods que continuam ativos aconteça o que acontecer — o pacote OEM, a moto deste preset, um mod de som.",
   "manage.notInstalled": "não instalado",

@@ -847,10 +847,15 @@ export const it: Translation = {
   "manage.contentSaved": "Contenuti gara salvati per “{{name}}”.",
   "manage.contentTitle": "Contenuti gara di “{{name}}”",
   "manage.contentBody":
-    "Livrea, attrezzatura e model swap del preset vengono trovati da soli. Qui va ciò che un loadout non può dire: la pista e i pacchetti che una gara richiede comunque.",
+    "Livrea, attrezzatura e model swap del preset vengono trovati da soli. Qui va il resto: la pista, i modelli di attrezzatura da tenere in più e i pacchetti che una gara richiede comunque.",
   "manage.paneTracks": "Piste",
+  "manage.paneHelmets": "Caschi",
+  "manage.paneBoots": "Stivali",
+  "manage.paneProtection": "Protezioni",
   "manage.paneKeep": "Sempre attive",
   "manage.paneTracksHint": "La pista (o le piste) per cui è pensato questo preset.",
+  "manage.paneGearHint":
+    "Modelli extra da lasciare nel selettore del gioco. L'attrezzatura del preset viene mantenuta da sola: spunta qui ciò che vuoi ancora poter scegliere. Tutto ciò che resta non spuntato si fa da parte.",
   "manage.paneKeepHint":
     "Mod da tenere attive qualunque cosa accada — il pacchetto OEM, la moto di questo preset, una mod audio.",
   "manage.notInstalled": "non installata",

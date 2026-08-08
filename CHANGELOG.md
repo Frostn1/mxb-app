@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-07
+
+### Fixed
+- **Race mode now clears the rider gear too.** Applying a race preset narrowed the bikes and
+  tracks the game could see and left the rider alone — every helmet, every boot, every
+  protection set and every gear livery you have installed still showed up in the game's
+  pickers, including the four hundred liveries sitting under the one helmet the preset
+  actually names. Manage only ever moved archives and extracted tracks, on the reasoning that
+  a loose `.pnt` costs nothing to mount; true, but mounting was never the point — a preset
+  that names one paint means the others should be out of sight. Race mode now takes rider gear
+  models and liveries out of the way alongside the rest, keeps exactly what the preset names,
+  and brings them all back on Restore all.
+
+### Added
+- **Helmets, Boots and Protection tabs in a preset's race content.** Next to Tracks and
+  Always keep, three panes list the gear models you have installed so you can tick the spares
+  worth keeping reachable — picking them by hand instead of leaving it all to what the preset
+  happens to name. Anything unticked steps aside for the race; the preset's own gear is kept
+  for you either way.
 ## 2026-08-07 — the Rider preview can wear a rider model
 
 ### Added
