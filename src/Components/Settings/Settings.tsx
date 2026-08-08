@@ -65,6 +65,7 @@ const REPO_URL = "https://github.com/Frostn1/mxb-app";
 const DISCORD_URL = "https://discord.gg/3994Rr3ywb";
 
 export type SectionId =
+  | "game"
   | "folder"
   | "general"
   | "overlay"
@@ -72,6 +73,7 @@ export type SectionId =
   | "frostmod"
   | "about";
 const SECTIONS: { id: SectionId; label: TKey }[] = [
+  { id: "game", label: "game.label" },
   { id: "folder", label: "settings.gameFolder" },
   { id: "general", label: "settings.general" },
   { id: "overlay", label: "overlay.section" },
@@ -173,8 +175,10 @@ interface SettingsProps {
 
 export default function Settings({ initialSection, onShowWhatsNew }: SettingsProps) {
   const { t, locale, setLocale } = useI18n();
-  const { config, reloadConfig, game } = useConfig();
+  const { config, reloadConfig, game, games } = useConfig();
   const caps = game.caps;
+  // A build that only knows one title has nothing to switch between — see `GameSwitcher`.
+  const multiGame = games.length > 1;
   const platform = usePlatform();
   const isWindows = platform === "windows";
   const isMac = platform === "macos";
@@ -185,11 +189,20 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const { startTour } = useTour();
   const [version, setVersion] = useState("");
   const [experimental, setExperimentalState] = useState<ExperimentalState | null>(null);
+  // The packaged version is always a plain `x.y.z` — the release tag's pre-release suffix
+  // only survives in what the backend reports (see `release_version`), so a beta names
+  // itself here. `getVersion()` covers the moment before that call lands.
+  const shownVersion = experimental?.version || version;
   const [active, setActive] = useState<SectionId>(initialSection ?? "folder");
-  // FrostMod has no GP Bikes build, so its section isn't there to jump to either.
-  const sections = SECTIONS.filter((s) => s.id !== "frostmod" || caps.frostmod);
+  // FrostMod has no GP Bikes build, so its section isn't there to jump to either — and
+  // neither is the game picker when there's only one game to pick.
+  const sections = SECTIONS.filter(
+    (s) =>
+      (s.id !== "frostmod" || caps.frostmod) && (s.id !== "game" || multiGame),
+  );
   const [busy, setBusy] = useState(false);
   const refs = useRef<Record<SectionId, HTMLDivElement | null>>({
+    game: null,
     folder: null,
     general: null,
     overlay: null,
@@ -508,20 +521,32 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             />
           </div>
 
+          {/* game — which title the app is driving. Its own card, above the folders it
+              scopes: everything below belongs to whatever is picked here, so it isn't a
+              property of the folder setting it used to sit inside. */}
+          {multiGame && (
+            <Section
+              title={t("game.label")}
+              desc={t("settings.gameDesc")}
+              innerRef={(el) => (refs.current.game = el)}
+            >
+              <GameSwitcher />
+            </Section>
+          )}
+
           {/* game folder */}
           <Section
             title={t("setup.modsFolder", { game: game.display })}
             desc={t("settings.modsFolderDesc")}
             innerRef={(el) => (refs.current.folder = el)}
           >
-            {/* Which title everything below belongs to. It sits at the top of this
-                section because it decides which game's folders the rest of it edits. */}
-            <GameSwitcher />
-            <div className="h-px bg-border" />
             <div className="flex gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+                {/* Named rather than a bare "Not set": switching to a title the player
+                    hasn't installed lands here, and "Not set" says neither what to set
+                    nor which game it's for. */}
                 <span className="flex-1 truncate" title={config.modsPath}>
-                  {config.modsPath || t("settings.notSet")}
+                  {config.modsPath || t("settings.selectFolderFor")}
                 </span>
                 {config.modsPath && (
                   <span className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-success">
@@ -530,7 +555,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 )}
               </div>
               <Button variant="outline" size="sm" onClick={changeFolder} disabled={busy}>
-                Change…
+                {config.modsPath ? t("settings.change") : t("settings.set")}
               </Button>
             </div>
             <button
@@ -959,7 +984,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {/* about */}
           <Section title={t("settings.about")} innerRef={(el) => (refs.current.about = el)}>
             <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
-              <span>mxb-app {version && `v${version}`}</span>
+              <span>{shownVersion ? `mxb-app v${shownVersion}` : "mxb-app"}</span>
               {experimental?.prerelease && (
                 <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-primary">
                   {t("settings.betaBadge")}

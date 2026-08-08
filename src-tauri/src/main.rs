@@ -2711,13 +2711,39 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// The version to *show*, which is the release tag when this build came from one.
+///
+/// `tauri.conf.json` carries a plain `x.y.z` that the release workflow never rewrites, so a
+/// build cut from `v0.8.0-beta.1` packages itself as `0.8.0` — indistinguishable from the
+/// full release that follows. The tag is baked in by `build.rs` (`MXB_RELEASE_TAG`) and is
+/// the only place the pre-release suffix survives.
+///
+/// Deliberately scoped to what the UI displays: the updater and the release showcase compare
+/// against `package_info().version` and must keep doing so.
+///
+/// A tag is only believed when it looks like a version, so a stray `MXB_RELEASE_TAG=main`
+/// can't put a branch name in the About box.
+fn release_version(packaged: String) -> String {
+    pick_release_version(option_env!("MXB_RELEASE_TAG"), packaged)
+}
+
+/// The rule behind [`release_version`], split out because `option_env!` resolves at compile
+/// time — testing it in place would mean a rebuild per case.
+fn pick_release_version(tag: Option<&str>, packaged: String) -> String {
+    tag.map(str::trim)
+        .map(|tag| tag.strip_prefix('v').unwrap_or(tag))
+        .filter(|tag| tag.starts_with(|c: char| c.is_ascii_digit()))
+        .map(str::to_string)
+        .unwrap_or(packaged)
+}
+
 /// Whether the unfinished multiplayer features should be shown, and whether this build is
 /// a pre-release. The frontend gates the Servers tab and the paint-sync UI on the first and
 /// badges the version with the second.
 #[tauri::command]
 fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    let version = app.package_info().version.to_string();
+    let version = release_version(app.package_info().version.to_string());
     serde_json::json!({
         "enabled": cfg.experimental_enabled(),
         // Set by the env var rather than the setting, so the UI can explain why the toggle
@@ -3785,6 +3811,48 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod release_version_tests {
+    use super::*;
+
+    /// The bug this exists for: a build cut from `v0.8.0-beta.1` packages itself as `0.8.0`,
+    /// so the Beta badge — which keys off a pre-release suffix — never fired on any beta.
+    #[test]
+    fn a_release_tag_carries_its_prerelease_suffix() {
+        assert_eq!(
+            pick_release_version(Some("v0.8.0-beta.1"), "0.8.0".into()),
+            "0.8.0-beta.1",
+        );
+    }
+
+    /// Local builds, and the `workflow_dispatch` runs that pass an empty tag.
+    #[test]
+    fn no_tag_leaves_the_packaged_version_alone() {
+        assert_eq!(pick_release_version(None, "0.8.0".into()), "0.8.0");
+        assert_eq!(pick_release_version(Some("  "), "0.8.0".into()), "0.8.0");
+    }
+
+    /// `github.ref_name` is a *branch* outside a tag push. Believing it would put "main" in
+    /// the About box, which reads as a broken build rather than a misconfigured workflow.
+    #[test]
+    fn a_tag_that_isnt_a_version_is_ignored() {
+        for junk in ["main", "chore/harden-release-binary", "vNext"] {
+            assert_eq!(
+                pick_release_version(Some(junk), "0.8.0".into()),
+                "0.8.0",
+                "{junk} should not have been believed",
+            );
+        }
+    }
+
+    /// The `v` is a tag convention, not part of the version — the UI adds its own.
+    #[test]
+    fn the_tags_v_prefix_is_optional() {
+        assert_eq!(pick_release_version(Some("0.9.0"), "0.8.0".into()), "0.9.0");
+        assert_eq!(pick_release_version(Some("v0.9.0"), "0.8.0".into()), "0.9.0");
+    }
 }
 
 #[cfg(test)]

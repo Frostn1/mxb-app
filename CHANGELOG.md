@@ -9,7 +9,21 @@
   that was never the shape they were drawn against. A paint whose model isn't installed still
   previews the way it did before.
 
+- **A beta build now says it's a beta.** The About box reads `v0.8.0-beta.1` with a **Beta**
+  badge beside it. The badge existed but could never fire: the packaged version is a plain
+  `0.8.0` and nothing wrote the tag's `-beta.1` suffix into the build, so a beta install
+  called itself the release it precedes.
+
 ### Changed
+- **The game picker moved out of the folder setting.** MX Bikes / GP Bikes now sits in its own
+  **Game** card at the top of Settings, above the folders it scopes, instead of inside the
+  card whose own title it changes. Builds that know one title don't show it at all.
+- **Switching to a game you haven't set up says what to do.** The folder row read a bare "Not
+  set" next to a **Change…** button; it now reads *Select a folder for GP Bikes* next to
+  **Set…**.
+- **"Join a server" is behind the Experimental toggle.** It launches the game with an
+  undocumented connect flag, so it belongs with the rest of the unfinished multiplayer surface
+  rather than being something you find by accident.
 - **The Library's 3D button says what it does.** The bare square on each row is now a
   labelled **View in 3D**.
 - **Settings spells out which folder to pick.** The app wants your MX Bikes folder — the one

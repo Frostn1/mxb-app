@@ -41,41 +41,39 @@ export default function GameSwitcher() {
   };
 
   return (
-    <div className="pb-3">
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          disabled={busy}
-          className="flex w-full cursor-default items-center gap-2 rounded-lg border border-white/[0.07] px-3 py-2 text-left transition-colors hover:bg-foreground/[0.05] disabled:opacity-60"
-        >
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              {t("game.label")}
-            </span>
-            <span className="truncate text-[12.5px] font-semibold">
-              {game.display}
-            </span>
-          </div>
-          {busy ? (
-            <Loader2 className="size-3.5 flex-none animate-spin text-muted-foreground" />
-          ) : (
-            <ChevronsUpDown className="size-3.5 flex-none text-muted-foreground" />
-          )}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-[196px]">
-          <DropdownMenuLabel>{t("game.switch")}</DropdownMenuLabel>
-          {games.map((g) => (
-            <DropdownMenuItem key={g.id} onSelect={() => void pick(g.id)}>
-              <Check
-                className={cn(
-                  "size-3.5",
-                  g.id === game.id ? "opacity-100" : "opacity-0",
-                )}
-              />
-              <span>{g.display}</span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={busy}
+        className="flex w-full cursor-default items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-left transition-colors hover:bg-foreground/[0.05] disabled:opacity-60"
+      >
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t("game.label")}
+          </span>
+          <span className="truncate text-[12.5px] font-semibold">
+            {game.display}
+          </span>
+        </div>
+        {busy ? (
+          <Loader2 className="size-3.5 flex-none animate-spin text-muted-foreground" />
+        ) : (
+          <ChevronsUpDown className="size-3.5 flex-none text-muted-foreground" />
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-[196px]">
+        <DropdownMenuLabel>{t("game.switch")}</DropdownMenuLabel>
+        {games.map((g) => (
+          <DropdownMenuItem key={g.id} onSelect={() => void pick(g.id)}>
+            <Check
+              className={cn(
+                "size-3.5",
+                g.id === game.id ? "opacity-100" : "opacity-0",
+              )}
+            />
+            <span>{g.display}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
