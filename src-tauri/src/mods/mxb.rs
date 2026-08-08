@@ -570,6 +570,12 @@ mod tests {
     #[test]
     fn decodes_title_entities() {
         assert_eq!(decode_entities("Rock &#038; Roll &#8211; MX"), "Rock & Roll – MX");
+        // Hex entities too — flag emoji are common in track titles, and left raw they
+        // fold `x1f1ee` into the "already installed" comparison key (issue #26).
+        assert_eq!(
+            decode_entities("ARDAN318 &#8211; Sirkuit Goro assalam &#x1f1ee;&#x1f1e9;"),
+            "ARDAN318 – Sirkuit Goro assalam 🇮🇩",
+        );
     }
 
     #[test]

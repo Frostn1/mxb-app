@@ -2,15 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 import { Store, LogOut, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
-  getInstalledMods,
-  normalizeModName,
   onShopAuth,
   shopLogin,
   shopLogout,
   shopMyDownloads,
   shopStatus,
+  scanLibrary,
   type ShopItem,
 } from "../../api/mods";
+import {
+  EMPTY_INSTALLED_INDEX,
+  buildInstalledIndex,
+  type InstalledIndex,
+} from "../../lib/installedMatch";
 import { useInstall } from "../../Context/Install";
 import ModCard from "../Browse/ModCard";
 import { Button } from "@/Components/ui/button";
@@ -24,7 +28,7 @@ interface ShopProps {
 export default function Shop({ refreshKey }: ShopProps) {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [items, setItems] = useState<ShopItem[]>([]);
-  const [installedNames, setInstalledNames] = useState<Set<string>>(new Set());
+  const [installed, setInstalled] = useState<InstalledIndex>(EMPTY_INSTALLED_INDEX);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,12 +84,12 @@ export default function Shop({ refreshKey }: ShopProps) {
   // Keep the "installed" badges in sync with the tracks library.
   useEffect(() => {
     let cancelled = false;
-    getInstalledMods("mods/tracks")
-      .then((installed) => {
+    scanLibrary("mods/tracks")
+      .then((entries) => {
         if (cancelled) return;
-        setInstalledNames(new Set(installed.map((m) => normalizeModName(m.name))));
+        setInstalled(buildInstalledIndex(entries.map((e) => e.name)));
       })
-      .catch(() => !cancelled && setInstalledNames(new Set()));
+      .catch(() => !cancelled && setInstalled(EMPTY_INSTALLED_INDEX));
     return () => {
       cancelled = true;
     };
@@ -182,7 +186,7 @@ export default function Shop({ refreshKey }: ShopProps) {
                 key={item.id}
                 mod={item}
                 isBike={false}
-                installed={installedNames.has(normalizeModName(item.title))}
+                installed={installed.has(item.title)}
                 selected={false}
                 selectionActive={false}
                 onOpen={() => install(item)}

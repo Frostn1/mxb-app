@@ -8,9 +8,9 @@ pub struct AppConfig {
     pub mods_path: String,
     /// MX Bikes install dir (`mxbikes.exe` + core `rider.pkz`); distinct from `mods_path`.
     pub game_path: String,
-    /// Override for the PiBoSo `profiles` folder. Empty (the normal case) means it
-    /// sits inside `mods_path` at `<mods_path>/profiles`. Set only for the edge case
-    /// where a player's profiles folder lives outside their MX Bikes folder.
+    /// Override for the PiBoSo `profiles` folder. Empty (the normal case) means it's
+    /// resolved from `mods_path` — see [`AppConfig::profiles_dir`]. Set it when the
+    /// resolver can't find the folder, e.g. profiles on a drive we don't probe.
     pub profiles_path: String,
     /// Hide to the tray on window close and keep running.
     pub run_in_background: bool,
@@ -52,16 +52,55 @@ impl Default for AppConfig {
 
 impl AppConfig {
     /// Folder that holds the per-player PiBoSo profiles (each a subdir with a
-    /// `profile.ini`). Defaults to `<mods_path>/profiles` — the normal, combined
-    /// layout — unless `profiles_path` overrides it for the split-folder edge case.
+    /// `profile.ini`).
+    ///
+    /// An explicit `profiles_path` always wins. Otherwise it's `<mods_path>/profiles`
+    /// — the normal, combined layout — falling back to the stock
+    /// `Documents\PiBoSo\MX Bikes\profiles` when that folder doesn't exist.
+    ///
+    /// The fallback is not exotic: `mxbikes.ini` lets a player point the *mods* folder
+    /// at another drive, and the game has no equivalent redirect for profiles, so it
+    /// keeps writing them to `Documents`. Anyone who uses that documented feature ends
+    /// up with a split layout, and without this the app looked for profiles in a folder
+    /// that never existed.
     pub fn profiles_dir(&self) -> PathBuf {
         let custom = self.profiles_path.trim();
-        if custom.is_empty() {
-            PathBuf::from(&self.mods_path).join("profiles")
-        } else {
-            PathBuf::from(custom)
+        if !custom.is_empty() {
+            return PathBuf::from(custom);
         }
+        // Case-tolerant join: under Proton the folder can come back as `Profiles`.
+        let primary = crate::library::resolve_child(Path::new(self.mods_path.trim()), "profiles");
+        resolve_profiles_dir(primary, || {
+            default_mx_bikes_dir().map(|d| d.join("profiles"))
+        })
     }
+}
+
+/// Pick between the profiles folder implied by `mods_path` and the stock PiBoSo one.
+///
+/// Only a *missing* primary hands over to the fallback — an existing folder is the
+/// player's, empty or not. When neither exists we still return the primary, so the
+/// path the UI reports is the one derived from the folder they picked.
+///
+/// `fallback` is a closure because working it out means scanning Steam libraries on
+/// Linux, and this runs on every preset read and write.
+fn resolve_profiles_dir(primary: PathBuf, fallback: impl FnOnce() -> Option<PathBuf>) -> PathBuf {
+    if primary.is_dir() {
+        return primary;
+    }
+    match fallback() {
+        Some(f) if f.is_dir() => f,
+        _ => primary,
+    }
+}
+
+/// The MX Bikes user folder where the game puts it when nothing has been moved: the
+/// Proton prefix on Linux, `Documents\PiBoSo\MX Bikes` elsewhere.
+fn default_mx_bikes_dir() -> Option<PathBuf> {
+    if let Some(p) = detect_proton_mods_path() {
+        return Some(PathBuf::from(p));
+    }
+    Some(dirs_next::document_dir()?.join("PiBoSo").join("MX Bikes"))
 }
 
 pub fn config_path(app: &AppHandle) -> PathBuf {
@@ -139,17 +178,11 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
 pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     if cfg.mods_path.trim().is_empty() {
         // On Linux the game runs under Proton and writes into the Wine prefix, not the
-        // user's real Documents — check there first, since `document_dir()` would
-        // otherwise hand back a path MX Bikes has never written to (and often `None`,
-        // because it depends on `~/.config/user-dirs.dirs` existing).
-        if let Some(p) = detect_proton_mods_path() {
-            cfg.mods_path = p;
-        } else if let Some(docs) = dirs_next::document_dir() {
-            cfg.mods_path = docs
-                .join("PiBoSo")
-                .join("MX Bikes")
-                .to_string_lossy()
-                .into_owned();
+        // user's real Documents — `default_mx_bikes_dir` checks there first, since
+        // `document_dir()` would otherwise hand back a path MX Bikes has never written
+        // to (and often `None`, because it depends on `~/.config/user-dirs.dirs`).
+        if let Some(dir) = default_mx_bikes_dir() {
+            cfg.mods_path = dir.to_string_lossy().into_owned();
         }
     }
     // Auto-detect the Steam game install (holds `rider.pkz`) so the 3D rider preview
@@ -285,9 +318,15 @@ mod tests {
 
     #[test]
     fn profiles_dir_defaults_to_mods_subfolder() {
+        let root = std::env::temp_dir().join(format!("frost-profiles-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("profiles")).unwrap();
+
         let mut cfg = AppConfig::default();
-        cfg.mods_path = "/games/mxb".into();
-        assert_eq!(cfg.profiles_dir(), PathBuf::from("/games/mxb").join("profiles"));
+        cfg.mods_path = root.to_string_lossy().into_owned();
+        assert_eq!(cfg.profiles_dir(), root.join("profiles"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -296,6 +335,43 @@ mod tests {
         cfg.mods_path = "/games/mxb".into();
         cfg.profiles_path = "/other/drive/profiles".into();
         assert_eq!(cfg.profiles_dir(), PathBuf::from("/other/drive/profiles"));
+    }
+
+    /// The `mxbikes.ini` split-layout case: mods on another drive, profiles still in
+    /// `Documents`. The primary folder doesn't exist, so the stock one takes over —
+    /// but only then, and only if it's really there.
+    #[test]
+    fn profiles_dir_falls_back_to_the_stock_folder_when_the_mods_one_is_missing() {
+        let root = std::env::temp_dir().join(format!("frost-profiles-fb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let relocated = root.join("A/MX Bikes/profiles");
+        let stock = root.join("Documents/PiBoSo/MX Bikes/profiles");
+        std::fs::create_dir_all(&stock).unwrap();
+
+        // Primary missing, fallback present → fallback.
+        assert_eq!(
+            resolve_profiles_dir(relocated.clone(), || Some(stock.clone())),
+            stock
+        );
+
+        // Primary present → it wins, and the fallback isn't even worked out.
+        std::fs::create_dir_all(&relocated).unwrap();
+        assert_eq!(
+            resolve_profiles_dir(relocated.clone(), || {
+                panic!("fallback must not be consulted when the primary is there")
+            }),
+            relocated
+        );
+
+        // Neither exists → keep the primary, so the UI names the folder they picked.
+        let nowhere = root.join("gone/profiles");
+        assert_eq!(
+            resolve_profiles_dir(nowhere.clone(), || Some(root.join("also-gone"))),
+            nowhere
+        );
+        assert_eq!(resolve_profiles_dir(nowhere.clone(), || None), nowhere);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
