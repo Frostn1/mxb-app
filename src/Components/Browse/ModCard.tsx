@@ -20,6 +20,7 @@ import {
 } from "@/Components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { formatDateShort } from "../../lib/mods";
+import { cachedImage, GRID_THUMB_WIDTH } from "../../lib/imgcache";
 import { useT } from "../../i18n/context";
 
 interface ModCardProps {
@@ -66,7 +67,10 @@ export default function ModCard({
           <div className="relative aspect-video overflow-hidden bg-gradient-to-br from-[#3a3f45] to-[#20242a]">
             {mod.image && !broken ? (
               <img
-                src={mod.image}
+                // Through the on-disk cache, so scrolling the grid twice doesn't re-fetch
+                // every thumbnail. A cache miss 404s, which lands on `onError` below exactly
+                // as a dead remote URL would.
+                src={cachedImage(mod.image, GRID_THUMB_WIDTH)}
                 alt={mod.title}
                 loading="lazy"
                 onError={() => setBroken(true)}

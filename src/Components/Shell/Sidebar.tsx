@@ -11,6 +11,7 @@ import {
   Loader2,
   Gamepad2,
   SlidersHorizontal,
+  Store,
   Server as ServerIcon,
   Plug,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
 import { experimentalState, launchGame } from "../../api/mods";
+import { shopCatalogAvailable } from "../../api/shop";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
@@ -43,18 +45,19 @@ interface SidebarProps {
 }
 
 /**
- * `cap` names a capability the active game must have for the item to appear. Gating on a
+ * `cap` names a capability the active game must have for the entry to appear. Gating on a
  * capability rather than on the game id keeps "why is this hidden" answerable in one
  * place — and turning a feature on for another title is a single `true` in `game.rs`.
  */
-const NAV: {
+type NavEntry = {
   id: DashboardView;
   label: TKey;
   icon: typeof Home;
   cap?: keyof GameCaps;
-}[] = [
+};
+
+const NAV: NavEntry[] = [
   { id: "browse", label: "nav.browse", icon: Home },
-  // { id: "shop", label: "nav.shop", icon: Store }, // hidden for now
   { id: "library", label: "nav.library", icon: LibraryIcon },
   // The Locker and Rider views are the 3D preview; GP Bikes' meshes need their own
   // part bindings before they can be shown.
@@ -64,15 +67,23 @@ const NAV: {
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
+/**
+ * The shop catalog needs an API credential baked in at build time, and builds without one
+ * (forks, and CI runs with no repo secret) simply can't reach it. Those get no Shop entry at
+ * all rather than a permanently-greyed row no user action could ever fix.
+ *
+ * Sits second, next to Browse, because it is the other catalog — unlike the experimental
+ * entry below, which is appended.
+ *
+ * `cap: "shop"` on top of that: the catalog is mxbikes-shop.com, so it has nothing to sell
+ * a player on another title.
+ */
+const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store, cap: "shop" };
+
 /** Shown only when the experimental features are on — see `settings.experimental`.
  *  Also capability-gated: it administers MX Bikes dedicated servers and keys riders by
  *  MX Bikes GUID, neither of which means anything for another title. */
-const EXPERIMENTAL_NAV: {
-  id: DashboardView;
-  label: TKey;
-  icon: typeof Home;
-  cap?: keyof GameCaps;
-} = {
+const EXPERIMENTAL_NAV: NavEntry = {
   id: "servers",
   label: "nav.servers",
   icon: ServerIcon,
@@ -102,6 +113,26 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       .then((s) => setExperimental(s.enabled))
       .catch(() => {});
   }, [view]);
+
+  // Asked once per mount. It's a compile-time fact on the Rust side, so it can't change
+  // under us; the state is only here because the answer arrives over IPC.
+  const [shopAvailable, setShopAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    shopCatalogAvailable()
+      .then((ok) => !cancelled && setShopAvailable(ok))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // Three independent gates: the shop needs a build-time credential, servers needs the
+  // experimental toggle, and every entry needs the active game to support it. Built here
+  // rather than inline so the JSX stays one `.map`.
+  const nav = [
+    ...(shopAvailable ? [NAV[0], SHOP_ENTRY, ...NAV.slice(1)] : NAV),
+    ...(experimental ? [EXPERIMENTAL_NAV] : []),
+  ].filter(({ cap }) => !cap || caps[cap]);
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -156,9 +187,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex flex-col gap-0.5">
-        {(experimental ? [...NAV, EXPERIMENTAL_NAV] : NAV)
-          .filter(({ cap }) => !cap || caps[cap])
-          .map(({ id, label, icon: Icon }) => {
+        {nav.map(({ id, label, icon: Icon }) => {
           const activeNav = view === id;
           return (
             <button

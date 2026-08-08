@@ -111,6 +111,70 @@
   GUID is first-come, so nobody can assert someone else's identity and have their paints
   served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 
+- **A Shop tab that browses the mxbikes-shop.com catalog.** The store hands us its whole
+  catalog as one JSON document, so the app fetches it once and does the searching, filtering,
+  sorting and paging locally — browsing is instant and keeps working with the network down.
+  Search by name, creator or category, filter down the store's own category tree (picking a
+  parent includes everything under it), sort by recently updated, price or discount, and flip
+  on **On sale** to see only what's actually discounted right now. Discounted items show the
+  normal price struck through beside the live one with a percentage badge, including the
+  awkward case of an item that has both a price *range* (a paint, or a paint plus the PSD)
+  and a sale on it. Genuinely free downloads say **Free** rather than "$0.00", which is a
+  different thing from the pay-what-you-want items that merely start at zero. The store's
+  catalog carries no sale end dates, so the half-hourly conditional refresh is what keeps a
+  finished sale from being shown forever — it corrects itself in the background without anyone
+  pressing anything, and where an end date ever does appear it's honoured against the clock.
+  A catalog served from cache says how old it is, and one that's days old says so in a way you
+  can't wave away. This is browse-only: **Buy** opens the product page in your own browser, and
+  nothing here installs or purchases anything.
+- **Thumbnails are cached on disk, and downscaled to the size they're drawn at.** Both
+  catalogs previously put remote image URLs straight into the page, so every scroll through
+  the grid re-downloaded the same images — and neither store offers a thumbnail size, so a
+  card roughly 300px wide was being handed a 1000–1280px original weighing about half a
+  megabyte. Images now go through an on-disk cache served over the app's own URL scheme,
+  which keeps lazy loading and the webview's native image cache intact, and grid thumbnails
+  are resized on the way in: a page of cards dropped from ~12 MB to ~2 MB, about 85 KB per
+  card instead of 490 KB. Transparency is preserved, and each size is cached separately so
+  opening an item still shows the full-resolution screenshot. Capped at 256 MB, evicted
+  oldest-first, and restricted to the two catalog domains.
+- **The whole window is a dropzone.** Drag anything MX Bikes onto the app — a `.zip`, `.rar`
+  or `.7z`, a bare `.pkz` or `.pnt`, an already-extracted folder, or a fistful of all of them
+  at once — and it works out what each one is, where it belongs, and shows you the list
+  before anything is written. A mixed archive becomes one row per mod rather than one verdict
+  for the lot, and a dropped folder is read where it lies instead of being copied twice.
+- **Content is identified by what's inside it, not by its name.** A bike by its `.ini` + `.cfg`
+  pair, a track by its `.map`/`.trh` files, a sound set by `engine.scl` + `sfx.cfg`, a livery
+  by the textures it carries — a paint that covers `rider` is an outfit, one that covers
+  `framecompletemap` is a bike livery. Each row says which signal identified it.
+- **Rider outfits and gear get a real destination.** An outfit goes to
+  `riders/default_mx/paints` and gloves to `riders/default_mx/gloves` — profiles MX Bikes
+  always ships, so the paint loads. Helmet, boot and protection paints land on the only model
+  of their kind when there is exactly one; with none or several, nothing in the file picks
+  between them, so the row asks.
+- **Every row can be re-filed before installing.** Identifying content correctly is not the
+  same as knowing where you want it kept, so each row offers that category's existing folders,
+  its root, and a free-text box for a folder that doesn't exist yet. A bike keeps its own
+  folder wherever it's filed — choosing "MX2" means `MX2/<Bike>`, not a bike's configs
+  scattered loose.
+- **You see what it will replace.** Every row reports how many files it will write and,
+  expandable, exactly which existing files it would overwrite — so re-dropping an updated mod
+  no longer silently replaces a bike's configs. Nothing installs until you press Install, and
+  rows can be unticked individually.
+
+### Changed
+- The signed-in "All My Downloads" page moved to `MyDownloads.tsx` and the `shop` route now
+  goes to the new catalog. That feature is intact and still hidden from the sidebar.
+- **Placement decides once, then acts.** Split `place_mod` into `plan_placement` (decide) and
+  an apply step driven by a single enumeration of the files to write, so the destination shown
+  in the review sheet is by construction the destination written to disk. Existing placement
+  behaviour and all of its tests are unchanged.
+- **Identifying a `.pkz` no longer reads it.** The question is answered from the archive's
+  file list alone; it used to parse the `[info]` block and decode and rescale the preview
+  image, which on a large track was seconds of work before anything appeared on screen.
+- **Staging directories are per-operation.** They used to be one path per process, wiped on
+  entry — safe only while installs were strictly serial. A staged drop awaiting review would
+  have had its files deleted by the next one.
+
 ### Security
 - A paint carries the destination it should be written to, and that path arrives from
   another player. It's validated twice — once by the service and again in the app before it
@@ -118,6 +182,15 @@
   with a separator, a `..`, a drive letter, a control character or a non-`.pnt` extension is
   refused outright rather than sanitised: a path we'd have to rewrite is one we don't
   understand. Downloaded bytes are checked against their digest before being written.
+
+### Fixed
+- **A hostile archive can no longer write outside the staging folder.** `.7z` extraction
+  joined entry names to the destination without filtering `..`; `.7z` and `.rar` extractions
+  are now swept for escapees (symlinks included), which deletes them and fails the install.
+- **A destination can no longer climb out of the MX Bikes folder.** Path segments are checked
+  for `..` before any write, and the resolved targets are verified to sit under `mods/`.
+- **A dropped bike folder keeps its own folder.** A bike shipped without a `paints/` subfolder
+  had its `.ini`/`.cfg` scattered loose into `mods/bikes` instead of `mods/bikes/<Bike>/`.
 
 ## 2026-08-08 — run a dedicated server from the app
 

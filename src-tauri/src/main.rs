@@ -7,11 +7,13 @@ mod bundle;
 mod cfg;
 mod config;
 mod cookie_session;
+mod dropzone;
 mod edf;
 mod frostmod;
 mod frostmod_manage;
 mod game;
 mod gameproc;
+mod imgcache;
 mod install;
 mod library;
 mod lru;
@@ -29,6 +31,8 @@ mod sidecar;
 mod presets;
 mod paintsync;
 mod servers;
+mod shop_catalog_session;
+mod shop_credentials;
 mod shop_session;
 mod soundmods;
 mod texstore;
@@ -219,6 +223,69 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 #[tauri::command]
 async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
     with_clearance(&app, "mod detail", || WpModsSource.detail(&slug)).await
+}
+
+// ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
+//
+// Browsing only. Nothing here installs or buys — the frontend opens the product page in
+// the user's own browser. See `mods::shop_catalog`.
+
+/// Whether this build has a shop credential at all. False hides the Shop tab entirely,
+/// which is what forks and credential-less CI builds get.
+#[tauri::command]
+fn shop_catalog_available() -> bool {
+    mods::shop_catalog::available()
+}
+
+/// Cheap and synchronous — it reports on what's already loaded and never fetches, so the
+/// UI can poll it without cost.
+#[tauri::command]
+fn shop_catalog_status(app: tauri::AppHandle) -> mods::shop_catalog::ShopStatus {
+    mods::shop_catalog::status(&app)
+}
+
+#[tauri::command]
+async fn shop_catalog_categories(
+    app: tauri::AppHandle,
+) -> Result<Vec<mods::shop_catalog::ShopCategory>, String> {
+    mods::shop_catalog::categories(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn shop_catalog_search(
+    app: tauri::AppHandle,
+    query: String,
+    category_id: Option<u64>,
+    page: u32,
+    sort: mods::shop_catalog::ShopSort,
+    on_sale_only: bool,
+) -> Result<mods::shop_catalog::ShopPage, String> {
+    mods::shop_catalog::search(&app, &query, category_id, page, sort, on_sale_only)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn shop_catalog_detail(
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<mods::shop_catalog::ShopModDetail, String> {
+    mods::shop_catalog::detail(&app, id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Ignores the cache age and any `ETag` we hold — "Refresh" has to mean refresh, not
+/// "ask politely and accept a 304".
+#[tauri::command]
+async fn shop_catalog_refresh(
+    app: tauri::AppHandle,
+) -> Result<mods::shop_catalog::ShopStatus, String> {
+    mods::shop_catalog::force_refresh(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -2233,6 +2300,95 @@ async fn import_file(
     .map_err(|e| format!("import_file task failed: {e}"))?
 }
 
+/// Stage and classify dropped paths. Reads only — nothing is installed until `commit_drop`.
+#[tauri::command]
+async fn plan_drop(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<dropzone::DropPlan, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        dropzone::plan(&cfg.mods_path, &paths).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("plan_drop task failed: {e}"))?
+}
+
+/// Re-cost one row after the user picked a different destination.
+#[tauri::command]
+async fn repreview_drop(
+    app: tauri::AppHandle,
+    plan_id: String,
+    item_id: String,
+    subpath: String,
+    dest_folder: String,
+) -> Result<DropPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let (file_count, bytes, collisions) =
+            dropzone::repreview(&cfg.mods_path, &plan_id, &item_id, &subpath, &dest_folder)
+                .map_err(|e| format!("{e:#}"))?;
+        Ok(DropPreview {
+            file_count,
+            bytes,
+            collisions,
+        })
+    })
+    .await
+    .map_err(|e| format!("repreview_drop task failed: {e}"))?
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DropPreview {
+    file_count: usize,
+    bytes: u64,
+    collisions: Vec<String>,
+}
+
+/// Install the reviewed rows.
+#[tauri::command]
+async fn commit_drop(
+    app: tauri::AppHandle,
+    plan_id: String,
+    items: Vec<dropzone::CommitItem>,
+) -> Result<dropzone::CommitOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let outcome =
+            dropzone::commit(&cfg.mods_path, &plan_id, &items).map_err(|e| format!("{e:#}"))?;
+
+        // Record which bikes gained a sound set, so the Library can tell them from stock.
+        let ok: Vec<String> = outcome.installed.iter().map(|i| i.id.clone()).collect();
+        let bikes = dropzone::sound_bikes(&plan_id, &ok);
+        if !bikes.is_empty() {
+            if let Ok(dir) = app.path().app_local_data_dir() {
+                let _ = soundmods::record(&dir, &bikes, "drop");
+            }
+        }
+
+        dropzone::cancel(&plan_id);
+
+        // One signal for the whole drop: `notify_frostmod` also emits `frostmod-reload`,
+        // which every library scanner listens to — firing it per item would re-run them all
+        // N times for a single user action.
+        if !outcome.installed.is_empty() {
+            install::notify_frostmod(&app, "drop");
+        }
+        Ok(outcome)
+    })
+    .await
+    .map_err(|e| format!("commit_drop task failed: {e}"))?
+}
+
+/// Discard a plan the user dismissed, deleting anything staged for it.
+#[tauri::command]
+async fn cancel_drop(plan_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || dropzone::cancel(&plan_id))
+        .await
+        .map_err(|e| format!("cancel_drop task failed: {e}"))
+}
+
 #[tauri::command]
 async fn move_mod(
     app: tauri::AppHandle,
@@ -3238,6 +3394,17 @@ fn log_level() -> log::LevelFilter {
 
 fn main() {
     tauri::Builder::default()
+        // Thumbnails for both catalogs, served from a disk cache instead of refetched on
+        // every scroll. Registered here rather than per-window so the overlay — which
+        // renders the same `ModCard` — gets it too.
+        //
+        // Asynchronous, so a cache miss that has to reach the origin never blocks the
+        // webview's protocol thread.
+        //
+        // A URI scheme is not a permission subject, so no capability file changes with this.
+        // If a CSP is ever enabled in `tauri.conf.json` (currently `null`), it must allow
+        // `img-src imgcache: http://imgcache.localhost` or every thumbnail goes blank.
+        .register_asynchronous_uri_scheme_protocol(imgcache::SCHEME, imgcache::handle)
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level())
@@ -3346,7 +3513,9 @@ fn main() {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
             shop_session::load_session(handle);
+            shop_catalog_session::load(handle);
             mxb_session::load(handle);
+            imgcache::start_maintenance(handle);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
@@ -3420,6 +3589,10 @@ fn main() {
             repair_orphaned_setup,
             add_to_library,
             import_file,
+            plan_drop,
+            repreview_drop,
+            commit_drop,
+            cancel_drop,
             move_mod,
             uninstall_mod,
             reveal_in_explorer,
@@ -3468,6 +3641,12 @@ fn main() {
             shop_logout,
             shop_my_downloads,
             shop_install,
+            shop_catalog_available,
+            shop_catalog_status,
+            shop_catalog_categories,
+            shop_catalog_search,
+            shop_catalog_detail,
+            shop_catalog_refresh,
             presets_list_profiles,
             presets_list_bikes,
             presets_read_loadout,

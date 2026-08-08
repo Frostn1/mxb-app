@@ -27,6 +27,10 @@ dist-ssr
 *.key
 *.key.pub
 
+# Shop catalog API credential, baked into the binary at build time by src-tauri/build.rs.
+# Covered by `*.local` above; spelled out so it's findable. Copy .env.local.example.
+/.env.local
+
 # Vite transient config-reload artifacts
 vite.config.ts.timestamp-*.mjs
 

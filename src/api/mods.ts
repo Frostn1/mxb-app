@@ -3,6 +3,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   BikeModels,
   BikeSounds,
+  DropCommitItem,
+  DropOutcome,
+  DropPlan,
+  DropPreview,
   LooseSwapBike,
   OrphanedSetup,
   RegisterReport,
@@ -551,6 +555,39 @@ export function importFile(
   destFolder: string,
 ): Promise<void> {
   return invoke<void>("import_file", { path, subpath, destFolder });
+}
+
+/** Stage + classify dropped paths. Reads only — nothing installs until `commitDrop`. */
+export function planDrop(paths: string[]): Promise<DropPlan> {
+  return invoke<DropPlan>("plan_drop", { paths });
+}
+
+/** Re-cost one row after the user picked a different destination. */
+export function repreviewDrop(
+  planId: string,
+  itemId: string,
+  subpath: string,
+  destFolder: string,
+): Promise<DropPreview> {
+  return invoke<DropPreview>("repreview_drop", {
+    planId,
+    itemId,
+    subpath,
+    destFolder,
+  });
+}
+
+/** Install the reviewed rows. Rows the user removed are simply not sent. */
+export function commitDrop(
+  planId: string,
+  items: DropCommitItem[],
+): Promise<DropOutcome> {
+  return invoke<DropOutcome>("commit_drop", { planId, items });
+}
+
+/** Discard a plan and delete whatever was staged for it. */
+export function cancelDrop(planId: string): Promise<void> {
+  return invoke<void>("cancel_drop", { planId });
 }
 
 export interface DestOption {

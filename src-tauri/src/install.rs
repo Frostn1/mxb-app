@@ -59,6 +59,24 @@ pub(crate) fn notify_frostmod(app: &AppHandle, slug: &str) {
     );
 }
 
+/// A staging directory nobody else is using.
+///
+/// This used to be one path per process, wiped on entry — fine while installs were strictly
+/// serial, fatal the moment two can be alive at once: a dropzone plan sits staged while the
+/// user reviews it, and a second drop would delete the first one's files out from under it.
+pub(crate) fn staging_dir(tag: &str) -> PathBuf {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!(
+        "frost-{tag}-{}-{stamp:x}-{n}",
+        std::process::id()
+    ))
+}
+
 pub(crate) fn build_client() -> anyhow::Result<Client> {
     Ok(Client::builder()
         .user_agent(UA)
@@ -260,7 +278,7 @@ pub fn import_file(
         anyhow::bail!("file not found: {file_path}");
     }
 
-    let work = std::env::temp_dir().join(format!("frost-import-{}", std::process::id()));
+    let work = staging_dir("import");
     let _ = std::fs::remove_dir_all(&work);
     let extracted = work.join("extracted");
     std::fs::create_dir_all(&extracted)?;
@@ -641,8 +659,15 @@ pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()>
         "7z" => {
             sevenz_rust::decompress_file(archive, dest)
                 .map_err(|e| anyhow::anyhow!("7z extraction failed: {e}"))?;
+            // `sevenz-rust` joins entry names to the destination without filtering `..`,
+            // so a hostile `.7z` can write outside `dest`. `zip` filters internally and
+            // the native unrar side is unverified — sweep both rather than trust them.
+            purge_escapees(archive, dest)?;
         }
-        "rar" => extract_rar(archive, dest)?,
+        "rar" => {
+            extract_rar(archive, dest)?;
+            purge_escapees(archive, dest)?;
+        }
         "pkz" | "pnt" => {
             // Already installable (.pkz/.pnt) — carry it through unchanged.
             let name = archive.file_name().unwrap_or_default();
@@ -651,6 +676,83 @@ pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()>
         other => anyhow::bail!("Unsupported archive type: .{other}"),
     }
     Ok(())
+}
+
+/// What a dropped path turned out to be once staged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StagedKind {
+    /// An archive that was unpacked into the staging directory.
+    Archive,
+    /// A single file carried through as-is — a `.pkz`, a `.pnt`, or something we don't
+    /// recognise but the user still wants placed somewhere.
+    Loose,
+    /// A folder the user dropped. Staged by reference: nothing is copied until commit.
+    Directory,
+}
+
+/// Stage one dropped path for classification.
+///
+/// Deliberately more permissive than [`extract_archive`]: the download path must reject a
+/// mystery file (an HTML error page is not a mod), but a user who drags a bare `.edf` in has
+/// told us they mean it. Unrecognised files become [`StagedKind::Loose`] and the classifier
+/// then refuses to guess a destination for them.
+pub(crate) fn stage_input(src: &Path, dest: &Path) -> anyhow::Result<StagedKind> {
+    if src.is_dir() {
+        return Ok(StagedKind::Directory);
+    }
+    if !src.is_file() {
+        anyhow::bail!("not found: {}", src.display());
+    }
+    std::fs::create_dir_all(dest)?;
+    match detect_ext(src) {
+        Ok(ext) if matches!(ext.as_str(), "zip" | "7z" | "rar") => {
+            extract_archive(src, dest)?;
+            Ok(StagedKind::Archive)
+        }
+        // `.pkz`/`.pnt` are recognised but not containers, and anything else the user
+        // dropped is carried through for the classifier to ask about.
+        _ => {
+            let name = src.file_name().unwrap_or_default();
+            std::fs::copy(src, dest.join(name))?;
+            Ok(StagedKind::Loose)
+        }
+    }
+}
+
+/// Refuse an archive that wrote outside its own staging directory.
+///
+/// Deleting the strays is not enough on its own — by the time we notice, the bytes are
+/// already on disk — so this also fails the whole install rather than proceeding with a
+/// half-extracted tree that a user would then be invited to commit.
+fn purge_escapees(archive: &Path, dest: &Path) -> anyhow::Result<()> {
+    let root = dest.canonicalize().unwrap_or_else(|_| dest.to_path_buf());
+    let mut escaped = Vec::new();
+    for entry in walkdir::WalkDir::new(dest).into_iter().filter_map(|e| e.ok()) {
+        let p = entry.path();
+        // Compare canonically so a symlink planted by the archive can't point out either.
+        let real = match p.canonicalize() {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        if !real.starts_with(&root) {
+            escaped.push(real);
+        }
+    }
+    if escaped.is_empty() {
+        return Ok(());
+    }
+    for p in &escaped {
+        let _ = if p.is_dir() {
+            std::fs::remove_dir_all(p)
+        } else {
+            std::fs::remove_file(p)
+        };
+    }
+    anyhow::bail!(
+        "{} tried to write {} file(s) outside the staging folder and was rejected",
+        archive.file_name().unwrap_or_default().to_string_lossy(),
+        escaped.len()
+    )
 }
 
 fn extract_rar(archive: &Path, dest: &Path) -> anyhow::Result<()> {
@@ -675,7 +777,7 @@ fn extract_rar(archive: &Path, dest: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn detect_ext(archive: &Path) -> anyhow::Result<String> {
+pub(crate) fn detect_ext(archive: &Path) -> anyhow::Result<String> {
     if let Some(ext) = archive
         .extension()
         .and_then(|e| e.to_str())
@@ -703,16 +805,66 @@ fn detect_ext(archive: &Path) -> anyhow::Result<String> {
 
 /// Content categories that live directly under `mods/`, across every title the app
 /// drives — see [`crate::game::ALL_MODS_DIRS`] for why this is a union rather than the
-/// active game's own list.
-use crate::game::ALL_MODS_DIRS as CATEGORY_DIRS;
+/// active game's own list. Re-exported because the dropzone reports on it too.
+pub(crate) use crate::game::ALL_MODS_DIRS as CATEGORY_DIRS;
 
-pub(crate) fn place_mod(
+/// Which rule in [`plan_placement`] decided the destination.
+///
+/// The dropzone renders this as the reason it shows the user ("found engine.scl + sfx.cfg"),
+/// so the explanation and the routing can never disagree — they come from the same match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RouteRule {
+    /// The archive carries a whole `mods/` tree; the caller's category is ignored.
+    ModsTree,
+    /// The archive root holds `bikes/`, `tracks/`, … — merged category by category.
+    CategoryDirs,
+    /// A `<Bike>/paints/…` bundle: bike content whatever the caller asked for.
+    PaintsBundle,
+    /// `<Bike>/{engine.scl,sfx.cfg}` — a packaged sound set.
+    SoundBundle,
+    /// Loose `engine.scl`+`sfx.cfg` at the root, destined for a bike the caller picked.
+    LooseSound,
+    /// Nothing self-describing was found; the caller's category decides.
+    Typed,
+}
+
+/// What a placement will actually do, decided but not yet performed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Placement {
+    /// Merge one tree into one destination.
+    Merge { src: PathBuf, dst: PathBuf },
+    /// Merge several trees, each into its own destination (the category dirs).
+    MergeEach { pairs: Vec<(PathBuf, PathBuf)> },
+    /// The `place_plain` rules: `.pkz`-at-root wins, junk is dropped, loose files may
+    /// get wrapped in a folder of their own.
+    Plain {
+        src: PathBuf,
+        dst: PathBuf,
+        slug: String,
+        wrap_loose: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Route {
+    pub rule: RouteRule,
+    pub placement: Placement,
+}
+
+/// Decide where `extracted` belongs — without touching the filesystem.
+///
+/// Split out of [`place_mod`] so a preview and the write that follows it are produced by the
+/// same code: the dropzone shows the user what [`writes_for`] enumerates, then commits by
+/// applying the very same [`Placement`].
+pub(crate) fn plan_placement(
     extracted: &Path,
     mods_dir: &Path,
     type_folder: &str,
     dest_folder: &str,
     slug: &str,
-) -> anyhow::Result<usize> {
+) -> Route {
+    let route = |rule, placement| Route { rule, placement };
+
     // Check the extracted root FIRST so a `<Bike>/paints/` bundle isn't unwrapped to bare `paints/`.
     let unwrapped = unwrap_wrapper(extracted);
     let candidates: Vec<&Path> = if unwrapped == extracted {
@@ -723,7 +875,13 @@ pub(crate) fn place_mod(
 
     for base in &candidates {
         if let Some(m) = child_dir(base, "mods") {
-            return merge_tree(&m, mods_dir);
+            return route(
+                RouteRule::ModsTree,
+                Placement::Merge {
+                    src: m,
+                    dst: mods_dir.to_path_buf(),
+                },
+            );
         }
     }
 
@@ -733,12 +891,14 @@ pub(crate) fn place_mod(
             .filter_map(|c| child_dir(base, c))
             .collect();
         if !cats.is_empty() {
-            let mut n = 0;
-            for c in &cats {
-                let name = c.file_name().unwrap_or_default();
-                n += merge_tree(c, &mods_dir.join(name))?;
-            }
-            return Ok(n);
+            let pairs = cats
+                .into_iter()
+                .map(|c| {
+                    let dst = mods_dir.join(c.file_name().unwrap_or_default());
+                    (c, dst)
+                })
+                .collect();
+            return route(RouteRule::CategoryDirs, Placement::MergeEach { pairs });
         }
     }
 
@@ -747,7 +907,13 @@ pub(crate) fn place_mod(
     if !type_folder.eq_ignore_ascii_case("rider") {
         for base in &candidates {
             if contains_paints_bundle(base) {
-                return merge_tree(base, &mods_dir.join("bikes"));
+                return route(
+                    RouteRule::PaintsBundle,
+                    Placement::Merge {
+                        src: base.to_path_buf(),
+                        dst: mods_dir.join("bikes"),
+                    },
+                );
             }
         }
     }
@@ -757,7 +923,13 @@ pub(crate) fn place_mod(
     for base in &candidates {
         if contains_sound_bundle(base) {
             // `<Bike>/{engine.scl,sfx.cfg}` — merge the bike folder(s) as-is.
-            return merge_tree(base, &mods_dir.join("bikes"));
+            return route(
+                RouteRule::SoundBundle,
+                Placement::Merge {
+                    src: base.to_path_buf(),
+                    dst: mods_dir.join("bikes"),
+                },
+            );
         }
         if dir_has_sound_markers(base) {
             // Loose `engine.scl`+`sfx.cfg` — drop into the chosen bike's root.
@@ -768,7 +940,15 @@ pub(crate) fn place_mod(
                 }
                 dir.push(sanitize(seg));
             }
-            return place_plain(base, &dir, slug, false);
+            return route(
+                RouteRule::LooseSound,
+                Placement::Plain {
+                    src: base.to_path_buf(),
+                    dst: dir,
+                    slug: slug.to_string(),
+                    wrap_loose: false,
+                },
+            );
         }
     }
 
@@ -792,10 +972,162 @@ pub(crate) fn place_mod(
     }
     // Extracted tracks need their own folder; loose bike paints don't.
     let wrap_loose = type_folder.eq_ignore_ascii_case("tracks");
-    place_plain(&unwrapped, &type_dir, slug, wrap_loose)
+    route(
+        RouteRule::Typed,
+        Placement::Plain {
+            src: unwrapped,
+            dst: type_dir,
+            slug: slug.to_string(),
+            wrap_loose,
+        },
+    )
 }
 
-fn unwrap_wrapper(dir: &Path) -> PathBuf {
+pub(crate) fn place_mod(
+    extracted: &Path,
+    mods_dir: &Path,
+    type_folder: &str,
+    dest_folder: &str,
+    slug: &str,
+) -> anyhow::Result<usize> {
+    let route = plan_placement(extracted, mods_dir, type_folder, dest_folder, slug);
+    apply(&route.placement)
+}
+
+/// Every `(source file, destination file)` a placement would produce, in order.
+///
+/// This is the single enumeration behind both the dropzone's preview and [`apply`]'s copy
+/// loop, which is what makes "what the review sheet promised" and "what landed on disk"
+/// the same list by construction rather than by careful maintenance.
+pub(crate) fn writes_for(placement: &Placement) -> Vec<(PathBuf, PathBuf)> {
+    let mut out = Vec::new();
+    match placement {
+        Placement::Merge { src, dst } => walk_merge(src, dst, &mut out),
+        Placement::MergeEach { pairs } => {
+            for (src, dst) in pairs {
+                walk_merge(src, dst, &mut out);
+            }
+        }
+        Placement::Plain {
+            src,
+            dst,
+            slug,
+            wrap_loose,
+        } => walk_plain(src, dst, slug, *wrap_loose, &mut out),
+    }
+    out
+}
+
+/// The directories a placement needs to exist even when it writes no files into them.
+///
+/// `place_plain` used to `create_dir_all` its target up front, and a track that extracts to
+/// an empty folder still wants that folder; enumerating writes alone would silently drop it.
+fn roots_for(placement: &Placement) -> Vec<PathBuf> {
+    match placement {
+        Placement::Merge { dst, .. } => vec![dst.clone()],
+        Placement::MergeEach { pairs } => pairs.iter().map(|(_, dst)| dst.clone()).collect(),
+        Placement::Plain { dst, .. } => vec![dst.clone()],
+    }
+}
+
+fn apply(placement: &Placement) -> anyhow::Result<usize> {
+    for root in roots_for(placement) {
+        std::fs::create_dir_all(&root)?;
+    }
+    let writes = writes_for(placement);
+    for (src, dst) in &writes {
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(src, dst)?;
+    }
+    Ok(writes.len())
+}
+
+fn walk_merge(src: &Path, dst: &Path, out: &mut Vec<(PathBuf, PathBuf)>) {
+    let Ok(rd) = std::fs::read_dir(src) else {
+        return;
+    };
+    let mut entries: Vec<_> = rd.filter_map(|e| e.ok()).collect();
+    // `read_dir` order is filesystem-dependent; sort so a preview and its commit list the
+    // same files in the same order (and so tests are reproducible).
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let target = dst.join(entry.file_name());
+        match entry.file_type() {
+            Ok(t) if t.is_dir() => walk_merge(&entry.path(), &target, out),
+            Ok(_) => out.push((entry.path(), target)),
+            Err(_) => {}
+        }
+    }
+}
+
+fn walk_plain(
+    base: &Path,
+    type_dir: &Path,
+    slug: &str,
+    wrap_loose: bool,
+    out: &mut Vec<(PathBuf, PathBuf)>,
+) {
+    let Ok(rd) = std::fs::read_dir(base) else {
+        return;
+    };
+    let mut entries: Vec<_> = rd.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+    let dirs: Vec<PathBuf> = entries
+        .iter()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .map(|e| e.path())
+        .collect();
+    let files: Vec<PathBuf> = entries
+        .iter()
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .map(|e| e.path())
+        .collect();
+
+    let has_pkz = files.iter().any(|p| has_ext(p, "pkz"));
+    let non_junk_files = files
+        .iter()
+        .filter(|p| !is_junk(&p.file_name().unwrap_or_default().to_string_lossy()))
+        .count();
+
+    // Loose files, no sub-folders: wrap in their own folder, or drop straight in.
+    if !has_pkz && dirs.is_empty() && non_junk_files > 0 {
+        let target = if wrap_loose {
+            type_dir.join(sanitize(slug))
+        } else {
+            type_dir.to_path_buf()
+        };
+        walk_merge(base, &target, out);
+        return;
+    }
+
+    // A `.pkz` is the complete, installable package. When one sits at the root,
+    // sibling folders are almost always extras the archive bundles alongside it —
+    // the dedicated-"server" build and the unpacked track source. Install ONLY the
+    // `.pkz` file(s) so those extras don't get dumped into the game folder.
+    if has_pkz {
+        for p in files.iter().filter(|p| has_ext(p, "pkz")) {
+            let name = p.file_name().unwrap_or_default();
+            out.push((p.clone(), type_dir.join(name)));
+        }
+        return;
+    }
+
+    for p in &files {
+        let name = p.file_name().unwrap_or_default();
+        if is_junk(&name.to_string_lossy()) {
+            continue;
+        }
+        out.push((p.clone(), type_dir.join(name)));
+    }
+    for d in &dirs {
+        let name = d.file_name().unwrap_or_default();
+        walk_merge(d, &type_dir.join(name), out);
+    }
+}
+
+pub(crate) fn unwrap_wrapper(dir: &Path) -> PathBuf {
     let mut cur = dir.to_path_buf();
     loop {
         let entries: Vec<_> = match std::fs::read_dir(&cur) {
@@ -818,7 +1150,7 @@ fn unwrap_wrapper(dir: &Path) -> PathBuf {
     }
 }
 
-fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
+pub(crate) fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
     std::fs::read_dir(parent)
         .ok()?
         .filter_map(|e| e.ok())
@@ -832,7 +1164,7 @@ fn child_dir(parent: &Path, name: &str) -> Option<PathBuf> {
 /// Both present in a folder = a sound mod.
 const SOUND_MARKERS: [&str; 2] = ["engine.scl", "sfx.cfg"];
 
-fn dir_has_sound_markers(dir: &Path) -> bool {
+pub(crate) fn dir_has_sound_markers(dir: &Path) -> bool {
     let mut found = [false; SOUND_MARKERS.len()];
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.filter_map(|e| e.ok()) {
@@ -850,7 +1182,7 @@ fn dir_has_sound_markers(dir: &Path) -> bool {
     found.iter().all(|&f| f)
 }
 
-fn contains_sound_bundle(base: &Path) -> bool {
+pub(crate) fn contains_sound_bundle(base: &Path) -> bool {
     std::fs::read_dir(base)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
@@ -907,7 +1239,7 @@ fn is_loose_paint_drop(base: &Path) -> bool {
     has_paint
 }
 
-fn contains_paints_bundle(base: &Path) -> bool {
+pub(crate) fn contains_paints_bundle(base: &Path) -> bool {
     std::fs::read_dir(base)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
@@ -917,95 +1249,14 @@ fn contains_paints_bundle(base: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn place_plain(
-    base: &Path,
-    type_dir: &Path,
-    slug: &str,
-    wrap_loose: bool,
-) -> anyhow::Result<usize> {
-    std::fs::create_dir_all(type_dir)?;
-    let entries: Vec<_> = std::fs::read_dir(base)?.filter_map(|e| e.ok()).collect();
-    let dirs: Vec<PathBuf> = entries
-        .iter()
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .map(|e| e.path())
-        .collect();
-    let files: Vec<PathBuf> = entries
-        .iter()
-        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-        .map(|e| e.path())
-        .collect();
-
-    let has_pkz = files.iter().any(|p| has_ext(p, "pkz"));
-    let non_junk_files = files
-        .iter()
-        .filter(|p| !is_junk(&p.file_name().unwrap_or_default().to_string_lossy()))
-        .count();
-
-    // Loose files, no sub-folders: wrap in their own folder, or drop straight in.
-    if !has_pkz && dirs.is_empty() && non_junk_files > 0 {
-        let target = if wrap_loose {
-            type_dir.join(sanitize(slug))
-        } else {
-            type_dir.to_path_buf()
-        };
-        return merge_tree(base, &target);
-    }
-
-    // A `.pkz` is the complete, installable package. When one sits at the root,
-    // sibling folders are almost always extras the archive bundles alongside it —
-    // the dedicated-"server" build and the unpacked track source. Install ONLY the
-    // `.pkz` file(s) so those extras don't get dumped into the game folder.
-    if has_pkz {
-        let mut n = 0;
-        for p in files.iter().filter(|p| has_ext(p, "pkz")) {
-            let name = p.file_name().unwrap_or_default();
-            std::fs::copy(p, type_dir.join(name))?;
-            n += 1;
-        }
-        return Ok(n);
-    }
-
-    let mut n = 0;
-    for p in &files {
-        let name = p.file_name().unwrap_or_default();
-        if is_junk(&name.to_string_lossy()) {
-            continue;
-        }
-        std::fs::copy(p, type_dir.join(name))?;
-        n += 1;
-    }
-    for d in &dirs {
-        let name = d.file_name().unwrap_or_default();
-        n += merge_tree(d, &type_dir.join(name))?;
-    }
-    Ok(n)
-}
-
-fn merge_tree(src: &Path, dst: &Path) -> anyhow::Result<usize> {
-    std::fs::create_dir_all(dst)?;
-    let mut n = 0;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let target = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            n += merge_tree(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), target)?;
-            n += 1;
-        }
-    }
-    Ok(n)
-}
-
-fn has_ext(p: &Path, ext: &str) -> bool {
+pub(crate) fn has_ext(p: &Path, ext: &str) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case(ext))
         .unwrap_or(false)
 }
 
-fn is_junk(name: &str) -> bool {
+pub(crate) fn is_junk(name: &str) -> bool {
     let n = name.to_lowercase();
     n.starts_with("readme")
         || n.ends_with(".txt")
@@ -1014,7 +1265,7 @@ fn is_junk(name: &str) -> bool {
         || n.ends_with(".md")
 }
 
-fn sanitize(name: &str) -> String {
+pub(crate) fn sanitize(name: &str) -> String {
     name.chars()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
@@ -1250,6 +1501,63 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&base);
         Ok(())
+    }
+
+    /// `zip` filters `..` out of entry names itself, so a zip-slip archive should extract
+    /// harmlessly *inside* the staging directory rather than escaping it. This pins that
+    /// behaviour: if a future `zip` upgrade regressed it, the sweep still has to catch it.
+    #[test]
+    fn a_zip_that_climbs_out_stays_inside_the_staging_folder() -> anyhow::Result<()> {
+        let base = place_tmp("zipslip");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&outside)?;
+
+        let archive = base.join("evil.zip");
+        {
+            let mut w = zip::ZipWriter::new(File::create(&archive)?);
+            w.start_file::<_, ()>("../outside/pwned.txt", zip::write::SimpleFileOptions::default())?;
+            w.write_all(b"nope")?;
+            w.finish()?;
+        }
+
+        let dest = base.join("staged");
+        std::fs::create_dir_all(&dest)?;
+        let _ = extract_archive(&archive, &dest);
+
+        assert!(
+            !outside.join("pwned.txt").exists(),
+            "an archive escaped the staging folder"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+        Ok(())
+    }
+
+    /// The sweep itself, exercised directly: a file planted outside the staging directory
+    /// must be removed and the extraction reported as failed rather than silently accepted.
+    #[test]
+    fn an_escaped_file_fails_the_extraction_and_is_deleted() -> anyhow::Result<()> {
+        let base = place_tmp("escape");
+        let dest = base.join("staged");
+        std::fs::create_dir_all(&dest)?;
+        touch(&dest.join("fine.txt"));
+
+        // A symlink is the escape route a `..`-filtering extractor still leaves open.
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&outside)?;
+        touch(&outside.join("secret.txt"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, dest.join("link"))?;
+        #[cfg(not(unix))]
+        return Ok(());
+
+        #[cfg(unix)]
+        {
+            let err = purge_escapees(Path::new("evil.7z"), &dest).unwrap_err();
+            assert!(err.to_string().contains("outside"), "{err}");
+            assert!(dest.join("fine.txt").exists(), "innocent files kept");
+            let _ = std::fs::remove_dir_all(&base);
+            Ok(())
+        }
     }
 
     fn place_tmp(name: &str) -> PathBuf {
