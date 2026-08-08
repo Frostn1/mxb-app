@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-08 — every gear paint in the picker, and boots on the right legs
+
+### Fixed
+- **Helmet and boots paint lists showed one source and hid the rest.** A gear model can carry
+  its paints in three places — packed inside its `.pkz`, loose in a folder of the same name
+  beside it, or shipped with the game — and the picker stopped at whichever it found first.
+  So a mod installed as a `.pkz` offered only the paint pack you'd added next to it and none
+  of its own, a mod installed as a folder offered only that folder, and the stock helmet and
+  boots offered nothing the game ships at all. Every source is now merged into one list, with
+  a paint that appears in more than one offered once.
+- **The Presets tab never asked a model what paints it carries.** It listed only what the
+  library scan found loose on disk, which is why the same helmet offered a different set of
+  paints in Presets than it did in Rider. Both tabs now read the same list, so they can't
+  disagree, and the "slots reference a mod that is not installed" count is taken from that
+  same list rather than contradicting the dropdown above it.
+- **A paint the picker offered could render as a different one.** With a model installed both
+  as a `.pkz` and as a folder, the viewer opened one of the two and quietly fell back to some
+  other paint when the name you picked lived in the other. It now looks in both.
+- **Boots on the wrong legs.** Which foot went on which side was decided by the two boot
+  meshes' lateral centres, which differ by about a centimetre and a half — each foot's own
+  asymmetry about the mirror plane it was copied across, not a left-right layout. That made it
+  a coin toss settled by how each author happened to build the mesh, so some boots came out
+  mirrored, buckles facing inward. The side is now read from the mesh's own node names
+  (`boot_l` / `boot_r`), with the old measurement kept for meshes that don't say. The preview
+  and the on-body render share the rule, so a boot can't look right in one and wrong in the
+  other.
+
 ## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
 
 ### Added

@@ -70,12 +70,11 @@ import {
   slotsFor,
   EMPTY_LOADOUT,
   loadScans,
-  slotOptions,
-  isMissing,
   missingSlots,
   loadoutSummary,
   type Scans,
 } from "../../lib/presets";
+import { useGearPaints } from "../../lib/useGearPaints";
 
 function humanSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -179,6 +178,10 @@ export default function Presets({
 
   const [sharePreset, setSharePreset] = useState<Preset | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+
+  // The paints the chosen helmet, boots and protection carry — packed inside the model or
+  // shipped with the game — merged with the loose ones the library scan found.
+  const { optionsFor, missingFor } = useGearPaints(loadout);
 
   const setSlot = useCallback((key: keyof Loadout, value: string) => {
     setLoadout((prev) => ({ ...prev, [key]: value }));
@@ -384,9 +387,14 @@ export default function Presets({
     })).filter((g) => g.slots.length > 0);
   }, [slots]);
 
+  // Counted through the same lookup the dropdowns use, so a paint the pickers offer is
+  // never also reported as a mod you haven't installed.
   const builderMissing = useMemo(
-    () => (scans ? missingSlots(bike, loadout, scans).length : 0),
-    [scans, bike, loadout],
+    () =>
+      grouped
+        .flatMap((g) => g.slots)
+        .filter((s) => missingFor(s, bike, scans)).length,
+    [scans, bike, grouped, missingFor],
   );
 
   // Wait for the first scan before claiming there's nothing — otherwise the empty
@@ -521,14 +529,14 @@ export default function Presets({
                 </div>
                 <div className="grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2">
                   {g.slots.map((slot) => {
-                    const options = scans ? slotOptions(slot, bike, loadout, scans) : [];
+                    const options = optionsFor(slot, bike, scans);
                     return (
                       <SlotField
                         key={slot.key}
                         slot={slot}
                         value={loadout[slot.key]}
                         options={options}
-                        missing={scans ? isMissing(slot, bike, loadout, scans) : false}
+                        missing={missingFor(slot, bike, scans)}
                         hint={
                           // "No matches." doesn't tell you a swap has to be registered
                           // in the Locker before it can be picked here.
