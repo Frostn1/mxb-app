@@ -1,0 +1,464 @@
+//! Fetching mxb-mods.com from inside a real browser, for the users Cloudflare refuses.
+//!
+//! [`crate::mxb_session`] exists because Cloudflare sometimes challenges our HTTP client, and
+//! it answers that by earning a `cf_clearance` in a WebView and replaying the cookie. A
+//! tester's log showed the limit of that approach: the challenge cleared in about a second,
+//! the cookie was harvested and sent correctly, and Cloudflare served the interstitial to
+//! reqwest anyway. A `cf_clearance` is bound to the TLS/HTTP2 fingerprint of the connection
+//! that earned it, and rustls does not fingerprint like the WebView's Chrome — so the cookie
+//! is not portable between them, and no amount of cookie work fixes it.
+//!
+//! What does fix it is not sending the request from Rust at all. This module keeps a hidden
+//! WebView parked on the mxb-mods.com origin and runs `fetch()` inside it: same-origin, real
+//! browser, real fingerprint, the site's own cookies. Cloudflare cannot tell it from a tab,
+//! because it isn't one.
+//!
+//! Only text comes back this way — the catalog JSON and mod-page HTML. Mod downloads resolve
+//! to MediaFire/Drive/Mega and never touch this path, so no large binary is ever marshalled
+//! through JavaScript.
+
+use crate::mods::mxb::Fetched;
+use crate::mxb_session;
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+use tauri::{AppHandle, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
+
+/// The window the fetches run in. Public because the window-event handler and the IPC guard
+/// both have to recognise it — it is the one webview allowed to talk to us from a remote
+/// origin, and the one that must never be parked in the tray.
+pub const WINDOW: &str = "mxb-fetch";
+
+/// The event the injected script emits its result on. Also public for the guard: this is the
+/// only IPC the fetch window is permitted to perform.
+pub const RESULT_EVENT: &str = "mxb-fetch:done";
+
+/// How long a single fetch may take. Generous, because the very first one also pays for
+/// Cloudflare's challenge clearing in the background.
+const TIMEOUT: Duration = Duration::from_secs(45);
+
+/// How long to wait for the page to be ready to run script after the window is built.
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Set once from `setup`. The mods code is a set of free functions with no handle to thread
+/// through — `search`, `detail` and `ratings` would all have to grow an `AppHandle`
+/// parameter, along with everything between them and the command layer, to avoid this.
+static APP: OnceLock<AppHandle> = OnceLock::new();
+
+pub fn init(app: &AppHandle) {
+    let _ = APP.set(app.clone());
+    listen_for_results(app);
+}
+
+fn app() -> anyhow::Result<&'static AppHandle> {
+    APP.get()
+        .ok_or_else(|| anyhow::anyhow!("the WebView fetch bridge was never initialised"))
+}
+
+/// Requests still waiting on a reply, by id.
+fn waiting() -> &'static Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Reply>>> {
+    static WAITING: OnceLock<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Reply>>>> =
+        OnceLock::new();
+    WAITING.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// What the injected script sends back.
+///
+/// `error` carries a network-level failure — a `fetch` that rejected rather than a request
+/// that was answered — so those stay distinguishable from an HTTP error status.
+#[derive(Debug, Deserialize)]
+struct Reply {
+    id: u64,
+    #[serde(default)]
+    status: u16,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// Route a reply to whoever is waiting for it.
+///
+/// An id we did not issue is dropped. That is the guard against the remote page inventing
+/// results: mxb-mods.com script can emit whatever it likes on this event, and the worst it
+/// achieves is a debug line.
+fn deliver(reply: Reply) {
+    let Some(tx) = lock(waiting()).remove(&reply.id) else {
+        log::debug!("ignoring a WebView fetch result for unknown id {}", reply.id);
+        return;
+    };
+    let _ = tx.send(reply);
+}
+
+fn listen_for_results(app: &AppHandle) {
+    app.listen(RESULT_EVENT, |event| {
+        match serde_json::from_str::<Reply>(event.payload()) {
+            Ok(reply) => deliver(reply),
+            // Never panic on a payload from a remote page.
+            Err(e) => log::warn!("unreadable WebView fetch result: {e}"),
+        }
+    });
+}
+
+pub async fn get(url: &str, params: &[(&str, String)]) -> anyhow::Result<Fetched> {
+    let full = with_query(url, params);
+    run(&full, None).await
+}
+
+pub async fn post(url: &str, form: &[(&str, String)]) -> anyhow::Result<Fetched> {
+    run(url, Some(&encode_form(form))).await
+}
+
+/// `application/x-www-form-urlencoded`, matching what `reqwest`'s `.form()` sends, so the
+/// two transports look identical to the site.
+fn encode_form(form: &[(&str, String)]) -> String {
+    form.iter()
+        .map(|(k, v)| format!("{}={}", urlencode(k), urlencode(v)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn with_query(url: &str, params: &[(&str, String)]) -> String {
+    if params.is_empty() {
+        return url.to_string();
+    }
+    let q = params
+        .iter()
+        .map(|(k, v)| format!("{}={}", urlencode(k), urlencode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{sep}{q}")
+}
+
+/// Percent-encoding for the characters that actually turn up in these queries — search
+/// terms, slugs and numbers. Deliberately conservative: anything not unreserved is escaped.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+async fn run(url: &str, body: Option<&str>) -> anyhow::Result<Fetched> {
+    let app = app()?;
+    let window = ensure_window(app).await?;
+
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    lock(waiting()).insert(id, tx);
+
+    let started = std::time::Instant::now();
+    if let Err(e) = window.eval(script(id, url, body)) {
+        lock(waiting()).remove(&id);
+        return Err(anyhow::anyhow!("could not run the fetch in the WebView: {e}"));
+    }
+
+    let reply = match tokio::time::timeout(TIMEOUT, rx).await {
+        Ok(Ok(reply)) => reply,
+        // The sender is only dropped if the map is cleared out from under us.
+        Ok(Err(_)) => {
+            return Err(anyhow::anyhow!("the WebView fetch was cancelled"));
+        }
+        Err(_) => {
+            lock(waiting()).remove(&id);
+            return Err(anyhow::anyhow!(
+                "the WebView did not answer within {TIMEOUT:?} — {url}"
+            ));
+        }
+    };
+
+    if let Some(error) = reply.error {
+        return Err(anyhow::anyhow!("the WebView could not reach {url}: {error}"));
+    }
+
+    log::debug!(
+        "webview GET {} -> {} in {:?}",
+        url.strip_prefix(mxb_session::BASE).unwrap_or(url),
+        reply.status,
+        started.elapsed()
+    );
+
+    Ok(Fetched {
+        status: reply.status,
+        headers: reply.headers,
+        body: reply.body,
+        url: if reply.url.is_empty() {
+            url.to_string()
+        } else {
+            reply.url
+        },
+    })
+}
+
+/// The script run inside the page.
+///
+/// `credentials: "include"` so the site's own cookies ride along, and header names are
+/// lowercased to match what [`Fetched`] callers look up. `withGlobalTauri` is off, so the
+/// result goes back through the IPC primitive rather than `window.__TAURI__`.
+fn script(id: u64, url: &str, body: Option<&str>) -> String {
+    let init = match body {
+        Some(body) => format!(
+            "{{method:'POST',credentials:'include',\
+             headers:{{'content-type':'application/x-www-form-urlencoded'}},body:{}}}",
+            js_string(body)
+        ),
+        None => "{credentials:'include'}".to_string(),
+    };
+    format!(
+        r#"(function(){{
+  var send = function(p) {{
+    p.id = {id};
+    // The object itself, not a JSON string of it — Tauri encodes the payload, and
+    // stringifying first would land a quoted string where a struct is expected.
+    window.__TAURI_INTERNALS__.invoke('plugin:event|emit', {{
+      event: {event}, payload: p
+    }});
+  }};
+  try {{
+    fetch({url}, {init}).then(function(r) {{
+      return r.text().then(function(t) {{
+        var h = {{}};
+        r.headers.forEach(function(v, k) {{ h[k.toLowerCase()] = v; }});
+        send({{ status: r.status, headers: h, body: t, url: r.url }});
+      }});
+    }}).catch(function(e) {{ send({{ error: String(e) }}); }});
+  }} catch (e) {{ send({{ error: String(e) }}); }}
+}})();"#,
+        event = js_string(RESULT_EVENT),
+        url = js_string(url),
+    )
+}
+
+/// A JS string literal. The URLs here are ours, but they carry user-typed search terms, and
+/// a quote or backslash reaching `eval` unescaped would break the script — or worse.
+fn js_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            // `</script` inside a string literal would still end a script block.
+            '<' => out.push_str("\\u003C"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Build the hidden window on first use and leave it up for the session.
+///
+/// Serialised, so two requests arriving together don't both try to build it.
+async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = LOCK.lock().await;
+
+    // Readiness is tracked separately from existence: a window that was built but never
+    // came good must not be handed out as if it were working, or every fetch through it
+    // times out 45 seconds at a time.
+    static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    if let Some(existing) = app.get_webview_window(WINDOW) {
+        if READY.load(Ordering::Relaxed) {
+            return Ok(existing);
+        }
+        wait_until_ready(&existing).await?;
+        READY.store(true, Ordering::Relaxed);
+        return Ok(existing);
+    }
+
+    let url: tauri::Url = mxb_session::BASE.parse()?;
+    log::info!("opening the hidden mxb-mods.com fetch window");
+    let window = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
+        .title("mxb-mods.com")
+        .user_agent(mxb_session::UA)
+        // Not `visible(false)`: WebView2 can throttle a window it considers fully hidden,
+        // and a throttled timer here reads as the site being slow. One pixel, parked well
+        // off-screen, stays a live window without ever being seen.
+        .inner_size(1.0, 1.0)
+        .position(-32000.0, -32000.0)
+        .skip_taskbar(true)
+        .decorations(false)
+        .focused(false)
+        .build()?;
+
+    wait_until_ready(&window).await?;
+    READY.store(true, Ordering::Relaxed);
+    Ok(window)
+}
+
+/// Wait for the page to be able to run our script.
+///
+/// Two things have to be true: the IPC primitive has to be injected, and Cloudflare's
+/// challenge — which the window will be served on first navigation, exactly as the visible
+/// clearance window is — has to have cleared. Polling a one-line `eval` covers both, since
+/// the challenge page is replaced by the real one when it passes.
+async fn wait_until_ready(window: &tauri::WebviewWindow) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + READY_TIMEOUT;
+    let mut last: Option<String> = None;
+    while std::time::Instant::now() < deadline {
+        match probe(window).await {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e.to_string()),
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    Err(anyhow::anyhow!(
+        "the hidden mxb-mods.com window never became ready{}",
+        last.map(|e| format!(" ({e})")).unwrap_or_default()
+    ))
+}
+
+/// One round-trip that proves script can run and reach us. Doubles as the check that
+/// `__TAURI_INTERNALS__` still exists — if a Tauri upgrade renames it, this fails here with
+/// a clear message instead of every fetch timing out.
+async fn probe(window: &tauri::WebviewWindow) -> anyhow::Result<()> {
+    const PROBE_ID: u64 = 0;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    lock(waiting()).insert(PROBE_ID, tx);
+    let js = format!(
+        "if (window.__TAURI_INTERNALS__) {{ window.__TAURI_INTERNALS__.invoke\
+         ('plugin:event|emit', {{ event: {event}, payload: {{id:0,status:204}} }}); }}",
+        event = js_string(RESULT_EVENT)
+    );
+    if let Err(e) = window.eval(&js) {
+        lock(waiting()).remove(&PROBE_ID);
+        return Err(anyhow::anyhow!("{e}"));
+    }
+    match tokio::time::timeout(Duration::from_millis(400), rx).await {
+        Ok(Ok(_)) => Ok(()),
+        _ => {
+            lock(waiting()).remove(&PROBE_ID);
+            Err(anyhow::anyhow!("no answer from the page yet"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A search term with a quote in it reaches `eval` — it must not be able to close the
+    /// string literal it sits in.
+    #[test]
+    fn js_strings_escape_what_would_break_out() {
+        assert_eq!(js_string(r#"a"b"#), r#""a\"b""#);
+        assert_eq!(js_string(r"a\b"), r#""a\\b""#);
+        assert_eq!(js_string("a\nb"), r#""a\nb""#);
+        // A closing script tag inside a literal still ends a script block in HTML parsing.
+        assert!(!js_string("</script>").contains('<'));
+    }
+
+    #[test]
+    fn the_script_carries_the_id_url_and_event() {
+        let js = script(42, "https://mxb-mods.com/wp-json/wp/v2/posts?page=2", None);
+        assert!(js.contains("p.id = 42;"), "{js}");
+        assert!(js.contains("wp-json/wp/v2/posts?page=2"), "{js}");
+        assert!(js.contains(RESULT_EVENT), "{js}");
+        assert!(js.contains("credentials:'include'"), "{js}");
+        assert!(!js.contains("method:'POST'"), "a GET must not claim to be a POST");
+        // Tauri encodes the payload itself. Stringifying first lands a quoted string where
+        // the listener expects a struct, and every reply is dropped as unreadable — which
+        // is exactly what the first run of this bridge did.
+        assert!(
+            !js.contains("JSON.stringify"),
+            "the payload must be the object, not a JSON string of it: {js}"
+        );
+    }
+
+    #[test]
+    fn a_post_carries_its_form_body() {
+        let js = script(7, "https://mxb-mods.com/wp-admin/admin-ajax.php", Some("a=1&b=2"));
+        assert!(js.contains("method:'POST'"), "{js}");
+        assert!(js.contains("a=1&b=2"), "{js}");
+        assert!(js.contains("x-www-form-urlencoded"), "{js}");
+    }
+
+    #[test]
+    fn queries_are_encoded_the_way_the_site_expects() {
+        let params = [("search", "supercross 26".to_string()), ("page", "2".to_string())];
+        let url = with_query("https://mxb-mods.com/wp-json/wp/v2/posts", &params);
+        assert_eq!(
+            url,
+            "https://mxb-mods.com/wp-json/wp/v2/posts?search=supercross%2026&page=2"
+        );
+        // An existing query string is appended to, not replaced.
+        assert!(with_query("https://x/y?a=1", &params).contains("?a=1&search="));
+        assert_eq!(with_query("https://x/y", &[]), "https://x/y");
+    }
+
+    #[test]
+    fn form_encoding_matches_reqwests() {
+        let form = [
+            ("action", "load_results".to_string()),
+            ("postID", "1234".to_string()),
+        ];
+        assert_eq!(encode_form(&form), "action=load_results&postID=1234");
+    }
+
+    /// The remote page can emit anything it likes on this event. A result for an id we never
+    /// issued has to be dropped, not delivered to whoever happens to be waiting.
+    #[test]
+    fn a_reply_for_an_unknown_id_is_dropped() {
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        lock(waiting()).insert(9001, tx);
+
+        deliver(Reply {
+            id: 9002,
+            status: 200,
+            headers: HashMap::new(),
+            body: "injected".into(),
+            url: String::new(),
+            error: None,
+        });
+        assert!(
+            rx.try_recv().is_err(),
+            "a reply for another id must not resolve this request"
+        );
+
+        deliver(Reply {
+            id: 9001,
+            status: 200,
+            headers: HashMap::new(),
+            body: "ours".into(),
+            url: String::new(),
+            error: None,
+        });
+        assert_eq!(rx.try_recv().unwrap().body, "ours");
+    }
+
+    /// Malformed JSON from the page must not panic the listener.
+    #[test]
+    fn an_unreadable_payload_is_survivable() {
+        assert!(serde_json::from_str::<Reply>("not json").is_err());
+        // Missing optional fields are fine; only the id is required.
+        let r: Reply = serde_json::from_str(r#"{"id":3}"#).unwrap();
+        assert_eq!(r.id, 3);
+        assert_eq!(r.status, 0);
+    }
+}

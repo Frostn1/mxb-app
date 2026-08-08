@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-08 — v0.7.1 — the model-swap crash is gone, and the Rider preview wears a real rider
+## 2026-08-08 — v0.7.1 — Browse works for blocked players, the model-swap crash is gone, and the Rider preview wears a real rider
 
 ### Added
 - **Helmets, Boots and Protection tabs in a preset's race content.** Next to Tracks and
@@ -24,6 +24,22 @@
   model.
 
 ### Fixed
+- **Browse loads for players mxb-mods.com was refusing.** Some players got nothing but
+  "mxb-mods.com refused the request (403)", and until now the app's answer was to open a
+  check window, let Cloudflare's challenge clear, and reuse the cookie it earned. A tester's
+  log proved that can't work: the challenge cleared in about a second, the cookie was sent
+  correctly, and the site refused us anyway — Cloudflare ties that cookie to the exact
+  browser connection that earned it, and the app's own downloader isn't that. So the app now
+  moves the *request* into the browser instead of moving the cookie out of it. When
+  mxb-mods.com refuses the fast path, the same request is re-run inside a hidden window on
+  the site's own page and everything carries on from there, for the rest of the session. The
+  visible "Checking with mxb-mods.com…" popup is gone entirely — nothing appears on screen.
+  Mod downloads are untouched: they come from MediaFire, Google Drive and MEGA, never from
+  mxb-mods.com.
+- **Retry works more than once.** Closing the old check window parked it in the tray instead
+  of destroying it, which left its name taken, so every attempt after the first failed to
+  open one and Retry quietly did nothing for the rest of the session. The shop login window
+  had the same fault. Only the main window parks in the tray now.
 - **The game no longer crashes to desktop when you pick a bike after swapping a model or
   applying a preset.** Since 0.7.0, swapping a bike's model asked FrostMod to re-apply the
   bike so the new mesh showed without the class-switch away-and-back. FrostMod v0.9.9 does
