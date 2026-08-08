@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-07 — a way out of the overlay that isn't the game
+
+### Added
+- **"Open full app" in the in-game overlay.** The overlay carries Presets, the Locker and
+  Browse; Rider, the Library and Settings only exist in the main window, and the only way
+  there was to close the overlay — which drops you back into the game — and then alt-tab.
+  A button next to the close X now puts the overlay away and brings the main window
+  forward instead, keeping the focus where you asked for it rather than handing it back to
+  MX Bikes on the way out.
+
 ## 2026-08-07 — v0.7.0 — Six languages, an in-game overlay, and bikes wearing the right paint
 
 ### Added

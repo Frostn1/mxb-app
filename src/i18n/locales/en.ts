@@ -750,6 +750,8 @@ export const en = {
   "overlay.registerFailed": "Overlay hotkey couldn't be registered",
   "overlay.toClose": "{{hotkey}} to close",
   "overlay.closeTitle": "Close overlay (Esc)",
+  "overlay.openMain": "Open full app",
+  "overlay.openMainTitle": "Close the overlay and open the main MXB App window",
   "overlay.needsSetup": "Finish setting up MXB App in its main window first — it needs to know where your MX Bikes folder is.",
   "overlay.fullscreenBlocked": "The overlay can't show over exclusive fullscreen",
   "overlay.fullscreenBlockedDesc": "Set MX Bikes to borderless or windowed in Options → Video, then try the shortcut again.",

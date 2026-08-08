@@ -130,11 +130,20 @@ fn center_over_game<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
-/// Hide the overlay and return keyboard focus to MX Bikes.
-pub fn hide<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+/// Take the overlay off the screen, leaving the foreground where it lands.
+///
+/// Separate from [`hide`] for the "Open full app" button: focus is on its way to the
+/// main window, so pulling MX Bikes forward on the way out would only fight it.
+pub fn dismiss<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(LABEL) {
         window.hide().map_err(|e| format!("{e:#}"))?;
     }
+    Ok(())
+}
+
+/// Hide the overlay and return keyboard focus to MX Bikes.
+pub fn hide<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    dismiss(app)?;
     // Order matters: the game can't take the foreground while our window still holds it.
     gameproc::focus_game();
     Ok(())
@@ -252,6 +261,15 @@ mod tests {
     fn hiding_a_never_opened_overlay_is_harmless() {
         let app = mock_app();
         hide(app.handle()).expect("nothing to hide is not a failure");
+        assert!(app.get_webview_window(LABEL).is_none());
+    }
+
+    /// "Open full app" routes through `dismiss` before the main window is raised, and
+    /// it too can fire with no overlay window built yet.
+    #[test]
+    fn dismissing_a_never_opened_overlay_is_harmless() {
+        let app = mock_app();
+        dismiss(app.handle()).expect("nothing to dismiss is not a failure");
         assert!(app.get_webview_window(LABEL).is_none());
     }
 }

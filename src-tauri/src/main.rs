@@ -1862,6 +1862,16 @@ fn overlay_hide(app: tauri::AppHandle) -> Result<(), String> {
     overlay::hide(&app)
 }
 
+/// The overlay's "Open full app" button: put the overlay away and bring the main
+/// window forward. Deliberately not `overlay::hide` — that hands focus back to MX
+/// Bikes, which is the opposite of what someone leaving for the full app wants.
+#[tauri::command]
+fn overlay_open_main(app: tauri::AppHandle) -> Result<(), String> {
+    overlay::dismiss(&app)?;
+    show_main(&app);
+    Ok(())
+}
+
 #[tauri::command]
 fn overlay_state(app: tauri::AppHandle) -> overlay::OverlayState {
     overlay::state(&config::load(&app).unwrap_or_default())
@@ -2332,6 +2342,7 @@ fn main() {
             set_instant_refresh,
             overlay_toggle,
             overlay_hide,
+            overlay_open_main,
             overlay_state,
             set_overlay_enabled,
             set_overlay_hotkey,

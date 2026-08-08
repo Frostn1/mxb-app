@@ -781,6 +781,8 @@ export const es: Translation = {
   "overlay.registerFailed": "No se pudo registrar el atajo del overlay",
   "overlay.toClose": "{{hotkey}} para cerrar",
   "overlay.closeTitle": "Cerrar overlay (Esc)",
+  "overlay.openMain": "Abrir la app completa",
+  "overlay.openMainTitle": "Cierra el overlay y abre la ventana principal de MXB App",
   "overlay.needsSetup": "Termina de configurar MXB App en su ventana principal — necesita saber dónde está tu carpeta de MX Bikes.",
   "overlay.fullscreenBlocked": "El overlay no puede mostrarse sobre la pantalla completa exclusiva",
   "overlay.fullscreenBlockedDesc": "Pon MX Bikes en modo sin bordes o en ventana desde Options → Video y vuelve a pulsar el atajo.",
