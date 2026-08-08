@@ -150,6 +150,8 @@ export const de: Translation = {
     "„{{label}}“ auf {{bike}} angewendet — gespeichert. Wähle dein Profil in MX Bikes (Profilmenü) neu aus, um den neuen Look zu laden.",
   "presets.appliedNextTime":
     "„{{label}}“ auf {{bike}} angewendet — gespeichert. Es wird beim nächsten Start des Spiels geladen.",
+  "presets.appliedReselectBike":
+    "„{{label}}“ auf {{bike}} angewendet — die Lackierungen sind live; wähle das Motorrad in MX Bikes neu aus, um das Modell zu sehen.",
   "presets.phaseBundling": "Dateien werden verpackt…",
   "presets.phaseUploading": "Paket wird hochgeladen…",
   "presets.phaseDownloading": "Paket wird heruntergeladen…",
@@ -692,8 +694,8 @@ export const de: Translation = {
     "Wird im Spiel aktualisiert — wenn es dein ausgewähltes Motorrad ist, ändert es sich jetzt.",
   "locker.modelFrostmodNotRunning":
     "Starte FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
-  "locker.modelFrostmodTooOld":
-    "Aktualisiere FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
+  "locker.modelReselectBike":
+    "Modell gewechselt — wähle das Motorrad in MX Bikes neu aus, um es zu sehen.",
   "locker.modelFrostmodUnreachable":
     "FrostMod war nicht erreichbar — wähle das Motorrad im Spiel neu aus, um es zu laden.",
   "locker.modelRefreshWindowsOnly":

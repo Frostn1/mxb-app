@@ -81,6 +81,24 @@
 ## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
 
 ### Fixed
+- **The game no longer crashes to desktop when you pick a bike after swapping a model or
+  applying a preset.** Since 0.7.0, swapping a bike's model asked FrostMod to re-apply the
+  bike so the new mesh showed without the class-switch away-and-back. FrostMod v0.9.9 does
+  that by replaying a bike-load call it captured earlier — using a descriptor the game had
+  already finished with, never checking the object that call writes into, and swallowing
+  the resulting fault so the game carried on with a half-swapped machine. Nothing looked
+  wrong at the time; the crash landed on the *next* bike selected by hand, which is why it
+  read as "choosing a bike crashes the game" rather than as anything to do with the swap.
+  The app no longer sends that request to any FrostMod below v0.9.11 — the release that
+  stops replaying — and a FrostMod whose version it can't read counts as one to leave
+  alone, where before an unreadable version was given the benefit of the doubt. Model swaps
+  and presets still apply in full; the swapped model now appears when you re-select the
+  bike in the garage, and the toast says so instead of promising a live refresh.
+- **A preset that swaps a model no longer reports a live refresh it didn't get.** The
+  apply toast was derived purely from the paint/gear reload, which never touches the mesh —
+  so a preset carrying a model swap said "refreshed live in-game" while the bike on screen
+  kept its old bodywork. It now says the paints are live and names re-selecting the bike as
+  what shows the model.
 - **The Rider preview no longer goes quiet when it fails to update.** If resolving the
   rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
   tab caught it and did nothing with it. The previous model stayed on screen, deliberately,

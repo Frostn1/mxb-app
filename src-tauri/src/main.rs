@@ -242,12 +242,14 @@ fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
 /// instant refresh is off — the same switch that gates `live_refresh`, since both
 /// reach into the running game.
 ///
-/// A FrostMod that predates `refresh_bike_model` logs an unknown verb and drops it,
-/// which reads as `Signaled` here and would have the UI promise a refresh that can't
-/// happen. The tag our installer recorded is the only evidence available on this side,
-/// so a clean send is downgraded to `TooOld` when it names a build without the verb.
-/// `NotRunning`/`WriteFailed` are left alone: they say something more specific, and an
-/// unreadable tag is treated as new enough (see `supports_model_refresh`).
+/// The tag our installer recorded decides whether the command goes out at all. It used
+/// to be sent unconditionally and only the *wording* adjusted afterwards, because the
+/// worst an old FrostMod did was log an unknown verb and drop it. That is no longer the
+/// worst: FrostMod v0.9.9 acts on the verb by replaying a bike-apply call it captured
+/// earlier, which corrupts the game's bike state and crashes it to desktop at the next
+/// bike the player picks by hand. So the check moved *before* the send — nothing is
+/// written to the command file and no event is pulsed for a build we don't trust.
+/// See `frostmod::MODEL_REFRESH_MIN_VERSION`.
 fn model_refresh_cmd(
     app: &tauri::AppHandle,
     enabled: bool,
@@ -256,11 +258,11 @@ fn model_refresh_cmd(
     if !enabled {
         return None;
     }
-    let sent = frostmod::signal_refresh_model(bike);
-    let too_old = matches!(sent, frostmod::CommandOutcome::Signaled)
-        && frostmod_manage::installed_version(app)
-            .is_some_and(|tag| !frostmod::supports_model_refresh(&tag));
-    Some(if too_old { frostmod::CommandOutcome::TooOld } else { sent })
+    let tag = frostmod_manage::installed_version(app);
+    if !frostmod::model_refresh_is_safe(tag.as_deref()) {
+        return Some(frostmod::CommandOutcome::Withheld);
+    }
+    Some(frostmod::signal_refresh_model(bike))
 }
 
 #[tauri::command]
