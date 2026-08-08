@@ -51,6 +51,11 @@
   across it.
 - **A "Stock" option that showed a helmet in the wrong texture.** It's offered only where the
   mesh really carries the sheet that side's paints replace.
+- **The overlay's empty frame left sitting over the game.** Clicking back into MX Bikes with
+  the overlay open stopped drawing the panel but kept its window there — a box over the game
+  that still swallowed clicks. The overlay now closes itself when you click away, to the game
+  or to anything else, and the hotkey brings it straight back. Its own file picker doesn't
+  count, so importing a mod from the overlay no longer risks closing it.
 
 ## 2026-08-08 — v0.8.0 — GP Bikes, dedicated servers, and paint sync
 
