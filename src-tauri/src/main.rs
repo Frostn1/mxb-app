@@ -6,6 +6,7 @@ mod bikeswap;
 mod bundle;
 mod cfg;
 mod config;
+mod cookie_session;
 mod edf;
 mod frostmod;
 mod frostmod_manage;
@@ -15,6 +16,7 @@ mod library;
 mod modelswap;
 mod mods;
 mod modwatch;
+mod mxb_session;
 mod overlay;
 mod paint;
 mod pkz;
@@ -74,16 +76,40 @@ fn create_config(
     Ok(true)
 }
 
+/// Run an mxb-mods.com call; if Cloudflare refuses it, earn a `cf_clearance` in a real
+/// browser and try exactly once more.
+///
+/// Once, not a loop: the handshake either produced a cookie the client didn't have or it
+/// didn't, and repeating it would just reopen the window at someone who is already stuck.
+/// Only refusals we could plausibly clear get this treatment — a 429 wants patience, not a
+/// browser window.
+async fn with_clearance<T, F, Fut>(app: &tauri::AppHandle, op: F) -> Result<T, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let err = match op().await {
+        Ok(value) => return Ok(value),
+        Err(err) => err,
+    };
+    match err.downcast_ref::<mods::mxb::Blocked>() {
+        Some(blocked) if blocked.clearable() => {}
+        _ => return Err(format!("{err:#}")),
+    }
+    if !mxb_session::handshake(app).await {
+        return Err(format!("{err:#}"));
+    }
+    op().await.map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 async fn search_mods(
+    app: tauri::AppHandle,
     query: String,
     category_id: u32,
     page: u32,
 ) -> Result<Vec<ModSummary>, String> {
-    MxbModsSource
-        .search(&query, category_id, page)
-        .await
-        .map_err(|e| format!("{e:#}"))
+    with_clearance(&app, || MxbModsSource.search(&query, category_id, page)).await
 }
 
 /// Community scores for the mods currently on screen, keyed by post id. Ids the site
@@ -94,8 +120,8 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 }
 
 #[tauri::command]
-async fn get_mod_detail(slug: String) -> Result<ModDetail, String> {
-    MxbModsSource.detail(&slug).await.map_err(|e| format!("{e:#}"))
+async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
+    with_clearance(&app, || MxbModsSource.detail(&slug)).await
 }
 
 #[tauri::command]
@@ -989,9 +1015,20 @@ async fn load_gear_model(
     part: String,
     paint: Option<String>,
     goggles: Option<String>,
+    // Show the mesh's own textures instead of a `.pnt` — the stock look. Separate flags
+    // because a helmet's goggles are picked independently of its shell.
+    stock: Option<bool>,
+    stock_goggles: Option<bool>,
 ) -> Result<RiderPart, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        load_gear_model_blocking(path, part, paint, goggles)
+        load_gear_model_blocking(
+            path,
+            part,
+            paint,
+            goggles,
+            stock.unwrap_or(false),
+            stock_goggles.unwrap_or(false),
+        )
     })
     .await
     .map_err(|e| format!("load_gear_model task failed: {e}"))?
@@ -1037,6 +1074,11 @@ async fn load_stock_gear_model(
 struct GearPaints {
     paints: Vec<String>,
     goggles: Vec<String>,
+    /// The mesh carries its own shell / goggle texture, so a "Stock" entry is worth
+    /// offering next to the packed paints. Preview-only — never a loadout value, since
+    /// the game names a `.pnt` there and has no word for "the model's own look".
+    has_stock: bool,
+    has_stock_goggles: bool,
 }
 
 fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
@@ -1050,7 +1092,15 @@ fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
         out.dedup();
         out
     };
+    // Names only — decoding the pixels is the load path's job, and this runs per picker.
+    let embedded: Vec<String> = files
+        .iter()
+        .find(|(n, _)| is_visible_gear_mesh(n))
+        .map(|(_, d)| edf::embedded_textures(d).iter().map(|t| t.name.clone()).collect())
+        .unwrap_or_default();
     Ok(GearPaints {
+        has_stock: embedded.iter().any(|n| !is_goggle_name(n) && !is_companion_map(n)),
+        has_stock_goggles: embedded.iter().any(|n| is_goggle_name(n) && !is_companion_map(n)),
         paints: names("paints"),
         goggles: names("goggles"),
     })
@@ -1070,7 +1120,12 @@ async fn list_installed_gear_paints(
     model: String,
 ) -> Result<GearPaints, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let empty = GearPaints { paints: Vec::new(), goggles: Vec::new() };
+        let empty = GearPaints {
+            paints: Vec::new(),
+            goggles: Vec::new(),
+            has_stock: false,
+            has_stock_goggles: false,
+        };
         if model.trim().is_empty() {
             return Ok(empty);
         }
@@ -1121,12 +1176,16 @@ fn load_gear_model_blocking(
     part: String,
     paint: Option<String>,
     goggles: Option<String>,
+    stock: bool,
+    stock_goggles: bool,
 ) -> Result<RiderPart, String> {
     let p = std::path::Path::new(&path);
     let files = read_gear_files(p).map_err(|e| format!("{e:#}"))?;
     let want = paint.filter(|s| !s.is_empty());
     let want_goggles = goggles.filter(|s| !s.is_empty());
     let mut nodes = Vec::new();
+    // Kept so a stock request can read the mesh's own textures back out of it.
+    let mut mesh: Option<&Vec<u8>> = None;
     // Collect paint/goggle entries up front so we can prefer the requested one but always
     // fall back to the first available: a stale or unknown paint name must still show the
     // gear textured, never bare grey.
@@ -1135,8 +1194,8 @@ fn load_gear_model_blocking(
     for (name, data) in &files {
         let base = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
         if base.ends_with(".edf") {
-            // Take the visible mesh: skip the `_s` shadow and `c_` cockpit variants.
-            if nodes.is_empty() && !base.ends_with("_s.edf") && !base.starts_with("c_") {
+            if nodes.is_empty() && is_visible_gear_mesh(name) {
+                mesh = Some(data);
                 nodes = edf::parse(data);
                 edf::to_right_handed(&mut nodes);
                 keep_lod0(&mut nodes);
@@ -1151,14 +1210,80 @@ fn load_gear_model_blocking(
         return Err(format!("no gear mesh found in {path}"));
     }
     let mut textures: Vec<paint::PntTexture> = Vec::new();
-    let main_tex = pick_gear_paint(&paints, want.as_deref(), &mut textures);
-    let goggle_tex = pick_gear_paint(&goggle_paints, want_goggles.as_deref(), &mut textures);
-    if want.is_some() && main_tex.is_none() && !paints.is_empty() {
+    // A stock side decodes nothing from `paints/` — the mesh already carries that texture.
+    let main_tex = (!stock)
+        .then(|| pick_gear_paint(&paints, want.as_deref(), &mut textures))
+        .flatten();
+    let goggle_tex = (!stock_goggles)
+        .then(|| pick_gear_paint(&goggle_paints, want_goggles.as_deref(), &mut textures))
+        .flatten();
+    if want.is_some() && main_tex.is_none() && !stock && !paints.is_empty() {
         log::warn!("[rider] {part} paint {want:?} not found; used first of {} packed", paints.len());
     }
+    let mut out: Vec<paint::PaintTexture> = textures.iter().map(paint::to_texture).collect();
+    // The look the model ships with, before any paint: the textures embedded in the mesh.
+    let (mut stock_main, mut stock_goggle) = (None, None);
+    if stock || stock_goggles {
+        let embedded = mesh.map(|d| paint::extract_edf_textures(d)).unwrap_or_default();
+        for t in &embedded {
+            let slot = if is_goggle_name(&t.name) { &mut stock_goggle } else { &mut stock_main };
+            slot.get_or_insert_with(|| t.name.clone());
+        }
+        if stock && stock_main.is_none() {
+            log::warn!("[rider] {part} has no stock texture in its mesh — showing it bare");
+        }
+        // A paint reuses the mesh's texture names (that's how it replaces them), so with
+        // one side stock and the other painted the two sets collide. Resolve it here: the
+        // stock side's embedded texture wins, the painted side keeps its `.pnt`. The
+        // frontend maps textures by name and would otherwise show whichever image
+        // happened to finish loading last.
+        let mut claimed: Vec<String> = Vec::new();
+        if stock {
+            claimed.extend(stock_main.clone());
+        }
+        if stock_goggles {
+            claimed.extend(stock_goggle.clone());
+        }
+        let claimed: Vec<String> = claimed.iter().map(|s| s.to_ascii_lowercase()).collect();
+        out.retain(|t| !claimed.contains(&t.name.to_ascii_lowercase()));
+        let taken: std::collections::HashSet<String> =
+            out.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+        out.extend(
+            embedded
+                .into_iter()
+                .filter(|t| !taken.contains(&t.name.to_ascii_lowercase())),
+        );
+    }
+    let main_tex = if stock { stock_main } else { main_tex };
+    let goggle_tex = if stock_goggles { stock_goggle } else { goggle_tex };
+    log::info!(
+        "[viewer] {part}: paint={want:?} goggles={want_goggles:?} stock={stock}/{stock_goggles} \
+         -> shell {main_tex:?}, goggles {goggle_tex:?} ({} textures)",
+        out.len(),
+    );
     bind_gear_submeshes(&mut nodes, main_tex.as_deref(), goggle_tex.as_deref());
-    let textures = textures.iter().map(paint::to_texture).collect();
-    Ok(RiderPart { part, nodes, textures })
+    Ok(RiderPart { part, nodes, textures: out })
+}
+
+/// The gear file carrying the visible mesh — not the `_s` shadow or the `c_` cockpit variant.
+fn is_visible_gear_mesh(name: &str) -> bool {
+    let base = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+    base.ends_with(".edf") && !base.ends_with("_s.edf") && !base.starts_with("c_")
+}
+
+/// Normal (`_n`) and reflection (`_r`) maps ride alongside a colour texture and are never
+/// the look itself. Mirrors the filter in `paint::extract_edf_textures`.
+fn is_companion_map(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.ends_with("_n") || n.ends_with("_r")
+}
+
+/// Goggles (and their lens) are the one gear part painted separately from the shell —
+/// the same test decides which submesh wears which texture, and which embedded texture
+/// is the stock goggle.
+fn is_goggle_name(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("goggle") || n.contains("lens")
 }
 
 /// Pick a gear paint by name, else the first available so the piece is always textured.
@@ -1187,9 +1312,7 @@ fn bind_gear_submeshes(nodes: &mut [edf::EdfNode], main_tex: Option<&str>, goggl
             continue;
         }
         for sm in &mut node.submeshes {
-            let n = sm.name.to_ascii_lowercase();
-            let is_goggle = n.contains("goggle") || n.contains("lens");
-            sm.texture = if is_goggle {
+            sm.texture = if is_goggle_name(&sm.name) {
                 goggle_tex.or(main_tex).map(str::to_string)
             } else {
                 main_tex.map(str::to_string)
@@ -1263,6 +1386,9 @@ fn load_gear(
                 spec.part.to_string(),
                 Some(paint.to_string()),
                 Some(goggles.to_string()),
+                // The rider wears what the loadout names; "stock" is a preview-only choice.
+                false,
+                false,
             ) {
                 Ok(part) => {
                     log::info!("[rider] {} '{model}' loaded: {} nodes", spec.part, part.nodes.len());
@@ -2050,6 +2176,7 @@ fn main() {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
             shop_session::load_session(handle);
+            mxb_session::load(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -2226,7 +2353,7 @@ mod viewer_tests {
         eprintln!("paints ({}): {:?}", paints.len(), &paints[..paints.len().min(4)]);
         eprintln!("goggles ({}): {:?}", goggles.len(), &goggles[..goggles.len().min(4)]);
 
-        let part = super::load_gear_model_blocking(path, "helmet".into(), None, None)
+        let part = super::load_gear_model_blocking(path.clone(), "helmet".into(), None, None, false, false)
             .expect("load gear");
         let have: std::collections::HashSet<String> =
             part.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
@@ -2247,6 +2374,59 @@ mod viewer_tests {
         if !goggles.is_empty() {
             let (shell, goggle) = (shell.expect("a shell submesh"), goggle.expect("a goggle submesh"));
             assert_ne!(shell, goggle, "goggles bind their own texture, not the shell's");
+        }
+
+        // Stock: the same mesh wearing the textures embedded in it, not a packed `.pnt`.
+        let listed = super::gear_paints_at(std::path::Path::new(&path)).expect("list paints");
+        eprintln!("has_stock={} goggles={}", listed.has_stock, listed.has_stock_goggles);
+        if !listed.has_stock {
+            eprintln!("this piece embeds no textures — no stock entry to check");
+            return;
+        }
+        let stock =
+            super::load_gear_model_blocking(path, "helmet".into(), None, None, true, listed.has_stock_goggles)
+                .expect("load stock gear");
+        let embedded: std::collections::HashSet<String> =
+            stock.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+        assert!(
+            !paints.iter().any(|p| embedded.contains(&p.to_ascii_lowercase())),
+            "a stock preview decodes no packed paint",
+        );
+        let mut bound = 0;
+        for n in &stock.nodes {
+            for s in &n.submeshes {
+                let t = s.texture.as_ref().expect("stock submesh bound to a texture");
+                eprintln!("stock submesh {:<10} -> {t}", s.name);
+                assert!(embedded.contains(&t.to_ascii_lowercase()), "'{t}' is embedded in the mesh");
+                bound += 1;
+            }
+        }
+        assert!(bound > 0, "stock bound at least one submesh");
+
+        // Mixed: stock shell, painted goggles. A paint reuses the mesh's texture names, so
+        // this is where the two sets would collide and the viewer would pick at random.
+        if let Some(g) = goggles.first() {
+            let mixed = super::load_gear_model_blocking(
+                std::env::var("MXB_REAL_GEAR").unwrap(),
+                "helmet".into(),
+                None,
+                Some(g.clone()),
+                true,
+                false,
+            )
+            .expect("load mixed gear");
+            let mut names: Vec<String> =
+                mixed.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+            names.sort_unstable();
+            let total = names.len();
+            names.dedup();
+            assert_eq!(names.len(), total, "one texture per name, so binding is unambiguous");
+            for n in &mixed.nodes {
+                for s in &n.submeshes {
+                    let t = s.texture.as_ref().expect("mixed submesh bound to a texture");
+                    assert!(names.contains(&t.to_ascii_lowercase()), "'{t}' is available");
+                }
+            }
         }
     }
 

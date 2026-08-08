@@ -291,8 +291,18 @@ export function loadGearModel(
   part: RiderPart["part"],
   paint?: string,
   goggles?: string,
+  /** Show the mesh's own texture instead of a `.pnt` — the stock look, per side. */
+  stock = false,
+  stockGoggles = false,
 ): Promise<RiderPart> {
-  return invoke<RiderPart>("load_gear_model", { path, part, paint, goggles });
+  return invoke<RiderPart>("load_gear_model", {
+    path,
+    part,
+    paint,
+    goggles,
+    stock,
+    stockGoggles,
+  });
 }
 
 export function listGearPaints(path: string): Promise<GearPaints> {

@@ -1,4 +1,5 @@
 use super::{DownloadOption, ModDetail, ModRating, ModSource, ModSummary};
+use crate::mxb_session;
 use futures_util::StreamExt;
 use regex::Regex;
 use reqwest::Client;
@@ -8,12 +9,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const BASE: &str = "https://mxb-mods.com";
-/// A full four-part version, unlike the `Chrome/126.0` form used elsewhere — real Chrome
-/// never sends a two-part version, and a UA that no browser would emit is itself a signal
-/// to a bot filter. Deliberately not `shop_session::UA`: that one has to keep matching the
-/// login WebView or the `cf_clearance` minted there stops verifying.
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.140 Safari/537.36";
+const BASE: &str = mxb_session::BASE;
 const PER_PAGE: &str = "24";
 
 pub struct MxbModsSource;
@@ -35,11 +31,11 @@ impl ModSource for MxbModsSource {
 
 /// One client for the whole session, not one per call.
 ///
-/// Two reasons beyond the obvious. It keeps a cookie jar, so if Cloudflare ever hands out
-/// a `cf_clearance` we replay it instead of arriving cold every time — the pattern
-/// `shop_session` already uses for the sibling domain. And it reuses connections, so a
-/// user typing in the search box costs one TLS handshake rather than one per keystroke,
-/// which is the sort of traffic shape that gets a client rate-limited in the first place.
+/// Two reasons beyond the obvious. It holds [`mxb_session::jar`] — shared with the WebView
+/// handshake, so a `cf_clearance` earned there is picked up by this client without
+/// rebuilding it — and it reuses connections, so a user typing in the search box costs one
+/// TLS handshake rather than one per keystroke, which is the sort of traffic shape that
+/// gets a client rate-limited in the first place.
 fn client() -> anyhow::Result<&'static Client> {
     static CLIENT: std::sync::OnceLock<Result<Client, String>> = std::sync::OnceLock::new();
     CLIENT
@@ -63,20 +59,20 @@ fn build_client() -> anyhow::Result<Client> {
     ] {
         headers.insert(k, HeaderValue::from_static(v));
     }
-    Ok(Client::builder()
-        .user_agent(UA)
-        .default_headers(headers)
-        .cookie_store(true)
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()?)
+    // UA, jar and timeouts come from `mxb_session` so the client and the handshake WebView
+    // cannot drift apart — a `cf_clearance` is bound to the UA that earned it.
+    Ok(mxb_session::client_builder().default_headers(headers).build()?)
 }
 
-/// Statuses worth trying again: Cloudflare hands out 403 on a bad bot score, 429 on rate
-/// limiting, and 503 while an interstitial is up. All three are commonly transient for a
-/// client that is not in fact a bot.
+/// Statuses worth trying again *on the spot*: 429 is rate limiting and 503 is usually an
+/// interstitial going up, both of which pass on their own.
+///
+/// 403 is deliberately not here. It is a bot-score refusal, and a second identical request
+/// from the same fingerprint on the same connection gets the same answer — retrying it just
+/// failed three times more slowly. It is handled a level up instead, by earning a
+/// `cf_clearance` in a real browser and trying once more with something actually different.
 fn worth_retrying(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 403 | 429 | 503)
+    matches!(status.as_u16(), 429 | 503)
 }
 
 /// `GET` with backoff over the transient blocks above. Transport errors retry too, which
@@ -110,25 +106,69 @@ async fn get_with_retry(
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("request failed")))
 }
 
+/// Cloudflare refused us, as opposed to the site being down or the parse failing.
+///
+/// A type rather than a message because the command layer has to *act* on it — run the
+/// WebView handshake and retry — and matching on error strings to decide that would break
+/// the first time someone reworded a sentence.
+#[derive(Debug, Clone)]
+pub struct Blocked {
+    /// The refusing status, or `None` for an interstitial served as a 200.
+    pub status: Option<u16>,
+    message: String,
+}
+
+impl std::fmt::Display for Blocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Blocked {}
+
+impl Blocked {
+    /// True when a `cf_clearance` could plausibly fix it — i.e. we were challenged, rather
+    /// than rate-limited or handed a server error.
+    pub fn clearable(&self) -> bool {
+        matches!(self.status, None | Some(403))
+    }
+}
+
 /// Turn a blocked response into something a person can act on. The raw reqwest `Display`
 /// ("HTTP status client error (403 Forbidden) for url (…)") told users nothing and shipped
 /// them a URL with percent-encoded query params.
+///
+/// The 403 wording assumes the handshake above it has already been tried and failed, since
+/// that is the only way this message reaches a user.
 fn blocked_error(status: reqwest::StatusCode) -> anyhow::Error {
-    match status.as_u16() {
-        403 => anyhow::anyhow!(
-            "mxb-mods.com refused the request (403). Its bot protection sometimes blocks \
-             an app it doesn't recognise — wait a minute and hit Retry. If it keeps \
-             happening, opening mxb-mods.com in your browser first usually clears it."
-        ),
-        429 => anyhow::anyhow!(
-            "mxb-mods.com is rate-limiting us (429). Give it a minute, then hit Retry."
-        ),
-        503 => anyhow::anyhow!(
-            "mxb-mods.com is unavailable right now (503) — it may be behind a Cloudflare \
-             check. Try again shortly."
-        ),
-        _ => anyhow::anyhow!("mxb-mods.com returned {status}"),
-    }
+    let message = match status.as_u16() {
+        403 => "mxb-mods.com refused the request (403), and its check window didn't clear \
+                it either. Open mxb-mods.com in your normal browser to confirm the site \
+                loads for you, then hit Retry."
+            .to_string(),
+        429 => "mxb-mods.com is rate-limiting us (429). Give it a minute, then hit Retry."
+            .to_string(),
+        503 => "mxb-mods.com is unavailable right now (503) — it may be behind a Cloudflare \
+                check. Try again shortly."
+            .to_string(),
+        _ => format!("mxb-mods.com returned {status}"),
+    };
+    anyhow::Error::new(Blocked {
+        status: Some(status.as_u16()),
+        message,
+    })
+}
+
+/// The interstitial-as-a-200 case. Same handling as a 403 — it is the same refusal, just
+/// dressed as a success.
+fn challenge_error() -> anyhow::Error {
+    anyhow::Error::new(Blocked {
+        status: None,
+        message: "mxb-mods.com served a Cloudflare check instead of the mod page, and its \
+                  check window didn't clear it. Open mxb-mods.com in your normal browser, \
+                  then hit Retry."
+            .to_string(),
+    })
 }
 
 /// A Cloudflare interstitial served with a 200, which would otherwise parse as an empty
@@ -232,10 +272,7 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // Only call it a challenge when the page also yielded nothing, so a marker that turns
     // up in a page that actually parsed can never turn a working mod into an error.
     if downloads.is_empty() && is_challenge(&html) {
-        anyhow::bail!(
-            "mxb-mods.com served a Cloudflare check instead of the mod page. Open \
-             mxb-mods.com in your browser once, then hit Retry."
-        );
+        return Err(challenge_error());
     }
 
     Ok(ModDetail {
@@ -619,12 +656,52 @@ mod client_tests {
 
     #[test]
     fn retries_only_the_transient_blocks() {
-        for code in [403u16, 429, 503] {
+        for code in [429u16, 503] {
             assert!(worth_retrying(reqwest::StatusCode::from_u16(code).unwrap()), "{code}");
         }
         for code in [200u16, 400, 404, 500] {
             assert!(!worth_retrying(reqwest::StatusCode::from_u16(code).unwrap()), "{code}");
         }
+    }
+
+    /// The point of the clearance work: a 403 is a bot-score refusal, and repeating the
+    /// same request from the same fingerprint only fails slower. It goes up to the
+    /// handshake instead.
+    #[test]
+    fn a_403_is_not_retried_in_place() {
+        assert!(!worth_retrying(reqwest::StatusCode::FORBIDDEN));
+    }
+
+    /// Which refusals the command layer should answer with a browser window. Getting this
+    /// wrong either pops a window at someone who is merely rate-limited, or fails to open
+    /// one for the person this whole change exists for.
+    #[test]
+    fn only_challenges_are_worth_a_handshake() {
+        let blocked = |code: u16| Blocked {
+            status: Some(code),
+            message: String::new(),
+        };
+        assert!(blocked(403).clearable());
+        assert!(!blocked(429).clearable());
+        assert!(!blocked(503).clearable());
+        // The interstitial-as-a-200 — the same refusal wearing a success code.
+        assert!(matches!(
+            challenge_error().downcast_ref::<Blocked>(),
+            Some(b) if b.clearable()
+        ));
+    }
+
+    /// `with_clearance` finds this by downcast, so a 403 has to survive the trip through
+    /// `anyhow` as a `Blocked` and not collapse into a bare message.
+    #[test]
+    fn a_blocked_error_stays_downcastable() {
+        let err = blocked_error(reqwest::StatusCode::FORBIDDEN);
+        let blocked = err
+            .downcast_ref::<Blocked>()
+            .expect("the command layer downcasts to decide whether to run the handshake");
+        assert_eq!(blocked.status, Some(403));
+        // `{:#}` is what the command layer sends the UI; it must still read as the message.
+        assert!(format!("{err:#}").contains("403"));
     }
 
     #[test]

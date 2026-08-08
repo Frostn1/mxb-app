@@ -43,7 +43,8 @@ reqwest = { version = "0.12", default-features = false, features = [
     "gzip",
     "brotli",
 ] }
-tokio = { version = "1", features = ["time"] }
+# `sync` for the mutex that stops two simultaneous 403s opening two clearance windows.
+tokio = { version = "1", features = ["time", "sync"] }
 futures-util = { version = "0.3", features = ["io"] }
 # Pure-Rust MEGA API client (built on reqwest): downloads + decrypts public
 # shared links in-app, so end users don't need the megatools/MEGAcmd binary.
