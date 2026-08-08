@@ -1,22 +1,56 @@
 # Changelog
 
-## 2026-08-08
+## 2026-08-08 — v0.7.1 — the model-swap crash is gone, and the Rider preview wears a real rider
+
+### Added
+- **Helmets, Boots and Protection tabs in a preset's race content.** Next to Tracks and
+  Always keep, three panes list the gear models you have installed so you can tick the spares
+  worth keeping reachable — picking them by hand instead of leaving it all to what the preset
+  happens to name. Anything unticked steps aside for the race; the preset's own gear is kept
+  for you either way.
+- **Custom rider models show up on the rider.** A rider model is a whole new body mesh, not a
+  texture — Rider+ and its variants install as folders under `mods/rider/riders`, and the
+  preview never looked there. It read the body out of the game's `rider.pkz` and nowhere else,
+  so picking an installed model listed the profile, found nothing to load, and rendered gear
+  floating where the rider should be. The body is now resolved from the installed model first,
+  loose or packed as a `.pkz`, and falls back to the game's own rider only when no model
+  supplies one. A rider packed as `riders/<name>.pkz` is listed in the picker too, as gear
+  already was.
+- **A rider model wears the kits you already own.** Rider+ ships its `paints` and `gloves`
+  folders empty on purpose, because existing gear is meant to work on it. A kit or glove paint
+  is now looked for in the chosen profile, then inside its archive, then under the stock
+  profiles — by exact name at every step, so reaching further never quietly swaps in a
+  different paint. The kit dropdown lists what you own rather than going blank on a fresh
+  model.
 
 ### Fixed
-- **The app builds again, and the rider wears the right textures.** Two changes landed
-  together that couldn't both be right: one gave every mesh part its own material table,
-  because an id counts into the table of the part that owns it and means nothing outside
-  it; the other added the custom-rider binder, written against the whole-model reading
-  that the first change deleted. The merge kept both, so `main` stopped compiling. The
-  rider binder now reads each part's id through its own node's table, the same way the
-  bike and gear viewers do — which is also the correct behaviour, not just the compiling
-  one: under the old reading every part resolved its ids through the first node's table,
-  which is what smeared one part's texture across another's geometry. Covered by a test
-  that pins two parts using the same local id to mean different textures.
-
-## 2026-08-07 — the protection slot shows what the mod actually is
-
-### Fixed
+- **The game no longer crashes to desktop when you pick a bike after swapping a model or
+  applying a preset.** Since 0.7.0, swapping a bike's model asked FrostMod to re-apply the
+  bike so the new mesh showed without the class-switch away-and-back. FrostMod v0.9.9 does
+  that by replaying a bike-load call it captured earlier — using a descriptor the game had
+  already finished with, never checking the object that call writes into, and swallowing
+  the resulting fault so the game carried on with a half-swapped machine. Nothing looked
+  wrong at the time; the crash landed on the *next* bike selected by hand, which is why it
+  read as "choosing a bike crashes the game" rather than as anything to do with the swap.
+  The app no longer sends that request to any FrostMod below v0.9.11 — the release that
+  stops replaying — and a FrostMod whose version it can't read counts as one to leave
+  alone, where before an unreadable version was given the benefit of the doubt. Model swaps
+  and presets still apply in full; the swapped model now appears when you re-select the
+  bike in the garage, and the toast says so instead of promising a live refresh.
+- **A preset that swaps a model no longer reports a live refresh it didn't get.** The
+  apply toast was derived purely from the paint/gear reload, which never touches the mesh —
+  so a preset carrying a model swap said "refreshed live in-game" while the bike on screen
+  kept its old bodywork. It now says the paints are live and names re-selecting the bike as
+  what shows the model.
+- **Race mode now clears the rider gear too.** Applying a race preset narrowed the bikes and
+  tracks the game could see and left the rider alone — every helmet, every boot, every
+  protection set and every gear livery you have installed still showed up in the game's
+  pickers, including the four hundred liveries sitting under the one helmet the preset
+  actually names. Manage only ever moved archives and extracted tracks, on the reasoning that
+  a loose `.pnt` costs nothing to mount; true, but mounting was never the point — a preset
+  that names one paint means the others should be out of sight. Race mode now takes rider gear
+  models and liveries out of the way alongside the rest, keeps exactly what the preset names,
+  and brings them all back on Restore all.
 - **Protection mods now show what they actually look like.** The protection slot is the
   busiest and least conventional one on mxb-mods — chains, necklaces, hoodies, bibs,
   backpacks, hair, the odd pickaxe — and unlike helmets and boots those mods bake their
@@ -42,13 +76,6 @@
   their own right, and since material indices count that list, every texture after one slid
   onto the wrong part. That's why the Tactical Vest wore its pouch's normal map.
 
-### Changed
-- **Protection is no longer hidden by default in the Rider tab.** It was, back when it
-  rendered as a grey blob spanning the whole torso.
-
-## 2026-08-07
-
-### Fixed
 - **Race mode now clears the rider gear too.** Applying a race preset narrowed the bikes and
   tracks the game could see and left the rider alone — every helmet, every boot, every
   protection set and every gear livery you have installed still showed up in the game's
@@ -58,33 +85,6 @@
   that names one paint means the others should be out of sight. Race mode now takes rider gear
   models and liveries out of the way alongside the rest, keeps exactly what the preset names,
   and brings them all back on Restore all.
-
-### Added
-- **Helmets, Boots and Protection tabs in a preset's race content.** Next to Tracks and
-  Always keep, three panes list the gear models you have installed so you can tick the spares
-  worth keeping reachable — picking them by hand instead of leaving it all to what the preset
-  happens to name. Anything unticked steps aside for the race; the preset's own gear is kept
-  for you either way.
-
-## 2026-08-07 — the Rider preview can wear a rider model
-
-### Added
-- **Custom rider models show up on the rider.** A rider model is a whole new body mesh, not a
-  texture — Rider+ and its variants install as folders under `mods/rider/riders`, and the
-  preview never looked there. It read the body out of the game's `rider.pkz` and nowhere else,
-  so picking an installed model listed the profile, found nothing to load, and rendered gear
-  floating where the rider should be. The body is now resolved from the installed model first,
-  loose or packed as a `.pkz`, and falls back to the game's own rider only when no model
-  supplies one. A rider packed as `riders/<name>.pkz` is listed in the picker too, as gear
-  already was.
-- **A rider model wears the kits you already own.** Rider+ ships its `paints` and `gloves`
-  folders empty on purpose, because existing gear is meant to work on it. A kit or glove paint
-  is now looked for in the chosen profile, then inside its archive, then under the stock
-  profiles — by exact name at every step, so reaching further never quietly swaps in a
-  different paint. The kit dropdown lists what you own rather than going blank on a fresh
-  model.
-
-### Fixed
 - **The rider stands up and faces forward.** Rider meshes don't agree on which axis is up: the stock motocross
   rider is authored Y-up, while the supermoto rider and Rider+ are Z-up and arrived lying on
   their back. Every piece of gear is anchored and scaled to a fraction of the body's height,
@@ -111,27 +111,6 @@
   model's own texture, so a rider that ships no paints — or a model with pieces of its own —
   renders as it was built rather than in flat grey.
 
-## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
-
-### Fixed
-- **The game no longer crashes to desktop when you pick a bike after swapping a model or
-  applying a preset.** Since 0.7.0, swapping a bike's model asked FrostMod to re-apply the
-  bike so the new mesh showed without the class-switch away-and-back. FrostMod v0.9.9 does
-  that by replaying a bike-load call it captured earlier — using a descriptor the game had
-  already finished with, never checking the object that call writes into, and swallowing
-  the resulting fault so the game carried on with a half-swapped machine. Nothing looked
-  wrong at the time; the crash landed on the *next* bike selected by hand, which is why it
-  read as "choosing a bike crashes the game" rather than as anything to do with the swap.
-  The app no longer sends that request to any FrostMod below v0.9.11 — the release that
-  stops replaying — and a FrostMod whose version it can't read counts as one to leave
-  alone, where before an unreadable version was given the benefit of the doubt. Model swaps
-  and presets still apply in full; the swapped model now appears when you re-select the
-  bike in the garage, and the toast says so instead of promising a live refresh.
-- **A preset that swaps a model no longer reports a live refresh it didn't get.** The
-  apply toast was derived purely from the paint/gear reload, which never touches the mesh —
-  so a preset carrying a model swap said "refreshed live in-game" while the bike on screen
-  kept its old bodywork. It now says the paints are live and names re-selecting the bike as
-  what shows the model.
 - **The Rider preview no longer goes quiet when it fails to update.** If resolving the
   rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
   tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
@@ -143,6 +122,8 @@
   persistent fault is re-hit on every slot edit.
 
 ### Changed
+- **Protection is no longer hidden by default in the Rider tab.** It was, back when it
+  rendered as a grey blob spanning the whole torso.
 - **When mxb-mods.com refuses us, the log now says enough to act on.** Browse failing with
   "mxb-mods.com refused the request (403)" wrote nothing to the log beyond whether the check
   window earned a cookie — the request that was actually refused went unrecorded, so a report
