@@ -349,6 +349,39 @@ fn looks_like_mods_dir(path: &str) -> bool {
         || crate::library::resolve_child(dir, "mods").is_dir()
 }
 
+/// The parent of `path` when the pick is the `mods` folder rather than the game folder
+/// above it, else `None`.
+///
+/// What the app wants is the game's *user* folder — the one holding `mods/` and
+/// `profiles/`. In a folder picker the two are one click apart, and getting it wrong is
+/// invisible afterwards: every scan then looks under `<mods>/mods`, finds nothing, and the
+/// library comes up empty next to a path that reads perfectly reasonably in Settings.
+///
+/// The folder's contents decide it, not just its name — a mods tree is called `mods` by
+/// convention, but what identifies it is the type folders the game reads out of it, and an
+/// extracted one can arrive under any name at all.
+fn climb_out_of_mods(path: &str, game: &GameProfile) -> Option<PathBuf> {
+    let dir = Path::new(path.trim());
+    if path.trim().is_empty() || !dir.is_dir() {
+        return None;
+    }
+    // Already the game folder: it holds the `mods`/`profiles` children itself.
+    if looks_like_mods_dir(path) {
+        return None;
+    }
+    let named_mods = dir
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("mods"));
+    let holds_type_folders = game
+        .mods_dirs
+        .iter()
+        .any(|k| crate::library::resolve_child(dir, k).is_dir());
+    if !named_mods && !holds_type_folders {
+        return None;
+    }
+    dir.parent().filter(|p| p.is_dir()).map(Path::to_path_buf)
+}
+
 /// The saved config, or one built on the spot when the MX Bikes folder sits where it
 /// normally does. Returns `None` only when there's genuinely nothing to go on — the
 /// one case where the setup screen has something to ask.
@@ -397,6 +430,18 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
 
 pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     let game = cfg.game();
+    // Picked one level too deep — take the folder above `mods`, which is the one every
+    // other path in the app is built from. Done here so it covers both ways in: first-run
+    // setup (`create_config`) and Change… in Settings (`set_mods_path`).
+    if let Some(up) = climb_out_of_mods(&cfg.mods_path, game) {
+        log::info!(
+            "{} folder was set to the mods folder ({}) — using the folder above it: {}",
+            game.display,
+            cfg.mods_path,
+            up.display()
+        );
+        cfg.mods_path = up.to_string_lossy().into_owned();
+    }
     // A folder that isn't there any more is worse than none: it reads as "configured",
     // so the app comes up on a dashboard scanning nothing instead of asking where the
     // game went. Covers a game uninstalled or moved, and a path a previous build adopted
@@ -714,6 +759,47 @@ mod tests {
         cfg.mods_path = root.to_string_lossy().into_owned();
         assert_eq!(cfg.profiles_dir(), root.join("profiles"));
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Picking `…/MX Bikes/mods` instead of `…/MX Bikes` — the folder one level down, and
+    /// the one a player is far more likely to have open when the picker appears.
+    #[test]
+    fn finalize_climbs_out_of_the_mods_folder() {
+        let root = std::env::temp_dir().join(format!("frost-climb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let game = root.join("MX Bikes");
+        std::fs::create_dir_all(game.join("mods").join("bikes")).unwrap();
+        std::fs::create_dir_all(game.join("profiles")).unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = game.join("mods").to_string_lossy().into_owned();
+        let out = finalize(cfg);
+        assert_eq!(Path::new(&out.mods_path), game);
+
+        // An extracted tree under any other name is still recognised by what's inside it.
+        let odd = root.join("MX Bikes 2").join("Mods_backup");
+        std::fs::create_dir_all(odd.join("tracks")).unwrap();
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = odd.to_string_lossy().into_owned();
+        assert_eq!(Path::new(&finalize(cfg).mods_path), odd.parent().unwrap());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The right folder must survive untouched, including the one case that looks like the
+    /// wrong one: a game folder that is itself *named* `mods`.
+    #[test]
+    fn finalize_leaves_the_game_folder_alone() {
+        let root = std::env::temp_dir().join(format!("frost-noclimb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for game in [root.join("MX Bikes"), root.join("mods")] {
+            std::fs::create_dir_all(game.join("mods").join("bikes")).unwrap();
+            std::fs::create_dir_all(game.join("profiles")).unwrap();
+            let mut cfg = AppConfig::default();
+            cfg.mods_path = game.to_string_lossy().into_owned();
+            assert_eq!(Path::new(&finalize(cfg).mods_path), game, "{}", game.display());
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

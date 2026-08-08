@@ -481,7 +481,7 @@ export const it: Translation = {
   "settings.about": "Info e aggiornamenti",
   "settings.whatsNew": "Novità",
   "settings.modsFolderDesc":
-    "Dove vengono installate le mod. Cambiandola, la libreria viene riscansionata.",
+    "Dove vengono installate le mod. Scegli la cartella che contiene le cartelle mods e profiles \u2014 quella sopra mods, non la cartella mods stessa. Cambiandola, la libreria viene riscansionata.",
   "settings.insideModsFolder": "Dentro la tua cartella {{game}}",
   "settings.notSet": "Non impostata",
   "settings.change": "Cambia…",
@@ -533,6 +533,8 @@ export const it: Translation = {
     "Impossibile aggiornare l'avvio automatico",
   "settings.folderUpdated": "Cartella di gioco aggiornata",
   "settings.folderUpdatedDesc": "La tua libreria verrà riscansionata.",
+  "settings.folderUsedParent":
+    "Quella era la cartella mods \u2014 è stata usata la cartella sopra: {{folder}}",
   "settings.setFolderFailed": "Impossibile impostare la cartella",
   "settings.reDetected": "Cartella {{game}} rilevata di nuovo",
   "settings.detectFolderFailed": "Impossibile rilevare la cartella",
@@ -676,7 +678,7 @@ export const it: Translation = {
   "library.empty":
     "Nessuna mod {{type}} installata — vai su Esplora e aggiungine una.",
   "library.noMatches": "Nessun risultato.",
-  "library.quick3d": "Anteprima 3D rapida",
+  "library.quick3d": "Vedi in 3D",
   "library.selectNone": "Deseleziona tutto",
   "library.move": "Sposta",
   "library.uninstall": "Disinstalla",

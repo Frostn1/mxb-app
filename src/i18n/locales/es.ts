@@ -485,7 +485,7 @@ export const es: Translation = {
   "settings.about": "Acerca de y actualizaciones",
   "settings.whatsNew": "Novedades",
   "settings.modsFolderDesc":
-    "Donde se instalan los mods. Cambiarla vuelve a analizar tu biblioteca.",
+    "Donde se instalan los mods. Elige la carpeta que contiene las carpetas mods y profiles \u2014 la de encima de mods, no la carpeta mods en sí. Cambiarla vuelve a analizar tu biblioteca.",
   "settings.insideModsFolder": "Dentro de tu carpeta de {{game}}",
   "settings.notSet": "Sin definir",
   "settings.change": "Cambiar…",
@@ -538,6 +538,8 @@ export const es: Translation = {
     "No se pudo actualizar el inicio automático",
   "settings.folderUpdated": "Carpeta del juego actualizada",
   "settings.folderUpdatedDesc": "Tu biblioteca se volverá a analizar.",
+  "settings.folderUsedParent":
+    "Esa era la carpeta mods \u2014 se usó la carpeta superior: {{folder}}",
   "settings.setFolderFailed": "No se pudo definir la carpeta",
   "settings.reDetected": "Carpeta de {{game}} detectada de nuevo",
   "settings.detectFolderFailed": "No se pudo detectar la carpeta",
@@ -681,7 +683,7 @@ export const es: Translation = {
   "library.empty":
     "Aún no hay {{type}} instaladas — ve a Explorar y añade alguna.",
   "library.noMatches": "Sin resultados.",
-  "library.quick3d": "Vista 3D rápida",
+  "library.quick3d": "Ver en 3D",
   "library.selectNone": "No seleccionar nada",
   "library.move": "Mover",
   "library.uninstall": "Desinstalar",

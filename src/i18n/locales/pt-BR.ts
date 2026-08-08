@@ -485,7 +485,7 @@ export const ptBR: Translation = {
   "settings.about": "Sobre e atualizações",
   "settings.whatsNew": "Novidades",
   "settings.modsFolderDesc":
-    "Onde os mods são instalados. Mudar isso faz uma nova varredura da biblioteca.",
+    "Onde os mods são instalados. Escolha a pasta que contém as pastas mods e profiles \u2014 a de cima de mods, não a pasta mods em si. Mudar isso faz uma nova varredura da biblioteca.",
   "settings.insideModsFolder": "Dentro da sua pasta do {{game}}",
   "settings.notSet": "Não definida",
   "settings.change": "Alterar…",
@@ -537,6 +537,8 @@ export const ptBR: Translation = {
     "Não foi possível alterar o início automático",
   "settings.folderUpdated": "Pasta do jogo atualizada",
   "settings.folderUpdatedDesc": "Sua biblioteca será varrida de novo.",
+  "settings.folderUsedParent":
+    "Essa era a pasta mods \u2014 foi usada a pasta acima dela: {{folder}}",
   "settings.setFolderFailed": "Não foi possível definir a pasta",
   "settings.reDetected": "Pasta do {{game}} detectada de novo",
   "settings.detectFolderFailed": "Não foi possível detectar a pasta",
@@ -679,7 +681,7 @@ export const ptBR: Translation = {
   "library.empty":
     "Nenhuma mod de {{type}} instalada — vá em Explorar e adicione uma.",
   "library.noMatches": "Nenhum resultado.",
-  "library.quick3d": "Prévia 3D rápida",
+  "library.quick3d": "Ver em 3D",
   "library.selectNone": "Desmarcar tudo",
   "library.move": "Mover",
   "library.uninstall": "Desinstalar",

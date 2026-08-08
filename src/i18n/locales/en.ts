@@ -474,7 +474,7 @@ export const en = {
   "settings.about": "About & updates",
   "settings.whatsNew": "What's new",
   "settings.modsFolderDesc":
-    "Where mods are installed. Changing it re-scans your library.",
+    "Where mods are installed. Pick the folder that holds the mods and profiles folders \u2014 the one above mods, not the mods folder itself. Changing it re-scans your library.",
   "settings.insideModsFolder": "Inside your {{game}} folder",
   "settings.notSet": "Not set",
   "settings.change": "Change…",
@@ -526,6 +526,8 @@ export const en = {
   "settings.startupUpdateFailed": "Couldn't update startup setting",
   "settings.folderUpdated": "Game folder updated",
   "settings.folderUpdatedDesc": "Your library will re-scan.",
+  "settings.folderUsedParent":
+    "That was the mods folder \u2014 used the folder above it: {{folder}}",
   "settings.setFolderFailed": "Couldn't set folder",
   "settings.reDetected": "Re-detected your {{game}} folder",
   "settings.detectFolderFailed": "Couldn't detect folder",
@@ -661,7 +663,7 @@ export const en = {
   "library.scanning": "Scanning your library…",
   "library.empty": "No {{type}} installed yet — head to Browse and add one.",
   "library.noMatches": "No matches.",
-  "library.quick3d": "Quick 3D view",
+  "library.quick3d": "View in 3D",
   "library.selectNone": "Select none",
   "library.move": "Move",
   "library.uninstall": "Uninstall",

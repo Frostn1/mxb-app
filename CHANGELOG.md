@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
+
+### Added
+- **Opening a paint in 3D now shows the model it was painted for, wearing it.** Click a
+  livery, a helmet paint or a goggle paint and the viewer loads the bike or helmet it belongs
+  to and selects that paint in the picker, instead of draping the textures over a stock body
+  that was never the shape they were drawn against. A paint whose model isn't installed still
+  previews the way it did before.
+
+### Changed
+- **The Library's 3D button says what it does.** The bare square on each row is now a
+  labelled **View in 3D**.
+- **Settings spells out which folder to pick.** The app wants your MX Bikes folder — the one
+  holding `mods` and `profiles` — not the `mods` folder inside it, which is one click deeper
+  in the picker and easy to land on. The setting now says so, and picking `mods` by mistake
+  quietly resolves to the folder above it (Settings says which one it took) rather than
+  leaving you with a library that scans nothing and a path that looks perfectly reasonable.
+
+### Fixed
+- **Helmets whose goggles came out wearing the helmet's paint.** The Bell Moto 10 packs are
+  the clear case: shell, tear-off, lens and goggle frame each ended up in the wrong texture,
+  the goggle worst of all. Three faults behind it, all in how a model's textures are counted
+  and matched:
+  - A helmet needn't ship the sheet its paints replace, and the Moto 10 doesn't — it names
+    it and leaves the pixels to the `.pnt`. That slot was going uncounted, so every piece
+    was drawn from its neighbour's texture.
+  - A one-character texture name (the Oakley pack calls its goggle sheet `O`) was skipped
+    entirely, sliding everything after it by one.
+  - Which pieces are the goggles was decided from their names, and a helmet names its
+    goggle group after the goggle it ships — `Armega`, `Airbrake` — not "goggles". It is now
+    decided by which paint supplies the texture the piece is drawn from, which is the mod's
+    own answer.
+- **Pieces no paint covers keep their own look.** A tear-off film, a visor, anything an author
+  baked into the mesh and left out of the `.pnt` used to have the shell's paint stretched
+  across it.
+- **A "Stock" option that showed a helmet in the wrong texture.** It's offered only where the
+  mesh really carries the sheet that side's paints replace.
+
 ## 2026-08-08 — v0.8.0 — GP Bikes, dedicated servers, and paint sync
 
 ### Added

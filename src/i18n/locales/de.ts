@@ -494,7 +494,7 @@ export const de: Translation = {
   "settings.about": "Info & Updates",
   "settings.whatsNew": "Was ist neu",
   "settings.modsFolderDesc":
-    "Wohin Mods installiert werden. Eine Änderung scannt deine Bibliothek neu.",
+    "Wohin Mods installiert werden. Wähle den Ordner, der die Ordner mods und profiles enthält \u2014 also den Ordner über mods, nicht den mods-Ordner selbst. Eine Änderung scannt deine Bibliothek neu.",
   "settings.insideModsFolder": "In deinem {{game}}-Ordner",
   "settings.notSet": "Nicht festgelegt",
   "settings.change": "Ändern…",
@@ -547,6 +547,8 @@ export const de: Translation = {
     "Autostart-Einstellung konnte nicht geändert werden",
   "settings.folderUpdated": "Spielordner aktualisiert",
   "settings.folderUpdatedDesc": "Deine Bibliothek wird neu gescannt.",
+  "settings.folderUsedParent":
+    "Das war der mods-Ordner \u2014 stattdessen wird der Ordner darüber verwendet: {{folder}}",
   "settings.setFolderFailed": "Ordner konnte nicht festgelegt werden",
   "settings.reDetected": "{{game}}-Ordner erneut erkannt",
   "settings.detectFolderFailed": "Ordner konnte nicht erkannt werden",
@@ -689,7 +691,7 @@ export const de: Translation = {
   "library.empty":
     "Noch keine {{type}} installiert — geh zu Entdecken und füge etwas hinzu.",
   "library.noMatches": "Keine Treffer.",
-  "library.quick3d": "Schnelle 3D-Ansicht",
+  "library.quick3d": "In 3D ansehen",
   "library.selectNone": "Auswahl aufheben",
   "library.move": "Verschieben",
   "library.uninstall": "Deinstallieren",

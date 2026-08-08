@@ -356,10 +356,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     if (typeof picked !== "string") return;
     setBusy(true);
     try {
-      await setModsPath(picked);
+      const adopted = await setModsPath(picked);
       await reloadConfig();
+      // Picking the `mods` folder is the common slip, and the backend quietly corrects it
+      // to the folder above. Say so — a path that isn't the one they chose looks like a bug.
+      const corrected = adopted && adopted !== picked;
       toast.success(t("settings.folderUpdated"), {
-        description: t("settings.folderUpdatedDesc"),
+        description: corrected
+          ? t("settings.folderUsedParent", { folder: adopted })
+          : t("settings.folderUpdatedDesc"),
       });
     } catch (e) {
       toast.error(t("settings.setFolderFailed"), { description: String(e) });

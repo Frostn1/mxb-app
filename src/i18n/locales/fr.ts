@@ -489,7 +489,7 @@ export const fr: Translation = {
   "settings.about": "À propos et mises à jour",
   "settings.whatsNew": "Nouveautés",
   "settings.modsFolderDesc":
-    "Là où les mods sont installés. Le modifier relance l'analyse de votre bibliothèque.",
+    "Là où les mods sont installés. Choisissez le dossier qui contient les dossiers mods et profiles \u2014 celui au-dessus de mods, pas le dossier mods lui-même. Le modifier relance l'analyse de votre bibliothèque.",
   "settings.insideModsFolder": "Dans votre dossier {{game}}",
   "settings.notSet": "Non défini",
   "settings.change": "Modifier…",
@@ -543,6 +543,8 @@ export const fr: Translation = {
     "Impossible de mettre à jour le lancement au démarrage",
   "settings.folderUpdated": "Dossier de jeu mis à jour",
   "settings.folderUpdatedDesc": "Votre bibliothèque va être réanalysée.",
+  "settings.folderUsedParent":
+    "C’était le dossier mods \u2014 le dossier au-dessus a été utilisé : {{folder}}",
   "settings.setFolderFailed": "Impossible de définir le dossier",
   "settings.reDetected": "Dossier {{game}} détecté à nouveau",
   "settings.detectFolderFailed": "Impossible de détecter le dossier",
@@ -685,7 +687,7 @@ export const fr: Translation = {
   "library.empty":
     "Aucun mod {{type}} installé — allez dans Parcourir pour en ajouter un.",
   "library.noMatches": "Aucun résultat.",
-  "library.quick3d": "Aperçu 3D rapide",
+  "library.quick3d": "Voir en 3D",
   "library.selectNone": "Tout désélectionner",
   "library.move": "Déplacer",
   "library.uninstall": "Désinstaller",

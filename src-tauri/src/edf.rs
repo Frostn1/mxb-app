@@ -175,8 +175,8 @@ fn parse_impl(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
     }
     let mut nodes = Vec::new();
     let cands = collect_sub_cands(b);
-    // Only needed to sanity-check a material's texture index, so count them once.
-    let colors = color_textures(b).len();
+    // Only needed to bound a material's texture index, so count them once.
+    let textures = embedded_textures(b).len();
     let mut o = HEADER_START;
 
     while o + 8 <= n {
@@ -205,7 +205,7 @@ fn parse_impl(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
                     let iend = ic + 8 + tc * 12;
                     if let (true, Some(name)) = (ok, plausible_name(b, iend)) {
                         // `o` is the node's vertex-count word — its material table ends there.
-                        let mats = node_material_table(b, o, colors);
+                        let mats = node_material_table(b, o, textures);
                         nodes.push(read_node(b, &cands, vs, vc, raw, iend, tc, name, mats));
                         o = iend; // jump past this block
                         continue;
@@ -438,7 +438,12 @@ const MAX_MATERIALS: usize = 64;
 // A 56-byte material record: two bracketing 0.0 floats around six shading terms, a run of
 // zeroed words, and the one-based texture index. Strict on purpose — the table is found by
 // walking backwards, so a loose test would latch onto compressed texture bytes.
-fn valid_material_record(b: &[u8], o: usize, colors: usize) -> bool {
+//
+// `textures` is every embedded texture, companions included, because a material may name
+// one: the Bell Moto 10's fourth material points at `Racecraft_n`, its goggle's normal map.
+// Bounding the index by the colour list instead threw that whole table away, and with it
+// the evidence every *other* piece of that helmet is bound from.
+fn valid_material_record(b: &[u8], o: usize, textures: usize) -> bool {
     if o + MAT_STRIDE > b.len() {
         return false;
     }
@@ -453,15 +458,17 @@ fn valid_material_record(b: &[u8], o: usize, colors: usize) -> bool {
     if w(8) != 0 || w(9) != 0 || w(10) != 0 || w(12) != 0 || w(13) != 0 {
         return false;
     }
-    w(11) as usize <= colors
+    w(11) as usize <= textures
 }
 
-/// One node's material table: LOCAL material id -> position in the model's colour textures,
-/// None where that material carries no texture. Empty when the node has no readable table
-/// (shadow meshes, which are never painted).
+/// One node's material table: LOCAL material id -> position in the model's declared colour
+/// textures (see [`declared_colors`]), None where that material carries no texture. Empty
+/// when the node has no readable table (shadow meshes, which are never painted).
 ///
 /// `node_start` is the offset of the node's `u32` vertex count; the table ends exactly there.
-pub fn node_material_table(b: &[u8], node_start: usize, colors: usize) -> Vec<Option<usize>> {
+/// `textures` is how many textures the model embeds — only a bound on the index, since the
+/// slot a material names may be a texture the model declares without embedding.
+pub fn node_material_table(b: &[u8], node_start: usize, textures: usize) -> Vec<Option<usize>> {
     for count in 1..=MAX_MATERIALS {
         let Some(o) = node_start.checked_sub(4 + MAT_STRIDE * count) else {
             break;
@@ -469,7 +476,7 @@ pub fn node_material_table(b: &[u8], node_start: usize, colors: usize) -> Vec<Op
         if u32le(b, o) as usize != count {
             continue;
         }
-        if (0..count).all(|k| valid_material_record(b, o + 4 + MAT_STRIDE * k, colors)) {
+        if (0..count).all(|k| valid_material_record(b, o + 4 + MAT_STRIDE * k, textures)) {
             return (0..count)
                 .map(|k| {
                     let one = u32le(b, o + 4 + MAT_STRIDE * k + MAT_TEX_FROM_REC) as usize;
@@ -479,6 +486,63 @@ pub fn node_material_table(b: &[u8], node_start: usize, colors: usize) -> Vec<Op
         }
     }
     Vec::new()
+}
+
+/// The COLOUR textures a model declares, by name, in file order — the list material indices
+/// count. Companion maps are left out: the TLD SE4 helmet embeds `TLDSE4`, `TLDSE4_n`,
+/// `TLDSE4goggle`, `TLDSE4goggle_n` and binds its goggles with material 2, which is only the
+/// goggle sheet if the `_n` between them doesn't take a slot.
+///
+/// `external` names textures the model draws but does *not* embed — a paint supplies their
+/// pixels. They hold a slot all the same, and it is the slot's *position* that matters: the
+/// Bell Moto 10 ships no shell texture in its mesh, only the name of the one its paints
+/// supply, written ahead of the three it does embed. Counting the embedded three alone slid
+/// every material down one, and its goggles came out wearing the helmet's paint.
+///
+/// A name is only taken as a declaration where the model writes it in the clear — outside
+/// any texture payload, and terminated — so a name that happens to occur inside compressed
+/// pixels can't invent a slot.
+pub fn declared_colors(b: &[u8], external: &[String]) -> Vec<String> {
+    let embedded = embedded_textures(b);
+    let mut slots: Vec<(usize, String)> = embedded
+        .iter()
+        .filter(|t| !is_companion_texture(&t.name))
+        .map(|t| (t.data_off, t.name.clone()))
+        .collect();
+    for name in external {
+        if name.is_empty()
+            || embedded.iter().any(|t| t.name.eq_ignore_ascii_case(name))
+            || is_companion_texture(name)
+        {
+            continue;
+        }
+        if let Some(at) = declaration_offset(b, name, &embedded) {
+            slots.push((at, name.clone()));
+        }
+    }
+    slots.sort_by_key(|(at, _)| *at);
+    slots.into_iter().map(|(_, name)| name).collect()
+}
+
+/// Where the model writes `name` as a texture it draws but doesn't embed, if it does.
+fn declaration_offset(b: &[u8], name: &str, embedded: &[EmbeddedTexture]) -> Option<usize> {
+    let needle = name.as_bytes();
+    let mut from = 0usize;
+    while let Some(rel) = b[from..].windows(needle.len()).position(|w| w == needle) {
+        let at = from + rel;
+        let terminated = b.get(at + needle.len()) == Some(&0);
+        // The declaration is a word followed by the name, so the byte in front is that
+        // word's zero high byte — a much narrower target than "not a letter".
+        let starts_clean = at > 0 && b[at - 1] == 0;
+        let in_pixels = embedded
+            .iter()
+            .any(|t| at >= t.data_off && at < t.data_off + t.data_len);
+        if terminated && starts_clean && !in_pixels {
+            return Some(at);
+        }
+        from = at + 1;
+    }
+    None
 }
 
 /// Companion maps ride alongside a colour texture and are never the look itself — MX
@@ -538,7 +602,13 @@ const TEX_PAD_LEN: usize = 8;
 // Name's first char to `width`: either -100 or -104 depending on the record; probe both.
 const TEX_W_FROM_NAME: [usize; 2] = [100, 104];
 
-// A null-terminated embedded-texture name at `o`: 2-39 name-safe chars (may lead with a digit).
+// A null-terminated embedded-texture name at `o`: 1-39 name-safe chars (may lead with a digit).
+//
+// One character counts: the Bell Moto 10 "O" pack names its goggle sheet `O`, and skipping it
+// didn't just lose that texture — material indices count this list, so every slot after it
+// slid, and the helmet came out wearing its goggle's paint. The record's shape (both
+// dimensions from the fixed size set, eight zero pad bytes, a payload that fits the file) is
+// what rules out a stray letter, not the length of the name.
 fn tex_name(b: &[u8], o: usize) -> Option<String> {
     let mut e = o;
     while e < b.len() && e - o < 40 {
@@ -552,7 +622,7 @@ fn tex_name(b: &[u8], o: usize) -> Option<String> {
         e += 1;
     }
     let len = e - o;
-    (2..=39).contains(&len).then(|| String::from_utf8_lossy(&b[o..e]).into_owned())
+    (1..=39).contains(&len).then(|| String::from_utf8_lossy(&b[o..e]).into_owned())
 }
 
 // Enumerate every texture in a model.edf, in file order. Anchored on the name, then
@@ -1090,14 +1160,23 @@ mod tests {
     #[test]
     fn a_nodes_material_table_is_read_back_off_its_vertex_count() {
         let b = material_table_bytes(&[3, 1, 0], 512);
-        // One-based into the colour list, and 0 means the material carries no texture.
+        // One-based into the declared colours, and 0 means the material carries no texture.
         assert_eq!(node_material_table(&b, 512, 3), vec![Some(2), Some(0), None]);
     }
 
+    /// A model declares more texture slots than it embeds — the Bell Moto 10 leaves its
+    /// shell sheet to a `.pnt` and names it, then embeds three more. The table is still this
+    /// node's, and throwing it away costs every piece in the mesh its binding.
     #[test]
-    fn a_material_table_is_refused_when_it_overruns_the_colour_list() {
-        // Index 4 with only 3 colours isn't this node's table — better no table than a
-        // part bound from a misread one.
+    fn a_material_may_name_a_slot_past_the_embedded_textures() {
+        let b = material_table_bytes(&[1, 4], 512);
+        assert_eq!(node_material_table(&b, 512, 4), vec![Some(0), Some(3)]);
+    }
+
+    #[test]
+    fn a_material_table_is_refused_when_it_overruns_the_textures() {
+        // Index 4 with only 3 textures in the file isn't this node's table — better no
+        // table than a part bound from a misread one.
         let b = material_table_bytes(&[4], 512);
         assert!(node_material_table(&b, 512, 3).is_empty());
         assert_eq!(node_material_table(&b, 512, 4), vec![Some(3)]);
