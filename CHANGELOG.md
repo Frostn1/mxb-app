@@ -45,7 +45,18 @@
   model's own texture, so a rider that ships no paints — or a model with pieces of its own —
   renders as it was built rather than in flat grey.
 
-## 2026-08-07 — a Cloudflare block on Browse can finally be diagnosed
+## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
+
+### Fixed
+- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
+  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
+  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
+  so the preview never blanks; but with no error anywhere that is indistinguishable from a
+  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
+  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
+  preview for as long as what you're looking at is out of date, and writes the error to the
+  console. The toast fires once per distinct message rather than once per pick, since a
+  persistent fault is re-hit on every slot edit.
 
 ### Changed
 - **When mxb-mods.com refuses us, the log now says enough to act on.** Browse failing with
@@ -65,19 +76,6 @@
   without being a Cloudflare interstitial said nothing at all. Both are logged.
 - **`MXB_LOG=debug` traces every mxb-mods.com request.** Off by default, because search runs
   on each keystroke and a line per keystroke would bury the failure worth reading.
-
-## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence
-
-### Fixed
-- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
-  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
-  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
-  so the preview never blanks; but with no error anywhere that is indistinguishable from a
-  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
-  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
-  preview for as long as what you're looking at is out of date, and writes the error to the
-  console. The toast fires once per distinct message rather than once per pick, since a
-  persistent fault is re-hit on every slot edit.
 
 ## 2026-08-07 — v0.7.0 — Race mode, an in-game overlay, and six languages
 
