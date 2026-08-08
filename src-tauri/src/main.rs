@@ -63,9 +63,16 @@ fn create_config(
     let mut cfg = config::finalize(config);
     // Setup only sends the folders, so carry over first-run state from any config
     // that's already there — rewriting it would replay the intro and the tour.
-    if let Ok(prev) = config::load(&app) {
-        cfg.welcome_seen |= prev.welcome_seen;
-        cfg.tour_done |= prev.tour_done;
+    match config::load(&app) {
+        Ok(prev) => {
+            cfg.welcome_seen |= prev.welcome_seen;
+            cfg.tour_done |= prev.tour_done;
+            cfg.seen_version = prev.seen_version;
+        }
+        // Nothing came before: this install is new, and nothing in the version someone
+        // just installed is news to them. Stamping it here is what keeps the release
+        // showcase to upgrades — a first run gets the intro and the tour instead.
+        Err(_) => cfg.seen_version = app.package_info().version.to_string(),
     }
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
     // Begin watching straight away so a fresh setup doesn't need a restart before
@@ -1687,6 +1694,18 @@ fn set_intro_seen(app: tauri::AppHandle, welcome: bool, tour: bool) -> Result<()
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Remember that the release showcase for `version` has been seen, so it doesn't come
+/// back on the next launch. No-ops before the config exists, like `set_intro_seen`.
+#[tauri::command]
+fn set_seen_version(app: tauri::AppHandle, version: String) -> Result<(), String> {
+    if !config::exists(&app) {
+        return Ok(());
+    }
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.seen_version = version;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Override the PiBoSo `profiles` folder for the split-folder edge case. An empty
 /// string clears the override, falling back to `<mods_path>/profiles`.
 #[tauri::command]
@@ -2323,6 +2342,7 @@ fn main() {
             set_game_path,
             set_mods_path,
             set_intro_seen,
+            set_seen_version,
             set_profiles_path,
             detect_game_path,
             count_profiles_in,

@@ -7,8 +7,10 @@ import RiderStudio from "../Rider/RiderStudio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
-import Settings from "../Settings/Settings";
+import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
+import ReleaseShowcase from "../Showcase/ReleaseShowcase";
+import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
 import { useConfig } from "../../Context/Config";
 import { setIntroSeen } from "../../api/mods";
@@ -45,12 +47,30 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // FrostMod installs itself silently on first run (see FrostmodProvider) —
   // no prompt here.
 
+  // Which Settings section to land on, when something sent us there on purpose.
+  // Cleared on the way out so a later visit opens where Settings normally opens.
+  const [settingsSection, setSettingsSection] = useState<SectionId | undefined>();
+
   const navigate = useCallback(
     (v: DashboardView) => {
       setView(v);
       closeMod();
+      if (v !== "settings") setSettingsSection(undefined);
     },
     [closeMod],
+  );
+
+  // "What's new" after an update. Mounted here rather than in App so the showcase can
+  // hand someone straight to the Settings section for the feature it just described —
+  // this is where the view lives.
+  const { release, dismiss: dismissShowcase, replay: replayShowcase } =
+    useReleaseShowcase();
+  const openSettingsSection = useCallback(
+    (section: SectionId) => {
+      setSettingsSection(section);
+      navigate("settings");
+    },
+    [navigate],
   );
 
   // First-run interactive tour — shown once, gated on a localStorage flag. Also
@@ -121,16 +141,28 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             <Presets
               onOpenInRider={openInRider}
               onOpenLocker={() => setView("locker")}
-              onOpenSettings={() => setView("settings")}
+              onOpenSettings={() => openSettingsSection("folder")}
             />
           ) : view === "rider" ? (
             <RiderStudio initialLoadout={riderPreset} onLoaded={clearRiderPreset} />
           ) : (
-            <Settings />
+            <Settings
+              initialSection={settingsSection}
+              onShowWhatsNew={replayShowcase}
+            />
           )}
         </div>
       </div>
       {tourRun && <Tour navigate={navigate} onDone={endTour} />}
+      {/* Never over the intro: a first run gets Welcome and the tour, and an update
+          landing mid-tour would spotlight UI behind a modal. */}
+      {release && !tourRun && !welcomeActive && (
+        <ReleaseShowcase
+          release={release}
+          onDone={dismissShowcase}
+          onOpenSettings={openSettingsSection}
+        />
+      )}
     </InstallProvider>
     </TourContext.Provider>
   );

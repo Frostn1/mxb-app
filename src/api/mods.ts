@@ -148,6 +148,11 @@ export function setIntroSeen(opts: {
   });
 }
 
+/** Persist that this version's release showcase has been seen. */
+export function setSeenVersion(version: string): Promise<void> {
+  return invoke<void>("set_seen_version", { version });
+}
+
 /** Whether this build can decode real bike geometry for the 3D preview. Public
  *  builds without the optional local module return false, so the UI hides it. */
 export function bikePreviewAvailable(): Promise<boolean> {
@@ -810,11 +815,13 @@ export function setInstantRefresh(enabled: boolean): Promise<void> {
 /** The in-game overlay's settings, plus what the game is doing right now. */
 export interface OverlayState {
   enabled: boolean;
-  /** Tauri accelerator string, e.g. `"CommandOrControl+Shift+M"`. */
+  /** Tauri accelerator string, e.g. `"CommandOrControl+Shift+X"`. */
   hotkey: string;
   gameRunning: boolean;
   /** A DirectX app owns the screen exclusively — nothing can be drawn over it. */
   fullscreenBlocked: boolean;
+  /** Why the shortcut isn't live (usually another app owns the combo), or null. */
+  hotkeyError: string | null;
 }
 
 export function getOverlayState(): Promise<OverlayState> {

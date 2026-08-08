@@ -26,8 +26,11 @@ export interface Config {
   tourDone?: boolean;
   /** Register the global hotkey that summons the in-game overlay (default true). */
   overlayEnabled?: boolean;
-  /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+M"`. */
+  /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+X"`. */
   overlayHotkey?: string;
+  /** App version whose release showcase has been seen. Blank on an install that
+   *  predates the showcase, which is what marks it as an upgrade worth telling. */
+  seenVersion?: string;
 }
 
 /** A track-mod as it appears in search results / browse grid. */

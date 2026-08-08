@@ -34,15 +34,30 @@ pub struct AppConfig {
     /// Register the global hotkey that summons the in-game overlay.
     pub overlay_enabled: bool,
     /// The combo that toggles the overlay, in Tauri accelerator syntax
-    /// (`"CommandOrControl+Shift+M"`). Blank falls back to [`DEFAULT_OVERLAY_HOTKEY`].
+    /// (`"CommandOrControl+Shift+X"`). Blank falls back to [`DEFAULT_OVERLAY_HOTKEY`].
     pub overlay_hotkey: String,
+    /// The app version whose release showcase has already been shown. Blank means the
+    /// install predates the showcase — an upgrade, so the newest showcase is due.
+    /// A *fresh* install is stamped with the running version at setup (see
+    /// `create_config`), because nothing in a version you just installed is new to you.
+    pub seen_version: String,
 }
 
 /// Toggle combo used until the player picks another one.
 ///
-/// Ctrl+Shift+M is free in MX Bikes (its bindings are single keys and gamepad inputs)
-/// and isn't a Windows system shortcut.
-pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+M";
+/// Ctrl+Shift+X is free in MX Bikes — its bindings are single keys and gamepad inputs —
+/// and isn't claimed by Windows or by the apps that sit alongside a race: Discord,
+/// Steam (Shift+Tab) and GeForce Experience (Alt+Z, Alt+F*).
+pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+X";
+
+/// Defaults we've shipped and then moved away from.
+///
+/// Ctrl+Shift+M is Discord's mute toggle. Discord registers it globally and gets there
+/// first, so our `register` call fails and the overlay never opens — invisibly, since a
+/// hotkey that was never bound has nothing to report at the moment it isn't pressed.
+/// A config still carrying one of these was never deliberately chosen, so it moves to
+/// the current default. Anything else is the player's pick and is left alone.
+pub const LEGACY_OVERLAY_HOTKEYS: &[&str] = &["CommandOrControl+Shift+M"];
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -59,8 +74,25 @@ impl Default for AppConfig {
             tour_done: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
+            seen_version: String::new(),
         }
     }
+}
+
+/// Bring a config written by an older build up to date.
+///
+/// Applied on every read rather than in a one-shot upgrade step: the config is also
+/// written by hand and by older builds still on disk, so "has this already been
+/// migrated?" is only ever answerable from the values themselves.
+pub fn migrate(mut cfg: AppConfig) -> AppConfig {
+    if LEGACY_OVERLAY_HOTKEYS.contains(&cfg.overlay_hotkey.trim()) {
+        log::info!(
+            "moving the overlay hotkey off the retired default {} → {DEFAULT_OVERLAY_HOTKEY}",
+            cfg.overlay_hotkey.trim(),
+        );
+        cfg.overlay_hotkey = DEFAULT_OVERLAY_HOTKEY.to_string();
+    }
+    cfg
 }
 
 impl AppConfig {
@@ -133,7 +165,7 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
     // A truncated/corrupt file is an error, not a silent empty config: callers that
     // can rebuild one (see `load_or_detect`) get the chance to, instead of the app
     // coming up pointed at nothing.
-    Ok(serde_json::from_str(&text)?)
+    Ok(migrate(serde_json::from_str(&text)?))
 }
 
 /// Whether `path` is really a player's MX Bikes folder — the game keeps `profiles/`
@@ -429,6 +461,35 @@ mod tests {
         assert!(cfg.launch_at_startup, "unset fields fall back to the defaults");
         assert!(!cfg.welcome_seen);
         assert!(!cfg.tour_done);
+        assert!(
+            cfg.seen_version.is_empty(),
+            "a config from before the showcase has nothing stamped, so the newest one is due",
+        );
+    }
+
+    /// The retired default was Discord's mute toggle, so an install still carrying it
+    /// has an overlay that silently never binds.
+    #[test]
+    fn the_retired_default_hotkey_moves_to_the_current_one() {
+        let mut cfg = AppConfig::default();
+        cfg.overlay_hotkey = "CommandOrControl+Shift+M".into();
+        assert_eq!(migrate(cfg).overlay_hotkey, DEFAULT_OVERLAY_HOTKEY);
+    }
+
+    #[test]
+    fn a_hotkey_the_player_picked_survives_migration() {
+        let mut cfg = AppConfig::default();
+        cfg.overlay_hotkey = "Alt+F1".into();
+        assert_eq!(migrate(cfg).overlay_hotkey, "Alt+F1");
+    }
+
+    /// Blank means "use the default" (see `overlay::hotkey_of`) — filling it in here
+    /// would turn a follow-the-default config into a pinned one.
+    #[test]
+    fn a_blank_hotkey_is_left_blank() {
+        let mut cfg = AppConfig::default();
+        cfg.overlay_hotkey = String::new();
+        assert!(migrate(cfg).overlay_hotkey.is_empty());
     }
 
     #[test]

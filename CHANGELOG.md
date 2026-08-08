@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-08-07
+
+### Added
+- **New versions now show what's new in them.** An update used to land silently: the banner
+  said a version was available, the app restarted, and the same screen came back. The
+  overlay was the worst case — a feature that doesn't exist until you know its shortcut, in
+  a release nobody had a reason to read about. After an update the app now shows the
+  release's headline feature (for 0.7.0, the overlay, with your own shortcut on it and a
+  link straight to its settings), a line each for the rest, and a link to the full release
+  notes for everything the list leaves out. Once per version, never on a fresh install —
+  a first run gets the intro and the tour instead, and nothing in a version you just
+  installed is news to you. It's re-openable any time from Settings → About & updates →
+  What's new.
+
+### Changed
+- **Settings → In-game overlay explains itself.** The section was a switch, a key field and
+  one grey line, which left the two things that actually decide whether the overlay works
+  looking optional. It now shows whether MX Bikes is running, offers **Show overlay now** so
+  you can see the thing without launching a race, and says plainly that a game holding the
+  screen in exclusive fullscreen can't be drawn over — set it to Borderless or Windowed in
+  Options → Video. When the screen is being held exclusively *right now*, it says so, since
+  that means the overlay is already open behind the game. And if the shortcut does nothing,
+  it points at the shortcut: another app owning the combo is the usual cause.
+
+### Fixed
+- **The overlay shortcut no longer defaults to Discord's mute key.** Ctrl+Shift+M is
+  Discord's default mute toggle; Discord registers it globally and gets there first, so on
+  a lot of machines our hotkey never bound at all — invisibly, because a shortcut that was
+  never registered has nothing to report at the moment you press it. The default is now
+  **Ctrl+Shift+X**, and an install still carrying the old default is moved to it on the next
+  launch. A combo you picked yourself is left alone. When registration does fail, Settings
+  now names the reason instead of leaving you with "I pressed it and nothing happened".
+
 ## 2026-08-07 — v0.7.0 — Six languages, an in-game overlay, and bikes wearing the right paint
 
 ### Added
