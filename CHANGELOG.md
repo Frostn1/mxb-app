@@ -120,6 +120,13 @@
   preview for as long as what you're looking at is out of date, and writes the error to the
   console. The toast fires once per distinct message rather than once per pick, since a
   persistent fault is re-hit on every slot edit.
+- **Browse's Cloudflare check works more than once per session.** The clearance window
+  closed into the tray instead of closing, which left its name registered for the life of
+  the process — so the handshake succeeded the first time and every attempt after it failed
+  with "a webview with that label already exists", leaving Retry doing nothing at all for
+  the rest of the session. Only the main window parks in the tray now; the clearance check
+  and the shop login, which had the same latent fault, close for real, and a rebuild waits
+  for the old window to finish tearing down rather than racing it.
 
 ### Changed
 - **Protection is no longer hidden by default in the Rider tab.** It was, back when it
