@@ -34,7 +34,9 @@ const SITE: Site = Site {
     timeout: Duration::from_secs(30),
 };
 
-const WINDOW: &str = "mxb-clearance";
+/// Public so the window-event handler can tell this transient window from the main one —
+/// hiding it instead of closing it strands its label and breaks every later handshake.
+pub const WINDOW: &str = "mxb-clearance";
 
 /// How long we leave the window up. It normally closes in a few seconds — a managed
 /// challenge clears on its own — but the budget has to cover one that wants a click.
@@ -155,8 +157,26 @@ pub async fn handshake(app: &AppHandle) -> bool {
         jar_summary()
     );
 
+    // Closing is a request handled on the main thread, not something that has finished by
+    // the time `close()` returns — so building the replacement immediately races the
+    // teardown and loses with "a webview with label `mxb-clearance` already exists". Wait
+    // for the label to actually free. If it never does, something is holding the window
+    // open and building would fail anyway; say so rather than logging the confusing
+    // already-exists error.
     if let Some(existing) = app.get_webview_window(WINDOW) {
         let _ = existing.close();
+        let mut freed = false;
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if app.get_webview_window(WINDOW).is_none() {
+                freed = true;
+                break;
+            }
+        }
+        if !freed {
+            log::error!("the previous mxb-mods.com check window would not close");
+            return false;
+        }
     }
 
     let url = match BASE.parse() {
