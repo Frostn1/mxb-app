@@ -583,6 +583,11 @@ export const es: Translation = {
     "Tiene que coincidir exactamente con tu nombre de piloto en MX Bikes — así saben las apps de los demás qué pinturas son tuyas.",
   "sync.ridingAs": "Publicando como {{name}}",
   "sync.pull": "Sincronizar pinturas",
+  "sync.setGuid": "Guardar GUID",
+  "sync.guidPlaceholder": "Tu GUID de MX Bikes",
+  "sync.guidHint":
+    "Tu GUID de MX Bikes (opcional). Te identifica aunque cambies de nombre de piloto, y el servidor lo registra cada vez que te conectas.",
+  "sync.guidSaved": "GUID guardado",
   "sync.pulled": "Instaladas {{installed}} de {{riders}} pilotos ({{had}} ya estaban)",
   "sync.pullFailed": "No se pudieron sincronizar las pinturas",
   "sync.rejected": "Se omitieron {{count}} con un destino no seguro",

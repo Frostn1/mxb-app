@@ -577,6 +577,11 @@ export const it: Translation = {
     "Deve corrispondere esattamente al tuo nome pilota in MX Bikes — è così che le app degli altri sanno quali livree sono tue.",
   "sync.ridingAs": "Pubblichi come {{name}}",
   "sync.pull": "Sincronizza livree",
+  "sync.setGuid": "Salva GUID",
+  "sync.guidPlaceholder": "Il tuo GUID di MX Bikes",
+  "sync.guidHint":
+    "Il tuo GUID di MX Bikes (facoltativo). Ti identifica anche se cambi nome pilota, e il server lo registra a ogni connessione.",
+  "sync.guidSaved": "GUID salvato",
   "sync.pulled": "Installate {{installed}} da {{riders}} piloti ({{had}} già presenti)",
   "sync.pullFailed": "Sincronizzazione non riuscita",
   "sync.rejected": "Saltate {{count}} con una destinazione non sicura",

@@ -6,6 +6,7 @@
 
 mod config;
 mod ini;
+mod roster;
 mod supervisor;
 
 use config::Config;
@@ -85,6 +86,7 @@ fn handle(mut request: Request, shared: &Shared) {
 
     let response = match (method.as_str(), path.as_str()) {
         ("GET", "/status") => status(shared),
+        ("GET", "/players") => players(shared),
         ("POST", "/start") => act(shared, |s| s.start()),
         ("POST", "/stop") => act(shared, |s| s.stop()),
         ("POST", "/restart") => act(shared, |s| s.restart()),
@@ -134,6 +136,17 @@ fn status(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
             }
         }),
     )
+}
+
+/// Who is connected right now, with the GUID that identifies them stably.
+fn players(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let guard = shared.lock().unwrap();
+    let log = guard.config().game_dir.join("log.txt");
+    match std::fs::read_to_string(&log) {
+        Ok(text) => json(200, &serde_json::json!({ "players": roster::connected(&text) })),
+        // No log yet is a server that has not been connected to, not a failure.
+        Err(_) => json(200, &serde_json::json!({ "players": [] })),
+    }
 }
 
 fn act<F>(shared: &Shared, f: F) -> Response<std::io::Cursor<Vec<u8>>>

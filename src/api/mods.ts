@@ -1023,6 +1023,8 @@ export function appPlatform(): Promise<string> {
 // ── Experimental features, beta builds, paint sync ───────────────────────────
 
 export interface ExperimentalState {
+  /** The MX Bikes GUID this account has claimed, if any. */
+  guid?: string;
   /** Whether the unfinished multiplayer features should be shown at all. */
   enabled: boolean;
   /** On because `MXB_EXPERIMENTAL=1` was set, so the toggle can explain itself. */
@@ -1059,6 +1061,14 @@ export function setExperimental(enabled: boolean): Promise<void> {
 /** Trade an invite code for an account. The token is stored by the backend, never here. */
 export function enrollAccount(code: string, riderName: string): Promise<string> {
   return invoke<string>("enroll_account", { code, riderName });
+}
+
+/**
+ * Claim this player's MX Bikes GUID — the identity that survives a rider-name change and
+ * the one the dedicated server logs on every connection. First-come on the server side.
+ */
+export function setGuid(guid: string): Promise<void> {
+  return invoke<void>("set_guid", { guid });
 }
 
 /** Publish this rider's paints so everyone else on the server can see them. */

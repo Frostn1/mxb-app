@@ -2369,6 +2369,7 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
         "prerelease": version.contains('-'),
         "enrolled": !cfg.cp_token.trim().is_empty(),
         "riderName": cfg.cp_rider_name,
+        "guid": cfg.cp_guid,
     })
 }
 
@@ -2415,6 +2416,37 @@ async fn enroll_account(
     cfg.cp_rider_name = body.rider_name.clone();
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
     Ok(body.rider_name)
+}
+
+/// Claim this player's MX Bikes GUID.
+///
+/// The GUID is the stable identity: a rider name is free text that changes between sessions
+/// and two people can pick the same one, while the dedicated server logs a GUID with every
+/// connection. Claiming is first-come on the server side.
+#[tauri::command]
+async fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enrol with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .put(format!("{}/v1/me/guid", paintsync::CONTROL_PLANE))
+        .bearer_auth(&cfg.cp_token)
+        .json(&serde_json::json!({ "guid": guid.trim() }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        let detail = resp.text().await.unwrap_or_default();
+        return Err(serde_json::from_str::<serde_json::Value>(&detail)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(detail));
+    }
+
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.cp_guid = guid.trim().to_string();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
 /// Publish this rider's paints so everyone else on the server can see them.
@@ -3294,6 +3326,7 @@ fn main() {
             experimental_state,
             set_experimental,
             enroll_account,
+            set_guid,
             publish_paints,
             sync_paints,
             list_servers,

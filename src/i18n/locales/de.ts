@@ -590,6 +590,11 @@ export const de: Translation = {
     "Muss exakt deinem Fahrernamen in MX Bikes entsprechen — daran erkennen die Apps der anderen, welche Paints dir gehören.",
   "sync.ridingAs": "Veröffentlicht als {{name}}",
   "sync.pull": "Paints abgleichen",
+  "sync.setGuid": "GUID speichern",
+  "sync.guidPlaceholder": "Deine MX-Bikes-GUID",
+  "sync.guidHint":
+    "Deine MX-Bikes-GUID (optional). Sie identifiziert dich auch nach einer Namensänderung, und der Server protokolliert sie bei jeder Verbindung.",
+  "sync.guidSaved": "GUID gespeichert",
   "sync.pulled": "{{installed}} von {{riders}} Fahrern installiert ({{had}} schon vorhanden)",
   "sync.pullFailed": "Abgleich fehlgeschlagen",
   "sync.rejected": "{{count}} mit unsicherem Ziel übersprungen",

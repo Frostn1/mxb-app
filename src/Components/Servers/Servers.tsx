@@ -22,6 +22,7 @@ import {
   serverAction,
   serverSetConfig,
   serverStatus,
+  setGuid as setGuidApi,
   syncPaints,
   type ExperimentalState,
   type ServerAction,
@@ -197,6 +198,7 @@ const PaintSync = () => {
   const [state, setState] = useState<ExperimentalState | null>(null);
   const [code, setCode] = useState("");
   const [riderName, setRiderName] = useState("");
+  const [guid, setGuid] = useState("");
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(() => {
@@ -212,6 +214,19 @@ const PaintSync = () => {
       const name = await enrollAccount(code.trim(), riderName.trim());
       toast.success(t("sync.enrolled", { name }));
       setCode("");
+      refresh();
+    } catch (e) {
+      toast.error(t("sync.enrollFailed"), { description: String(e) });
+    }
+    setBusy(false);
+  };
+
+  const claimGuid = async () => {
+    setBusy(true);
+    try {
+      await setGuidApi(guid.trim());
+      toast.success(t("sync.guidSaved"));
+      setGuid("");
       refresh();
     } catch (e) {
       toast.error(t("sync.enrollFailed"), { description: String(e) });
@@ -242,15 +257,45 @@ const PaintSync = () => {
       <p className="mt-1 text-[12.5px] text-muted-foreground">{t("sync.desc")}</p>
 
       {state?.enrolled ? (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-[12.5px] text-muted-foreground">
-            {t("sync.ridingAs", { name: state.riderName })}
-          </span>
-          <Button className="ml-auto" size="sm" disabled={busy} onClick={() => void pull()}>
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}{" "}
-            {t("sync.pull")}
-          </Button>
-        </div>
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-[12.5px] text-muted-foreground">
+              {t("sync.ridingAs", { name: state.riderName })}
+            </span>
+            <Button className="ml-auto" size="sm" disabled={busy} onClick={() => void pull()}>
+              {busy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Download className="size-3.5" />
+              )}{" "}
+              {t("sync.pull")}
+            </Button>
+          </div>
+
+          {/* The GUID is the identity that survives a name change, and it's what the
+              server logs on every connection — so it's worth claiming even though the
+              rider name works on its own for a small group. */}
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="flex-1 text-[11.5px] text-muted-foreground">
+              {t("sync.guidHint")}
+              <Input
+                value={guid}
+                onChange={(e) => setGuid(e.target.value)}
+                placeholder={state.guid || t("sync.guidPlaceholder")}
+                spellCheck={false}
+                className="mt-1.5 h-8 text-[12.5px]"
+              />
+            </label>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || !guid.trim()}
+              onClick={() => void claimGuid()}
+            >
+              {t("sync.setGuid")}
+            </Button>
+          </div>
+        </>
       ) : (
         <div className="mt-4 space-y-2">
           <Input

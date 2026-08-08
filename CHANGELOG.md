@@ -29,6 +29,15 @@
   keys off a semver pre-release suffix, which is the same thing the release workflow uses to
   mark a build as a pre-release, so the two can't disagree.
 
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
+
 ### Security
 - A paint carries the destination it should be written to, and that path arrives from
   another player. It's validated twice — once by the service and again in the app before it
@@ -646,6 +655,15 @@
   Vite's gitignored timestamped config copies. Now 0 errors / 3 dependency-array
   warnings, so lint can gate CI.
 
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
+
 ### Security
 - **Bump swiper to 14.0.7** — clears a critical prototype-pollution advisory covering
   6.5.1–12.1.1. Unlike the vite/rollup/esbuild advisories (build-time only), this one
@@ -759,6 +777,15 @@
   already used), so the swap shows up without reselecting your profile. The swap toast now
   reports the refresh result. `apply_model_swap`/`apply_sound_swap` return a
   `SwapApplyOutcome`, and the refresh step is shared with `presets_apply`.
+
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 
 ### Security
 - **Bump postcss to 8.5.25** — pins the transitive `postcss` (pulled in by Vite) via an npm

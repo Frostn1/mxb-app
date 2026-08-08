@@ -44,6 +44,22 @@ export function isRiderName(value: unknown): value is string {
   return !/[\x00-\x1f\x7f]/.test(name);
 }
 
+/**
+ * An MX Bikes player GUID.
+ *
+ * Deliberately loose on format — the exact shape PiBoSo emits hasn't been confirmed against
+ * a real connection, so this checks only that it is a plausible opaque identifier rather
+ * than inventing a pattern that might reject valid ones. Tightened once a real GUID is seen.
+ */
+export function isGuid(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const g = value.trim();
+  if (g.length < 4 || g.length > 100) return false;
+  // No whitespace: the server log delimits the GUID by whitespace, so one containing any
+  // could never have come from there.
+  return /^[A-Za-z0-9._:-]+$/.test(g);
+}
+
 /** Lowercase 64-char hex — the shape of a SHA-256 digest, which is also the R2 object key. */
 export function isSha256(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);

@@ -562,6 +562,11 @@ export const en = {
     "This has to match your rider name in MX Bikes exactly — it's how other players' apps know which paints are yours.",
   "sync.ridingAs": "Publishing as {{name}}",
   "sync.pull": "Sync paints",
+  "sync.setGuid": "Save GUID",
+  "sync.guidPlaceholder": "Your MX Bikes GUID",
+  "sync.guidHint":
+    "Your MX Bikes GUID (optional). It identifies you even if you change your rider name, and the server logs it whenever you connect.",
+  "sync.guidSaved": "GUID saved",
   "sync.pulled": "Installed {{installed}} from {{riders}} riders ({{had}} already had)",
   "sync.pullFailed": "Couldn't sync paints",
   "sync.rejected": "Skipped {{count}} with an unsafe destination",

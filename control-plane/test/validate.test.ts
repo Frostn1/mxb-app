@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bearer } from "../src/auth";
 import {
+  isGuid,
   isPaintFileName,
   isPaintSize,
   isRelDest,
@@ -111,6 +112,27 @@ describe("content addressing", () => {
     expect(isPaintSize(0)).toBe(false);
     expect(isPaintSize(-1)).toBe(false);
     expect(isPaintSize(1.5)).toBe(false);
+  });
+});
+
+describe("player GUIDs", () => {
+  it("accepts plausible opaque identifiers", () => {
+    expect(isGuid("ab12cd34ef56")).toBe(true);
+    expect(isGuid("A1B2-C3D4-E5F6")).toBe(true);
+  });
+
+  it("rejects anything with whitespace", () => {
+    // The server log delimits the GUID by whitespace, so one containing any could never
+    // have come from there.
+    expect(isGuid("ab12 cd34")).toBe(false);
+    expect(isGuid(" ")).toBe(false);
+  });
+
+  it("rejects lengths and characters that are not an identifier", () => {
+    expect(isGuid("ab")).toBe(false);
+    expect(isGuid("x".repeat(101))).toBe(false);
+    expect(isGuid("../etc/passwd")).toBe(false);
+    expect(isGuid(null)).toBe(false);
   });
 });
 

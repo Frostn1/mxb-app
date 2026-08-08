@@ -10,6 +10,7 @@
 
 import { bearer, hashToken, newToken } from "./auth";
 import {
+  isGuid,
   isPaintFileName,
   isPaintSize,
   isRelDest,
@@ -23,6 +24,7 @@ interface Account {
   id: string;
   rider_name: string;
   steam_id: string | null;
+  guid: string | null;
 }
 
 export default {
@@ -56,6 +58,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (!account) return json(401, { error: "unauthorized" });
 
   if (method === "GET" && path === "/v1/me") return me(account, env);
+  if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "GET" && path === "/v1/servers") return listServers(env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
@@ -76,7 +79,7 @@ async function authenticate(request: Request, env: Env): Promise<Account | null>
   // of a secret in our code to leak timing.
   const hash = await hashToken(token);
   return await env.DB.prepare(
-    "SELECT id, rider_name, steam_id FROM accounts WHERE token_hash = ?",
+    "SELECT id, rider_name, steam_id, guid FROM accounts WHERE token_hash = ?",
   )
     .bind(hash)
     .first<Account>();
@@ -141,6 +144,7 @@ async function me(account: Account, env: Env): Promise<Response> {
     accountId: account.id,
     riderName: account.rider_name,
     steamId: account.steam_id,
+    guid: account.guid,
     paints: paints.results.map((p) => ({
       slot: p.slot,
       fileName: p.file_name,
@@ -148,6 +152,33 @@ async function me(account: Account, env: Env): Promise<Response> {
       size: p.size,
     })),
   });
+}
+
+/**
+ * Claim a GUID for this account.
+ *
+ * The GUID is what makes a rider identifiable across name changes, and it's what the server
+ * log reports on every connection. Claiming is first-come: the unique index rejects a second
+ * account trying to take one already held, which is the whole point — otherwise anyone could
+ * assert someone else's identity and have their paints served under it.
+ */
+async function putGuid(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { guid } = body as { guid?: unknown };
+  if (!isGuid(guid)) return json(400, { error: "that doesn't look like an MX Bikes GUID" });
+
+  try {
+    await env.DB.prepare("UPDATE accounts SET guid = ? WHERE id = ?")
+      .bind((guid as string).trim(), account.id)
+      .run();
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) {
+      return json(409, { error: "that GUID is already claimed by another account" });
+    }
+    throw err;
+  }
+  return json(200, { ok: true, guid: (guid as string).trim() });
 }
 
 async function putLoadout(request: Request, account: Account, env: Env): Promise<Response> {
@@ -271,10 +302,11 @@ async function roster(url: URL, env: Env): Promise<Response> {
   if (!serverId) return json(400, { error: "a server id is required" });
 
   const rows = await env.DB.prepare(
-    "SELECT a.rider_name, p.slot, p.file_name, p.sha256, p.size, p.rel_dest" +
+    "SELECT a.rider_name, a.guid, p.slot, p.file_name, p.sha256, p.size, p.rel_dest" +
       " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id",
   ).all<{
     rider_name: string;
+    guid: string | null;
     slot: string;
     file_name: string;
     sha256: string;
@@ -282,16 +314,20 @@ async function roster(url: URL, env: Env): Promise<Response> {
     rel_dest: string;
   }>();
 
-  const riders = new Map<string, { riderName: string; paints: unknown[] }>();
+  const riders = new Map<string, { riderName: string; guid: string | null; paints: unknown[] }>();
   for (const r of rows.results) {
     // Re-checked on the way out as well as in. A row predating the validation, or one
     // written by some future path that forgot it, must not reach a client that is about to
     // turn it into a filesystem path.
     if (!isRelDest(r.rel_dest)) continue;
-    let rider = riders.get(r.rider_name);
+    // Group by GUID where the account has claimed one — it is stable across name changes
+    // and cannot be taken by someone else. Name is the fallback for accounts that have not
+    // supplied a GUID yet, which is every account until the player has connected once.
+    const key = r.guid ?? `name:${r.rider_name.toLowerCase()}`;
+    let rider = riders.get(key);
     if (!rider) {
-      rider = { riderName: r.rider_name, paints: [] };
-      riders.set(r.rider_name, rider);
+      rider = { riderName: r.rider_name, guid: r.guid, paints: [] };
+      riders.set(key, rider);
     }
     rider.paints.push({
       slot: r.slot,

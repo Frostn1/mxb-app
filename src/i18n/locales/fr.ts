@@ -587,6 +587,11 @@ export const fr: Translation = {
     "Il doit correspondre exactement à votre nom de pilote dans MX Bikes — c'est ainsi que les apps des autres savent quelles décos sont les vôtres.",
   "sync.ridingAs": "Publié sous {{name}}",
   "sync.pull": "Synchroniser les décos",
+  "sync.setGuid": "Enregistrer le GUID",
+  "sync.guidPlaceholder": "Votre GUID MX Bikes",
+  "sync.guidHint":
+    "Votre GUID MX Bikes (facultatif). Il vous identifie même si vous changez de nom de pilote, et le serveur l'enregistre à chaque connexion.",
+  "sync.guidSaved": "GUID enregistré",
   "sync.pulled": "{{installed}} installées depuis {{riders}} pilotes ({{had}} déjà présentes)",
   "sync.pullFailed": "Synchronisation impossible",
   "sync.rejected": "{{count}} ignorées : destination non sûre",

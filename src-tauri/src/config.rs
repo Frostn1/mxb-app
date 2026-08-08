@@ -58,6 +58,9 @@ pub struct AppConfig {
     /// The in-game rider name this account enrolled with. Kept so the UI can show which
     /// identity the paints are published under.
     pub cp_rider_name: String,
+    /// This player's MX Bikes GUID, once claimed. The stable identity the roster keys on —
+    /// rider names are free text and change between sessions.
+    pub cp_guid: String,
 }
 
 /// Set to `1` to force the experimental features on for one run.
@@ -113,6 +116,7 @@ impl Default for AppConfig {
             experimental: false,
             cp_token: String::new(),
             cp_rider_name: String::new(),
+            cp_guid: String::new(),
         }
     }
 }
