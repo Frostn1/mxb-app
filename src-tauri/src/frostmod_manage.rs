@@ -113,7 +113,8 @@ pub fn ensure_serverfilter(app: &AppHandle) {
     }
 }
 
-fn installed_version(app: &AppHandle) -> Option<String> {
+/// The release tag our installer recorded for the FrostMod on disk, if any.
+pub fn installed_version(app: &AppHandle) -> Option<String> {
     std::fs::read_to_string(version_path(app))
         .ok()
         .map(|s| s.trim().to_string())

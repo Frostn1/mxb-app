@@ -649,6 +649,8 @@ export const en = {
     "Refreshing in-game — if it's your selected bike, it changes now.",
   "locker.modelFrostmodNotRunning":
     "Run FrostMod to see model swaps live — for now, reselect the bike in-game.",
+  "locker.modelFrostmodTooOld":
+    "Update FrostMod to see model swaps live — for now, reselect the bike in-game.",
   "locker.modelFrostmodUnreachable":
     "Couldn't reach FrostMod — reselect the bike in-game to load it.",
   "locker.modelRefreshWindowsOnly":

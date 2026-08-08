@@ -680,6 +680,8 @@ export const fr: Translation = {
     "Actualisation en jeu — si c'est la moto que vous avez sélectionnée, elle change maintenant.",
   "locker.modelFrostmodNotRunning":
     "Lancez FrostMod pour voir les changements de modèle en direct — pour l'instant, resélectionnez la moto en jeu.",
+  "locker.modelFrostmodTooOld":
+    "Mettez FrostMod à jour pour voir les changements de modèle en direct — pour l'instant, resélectionnez la moto en jeu.",
   "locker.modelFrostmodUnreachable":
     "Impossible de joindre FrostMod — resélectionnez la moto en jeu pour la charger.",
   "locker.modelRefreshWindowsOnly":

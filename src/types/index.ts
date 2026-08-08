@@ -341,7 +341,9 @@ export type CommandOutcome =
   | "signaled"
   | "not_running"
   | "write_failed"
-  | "unsupported";
+  | "unsupported"
+  /** Sent, but the installed FrostMod predates the verb and drops it. */
+  | "too_old";
 
 export interface PresetApplyOutcome {
   content_reload: ReloadOutcome;

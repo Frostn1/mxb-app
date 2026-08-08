@@ -98,6 +98,9 @@ pub fn is_running() -> bool {
 //       unless that bike is the one currently selected.
 //   `swap_bike` — switch the active bike outright. NOT implemented in FrostMod
 //       yet (Stage B); it logs and ignores.
+//
+// A verb the running FrostMod predates is logged as unknown and dropped, which
+// looks exactly like success from this side — see `supports_model_refresh`.
 // ===========================================================================
 
 /// Name of FrostMod's command event. Must match frostmod.cpp exactly.
@@ -129,6 +132,10 @@ pub enum CommandOutcome {
     WriteFailed,
     /// Non-Windows dev build — can't talk to FrostMod.
     Unsupported,
+    /// Sent, but the installed FrostMod predates the verb — it logs "unknown verb"
+    /// and does nothing. Only the caller knows which verb it sent and which release
+    /// introduced it, so this is never produced by `send_command` itself.
+    TooOld,
 }
 
 /// Write the command file (so it's there before FrostMod wakes), then pulse the
@@ -175,6 +182,39 @@ pub fn signal_refresh_model(bike_id: &str) -> CommandOutcome {
     send_command(command_json("refresh_bike_model", bike_id))
 }
 
+/// The FrostMod release that added the command listener and `refresh_bike_model`.
+/// Anything older creates no `Local\FrostModCommand` event at all, so the send comes
+/// back `NotRunning` — but a *future* verb on a listening-but-older FrostMod would be
+/// taken and dropped, which is the case this gate really guards.
+pub const MODEL_REFRESH_MIN_VERSION: &str = "v0.9.9";
+
+/// Parse a release tag (`v0.9.9`, `0.10.0`, `v1.0.0-rc1`) into comparable parts.
+/// Anything unparseable is `None` — we then assume support rather than cry wolf.
+fn version_parts(tag: &str) -> Option<(u32, u32, u32)> {
+    let core = tag.trim().trim_start_matches(['v', 'V']);
+    // Drop any pre-release/build tail: `0.9.9-rc1` is 0.9.9 for our purposes, since
+    // the verb either exists in that build or it doesn't.
+    let core = core.split(['-', '+']).next()?;
+    let mut it = core.split('.');
+    let major = it.next()?.parse().ok()?;
+    // A tag may be `v1` or `v1.2` — a missing part is zero, not a parse failure.
+    let minor = it.next().map_or(Some(0), |s| s.parse().ok())?;
+    let patch = it.next().map_or(Some(0), |s| s.parse().ok())?;
+    Some((major, minor, patch))
+}
+
+/// Does the FrostMod release tagged `tag` understand `refresh_bike_model`?
+///
+/// A tag we can't read counts as supported: `version.txt` is written by our own
+/// installer, so an unreadable one means something unusual, and warning "update
+/// FrostMod" at a user who already has the newest build is worse than staying quiet.
+pub fn supports_model_refresh(tag: &str) -> bool {
+    match (version_parts(tag), version_parts(MODEL_REFRESH_MIN_VERSION)) {
+        (Some(have), Some(min)) => have >= min,
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +231,44 @@ mod tests {
             command_json("swap_bike", r#"a"b\c"#),
             r#"{"bikeId":"a\"b\\c","verb":"swap_bike"}"#
         );
+    }
+
+    #[test]
+    fn the_refresh_verb_needs_the_release_that_introduced_it() {
+        assert!(supports_model_refresh("v0.9.9"));
+        assert!(supports_model_refresh("0.9.9")); // tags are written with the v, but be lenient
+        assert!(!supports_model_refresh("v0.9.8"));
+        assert!(!supports_model_refresh("v0.8.12"));
+    }
+
+    #[test]
+    fn versions_compare_by_number_not_by_string() {
+        // The trap: "v0.9.10" < "v0.9.9" lexically, and "v0.10.0" < "v0.9.9" too.
+        assert!(supports_model_refresh("v0.9.10"));
+        assert!(supports_model_refresh("v0.10.0"));
+        assert!(supports_model_refresh("v1.0.0"));
+    }
+
+    #[test]
+    fn a_prerelease_of_the_minimum_counts_as_the_minimum() {
+        // Our own release flow tags pre-releases with a `-` suffix (see release.yml),
+        // and such a build carries the verb.
+        assert!(supports_model_refresh("v0.9.9-rc1"));
+        assert!(!supports_model_refresh("v0.9.8-rc1"));
+    }
+
+    #[test]
+    fn an_unreadable_tag_is_given_the_benefit_of_the_doubt() {
+        // Better silent than telling someone on the newest build to update.
+        assert!(supports_model_refresh(""));
+        assert!(supports_model_refresh("nightly"));
+        assert!(supports_model_refresh("v-broken-"));
+    }
+
+    #[test]
+    fn short_tags_fill_the_missing_parts_with_zero() {
+        assert!(supports_model_refresh("v1"));
+        assert!(!supports_model_refresh("v0.9"));
     }
 
     #[test]
