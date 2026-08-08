@@ -42,6 +42,7 @@ import {
   presetsListProfiles,
   presetsListBikes,
   presetsReadLoadout,
+  presetsSlots,
   presetsApply,
   presetsList,
   presetsSave,
@@ -65,8 +66,8 @@ import { SlotField } from "./SlotField";
 import { Trans } from "../../i18n";
 import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
-  SLOTS,
   SLOT_GROUPS,
+  slotsFor,
   EMPTY_LOADOUT,
   loadScans,
   slotOptions,
@@ -354,10 +355,34 @@ export default function Presets({
     [refreshSaved],
   );
 
-  const grouped = useMemo(
-    () => SLOT_GROUPS.map((g) => ({ ...g, slots: SLOTS.filter((s) => s.group === g.id) })),
-    [],
-  );
+  // Which slots this profile actually offers. Read from its `profile.ini` rather than
+  // assumed, because GP Bikes' slot set is not MX Bikes' — see `slotsFor`.
+  const [slots, setSlots] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!profile) {
+      setSlots(null);
+      return;
+    }
+    let cancelled = false;
+    presetsSlots(profile)
+      .then((s) => !cancelled && setSlots(s))
+      // A profile we can't read falls back to showing every slot, which is what the app
+      // did before this existed — better than an editor with nothing in it.
+      .catch(() => !cancelled && setSlots(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
+
+  const grouped = useMemo(() => {
+    const available = slotsFor(slots);
+    return SLOT_GROUPS.map((g) => ({
+      ...g,
+      slots: available.filter((s) => s.group === g.id),
+    // Groups whose every slot belongs to another game would otherwise render as an
+    // empty labelled box.
+    })).filter((g) => g.slots.length > 0);
+  }, [slots]);
 
   const builderMissing = useMemo(
     () => (scans ? missingSlots(bike, loadout, scans).length : 0),

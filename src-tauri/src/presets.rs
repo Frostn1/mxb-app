@@ -1,9 +1,20 @@
 use anyhow::Context;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// `profile.ini` sections that are *not* cosmetic slots and must never be treated as
+/// one. `[info]` holds the active bike and race number, which have their own handling.
+pub const NON_SLOT_SECTIONS: [&str; 1] = ["info"];
+
+/// Sections the app has a named [`Loadout`] field for.
+///
+/// A superset across titles, not one game's list: MX Bikes uses all fifteen, GP Bikes
+/// uses a subset (and adds sections of its own, which land in [`Loadout::extra`]).
+/// Nothing is ever *written* to a section merely because it appears here — see
+/// [`apply_loadout`].
 pub const SLOT_SECTIONS: [&str; 15] = [
     "paint",
     "bike_font",
@@ -43,6 +54,13 @@ pub struct Loadout {
     pub race_number: String,
     /// Model-swap variant; not a `profile.ini` value — a filesystem swap at apply time. Empty = leave current model.
     pub model_swap: String,
+    /// Slots read from the file that have no named field above — GP Bikes' own sections,
+    /// and anything a future game patch adds.
+    ///
+    /// Skipped when empty so an MX Bikes preset serializes byte-identically to one saved
+    /// before this existed, which is what keeps old share codes valid.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, String>,
 }
 
 impl Loadout {
@@ -63,7 +81,7 @@ impl Loadout {
             "protection_paint" => &self.protection_paint,
             "riding_style" => &self.riding_style,
             "tyres" => &self.tyres,
-            _ => return None,
+            other => self.extra.get(other).map(String::as_str)?,
         })
     }
 
@@ -84,7 +102,9 @@ impl Loadout {
             "protection_paint" => self.protection_paint = val,
             "riding_style" => self.riding_style = val,
             "tyres" => self.tyres = val,
-            _ => {}
+            other => {
+                self.extra.insert(other.to_string(), val);
+            }
         }
     }
 }
@@ -214,6 +234,20 @@ impl IniDoc {
         }
     }
 
+    /// Every section header in the file, in the order they appear.
+    ///
+    /// This is what lets the app read a `profile.ini` it has no hardcoded knowledge of.
+    /// GP Bikes' slot set is not MX Bikes' — no `goggles_paint`, no `boots`, no
+    /// `protection`, since it bakes those into the rider model — so rather than ship a
+    /// guessed list per title, the file is asked what it has.
+    fn sections(&self) -> Vec<String> {
+        self.lines.iter().filter_map(|l| Self::header_name(l).map(str::to_string)).collect()
+    }
+
+    fn has_section(&self, section: &str) -> bool {
+        self.section_span(section).is_some()
+    }
+
     fn section_keys(&self, section: &str) -> Vec<String> {
         let mut out = Vec::new();
         if let Some((h, end)) = self.section_span(section) {
@@ -329,8 +363,32 @@ pub fn read_loadout(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow:
     for section in SLOT_SECTIONS {
         lo.set_slot(section, doc.get(section, bikeid).unwrap_or_default());
     }
+    // Anything else the file carries is a slot too — this is how GP Bikes' sections get
+    // read without the app having a hardcoded list for it. `set_slot` routes these into
+    // `extra`, since by definition they have no named field.
+    for section in doc.sections() {
+        if is_slot_section(&section) && !SLOT_SECTIONS.contains(&section.as_str()) {
+            lo.set_slot(&section, doc.get(&section, bikeid).unwrap_or_default());
+        }
+    }
     lo.race_number = doc.get("info", "race_number").unwrap_or_default();
     Ok(lo)
+}
+
+/// Whether a `profile.ini` section is a cosmetic slot rather than bookkeeping.
+fn is_slot_section(section: &str) -> bool {
+    !NON_SLOT_SECTIONS.iter().any(|s| s.eq_ignore_ascii_case(section))
+}
+
+/// The slots a profile actually has, in file order. Lets the UI show the pickers this
+/// game offers instead of a fixed MX Bikes list with dead rows in it.
+pub fn slots_for(profiles_dir: &Path, profile: &str) -> anyhow::Result<Vec<String>> {
+    let text = read_profile_ini(&profile_ini_path(profiles_dir, profile))?;
+    Ok(IniDoc::parse(&text)
+        .sections()
+        .into_iter()
+        .filter(|s| is_slot_section(s))
+        .collect())
 }
 
 pub fn apply_loadout(
@@ -350,9 +408,23 @@ pub fn apply_loadout(
 
     let (text, was_utf8) = decode_ini(&bytes);
     let mut doc = IniDoc::parse(&text);
-    for section in SLOT_SECTIONS {
-        if let Some(val) = loadout.slot(section) {
-            doc.set(section, bikeid, val);
+    // Write a slot only when the file already has that section, or when there's a real
+    // value to record.
+    //
+    // Without the first condition, applying an MX-Bikes-shaped loadout to a GP Bikes
+    // profile would invent `[goggles_paint]`, `[boots]` and `[protection]` sections that
+    // game has no concept of. MX Bikes' own `profile.ini` carries every section it uses,
+    // so nothing about applying to one changes.
+    let sections: Vec<String> = SLOT_SECTIONS
+        .iter()
+        .map(|s| s.to_string())
+        .chain(loadout.extra.keys().cloned())
+        .collect();
+    for section in sections {
+        if let Some(val) = loadout.slot(&section) {
+            if doc.has_section(&section) || !val.is_empty() {
+                doc.set(&section, bikeid, val);
+            }
         }
     }
     if make_active {
@@ -488,6 +560,117 @@ KTM250=p_mx
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// A GP Bikes `profile.ini`: the sections it shares with MX Bikes, an `animation`
+    /// slot MX Bikes has no field for, and — critically — no `goggles_paint`, `boots` or
+    /// `protection`, which GP bakes into the rider model.
+    const GP_SAMPLE: &str = "\
+[info]
+bikeid=BSB23_Ducati_V4R
+race_number=46
+
+[paint]
+BSB23_Ducati_V4R=Team
+
+[rider]
+BSB23_Ducati_V4R=(S) Suit 1 + Boots Alpinestars
+
+[helmet]
+BSB23_Ducati_V4R=AGV Pista GP RR
+
+[helmet_paint]
+BSB23_Ducati_V4R=Mugello
+
+[suit_paint]
+BSB23_Ducati_V4R=Team
+
+[animation]
+BSB23_Ducati_V4R=Elbow Down
+
+[tyres]
+BSB23_Ducati_V4R=BS_Racing_Battlax
+";
+
+    fn write_gp_sample(dir: &Path, profile: &str) -> PathBuf {
+        let p = dir.join("profiles").join(profile);
+        fs::create_dir_all(&p).unwrap();
+        let ini = p.join("profile.ini");
+        fs::write(&ini, GP_SAMPLE).unwrap();
+        ini
+    }
+
+    /// The slot list comes from the file, so a game the app has no hardcoded list for
+    /// still reports the right pickers — and never reports `[info]`, which is bookkeeping.
+    #[test]
+    fn slots_come_from_the_file_not_a_hardcoded_list() {
+        let root = tmp("gp-slots");
+        write_gp_sample(&root, "rider1");
+        let slots = slots_for(&root.join("profiles"), "rider1").unwrap();
+
+        assert!(slots.contains(&"animation".to_string()), "GP-only slot: {slots:?}");
+        assert!(slots.contains(&"helmet_paint".to_string()));
+        assert!(!slots.contains(&"info".to_string()), "[info] is not a slot");
+        assert!(!slots.contains(&"goggles_paint".to_string()), "GP has no goggles");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A section with no named `Loadout` field still round-trips: read into `extra`,
+    /// written back to the same place.
+    #[test]
+    fn an_unknown_slot_round_trips_through_extra() {
+        let root = tmp("gp-extra");
+        let ini = write_gp_sample(&root, "rider1");
+        let profiles = root.join("profiles");
+
+        let mut lo = read_loadout(&profiles, "rider1", "BSB23_Ducati_V4R").unwrap();
+        assert_eq!(lo.extra.get("animation").map(String::as_str), Some("Elbow Down"));
+        assert_eq!(lo.helmet, "AGV Pista GP RR", "shared slots still use their fields");
+
+        lo.set_slot("animation", "Balanced".into());
+        apply_loadout(&profiles, "rider1", "BSB23_Ducati_V4R", &lo, false).unwrap();
+
+        let text = fs::read_to_string(&ini).unwrap();
+        assert!(text.contains("BSB23_Ducati_V4R=Balanced"), "animation was written: {text}");
+        let back = read_loadout(&profiles, "rider1", "BSB23_Ducati_V4R").unwrap();
+        assert_eq!(back.extra.get("animation").map(String::as_str), Some("Balanced"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The reason `apply_loadout` checks `has_section`: an MX-Bikes-shaped loadout must
+    /// not invent gear sections in a GP Bikes profile, or the file grows slots that
+    /// game will never read and the app would then offer as if they were real.
+    #[test]
+    fn applying_does_not_invent_sections_the_game_lacks() {
+        let root = tmp("gp-no-invent");
+        let ini = write_gp_sample(&root, "rider1");
+        let profiles = root.join("profiles");
+
+        let lo = read_loadout(&profiles, "rider1", "BSB23_Ducati_V4R").unwrap();
+        apply_loadout(&profiles, "rider1", "BSB23_Ducati_V4R", &lo, false).unwrap();
+
+        let text = fs::read_to_string(&ini).unwrap();
+        for absent in ["[goggles_paint]", "[boots]", "[protection]", "[gloves_paint]"] {
+            assert!(!text.contains(absent), "{absent} must not appear:\n{text}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// An MX Bikes preset must serialize exactly as it did before `extra` existed, or
+    /// every share code already in circulation changes.
+    #[test]
+    fn an_mx_bikes_preset_serializes_without_the_extra_field() {
+        let preset = Preset {
+            name: "Race day".into(),
+            loadout: Loadout {
+                paint: "RedBud".into(),
+                ..Default::default()
+            },
+            bundle: None,
+            content: None,
+        };
+        let json = serde_json::to_string(&preset).unwrap();
+        assert!(!json.contains("extra"), "empty extra is skipped: {json}");
     }
 
     #[test]

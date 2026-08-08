@@ -9,12 +9,17 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const BASE: &str = mxb_session::BASE;
 const PER_PAGE: &str = "24";
 
-pub struct MxbModsSource;
+/// The mods catalog for whichever game is active.
+///
+/// mxb-mods.com and gpb-mods.com are the same WordPress build by the same author — same
+/// REST shape, same popular-posts plugin, same ratings endpoint — so one implementation
+/// serves both and only the host varies (see [`mxb_session::base`]). Category ids differ
+/// between them and are supplied by the caller.
+pub struct WpModsSource;
 
-impl ModSource for MxbModsSource {
+impl ModSource for WpModsSource {
     async fn search(
         &self,
         query: &str,
@@ -56,7 +61,7 @@ fn build_client() -> anyhow::Result<Client> {
         ("sec-fetch-site", "same-origin"),
         ("sec-fetch-mode", "cors"),
         ("sec-fetch-dest", "empty"),
-        ("referer", BASE),
+        ("referer", mxb_session::base()),
     ] {
         headers.insert(k, HeaderValue::from_static(v));
     }
@@ -224,7 +229,7 @@ async fn into_fetched(resp: reqwest::Response) -> Fetched {
 /// percent-encoded query params, and the path is the bit that distinguishes the two
 /// endpoints Cloudflare treats differently — the WP REST API and the rendered mod page.
 fn path_of(url: &str) -> &str {
-    url.strip_prefix(BASE).unwrap_or(url)
+    url.strip_prefix(mxb_session::base()).unwrap_or(url)
 }
 
 /// Cloudflare refused us, as opposed to the site being down or the parse failing.
@@ -456,7 +461,7 @@ async fn listing_response(
     category_id: u32,
     page: Page,
 ) -> anyhow::Result<(Fetched, Option<u32>)> {
-    let url = format!("{BASE}/wp-json/wp/v2/posts");
+    let url = format!("{}/wp-json/wp/v2/posts", mxb_session::base());
     let mut params: Vec<(&str, String)> = vec![
         ("categories", category_id.to_string()),
         ("_embed", "wp:featuredmedia".to_string()),
@@ -537,7 +542,7 @@ async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
 /// differences are `limit`/`offset` instead of `page`, and that paging past the end
 /// returns an empty list rather than a 400.
 async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec<ModSummary>> {
-    let url = format!("{BASE}/wp-json/wordpress-popular-posts/v1/popular-posts");
+    let url = format!("{}/wp-json/wordpress-popular-posts/v1/popular-posts", mxb_session::base());
     let per_page: u32 = PER_PAGE.parse().unwrap_or(24);
     let params: Vec<(&str, String)> = vec![
         ("taxonomy", "category".to_string()),
@@ -562,7 +567,7 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
 
 pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // 1. Post metadata + description via the REST API.
-    let url = format!("{BASE}/wp-json/wp/v2/posts");
+    let url = format!("{}/wp-json/wp/v2/posts", mxb_session::base());
     let params = vec![
         ("slug", slug.to_string()),
         ("_embed", "wp:featuredmedia".to_string()),
@@ -703,7 +708,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The rating plugin has no REST route; its front end reads scores from this admin-ajax
 /// action, which answers unauthenticated with `{voteCount, avgRating}`.
 async fn rating(id: u64) -> anyhow::Result<ModRating> {
-    let url = format!("{BASE}/wp-admin/admin-ajax.php");
+    let url = format!("{}/wp-admin/admin-ajax.php", mxb_session::base());
     let form = [
         ("action", "load_results".to_string()),
         ("postID", id.to_string()),

@@ -20,6 +20,9 @@ import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
 import { launchGame } from "../../api/mods";
 import { useGameRunning } from "../../lib/useGameRunning";
+import { useConfig } from "../../Context/Config";
+import GameSwitcher from "./GameSwitcher";
+import type { GameCaps } from "../../types";
 
 export type DashboardView =
   | "browse"
@@ -36,13 +39,25 @@ interface SidebarProps {
   onNavigate: (view: DashboardView) => void;
 }
 
-const NAV: { id: DashboardView; label: TKey; icon: typeof Home }[] = [
+/**
+ * `cap` names a capability the active game must have for the item to appear. Gating on a
+ * capability rather than on the game id keeps "why is this hidden" answerable in one
+ * place — and turning a feature on for another title is a single `true` in `game.rs`.
+ */
+const NAV: {
+  id: DashboardView;
+  label: TKey;
+  icon: typeof Home;
+  cap?: keyof GameCaps;
+}[] = [
   { id: "browse", label: "nav.browse", icon: Home },
   // { id: "shop", label: "nav.shop", icon: Store }, // hidden for now
   { id: "library", label: "nav.library", icon: LibraryIcon },
-  { id: "locker", label: "nav.locker", icon: Bike },
+  // The Locker and Rider views are the 3D preview; GP Bikes' meshes need their own
+  // part bindings before they can be shown.
+  { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
   { id: "presets", label: "nav.presets", icon: Shirt },
-  { id: "rider", label: "nav.rider", icon: User },
+  { id: "rider", label: "nav.rider", icon: User, cap: "viewer" },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
 ];
 
@@ -56,6 +71,8 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const { running, reload, status, start } = useFrostmod();
   const { active, queueLength } = useInstall();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
+  const { game } = useConfig();
+  const caps = game.caps;
   const [starting, setStarting] = useState(false);
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
@@ -105,8 +122,10 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         MXB App
       </div>
 
+      <GameSwitcher />
+
       <nav className="flex flex-col gap-0.5">
-        {NAV.map(({ id, label, icon: Icon }) => {
+        {NAV.filter(({ cap }) => !cap || caps[cap]).map(({ id, label, icon: Icon }) => {
           const activeNav = view === id;
           return (
             <button
@@ -186,6 +205,9 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           </span>
         </button>
 
+        {/* FrostMod is a compiled MX Bikes plugin — there is nothing to report, start or
+            reload for a title it wasn't built for. */}
+        {caps.frostmod && (
         <div
           data-tour="frostmod"
           className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2"
@@ -223,6 +245,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
             )
           )}
         </div>
+        )}
 
         <button
           data-tour="settings"

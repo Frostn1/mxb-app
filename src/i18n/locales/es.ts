@@ -85,13 +85,13 @@ export const es: Translation = {
   "setup.title": "Bienvenido a MXB App",
   "setup.tagline":
     "Explora mxb-mods, instala con un clic y deja que FrostMod recargue el juego por ti.",
-  "setup.modsFolder": "Carpeta de MX Bikes",
+  "setup.modsFolder": "Carpeta de {{game}}",
   "setup.autoDetect":
     "MXB App detectará automáticamente tu carpeta {{hint}}. También puedes elegirla tú.",
   "setup.chooseManually": "Elegir la carpeta manualmente…",
   "setup.chooseDifferent": "Elegir otra carpeta…",
-  "setup.gameInstall": "Instalación de MX Bikes",
-  "setup.detecting": "Buscando tu instalación de MX Bikes…",
+  "setup.gameInstall": "Instalación de {{game}}",
+  "setup.detecting": "Buscando tu instalación de {{game}}…",
   "setup.found": "Encontrada",
   "setup.detectedAutomatically": "Detectada automáticamente",
   "setup.installNotFound":
@@ -100,9 +100,8 @@ export const es: Translation = {
     "Elegir la carpeta de instalación manualmente…",
   "setup.startBrowsing": "Empezar a explorar mods",
   "setup.detectAndStart": "Detectar y empezar",
-  "setup.pickModsFolder": "Selecciona tu carpeta de MX Bikes",
-  "setup.pickInstallFolder":
-    "Selecciona tu carpeta de instalación de MX Bikes",
+  "setup.pickModsFolder": "Selecciona tu carpeta de {{game}}",
+  "setup.pickInstallFolder": "Selecciona la carpeta de instalación de {{game}}",
 
   // ── Bienvenida ─────────────────────────────────────────────────────────────
   "welcome.intro.title": "Bienvenido a MXB App",
@@ -885,4 +884,21 @@ export const es: Translation = {
   "manage.deleteTitle": "¿Eliminar {{name}}?",
   "manage.deleteBody": "Va a la papelera, así que todavía puedes recuperarlo desde ahí.",
   "manage.deleted": "{{name}} eliminado.",
+  "game.label": "Juego",
+  "game.switch": "Cambiar de juego",
+  "game.switchFailed": "No se pudo cambiar de juego",
+  "settings.instantRefreshMxOnly": "Solo MX Bikes — {{game}} no recarga perfiles en caliente.",
+  "modType.misc": "Varios",
+  "modType.miscInline": "extras",
+  "browseCat.raceTracks": "Circuitos",
+  "browseCat.kartTracks": "Circuitos de karts",
+  "browseCat.others": "Otros",
+  "browseCat.riderModels": "Modelos de piloto",
+  "browseCat.suitPaints": "Diseños de mono",
+  "browseCat.helmetModels": "Modelos de casco",
+  "browseCat.plugins": "Complementos",
+  "browseCat.tools": "Herramientas",
+  "browseCat.menuBackgrounds": "Fondos de menú",
+  "category.animation": "Estilo de pilotaje",
+  "section.animation": "Estilos de pilotaje",
 };

@@ -3,11 +3,11 @@ use serde::Serialize;
 use crate::config::AppConfig;
 
 /// Customization loader `fcn.1400ecd00` minus PE image base `0x140000000`.
+///
+/// An `mxbikes.exe` offset, so it is only ever used when MX Bikes is the active game —
+/// see [`crate::game::Caps::instant_refresh`], which gates every path that reaches here.
 #[cfg(windows)]
 const LOADER_OFFSET: usize = 0x000e_cd00;
-
-/// The game's main executable (matched case-insensitively).
-const GAME_EXE: &str = "mxbikes.exe";
 
 // Non-Windows builds only construct `Unsupported`/`Disabled`.
 #[allow(dead_code)]
@@ -158,7 +158,7 @@ fn find_game_pid() -> Option<u32> {
         let mut pid = None;
         if ffi::Process32First(snap, &mut entry) != 0 {
             loop {
-                if ffi::field_eq_ignore_case(&entry.sz_exe_file, GAME_EXE) {
+                if ffi::field_eq_ignore_case(&entry.sz_exe_file, crate::game::active().exe) {
                     pid = Some(entry.th32_process_id);
                     break;
                 }
@@ -381,26 +381,30 @@ pub enum LaunchOutcome {
     AlreadyRunning,
 }
 
-/// The MX Bikes install folder and its `mxbikes.exe`, for launching.
+/// The active game's install folder and its executable, for launching.
 ///
 /// Falls back to Steam detection when `gamePath` is blank: the setting only ever gets
 /// filled by that same detector, so an install we can find is one we can launch even if
 /// the config predates the setting.
 fn resolve_exe(cfg: &AppConfig) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let game = cfg.game();
     let dir = match cfg.game_path.trim() {
-        "" => crate::config::detect_game_path().ok_or_else(|| {
+        "" => crate::config::detect_game_path(game).ok_or_else(|| {
             anyhow::anyhow!(
-                "MX Bikes install folder isn't set — set it in Settings, under MX Bikes install folder."
+                "{0} install folder isn't set — set it in Settings, under {0} install folder.",
+                game.display
             )
         })?,
         p => p.to_string(),
     };
     let dir = std::path::PathBuf::from(dir);
-    let exe = crate::library::resolve_child(&dir, GAME_EXE);
+    let exe = crate::library::resolve_child(&dir, game.exe);
     if !exe.is_file() {
         anyhow::bail!(
-            "Couldn't find {GAME_EXE} in {} — check the MX Bikes install folder in Settings.",
-            dir.display()
+            "Couldn't find {} in {} — check the {} install folder in Settings.",
+            game.exe,
+            dir.display(),
+            game.display
         );
     }
     Ok((dir, exe))
@@ -417,7 +421,7 @@ pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
         return Ok(LaunchOutcome::AlreadyRunning);
     }
     let (dir, exe) = resolve_exe(cfg)?;
-    log::info!("launching MX Bikes: {}", exe.display());
+    log::info!("launching {}: {}", cfg.game().display, exe.display());
 
     #[cfg(windows)]
     {
@@ -433,11 +437,10 @@ pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
     #[cfg(target_os = "linux")]
     {
         let _ = dir;
-        let url = format!("steam://rungameid/{}", crate::config::MX_BIKES_APPID);
-        std::process::Command::new("xdg-open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| anyhow::anyhow!("Couldn't ask Steam to launch MX Bikes ({url}): {e}"))?;
+        let url = format!("steam://rungameid/{}", cfg.game().steam_appid);
+        std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| {
+            anyhow::anyhow!("Couldn't ask Steam to launch {} ({url}): {e}", cfg.game().display)
+        })?;
         Ok(LaunchOutcome::Launched)
     }
 
@@ -462,13 +465,13 @@ mod tests {
     #[test]
     fn finds_the_exe_in_the_configured_folder() {
         let dir = temp_dir("found");
-        std::fs::write(dir.join(GAME_EXE), b"stub").unwrap();
+        std::fs::write(dir.join(crate::game::MXB.exe), b"stub").unwrap();
 
         let mut cfg = AppConfig::default();
         cfg.game_path = dir.to_string_lossy().into_owned();
         let (found_dir, exe) = resolve_exe(&cfg).expect("a folder holding mxbikes.exe launches");
         assert_eq!(found_dir, dir);
-        assert_eq!(exe, dir.join(GAME_EXE));
+        assert_eq!(exe, dir.join(crate::game::MXB.exe));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -489,7 +492,7 @@ mod tests {
             .file_name()
             .unwrap()
             .to_string_lossy()
-            .eq_ignore_ascii_case(GAME_EXE));
+            .eq_ignore_ascii_case(crate::game::MXB.exe));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -502,7 +505,7 @@ mod tests {
         cfg.game_path = dir.to_string_lossy().into_owned();
         let err = resolve_exe(&cfg).expect_err("no exe means no launch");
         let msg = format!("{err:#}");
-        assert!(msg.contains(GAME_EXE), "names what's missing: {msg}");
+        assert!(msg.contains(crate::game::MXB.exe), "names what's missing: {msg}");
         assert!(msg.contains("Settings"), "points at the fix: {msg}");
 
         let _ = std::fs::remove_dir_all(&dir);

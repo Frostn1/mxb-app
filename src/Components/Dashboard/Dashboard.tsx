@@ -25,7 +25,7 @@ interface DashboardProps {
 }
 
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
-  const { config } = useConfig();
+  const { config, game } = useConfig();
   const [view, setView] = useState<DashboardView>("browse");
   // A preset handed off from the Presets tab to load in the Rider tab (its
   // "View in Rider" button). Consumed once by the Rider view, then cleared.
@@ -34,6 +34,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const showBrowse = useCallback(() => setView("browse"), []);
   const {
     modType,
+    modTypes,
     changeType,
     selectedSlug,
     selectedCategoryId,
@@ -43,7 +44,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     openMod,
     openModTarget,
     closeMod,
-  } = useModBrowsing(showBrowse);
+  } = useModBrowsing(showBrowse, game.id);
 
   // FrostMod installs itself silently on first run (see FrostmodProvider) —
   // no prompt here.
@@ -123,6 +124,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           ) : view === "browse" ? (
             <Browse
               modType={modType}
+              modTypes={modTypes}
               installed={installed}
               onOpenMod={openMod}
               onChangeType={changeType}

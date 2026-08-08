@@ -100,9 +100,9 @@ pub fn plan_detailed(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<Bundl
 }
 
 fn resolve(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
-    let bikes = library::scan_library(&cfg.mods_path, "mods/bikes", &[]).unwrap_or_default();
-    let rider = library::scan_library(&cfg.mods_path, "mods/rider", &[]).unwrap_or_default();
-    let tyres = library::scan_library(&cfg.mods_path, "mods/tyres", &[]).unwrap_or_default();
+    let bikes = library::scan_library(&cfg.mods_path, "mods/bikes", &[], cfg.game()).unwrap_or_default();
+    let rider = library::scan_library(&cfg.mods_path, "mods/rider", &[], cfg.game()).unwrap_or_default();
+    let tyres = library::scan_library(&cfg.mods_path, "mods/tyres", &[], cfg.game()).unwrap_or_default();
 
     let specs = vec![
         Spec { slot: "paint", value: loadout.paint.clone(), scan: Scan::Bikes, cats: &["bikePaint"], parent: None },

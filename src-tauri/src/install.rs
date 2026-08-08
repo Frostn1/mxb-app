@@ -685,8 +685,10 @@ fn detect_ext(archive: &Path) -> anyhow::Result<String> {
     anyhow::bail!("Could not determine the archive type of the downloaded file.")
 }
 
-/// MX Bikes content categories that live directly under `mods/`.
-const CATEGORY_DIRS: [&str; 5] = ["bikes", "tracks", "rider", "tyres", "misc"];
+/// Content categories that live directly under `mods/`, across every title the app
+/// drives — see [`crate::game::ALL_MODS_DIRS`] for why this is a union rather than the
+/// active game's own list.
+use crate::game::ALL_MODS_DIRS as CATEGORY_DIRS;
 
 pub(crate) fn place_mod(
     extracted: &Path,

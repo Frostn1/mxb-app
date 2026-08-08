@@ -1,12 +1,38 @@
+use crate::game::{Game, GameProfile};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
+
+/// Where one title's content lives. The active game's copy is mirrored into
+/// [`AppConfig`]'s own `mods_path` / `game_path` / `profiles_path`; this is how the
+/// *other* titles' folders are remembered across a switch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GamePaths {
+    pub mods_path: String,
+    pub game_path: String,
+    pub profiles_path: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
+    /// The title the app is currently driving. Absent in every config written before
+    /// multi-game support, which deserializes to [`Game::Mxb`] — the title those
+    /// installs are for.
+    pub active_game: Game,
+    /// Saved folders per title, keyed by [`Game::id`]. The active game's entry is kept
+    /// in sync with the flat fields below on every save.
+    ///
+    /// The flat fields stay the source of truth for the *active* game rather than being
+    /// replaced by this map: roughly fifty call sites read `cfg.mods_path` directly, and
+    /// a config that keeps meaning what it always meant is also one an older build can
+    /// still read.
+    pub games: BTreeMap<String, GamePaths>,
     pub mods_path: String,
-    /// MX Bikes install dir (`mxbikes.exe` + core `rider.pkz`); distinct from `mods_path`.
+    /// Active game's install dir (its executable + core archives); distinct from
+    /// `mods_path`.
     pub game_path: String,
     /// Override for the PiBoSo `profiles` folder. Empty (the normal case) means it's
     /// resolved from `mods_path` — see [`AppConfig::profiles_dir`]. Set it when the
@@ -62,6 +88,8 @@ pub const LEGACY_OVERLAY_HOTKEYS: &[&str] = &["CommandOrControl+Shift+M"];
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            active_game: Game::default(),
+            games: BTreeMap::new(),
             mods_path: String::new(),
             game_path: String::new(),
             profiles_path: String::new(),
@@ -92,10 +120,52 @@ pub fn migrate(mut cfg: AppConfig) -> AppConfig {
         );
         cfg.overlay_hotkey = DEFAULT_OVERLAY_HOTKEY.to_string();
     }
+    // Pre-multi-game configs have folders but no `games` map. Seed the active game's
+    // entry from them so switching away and back doesn't lose the folders someone has
+    // been using — see `stash_active`, which is the same operation on the write side.
+    cfg.stash_active();
     cfg
 }
 
 impl AppConfig {
+    /// The active title's constants — folder names, executable, mods taxonomy, caps.
+    pub fn game(&self) -> &'static GameProfile {
+        self.active_game.profile()
+    }
+
+    /// Copy the live folders into `games[active]`. Called on every save and on every
+    /// read, so the map is always current no matter which build wrote the file.
+    pub fn stash_active(&mut self) {
+        self.games.insert(
+            self.active_game.id().to_string(),
+            GamePaths {
+                mods_path: self.mods_path.clone(),
+                game_path: self.game_path.clone(),
+                profiles_path: self.profiles_path.clone(),
+            },
+        );
+    }
+
+    /// Make `game` the active title, swapping the live folders for that game's saved
+    /// ones. The outgoing game's folders are stashed first, so switching back restores
+    /// them. A game with nothing saved comes up blank and is filled in by
+    /// [`finalize`] — i.e. auto-detected on first switch.
+    ///
+    /// Returns whether anything changed, so callers can skip the work (restarting the
+    /// mods watcher, re-scanning) when the user re-picks the game they're already on.
+    pub fn switch_game(&mut self, game: Game) -> bool {
+        if self.active_game == game {
+            return false;
+        }
+        self.stash_active();
+        let next = self.games.get(game.id()).cloned().unwrap_or_default();
+        self.active_game = game;
+        self.mods_path = next.mods_path;
+        self.game_path = next.game_path;
+        self.profiles_path = next.profiles_path;
+        true
+    }
+
     /// Folder that holds the per-player PiBoSo profiles (each a subdir with a
     /// `profile.ini`).
     ///
@@ -116,7 +186,7 @@ impl AppConfig {
         // Case-tolerant join: under Proton the folder can come back as `Profiles`.
         let primary = crate::library::resolve_child(Path::new(self.mods_path.trim()), "profiles");
         resolve_profiles_dir(primary, || {
-            default_mx_bikes_dir().map(|d| d.join("profiles"))
+            default_user_dir(self.game()).map(|d| d.join("profiles"))
         })
     }
 }
@@ -139,13 +209,13 @@ fn resolve_profiles_dir(primary: PathBuf, fallback: impl FnOnce() -> Option<Path
     }
 }
 
-/// The MX Bikes user folder where the game puts it when nothing has been moved: the
-/// Proton prefix on Linux, `Documents\PiBoSo\MX Bikes` elsewhere.
-fn default_mx_bikes_dir() -> Option<PathBuf> {
-    if let Some(p) = detect_proton_mods_path() {
+/// The game's user folder where it puts it when nothing has been moved: the Proton
+/// prefix on Linux, `Documents\PiBoSo\<game>` elsewhere.
+fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
+    if let Some(p) = detect_proton_mods_path(game) {
         return Some(PathBuf::from(p));
     }
-    Some(dirs_next::document_dir()?.join("PiBoSo").join("MX Bikes"))
+    Some(dirs_next::document_dir()?.join("PiBoSo").join(game.user_dir))
 }
 
 pub fn config_path(app: &AppHandle) -> PathBuf {
@@ -165,7 +235,9 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
     // A truncated/corrupt file is an error, not a silent empty config: callers that
     // can rebuild one (see `load_or_detect`) get the chance to, instead of the app
     // coming up pointed at nothing.
-    Ok(migrate(serde_json::from_str(&text)?))
+    let cfg = migrate(serde_json::from_str(&text)?);
+    crate::game::set_active(cfg.active_game);
+    Ok(cfg)
 }
 
 /// Whether `path` is really a player's MX Bikes folder — the game keeps `profiles/`
@@ -204,7 +276,11 @@ pub fn load_or_detect(app: &AppHandle) -> Option<AppConfig> {
     if !looks_like_mods_dir(&cfg.mods_path) {
         return None;
     }
-    log::info!("no usable config — auto-detected MX Bikes folder: {}", cfg.mods_path);
+    log::info!(
+        "no usable config — auto-detected {} folder: {}",
+        cfg.game().display,
+        cfg.mods_path
+    );
     if let Err(e) = save(app, &cfg) {
         log::warn!("couldn't save the auto-detected config: {e:#}");
     }
@@ -216,44 +292,48 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(cfg)?)?;
+    // Never persist a `games` map that disagrees with the live folders: callers mutate
+    // `mods_path` and friends directly (`set_mods_path`, `set_game_path`), and a stale
+    // entry would resurrect an old folder the next time the user switched back.
+    let mut cfg = cfg.clone();
+    cfg.stash_active();
+    std::fs::write(path, serde_json::to_string_pretty(&cfg)?)?;
+    crate::game::set_active(cfg.active_game);
     Ok(())
 }
 
 pub fn finalize(mut cfg: AppConfig) -> AppConfig {
+    let game = cfg.game();
     if cfg.mods_path.trim().is_empty() {
         // On Linux the game runs under Proton and writes into the Wine prefix, not the
-        // user's real Documents — `default_mx_bikes_dir` checks there first, since
-        // `document_dir()` would otherwise hand back a path MX Bikes has never written
+        // user's real Documents — `default_user_dir` checks there first, since
+        // `document_dir()` would otherwise hand back a path the game has never written
         // to (and often `None`, because it depends on `~/.config/user-dirs.dirs`).
-        if let Some(dir) = default_mx_bikes_dir() {
+        if let Some(dir) = default_user_dir(game) {
             cfg.mods_path = dir.to_string_lossy().into_owned();
         }
     }
-    // Auto-detect the Steam game install (holds `rider.pkz`) so the 3D rider preview
-    // works out of the box. Only fills a blank — never overrides a manual pick.
+    // Auto-detect the Steam game install so the 3D preview works out of the box. Only
+    // fills a blank — never overrides a manual pick.
     if cfg.game_path.trim().is_empty() {
-        if let Some(gp) = detect_game_path() {
+        if let Some(gp) = detect_game_path(game) {
             cfg.game_path = gp;
         }
     }
+    cfg.stash_active();
     cfg
 }
 
-/// MX Bikes' Steam AppID — names its Proton prefix under `steamapps/compatdata`, and
-/// addresses the game in the `steam://rungameid/…` URL the Linux launcher uses.
-pub const MX_BIKES_APPID: &str = "655500";
-
-/// The MX Bikes user folder inside a Proton prefix.
+/// The game's user folder inside a Proton prefix.
 ///
 /// Under Proton the game is a Windows process, so `Documents` is the prefix's fake
-/// `C:` drive — `compatdata/655500/pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes`
+/// `C:` drive — `compatdata/<appid>/pfx/drive_c/users/steamuser/Documents/PiBoSo/<game>`
 /// — and nothing is ever written to the user's real `~/Documents`. Without this a Linux
 /// player lands on the setup screen with no working default to accept.
 ///
 /// Returns the first prefix that actually looks like a mods dir, so a stale prefix from an
 /// uninstalled copy can't win over a real one.
-fn detect_proton_mods_path() -> Option<String> {
+fn detect_proton_mods_path(game: &GameProfile) -> Option<String> {
     if cfg!(not(target_os = "linux")) {
         return None;
     }
@@ -261,8 +341,9 @@ fn detect_proton_mods_path() -> Option<String> {
         let candidate = lib
             .join("steamapps")
             .join("compatdata")
-            .join(MX_BIKES_APPID)
-            .join("pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes");
+            .join(game.steam_appid)
+            .join("pfx/drive_c/users/steamuser/Documents/PiBoSo")
+            .join(game.user_dir);
         let as_str = candidate.to_string_lossy().into_owned();
         if looks_like_mods_dir(&as_str) {
             return Some(as_str);
@@ -271,12 +352,14 @@ fn detect_proton_mods_path() -> Option<String> {
     None
 }
 
-/// Locate the MX Bikes install folder (the one containing `rider.pkz`) by scanning
-/// Steam libraries. Returns `None` when it can't be found (e.g. non-Steam install).
-pub fn detect_game_path() -> Option<String> {
+/// Locate the game's install folder (the one holding its `install_marker`) by scanning
+/// Steam libraries. Returns `None` when it can't be found (e.g. non-Steam install —
+/// GP Bikes is also sold directly by PiBoSo, so this missing is unremarkable there).
+pub fn detect_game_path(game: &GameProfile) -> Option<String> {
     for lib in steam_libraries() {
-        let dir = lib.join("steamapps").join("common").join("MX Bikes");
-        if dir.join("rider.pkz").is_file() {
+        let dir = lib.join("steamapps").join("common").join(game.steam_common);
+        // Case-tolerant: a case-sensitive filesystem can hold `GPBikes.exe`.
+        if crate::library::resolve_child(&dir, game.install_marker).is_file() {
             return Some(dir.to_string_lossy().into_owned());
         }
     }
@@ -361,6 +444,72 @@ fn parse_library_paths(vdf: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole compatibility contract for existing installs: a `config.json` written
+    /// before GP Bikes support has no `activeGame` and no `games`, and must come back as
+    /// an MX Bikes config pointing at exactly the folders it named.
+    #[test]
+    fn a_pre_multi_game_config_migrates_to_mx_bikes() {
+        let json = r#"{
+            "modsPath": "/games/MX Bikes",
+            "gamePath": "/steam/common/MX Bikes",
+            "profilesPath": "",
+            "runInBackground": true,
+            "overlayHotkey": "CommandOrControl+Shift+X"
+        }"#;
+        let cfg = migrate(serde_json::from_str::<AppConfig>(json).unwrap());
+
+        assert_eq!(cfg.active_game, Game::Mxb, "an old config is an MX Bikes one");
+        assert_eq!(cfg.mods_path, "/games/MX Bikes", "folders are untouched");
+        assert_eq!(cfg.game_path, "/steam/common/MX Bikes");
+        // ...and they've been seeded into the map, so switching away and back keeps them.
+        assert_eq!(
+            cfg.games.get("mxb").map(|g| g.mods_path.as_str()),
+            Some("/games/MX Bikes"),
+        );
+    }
+
+    /// Switching parks the outgoing game's folders and restores the incoming one's, so a
+    /// player who set both up once never has to pick them again.
+    #[test]
+    fn switching_games_parks_and_restores_folders() {
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = "/mx/mods".into();
+        cfg.game_path = "/mx/install".into();
+
+        assert!(cfg.switch_game(Game::Gpb), "a real switch reports the change");
+        assert_eq!(cfg.active_game, Game::Gpb);
+        assert_eq!(cfg.mods_path, "", "GP Bikes has nothing saved yet");
+
+        cfg.mods_path = "/gp/mods".into();
+        cfg.game_path = "/gp/install".into();
+
+        assert!(cfg.switch_game(Game::Mxb));
+        assert_eq!(cfg.mods_path, "/mx/mods", "MX Bikes' folders came back");
+        assert_eq!(cfg.game_path, "/mx/install");
+
+        assert!(cfg.switch_game(Game::Gpb));
+        assert_eq!(cfg.mods_path, "/gp/mods", "and so did GP Bikes'");
+    }
+
+    /// Re-picking the active game must be a no-op, not a round-trip that could clobber
+    /// folders the user just edited.
+    #[test]
+    fn switching_to_the_active_game_changes_nothing() {
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = "/mx/mods".into();
+        assert!(!cfg.switch_game(Game::Mxb));
+        assert_eq!(cfg.mods_path, "/mx/mods");
+    }
+
+    /// Each title resolves its own `Documents\PiBoSo\<game>` folder.
+    #[test]
+    fn each_game_has_its_own_user_folder() {
+        let mxb = default_user_dir(&crate::game::MXB).unwrap();
+        let gpb = default_user_dir(&crate::game::GPB).unwrap();
+        assert!(mxb.ends_with("PiBoSo/MX Bikes"), "{}", mxb.display());
+        assert!(gpb.ends_with("PiBoSo/GP Bikes"), "{}", gpb.display());
+    }
 
     #[test]
     fn profiles_dir_defaults_to_mods_subfolder() {
@@ -535,7 +684,7 @@ mod linux_paths_tests {
         let _ = std::fs::remove_dir_all(&root);
         let mods = root
             .join("steamapps/compatdata")
-            .join(MX_BIKES_APPID)
+            .join(crate::game::MXB.steam_appid)
             .join("pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes");
         std::fs::create_dir_all(mods.join("mods").join("bikes")).unwrap();
         std::fs::create_dir_all(mods.join("profiles")).unwrap();
@@ -548,7 +697,7 @@ mod linux_paths_tests {
         let built = root
             .join("steamapps")
             .join("compatdata")
-            .join(MX_BIKES_APPID)
+            .join(crate::game::MXB.steam_appid)
             .join("pfx/drive_c/users/steamuser/Documents/PiBoSo/MX Bikes");
         assert_eq!(built, mods);
         let _ = std::fs::remove_dir_all(&root);
@@ -559,7 +708,7 @@ mod linux_paths_tests {
         // On Windows/macOS the game is native and writes to the real Documents folder,
         // so the prefix probe must never hijack detection there.
         if cfg!(not(target_os = "linux")) {
-            assert!(detect_proton_mods_path().is_none());
+            assert!(detect_proton_mods_path(&crate::game::MXB).is_none());
         }
     }
 }

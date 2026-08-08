@@ -6,25 +6,32 @@ import { usePlatform } from "../../lib/usePlatform";
 import { Trans } from "../../i18n";
 import { useT } from "../../i18n/context";
 import { Button } from "@/Components/ui/button";
+import type { GameInfo } from "../../types";
+import GameSwitcher from "../Shell/GameSwitcher";
 
 interface SetupProps {
   onComplete: () => void;
+  /** The title being set up. Drives the folder hint and is carried into the config, so
+   *  finishing setup after a game switch doesn't drop you back on MX Bikes. */
+  game: GameInfo;
 }
 
 /**
- * Where MX Bikes keeps its user folder, per OS. On Linux the game runs under Proton and
- * writes inside the Wine prefix, so pointing someone at `~/Documents` would send them
- * looking in a folder MX Bikes has never touched.
+ * Where the game keeps its user folder, per OS. On Linux it runs under Proton and writes
+ * inside the Wine prefix, so pointing someone at `~/Documents` would send them looking in
+ * a folder the game has never touched.
  */
-function hintFor(platform: string | null): string {
-  if (platform === "linux") return "steamapps/compatdata/655500/.../Documents/PiBoSo/MX Bikes";
-  if (platform === "macos") return "Documents/PiBoSo/MX Bikes";
-  return "Documents\\PiBoSo\\MX Bikes";
+function hintFor(platform: string | null, game: GameInfo): string {
+  const appid = game.id === "gpb" ? "848050" : "655500";
+  if (platform === "linux")
+    return `steamapps/compatdata/${appid}/.../Documents/PiBoSo/${game.display}`;
+  if (platform === "macos") return `Documents/PiBoSo/${game.display}`;
+  return `Documents\\PiBoSo\\${game.display}`;
 }
 
-export default function Setup({ onComplete }: SetupProps) {
+export default function Setup({ onComplete, game }: SetupProps) {
   const t = useT();
-  const defaultHint = hintFor(usePlatform());
+  const defaultHint = hintFor(usePlatform(), game);
   const [chosen, setChosen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,13 +59,13 @@ export default function Setup({ onComplete }: SetupProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [game.id]);
 
   const finish = async (modsPath: string) => {
     setBusy(true);
     setError(null);
     try {
-      await createConfig({ modsPath, gamePath: gamePath ?? "" });
+      await createConfig({ modsPath, gamePath: gamePath ?? "", activeGame: game.id });
       onComplete();
     } catch (e) {
       setError(String(e));
@@ -104,9 +111,15 @@ export default function Setup({ onComplete }: SetupProps) {
           </div>
         </div>
 
+        {/* Which game is being set up. Also the way out for someone who switched to a
+            title they don't have installed — there's no sidebar on this screen. */}
+        <div className="w-full">
+          <GameSwitcher />
+        </div>
+
         <div className="flex w-full flex-col gap-2.5">
           <span className="text-[11.5px] font-bold uppercase tracking-[1px] text-faint">
-            {t("setup.modsFolder")}
+            {t("setup.modsFolder", { game: game.display })}
           </span>
           {chosen ? (
             <div className="flex items-center gap-2.5 rounded-[10px] border border-input bg-card px-3.5 py-3 font-mono text-[12.5px] text-muted-foreground">

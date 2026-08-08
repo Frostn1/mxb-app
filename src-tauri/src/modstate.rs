@@ -29,9 +29,12 @@ use std::path::{Path, PathBuf};
 /// `mods/`: the game never looks here, and neither does the mods watcher.
 pub const SHADOW_DIR: &str = "mxbapp_disabled";
 
-/// The three content folders Manage governs. `tyres` and the rest are left alone — they
-/// hold a handful of files and aren't what a load is waiting on.
-const SUBPATHS: [&str; 3] = ["mods/tracks", "mods/bikes", "mods/rider"];
+/// The content folders Manage governs for `cfg`'s active game, as `mods/…` subpaths.
+/// Narrower than everything under `mods/` on purpose — see
+/// [`crate::game::GameProfile::manage_dirs`].
+fn subpaths(cfg: &AppConfig) -> Vec<String> {
+    cfg.game().manage_dirs.iter().map(|d| format!("mods/{d}")).collect()
+}
 
 /// One mod as Manage sees it: where it lives relative to the MX Bikes root, and whether
 /// the game can currently see it.
@@ -185,8 +188,8 @@ fn entry_from_library(mods_path: &str, e: &LibraryEntry, enabled: bool) -> Optio
 pub fn scan(cfg: &AppConfig, sound_bikes: &[String]) -> Vec<ModEntry> {
     let mut out = Vec::new();
 
-    for subpath in SUBPATHS {
-        for e in library::scan_library(&cfg.mods_path, subpath, sound_bikes)
+    for subpath in subpaths(cfg) {
+        for e in library::scan_library(&cfg.mods_path, &subpath, sound_bikes, cfg.game())
             .unwrap_or_default()
             .iter()
             .filter(|e| is_candidate(e))
@@ -200,10 +203,10 @@ pub fn scan(cfg: &AppConfig, sound_bikes: &[String]) -> Vec<ModEntry> {
     let shadow = shadow_root(&cfg.mods_path);
     if shadow.is_dir() {
         let shadow_str = shadow.to_string_lossy().into_owned();
-        for subpath in SUBPATHS {
+        for subpath in subpaths(cfg) {
             // `mods/tracks` under the real root is `tracks` under the shadow root.
             let leaf = subpath.trim_start_matches("mods/");
-            for e in library::scan_library(&shadow_str, leaf, sound_bikes)
+            for e in library::scan_library(&shadow_str, leaf, sound_bikes, cfg.game())
                 .unwrap_or_default()
                 .iter()
                 .filter(|e| is_candidate(e))
@@ -501,7 +504,7 @@ pub fn restore_all(cfg: &AppConfig) -> StateOutcome {
     }
 
     let mut rels: Vec<String> = Vec::new();
-    for subpath in SUBPATHS {
+    for subpath in subpaths(cfg) {
         let leaf = subpath.trim_start_matches("mods/");
         collect_parked(
             &shadow,

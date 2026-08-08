@@ -1,3 +1,4 @@
+use crate::game::GameProfile;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
@@ -180,6 +181,8 @@ pub struct RiderTargets {
     pub helmets: Vec<String>,
     pub boots: Vec<String>,
     pub protection: Vec<String>,
+    /// GP Bikes riding-style animations. Always empty for MX Bikes.
+    pub animations: Vec<String>,
     pub profiles: Vec<String>,
 }
 
@@ -207,8 +210,12 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
     };
     RiderTargets {
         helmets: models_in("helmets"),
+        // Absent for GP Bikes, which bakes boots and protection into the rider model —
+        // the folders simply aren't there, and `models_in` returns empty for those.
         boots: models_in("boots"),
         protection: models_in("protection"),
+        // GP Bikes' riding-style animations. Nothing writes here for MX Bikes.
+        animations: models_in("animations"),
         // A rider model can be packed as `riders/<name>.pkz` just as gear can, and a
         // profile the picker never lists is a model nobody can wear.
         profiles: models_in("riders"),
@@ -466,45 +473,50 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     out
 }
 
-fn scan_rider(dir: &Path) -> Vec<LibraryEntry> {
+fn scan_rider(dir: &Path, game: &GameProfile) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
 
-    for (area, model_cat, paint_cat) in [
-        ("helmets", "helmet", "helmetPaint"),
-        ("boots", "boots", "bootPaint"),
-        ("protection", "protection", "protectionPaint"),
-    ] {
-        let abase = dir.join(area);
+    for area in game.rider.areas {
+        let abase = dir.join(area.folder);
         for model in immediate_dirs(&abase) {
             let mpath = abase.join(&model);
-            out.push(make_entry(dir, &mpath, model_cat, None));
-            collect_loose(dir, &mpath.join("paints"), paint_cat, Some(&model), &mut out);
-            if area == "helmets" {
+            out.push(make_entry(dir, &mpath, area.model_cat, None));
+            if let Some(paint_cat) = area.paint_cat {
+                collect_loose(dir, &mpath.join("paints"), paint_cat, Some(&model), &mut out);
+            }
+            if area.goggles {
                 collect_loose(dir, &mpath.join("goggles"), "goggles", Some(&model), &mut out);
             }
         }
         // A model packaged as a bare `.pkz` directly under the area folder.
-        collect_pkz_shallow(dir, &abase, model_cat, &mut out);
-        if let Ok(rd) = fs::read_dir(&abase) {
-            for e in rd.flatten() {
-                let p = e.path();
-                if p.is_file() && has_ext(&p, "pnt") {
-                    out.push(make_entry(dir, &p, paint_cat, None));
+        collect_pkz_shallow(dir, &abase, area.model_cat, &mut out);
+        if let Some(paint_cat) = area.paint_cat {
+            if let Ok(rd) = fs::read_dir(&abase) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.is_file() && has_ext(&p, "pnt") {
+                        out.push(make_entry(dir, &p, paint_cat, None));
+                    }
                 }
             }
         }
     }
 
-    // Gloves installed directly under rider/gloves.
-    collect_loose(dir, &dir.join("gloves"), "gloves", None, &mut out);
-    collect_pkz_shallow(dir, &dir.join("gloves"), "gloves", &mut out);
+    // Gloves installed directly under rider/gloves. MX Bikes only — GP Bikes bakes them
+    // into the rider model.
+    if game.rider.gloves {
+        collect_loose(dir, &dir.join("gloves"), "gloves", None, &mut out);
+        collect_pkz_shallow(dir, &dir.join("gloves"), "gloves", &mut out);
+    }
 
-    // Rider profiles: outfit/kit paints, gloves, and goggles live per profile.
+    // Rider profiles: outfit/kit paints always, plus whatever else the title keeps
+    // per profile (MX Bikes: gloves and goggles).
     for profile in immediate_dirs(&dir.join("riders")) {
         let pbase = dir.join("riders").join(&profile);
         collect_loose(dir, &pbase.join("paints"), "outfit", Some(&profile), &mut out);
-        collect_loose(dir, &pbase.join("gloves"), "gloves", Some(&profile), &mut out);
-        collect_loose(dir, &pbase.join("goggles"), "goggles", Some(&profile), &mut out);
+        for (folder, cat) in game.rider.profile_extras {
+            collect_loose(dir, &pbase.join(folder), cat, Some(&profile), &mut out);
+        }
     }
 
     sort_entries(&mut out);
@@ -526,6 +538,7 @@ pub fn scan_library(
     mods_path: &str,
     subpath: &str,
     sound_bikes: &[String],
+    game: &GameProfile,
 ) -> anyhow::Result<Vec<LibraryEntry>> {
     let dir = mods_subdir(mods_path, subpath);
     if !dir.exists() {
@@ -535,7 +548,9 @@ pub fn scan_library(
     Ok(match kind {
         "tracks" => scan_tracks(&dir),
         "bikes" => scan_bikes(&dir, sound_bikes),
-        "rider" => scan_rider(&dir),
+        "rider" => scan_rider(&dir, game),
+        // `tyres`, and GP Bikes' `misc/{dashes,stands}` — folders of `.pkz` with no
+        // internal structure to read, which is exactly what `scan_generic` handles.
         _ => scan_generic(&dir),
     })
 }
@@ -589,7 +604,7 @@ mod tests {
         touch(&base.join("Loose Track/Loose.cfg"));
         touch(&base.join("Loose Track/Loose.pkz")); // inside a track folder → skipped
 
-        let v = scan_library(root.to_str().unwrap(), "mods/tracks", &[]).unwrap();
+        let v = scan_library(root.to_str().unwrap(), "mods/tracks", &[], &crate::game::MXB).unwrap();
         assert!(cat(&v, "Packed.pkz").is_some());
         let lt = cat(&v, "Loose Track").expect("extracted track surfaced");
         assert_eq!(lt.kind, "folder");
@@ -607,7 +622,7 @@ mod tests {
         touch(&base.join("KTM450/paints/Red.pnt")); // livery for it
         touch(&base.join("KTM450/OEM2024.pkz")); // model swap for it
 
-        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[]).unwrap();
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
         assert_eq!(cat(&v, "KTM450.pkz").unwrap().category, "bike");
         let paint = cat(&v, "Red.pnt").unwrap();
         assert_eq!(paint.category, "bikePaint");
@@ -632,7 +647,7 @@ mod tests {
             "Gone".to_string(),
             "Stock".to_string(),
         ];
-        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &recorded).unwrap();
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &recorded, &crate::game::MXB).unwrap();
         let s = cat(&v, "MX2OEM_2023_KTM_250_SX-F").expect("sound bike surfaced");
         assert_eq!(s.category, "sound");
         assert_eq!(s.kind, "folder");
@@ -657,7 +672,7 @@ mod tests {
         touch(&base.join("riders/default_mx/paints/Kit.pnt"));
         touch(&base.join("riders/default_mx/gloves/G.pnt"));
 
-        let v = scan_library(root.to_str().unwrap(), "mods/rider", &[]).unwrap();
+        let v = scan_library(root.to_str().unwrap(), "mods/rider", &[], &crate::game::MXB).unwrap();
         let has = |c: &str| v.iter().any(|e| e.category == c);
         assert!(has("helmet"), "helmet model");
         assert!(has("helmetPaint"), "helmet paint");
@@ -671,6 +686,69 @@ mod tests {
         assert!(has("gloves"), "gloves");
         assert!(has("outfit"), "outfit/kit");
         assert_eq!(cat(&v, "Kit.pnt").unwrap().parent.as_deref(), Some("default_mx"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// GP Bikes' `mods/rider` is a different shape: helmets and riding-style animations,
+    /// no boots/protection/gloves folders (those are baked into the rider model), and no
+    /// goggles (road helmets use visors).
+    #[test]
+    fn surfaces_gp_bikes_rider_categories() {
+        let root = tmp("lib-rider-gp");
+        let base = root.join("mods/rider");
+        touch(&base.join("helmets/AGV Pista GP RR/AGV Pista GP RR.pkz"));
+        touch(&base.join("helmets/AGV Pista GP RR/paints/Rossi.pnt"));
+        touch(&base.join("animations/Elbow Down/Elbow Down.pkz"));
+        touch(&base.join("riders/(S) Suit 1 + Boots Alpinestars/paints/Team.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/rider", &[], &crate::game::GPB).unwrap();
+        let has = |c: &str| v.iter().any(|e| e.category == c);
+        assert!(has("helmet"), "helmet model");
+        assert!(has("helmetPaint"), "helmet paint");
+        assert!(has("animation"), "riding-style animation");
+        assert!(has("outfit"), "per-profile suit paint");
+        assert_eq!(
+            cat(&v, "Team.pnt").unwrap().parent.as_deref(),
+            Some("(S) Suit 1 + Boots Alpinestars"),
+            "a suit paint belongs to the rider model it sits under",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The same tree scanned as GP Bikes must not sprout MX-only categories: a `goggles`
+    /// folder there is not a thing the game reads, and reporting one would put an item in
+    /// the library that can never be selected.
+    #[test]
+    fn gp_bikes_ignores_mx_only_gear_folders() {
+        let root = tmp("lib-rider-gp-strict");
+        let base = root.join("mods/rider");
+        touch(&base.join("helmets/AGV/goggles/Smoke.pnt"));
+        touch(&base.join("boots/Tech10/paints/Wht.pnt"));
+        touch(&base.join("gloves/Flexair.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/rider", &[], &crate::game::GPB).unwrap();
+        let has = |c: &str| v.iter().any(|e| e.category == c);
+        assert!(!has("goggles"), "GP helmets have visors, not goggles");
+        assert!(!has("boots") && !has("bootPaint"), "boots are baked into the rider");
+        assert!(!has("gloves"), "gloves are baked into the rider");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `tyres` (both games) and GP Bikes' `misc/{dashes,stands}` have no internal
+    /// structure — they fall through to the generic `.pkz` sweep rather than being
+    /// silently skipped for want of a dedicated scanner.
+    #[test]
+    fn structureless_folders_still_list_their_archives() {
+        let root = tmp("lib-generic");
+        touch(&root.join("mods/tyres/Dunlop_MiniGp/Dunlop_MiniGp.pkz"));
+        touch(&root.join("mods/misc/stands/Paddock.pkz"));
+
+        let tyres =
+            scan_library(root.to_str().unwrap(), "mods/tyres", &[], &crate::game::GPB).unwrap();
+        assert_eq!(tyres.len(), 1, "the tyre archive is listed");
+        let misc =
+            scan_library(root.to_str().unwrap(), "mods/misc", &[], &crate::game::GPB).unwrap();
+        assert_eq!(misc.len(), 1, "the stand archive is listed");
         let _ = fs::remove_dir_all(&root);
     }
 

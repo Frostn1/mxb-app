@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  DEFAULT_MOD_TYPE,
-  MOD_TYPES,
-  scanLibrary,
-  type ModType,
-} from "../api/mods";
+import { modTypesFor, scanLibrary, type ModType } from "../api/mods";
+import type { GameId } from "../types";
 import {
   EMPTY_INSTALLED_INDEX,
   buildInstalledIndex,
@@ -18,9 +14,17 @@ import type { ModTarget } from "../Context/Install";
  *
  * Shared by the main window's Dashboard and the in-game overlay, which both put the
  * same two components on screen and would otherwise re-derive this identically.
+ *
+ * `game` is passed in rather than read from `ConfigContext` because the overlay calls
+ * this hook *above* the provider it renders, so a context read there would silently
+ * report MX Bikes whatever game was active.
  */
-export function useModBrowsing(onOpenedFromElsewhere?: () => void) {
-  const [modType, setModType] = useState<ModType>(DEFAULT_MOD_TYPE);
+export function useModBrowsing(
+  onOpenedFromElsewhere?: () => void,
+  game: GameId = "mxb",
+) {
+  const modTypes = modTypesFor(game);
+  const [modType, setModType] = useState<ModType>(modTypes[0]);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   // The browse category the opened mod was found under (drives livery routing).
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
@@ -28,6 +32,17 @@ export function useModBrowsing(onOpenedFromElsewhere?: () => void) {
   const [libraryVersion, setLibraryVersion] = useState(0);
   // What's on disk for the active type, as a fuzzy lookup (for "in library" badges).
   const [installed, setInstalled] = useState<InstalledIndex>(EMPTY_INSTALLED_INDEX);
+
+  // Follow a game switch. The two catalogs don't share category ids, so carrying the old
+  // `modType` over would query the new site with the old site's numbers and come back
+  // empty. Keeps the equivalent tab where there is one (tracks stays tracks).
+  useEffect(() => {
+    // Re-derived here rather than closing over `modTypes` so `game` is the only
+    // dependency — the two are the same thing, and depending on both is noise.
+    const next = modTypesFor(game);
+    setModType((current) => next.find((t) => t.id === current.id) ?? next[0]);
+    setSelectedSlug(null);
+  }, [game]);
 
   // The full library scan, not `getInstalledMods` — that one sees `.pkz` files only, so
   // extracted track folders and every `.pnt` paint/livery counted as "not installed".
@@ -58,13 +73,13 @@ export function useModBrowsing(onOpenedFromElsewhere?: () => void) {
   // folders and livery routing. The caller navigates to wherever Browse lives.
   const openModTarget = useCallback(
     ({ slug, subpath, categoryId }: ModTarget) => {
-      const type = MOD_TYPES.find((t) => t.installSubpath === subpath);
+      const type = modTypes.find((t) => t.installSubpath === subpath);
       if (type) setModType(type);
       setSelectedCategoryId(categoryId ?? type?.categoryId ?? null);
       setSelectedSlug(slug);
       onOpenedFromElsewhere?.();
     },
-    [onOpenedFromElsewhere],
+    [onOpenedFromElsewhere, modTypes],
   );
 
   const changeType = useCallback((t: ModType) => {
@@ -74,6 +89,8 @@ export function useModBrowsing(onOpenedFromElsewhere?: () => void) {
 
   return {
     modType,
+    /** The active game's browse tree — what the type selector offers. */
+    modTypes,
     changeType,
     selectedSlug,
     selectedCategoryId,

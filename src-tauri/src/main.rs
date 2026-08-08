@@ -10,6 +10,7 @@ mod cookie_session;
 mod edf;
 mod frostmod;
 mod frostmod_manage;
+mod game;
 mod gameproc;
 mod install;
 mod library;
@@ -36,7 +37,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
-use mods::mxb::MxbModsSource;
+use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -191,7 +192,7 @@ async fn search_mods(
     sort: ModSort,
 ) -> Result<Vec<ModSummary>, String> {
     with_clearance(&app, "search", || {
-        MxbModsSource.search(&query, category_id, page, sort)
+        WpModsSource.search(&query, category_id, page, sort)
     })
     .await
 }
@@ -205,7 +206,7 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 
 #[tauri::command]
 async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
-    with_clearance(&app, "mod detail", || MxbModsSource.detail(&slug)).await
+    with_clearance(&app, "mod detail", || WpModsSource.detail(&slug)).await
 }
 
 #[tauri::command]
@@ -233,7 +234,7 @@ fn scan_library_blocking(
 ) -> Result<Vec<library::LibraryEntry>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let sound_bikes = sound_bikes_of(&app);
-    library::scan_library(&cfg.mods_path, &subpath, &sound_bikes).map_err(|e| format!("{e:#}"))
+    library::scan_library(&cfg.mods_path, &subpath, &sound_bikes, cfg.game()).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -1365,7 +1366,7 @@ fn resolve_game_pkz(cfg: &config::AppConfig, name: &str) -> Option<std::path::Pa
         return Some(p);
     }
     // Last resort for configs that predate game-path auto-detection: scan Steam now.
-    let detected = config::detect_game_path()?;
+    let detected = config::detect_game_path(cfg.game())?;
     let p = std::path::Path::new(&detected).join(name);
     p.exists().then_some(p)
 }
@@ -2246,7 +2247,44 @@ fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// Point the app at a different MX Bikes folder; an empty string re-runs detection.
+/// The titles this build can drive, with their per-game capabilities. Static data —
+/// the switcher and the feature gating both read it.
+#[tauri::command]
+fn list_games() -> Vec<game::GameInfo> {
+    game::all_info()
+}
+
+/// Switch which game the app is driving.
+///
+/// The outgoing game's folders are parked and the incoming one's restored; a game being
+/// opened for the first time has none saved, so `finalize` auto-detects them the same
+/// way first-run setup does. Returns the resulting config so the UI can go straight to
+/// the setup screen when detection came up empty.
+///
+/// Async for the same reason as `set_mods_path`: detection scans Steam libraries and the
+/// watcher restart tears down a thread, neither of which belongs on the UI thread.
+#[tauri::command]
+async fn set_active_game(
+    app: tauri::AppHandle,
+    watcher: State<'_, ModWatcher>,
+    game: game::Game,
+) -> Result<AppConfig, String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    if !cfg.switch_game(game) {
+        return Ok(cfg);
+    }
+    let cfg = config::finalize(cfg);
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    log::info!("switched to {} ({})", cfg.game().display, cfg.mods_path);
+    // Point the watcher at the new game's folder — otherwise it keeps reporting changes
+    // in the game we just left.
+    if cfg.watch_mods_reload {
+        modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
+    Ok(cfg)
+}
+
+/// Point the app at a different mods folder; an empty string re-runs detection.
 /// Only the folder changes — unlike a full `create_config`, the rest of the settings
 /// (startup, tray, FrostMod, first-run state) are left alone.
 ///
@@ -2304,10 +2342,11 @@ fn set_profiles_path(app: tauri::AppHandle, path: String) -> Result<(), String> 
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// Scan Steam for the MX Bikes install (holds `rider.pkz`). `None` if not found.
+/// Scan Steam for the active game's install folder. `None` if not found.
 #[tauri::command]
-fn detect_game_path() -> Option<String> {
-    config::detect_game_path()
+fn detect_game_path(app: tauri::AppHandle) -> Option<String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    config::detect_game_path(cfg.game())
 }
 
 /// How many profiles (subdirs with a `profile.ini`) live under `path` — lets the
@@ -2653,6 +2692,17 @@ fn presets_list_bikes(app: tauri::AppHandle, profile: String) -> Result<Vec<Stri
     presets::list_bikes(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
 }
 
+/// Which cosmetic slots this profile actually has, in `profile.ini` order.
+///
+/// The two games don't offer the same ones — GP Bikes has no goggles, boots or
+/// protection — so the editor asks rather than rendering a fixed MX Bikes list with rows
+/// that would do nothing.
+#[tauri::command]
+fn presets_slots(app: tauri::AppHandle, profile: String) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    presets::slots_for(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn presets_read_loadout(
     app: tauri::AppHandle,
@@ -2996,7 +3046,7 @@ fn main() {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
-            log::info!("mxb-mods.com user-agent: {}", mxb_session::UA);
+            log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
@@ -3041,13 +3091,13 @@ fn main() {
             // `load_or_detect` rebuilds a missing/unreadable config from the standard
             // MX Bikes folder, so a lost config no longer means a trip through setup.
             if let Some(mut cfg) = config::load_or_detect(handle) {
-                // Auto-detect the MX Bikes install on launch for configs that
+                // Auto-detect the active game's install on launch for configs that
                 // never got one (created before detection existed, or when the
                 // game wasn't installed yet). Only fills a blank — never overrides
                 // a manual pick — and persists it so the 3D rider preview works.
                 if cfg.game_path.trim().is_empty() {
-                    if let Some(gp) = config::detect_game_path() {
-                        log::info!("auto-detected MX Bikes install: {gp}");
+                    if let Some(gp) = config::detect_game_path(cfg.game()) {
+                        log::info!("auto-detected {} install: {gp}", cfg.game().display);
                         cfg.game_path = gp;
                         let _ = config::save(handle, &cfg);
                     }
@@ -3188,6 +3238,9 @@ fn main() {
             presets_list_profiles,
             presets_list_bikes,
             presets_read_loadout,
+            presets_slots,
+            list_games,
+            set_active_game,
             presets_apply,
             presets_list,
             presets_save,

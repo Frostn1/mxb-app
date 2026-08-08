@@ -1,0 +1,327 @@
+//! Which PiBoSo title the app is driving, and everything that differs between them.
+//!
+//! MX Bikes and GP Bikes are the same engine by the same developer: identical archive
+//! formats (`.pkz`), paint format (`.pnt`), mesh format (`.edf`), `profile.ini` dialect
+//! and mods-folder *mechanics*. What actually differs is a table of constants — where the
+//! user folder lives, what the executable is called, which folders `mods/` contains, and
+//! which catalog site serves them.
+//!
+//! So rather than fork the install/enable/scan machinery per game, every one of those
+//! constants lives here and the machinery takes a `&GameProfile`. Adding a third PiBoSo
+//! title (World Racing Series, Kart Racing Pro) is a new `const` in this file plus its
+//! catalog session.
+
+use crate::cookie_session::Site;
+use serde::{Deserialize, Serialize};
+use std::sync::RwLock;
+
+/// The title the app is currently driving.
+///
+/// Process-wide because that is what it is: one app process drives one game, and the
+/// places that need to know — the process-list scan, the catalog client's cookie jar —
+/// are reached from call paths that have no `AppConfig` to hand and would otherwise have
+/// to grow one purely to pass it along.
+///
+/// Kept in step with the config by [`crate::config::load`] and [`crate::config::save`],
+/// the two funnels every read and write of the active game goes through.
+static ACTIVE: RwLock<Game> = RwLock::new(Game::Mxb);
+
+/// Point the process-wide lookups at `game`. Idempotent.
+pub fn set_active(game: Game) {
+    if let Ok(mut slot) = ACTIVE.write() {
+        *slot = game;
+    }
+}
+
+/// The active title's profile. Falls back to MX Bikes if the lock was poisoned — the
+/// title every install starts on, and a wrong answer here costs a mislabelled badge
+/// rather than a wrong write.
+pub fn active() -> &'static GameProfile {
+    ACTIVE.read().map(|g| g.profile()).unwrap_or(&MXB)
+}
+
+/// The titles the app knows how to drive. Serialized as `"mxb"` / `"gpb"` — these strings
+/// are the keys in `AppConfig::games` and travel to the frontend, so they are stable
+/// identifiers and must not be renamed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Game {
+    /// MX Bikes — the title the app shipped for.
+    #[default]
+    Mxb,
+    Gpb,
+}
+
+impl Game {
+    pub fn profile(self) -> &'static GameProfile {
+        match self {
+            Game::Mxb => &MXB,
+            Game::Gpb => &GPB,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        self.profile().id
+    }
+
+    /// Parse a stored/incoming id. Anything unrecognized falls back to MX Bikes rather
+    /// than erroring: a config written by a *newer* build naming a game this one doesn't
+    /// have should leave the app usable, not refuse to start.
+    pub fn from_id(id: &str) -> Game {
+        match id.trim().to_ascii_lowercase().as_str() {
+            "gpb" => Game::Gpb,
+            _ => Game::Mxb,
+        }
+    }
+
+    pub const ALL: [Game; 2] = [Game::Mxb, Game::Gpb];
+}
+
+/// One gear area under `mods/rider` — a folder of models, each of which may carry paints.
+pub struct RiderArea {
+    /// Folder name under `mods/rider`.
+    pub folder: &'static str,
+    /// Library category for a model in this area.
+    pub model_cat: &'static str,
+    /// Library category for a paint in `<model>/paints`. `None` when the area holds
+    /// models that can't be painted — GP Bikes' `animations` are riding styles, not gear.
+    pub paint_cat: Option<&'static str>,
+    /// The area's models can carry a `goggles/` folder alongside `paints/`. MX Bikes
+    /// helmets do; GP Bikes' road helmets use visors and have no such folder.
+    pub goggles: bool,
+}
+
+/// How `mods/rider` is laid out for a title.
+pub struct RiderLayout {
+    pub areas: &'static [RiderArea],
+    /// `mods/rider/gloves` exists as a flat area (models directly inside, no per-model
+    /// folder). MX Bikes only.
+    pub gloves: bool,
+    /// Subfolders inside `mods/rider/riders/<profile>/` beyond `paints`, as
+    /// `(folder, library category)`.
+    pub profile_extras: &'static [(&'static str, &'static str)],
+}
+
+/// Features that only exist for some titles. Gating on these rather than on `Game`
+/// keeps "why is this hidden" answerable in one place, and means a future GP build of
+/// FrostMod is a single `true`.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Caps {
+    /// FrostMod, the in-process mod loader. It is a compiled **MX Bikes** plugin; there
+    /// is no GP Bikes build, so hot reload and its status panel don't apply there.
+    pub frostmod: bool,
+    /// Re-run the game's profile loader in place after applying a preset. Implemented by
+    /// poking `mxbikes.exe` memory, so it is as MX-Bikes-specific as FrostMod.
+    pub instant_refresh: bool,
+    /// The 3D preview (Locker / Rider / bike preview). GP Bikes uses the same `.edf`
+    /// meshes, but its bike part names and rider rig need their own bindings — not in
+    /// this pass.
+    pub viewer: bool,
+    /// The authenticated paid-content shop. mxbikes-shop.com is MX Bikes only.
+    pub shop: bool,
+}
+
+pub struct GameProfile {
+    pub id: &'static str,
+    /// Human name, used verbatim in the UI. Never translated — it's a product name.
+    pub display: &'static str,
+    /// Folder under `Documents/PiBoSo` the game writes its user data to.
+    pub user_dir: &'static str,
+    /// Steam AppID — names the Proton prefix under `steamapps/compatdata` and addresses
+    /// the game in the `steam://rungameid/…` URL the Linux launcher uses.
+    pub steam_appid: &'static str,
+    /// Folder under `steamapps/common` the game installs to.
+    pub steam_common: &'static str,
+    pub exe: &'static str,
+    /// A file whose presence proves a folder really is the game's *install* dir.
+    pub install_marker: &'static str,
+    /// Top-level folders under `<mods_path>/mods`. Drives install routing and which
+    /// library tabs exist.
+    pub mods_dirs: &'static [&'static str],
+    /// The subset of `mods_dirs` that Manage enables and disables. Deliberately narrower:
+    /// `tyres` and `misc` hold a handful of small files and aren't what a track load is
+    /// waiting on, so parking them buys nothing and only risks breaking a setup.
+    pub manage_dirs: &'static [&'static str],
+    pub rider: RiderLayout,
+    /// The mods catalog this title browses — mxb-mods.com or gpb-mods.com. Both are the
+    /// same WordPress/WP-REST stack by the same author, so one client serves either; the
+    /// `Site` carries the host and its own cookie jar identity.
+    pub catalog: &'static Site,
+    pub caps: Caps,
+}
+
+pub static MXB: GameProfile = GameProfile {
+    id: "mxb",
+    display: "MX Bikes",
+    user_dir: "MX Bikes",
+    steam_appid: "655500",
+    steam_common: "MX Bikes",
+    exe: "mxbikes.exe",
+    // The core rider body archive — what the 3D preview needs, so it's also what proves
+    // we found the install rather than just a folder named after it.
+    install_marker: "rider.pkz",
+    mods_dirs: &["bikes", "tracks", "rider", "tyres", "misc"],
+    manage_dirs: &["tracks", "bikes", "rider"],
+    rider: RiderLayout {
+        areas: &[
+            RiderArea {
+                folder: "helmets",
+                model_cat: "helmet",
+                paint_cat: Some("helmetPaint"),
+                goggles: true,
+            },
+            RiderArea {
+                folder: "boots",
+                model_cat: "boots",
+                paint_cat: Some("bootPaint"),
+                goggles: false,
+            },
+            RiderArea {
+                folder: "protection",
+                model_cat: "protection",
+                paint_cat: Some("protectionPaint"),
+                goggles: false,
+            },
+        ],
+        gloves: true,
+        profile_extras: &[("gloves", "gloves"), ("goggles", "goggles")],
+    },
+    catalog: &crate::mxb_session::MXB_SITE,
+    caps: Caps {
+        frostmod: true,
+        instant_refresh: true,
+        viewer: true,
+        shop: true,
+    },
+};
+
+pub static GPB: GameProfile = GameProfile {
+    id: "gpb",
+    display: "GP Bikes",
+    user_dir: "GP Bikes",
+    steam_appid: "848050",
+    steam_common: "GP Bikes",
+    exe: "gpbikes.exe",
+    // No `rider.pkz` to key on the way MX Bikes has, and the 3D preview doesn't run for
+    // GP Bikes yet anyway — the executable is both the proof and the thing we launch.
+    install_marker: "gpbikes.exe",
+    mods_dirs: &["bikes", "tracks", "rider", "tyres", "misc"],
+    manage_dirs: &["tracks", "bikes", "rider"],
+    rider: RiderLayout {
+        areas: &[
+            RiderArea {
+                folder: "helmets",
+                model_cat: "helmet",
+                paint_cat: Some("helmetPaint"),
+                // Road helmets have visors, not goggles: no `goggles/` folder exists.
+                goggles: false,
+            },
+            // Riding-style animations. Models with nothing to paint, so no paint category
+            // — a `.pnt` under here would be a stray.
+            RiderArea {
+                folder: "animations",
+                model_cat: "animation",
+                paint_cat: None,
+                goggles: false,
+            },
+        ],
+        // GP Bikes bakes gloves and boots into the rider model — the `riders` folder is
+        // full of entries like `(S) Suit 1 + Boots Alpinestars`. There is nothing to
+        // pick separately, so there are no folders for them.
+        gloves: false,
+        profile_extras: &[],
+    },
+    catalog: &crate::mxb_session::GPB_SITE,
+    caps: Caps {
+        frostmod: false,
+        instant_refresh: false,
+        viewer: false,
+        shop: false,
+    },
+};
+
+/// Every content folder name any known title puts directly under `mods/`.
+///
+/// The union across titles, not one game's list, because its job is *recognition*: when
+/// an extracted archive already contains a `mods/<something>/` tree, this is what decides
+/// that it does. Routing — where a file actually lands — is per-game and uses
+/// [`GameProfile::mods_dirs`]. Being generous here costs nothing (an MX Bikes archive
+/// simply never contains a GP-only folder) and being narrow would silently mis-place a
+/// correctly-packed archive.
+pub const ALL_MODS_DIRS: [&str; 5] = ["bikes", "tracks", "rider", "tyres", "misc"];
+
+/// What the frontend needs to render the game switcher and gate features.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameInfo {
+    pub id: &'static str,
+    pub display: &'static str,
+    pub mods_dirs: &'static [&'static str],
+    pub caps: Caps,
+}
+
+impl GameProfile {
+    pub fn info(&'static self) -> GameInfo {
+        GameInfo {
+            id: self.id,
+            display: self.display,
+            mods_dirs: self.mods_dirs,
+            caps: self.caps,
+        }
+    }
+}
+
+pub fn all_info() -> Vec<GameInfo> {
+    Game::ALL.iter().map(|g| g.profile().info()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_round_trip() {
+        for g in Game::ALL {
+            assert_eq!(Game::from_id(g.id()), g, "{} should round-trip", g.id());
+        }
+    }
+
+    /// A config naming a title this build doesn't have must still open — on MX Bikes,
+    /// the title every existing install is already using.
+    #[test]
+    fn unknown_id_falls_back_to_mx_bikes() {
+        assert_eq!(Game::from_id("wrs"), Game::Mxb);
+        assert_eq!(Game::from_id(""), Game::Mxb);
+    }
+
+    /// The default must stay MX Bikes: every config written before this feature existed
+    /// has no game recorded, and deserializing one has to land on the title it was for.
+    #[test]
+    fn default_is_mx_bikes() {
+        assert_eq!(Game::default(), Game::Mxb);
+    }
+
+    /// `ALL_MODS_DIRS` only works as a recogniser if it really is the union — a game
+    /// whose folders it doesn't cover would have correctly-packed archives mis-placed.
+    #[test]
+    fn all_mods_dirs_covers_every_game() {
+        for g in Game::ALL {
+            for dir in g.profile().mods_dirs {
+                assert!(
+                    ALL_MODS_DIRS.contains(dir),
+                    "{} has a `{dir}` folder that ALL_MODS_DIRS doesn't list",
+                    g.id(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gp_bikes_has_no_mx_only_features() {
+        let caps = Game::Gpb.profile().caps;
+        assert!(!caps.frostmod, "FrostMod is an MX Bikes plugin");
+        assert!(!caps.instant_refresh, "instant refresh pokes mxbikes.exe");
+        assert!(!caps.shop, "mxbikes-shop.com is MX Bikes only");
+    }
+}

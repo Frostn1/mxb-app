@@ -87,13 +87,13 @@ export const fr: Translation = {
   "setup.title": "Bienvenue dans MXB App",
   "setup.tagline":
     "Parcourez mxb-mods, installez en un clic, et laissez FrostMod recharger le jeu pour vous.",
-  "setup.modsFolder": "Dossier MX Bikes",
+  "setup.modsFolder": "Dossier {{game}}",
   "setup.autoDetect":
     "MXB App détectera automatiquement votre dossier {{hint}}. Vous pouvez aussi le choisir vous-même.",
   "setup.chooseManually": "Choisir le dossier manuellement…",
   "setup.chooseDifferent": "Choisir un autre dossier…",
-  "setup.gameInstall": "Installation de MX Bikes",
-  "setup.detecting": "Recherche de votre installation de MX Bikes…",
+  "setup.gameInstall": "Installation de {{game}}",
+  "setup.detecting": "Recherche de votre installation de {{game}}…",
   "setup.found": "Trouvée",
   "setup.detectedAutomatically": "Détectée automatiquement",
   "setup.installNotFound":
@@ -102,9 +102,8 @@ export const fr: Translation = {
     "Choisir le dossier d'installation manuellement…",
   "setup.startBrowsing": "Commencer à parcourir les mods",
   "setup.detectAndStart": "Détecter et commencer",
-  "setup.pickModsFolder": "Sélectionnez votre dossier MX Bikes",
-  "setup.pickInstallFolder":
-    "Sélectionnez votre dossier d'installation de MX Bikes",
+  "setup.pickModsFolder": "Sélectionnez votre dossier {{game}}",
+  "setup.pickInstallFolder": "Sélectionnez le dossier d'installation de {{game}}",
 
   // ── Bienvenue ──────────────────────────────────────────────────────────────
   "welcome.intro.title": "Bienvenue dans MXB App",
@@ -887,4 +886,21 @@ export const fr: Translation = {
   "manage.deleteTitle": "Supprimer {{name}} ?",
   "manage.deleteBody": "Il part à la corbeille, vous pouvez donc encore le récupérer.",
   "manage.deleted": "{{name}} supprimé.",
+  "game.label": "Jeu",
+  "game.switch": "Changer de jeu",
+  "game.switchFailed": "Impossible de changer de jeu",
+  "settings.instantRefreshMxOnly": "MX Bikes uniquement — {{game}} ne recharge pas les profils à chaud.",
+  "modType.misc": "Divers",
+  "modType.miscInline": "extras",
+  "browseCat.raceTracks": "Circuits",
+  "browseCat.kartTracks": "Circuits de karting",
+  "browseCat.others": "Autres",
+  "browseCat.riderModels": "Modèles de pilote",
+  "browseCat.suitPaints": "Peintures de combinaison",
+  "browseCat.helmetModels": "Modèles de casque",
+  "browseCat.plugins": "Plugins",
+  "browseCat.tools": "Outils",
+  "browseCat.menuBackgrounds": "Fonds de menu",
+  "category.animation": "Style de pilotage",
+  "section.animation": "Styles de pilotage",
 };

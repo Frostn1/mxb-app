@@ -12,18 +12,19 @@ import { ThemeProvider } from "../../Context/Theme";
 import { useI18n } from "../../i18n/context";
 import type { TKey } from "../../i18n/core";
 import { FrostmodProvider } from "../../Context/Frostmod";
-import { ConfigContext } from "../../Context/Config";
+import { ConfigContext, MXB_FALLBACK } from "../../Context/Config";
 import { InstallProvider } from "../../Context/Install";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import {
   bikePreviewAvailable,
+  listGames,
   getConfig,
   getOverlayState,
   isConfigured,
   overlayHide,
   overlayOpenMain,
 } from "../../api/mods";
-import type { Config } from "../../types";
+import type { Config, GameInfo } from "../../types";
 
 /**
  * The in-game overlay: a compact, frameless panel drawn over MX Bikes and summoned by
@@ -64,12 +65,14 @@ export default function Overlay() {
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<Config | null>(null);
   const [bikePreview, setBikePreview] = useState(false);
+  const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [hotkey, setHotkey] = useState("");
   const [tab, setTab] = useState<OverlayTab>("presets");
 
   const showBrowse = useCallback(() => setTab("browse"), []);
   const {
     modType,
+    modTypes,
     changeType,
     selectedSlug,
     selectedCategoryId,
@@ -78,11 +81,16 @@ export default function Overlay() {
     openMod,
     openModTarget,
     closeMod,
-  } = useModBrowsing(showBrowse);
+  } = useModBrowsing(showBrowse, config?.activeGame);
 
   const reloadConfig = useCallback(async () => {
     setConfig(await getConfig());
   }, []);
+
+  // The overlay is a separate window and doesn't fetch the game table; it only needs the
+  // active title's capabilities to gate what it renders.
+  const overlayGame =
+    games.find((g) => g.id === (config?.activeGame ?? "mxb")) ?? MXB_FALLBACK;
 
   const dismiss = useCallback(() => {
     void overlayHide().catch(() => {});
@@ -98,6 +106,11 @@ export default function Overlay() {
     (async () => {
       try {
         bikePreviewAvailable().then(setBikePreview).catch(() => {});
+        listGames()
+          .then((g) => {
+            if (g.length) setGames(g);
+          })
+          .catch(() => {});
         getOverlayState()
           .then((s) => setHotkey(s.hotkey))
           .catch(() => {});
@@ -200,7 +213,18 @@ export default function Overlay() {
               <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/85">
                 {ready &&
                   (config ? (
-                    <ConfigContext.Provider value={{ config, reloadConfig, bikePreview }}>
+                    <ConfigContext.Provider
+                      value={{
+                        config,
+                        reloadConfig,
+                        bikePreview,
+                        // The overlay has no game switcher — it shows one game's content,
+                        // the one the main window is on — so a single-entry list is right.
+                        games: [overlayGame],
+                        game: overlayGame,
+                        switchGame: async () => {},
+                      }}
+                    >
                       <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
                         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                           {tab === "presets" ? (
@@ -220,6 +244,7 @@ export default function Overlay() {
                           ) : (
                             <Browse
                               modType={modType}
+                              modTypes={modTypes}
                               installed={installed}
                               onOpenMod={openMod}
                               onChangeType={changeType}

@@ -169,7 +169,8 @@ interface SettingsProps {
 
 export default function Settings({ initialSection, onShowWhatsNew }: SettingsProps) {
   const { t, locale, setLocale } = useI18n();
-  const { config, reloadConfig } = useConfig();
+  const { config, reloadConfig, game } = useConfig();
+  const caps = game.caps;
   const platform = usePlatform();
   const isWindows = platform === "windows";
   const isMac = platform === "macos";
@@ -180,6 +181,8 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const { startTour } = useTour();
   const [version, setVersion] = useState("");
   const [active, setActive] = useState<SectionId>(initialSection ?? "folder");
+  // FrostMod has no GP Bikes build, so its section isn't there to jump to either.
+  const sections = SECTIONS.filter((s) => s.id !== "frostmod" || caps.frostmod);
   const [busy, setBusy] = useState(false);
   const refs = useRef<Record<SectionId, HTMLDivElement | null>>({
     folder: null,
@@ -466,7 +469,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   return (
     <div className="flex h-full">
       <nav className="flex w-[170px] flex-none flex-col gap-0.5 px-4 pt-[70px]">
-        {SECTIONS.map((s) => (
+        {sections.map((s) => (
           <button
             key={s.id}
             onClick={() => goto(s.id)}
@@ -540,7 +543,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   values={{
                     profiles: <span className="font-mono">profiles</span>,
                     documents: (
-                      <span className="font-mono">Documents\PiBoSo\MX Bikes</span>
+                      <span className="font-mono">{`Documents\\PiBoSo\\${game.display}`}</span>
                     ),
                   }}
                 />
@@ -636,11 +639,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             <ToggleRow
               label={t("settings.instantRefresh")}
               desc={
-                isWindows
-                  ? t("settings.instantRefreshDesc")
-                  : t("settings.instantRefreshWindowsOnly")
+                !caps.instantRefresh
+                  ? t("settings.instantRefreshMxOnly", { game: game.display })
+                  : isWindows
+                    ? t("settings.instantRefreshDesc")
+                    : t("settings.instantRefreshWindowsOnly")
               }
-              checked={instantRefresh}
+              checked={instantRefresh && caps.instantRefresh}
+              disabled={!caps.instantRefresh}
               onChange={toggleInstantRefresh}
             />
           </Section>
@@ -780,7 +786,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {/* frostmod — a Win32 DLL injected into the game, so it has nothing to do
               anywhere else. Hidden rather than shown-and-disabled: every control in it
               would fail, including one that downloads two Windows binaries. */}
-          {isWindows && (
+          {isWindows && caps.frostmod && (
           <Section
             title={t("settings.frostmod")}
             innerRef={(el) => (refs.current.frostmod = el)}
@@ -975,14 +981,18 @@ function ToggleRow({
   desc,
   checked,
   onChange,
+  /** Shown but not operable — for a setting the active game can't support, where
+   *  hiding it would leave the player wondering where it went. */
+  disabled = false,
 }: {
   label: string;
   desc: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className={cn("flex items-start justify-between gap-4", disabled && "opacity-60")}>
       <div className="flex flex-col gap-0.5">
         <span className="text-[12.5px] text-foreground/85">{label}</span>
         <span className="text-[11.5px] leading-relaxed text-muted-foreground">
@@ -990,7 +1000,7 @@ function ToggleRow({
         </span>
       </div>
       <div className="pt-0.5">
-        <Switch checked={checked} onCheckedChange={onChange} />
+        <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} />
       </div>
     </div>
   );

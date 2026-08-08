@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-08-08 — GP Bikes support
+
+### Added
+- **The app now drives GP Bikes as well as MX Bikes.** A game switcher sits at the top of the
+  sidebar; picking a title points the whole app — Library, Manage, Presets, Browse and the
+  Play button — at that game's folders. The two games keep their folders separately, so
+  switching back and forth never asks you to find them again, and a game you open for the
+  first time has its folders auto-detected (`Documents\PiBoSo\GP Bikes`, and the Steam
+  install under AppID 848050) exactly as first-run setup does. Switching to a game the app
+  can't locate lands you on the setup screen, with the switcher still there to get back.
+- **GP Bikes' mods tree is read as its own shape.** GP keeps `bikes`, `tracks`, `tyres`,
+  `misc` and a `rider` folder laid out differently from MX Bikes': helmets and riding-style
+  `animations`, with boots, gloves and protection baked into the rider model rather than
+  picked separately. The Library lists riding styles as their own category and no longer
+  offers goggles, boots or protection for a game that has no concept of them.
+- **Browse serves GP Bikes from gpb-mods.com.** The same catalog client, pointed at the
+  matching site — Race and Kart tracks, New Bikes, Liveries, Sounds, Rider Models, Suit
+  Paints, Helmets and Helmet Models, plus Plugins, Tools and Menu Backgrounds. Each site
+  keeps its own cookie jar, since a Cloudflare clearance only works on the host that issued
+  it.
+- **Presets read the slots a profile actually has.** Rather than assuming MX Bikes' fifteen,
+  the editor reads the sections out of the profile's own `profile.ini` and shows those. GP
+  Bikes profiles get their riding-style slot, and don't get pickers that would write nothing.
+
+### Changed
+- **Features with no GP Bikes build say so instead of failing quietly.** FrostMod is a
+  compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for GP
+  Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
+  (Locker and Rider) is MX Bikes only for now — GP's meshes need their own part bindings.
+- **Existing MX Bikes setups are untouched.** A `config.json` written before this release
+  opens as the MX Bikes config it always was, with the same folders; preset share codes are
+  unchanged. Applying a preset no longer creates `profile.ini` sections that the game
+  doesn't use.
+
 ## 2026-08-08 — v0.7.1 — Browse works for blocked players, the model-swap crash is gone, and the Rider preview wears a real rider
 
 ### Added

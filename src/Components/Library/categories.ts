@@ -9,6 +9,7 @@ import {
   Shield,
   Hand,
   Shirt,
+  PersonStanding,
   Volume2,
   Package,
   type LucideIcon,
@@ -33,6 +34,7 @@ export const CATEGORY_LABEL: Record<string, TKey> = {
   protectionPaint: "category.protectionPaint",
   gloves: "category.gloves",
   outfit: "category.outfit",
+  animation: "category.animation",
   misc: "category.misc",
 };
 
@@ -51,6 +53,7 @@ export const SECTION_LABEL: Record<string, TKey> = {
   protectionPaint: "section.protectionPaint",
   gloves: "section.gloves",
   outfit: "section.outfit",
+  animation: "section.animation",
 };
 
 export const CATEGORY_ICON: Record<string, LucideIcon> = {
@@ -68,6 +71,7 @@ export const CATEGORY_ICON: Record<string, LucideIcon> = {
   protectionPaint: Palette,
   gloves: Hand,
   outfit: Shirt,
+  animation: PersonStanding,
   misc: Package,
 };
 
@@ -86,5 +90,8 @@ export const RIDER_SECTION_ORDER: LibraryCategory[] = [
   "protectionPaint",
   "gloves",
   "outfit",
+  // GP Bikes riding styles. MX Bikes never produces this category, so listing it
+  // unconditionally costs nothing.
+  "animation",
   "misc",
 ];
