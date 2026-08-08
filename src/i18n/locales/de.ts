@@ -690,6 +690,8 @@ export const de: Translation = {
     "Wird im Spiel aktualisiert — wenn es dein ausgewähltes Motorrad ist, ändert es sich jetzt.",
   "locker.modelFrostmodNotRunning":
     "Starte FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
+  "locker.modelFrostmodTooOld":
+    "Aktualisiere FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
   "locker.modelFrostmodUnreachable":
     "FrostMod war nicht erreichbar — wähle das Motorrad im Spiel neu aus, um es zu laden.",
   "locker.modelRefreshWindowsOnly":

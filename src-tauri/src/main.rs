@@ -216,8 +216,26 @@ fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
 /// Ask FrostMod to re-apply `bike` so a just-swapped model shows live. `None` when
 /// instant refresh is off — the same switch that gates `live_refresh`, since both
 /// reach into the running game.
-fn model_refresh_cmd(enabled: bool, bike: &str) -> Option<frostmod::CommandOutcome> {
-    enabled.then(|| frostmod::signal_refresh_model(bike))
+///
+/// A FrostMod that predates `refresh_bike_model` logs an unknown verb and drops it,
+/// which reads as `Signaled` here and would have the UI promise a refresh that can't
+/// happen. The tag our installer recorded is the only evidence available on this side,
+/// so a clean send is downgraded to `TooOld` when it names a build without the verb.
+/// `NotRunning`/`WriteFailed` are left alone: they say something more specific, and an
+/// unreadable tag is treated as new enough (see `supports_model_refresh`).
+fn model_refresh_cmd(
+    app: &tauri::AppHandle,
+    enabled: bool,
+    bike: &str,
+) -> Option<frostmod::CommandOutcome> {
+    if !enabled {
+        return None;
+    }
+    let sent = frostmod::signal_refresh_model(bike);
+    let too_old = matches!(sent, frostmod::CommandOutcome::Signaled)
+        && frostmod_manage::installed_version(app)
+            .is_some_and(|tag| !frostmod::supports_model_refresh(&tag));
+    Some(if too_old { frostmod::CommandOutcome::TooOld } else { sent })
 }
 
 #[tauri::command]
@@ -249,7 +267,7 @@ fn apply_model_swap_blocking(
     // class switch away-and-back. Only acts if `bike` is the selected one (decided
     // inside FrostMod, which is the only side that knows). Gated on the same
     // instant-refresh setting as the look refresh — both poke the live game.
-    let model_refresh = model_refresh_cmd(cfg.instant_refresh, &bike);
+    let model_refresh = model_refresh_cmd(&app, cfg.instant_refresh, &bike);
     Ok(SwapApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
@@ -2146,7 +2164,7 @@ fn presets_apply(
         modelswap::apply_model_swap(&cfg.mods_path, &bikeid, want)
             .map_err(|e| format!("Cosmetics applied, but the model swap failed: {e:#}"))?;
         // Same reason as the Locker path: the look loader won't reload the mesh.
-        model_refresh = model_refresh_cmd(cfg.instant_refresh, &bikeid);
+        model_refresh = model_refresh_cmd(&app, cfg.instant_refresh, &bikeid);
     }
     let content_reload = frostmod::signal_reload();
     Ok(PresetApplyOutcome {

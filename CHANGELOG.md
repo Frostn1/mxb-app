@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-08
+
+### Fixed
+- **The Locker no longer promises a live model swap that an older FrostMod can't do.**
+  Swapping a model asks FrostMod to re-apply the selected bike so the new mesh shows
+  without the class-switch away-and-back — but that command only exists in FrostMod
+  v0.9.9 and up. An older build takes the message, logs "unknown verb" and drops it,
+  which from this side looks exactly like success, so the toast said "Refreshing
+  in-game" while nothing changed. The app now reads the release tag its own installer
+  recorded and says "Update FrostMod to see model swaps live" instead. A tag it can't
+  read is assumed new enough — telling someone on the latest build to update is the
+  worse mistake — and the version is compared numerically, so v0.9.10 doesn't read as
+  older than v0.9.9.
 ## 2026-08-07
 
 ### Added
