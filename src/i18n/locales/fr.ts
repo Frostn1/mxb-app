@@ -542,6 +542,16 @@ export const fr: Translation = {
   "game.alreadyRunning": "MX Bikes est déjà en cours d'exécution",
   "game.launching": "Lancement de MX Bikes…",
   "game.launchFailed": "Impossible de lancer MX Bikes",
+  "join.title": "Rejoindre un serveur",
+  "join.desc":
+    "Saisissez l'adresse d'un serveur pour lancer MX Bikes en vous y connectant directement.",
+  "join.address": "Adresse du serveur",
+  "join.action": "Rejoindre",
+  "join.joining": "Connexion…",
+  "join.launching": "Connexion à {{address}}…",
+  "join.alreadyRunning":
+    "Fermez d'abord MX Bikes — un jeu déjà lancé ne peut pas être envoyé vers un serveur.",
+  "join.failed": "Impossible de rejoindre ce serveur",
 
   // ── Chaînes manquées par le premier balayage (JSX multi-lignes) ────────────
   "libraryDetail.noEmbedded": "Aucun détail intégré n'a été trouvé pour cet élément.",
