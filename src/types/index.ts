@@ -369,8 +369,24 @@ export interface FrostmodStatus {
   version: string | null;
   /** Latest release tag on GitHub (null if the check failed / offline). */
   latest: string | null;
+  /**
+   * The binaries on disk aren't the ones the recorded version ships — an install
+   * that didn't fully apply. Reinstalling is the fix.
+   */
+  needsRepair: boolean;
   /** FrostMod currently running (its reload event exists). */
   running: boolean;
+}
+
+/** What an install landed, beyond succeeding. */
+export interface FrostmodInstallReport {
+  /** The release tag now on disk. */
+  version: string;
+  /**
+   * The running game still has the previous FrostMod mapped in, so the new one
+   * only takes over once MX Bikes is restarted.
+   */
+  needsGameRestart: boolean;
 }
 
 export interface Loadout {

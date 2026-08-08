@@ -75,6 +75,9 @@ trash = "5"
 # trigger a FrostMod reload. Debounced so an extract burst yields one reload.
 notify = "6"
 notify-debouncer-mini = "0.4"
+# Check an installed FrostMod binary against the digest its GitHub release advertises,
+# so an install that only half-applied can be spotted and repaired.
+sha2 = "0.10"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

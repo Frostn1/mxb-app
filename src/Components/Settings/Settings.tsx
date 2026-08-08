@@ -561,9 +561,11 @@ export default function Settings() {
                     ? t("settings.checkingGitHub")
                     : statusError
                       ? t("settings.updateCheckFailed")
-                      : status?.latest
-                        ? t("settings.latestVersion", { version: status.latest })
-                        : null}
+                      : status?.needsRepair
+                        ? t("settings.frostmodNeedsRepair")
+                        : status?.latest
+                          ? t("settings.latestVersion", { version: status.latest })
+                          : null}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
@@ -583,9 +585,17 @@ export default function Settings() {
                     status?.installed &&
                     status.latest &&
                     status.version !== status.latest;
+                  // An install carrying the right tag over the wrong binaries reads as
+                  // current on version alone; without this it'd sit on a disabled "Up to
+                  // date" with no way to put the missing half in place.
+                  const repairable = Boolean(status?.needsRepair);
                   // "Up to date" only when we actually confirmed the latest tag.
                   const confirmedCurrent =
-                    status?.installed && !updatable && !statusError && status?.latest;
+                    status?.installed &&
+                    !updatable &&
+                    !repairable &&
+                    !statusError &&
+                    status?.latest;
                   return (
                     <Button
                       variant={confirmedCurrent ? "outline" : "default"}
@@ -599,9 +609,11 @@ export default function Settings() {
                           ? t("settings.installFrostmod")
                           : updatable
                             ? t("settings.updateTo", { version: status.latest ?? "" })
-                            : statusError || !status?.latest
-                              ? t("settings.reinstallLatest")
-                              : t("settings.upToDate")}
+                            : repairable
+                              ? t("settings.frostmodRepair")
+                              : statusError || !status?.latest
+                                ? t("settings.reinstallLatest")
+                                : t("settings.upToDate")}
                     </Button>
                   );
                 })()}
