@@ -524,6 +524,9 @@ export const it: Translation = {
   "settings.frostmodNeedsRepair":
     "I file installati non corrispondono a questa versione — reinstallando si risolve.",
   "settings.frostmodRepair": "Ripara installazione",
+  "settings.frostmodUnsupportedForGame":
+    "Questa versione di FrostMod non è sicura su {{game}} — aggiornala per usare FrostMod qui.",
+  "settings.frostmodUpdateRequired": "Aggiornamento necessario",
   "settings.checkNewer": "Cerca una versione più recente di FrostMod",
   "settings.working": "Elaborazione…",
   "settings.installFrostmod": "Installa FrostMod",

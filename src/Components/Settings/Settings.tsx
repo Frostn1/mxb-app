@@ -872,9 +872,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                       ? t("settings.updateCheckFailed")
                       : status?.needsRepair
                         ? t("settings.frostmodNeedsRepair")
-                        : status?.latest
-                          ? t("settings.latestVersion", { version: status.latest })
-                          : null}
+                        : // Ranked above "latest version" on purpose: a build too old for
+                          // this game can't run at all, which the version line alone
+                          // wouldn't explain.
+                          status?.installed && !status.supportedForGame
+                          ? t("settings.frostmodUnsupportedForGame", {
+                              game: game.display,
+                            })
+                          : status?.latest
+                            ? t("settings.latestVersion", { version: status.latest })
+                            : null}
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
@@ -898,11 +905,18 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   // current on version alone; without this it'd sit on a disabled "Up to
                   // date" with no way to put the missing half in place.
                   const repairable = Boolean(status?.needsRepair);
+                  // Same idea for a build that's too old for the active title: it reads as
+                  // current on version alone, but can't be started, so the button has to
+                  // stay live to offer the update that fixes it.
+                  const unsupported = Boolean(
+                    status?.installed && !status.supportedForGame,
+                  );
                   // "Up to date" only when we actually confirmed the latest tag.
                   const confirmedCurrent =
                     status?.installed &&
                     !updatable &&
                     !repairable &&
+                    !unsupported &&
                     !statusError &&
                     status?.latest;
                   return (
@@ -920,9 +934,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                             ? t("settings.updateTo", { version: status.latest ?? "" })
                             : repairable
                               ? t("settings.frostmodRepair")
-                              : statusError || !status?.latest
-                                ? t("settings.reinstallLatest")
-                                : t("settings.upToDate")}
+                              : // Already on the newest tag, but that tag is still too
+                                // old for this game — "Up to date" would be a lie.
+                                unsupported
+                                ? t("settings.frostmodUpdateRequired")
+                                : statusError || !status?.latest
+                                  ? t("settings.reinstallLatest")
+                                  : t("settings.upToDate")}
                     </Button>
                   );
                 })()}

@@ -517,6 +517,9 @@ export const en = {
   "settings.frostmodNeedsRepair":
     "The installed files don't match this version — reinstalling fixes it.",
   "settings.frostmodRepair": "Repair install",
+  "settings.frostmodUnsupportedForGame":
+    "This FrostMod build isn't safe on {{game}} — update it to use FrostMod here.",
+  "settings.frostmodUpdateRequired": "Update required",
   "settings.checkNewer": "Check for a newer FrostMod",
   "settings.working": "Working…",
   "settings.installFrostmod": "Install FrostMod",

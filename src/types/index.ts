@@ -542,6 +542,13 @@ export interface FrostmodStatus {
   needsRepair: boolean;
   /** FrostMod currently running (its reload event exists). */
   running: boolean;
+  /**
+   * The installed build is safe to run against the *active* game. False means
+   * "installed, but too old for this title" — FrostMod v0.10.0 attaches to GP Bikes and
+   * then reloads using MX Bikes' offsets, which crashes it. Updating is the fix, so offer
+   * that rather than a start; the backend refuses to launch it either way.
+   */
+  supportedForGame: boolean;
 }
 
 /** What an install landed, beyond succeeding. */

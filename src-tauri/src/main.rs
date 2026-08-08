@@ -2665,6 +2665,7 @@ fn list_games() -> Vec<game::GameInfo> {
 async fn set_active_game(
     app: tauri::AppHandle,
     watcher: State<'_, ModWatcher>,
+    frostmod_state: State<'_, FrostmodProcess>,
     game: game::Game,
 ) -> Result<AppConfig, String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -2678,6 +2679,18 @@ async fn set_active_game(
     // in the game we just left.
     if cfg.watch_mods_reload {
         modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
+    // FrostMod reads `--game` and `--mods` once, at launch, and `start` no-ops while one
+    // is already running — so without this a switch leaves FrostMod waiting for the game
+    // we just left while the status pill still reads "running". `force_stop_exe` because
+    // the running one may not be ours to `stop`: a hand-launched frostmod.exe claims the
+    // same named event, and that is exactly how this was first reported.
+    if frostmod::is_running() {
+        frostmod_manage::stop(&frostmod_state);
+        frostmod_manage::force_stop_exe();
+        if let Err(e) = frostmod_manage::start(&app, &frostmod_state) {
+            log::warn!("could not restart FrostMod for {}: {e:#}", cfg.game().display);
+        }
     }
     Ok(cfg)
 }
