@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Bike, ExternalLink, Home, Shirt, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/Components/ui/sonner";
@@ -10,7 +10,7 @@ import Manage from "../Manage/Manage";
 import Presets from "../Presets/Presets";
 import { ThemeProvider } from "../../Context/Theme";
 import { useI18n } from "../../i18n/context";
-import type { TKey } from "../../i18n/core";
+import { setAmbientVars, type TKey } from "../../i18n/core";
 import { FrostmodProvider } from "../../Context/Frostmod";
 import { ConfigContext, MXB_FALLBACK } from "../../Context/Config";
 import { InstallProvider } from "../../Context/Install";
@@ -24,7 +24,7 @@ import {
   overlayHide,
   overlayOpenMain,
 } from "../../api/mods";
-import type { Config, GameInfo } from "../../types";
+import type { Config, GameCaps, GameInfo } from "../../types";
 
 /**
  * The in-game overlay: a compact, frameless panel drawn over MX Bikes and summoned by
@@ -42,11 +42,19 @@ import type { Config, GameInfo } from "../../types";
 
 type OverlayTab = "presets" | "locker" | "browse" | "manage";
 
-const TABS: { id: OverlayTab; label: TKey; icon: typeof Home }[] = [
+/** `cap` gates a tab on the active game supporting it — same rule as the sidebar's nav,
+ *  so the overlay can't offer a view the main window hides. */
+const TABS: {
+  id: OverlayTab;
+  label: TKey;
+  icon: typeof Home;
+  cap?: keyof GameCaps;
+}[] = [
   { id: "presets", label: "nav.presets", icon: Shirt },
-  { id: "locker", label: "nav.locker", icon: Bike },
+  // The Locker is the 3D preview; GP Bikes' meshes need their own part bindings first.
+  { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
   { id: "browse", label: "nav.browse", icon: Home },
-  { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
+  { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
 /** Human-readable form of a Tauri accelerator, for the header hint. */
@@ -91,6 +99,24 @@ export default function Overlay() {
   // active title's capabilities to gate what it renders.
   const overlayGame =
     games.find((g) => g.id === (config?.activeGame ?? "mxb")) ?? MXB_FALLBACK;
+
+  // Every translated string can say `{{game}}` / `{{site}}` instead of naming one
+  // title — see `setAmbientVars`. Set as a layout effect so the first paint after a
+  // switch already reads right.
+  useLayoutEffect(() => {
+    setAmbientVars({ game: overlayGame.display, site: overlayGame.catalogDomain });
+  }, [overlayGame]);
+
+  const tabs = useMemo(
+    () => TABS.filter((t) => !t.cap || overlayGame.caps[t.cap]),
+    [overlayGame],
+  );
+
+  // A tab this game doesn't offer can't stay selected — the overlay outlives a game
+  // switch made in the main window, so the selection can go stale under it.
+  useEffect(() => {
+    if (!tabs.some((t) => t.id === tab)) setTab(tabs[0].id);
+  }, [tabs, tab]);
 
   const dismiss = useCallback(() => {
     void overlayHide().catch(() => {});
@@ -163,7 +189,7 @@ export default function Overlay() {
                 </span>
 
                 <nav className="flex items-center gap-0.5">
-                  {TABS.map(({ id, label, icon: Icon }) => (
+                  {tabs.map(({ id, label, icon: Icon }) => (
                     <button
                       key={id}
                       onClick={() => {

@@ -8,6 +8,7 @@ const MXB_CAPS: GameCaps = {
   instantRefresh: true,
   viewer: true,
   shop: true,
+  manage: true,
 };
 
 const MXB_FALLBACK: GameInfo = {

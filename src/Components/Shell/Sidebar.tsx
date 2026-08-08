@@ -57,7 +57,7 @@ const NAV: {
   { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
   { id: "presets", label: "nav.presets", icon: Shirt },
   { id: "rider", label: "nav.rider", icon: User, cap: "viewer" },
-  { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
+  { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);

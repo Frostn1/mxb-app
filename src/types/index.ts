@@ -11,6 +11,8 @@ export interface GameCaps {
   viewer: boolean;
   /** The authenticated paid-content shop (mxbikes-shop.com). */
   shop: boolean;
+  /** The Manage view (parking mods to trim what the game loads). */
+  manage: boolean;
 }
 
 /** One title the app can drive, as reported by `listGames()`. */

@@ -34,6 +34,15 @@
   failing later with "couldn't determine the archive type".
 
 ### Fixed
+- **Switching to a game you don't have installed opened an empty dashboard instead of
+  the setup screen.** The app adopted `Documents\PiBoSo\<game>` whether or not that
+  folder existed, and a non-blank folder reads as "configured" — so you got a working UI
+  scanning nothing. A folder is now only adopted if it's really there, a saved folder
+  that has since been deleted or moved is re-detected rather than trusted, and setup says
+  so plainly when it can't find one instead of silently returning you to the same screen.
+- **The UI named MX Bikes while driving GP Bikes** — "Launch MX Bikes", "MX Bikes is
+  running", the install-folder settings and the overlay's status line among them. Strings
+  now say which game is actually active.
 - **Switching games left the previous game's content on screen.** Library, Manage and the
   rest load their data when they first appear, so switching titles swapped the folders
   underneath them without refreshing anything — most visibly Manage, which kept listing
@@ -47,10 +56,11 @@
   guided tour likewise no longer walks through steps for features the active game hides.
 
 ### Changed
-- **Features with no GP Bikes build say so instead of failing quietly.** FrostMod is a
-  compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for GP
-  Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
-  (Locker and Rider) is MX Bikes only for now — GP's meshes need their own part bindings.
+- **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
+  is a compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for
+  GP Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
+  (Locker and Rider) and Manage are MX Bikes only for now; the overlay and the guided tour
+  follow the same gating, so neither offers a view the main window doesn't.
 - **Existing MX Bikes setups are untouched.** A `config.json` written before this release
   opens as the MX Bikes config it always was, with the same folders; preset share codes are
   unchanged. Applying a preset no longer creates `profile.ini` sections that the game

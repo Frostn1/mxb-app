@@ -103,6 +103,16 @@ fn create_config(
     config: AppConfig,
 ) -> Result<bool, String> {
     let mut cfg = config::finalize(config);
+    // Detection came up empty and the user didn't pick a folder, so there is nothing to
+    // save. Say so instead of writing a config with no folder in it: the setup screen
+    // only reappears when `modsPath` is blank, so a silent save would bounce the user
+    // straight back to the same screen with no explanation of what went wrong.
+    if cfg.mods_path.trim().is_empty() {
+        return Err(format!(
+            "Couldn't find your {} folder automatically — choose it manually.",
+            cfg.game().display
+        ));
+    }
     // Setup only sends the folders, so carry over first-run state from any config
     // that's already there — rewriting it would replay the intro and the tour.
     match config::load(&app) {

@@ -93,7 +93,7 @@ export const en = {
   "setup.found": "Found",
   "setup.detectedAutomatically": "Detected automatically",
   "setup.installNotFound":
-    "Couldn't find your MX Bikes install automatically — it powers the 3D rider preview. Pick it manually, or set it later in Settings.",
+    "Couldn't find your {{game}} install automatically — it powers the 3D rider preview. Pick it manually, or set it later in Settings.",
   "setup.chooseInstallManually": "Choose the install folder manually…",
   "setup.startBrowsing": "Start browsing mods",
   "setup.detectAndStart": "Detect & start browsing",
@@ -427,7 +427,7 @@ export const en = {
   "settings.whatsNew": "What's new",
   "settings.modsFolderDesc":
     "Where mods are installed. Changing it re-scans your library.",
-  "settings.insideModsFolder": "Inside your MX Bikes folder",
+  "settings.insideModsFolder": "Inside your {{game}} folder",
   "settings.notSet": "Not set",
   "settings.change": "Change…",
   "settings.set": "Set…",
@@ -445,7 +445,7 @@ export const en = {
     "Start MXB App automatically when you log in.",
   "settings.instantRefresh": "Instant preset refresh",
   "settings.instantRefreshDesc":
-    "When you apply a preset while MX Bikes is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile.",
+    "When you apply a preset while {{game}} is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile.",
   "settings.instantRefreshWindowsOnly":
     "Refreshing the look in-game without a restart needs FrostMod, which is Windows-only — you'll be told to reselect your profile instead.",
   "settings.autoRunFrostmod": "Run FrostMod automatically",
@@ -479,20 +479,20 @@ export const en = {
   "settings.folderUpdated": "Game folder updated",
   "settings.folderUpdatedDesc": "Your library will re-scan.",
   "settings.setFolderFailed": "Couldn't set folder",
-  "settings.reDetected": "Re-detected your MX Bikes folder",
+  "settings.reDetected": "Re-detected your {{game}} folder",
   "settings.detectFolderFailed": "Couldn't detect folder",
   "settings.pickInstallFolder":
-    "Select your MX Bikes install folder (contains rider.pkz)",
+    "Select your {{game}} install folder (contains rider.pkz)",
   "settings.installSet": "Game install set",
   "settings.installSetDesc":
     "The 3D rider preview can now load the real body model.",
   "settings.setInstallFailed": "Couldn't set install folder",
-  "settings.installNotFound": "Couldn't find MX Bikes",
+  "settings.installNotFound": "Couldn't find {{game}}",
   "settings.installNotFoundDesc":
     "No Steam install detected — set the folder manually.",
-  "settings.installFound": "Found your MX Bikes install",
+  "settings.installFound": "Found your {{game}} install",
   "settings.detectInstallFailed": "Couldn't detect install folder",
-  "settings.pickProfilesFolder": "Select your MX Bikes profiles folder",
+  "settings.pickProfilesFolder": "Select your {{game}} profiles folder",
   "settings.profilesSet": "Profiles folder set",
   "settings.profilesFound_one": "Found {{count}} profile.",
   "settings.profilesFound_other": "Found {{count}} profiles.",
@@ -509,11 +509,11 @@ export const en = {
   // ── Launching the game ─────────────────────────────────────────────────────
   "game.play": "Play",
   "game.starting": "Starting…",
-  "game.running": "MX Bikes running",
-  "game.launch": "Launch MX Bikes",
-  "game.alreadyRunning": "MX Bikes is already running",
-  "game.launching": "Launching MX Bikes…",
-  "game.launchFailed": "Couldn't launch MX Bikes",
+  "game.running": "{{game}} running",
+  "game.launch": "Launch {{game}}",
+  "game.alreadyRunning": "{{game}} is already running",
+  "game.launching": "Launching {{game}}…",
+  "game.launchFailed": "Couldn't launch {{game}}",
 
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",
@@ -531,10 +531,10 @@ export const en = {
   "presets.shareWarning":
     "Uploads to a public, temporary link — it redistributes mod files made by others, so share responsibly.",
   "settings.profilesDesc":
-    "Presets read your profiles from here — the path below is where the app is looking right now. It's the {{profiles}} folder inside your MX Bikes folder, or your {{documents}} one if you moved your mods folder. Set it only if yours is somewhere else.",
+    "Presets read your profiles from here — the path below is where the app is looking right now. It's the {{profiles}} folder inside your {{game}} folder, or your {{documents}} one if you moved your mods folder. Set it only if yours is somewhere else.",
   "settings.resetToDefault": "Reset to default",
   "settings.gameInstallDesc":
-    "Game install folder (optional) — where MX Bikes is installed (holds {{file}}). Set it to load the real rider body in the 3D preview.",
+    "Game install folder (optional) — where {{game}} is installed (holds {{file}}). Set it to load the real rider body in the 3D preview.",
   "viewer.stockGearNote":
     "Shown on the game's stock {{part}}. A paint made for a different model may not line up perfectly.",
   "viewer.paintNoChange":
@@ -742,18 +742,18 @@ export const en = {
   // In-game overlay — the hotkey panel drawn over MX Bikes.
   "overlay.section": "In-game overlay",
   "overlay.enable": "Enable the in-game overlay",
-  "overlay.enableDesc": "Press a shortcut while MX Bikes is running to bring up Presets, Locker and Browse over the game — no alt-tab. Presets and model swaps apply to the running game.",
+  "overlay.enableDesc": "Press a shortcut while {{game}} is running to bring up Presets, Locker and Browse over the game — no alt-tab. Presets and model swaps apply to the running game.",
   "overlay.shortcut": "Overlay shortcut",
   "overlay.shortcutDesc": "Works while the game has focus. Esc closes the overlay and hands control back.",
-  "overlay.borderlessTitle": "Run MX Bikes borderless or windowed",
-  "overlay.borderlessNote": "Nothing can be drawn over a game holding the screen in exclusive fullscreen — the overlay included. Set MX Bikes to Borderless (or Windowed) in Options → Video and it appears over the game as expected.",
-  "overlay.gameRunning": "MX Bikes is running",
-  "overlay.gameNotRunning": "MX Bikes isn't running",
+  "overlay.borderlessTitle": "Run {{game}} borderless or windowed",
+  "overlay.borderlessNote": "Nothing can be drawn over a game holding the screen in exclusive fullscreen — the overlay included. Set {{game}} to Borderless (or Windowed) in Options → Video and it appears over the game as expected.",
+  "overlay.gameRunning": "{{game}} is running",
+  "overlay.gameNotRunning": "{{game}} isn't running",
   "overlay.showNow": "Show overlay now",
   "overlay.showFailed": "Couldn't open the overlay",
   "overlay.hotkeyTaken": "Another app is using this shortcut",
   "overlay.hotkeyTakenDesc": "The combo goes to whichever app claimed it first, so the overlay never opens. Pick a different one above — Discord's mute toggle is the usual culprit.",
-  "overlay.fullscreenNow": "MX Bikes is in exclusive fullscreen right now",
+  "overlay.fullscreenNow": "{{game}} is in exclusive fullscreen right now",
   "overlay.fullscreenNowDesc": "The overlay still opens — the game is simply drawn over it. Switch to borderless or windowed in Options → Video.",
   "overlay.notWorking": "Pressed it and nothing happened?",
   "overlay.notWorkingDesc": "Check the shortcut above: another app may already own that combo, and picking a free one is what fixes it.",
@@ -767,9 +767,9 @@ export const en = {
   "overlay.closeTitle": "Close overlay (Esc)",
   "overlay.openMain": "Open full app",
   "overlay.openMainTitle": "Close the overlay and open the main MXB App window",
-  "overlay.needsSetup": "Finish setting up MXB App in its main window first — it needs to know where your MX Bikes folder is.",
+  "overlay.needsSetup": "Finish setting up MXB App in its main window first — it needs to know where your {{game}} folder is.",
   "overlay.fullscreenBlocked": "The overlay can't show over exclusive fullscreen",
-  "overlay.fullscreenBlockedDesc": "Set MX Bikes to borderless or windowed in Options → Video, then try the shortcut again.",
+  "overlay.fullscreenBlockedDesc": "Set {{game}} to borderless or windowed in Options → Video, then try the shortcut again.",
 
   // Release showcase — the "what's new" modal shown once after an update.
   "showcase.eyebrow": "Just updated",

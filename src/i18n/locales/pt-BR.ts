@@ -97,7 +97,7 @@ export const ptBR: Translation = {
   "setup.found": "Encontrada",
   "setup.detectedAutomatically": "Detectada automaticamente",
   "setup.installNotFound":
-    "Não deu pra encontrar sua instalação do MX Bikes automaticamente — é ela que alimenta a prévia 3D do piloto. Escolha manualmente, ou defina depois nas Configurações.",
+    "Não deu pra encontrar sua instalação do {{game}} automaticamente — é ela que alimenta a prévia 3D do piloto. Escolha manualmente, ou defina depois nas Configurações.",
   "setup.chooseInstallManually":
     "Escolher a pasta de instalação manualmente…",
   "setup.startBrowsing": "Começar a explorar mods",
@@ -439,7 +439,7 @@ export const ptBR: Translation = {
   "settings.whatsNew": "Novidades",
   "settings.modsFolderDesc":
     "Onde os mods são instalados. Mudar isso faz uma nova varredura da biblioteca.",
-  "settings.insideModsFolder": "Dentro da sua pasta do MX Bikes",
+  "settings.insideModsFolder": "Dentro da sua pasta do {{game}}",
   "settings.notSet": "Não definida",
   "settings.change": "Alterar…",
   "settings.set": "Definir…",
@@ -457,7 +457,7 @@ export const ptBR: Translation = {
     "Abrir o MXB App automaticamente quando você fizer login.",
   "settings.instantRefresh": "Atualização instantânea de presets",
   "settings.instantRefreshDesc":
-    "Quando você aplica um preset com o MX Bikes aberto, atualiza o visual no jogo na hora — sem reiniciar nem reselecionar o perfil. Se não der, você será avisado para selecionar o perfil de novo.",
+    "Quando você aplica um preset com o {{game}} aberto, atualiza o visual no jogo na hora — sem reiniciar nem reselecionar o perfil. Se não der, você será avisado para selecionar o perfil de novo.",
   "settings.instantRefreshWindowsOnly":
     "Atualizar o visual no jogo sem reiniciar precisa do FrostMod, que só existe no Windows — em vez disso você será avisado para selecionar o perfil de novo.",
   "settings.autoRunFrostmod": "Iniciar o FrostMod automaticamente",
@@ -491,23 +491,23 @@ export const ptBR: Translation = {
   "settings.folderUpdated": "Pasta do jogo atualizada",
   "settings.folderUpdatedDesc": "Sua biblioteca será varrida de novo.",
   "settings.setFolderFailed": "Não foi possível definir a pasta",
-  "settings.reDetected": "Pasta do MX Bikes detectada de novo",
+  "settings.reDetected": "Pasta do {{game}} detectada de novo",
   "settings.detectFolderFailed": "Não foi possível detectar a pasta",
   "settings.pickInstallFolder":
-    "Selecione sua pasta de instalação do MX Bikes (contém rider.pkz)",
+    "Selecione sua pasta de instalação do {{game}} (contém rider.pkz)",
   "settings.installSet": "Instalação do jogo definida",
   "settings.installSetDesc":
     "A prévia 3D do piloto já pode carregar o modelo real do corpo.",
   "settings.setInstallFailed":
     "Não foi possível definir a pasta de instalação",
-  "settings.installNotFound": "Não foi possível encontrar o MX Bikes",
+  "settings.installNotFound": "Não foi possível encontrar o {{game}}",
   "settings.installNotFoundDesc":
     "Nenhuma instalação da Steam detectada — defina a pasta manualmente.",
-  "settings.installFound": "Instalação do MX Bikes encontrada",
+  "settings.installFound": "Instalação do {{game}} encontrada",
   "settings.detectInstallFailed":
     "Não foi possível detectar a pasta de instalação",
   "settings.pickProfilesFolder":
-    "Selecione sua pasta de perfis do MX Bikes",
+    "Selecione sua pasta de perfis do {{game}}",
   "settings.profilesSet": "Pasta de perfis definida",
   "settings.profilesFound_one": "{{count}} perfil encontrado.",
   "settings.profilesFound_other": "{{count}} perfis encontrados.",
@@ -527,11 +527,11 @@ export const ptBR: Translation = {
   // ── Início do jogo ─────────────────────────────────────────────────────────
   "game.play": "Jogar",
   "game.starting": "Iniciando…",
-  "game.running": "MX Bikes em execução",
-  "game.launch": "Iniciar o MX Bikes",
-  "game.alreadyRunning": "O MX Bikes já está em execução",
-  "game.launching": "Iniciando o MX Bikes…",
-  "game.launchFailed": "Não foi possível iniciar o MX Bikes",
+  "game.running": "{{game}} em execução",
+  "game.launch": "Iniciar o {{game}}",
+  "game.alreadyRunning": "O {{game}} já está em execução",
+  "game.launching": "Iniciando o {{game}}…",
+  "game.launchFailed": "Não foi possível iniciar o {{game}}",
 
   // ── Textos que a primeira varredura não pegou (JSX em várias linhas) ──────
   "libraryDetail.noEmbedded": "Nenhum detalhe embutido foi encontrado para este item.",
@@ -549,10 +549,10 @@ export const ptBR: Translation = {
   "presets.shareWarning":
     "Envia para um link público e temporário — isso redistribui arquivos de mods feitos por outras pessoas, então compartilhe com responsabilidade.",
   "settings.profilesDesc":
-    "Os presets leem seus perfis daqui — o caminho abaixo é onde o app está olhando agora. É a pasta {{profiles}} dentro da sua pasta do MX Bikes, ou {{documents}} se você moveu sua pasta de mods. Defina só se a sua estiver em outro lugar.",
+    "Os presets leem seus perfis daqui — o caminho abaixo é onde o app está olhando agora. É a pasta {{profiles}} dentro da sua pasta do {{game}}, ou {{documents}} se você moveu sua pasta de mods. Defina só se a sua estiver em outro lugar.",
   "settings.resetToDefault": "Restaurar o padrão",
   "settings.gameInstallDesc":
-    "Pasta de instalação do jogo (opcional) — onde o MX Bikes está instalado (contém {{file}}). Defina para carregar o corpo real do piloto na prévia 3D.",
+    "Pasta de instalação do jogo (opcional) — onde o {{game}} está instalado (contém {{file}}). Defina para carregar o corpo real do piloto na prévia 3D.",
   "viewer.stockGearNote":
     "Mostrado no {{part}} original do jogo. Uma pintura feita para outro modelo pode não encaixar perfeitamente.",
   "viewer.paintNoChange":
@@ -763,18 +763,18 @@ export const ptBR: Translation = {
   // In-game overlay — the hotkey panel drawn over MX Bikes.
   "overlay.section": "Overlay no jogo",
   "overlay.enable": "Ativar o overlay no jogo",
-  "overlay.enableDesc": "Aperte um atalho com o MX Bikes aberto para abrir Presets, Locker e Browse por cima do jogo — sem alt-tab. Presets e trocas de modelo valem no jogo em andamento.",
+  "overlay.enableDesc": "Aperte um atalho com o {{game}} aberto para abrir Presets, Locker e Browse por cima do jogo — sem alt-tab. Presets e trocas de modelo valem no jogo em andamento.",
   "overlay.shortcut": "Atalho do overlay",
   "overlay.shortcutDesc": "Funciona mesmo com o jogo em foco. Esc fecha o overlay e devolve o controle.",
-  "overlay.borderlessTitle": "Jogue o MX Bikes sem bordas ou em janela",
-  "overlay.borderlessNote": "Nada é desenhado por cima de um jogo que segura a tela em modo exclusivo — nem o overlay. Deixe o MX Bikes em Borderless (ou Windowed) nas Options → Video e ele aparece sobre o jogo como esperado.",
-  "overlay.gameRunning": "O MX Bikes está aberto",
-  "overlay.gameNotRunning": "O MX Bikes não está aberto",
+  "overlay.borderlessTitle": "Jogue o {{game}} sem bordas ou em janela",
+  "overlay.borderlessNote": "Nada é desenhado por cima de um jogo que segura a tela em modo exclusivo — nem o overlay. Deixe o {{game}} em Borderless (ou Windowed) nas Options → Video e ele aparece sobre o jogo como esperado.",
+  "overlay.gameRunning": "O {{game}} está aberto",
+  "overlay.gameNotRunning": "O {{game}} não está aberto",
   "overlay.showNow": "Mostrar o overlay agora",
   "overlay.showFailed": "Não foi possível abrir o overlay",
   "overlay.hotkeyTaken": "Outro app está usando este atalho",
   "overlay.hotkeyTakenDesc": "A combinação fica com o app que pediu primeiro, então o overlay nunca abre. Escolha outra acima — o mudo do Discord costuma ser o culpado.",
-  "overlay.fullscreenNow": "O MX Bikes está em tela cheia exclusiva agora",
+  "overlay.fullscreenNow": "O {{game}} está em tela cheia exclusiva agora",
   "overlay.fullscreenNowDesc": "O overlay abre mesmo assim — é o jogo que é desenhado por cima. Mude para sem bordas ou janela nas Options → Video.",
   "overlay.notWorking": "Apertou e não aconteceu nada?",
   "overlay.notWorkingDesc": "Confira o atalho acima: outro app pode já ter essa combinação, e escolher uma livre é o que resolve.",
@@ -788,9 +788,9 @@ export const ptBR: Translation = {
   "overlay.closeTitle": "Fechar overlay (Esc)",
   "overlay.openMain": "Abrir o app completo",
   "overlay.openMainTitle": "Fecha o overlay e abre a janela principal do MXB App",
-  "overlay.needsSetup": "Termine a configuração do MXB App na janela principal primeiro — ele precisa saber onde fica a sua pasta do MX Bikes.",
+  "overlay.needsSetup": "Termine a configuração do MXB App na janela principal primeiro — ele precisa saber onde fica a sua pasta do {{game}}.",
   "overlay.fullscreenBlocked": "O overlay não aparece por cima da tela cheia exclusiva",
-  "overlay.fullscreenBlockedDesc": "Deixe o MX Bikes em sem bordas ou em janela nas Options → Video e tente o atalho de novo.",
+  "overlay.fullscreenBlockedDesc": "Deixe o {{game}} em sem bordas ou em janela nas Options → Video e tente o atalho de novo.",
 
   // Vitrine da versão — a janela de novidades mostrada uma vez depois de atualizar.
   "showcase.eyebrow": "Recém-atualizado",

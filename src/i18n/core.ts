@@ -102,10 +102,27 @@ function lookup(
   return d[key];
 }
 
+/**
+ * Variables available to every string without its call site passing them.
+ *
+ * `{{game}}` is the case this exists for. The app drives more than one title, so any
+ * string naming "MX Bikes" is wrong half the time — but threading the active game
+ * through forty-odd `t()` calls would mean a placeholder rendering literally the first
+ * time someone adds a string and forgets. Mirrored outside React for the same reason the
+ * active locale is: the strings are read from plain helpers as well as components.
+ *
+ * Explicit vars always win, so a call site can still override.
+ */
+let ambientVars: TVars = {};
+
+export function setAmbientVars(vars: TVars): void {
+  ambientVars = vars;
+}
+
 function interpolate(str: string, vars?: TVars): string {
-  if (!vars) return str;
+  const all = vars ? { ...ambientVars, ...vars } : ambientVars;
   return str.replace(/\{\{(\w+)\}\}/g, (whole, name: string) =>
-    name in vars ? String(vars[name]) : whole,
+    name in all ? String(all[name]) : whole,
   );
 }
 

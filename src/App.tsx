@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import TitleBar from "./Components/TitleBar/TitleBar";
 import Dashboard from "./Components/Dashboard/Dashboard";
 import Setup from "./Components/Setup/Setup";
@@ -21,6 +21,7 @@ import {
 } from "./api/mods";
 import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
 import { useI18n } from "./i18n/context";
+import { setAmbientVars } from "./i18n/core";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "./types";
@@ -70,6 +71,13 @@ const App = () => {
 
   const activeGame =
     games.find((g) => g.id === (config?.activeGame ?? "mxb")) ?? MXB_FALLBACK;
+
+  // Every translated string can say `{{game}}` / `{{site}}` instead of naming one
+  // title — see `setAmbientVars`. Set as a layout effect so the first paint after a
+  // switch already reads right.
+  useLayoutEffect(() => {
+    setAmbientVars({ game: activeGame.display, site: activeGame.catalogDomain });
+  }, [activeGame]);
 
   // Carry the old webview-only flags into the config once, so an existing install
   // doesn't get shown the intro again the first time that storage is lost.

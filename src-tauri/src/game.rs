@@ -120,6 +120,10 @@ pub struct Caps {
     pub viewer: bool,
     /// The authenticated paid-content shop. mxbikes-shop.com is MX Bikes only.
     pub shop: bool,
+    /// The Manage view — parking mods in `mxbapp_disabled` to trim what the game loads.
+    /// Filesystem-only, so it *works* for any title; off for GP Bikes because it isn't
+    /// wanted there, not because it can't.
+    pub manage: bool,
 }
 
 pub struct GameProfile {
@@ -193,6 +197,7 @@ pub static MXB: GameProfile = GameProfile {
         instant_refresh: true,
         viewer: true,
         shop: true,
+        manage: true,
     },
 };
 
@@ -238,6 +243,7 @@ pub static GPB: GameProfile = GameProfile {
         instant_refresh: false,
         viewer: false,
         shop: false,
+        manage: false,
     },
 };
 
@@ -327,5 +333,6 @@ mod tests {
         assert!(!caps.frostmod, "FrostMod is an MX Bikes plugin");
         assert!(!caps.instant_refresh, "instant refresh pokes mxbikes.exe");
         assert!(!caps.shop, "mxbikes-shop.com is MX Bikes only");
+        assert!(!caps.manage, "Manage is MX Bikes only for now");
     }
 }

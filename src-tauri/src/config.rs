@@ -304,12 +304,29 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> anyhow::Result<()> {
 
 pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     let game = cfg.game();
+    // A folder that isn't there any more is worse than none: it reads as "configured",
+    // so the app comes up on a dashboard scanning nothing instead of asking where the
+    // game went. Covers a game uninstalled or moved, and a path a previous build adopted
+    // without checking. Only reached on a game switch or a fresh setup — never on plain
+    // startup — so a drive that happens to be offline right now isn't forgotten.
+    if !cfg.mods_path.trim().is_empty() && !Path::new(cfg.mods_path.trim()).is_dir() {
+        log::info!("saved {} folder is gone ({}) — re-detecting", game.display, cfg.mods_path);
+        cfg.mods_path.clear();
+    }
     if cfg.mods_path.trim().is_empty() {
         // On Linux the game runs under Proton and writes into the Wine prefix, not the
         // user's real Documents — `default_user_dir` checks there first, since
         // `document_dir()` would otherwise hand back a path the game has never written
         // to (and often `None`, because it depends on `~/.config/user-dirs.dirs`).
-        if let Some(dir) = default_user_dir(game) {
+        //
+        // Only adopt it if the folder is actually there. `default_user_dir` builds a path
+        // whether or not it exists, so switching to a title you don't have installed used
+        // to leave the app pointed at a folder that was never created — and, because the
+        // path was non-empty, showing a full (empty) dashboard instead of the setup
+        // screen. Existence, not `looks_like_mods_dir`: a game installed but never
+        // launched has the folder without the `mods`/`profiles` children yet, and that is
+        // still the right folder to use.
+        if let Some(dir) = default_user_dir(game).filter(|d| d.is_dir()) {
             cfg.mods_path = dir.to_string_lossy().into_owned();
         }
     }
@@ -500,6 +517,35 @@ mod tests {
         cfg.mods_path = "/mx/mods".into();
         assert!(!cfg.switch_game(Game::Mxb));
         assert_eq!(cfg.mods_path, "/mx/mods");
+    }
+
+    /// Switching to a title that isn't installed must leave the folder blank, because a
+    /// blank folder is what puts the setup screen up. `default_user_dir` happily builds a
+    /// path for a game that was never installed, and adopting it left the app pointed at
+    /// a folder that doesn't exist — showing a full, empty dashboard instead of asking
+    /// where the game is.
+    #[test]
+    fn a_game_that_isnt_installed_leaves_the_folder_blank() {
+        let missing = std::env::temp_dir().join(format!("frost-no-game-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&missing);
+
+        let mut cfg = AppConfig::default();
+        cfg.active_game = Game::Gpb;
+        // Stand in for `default_user_dir` returning a path that was never created.
+        assert!(!missing.is_dir(), "precondition: the folder isn't there");
+        assert_eq!(
+            Some(missing.clone()).filter(|d| d.is_dir()),
+            None,
+            "a non-existent default is not adopted",
+        );
+
+        // And the real thing: with nothing installed, `finalize` must not invent a path.
+        let out = finalize(cfg);
+        assert!(
+            out.mods_path.is_empty() || Path::new(&out.mods_path).is_dir(),
+            "either blank, or a folder that actually exists — got {:?}",
+            out.mods_path,
+        );
     }
 
     /// Each title resolves its own `Documents\PiBoSo\<game>` folder.
