@@ -97,11 +97,12 @@ export const MOD_TYPES: ModType[] = [
 
 export const DEFAULT_MOD_TYPE = MOD_TYPES[0];
 
-/** Normalize a mod title or filename for fuzzy "already installed" matching. */
+/** Normalize a mod title or filename into a comparison key. `.pnt` is in the list
+ *  because paints and liveries are installed files too — see `lib/installedMatch`. */
 export function normalizeModName(s: string): string {
   return s
     .toLowerCase()
-    .replace(/\.(pkz|zip|rar|7z)$/i, "")
+    .replace(/\.(pkz|zip|rar|7z|pnt)$/i, "")
     .replace(/[^a-z0-9]+/g, "");
 }
 

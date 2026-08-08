@@ -20,6 +20,17 @@
   old model. Model and sound swaps now report separately, and the model note reflects
   what actually happened: refreshing now, FrostMod not running, or instant refresh off.
 ### Fixed
+- **Browse knows what you already have.** The "Installed" badge almost never appeared —
+  one reporter's library scored 19 of 96 tracks and **0 of 96** bikes and rider items,
+  all of them installed and working in-game. Two causes. Browse asked for installed mods
+  with a scan that keeps `.pkz` files only, so extracted track folders and every `.pnt`
+  paint were invisible; since the Bikes and Rider categories are mostly liveries and gear
+  paints, nothing in them could ever be badged. And it compared the site's post title to
+  the packaged filename as exact strings, which post titles never survive — they carry
+  author credits, release tags and notes like "(READ INSTRUCTIONS)". Browse now reads the
+  same full library scan the Library tab uses, and matches titles the way a person would:
+  one name spelled inside the other, or enough distinctive words in common. Careful
+  enough to still tell two colourways of the same bike apart. (#26)
 - **Presets no longer comes up blank when your mods folder lives somewhere else.**
   `mxbikes.ini` lets you point the mods folder at another drive, but the game has no
   equivalent redirect for profiles — it keeps writing those to
