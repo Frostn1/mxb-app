@@ -1,0 +1,172 @@
+{
+  "schema": 3,
+  "generated": "2026-08-07T22:05:45+00:00",
+  "generated_ts": 1786140345,
+  "site": "https://mxbikes-shop.com",
+  "currency": "USD",
+  "count": 11,
+  "some_future_top_level_field": { "we": "must ignore this" },
+  "categories": [
+    {
+      "id": 10,
+      "name": "Bikes",
+      "slug": "bikes",
+      "children": [
+        { "id": 11, "name": "250cc", "slug": "250cc" },
+        { "id": 12, "name": "450cc", "slug": "450cc" }
+      ]
+    },
+    { "id": 20, "name": "Tracks", "slug": "tracks" },
+    { "id": 30, "name": "Paints", "slug": "paints" }
+  ],
+  "mods": [
+    {
+      "id": 101,
+      "name": "Alpha Supercross Pack",
+      "url": "https://mxbikes-shop.com/downloads/alpha-supercross-pack/",
+      "image": "https://mxbikes-shop.com/img/101.jpg",
+      "author": "Niko",
+      "author_url": "https://mxbikes-shop.com/creator/niko/",
+      "categories": [{ "name": "Tracks", "slug": "tracks" }],
+      "price": 22.5,
+      "price_max": null,
+      "sale_price": 11.25,
+      "sale_price_max": null,
+      "free": false,
+      "sale_start": 1785000000,
+      "sale_end": 1790000000,
+      "updated": "2026-07-01T10:00:00+00:00",
+      "published": "2026-01-15T10:00:00+00:00"
+    },
+    {
+      "id": 102,
+      "name": "Bravo Expired Sale Track",
+      "url": "https://mxbikes-shop.com/downloads/bravo/",
+      "image": "https://mxbikes-shop.com/img/102.jpg",
+      "author": "Niko",
+      "categories": [{ "name": "Tracks", "slug": "tracks" }],
+      "price": 20.0,
+      "sale_price": 5.0,
+      "free": false,
+      "sale_start": 1780000000,
+      "sale_end": 1785000000,
+      "updated": 1783000000,
+      "published": 1780000000
+    },
+    {
+      "id": 103,
+      "name": "Charlie Future Sale Bike",
+      "url": "https://mxbikes-shop.com/downloads/charlie/",
+      "image": "https://mxbikes-shop.com/img/103.jpg",
+      "author": "Mouk",
+      "categories": [{ "name": "250cc", "slug": "250cc" }],
+      "price": 30.0,
+      "sale_price": 15.0,
+      "free": false,
+      "sale_start": 1790000000,
+      "sale_end": 1795000000,
+      "updated": 1784000000,
+      "published": 1781000000
+    },
+    {
+      "id": 104,
+      "name": "Delta Paint Options",
+      "url": "https://mxbikes-shop.com/downloads/delta/",
+      "image": "https://mxbikes-shop.com/img/104.jpg",
+      "author": "Mouk",
+      "categories": [{ "name": "Paints", "slug": "paints" }],
+      "price": 8,
+      "price_max": 14,
+      "sale_price": null,
+      "sale_price_max": null,
+      "free": false,
+      "updated": 1785500000,
+      "published": 1782000000
+    },
+    {
+      "id": 105,
+      "name": "Echo Paint Plus PSD",
+      "url": "https://mxbikes-shop.com/downloads/echo/",
+      "image": "https://mxbikes-shop.com/img/105.jpg",
+      "author": "Mouk",
+      "categories": [
+        { "name": "Paints", "slug": "paints" },
+        { "name": "450cc", "slug": "450cc" }
+      ],
+      "price": 10.0,
+      "price_max": 20.0,
+      "sale_price": 7.5,
+      "sale_price_max": 15.0,
+      "free": false,
+      "updated": 1786000000,
+      "published": 1783500000
+    },
+    {
+      "id": 106,
+      "name": "Foxtrot Stringly Priced",
+      "url": "https://mxbikes-shop.com/downloads/foxtrot/",
+      "image": "https://mxbikes-shop.com/img/106.jpg",
+      "author": "Yamaha YZ-250 Fan",
+      "categories": ["250cc"],
+      "price": "$24.99",
+      "sale_price": "19.99",
+      "free": false,
+      "updated": "2026-06-01 09:30:00",
+      "published": "2026-02-01"
+    },
+    {
+      "id": 107,
+      "name": "Golf No Image",
+      "url": "http://mxbikes-shop.com/insecure/",
+      "author_url": "https://evil.example.com/creator/",
+      "categories": [{ "id": 12, "name": "450cc" }],
+      "price": 5.0,
+      "free": false,
+      "updated": 1786100000,
+      "published": 1784500000
+    },
+    {
+      "id": 108,
+      "name": "Hotel Bare Minimum"
+    },
+    {
+      "name": "India Has No Id"
+    },
+    {
+      "id": 110,
+      "name": "Juliett Unknown Fields",
+      "url": "https://mxbikes-shop.com/downloads/juliett/",
+      "image": "https://mxbikes-shop.com/img/110.jpg",
+      "categories": [{ "name": "Tracks", "slug": "tracks" }],
+      "price": 12.0,
+      "free": false,
+      "updated": 1786120000,
+      "published": 1785900000,
+      "bundle_contents": ["a", "b"],
+      "vendor_rating": 4.8,
+      "description": "<p>Great track.</p><script>alert('xss')</script><a href=\"javascript:alert(1)\" onclick=\"steal()\">click</a>"
+    },
+    {
+      "id": 111,
+      "name": "Kilo Free Track",
+      "url": "https://mxbikes-shop.com/downloads/kilo/",
+      "image": "https://mxbikes-shop.com/img/111.jpg",
+      "price": 0,
+      "sale_price": null,
+      "free": true,
+      "updated": 1786110000,
+      "published": 1785000000
+    },
+    {
+      "id": 112,
+      "name": "Lima Hundred Percent Off",
+      "url": "https://mxbikes-shop.com/downloads/lima/",
+      "image": "https://mxbikes-shop.com/img/112.jpg",
+      "price": 6.0,
+      "sale_price": 0,
+      "free": false,
+      "updated": 1786130000,
+      "published": 1785800000
+    }
+  ]
+}

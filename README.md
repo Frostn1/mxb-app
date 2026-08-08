@@ -93,6 +93,31 @@ cargo test           # unit tests (REST/HTML parsing, download resolution)
 > Windows workflow. The cross-platform download/extract logic can be built and
 > tested on any OS.
 
+### Building with the shop catalog
+
+The **Shop** tab browses the [mxbikes-shop.com](https://mxbikes-shop.com) catalog, which
+needs an API credential supplied by the store. Copy the example file and fill it in:
+
+```sh
+cp .env.local.example .env.local   # gitignored; never commit it
+```
+
+The store authenticates with a single custom header, so `MXB_SHOP_API_HEADER` is the header's
+*name* and `MXB_SHOP_API_KEY` is its value.
+
+`src-tauri/build.rs` reads the file at compile time and bakes the values into the Rust binary
+— they are deliberately not Vite env vars, which get inlined into the JS bundle and would
+ship the key to anyone who unzips the app. Setting the same names in the environment
+overrides the file, which is how CI supplies them.
+
+**Building without it is fully supported**: the Shop tab simply doesn't appear, and nothing
+else changes. That's what forks build. Official releases get the values from the
+`MXB_SHOP_API_HEADER` and `MXB_SHOP_API_KEY` repository secrets — **without those secrets,
+released builds ship with no Shop tab.**
+
+The catalog is browse-only: it shows what the store sells and links out to the product page.
+Buying and downloading happen on the store's own site.
+
 ## Releases
 
 Releases are built in CI by

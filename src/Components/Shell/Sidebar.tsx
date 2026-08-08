@@ -11,6 +11,7 @@ import {
   Loader2,
   Gamepad2,
   SlidersHorizontal,
+  Store,
   Server as ServerIcon,
   Plug,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
 import { experimentalState, launchGame } from "../../api/mods";
+import { shopCatalogAvailable } from "../../api/shop";
 import { useGameRunning } from "../../lib/useGameRunning";
 import JoinServerDialog from "./JoinServerDialog";
 
@@ -40,9 +42,10 @@ interface SidebarProps {
   onNavigate: (view: DashboardView) => void;
 }
 
-const NAV: { id: DashboardView; label: TKey; icon: typeof Home }[] = [
+type NavEntry = { id: DashboardView; label: TKey; icon: typeof Home };
+
+const NAV: NavEntry[] = [
   { id: "browse", label: "nav.browse", icon: Home },
-  // { id: "shop", label: "nav.shop", icon: Store }, // hidden for now
   { id: "library", label: "nav.library", icon: LibraryIcon },
   { id: "locker", label: "nav.locker", icon: Bike },
   { id: "presets", label: "nav.presets", icon: Shirt },
@@ -50,8 +53,18 @@ const NAV: { id: DashboardView; label: TKey; icon: typeof Home }[] = [
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal },
 ];
 
+/**
+ * The shop catalog needs an API credential baked in at build time, and builds without one
+ * (forks, and CI runs with no repo secret) simply can't reach it. Those get no Shop entry at
+ * all rather than a permanently-greyed row no user action could ever fix.
+ *
+ * Sits second, next to Browse, because it is the other catalog — unlike the experimental
+ * entry below, which is appended.
+ */
+const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store };
+
 /** Shown only when the experimental features are on — see `settings.experimental`. */
-const EXPERIMENTAL_NAV: { id: DashboardView; label: TKey; icon: typeof Home } = {
+const EXPERIMENTAL_NAV: NavEntry = {
   id: "servers",
   label: "nav.servers",
   icon: ServerIcon,
@@ -78,6 +91,25 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       .then((s) => setExperimental(s.enabled))
       .catch(() => {});
   }, [view]);
+
+  // Asked once per mount. It's a compile-time fact on the Rust side, so it can't change
+  // under us; the state is only here because the answer arrives over IPC.
+  const [shopAvailable, setShopAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    shopCatalogAvailable()
+      .then((ok) => !cancelled && setShopAvailable(ok))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // Two independent gates: the shop needs a build-time credential, servers needs the
+  // experimental toggle. Built here rather than inline so the JSX stays one `.map`.
+  const nav = [
+    ...(shopAvailable ? [NAV[0], SHOP_ENTRY, ...NAV.slice(1)] : NAV),
+    ...(experimental ? [EXPERIMENTAL_NAV] : []),
+  ];
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -127,7 +159,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex flex-col gap-0.5">
-        {(experimental ? [...NAV, EXPERIMENTAL_NAV] : NAV).map(({ id, label, icon: Icon }) => {
+        {nav.map(({ id, label, icon: Icon }) => {
           const activeNav = view === id;
           return (
             <button

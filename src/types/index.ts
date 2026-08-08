@@ -551,3 +551,97 @@ export type SlotSource =
   | "ridingStyle" // mx / sm
   | "tyres" // tyre models
   | "font"; // number-plate / suit fonts (free text)
+
+// ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
+//
+// Mirrors the serde output of `src-tauri/src/mods/shop_catalog.rs`. Browse-only: there is
+// deliberately no download URL here, because buying happens on the store's own site.
+//
+// Note these do NOT extend `ModSummary`. A shop item has no slug, no single category id and
+// no post date, and `ShopItem` (above) already shows what forcing that shape costs.
+
+/** What an item costs now, and what it costs normally. */
+export interface ShopPrice {
+  /** The normal price; the low end of the range when `hasRange`. */
+  base: number | null;
+  /** The high end of the normal range. Null when the item has a single option. */
+  baseMax: number | null;
+  /** The discounted price — only ever set when `onSale`. */
+  sale: number | null;
+  saleMax: number | null;
+  /** A sale price exists *and* the clock is inside its window. */
+  onSale: boolean;
+  /** Several options (e.g. a paint, or a paint plus the PSD), so show a range. */
+  hasRange: boolean;
+  /**
+   * The store gives this away. Distinct from a price of 0 — a pay-what-you-want item starts
+   * at 0 without being free, and "$0.00" reads as broken where "Free" doesn't.
+   */
+  free: boolean;
+  /** Whole percent off, rounded down. */
+  discountPct: number | null;
+  /** Unix seconds. Only set when the dump really carries a window — never invent one. */
+  saleEnds: number | null;
+}
+
+export interface ShopMod {
+  id: number;
+  title: string;
+  /** The product page. Null means the URL failed origin checks — hide the Buy button. */
+  url: string | null;
+  image: string | null;
+  author: string | null;
+  authorUrl: string | null;
+  categoryIds: number[];
+  categoryNames: string[];
+  /** Unix seconds. */
+  updated: number | null;
+  price: ShopPrice;
+}
+
+export interface ShopModDetail extends ShopMod {
+  /** Already sanitised in Rust. */
+  descriptionHtml: string | null;
+  images: string[];
+}
+
+export interface ShopCategory {
+  id: number;
+  name: string;
+  slug: string;
+  parent: number | null;
+  /** 0 for top level, so the UI can indent without walking the tree. */
+  depth: number;
+  /** Items in this category and its descendants — what picking it actually selects. */
+  count: number;
+}
+
+export interface ShopPage {
+  items: ShopMod[];
+  total: number;
+  hasMore: boolean;
+  currency: string;
+  generatedTs: number | null;
+  stale: boolean;
+}
+
+export interface ShopStatus {
+  /** This build has a shop credential. False hides the Shop tab entirely. */
+  available: boolean;
+  count: number;
+  currency: string;
+  generatedTs: number | null;
+  fetchedAt: number | null;
+  stale: boolean;
+  /** Old enough that the prices shouldn't be presented quietly. */
+  veryStale: boolean;
+  error: string | null;
+}
+
+export type ShopSort =
+  | "newest"
+  | "recentlyUpdated"
+  | "priceAsc"
+  | "priceDesc"
+  | "onSale"
+  | "nameAsc";

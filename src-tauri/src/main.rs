@@ -11,6 +11,7 @@ mod edf;
 mod frostmod;
 mod frostmod_manage;
 mod gameproc;
+mod imgcache;
 mod install;
 mod library;
 mod lru;
@@ -28,6 +29,8 @@ mod sidecar;
 mod presets;
 mod paintsync;
 mod servers;
+mod shop_catalog_session;
+mod shop_credentials;
 mod shop_session;
 mod soundmods;
 mod texstore;
@@ -208,6 +211,69 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 #[tauri::command]
 async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
     with_clearance(&app, "mod detail", || MxbModsSource.detail(&slug)).await
+}
+
+// ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
+//
+// Browsing only. Nothing here installs or buys — the frontend opens the product page in
+// the user's own browser. See `mods::shop_catalog`.
+
+/// Whether this build has a shop credential at all. False hides the Shop tab entirely,
+/// which is what forks and credential-less CI builds get.
+#[tauri::command]
+fn shop_catalog_available() -> bool {
+    mods::shop_catalog::available()
+}
+
+/// Cheap and synchronous — it reports on what's already loaded and never fetches, so the
+/// UI can poll it without cost.
+#[tauri::command]
+fn shop_catalog_status(app: tauri::AppHandle) -> mods::shop_catalog::ShopStatus {
+    mods::shop_catalog::status(&app)
+}
+
+#[tauri::command]
+async fn shop_catalog_categories(
+    app: tauri::AppHandle,
+) -> Result<Vec<mods::shop_catalog::ShopCategory>, String> {
+    mods::shop_catalog::categories(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn shop_catalog_search(
+    app: tauri::AppHandle,
+    query: String,
+    category_id: Option<u64>,
+    page: u32,
+    sort: mods::shop_catalog::ShopSort,
+    on_sale_only: bool,
+) -> Result<mods::shop_catalog::ShopPage, String> {
+    mods::shop_catalog::search(&app, &query, category_id, page, sort, on_sale_only)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn shop_catalog_detail(
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<mods::shop_catalog::ShopModDetail, String> {
+    mods::shop_catalog::detail(&app, id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Ignores the cache age and any `ETag` we hold — "Refresh" has to mean refresh, not
+/// "ask politely and accept a 304".
+#[tauri::command]
+async fn shop_catalog_refresh(
+    app: tauri::AppHandle,
+) -> Result<mods::shop_catalog::ShopStatus, String> {
+    mods::shop_catalog::force_refresh(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -3170,6 +3236,17 @@ fn log_level() -> log::LevelFilter {
 
 fn main() {
     tauri::Builder::default()
+        // Thumbnails for both catalogs, served from a disk cache instead of refetched on
+        // every scroll. Registered here rather than per-window so the overlay — which
+        // renders the same `ModCard` — gets it too.
+        //
+        // Asynchronous, so a cache miss that has to reach the origin never blocks the
+        // webview's protocol thread.
+        //
+        // A URI scheme is not a permission subject, so no capability file changes with this.
+        // If a CSP is ever enabled in `tauri.conf.json` (currently `null`), it must allow
+        // `img-src imgcache: http://imgcache.localhost` or every thumbnail goes blank.
+        .register_asynchronous_uri_scheme_protocol(imgcache::SCHEME, imgcache::handle)
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level())
@@ -3278,7 +3355,9 @@ fn main() {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
             shop_session::load_session(handle);
+            shop_catalog_session::load(handle);
             mxb_session::load(handle);
+            imgcache::start_maintenance(handle);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
@@ -3400,6 +3479,12 @@ fn main() {
             shop_logout,
             shop_my_downloads,
             shop_install,
+            shop_catalog_available,
+            shop_catalog_status,
+            shop_catalog_categories,
+            shop_catalog_search,
+            shop_catalog_detail,
+            shop_catalog_refresh,
             presets_list_profiles,
             presets_list_bikes,
             presets_read_loadout,
