@@ -146,6 +146,8 @@ export const ptBR: Translation = {
     "“{{label}}” aplicado em {{bike}} — salvo. Selecione seu perfil de novo no MX Bikes (menu Profile) para carregar o novo visual.",
   "presets.appliedNextTime":
     "“{{label}}” aplicado em {{bike}} — salvo. Carrega na próxima vez que o jogo abrir.",
+  "presets.appliedReselectBike":
+    "“{{label}}” aplicado em {{bike}} — as pinturas já estão valendo; selecione a moto de novo no MX Bikes para ver o modelo.",
   "presets.phaseBundling": "Empacotando os arquivos…",
   "presets.phaseUploading": "Enviando o pacote…",
   "presets.phaseDownloading": "Baixando o pacote…",
@@ -672,8 +674,8 @@ export const ptBR: Translation = {
     "Atualizando no jogo — se for a moto que você tem selecionada, ela muda agora.",
   "locker.modelFrostmodNotRunning":
     "Rode o FrostMod para ver as trocas de modelo ao vivo — por enquanto, selecione a moto de novo no jogo.",
-  "locker.modelFrostmodTooOld":
-    "Atualize o FrostMod para ver as trocas de modelo ao vivo — por enquanto, selecione a moto de novo no jogo.",
+  "locker.modelReselectBike":
+    "Modelo trocado — selecione a moto de novo no MX Bikes para vê-lo.",
   "locker.modelFrostmodUnreachable":
     "Não deu pra falar com o FrostMod — selecione a moto de novo no jogo para carregar.",
   "locker.modelRefreshWindowsOnly":

@@ -140,6 +140,8 @@ export const en = {
     "Applied “{{label}}” to {{bike}} — saved. Reselect your profile in MX Bikes (Profile menu) to load the new look.",
   "presets.appliedNextTime":
     "Applied “{{label}}” to {{bike}} — saved. It loads next time the game opens.",
+  "presets.appliedReselectBike":
+    "Applied “{{label}}” to {{bike}} — the paints are live; reselect the bike in MX Bikes to see the model.",
   // Share / import.
   "presets.phaseBundling": "Packaging assets…",
   "presets.phaseUploading": "Uploading bundle…",
@@ -652,8 +654,8 @@ export const en = {
     "Refreshing in-game — if it's your selected bike, it changes now.",
   "locker.modelFrostmodNotRunning":
     "Run FrostMod to see model swaps live — for now, reselect the bike in-game.",
-  "locker.modelFrostmodTooOld":
-    "Update FrostMod to see model swaps live — for now, reselect the bike in-game.",
+  "locker.modelReselectBike":
+    "Model swapped — reselect the bike in MX Bikes to see it.",
   "locker.modelFrostmodUnreachable":
     "Couldn't reach FrostMod — reselect the bike in-game to load it.",
   "locker.modelRefreshWindowsOnly":
