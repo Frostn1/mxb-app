@@ -83,6 +83,23 @@ fn rel_dest(type_folder: &str, e: &LibraryEntry) -> String {
 }
 
 pub fn plan(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
+    let mut p = resolve(cfg, loadout)?;
+    dedup_assets(&mut p.assets);
+    p.total_size = p.assets.iter().map(|a| a.size).sum();
+    Ok(p)
+}
+
+/// The same resolution as [`plan`], with every asset still addressed in its own right.
+///
+/// [`plan`] collapses an asset into the folder that already contains it, because a zip that
+/// carries `rider/helmets/AGV` carries the liveries under it for free. Manage needs the
+/// opposite: it keeps that helmet by moving nothing at all, and decides livery by livery
+/// which ones the game still gets to offer — so the paint has to be named, not implied.
+pub fn plan_detailed(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
+    resolve(cfg, loadout)
+}
+
+fn resolve(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
     let bikes = library::scan_library(&cfg.mods_path, "mods/bikes", &[]).unwrap_or_default();
     let rider = library::scan_library(&cfg.mods_path, "mods/rider", &[]).unwrap_or_default();
     let tyres = library::scan_library(&cfg.mods_path, "mods/tyres", &[]).unwrap_or_default();
@@ -166,8 +183,6 @@ pub fn plan(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
             });
         }
     }
-
-    dedup_assets(&mut assets);
 
     let total_size = assets.iter().map(|a| a.size).sum();
     Ok(BundlePlan { assets, unresolved, total_size })
