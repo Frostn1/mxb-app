@@ -15,6 +15,7 @@ import type {
   LibraryEntry,
   Loadout,
   ModDetail,
+  ModRating,
   ModSummary,
   PkzMeta,
   PaintTexture,
@@ -150,6 +151,12 @@ export function searchMods(
 
 export function getModDetail(slug: string): Promise<ModDetail> {
   return invoke<ModDetail>("get_mod_detail", { slug });
+}
+
+/** Community scores for the given post ids, keyed by id. Ids the site didn't answer for
+ *  are absent — ratings decorate a card, so a miss shows no stars rather than an error. */
+export function getModRatings(ids: number[]): Promise<Record<string, ModRating>> {
+  return invoke<Record<string, ModRating>>("get_mod_ratings", { ids });
 }
 
 export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {

@@ -30,7 +30,7 @@ use frostmod_manage::{FrostmodProcess, FrostmodStatus};
 use library::InstalledMod;
 use modwatch::ModWatcher;
 use mods::mxb::MxbModsSource;
-use mods::{ModDetail, ModSource, ModSummary};
+use mods::{ModDetail, ModRating, ModSource, ModSummary};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -83,6 +83,13 @@ async fn search_mods(
         .search(&query, category_id, page)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+/// Community scores for the mods currently on screen, keyed by post id. Ids the site
+/// wouldn't answer for are left out rather than erroring — the cards just show no stars.
+#[tauri::command]
+async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRating> {
+    mods::mxb::ratings(&ids).await
 }
 
 #[tauri::command]
@@ -1970,6 +1977,7 @@ fn main() {
             app_platform,
             search_mods,
             get_mod_detail,
+            get_mod_ratings,
             get_installed_mods,
             scan_library,
             get_pkz_meta_cached,
