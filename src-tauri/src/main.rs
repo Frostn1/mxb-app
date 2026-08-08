@@ -1561,6 +1561,21 @@ fn frostmod_running() -> bool {
     frostmod::is_running()
 }
 
+/// Start MX Bikes from the Play button in the sidebar.
+#[tauri::command]
+fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String> {
+    // `load_or_detect`, not `load`: a missing config file shouldn't turn Play into an
+    // error when the install is sitting exactly where the detector looks.
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
+#[tauri::command]
+fn game_running() -> bool {
+    gameproc::is_game_running()
+}
+
 /// Installed bikes with their class, for the garage bike-switch UI. The frontend
 /// filters this to the current race's class before offering a swap.
 #[tauri::command]
@@ -2055,6 +2070,8 @@ fn main() {
             frostmod_install,
             frostmod_start,
             frostmod_stop,
+            launch_game,
+            game_running,
             shop_login,
             shop_status,
             shop_logout,

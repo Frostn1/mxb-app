@@ -1,11 +1,12 @@
 use serde::Serialize;
 
+use crate::config::AppConfig;
+
 /// Customization loader `fcn.1400ecd00` minus PE image base `0x140000000`.
 #[cfg(windows)]
 const LOADER_OFFSET: usize = 0x000e_cd00;
 
 /// The game's main executable (matched case-insensitively).
-#[cfg(windows)]
 const GAME_EXE: &str = "mxbikes.exe";
 
 // Non-Windows builds only construct `Unsupported`/`Disabled`.
@@ -227,4 +228,144 @@ pub fn is_game_running() -> bool {
 #[cfg(not(windows))]
 pub fn refresh_look() -> LiveRefresh {
     LiveRefresh::Unsupported
+}
+
+/// What happened when the user pressed Play.
+// macOS dev builds only ever construct `AlreadyRunning` (the launch bails first).
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchOutcome {
+    /// We started the game.
+    Launched,
+    /// MX Bikes was already up — we left it alone rather than spawning a second copy.
+    AlreadyRunning,
+}
+
+/// The MX Bikes install folder and its `mxbikes.exe`, for launching.
+///
+/// Falls back to Steam detection when `gamePath` is blank: the setting only ever gets
+/// filled by that same detector, so an install we can find is one we can launch even if
+/// the config predates the setting.
+fn resolve_exe(cfg: &AppConfig) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let dir = match cfg.game_path.trim() {
+        "" => crate::config::detect_game_path().ok_or_else(|| {
+            anyhow::anyhow!(
+                "MX Bikes install folder isn't set — set it in Settings, under MX Bikes install folder."
+            )
+        })?,
+        p => p.to_string(),
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let exe = crate::library::resolve_child(&dir, GAME_EXE);
+    if !exe.is_file() {
+        anyhow::bail!(
+            "Couldn't find {GAME_EXE} in {} — check the MX Bikes install folder in Settings.",
+            dir.display()
+        );
+    }
+    Ok((dir, exe))
+}
+
+/// Start MX Bikes, unless it's already running.
+///
+/// Windows runs the exe directly rather than going through `steam://`: that works for
+/// standalone (non-Steam) copies too, and doesn't need Steam to be up. Under Proton the
+/// exe isn't ours to spawn — Steam has to set up the prefix — so Linux hands the Steam
+/// URL to the desktop instead.
+pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
+    if is_game_running() {
+        return Ok(LaunchOutcome::AlreadyRunning);
+    }
+    let (dir, exe) = resolve_exe(cfg)?;
+    log::info!("launching MX Bikes: {}", exe.display());
+
+    #[cfg(windows)]
+    {
+        // No CREATE_NO_WINDOW here (unlike the headless FrostMod child) — the game
+        // draws its own window and hiding the console would gain nothing.
+        std::process::Command::new(&exe)
+            .current_dir(&dir)
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("Couldn't start {}: {e}", exe.display()))?;
+        Ok(LaunchOutcome::Launched)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = dir;
+        let url = format!("steam://rungameid/{}", crate::config::MX_BIKES_APPID);
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("Couldn't ask Steam to launch MX Bikes ({url}): {e}"))?;
+        Ok(LaunchOutcome::Launched)
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = dir;
+        anyhow::bail!("Launching MX Bikes is supported on Windows and Linux only")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("frost-launch-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn finds_the_exe_in_the_configured_folder() {
+        let dir = temp_dir("found");
+        std::fs::write(dir.join(GAME_EXE), b"stub").unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.game_path = dir.to_string_lossy().into_owned();
+        let (found_dir, exe) = resolve_exe(&cfg).expect("a folder holding mxbikes.exe launches");
+        assert_eq!(found_dir, dir);
+        assert_eq!(exe, dir.join(GAME_EXE));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Proton installs on a case-sensitive filesystem can hold `MXBikes.exe`; an exact
+    /// match would call a perfectly good install missing.
+    #[test]
+    fn matches_the_exe_case_insensitively() {
+        let dir = temp_dir("case");
+        std::fs::write(dir.join("MXBikes.exe"), b"stub").unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.game_path = dir.to_string_lossy().into_owned();
+        // The name it comes back under depends on the host filesystem's case rules
+        // (macOS resolves the exact join); what matters is that it resolves at all.
+        let (_, exe) = resolve_exe(&cfg).expect("a differently-cased exe still resolves");
+        assert!(exe
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(GAME_EXE));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_folder_without_the_exe_says_where_to_fix_it() {
+        let dir = temp_dir("empty");
+
+        let mut cfg = AppConfig::default();
+        cfg.game_path = dir.to_string_lossy().into_owned();
+        let err = resolve_exe(&cfg).expect_err("no exe means no launch");
+        let msg = format!("{err:#}");
+        assert!(msg.contains(GAME_EXE), "names what's missing: {msg}");
+        assert!(msg.contains("Settings"), "points at the fix: {msg}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

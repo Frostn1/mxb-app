@@ -12,6 +12,7 @@ import type {
   FrostmodStatus,
   InstalledMod,
   InstallProgress,
+  LaunchOutcome,
   LibraryEntry,
   Loadout,
   ModDetail,
@@ -703,6 +704,16 @@ export function reloadFrostmod(): Promise<ReloadOutcome> {
 /** Is FrostMod currently running on this PC? */
 export function isFrostmodRunning(): Promise<boolean> {
   return invoke<boolean>("frostmod_running");
+}
+
+/** Start MX Bikes. Resolves to `already_running` when the game is already up. */
+export function launchGame(): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("launch_game");
+}
+
+/** Is MX Bikes currently running? Always false off Windows — the probe is Win32-only. */
+export function isGameRunning(): Promise<boolean> {
+  return invoke<boolean>("game_running");
 }
 
 /** Install/version/running snapshot (hits GitHub for the latest tag). */

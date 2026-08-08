@@ -195,8 +195,9 @@ pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     cfg
 }
 
-/// MX Bikes' Steam AppID — names its Proton prefix under `steamapps/compatdata`.
-const MX_BIKES_APPID: &str = "655500";
+/// MX Bikes' Steam AppID — names its Proton prefix under `steamapps/compatdata`, and
+/// addresses the game in the `steam://rungameid/…` URL the Linux launcher uses.
+pub const MX_BIKES_APPID: &str = "655500";
 
 /// The MX Bikes user folder inside a Proton prefix.
 ///
