@@ -7,6 +7,7 @@ mod bundle;
 mod cfg;
 mod config;
 mod cookie_session;
+mod dropzone;
 mod edf;
 mod frostmod;
 mod frostmod_manage;
@@ -2288,6 +2289,95 @@ async fn import_file(
     .map_err(|e| format!("import_file task failed: {e}"))?
 }
 
+/// Stage and classify dropped paths. Reads only — nothing is installed until `commit_drop`.
+#[tauri::command]
+async fn plan_drop(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<dropzone::DropPlan, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        dropzone::plan(&cfg.mods_path, &paths).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("plan_drop task failed: {e}"))?
+}
+
+/// Re-cost one row after the user picked a different destination.
+#[tauri::command]
+async fn repreview_drop(
+    app: tauri::AppHandle,
+    plan_id: String,
+    item_id: String,
+    subpath: String,
+    dest_folder: String,
+) -> Result<DropPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let (file_count, bytes, collisions) =
+            dropzone::repreview(&cfg.mods_path, &plan_id, &item_id, &subpath, &dest_folder)
+                .map_err(|e| format!("{e:#}"))?;
+        Ok(DropPreview {
+            file_count,
+            bytes,
+            collisions,
+        })
+    })
+    .await
+    .map_err(|e| format!("repreview_drop task failed: {e}"))?
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DropPreview {
+    file_count: usize,
+    bytes: u64,
+    collisions: Vec<String>,
+}
+
+/// Install the reviewed rows.
+#[tauri::command]
+async fn commit_drop(
+    app: tauri::AppHandle,
+    plan_id: String,
+    items: Vec<dropzone::CommitItem>,
+) -> Result<dropzone::CommitOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let outcome =
+            dropzone::commit(&cfg.mods_path, &plan_id, &items).map_err(|e| format!("{e:#}"))?;
+
+        // Record which bikes gained a sound set, so the Library can tell them from stock.
+        let ok: Vec<String> = outcome.installed.iter().map(|i| i.id.clone()).collect();
+        let bikes = dropzone::sound_bikes(&plan_id, &ok);
+        if !bikes.is_empty() {
+            if let Ok(dir) = app.path().app_local_data_dir() {
+                let _ = soundmods::record(&dir, &bikes, "drop");
+            }
+        }
+
+        dropzone::cancel(&plan_id);
+
+        // One signal for the whole drop: `notify_frostmod` also emits `frostmod-reload`,
+        // which every library scanner listens to — firing it per item would re-run them all
+        // N times for a single user action.
+        if !outcome.installed.is_empty() {
+            install::notify_frostmod(&app, "drop");
+        }
+        Ok(outcome)
+    })
+    .await
+    .map_err(|e| format!("commit_drop task failed: {e}"))?
+}
+
+/// Discard a plan the user dismissed, deleting anything staged for it.
+#[tauri::command]
+async fn cancel_drop(plan_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || dropzone::cancel(&plan_id))
+        .await
+        .map_err(|e| format!("cancel_drop task failed: {e}"))
+}
+
 #[tauri::command]
 async fn move_mod(
     app: tauri::AppHandle,
@@ -3431,6 +3521,10 @@ fn main() {
             repair_orphaned_setup,
             add_to_library,
             import_file,
+            plan_drop,
+            repreview_drop,
+            commit_drop,
+            cancel_drop,
             move_mod,
             uninstall_mod,
             reveal_in_explorer,

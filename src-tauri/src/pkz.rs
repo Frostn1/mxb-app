@@ -618,6 +618,29 @@ pub fn read_selected(
     bail!("unsupported .pkz (can't read) for {path:?}");
 }
 
+/// Just the entry names — no payload is inflated and no preview image is decoded.
+///
+/// "What kind of thing is this?" is answerable from the file list alone, and answering it
+/// that way is the difference between a dropped 400 MB track being identified instantly and
+/// the window sitting still while its preview art is decoded and rescaled. The name-collecting
+/// `keep` closure always returns `false`, so the archive is walked but nothing is read out.
+pub fn entry_names(path: &Path) -> Result<Vec<String>> {
+    if is_plain_zip(path) {
+        let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
+        let mut archive =
+            zip::ZipArchive::new(file).with_context(|| format!("open zip {path:?}"))?;
+        return Ok((0..archive.len())
+            .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().replace('\\', "/")))
+            .collect());
+    }
+    let names = std::cell::RefCell::new(Vec::new());
+    read_selected(path, |n| {
+        names.borrow_mut().push(n.replace('\\', "/"));
+        false
+    })?;
+    Ok(names.into_inner())
+}
+
 pub fn read_entry(path: &Path, file_name: &str) -> Result<Option<Vec<u8>>> {
     if is_plain_zip(path) {
         let file = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
