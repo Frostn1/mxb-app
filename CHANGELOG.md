@@ -1,5 +1,78 @@
 # Changelog
 
+## 2026-08-08 — GP Bikes support
+
+### Added
+- **The app now drives GP Bikes as well as MX Bikes.** First launch asks which game you're
+  setting up before anything else, and the game picker lives in Settings from then on;
+  picking a title points the whole app — Library, Manage, Presets, Browse and the
+  Play button — at that game's folders. The sidebar shows which game you're on. The two
+  games keep their folders separately, so
+  switching back and forth never asks you to find them again, and a game you open for the
+  first time has its folders auto-detected (`Documents\PiBoSo\GP Bikes`, and the Steam
+  install under AppID 848050) exactly as first-run setup does. Switching to a game the app
+  can't locate lands you on the setup screen, with the switcher still there to get back.
+- **GP Bikes' mods tree is read as its own shape.** GP keeps `bikes`, `tracks`, `tyres`,
+  `misc` and a `rider` folder laid out differently from MX Bikes': helmets and riding-style
+  `animations`, with boots, gloves and protection baked into the rider model rather than
+  picked separately. The Library lists riding styles as their own category and no longer
+  offers goggles, boots or protection for a game that has no concept of them.
+- **Browse serves GP Bikes from gpb-mods.com.** The same catalog client, pointed at the
+  matching site — Race and Kart tracks, New Bikes, Liveries, Sounds, Rider Models, Suit
+  Paints, Helmets and Helmet Models, plus Plugins, Tools and Menu Backgrounds. Each site
+  keeps its own cookie jar, since a Cloudflare clearance only works on the host that issued
+  it.
+- **Presets read the slots a profile actually has.** Rather than assuming MX Bikes' fifteen,
+  the editor reads the sections out of the profile's own `profile.ini` and shows those. GP
+  Bikes profiles get their riding-style slot, and don't get pickers that would write nothing.
+
+- **Proton Drive downloads.** `drive.proton.me` links are now recognised and labelled as
+  Proton Drive, and a mod offering one alongside another mirror prefers the other. Proton
+  shares are end-to-end encrypted — the key lives in the part of the URL that never
+  reaches the server — so they can't be fetched automatically; picking one now opens the
+  guided "download it, then choose the file" flow instead of downloading the web page and
+  failing later with "couldn't determine the archive type".
+
+### Fixed
+- **A config written by an older build lost track of which game was active.** Builds that
+  predate multi-game support read the config fine but rewrite it without `activeGame` and
+  `games` — so running one once (a downgrade, or the shipped app alongside a newer build)
+  erased the choice while leaving the folder pointing at that game. Defaulting to MX Bikes
+  there would drive a GP Bikes folder as an MX Bikes one; the game is now re-derived from
+  the folders instead — the install folder's executable if there is one, otherwise the
+  user folder's name.
+- **Switching to a game you don't have installed opened an empty dashboard instead of
+  the setup screen.** The app adopted `Documents\PiBoSo\<game>` whether or not that
+  folder existed, and a non-blank folder reads as "configured" — so you got a working UI
+  scanning nothing. A folder is now only adopted if it's really there, a saved folder
+  that has since been deleted or moved is re-detected rather than trusted, and setup says
+  so plainly when it can't find one instead of silently returning you to the same screen.
+- **The UI named MX Bikes while driving GP Bikes** — "Launch MX Bikes", "MX Bikes is
+  running", the install-folder settings and the overlay's status line among them. Strings
+  now say which game is actually active.
+- **Switching games left the previous game's content on screen.** Library, Manage and the
+  rest load their data when they first appear, so switching titles swapped the folders
+  underneath them without refreshing anything — most visibly Manage, which kept listing
+  the MX Bikes mods. Switching now restarts those views from scratch.
+- **Pages named the wrong site.** "View on mxb-mods.com", the missing-download note and
+  the tour all said mxb-mods.com regardless of which catalog was actually being browsed.
+  They now name the site they link to.
+- **"FrostMod will hot-reload the track list" was shown for GP Bikes,** which has no
+  FrostMod build and so was never going to reload anything. That title now gets the
+  instruction that's actually true — restart the game to pick the new content up. The
+  guided tour likewise no longer walks through steps for features the active game hides.
+
+### Changed
+- **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
+  is a compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for
+  GP Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
+  (Locker and Rider) and Manage are MX Bikes only for now; the overlay and the guided tour
+  follow the same gating, so neither offers a view the main window doesn't.
+- **Existing MX Bikes setups are untouched.** A `config.json` written before this release
+  opens as the MX Bikes config it always was, with the same folders; preset share codes are
+  unchanged. Applying a preset no longer creates `profile.ini` sections that the game
+  doesn't use.
+
 ## 2026-08-08 — everyone on the server finally looks right
 
 ### Added
@@ -38,6 +111,78 @@
   GUID is first-come, so nobody can assert someone else's identity and have their paints
   served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 
+- **A Shop tab that browses the mxbikes-shop.com catalog.** The store hands us its whole
+  catalog as one JSON document, so the app fetches it once and does the searching, filtering,
+  sorting and paging locally — browsing is instant and keeps working with the network down.
+  Search by name, creator or category, filter down the store's own category tree (picking a
+  parent includes everything under it), sort by recently updated, price or discount, and flip
+  on **On sale** to see only what's actually discounted right now. Discounted items show the
+  normal price struck through beside the live one with a percentage badge, including the
+  awkward case of an item that has both a price *range* (a paint, or a paint plus the PSD)
+  and a sale on it. Genuinely free downloads say **Free** rather than "$0.00", which is a
+  different thing from the pay-what-you-want items that merely start at zero. The store's
+  catalog carries no sale end dates, so the half-hourly conditional refresh is what keeps a
+  finished sale from being shown forever — it corrects itself in the background without anyone
+  pressing anything, and where an end date ever does appear it's honoured against the clock.
+  A catalog served from cache says how old it is, and one that's days old says so in a way you
+  can't wave away. This is browse-only: **Buy** opens the product page in your own browser, and
+  nothing here installs or purchases anything.
+- **Thumbnails are cached on disk, and downscaled to the size they're drawn at.** Both
+  catalogs previously put remote image URLs straight into the page, so every scroll through
+  the grid re-downloaded the same images — and neither store offers a thumbnail size, so a
+  card roughly 300px wide was being handed a 1000–1280px original weighing about half a
+  megabyte. Images now go through an on-disk cache served over the app's own URL scheme,
+  which keeps lazy loading and the webview's native image cache intact, and grid thumbnails
+  are resized on the way in: a page of cards dropped from ~12 MB to ~2 MB, about 85 KB per
+  card instead of 490 KB. Transparency is preserved, and each size is cached separately so
+  opening an item still shows the full-resolution screenshot. Capped at 256 MB, evicted
+  oldest-first, and restricted to the two catalog domains.
+- **The whole window is a dropzone.** Drag anything MX Bikes onto the app — a `.zip`, `.rar`
+  or `.7z`, a bare `.pkz` or `.pnt`, an already-extracted folder, or a fistful of all of them
+  at once — and it works out what each one is, where it belongs, and shows you the list
+  before anything is written. A mixed archive becomes one row per mod rather than one verdict
+  for the lot, and a dropped folder is read where it lies instead of being copied twice.
+- **Content is identified by what's inside it, not by its name.** A bike by its `.ini` + `.cfg`
+  pair, a track by its `.map`/`.trh` files, a sound set by `engine.scl` + `sfx.cfg`, a livery
+  by the textures it carries — a paint that covers `rider` is an outfit, one that covers
+  `framecompletemap` is a bike livery. Each row says which signal identified it.
+- **Rider outfits and gear get a real destination.** An outfit goes to
+  `riders/default_mx/paints` and gloves to `riders/default_mx/gloves` — profiles MX Bikes
+  always ships, so the paint loads. Helmet, boot and protection paints land on the only model
+  of their kind when there is exactly one; with none or several, nothing in the file picks
+  between them, so the row asks.
+- **Every row can be re-filed before installing.** Identifying content correctly is not the
+  same as knowing where you want it kept, so each row offers that category's existing folders,
+  its root, and a free-text box for a folder that doesn't exist yet. A bike keeps its own
+  folder wherever it's filed — choosing "MX2" means `MX2/<Bike>`, not a bike's configs
+  scattered loose.
+- **You see what it will replace.** Every row reports how many files it will write and,
+  expandable, exactly which existing files it would overwrite — so re-dropping an updated mod
+  no longer silently replaces a bike's configs. Nothing installs until you press Install, and
+  rows can be unticked individually.
+
+### Changed
+- The signed-in "All My Downloads" page moved to `MyDownloads.tsx` and the `shop` route now
+  goes to the new catalog. That feature is intact and still hidden from the sidebar.
+- **Placement decides once, then acts.** Split `place_mod` into `plan_placement` (decide) and
+  an apply step driven by a single enumeration of the files to write, so the destination shown
+  in the review sheet is by construction the destination written to disk. Existing placement
+  behaviour and all of its tests are unchanged.
+- **Identifying a `.pkz` no longer reads it.** The question is answered from the archive's
+  file list alone; it used to parse the `[info]` block and decode and rescale the preview
+  image, which on a large track was seconds of work before anything appeared on screen.
+- **Staging directories are per-operation.** They used to be one path per process, wiped on
+  entry — safe only while installs were strictly serial. A staged drop awaiting review would
+  have had its files deleted by the next one.
+
+### Security
+- A paint carries the destination it should be written to, and that path arrives from
+  another player. It's validated twice — once by the service and again in the app before it
+  becomes a real path — because only the second check actually protects a disk. Anything
+  with a separator, a `..`, a drive letter, a control character or a non-`.pnt` extension is
+  refused outright rather than sanitised: a path we'd have to rewrite is one we don't
+  understand. Downloaded bytes are checked against their digest before being written.
+
 ### Fixed
 - **The mxb-mods.com fetch window is properly hidden now.** When Cloudflare refuses the app's
   own downloader, Browse re-runs the request inside a WebView parked on the site — and that
@@ -47,14 +192,13 @@
   no titlebar to close it by. It's built hidden outright now. The throttling that was being
   avoided isn't reachable that way — the webview inside keeps its own visibility, and that is
   what the browser engine reads — so Browse behaves exactly as before, minus the window.
-
-### Security
-- A paint carries the destination it should be written to, and that path arrives from
-  another player. It's validated twice — once by the service and again in the app before it
-  becomes a real path — because only the second check actually protects a disk. Anything
-  with a separator, a `..`, a drive letter, a control character or a non-`.pnt` extension is
-  refused outright rather than sanitised: a path we'd have to rewrite is one we don't
-  understand. Downloaded bytes are checked against their digest before being written.
+- **A hostile archive can no longer write outside the staging folder.** `.7z` extraction
+  joined entry names to the destination without filtering `..`; `.7z` and `.rar` extractions
+  are now swept for escapees (symlinks included), which deletes them and fails the install.
+- **A destination can no longer climb out of the MX Bikes folder.** Path segments are checked
+  for `..` before any write, and the resolved targets are verified to sit under `mods/`.
+- **A dropped bike folder keeps its own folder.** A bike shipped without a `paints/` subfolder
+  had its `.ini`/`.cfg` scattered loose into `mods/bikes` instead of `mods/bikes/<Bike>/`.
 
 ## 2026-08-08 — run a dedicated server from the app
 

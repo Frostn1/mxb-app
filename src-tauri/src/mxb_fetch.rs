@@ -192,7 +192,7 @@ async fn run(url: &str, body: Option<&str>) -> anyhow::Result<Fetched> {
 
     log::debug!(
         "webview GET {} -> {} in {:?}",
-        url.strip_prefix(mxb_session::BASE).unwrap_or(url),
+        url.strip_prefix(mxb_session::base()).unwrap_or(url),
         reply.status,
         started.elapsed()
     );
@@ -292,7 +292,7 @@ async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> 
         return Ok(existing);
     }
 
-    let url: tauri::Url = mxb_session::BASE.parse()?;
+    let url: tauri::Url = mxb_session::base().parse()?;
     log::info!("opening the hidden mxb-mods.com fetch window");
     let window = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
         .title("mxb-mods.com")

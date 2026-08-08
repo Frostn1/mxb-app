@@ -10,12 +10,17 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const BASE: &str = mxb_session::BASE;
 const PER_PAGE: &str = "24";
 
-pub struct MxbModsSource;
+/// The mods catalog for whichever game is active.
+///
+/// mxb-mods.com and gpb-mods.com are the same WordPress build by the same author — same
+/// REST shape, same popular-posts plugin, same ratings endpoint — so one implementation
+/// serves both and only the host varies (see [`mxb_session::base`]). Category ids differ
+/// between them and are supplied by the caller.
+pub struct WpModsSource;
 
-impl ModSource for MxbModsSource {
+impl ModSource for WpModsSource {
     async fn search(
         &self,
         query: &str,
@@ -57,7 +62,7 @@ fn build_client() -> anyhow::Result<Client> {
         ("sec-fetch-site", "same-origin"),
         ("sec-fetch-mode", "cors"),
         ("sec-fetch-dest", "empty"),
-        ("referer", BASE),
+        ("referer", mxb_session::base()),
     ] {
         headers.insert(k, HeaderValue::from_static(v));
     }
@@ -225,36 +230,13 @@ async fn into_fetched(resp: reqwest::Response) -> Fetched {
 /// percent-encoded query params, and the path is the bit that distinguishes the two
 /// endpoints Cloudflare treats differently — the WP REST API and the rendered mod page.
 fn path_of(url: &str) -> &str {
-    url.strip_prefix(BASE).unwrap_or(url)
+    url.strip_prefix(mxb_session::base()).unwrap_or(url)
 }
 
-/// Cloudflare refused us, as opposed to the site being down or the parse failing.
-///
-/// A type rather than a message because the command layer has to *act* on it — run the
-/// WebView handshake and retry — and matching on error strings to decide that would break
-/// the first time someone reworded a sentence.
-#[derive(Debug, Clone)]
-pub struct Blocked {
-    /// The refusing status, or `None` for an interstitial served as a 200.
-    pub status: Option<u16>,
-    message: String,
-}
-
-impl std::fmt::Display for Blocked {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Blocked {}
-
-impl Blocked {
-    /// True when a `cf_clearance` could plausibly fix it — i.e. we were challenged, rather
-    /// than rate-limited or handed a server error.
-    pub fn clearable(&self) -> bool {
-        matches!(self.status, None | Some(403))
-    }
-}
+/// Cloudflare refusals, shared with [`super::shop_catalog`] — both catalogs sit behind it,
+/// and `main.rs`'s clearance retry downcasts to one type for both. Defined in [`super`] and
+/// re-exported here so `mods::mxb::Blocked` still names it.
+pub use super::Blocked;
 
 /// Turn a blocked response into something a person can act on. The raw reqwest `Display`
 /// ("HTTP status client error (403 Forbidden) for url (…)") told users nothing and shipped
@@ -457,7 +439,7 @@ async fn listing_response(
     category_id: u32,
     page: Page,
 ) -> anyhow::Result<(Fetched, Option<u32>)> {
-    let url = format!("{BASE}{}", obfstr!("/wp-json/wp/v2/posts"));
+    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
     let mut params: Vec<(&str, String)> = vec![
         ("categories", category_id.to_string()),
         ("_embed", "wp:featuredmedia".to_string()),
@@ -539,7 +521,8 @@ async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
 /// returns an empty list rather than a 400.
 async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec<ModSummary>> {
     let url = format!(
-        "{BASE}{}",
+        "{}{}",
+        mxb_session::base(),
         obfstr!("/wp-json/wordpress-popular-posts/v1/popular-posts")
     );
     let per_page: u32 = PER_PAGE.parse().unwrap_or(24);
@@ -566,7 +549,7 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
 
 pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // 1. Post metadata + description via the REST API.
-    let url = format!("{BASE}{}", obfstr!("/wp-json/wp/v2/posts"));
+    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
     // `wp:term` rides along in the same request — the categories it brings back are what
     // tell the install picker which bike a livery is for.
     let params = vec![
@@ -710,7 +693,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The rating plugin has no REST route; its front end reads scores from this admin-ajax
 /// action, which answers unauthenticated with `{voteCount, avgRating}`.
 async fn rating(id: u64) -> anyhow::Result<ModRating> {
-    let url = format!("{BASE}{}", obfstr!("/wp-admin/admin-ajax.php"));
+    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-admin/admin-ajax.php"));
     let form = [
         ("action", "load_results".to_string()),
         ("postID", id.to_string()),
@@ -927,6 +910,8 @@ fn friendly_host(url: &str) -> String {
         "ShareMods".to_string()
     } else if has("pixeldrain") {
         "Pixeldrain".to_string()
+    } else if has("drive.proton.me") || has("proton.me") {
+        "Proton Drive".to_string()
     } else if has("1drv.ms") || has("onedrive") {
         "OneDrive".to_string()
     } else if host.is_empty() {

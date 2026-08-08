@@ -3,6 +3,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   BikeModels,
   BikeSounds,
+  DropCommitItem,
+  DropOutcome,
+  DropPlan,
+  DropPreview,
   LooseSwapBike,
   OrphanedSetup,
   RegisterReport,
@@ -35,6 +39,8 @@ import type {
   ReloadOutcome,
   BundlePlan,
   BundleProgress,
+  GameId,
+  GameInfo,
 } from "../types";
 import type { TKey } from "../i18n";
 
@@ -59,10 +65,77 @@ export interface ModType {
   /** Parent WordPress category id (also the "All" filter). */
   categoryId: number;
   categories: ModCategory[];
-  /** Relative folder under the MX Bikes root, e.g. `mods/tracks`. */
+  /** Relative folder under the game root, e.g. `mods/tracks`. */
   installSubpath: string;
 }
 
+/**
+ * Browse categories per game.
+ *
+ * mxb-mods.com and gpb-mods.com run the same WordPress build, but their category *ids*
+ * are unrelated — each site numbered its own taxonomy. The GP ids below come from
+ * `gpb-mods.com/wp-json/wp/v2/categories`.
+ */
+const MOD_TYPES_BY_GAME: Record<GameId, ModType[]> = {
+  mxb: [],
+  gpb: [
+    {
+      id: "tracks",
+      label: "modType.tracks",
+      labelInline: "modType.tracksInline",
+      categoryId: 29,
+      installSubpath: "mods/tracks",
+      categories: [
+        { id: 29, label: "browseCat.all" },
+        { id: 68, label: "browseCat.raceTracks" },
+        { id: 69, label: "browseCat.kartTracks" },
+      ],
+    },
+    {
+      id: "bikes",
+      label: "modType.bikes",
+      labelInline: "modType.bikesInline",
+      categoryId: 18,
+      installSubpath: "mods/bikes",
+      categories: [
+        { id: 18, label: "browseCat.all" },
+        { id: 72, label: "browseCat.newBikes" },
+        { id: 71, label: "browseCat.liveries" },
+        { id: 77, label: "browseCat.sounds" },
+        { id: 76, label: "browseCat.others" },
+      ],
+    },
+    {
+      id: "rider",
+      label: "modType.rider",
+      labelInline: "modType.riderInline",
+      categoryId: 9,
+      installSubpath: "mods/rider",
+      categories: [
+        { id: 9, label: "browseCat.all" },
+        { id: 54, label: "browseCat.riderModels" },
+        { id: 55, label: "browseCat.suitPaints" },
+        { id: 51, label: "browseCat.helmets" },
+        { id: 70, label: "browseCat.helmetModels" },
+      ],
+    },
+    {
+      id: "misc",
+      label: "modType.misc",
+      labelInline: "modType.miscInline",
+      categoryId: 30,
+      installSubpath: "mods/misc",
+      categories: [
+        { id: 30, label: "browseCat.all" },
+        { id: 31, label: "browseCat.plugins" },
+        { id: 32, label: "browseCat.tools" },
+        { id: 33, label: "browseCat.menuBackgrounds" },
+      ],
+    },
+  ],
+};
+
+/** The MX Bikes catalog — the app's original browse tree. */
 export const MOD_TYPES: ModType[] = [
   {
     id: "tracks",
@@ -111,7 +184,34 @@ export const MOD_TYPES: ModType[] = [
   },
 ];
 
+MOD_TYPES_BY_GAME.mxb = MOD_TYPES;
+
+/** Browse tree for `game`, falling back to MX Bikes' for an id we don't know. */
+export function modTypesFor(game: GameId | undefined): ModType[] {
+  return MOD_TYPES_BY_GAME[game ?? "mxb"] ?? MOD_TYPES;
+}
+
 export const DEFAULT_MOD_TYPE = MOD_TYPES[0];
+
+/** The titles this build can drive, with their capabilities. */
+export function listGames(): Promise<GameInfo[]> {
+  return invoke<GameInfo[]>("list_games");
+}
+
+/**
+ * Switch which game the app drives. Returns the resulting config — a game being opened
+ * for the first time has its folders auto-detected, and comes back with `modsPath` blank
+ * when detection found nothing, which is the caller's cue to send the user to setup.
+ */
+export function setActiveGame(game: GameId): Promise<Config> {
+  return invoke<Config>("set_active_game", { game });
+}
+
+/** Cosmetic slots this profile actually has, in `profile.ini` order. The two games
+ *  don't offer the same ones, so the preset editor asks rather than assuming. */
+export function presetsSlots(profile: string): Promise<string[]> {
+  return invoke<string[]>("presets_slots", { profile });
+}
 
 /** Normalize a mod title or filename into a comparison key. `.pnt` is in the list
  *  because paints and liveries are installed files too — see `lib/installedMatch`. */
@@ -413,8 +513,10 @@ export function setGamePath(path: string): Promise<void> {
 }
 
 /** Auto-detect the Steam MX Bikes install (holds `rider.pkz`); null if not found. */
-export function detectGamePath(): Promise<string | null> {
-  return invoke<string | null>("detect_game_path");
+/** Scan Steam for a game's install folder. Omit `game` for the active one; setup passes
+ *  it explicitly, since on a first run the pick isn't saved yet. */
+export function detectGamePath(game?: GameId): Promise<string | null> {
+  return invoke<string | null>("detect_game_path", { game });
 }
 
 /**
@@ -453,6 +555,39 @@ export function importFile(
   destFolder: string,
 ): Promise<void> {
   return invoke<void>("import_file", { path, subpath, destFolder });
+}
+
+/** Stage + classify dropped paths. Reads only — nothing installs until `commitDrop`. */
+export function planDrop(paths: string[]): Promise<DropPlan> {
+  return invoke<DropPlan>("plan_drop", { paths });
+}
+
+/** Re-cost one row after the user picked a different destination. */
+export function repreviewDrop(
+  planId: string,
+  itemId: string,
+  subpath: string,
+  destFolder: string,
+): Promise<DropPreview> {
+  return invoke<DropPreview>("repreview_drop", {
+    planId,
+    itemId,
+    subpath,
+    destFolder,
+  });
+}
+
+/** Install the reviewed rows. Rows the user removed are simply not sent. */
+export function commitDrop(
+  planId: string,
+  items: DropCommitItem[],
+): Promise<DropOutcome> {
+  return invoke<DropOutcome>("commit_drop", { planId, items });
+}
+
+/** Discard a plan and delete whatever was staged for it. */
+export function cancelDrop(planId: string): Promise<void> {
+  return invoke<void>("cancel_drop", { planId });
 }
 
 export interface DestOption {
@@ -731,7 +866,16 @@ export function buildRiderDestinations(
   return { options, guess, suggestions };
 }
 
-const BLOCKED_HOST_PATTERNS: string[] = [];
+/**
+ * Hosts we can't download from unattended, so the UI routes them to the
+ * download-it-yourself-then-pick-the-file flow instead of failing mid-install.
+ *
+ * Proton Drive shares are end-to-end encrypted: the decryption key is in the URL
+ * fragment, which never reaches the server, and the file arrives as OpenPGP-encrypted
+ * blocks. There is no direct link to resolve. Listing it here also sorts it *below* any
+ * other mirror on the same mod, so a MediaFire alternative is preferred automatically.
+ */
+const BLOCKED_HOST_PATTERNS: string[] = ["drive.proton.me", "proton.me"];
 
 export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   const s = `${opt.url} ${opt.host}`.toLowerCase();

@@ -3,7 +3,6 @@ import { Search, Download, X, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import {
   MOD_SORTS,
-  MOD_TYPES,
   SEARCH_PAGE_SIZE,
   getModRatings,
   isLiveryContext,
@@ -42,6 +41,8 @@ import { cn } from "@/lib/utils";
 
 interface BrowseProps {
   modType: ModType;
+  /** The active game's browse tree — the catalogs differ per title. */
+  modTypes: ModType[];
   installed: InstalledIndex;
   onOpenMod: (slug: string, categoryId: number) => void;
   onChangeType: (type: ModType) => void;
@@ -49,6 +50,7 @@ interface BrowseProps {
 
 export default function Browse({
   modType,
+  modTypes,
   installed,
   onOpenMod,
   onChangeType,
@@ -293,10 +295,10 @@ export default function Browse({
           <Segmented
             value={modType.id}
             onChange={(id) => {
-              const next = MOD_TYPES.find((mt) => mt.id === id);
+              const next = modTypes.find((mt) => mt.id === id);
               if (next) onChangeType(next);
             }}
-            options={MOD_TYPES.map((mt) => ({
+            options={modTypes.map((mt) => ({
               value: mt.id,
               label: t(mt.label),
             }))}

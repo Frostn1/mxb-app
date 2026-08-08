@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ExternalLink,
@@ -7,12 +7,6 @@ import {
   Snowflake,
   FileDown,
 } from "lucide-react";
-import { Swiper, SwiperSlide } from "swiper/react";
-import { Navigation, Pagination } from "swiper/modules";
-import type { Swiper as SwiperClass } from "swiper";
-import "swiper/css";
-import "swiper/css/navigation";
-import "swiper/css/pagination";
 import { open } from "@tauri-apps/plugin-shell";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { useT, type TKey } from "../../i18n/context";
@@ -40,6 +34,7 @@ import type {
   InstallStage,
   ModDetail as Detail,
 } from "../../types";
+import Gallery from "./Gallery";
 import InstallDialog, { type InstallChoice } from "./InstallDialog";
 import { useInstall } from "../../Context/Install";
 import type { InstalledIndex } from "../../lib/installedMatch";
@@ -57,6 +52,7 @@ import {
   AlertDialogAction,
 } from "@/Components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useConfig } from "../../Context/Config";
 
 interface ModDetailProps {
   slug: string;
@@ -100,6 +96,7 @@ export default function ModDetail({
   onBack,
 }: ModDetailProps) {
   const t = useT();
+  const { game } = useConfig();
   const livery = isLiveryContext(modType, categoryId);
   const sound = isSoundContext(modType, categoryId);
   // For rider kit/gloves, which profile sub-folder to target (`null` for gear paints).
@@ -121,8 +118,6 @@ export default function ModDetail({
   } | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmReinstall, setConfirmReinstall] = useState(false);
-  const [activeImg, setActiveImg] = useState(0);
-  const swiperRef = useRef<SwiperClass | null>(null);
 
   const { active, startInstall, startImport } = useInstall();
   const myActive = active && active.slug === slug ? active : null;
@@ -135,7 +130,6 @@ export default function ModDetail({
     setDestOptions([]);
     setGuess("");
     setSuggestions([]);
-    setActiveImg(0);
     getModDetail(slug)
       .then(async (d) => {
         if (cancelled) return;
@@ -291,50 +285,12 @@ export default function ModDetail({
       <div className="mt-4 flex min-h-0 flex-1 gap-6">
         {/* left: gallery + description */}
         <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto pr-1">
-          {detail.images.length > 0 ? (
-            <>
-              <Swiper
-                className="frost-gallery aspect-video w-full flex-none"
-                modules={[Navigation, Pagination]}
-                navigation
-                pagination={{ clickable: true }}
-                onSwiper={(s) => (swiperRef.current = s)}
-                onSlideChange={(s) => setActiveImg(s.activeIndex)}
-              >
-                {detail.images.map((src) => (
-                  <SwiperSlide key={src}>
-                    <img
-                      src={src}
-                      alt={detail.title}
-                      className="size-full object-cover"
-                    />
-                  </SwiperSlide>
-                ))}
-              </Swiper>
-              {detail.images.length > 1 && (
-                <div className="flex flex-none gap-2 overflow-x-auto pb-1">
-                  {detail.images.slice(0, 8).map((src, i) => (
-                    <button
-                      key={src}
-                      onClick={() => swiperRef.current?.slideTo(i)}
-                      className={cn(
-                        "aspect-video w-24 flex-none overflow-hidden rounded-md border transition-opacity",
-                        i === activeImg
-                          ? "border-primary"
-                          : "border-transparent opacity-60 hover:opacity-100",
-                      )}
-                    >
-                      <img src={src} alt="" className="size-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="grid aspect-video w-full flex-none place-items-center rounded-xl border border-border bg-gradient-to-br from-[#3a3f45] to-[#20242a] text-foreground/20">
-              No screenshots
-            </div>
-          )}
+          <Gallery
+            images={detail.images}
+            title={detail.title}
+            emptyLabel="No screenshots"
+          />
+
 
           <div className="flex flex-col gap-2 pt-1">
             <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
@@ -424,16 +380,19 @@ export default function ModDetail({
               </>
             ) : (
               <p className="text-[12.5px] text-muted-foreground">
-                {t("modDetail.noDownloadLink")}
+                {t("modDetail.noDownloadLink", { site: game.catalogDomain })}
               </p>
             )}
           </div>
 
-          {/* frostmod hint */}
+          {/* What happens once the install finishes. FrostMod hot-reloads the game, but
+              it's an MX Bikes plugin — promising a reload for a title that has none is
+              worse than saying nothing, so that case gets the honest instruction. */}
           <div className="flex items-center gap-2.5 rounded-[10px] border border-success/25 bg-success/[0.06] px-3 py-2.5">
             <span className="size-[7px] flex-none rounded-full bg-success" />
             <span className="text-[12px] text-success/90">
-              {t("modDetail.frostmodHint", {
+              {t(game.caps.frostmod ? "modDetail.frostmodHint" : "modDetail.restartHint", {
+                game: game.display,
                 kind:
                   modType.id === "rider"
                     ? t("modDetail.kindRider")
@@ -510,6 +469,7 @@ function Breadcrumb({
   link: string | null;
 }) {
   const t = useT();
+  const { game } = useConfig();
   return (
     <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
       <button
@@ -527,7 +487,8 @@ function Breadcrumb({
           onClick={() => open(link)}
           className="ml-auto flex cursor-default items-center gap-1 text-[12px] text-primary hover:brightness-110"
         >
-          {t("modDetail.viewOnSite")} <ExternalLink className="size-3" />
+          {t("modDetail.viewOnSite", { site: game.catalogDomain })}{" "}
+          <ExternalLink className="size-3" />
         </button>
       )}
     </div>
@@ -649,8 +610,11 @@ function BlockedHost({
           {t("modDetail.finishInBrowser")}
         </span>
         <span className="text-[12px] leading-relaxed text-muted-foreground">
-          {host} only allows browser downloads. Download it, then point MXB App at
-          the file to finish the install.
+          {/* Proton Drive isn't a browser-only *policy* — the file is encrypted with a
+              key that never leaves the URL fragment, so say what's actually true. */}
+          {/proton/i.test(host)
+            ? `${t("modDetail.protonHint")} ${t("modDetail.thenAddFile")}`
+            : `${host} only allows browser downloads. Download it, then point MXB App at the file to finish the install.`}
         </span>
       </div>
       <div className="flex items-start gap-3">

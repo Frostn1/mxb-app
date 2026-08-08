@@ -1,10 +1,57 @@
+/** A PiBoSo title the app can drive. Stable ids — they key `Config.games`. */
+export type GameId = "mxb" | "gpb";
+
+/** Features that only exist for some titles. Drives nav and settings gating. */
+export interface GameCaps {
+  /** FrostMod, the in-process mod loader. An MX Bikes plugin — no GP Bikes build. */
+  frostmod: boolean;
+  /** Re-run the profile loader in the live game after applying a preset. */
+  instantRefresh: boolean;
+  /** The 3D preview (Locker / Rider / bike preview). */
+  viewer: boolean;
+  /** The authenticated paid-content shop (mxbikes-shop.com). */
+  shop: boolean;
+  /** The Manage view (parking mods to trim what the game loads). */
+  manage: boolean;
+  /** Join a server by address (launches the game with `-directconnect`). */
+  joinByAddress: boolean;
+  /** The Servers tab and paint sync (MX Bikes dedicated servers, MX Bikes GUIDs). */
+  servers: boolean;
+}
+
+/** One title the app can drive, as reported by `listGames()`. */
+export interface GameInfo {
+  id: GameId;
+  /** Product name, shown verbatim — never translated. */
+  display: string;
+  /** Top-level folders under `<modsPath>/mods` for this title. */
+  modsDirs: string[];
+  /** Host of this title's catalog, e.g. `mxb-mods.com`. Shown wherever the UI names
+   *  the site it links out to. */
+  catalogDomain: string;
+  caps: GameCaps;
+}
+
+/** Saved folders for one title. */
+export interface GamePaths {
+  modsPath?: string;
+  gamePath?: string;
+  profilesPath?: string;
+}
+
 export interface Config {
+  /** Which title the app is driving. Absent on configs written before multi-game
+   *  support, which the backend reads as `"mxb"`. */
+  activeGame?: GameId;
+  /** Saved folders per title. The active game's entry mirrors the flat fields below,
+   *  which stay the source of truth for it. */
+  games?: Partial<Record<GameId, GamePaths>>;
   modsPath: string;
-  /** MX Bikes **install** dir (holds core `rider.pkz`) for the 3D rider body. */
+  /** Active game's **install** dir (its executable + core archives). */
   gamePath?: string;
   /**
    * Override for the PiBoSo `profiles` folder. Empty (normal) means it lives at
-   * `<modsPath>/profiles`; set only when profiles sit outside the MX Bikes folder.
+   * `<modsPath>/profiles`; set only when profiles sit outside the game folder.
    */
   profilesPath?: string;
   /** Hide to the tray on close and keep running (default true). */
@@ -117,6 +164,8 @@ export type LibraryCategory =
   | "protectionPaint"
   | "gloves"
   | "outfit"
+  /** GP Bikes riding-style animation. */
+  | "animation"
   | "misc";
 
 export interface LibraryEntry {
@@ -307,6 +356,104 @@ export interface PkzMeta {
   altitude: number | null;
   /** Preview image as a `data:image/png;base64,…` URI, if one was found. */
   thumbnail: string | null;
+}
+
+/** What the dropzone decided a dropped item is. Mirrors `dropzone::ContentKind`. */
+export type DropKind =
+  | "modsTree"
+  | "track"
+  | "bike"
+  | "bikePaint"
+  | "soundSet"
+  | "riderGear"
+  | "unknown";
+
+/** Why it decided that. A key, not prose — the UI translates it. */
+export type DropReason =
+  | "modsTree"
+  | "categoryDirs"
+  | "paintsBundle"
+  | "soundMarkers"
+  | "trackMarkers"
+  | "trackPackage"
+  | "bikeConfig"
+  | "loosePaint"
+  | "gearFolders"
+  | "riderTexture"
+  | "gearTexture"
+  | "unrecognised";
+
+export interface DropChoice {
+  /** Written straight into `destFolder`, e.g. `MX1OEM_2023_KTM_450/paints`. */
+  value: string;
+  /** A real bike or folder name — shown verbatim, never translated. */
+  label: string;
+  /** The category this destination lives under, so the UI never infers it from the path. */
+  subpath: string;
+}
+
+export interface DropItem {
+  id: string;
+  name: string;
+  kind: DropKind;
+  reason: DropReason;
+  /** `mods/<x>`. Empty while `needsChoice` and the user hasn't picked. */
+  subpath: string;
+  destFolder: string;
+  /** The structural part of `destFolder`, which survives re-filing: a bike stays in its own
+   *  folder, so choosing "MX2" means `MX2/<Bike>` rather than replacing it. */
+  keepFolder: string;
+  /** The content doesn't say where it belongs — the user must choose. */
+  needsChoice: boolean;
+  choices: DropChoice[];
+  /** Existing files this would replace, relative to the mods folder. */
+  collisions: string[];
+  fileCount: number;
+  bytes: number;
+  /** Extra detail worth showing — a bike's real name and class, a track's name. */
+  detail?: string;
+}
+
+export interface DropSkipped {
+  name: string;
+  reason: string;
+}
+
+export interface DropPlan {
+  id: string;
+  items: DropItem[];
+  skipped: DropSkipped[];
+  totalBytes: number;
+}
+
+export interface DropPreview {
+  fileCount: number;
+  bytes: number;
+  collisions: string[];
+}
+
+export interface DropCommitItem {
+  id: string;
+  subpath: string;
+  destFolder: string;
+}
+
+export interface DropInstalled {
+  id: string;
+  name: string;
+  files: number;
+  dest: string;
+}
+
+export interface DropFailed {
+  id: string;
+  name: string;
+  error: string;
+}
+
+export interface DropOutcome {
+  installed: DropInstalled[];
+  failed: DropFailed[];
 }
 
 export type InstallStage =
@@ -551,3 +698,97 @@ export type SlotSource =
   | "ridingStyle" // mx / sm
   | "tyres" // tyre models
   | "font"; // number-plate / suit fonts (free text)
+
+// ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
+//
+// Mirrors the serde output of `src-tauri/src/mods/shop_catalog.rs`. Browse-only: there is
+// deliberately no download URL here, because buying happens on the store's own site.
+//
+// Note these do NOT extend `ModSummary`. A shop item has no slug, no single category id and
+// no post date, and `ShopItem` (above) already shows what forcing that shape costs.
+
+/** What an item costs now, and what it costs normally. */
+export interface ShopPrice {
+  /** The normal price; the low end of the range when `hasRange`. */
+  base: number | null;
+  /** The high end of the normal range. Null when the item has a single option. */
+  baseMax: number | null;
+  /** The discounted price — only ever set when `onSale`. */
+  sale: number | null;
+  saleMax: number | null;
+  /** A sale price exists *and* the clock is inside its window. */
+  onSale: boolean;
+  /** Several options (e.g. a paint, or a paint plus the PSD), so show a range. */
+  hasRange: boolean;
+  /**
+   * The store gives this away. Distinct from a price of 0 — a pay-what-you-want item starts
+   * at 0 without being free, and "$0.00" reads as broken where "Free" doesn't.
+   */
+  free: boolean;
+  /** Whole percent off, rounded down. */
+  discountPct: number | null;
+  /** Unix seconds. Only set when the dump really carries a window — never invent one. */
+  saleEnds: number | null;
+}
+
+export interface ShopMod {
+  id: number;
+  title: string;
+  /** The product page. Null means the URL failed origin checks — hide the Buy button. */
+  url: string | null;
+  image: string | null;
+  author: string | null;
+  authorUrl: string | null;
+  categoryIds: number[];
+  categoryNames: string[];
+  /** Unix seconds. */
+  updated: number | null;
+  price: ShopPrice;
+}
+
+export interface ShopModDetail extends ShopMod {
+  /** Already sanitised in Rust. */
+  descriptionHtml: string | null;
+  images: string[];
+}
+
+export interface ShopCategory {
+  id: number;
+  name: string;
+  slug: string;
+  parent: number | null;
+  /** 0 for top level, so the UI can indent without walking the tree. */
+  depth: number;
+  /** Items in this category and its descendants — what picking it actually selects. */
+  count: number;
+}
+
+export interface ShopPage {
+  items: ShopMod[];
+  total: number;
+  hasMore: boolean;
+  currency: string;
+  generatedTs: number | null;
+  stale: boolean;
+}
+
+export interface ShopStatus {
+  /** This build has a shop credential. False hides the Shop tab entirely. */
+  available: boolean;
+  count: number;
+  currency: string;
+  generatedTs: number | null;
+  fetchedAt: number | null;
+  stale: boolean;
+  /** Old enough that the prices shouldn't be presented quietly. */
+  veryStale: boolean;
+  error: string | null;
+}
+
+export type ShopSort =
+  | "newest"
+  | "recentlyUpdated"
+  | "priceAsc"
+  | "priceDesc"
+  | "onSale"
+  | "nameAsc";

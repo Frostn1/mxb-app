@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import TitleBar from "./Components/TitleBar/TitleBar";
 import Dashboard from "./Components/Dashboard/Dashboard";
 import Setup from "./Components/Setup/Setup";
@@ -6,7 +6,7 @@ import Welcome from "./Components/Welcome/Welcome";
 import LooseSwapPrompt from "./Components/Locker/LooseSwapPrompt";
 import { ThemeProvider } from "./Context/Theme";
 import { FrostmodProvider } from "./Context/Frostmod";
-import { ConfigContext } from "./Context/Config";
+import { ConfigContext, MXB_FALLBACK } from "./Context/Config";
 import { toast } from "sonner";
 import { Toaster } from "@/Components/ui/sonner";
 import { TooltipProvider } from "@/Components/ui/tooltip";
@@ -14,14 +14,17 @@ import {
   bikePreviewAvailable,
   getConfig,
   isConfigured,
+  listGames,
   onOverlayFullscreenBlocked,
+  setActiveGame,
   setIntroSeen,
 } from "./api/mods";
 import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
 import { useI18n } from "./i18n/context";
+import { setAmbientVars } from "./i18n/core";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
-import type { Config } from "./types";
+import type { Config, GameId, GameInfo } from "./types";
 
 /**
  * Bumped when the intro tour changes enough to warrant showing it again.
@@ -40,6 +43,8 @@ const App = () => {
   // Whether this build can decode real bike geometry (optional local module). Fixed
   // at build time, so fetch it once at startup.
   const [bikePreview, setBikePreview] = useState(false);
+  // Static per build, so fetched once at startup alongside `bikePreview`.
+  const [games, setGames] = useState<GameInfo[]>([MXB_FALLBACK]);
   const [welcomeDismissed, setWelcomeDismissed] = useState(
     () => localStorage.getItem(WELCOME_SEEN_KEY) === "1",
   );
@@ -57,6 +62,23 @@ const App = () => {
     setConfig(await getConfig());
   }, []);
 
+  const switchGame = useCallback(async (id: GameId) => {
+    // The backend returns the resulting config, so a game whose folders it couldn't
+    // detect comes back with a blank `modsPath` — which renders the setup screen,
+    // exactly as it would on a first run.
+    setConfig(await setActiveGame(id));
+  }, []);
+
+  const activeGame =
+    games.find((g) => g.id === (config?.activeGame ?? "mxb")) ?? MXB_FALLBACK;
+
+  // Every translated string can say `{{game}}` / `{{site}}` instead of naming one
+  // title — see `setAmbientVars`. Set as a layout effect so the first paint after a
+  // switch already reads right.
+  useLayoutEffect(() => {
+    setAmbientVars({ game: activeGame.display, site: activeGame.catalogDomain });
+  }, [activeGame]);
+
   // Carry the old webview-only flags into the config once, so an existing install
   // doesn't get shown the intro again the first time that storage is lost.
   useEffect(() => {
@@ -71,6 +93,11 @@ const App = () => {
     (async () => {
       try {
         bikePreviewAvailable().then(setBikePreview).catch(() => {});
+        listGames()
+          .then((g) => {
+            if (g.length) setGames(g);
+          })
+          .catch(() => {});
         if (await isConfigured()) await reloadConfig();
       } catch (err) {
         console.error("Startup failed", err);
@@ -123,14 +150,42 @@ const App = () => {
               </div>
               <UpdateBanner />
               <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
-                {ready &&
-                  (config ? (
-                    <ConfigContext.Provider value={{ config, reloadConfig, bikePreview }}>
-                      <Dashboard welcomeActive={showWelcome} />
-                    </ConfigContext.Provider>
-                  ) : (
-                    <Setup onComplete={reloadConfig} />
-                  ))}
+                {ready && (
+                  // The provider wraps *both* branches, not just the dashboard: the setup
+                  // screen carries the game switcher, and someone who switched to a game
+                  // they haven't installed needs a way back without restarting the app.
+                  <ConfigContext.Provider
+                    value={{
+                      config: config ?? { modsPath: "" },
+                      reloadConfig,
+                      bikePreview,
+                      games,
+                      game: activeGame,
+                      switchGame,
+                    }}
+                  >
+                    {/* A config with no mods folder means setup hasn't finished — either a
+                        first run, or a switch to a game we couldn't locate.
+
+                        The dashboard is keyed by game: switching titles changes every
+                        folder it reads, and its views fetch on mount. Remounting is what
+                        makes "switch game" mean "start over here" rather than leaving the
+                        previous game's library and Manage list on screen. */}
+                    {config?.modsPath ? (
+                      <Dashboard key={activeGame.id} welcomeActive={showWelcome} />
+                    ) : (
+                      <Setup
+                        onComplete={reloadConfig}
+                        game={activeGame}
+                        games={games}
+                        // No saved config at all = a genuine first run, so ask which
+                        // game before anything else. A blank `modsPath` on an existing
+                        // config means we got here by switching, and that's already answered.
+                        firstRun={!config}
+                      />
+                    )}
+                  </ConfigContext.Provider>
+                )}
               </main>
             </div>
             <Toaster />

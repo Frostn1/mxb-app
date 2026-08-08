@@ -7,10 +7,13 @@ mod bundle;
 mod cfg;
 mod config;
 mod cookie_session;
+mod dropzone;
 mod edf;
 mod frostmod;
 mod frostmod_manage;
+mod game;
 mod gameproc;
+mod imgcache;
 mod install;
 mod library;
 mod lru;
@@ -28,6 +31,8 @@ mod sidecar;
 mod presets;
 mod paintsync;
 mod servers;
+mod shop_catalog_session;
+mod shop_credentials;
 mod shop_session;
 mod soundmods;
 mod texstore;
@@ -38,7 +43,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
-use mods::mxb::MxbModsSource;
+use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -104,6 +109,16 @@ fn create_config(
     config: AppConfig,
 ) -> Result<bool, String> {
     let mut cfg = config::finalize(config);
+    // Detection came up empty and the user didn't pick a folder, so there is nothing to
+    // save. Say so instead of writing a config with no folder in it: the setup screen
+    // only reappears when `modsPath` is blank, so a silent save would bounce the user
+    // straight back to the same screen with no explanation of what went wrong.
+    if cfg.mods_path.trim().is_empty() {
+        return Err(format!(
+            "Couldn't find your {} folder automatically — choose it manually.",
+            cfg.game().display
+        ));
+    }
     // Setup only sends the folders, so carry over first-run state from any config
     // that's already there — rewriting it would replay the intro and the tour.
     match config::load(&app) {
@@ -193,7 +208,7 @@ async fn search_mods(
     sort: ModSort,
 ) -> Result<Vec<ModSummary>, String> {
     with_clearance(&app, "search", || {
-        MxbModsSource.search(&query, category_id, page, sort)
+        WpModsSource.search(&query, category_id, page, sort)
     })
     .await
 }
@@ -207,7 +222,70 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 
 #[tauri::command]
 async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
-    with_clearance(&app, "mod detail", || MxbModsSource.detail(&slug)).await
+    with_clearance(&app, "mod detail", || WpModsSource.detail(&slug)).await
+}
+
+// ───────────────────────────── mxbikes-shop catalog ─────────────────────────────
+//
+// Browsing only. Nothing here installs or buys — the frontend opens the product page in
+// the user's own browser. See `mods::shop_catalog`.
+
+/// Whether this build has a shop credential at all. False hides the Shop tab entirely,
+/// which is what forks and credential-less CI builds get.
+#[tauri::command]
+fn shop_catalog_available() -> bool {
+    mods::shop_catalog::available()
+}
+
+/// Cheap and synchronous — it reports on what's already loaded and never fetches, so the
+/// UI can poll it without cost.
+#[tauri::command]
+fn shop_catalog_status(app: tauri::AppHandle) -> mods::shop_catalog::ShopStatus {
+    mods::shop_catalog::status(&app)
+}
+
+#[tauri::command]
+async fn shop_catalog_categories(
+    app: tauri::AppHandle,
+) -> Result<Vec<mods::shop_catalog::ShopCategory>, String> {
+    mods::shop_catalog::categories(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn shop_catalog_search(
+    app: tauri::AppHandle,
+    query: String,
+    category_id: Option<u64>,
+    page: u32,
+    sort: mods::shop_catalog::ShopSort,
+    on_sale_only: bool,
+) -> Result<mods::shop_catalog::ShopPage, String> {
+    mods::shop_catalog::search(&app, &query, category_id, page, sort, on_sale_only)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn shop_catalog_detail(
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<mods::shop_catalog::ShopModDetail, String> {
+    mods::shop_catalog::detail(&app, id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Ignores the cache age and any `ETag` we hold — "Refresh" has to mean refresh, not
+/// "ask politely and accept a 304".
+#[tauri::command]
+async fn shop_catalog_refresh(
+    app: tauri::AppHandle,
+) -> Result<mods::shop_catalog::ShopStatus, String> {
+    mods::shop_catalog::force_refresh(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -235,7 +313,7 @@ fn scan_library_blocking(
 ) -> Result<Vec<library::LibraryEntry>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let sound_bikes = sound_bikes_of(&app);
-    library::scan_library(&cfg.mods_path, &subpath, &sound_bikes).map_err(|e| format!("{e:#}"))
+    library::scan_library(&cfg.mods_path, &subpath, &sound_bikes, cfg.game()).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -1379,7 +1457,7 @@ fn resolve_game_pkz(cfg: &config::AppConfig, name: &str) -> Option<std::path::Pa
         return Some(p);
     }
     // Last resort for configs that predate game-path auto-detection: scan Steam now.
-    let detected = config::detect_game_path()?;
+    let detected = config::detect_game_path(cfg.game())?;
     let p = std::path::Path::new(&detected).join(name);
     p.exists().then_some(p)
 }
@@ -2222,6 +2300,95 @@ async fn import_file(
     .map_err(|e| format!("import_file task failed: {e}"))?
 }
 
+/// Stage and classify dropped paths. Reads only — nothing is installed until `commit_drop`.
+#[tauri::command]
+async fn plan_drop(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<dropzone::DropPlan, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        dropzone::plan(&cfg.mods_path, &paths).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("plan_drop task failed: {e}"))?
+}
+
+/// Re-cost one row after the user picked a different destination.
+#[tauri::command]
+async fn repreview_drop(
+    app: tauri::AppHandle,
+    plan_id: String,
+    item_id: String,
+    subpath: String,
+    dest_folder: String,
+) -> Result<DropPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let (file_count, bytes, collisions) =
+            dropzone::repreview(&cfg.mods_path, &plan_id, &item_id, &subpath, &dest_folder)
+                .map_err(|e| format!("{e:#}"))?;
+        Ok(DropPreview {
+            file_count,
+            bytes,
+            collisions,
+        })
+    })
+    .await
+    .map_err(|e| format!("repreview_drop task failed: {e}"))?
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DropPreview {
+    file_count: usize,
+    bytes: u64,
+    collisions: Vec<String>,
+}
+
+/// Install the reviewed rows.
+#[tauri::command]
+async fn commit_drop(
+    app: tauri::AppHandle,
+    plan_id: String,
+    items: Vec<dropzone::CommitItem>,
+) -> Result<dropzone::CommitOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let outcome =
+            dropzone::commit(&cfg.mods_path, &plan_id, &items).map_err(|e| format!("{e:#}"))?;
+
+        // Record which bikes gained a sound set, so the Library can tell them from stock.
+        let ok: Vec<String> = outcome.installed.iter().map(|i| i.id.clone()).collect();
+        let bikes = dropzone::sound_bikes(&plan_id, &ok);
+        if !bikes.is_empty() {
+            if let Ok(dir) = app.path().app_local_data_dir() {
+                let _ = soundmods::record(&dir, &bikes, "drop");
+            }
+        }
+
+        dropzone::cancel(&plan_id);
+
+        // One signal for the whole drop: `notify_frostmod` also emits `frostmod-reload`,
+        // which every library scanner listens to — firing it per item would re-run them all
+        // N times for a single user action.
+        if !outcome.installed.is_empty() {
+            install::notify_frostmod(&app, "drop");
+        }
+        Ok(outcome)
+    })
+    .await
+    .map_err(|e| format!("commit_drop task failed: {e}"))?
+}
+
+/// Discard a plan the user dismissed, deleting anything staged for it.
+#[tauri::command]
+async fn cancel_drop(plan_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || dropzone::cancel(&plan_id))
+        .await
+        .map_err(|e| format!("cancel_drop task failed: {e}"))
+}
+
 #[tauri::command]
 async fn move_mod(
     app: tauri::AppHandle,
@@ -2260,7 +2427,44 @@ fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// Point the app at a different MX Bikes folder; an empty string re-runs detection.
+/// The titles this build can drive, with their per-game capabilities. Static data —
+/// the switcher and the feature gating both read it.
+#[tauri::command]
+fn list_games() -> Vec<game::GameInfo> {
+    game::all_info()
+}
+
+/// Switch which game the app is driving.
+///
+/// The outgoing game's folders are parked and the incoming one's restored; a game being
+/// opened for the first time has none saved, so `finalize` auto-detects them the same
+/// way first-run setup does. Returns the resulting config so the UI can go straight to
+/// the setup screen when detection came up empty.
+///
+/// Async for the same reason as `set_mods_path`: detection scans Steam libraries and the
+/// watcher restart tears down a thread, neither of which belongs on the UI thread.
+#[tauri::command]
+async fn set_active_game(
+    app: tauri::AppHandle,
+    watcher: State<'_, ModWatcher>,
+    game: game::Game,
+) -> Result<AppConfig, String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    if !cfg.switch_game(game) {
+        return Ok(cfg);
+    }
+    let cfg = config::finalize(cfg);
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    log::info!("switched to {} ({})", cfg.game().display, cfg.mods_path);
+    // Point the watcher at the new game's folder — otherwise it keeps reporting changes
+    // in the game we just left.
+    if cfg.watch_mods_reload {
+        modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
+    Ok(cfg)
+}
+
+/// Point the app at a different mods folder; an empty string re-runs detection.
 /// Only the folder changes — unlike a full `create_config`, the rest of the settings
 /// (startup, tray, FrostMod, first-run state) are left alone.
 ///
@@ -2318,10 +2522,19 @@ fn set_profiles_path(app: tauri::AppHandle, path: String) -> Result<(), String> 
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
-/// Scan Steam for the MX Bikes install (holds `rider.pkz`). `None` if not found.
+/// Scan Steam for a game's install folder. `None` if not found.
+///
+/// `game` names which title to look for. Setup passes it explicitly because on a first
+/// run the user has picked a game but nothing is saved yet — and persisting the pick just
+/// to make detection work would write a config before setup finishes, which would then
+/// look like an upgrade rather than a fresh install. Omitted, it means the active game.
 #[tauri::command]
-fn detect_game_path() -> Option<String> {
-    config::detect_game_path()
+fn detect_game_path(app: tauri::AppHandle, game: Option<game::Game>) -> Option<String> {
+    let profile = match game {
+        Some(g) => g.profile(),
+        None => config::load(&app).unwrap_or_default().game(),
+    };
+    config::detect_game_path(profile)
 }
 
 /// How many profiles (subdirs with a `profile.ini`) live under `path` — lets the
@@ -2855,6 +3068,17 @@ fn presets_list_bikes(app: tauri::AppHandle, profile: String) -> Result<Vec<Stri
     presets::list_bikes(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
 }
 
+/// Which cosmetic slots this profile actually has, in `profile.ini` order.
+///
+/// The two games don't offer the same ones — GP Bikes has no goggles, boots or
+/// protection — so the editor asks rather than rendering a fixed MX Bikes list with rows
+/// that would do nothing.
+#[tauri::command]
+fn presets_slots(app: tauri::AppHandle, profile: String) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    presets::slots_for(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn presets_read_loadout(
     app: tauri::AppHandle,
@@ -3170,6 +3394,17 @@ fn log_level() -> log::LevelFilter {
 
 fn main() {
     tauri::Builder::default()
+        // Thumbnails for both catalogs, served from a disk cache instead of refetched on
+        // every scroll. Registered here rather than per-window so the overlay — which
+        // renders the same `ModCard` — gets it too.
+        //
+        // Asynchronous, so a cache miss that has to reach the origin never blocks the
+        // webview's protocol thread.
+        //
+        // A URI scheme is not a permission subject, so no capability file changes with this.
+        // If a CSP is ever enabled in `tauri.conf.json` (currently `null`), it must allow
+        // `img-src imgcache: http://imgcache.localhost` or every thumbnail goes blank.
+        .register_asynchronous_uri_scheme_protocol(imgcache::SCHEME, imgcache::handle)
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level())
@@ -3198,7 +3433,7 @@ fn main() {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
-            log::info!("mxb-mods.com user-agent: {}", mxb_session::UA);
+            log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
@@ -3243,13 +3478,13 @@ fn main() {
             // `load_or_detect` rebuilds a missing/unreadable config from the standard
             // MX Bikes folder, so a lost config no longer means a trip through setup.
             if let Some(mut cfg) = config::load_or_detect(handle) {
-                // Auto-detect the MX Bikes install on launch for configs that
+                // Auto-detect the active game's install on launch for configs that
                 // never got one (created before detection existed, or when the
                 // game wasn't installed yet). Only fills a blank — never overrides
                 // a manual pick — and persists it so the 3D rider preview works.
                 if cfg.game_path.trim().is_empty() {
-                    if let Some(gp) = config::detect_game_path() {
-                        log::info!("auto-detected MX Bikes install: {gp}");
+                    if let Some(gp) = config::detect_game_path(cfg.game()) {
+                        log::info!("auto-detected {} install: {gp}", cfg.game().display);
                         cfg.game_path = gp;
                         let _ = config::save(handle, &cfg);
                     }
@@ -3278,7 +3513,9 @@ fn main() {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
             shop_session::load_session(handle);
+            shop_catalog_session::load(handle);
             mxb_session::load(handle);
+            imgcache::start_maintenance(handle);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
@@ -3352,6 +3589,10 @@ fn main() {
             repair_orphaned_setup,
             add_to_library,
             import_file,
+            plan_drop,
+            repreview_drop,
+            commit_drop,
+            cancel_drop,
             move_mod,
             uninstall_mod,
             reveal_in_explorer,
@@ -3400,9 +3641,18 @@ fn main() {
             shop_logout,
             shop_my_downloads,
             shop_install,
+            shop_catalog_available,
+            shop_catalog_status,
+            shop_catalog_categories,
+            shop_catalog_search,
+            shop_catalog_detail,
+            shop_catalog_refresh,
             presets_list_profiles,
             presets_list_bikes,
             presets_read_loadout,
+            presets_slots,
+            list_games,
+            set_active_game,
             presets_apply,
             presets_list,
             presets_save,

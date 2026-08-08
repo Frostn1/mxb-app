@@ -7,8 +7,9 @@ import Manage from "../Manage/Manage";
 import Servers from "../Servers/Servers";
 import RiderStudio from "../Rider/RiderStudio";
 import Browse from "../Browse/Browse";
-import Shop from "../Shop/Shop";
+import ShopCatalog from "../Shop/ShopCatalog";
 import ModDetail from "../ModDetail/ModDetail";
+import DropZone from "../Dropzone/DropZone";
 import Settings, { type SectionId } from "../Settings/Settings";
 import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
@@ -26,7 +27,7 @@ interface DashboardProps {
 }
 
 const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
-  const { config } = useConfig();
+  const { config, game } = useConfig();
   const [view, setView] = useState<DashboardView>("browse");
   // A preset handed off from the Presets tab to load in the Rider tab (its
   // "View in Rider" button). Consumed once by the Rider view, then cleared.
@@ -35,6 +36,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const showBrowse = useCallback(() => setView("browse"), []);
   const {
     modType,
+    modTypes,
     changeType,
     selectedSlug,
     selectedCategoryId,
@@ -44,7 +46,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     openMod,
     openModTarget,
     closeMod,
-  } = useModBrowsing(showBrowse);
+  } = useModBrowsing(showBrowse, game.id);
 
   // FrostMod installs itself silently on first run (see FrostmodProvider) —
   // no prompt here.
@@ -110,6 +112,10 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   return (
     <TourContext.Provider value={{ startTour }}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
+      {/* Mounted here rather than in `App` so a drop only works once the app is set up —
+          there is nowhere to install to before the MX Bikes folder is known. The overlay
+          window renders its own tree and deliberately gets no drop target. */}
+      <DropZone onInstalled={onInstalled} />
       <div className="flex min-h-0 flex-1">
         <Sidebar view={view} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -124,12 +130,13 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           ) : view === "browse" ? (
             <Browse
               modType={modType}
+              modTypes={modTypes}
               installed={installed}
               onOpenMod={openMod}
               onChangeType={changeType}
             />
           ) : view === "shop" ? (
-            <Shop refreshKey={libraryVersion} />
+            <ShopCatalog />
           ) : view === "library" ? (
             <Library
               modType={modType}
