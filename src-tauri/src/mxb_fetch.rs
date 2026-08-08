@@ -297,9 +297,18 @@ async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> 
     let window = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
         .title("mxb-mods.com")
         .user_agent(mxb_session::UA)
-        // Not `visible(false)`: WebView2 can throttle a window it considers fully hidden,
-        // and a throttled timer here reads as the site being slow. One pixel, parked well
-        // off-screen, stays a live window without ever being seen.
+        // Never shown. This was first built visible-but-off-screen, on the worry that a
+        // fully hidden window would have its timers throttled and read as the site being
+        // slow. But off-screen only takes it off the desktop — it stays a window the
+        // system lists and can surface, and `skip_taskbar` below does nothing on macOS, so
+        // it turns up in the Window menu and Mission Control with no titlebar to dismiss it
+        // by. Nor was it the trade-off it looked like: `visible` here is the *window*'s
+        // flag, and the webview inside keeps its own, which Tauri leaves on. WebView2 reads
+        // page visibility from that one rather than from the host window, so the page still
+        // counts as visible and nothing backgrounds it.
+        .visible(false)
+        // Kept as a second line of defence: if anything ever does show this window, it has
+        // one pixel to do it in, well off-screen.
         .inner_size(1.0, 1.0)
         .position(-32000.0, -32000.0)
         .skip_taskbar(true)
