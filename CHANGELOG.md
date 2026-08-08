@@ -73,6 +73,35 @@
   no word for "the model's own look".
 
 ### Fixed
+- **Updating FrostMod while MX Bikes is open no longer fails with "the process cannot
+  access the file… (os error 32)".** The update overwrote `frostmod.exe` and
+  `frostmod.dll` in place, and Windows won't open a mapped image for writing — so once
+  the game had the DLL injected, every attempt hit a sharing violation and the three
+  seconds of retries could never outlast a running game. The old binaries are now
+  renamed aside instead (which Windows *does* allow on a loaded image) and the new ones
+  take their place, so the update lands with the game still running; the toast says to
+  restart MX Bikes when the old FrostMod is still the one loaded. The displaced copies
+  are cleaned up on the next install or start.
+- **A failed FrostMod update no longer reports the version it failed to install.** The
+  two binaries were written one at a time with no rollback, so a failure on the second
+  left a new `frostmod.exe` beside an old `frostmod.dll`; separately, a release missing
+  one of them installed the other anyway and still stamped the new tag into
+  `version.txt`, leaving Settings showing a version that had never been installed. Both
+  binaries are now downloaded to a staging folder first and moved into place as one
+  unit — any failure puts the previous install back untouched — and the version is
+  recorded only once both are actually on disk. A release short a binary is refused by
+  name rather than half-applied, and a failed attempt re-reads the real state instead of
+  leaving the panel on its pre-attempt guess.
+- **Anyone already stuck on a FrostMod that says one version and runs another is
+  repaired automatically.** A recorded version matching the latest release read as "Up to
+  date" on the tag alone, and that button is disabled — so an install left carrying
+  v0.9.9's number over v0.9.8's files had no way out of it. The installed binaries are
+  now checked against the SHA-256 digests their release advertises, so a mismatch is
+  visible rather than assumed away: the panel says the files don't match and offers
+  **Repair install**, and the app repairs it on next launch without being asked, since
+  nobody would otherwise know to press anything. Downloads are checked against the same
+  digests before they replace anything, so a truncated one can't overwrite a working
+  install.
 - **Picking a goggle paint now updates the 3D preview on its own.** The Rider tab's
   preview re-resolves the model whenever a rider slot changes, but the list of slots it
   watched never included the goggles — so choosing a lens did nothing on screen, and the
