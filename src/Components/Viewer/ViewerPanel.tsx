@@ -77,6 +77,7 @@ export function ViewerPanel({
         loadout.rider,
         loadout.helmet,
         loadout.helmetPaint,
+        loadout.gogglesPaint,
         loadout.boots,
         loadout.bootsPaint,
         loadout.protection,

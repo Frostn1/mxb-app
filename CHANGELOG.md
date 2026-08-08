@@ -24,6 +24,12 @@
   — it never becomes a value in your loadout, since the game names a `.pnt` there and has
   no word for "the model's own look".
 ### Fixed
+- **Picking a goggle paint now updates the 3D preview on its own.** The Rider tab's
+  preview re-resolves the model whenever a rider slot changes, but the list of slots it
+  watched never included the goggles — so choosing a lens did nothing on screen, and the
+  new paint only appeared once you touched some *other* slot (helmet paint, boots) and
+  dragged the goggles along with it. The backend had been reading the goggle paint
+  correctly the whole time; it was simply never asked to.
 - **Downloads that Google Drive refuses now say why, instead of "the host returned a web
   page".** Hitting a popular mod (Flow Series #1 FlowiCompound, for one) gave a message
   that blamed the page and told you to download it manually — but Drive was answering the
