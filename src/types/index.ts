@@ -321,10 +321,19 @@ export type LiveRefresh =
   | "disabled"
   | "unsupported";
 
+/** Result of a payload-carrying command sent to FrostMod (see `frostmod.rs`). */
+export type CommandOutcome =
+  | "signaled"
+  | "not_running"
+  | "write_failed"
+  | "unsupported";
+
 export interface PresetApplyOutcome {
   content_reload: ReloadOutcome;
   game_running: boolean;
   live_refresh: LiveRefresh;
+  /** Set only when the preset performed a model swap. See `SwapApplyOutcome`. */
+  model_refresh: CommandOutcome | null;
 }
 
 /** Outcome of a Locker model/sound swap — same shape/feedback as a preset apply. */
@@ -332,6 +341,13 @@ export interface SwapApplyOutcome {
   content_reload: ReloadOutcome;
   game_running: boolean;
   live_refresh: LiveRefresh;
+  /**
+   * Model swaps only (`null` for sound). `live_refresh` re-runs the game's
+   * *customization* loader — that reloads paints/gear but never the mesh, so the
+   * model needs FrostMod to re-apply the bike. `signaled` means FrostMod was asked;
+   * it still no-ops unless the swapped bike is the one currently selected in-game.
+   */
+  model_refresh: CommandOutcome | null;
 }
 
 /** Install/version/running snapshot for the FrostMod settings panel. */

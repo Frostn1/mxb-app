@@ -135,10 +135,19 @@ interface PresetsProps {
   onOpenInRider?: (loadout: Loadout) => void;
   /** Jump to the Locker — where model swaps have to be registered before they show here. */
   onOpenLocker?: () => void;
+  /** Jump to Settings — the profiles folder picker lives there. */
+  onOpenSettings?: () => void;
 }
 
-export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = {}) {
+export default function Presets({
+  onOpenInRider,
+  onOpenLocker,
+  onOpenSettings,
+}: PresetsProps = {}) {
   const [profiles, setProfiles] = useState<string[]>([]);
+  /** Where the backend read profiles from, and whether that folder is even there.
+   *  Only used by the empty state, which is the one place it matters. */
+  const [profilesDir, setProfilesDir] = useState<{ dir: string; exists: boolean } | null>(null);
   const [profile, setProfile] = useState<string>("");
   const [bikes, setBikes] = useState<string[]>([]);
   const [bike, setBike] = useState<string>("");
@@ -165,15 +174,16 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [profs, presets, sc] = await Promise.all([
+      const [scan, presets, sc] = await Promise.all([
         presetsListProfiles(),
         presetsList(),
         loadScans(),
       ]);
-      setProfiles(profs);
+      setProfiles(scan.profiles);
+      setProfilesDir({ dir: scan.dir, exists: scan.exists });
       setSaved(presets);
       setScans(sc);
-      setProfile((p) => p || profs[0] || "");
+      setProfile((p) => p || scan.profiles[0] || "");
     } catch (e) {
       setError(String(e));
     }
@@ -342,7 +352,9 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
     [scans, bike, loadout],
   );
 
-  const noProfiles = profiles.length === 0 && !error;
+  // Wait for the first scan before claiming there's nothing — otherwise the empty
+  // state flashes (naming no folder) on every mount.
+  const noProfiles = profilesDir !== null && profiles.length === 0 && !error;
 
   return (
     <div className="flex h-full flex-col">
@@ -374,9 +386,34 @@ export default function Presets({ onOpenInRider, onOpenLocker }: PresetsProps = 
       )}
 
       {noProfiles ? (
-        <div className="flex flex-1 items-center justify-center px-7 text-center text-[13px] text-muted-foreground">
-          No MX Bikes profiles found. Launch the game once so it creates a profile,
-          then refresh.
+        /* Name the folder we actually read. A blank tab used to be the only signal
+           that a path was involved at all — and when the mods folder has been moved
+           via `mxbikes.ini`, a wrong path is the likeliest reason we found nothing. */
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-7 text-center">
+          <div className="max-w-[440px] text-[13px] leading-relaxed text-muted-foreground">
+            {profilesDir && !profilesDir.exists
+              ? "No profiles folder here — this folder doesn’t exist:"
+              : "No MX Bikes profiles found in:"}
+            <div className="mt-2 break-all rounded-lg border border-border bg-card/40 px-3 py-2 font-mono text-[11.5px] text-foreground/80">
+              {profilesDir?.dir || "your MX Bikes folder"}
+            </div>
+            <p className="mt-2.5">
+              {profilesDir && !profilesDir.exists
+                ? "If you moved your mods folder (mxbikes.ini), your profiles stayed in Documents\\PiBoSo\\MX Bikes\\profiles — point the app at them in Settings."
+                : "Launch the game once so it creates a profile, then refresh — or point the app at the folder that holds your profiles."}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {onOpenSettings && (
+              <Button variant="outline" size="sm" onClick={onOpenSettings}>
+                Choose profiles folder…
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => void load()}>
+              <RefreshCw className="size-3.5" />
+              Refresh
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
