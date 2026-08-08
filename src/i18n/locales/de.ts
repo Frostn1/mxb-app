@@ -805,6 +805,8 @@ export const de: Translation = {
   "overlay.registerFailed": "Overlay-Tastenkürzel konnte nicht registriert werden",
   "overlay.toClose": "{{hotkey}} zum Schließen",
   "overlay.closeTitle": "Overlay schließen (Esc)",
+  "overlay.openMain": "Vollständige App öffnen",
+  "overlay.openMainTitle": "Overlay schließen und das Hauptfenster von MXB App öffnen",
   "overlay.needsSetup": "Richte MXB App zuerst im Hauptfenster fertig ein — sie muss wissen, wo dein MX-Bikes-Ordner liegt.",
   "overlay.fullscreenBlocked": "Das Overlay kann nicht über exklusivem Vollbild erscheinen",
   "overlay.fullscreenBlockedDesc": "Stelle MX Bikes unter Options → Video auf randlos oder Fenstermodus und drücke das Kürzel erneut.",

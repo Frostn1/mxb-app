@@ -838,6 +838,11 @@ export function overlayHide(): Promise<void> {
   return invoke<void>("overlay_hide");
 }
 
+/** Close the overlay and bring the main MXB App window to the front. */
+export function overlayOpenMain(): Promise<void> {
+  return invoke<void>("overlay_open_main");
+}
+
 export function setOverlayEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_overlay_enabled", { enabled });
 }
