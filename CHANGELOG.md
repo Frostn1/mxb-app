@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-08 — FrostMod works on GP Bikes
+
+### Added
+- **FrostMod's live mod reload now works for GP Bikes.** FrostMod v0.10.0 attaches to
+  `gpbikes.exe`, so the status panel, the reload button and the watch-the-folder auto-reload
+  are all available when GP Bikes is the active game — they were hidden before because
+  FrostMod only knew about MX Bikes. The app launches it with the game it's driving, which
+  is what makes it attach; without that it would sit running and never hook anything.
+
+### Notes
+- Instant profile refresh stays MX Bikes only. Unlike FrostMod's reload, it calls a
+  hardcoded `mxbikes.exe` function offset, and there's no GP equivalent yet.
+
 ## 2026-08-08 — GP Bikes support
 
 ### Added
