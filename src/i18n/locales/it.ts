@@ -751,4 +751,23 @@ export const it: Translation = {
   "dest.protectionPaintsFor": "{{name}} · grafiche protezioni",
   "dest.outfitFor": "{{name}} · completo / kit",
   "dest.glovesFor": "{{name}} · guanti",
+
+  // In-game overlay — the hotkey panel drawn over MX Bikes.
+  "overlay.section": "Overlay in gioco",
+  "overlay.enable": "Attiva l'overlay in gioco",
+  "overlay.enableDesc": "Premi una scorciatoia mentre MX Bikes è in esecuzione per aprire Preset, Locker e Browse sopra il gioco — senza alt-tab. I preset e i cambi modello si applicano al gioco in esecuzione.",
+  "overlay.shortcut": "Scorciatoia overlay",
+  "overlay.shortcutDesc": "Funziona anche quando il gioco ha il focus. Esc chiude l'overlay e restituisce il controllo.",
+  "overlay.borderlessNote": "Imposta MX Bikes in modalità senza bordi o finestra in Options → Video. Nulla può essere disegnato sopra un gioco in fullscreen esclusivo — overlay compreso.",
+  "overlay.pressKeys": "Premi i tasti…",
+  "overlay.needModifier": "Aggiungi un modificatore",
+  "overlay.needModifierDesc": "Tieni premuto Ctrl, Alt o Shift, così la scorciatoia non scatta mentre scrivi.",
+  "overlay.shortcutUpdated": "Scorciatoia overlay aggiornata",
+  "overlay.shortcutRejected": "Impossibile usare questa scorciatoia",
+  "overlay.registerFailed": "Impossibile registrare la scorciatoia dell'overlay",
+  "overlay.toClose": "{{hotkey}} per chiudere",
+  "overlay.closeTitle": "Chiudi overlay (Esc)",
+  "overlay.needsSetup": "Completa prima la configurazione di MXB App nella finestra principale — deve sapere dov'è la tua cartella MX Bikes.",
+  "overlay.fullscreenBlocked": "L'overlay non può apparire sopra il fullscreen esclusivo",
+  "overlay.fullscreenBlockedDesc": "Imposta MX Bikes senza bordi o in finestra in Options → Video, poi riprova con la scorciatoia.",
 };

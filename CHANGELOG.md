@@ -13,6 +13,17 @@
   ignores them, and a sort that silently does nothing is worse than one that isn't there.
   The popular listings can't be searched, so they step aside while the search box has text
   in it and the order falls back to newest.
+- **An in-game overlay, on a hotkey.** Everything the app does still meant leaving the
+  game to do it. Ctrl+Shift+M (rebindable in Settings → In-game overlay) now brings
+  Presets, the Locker and Browse up over MX Bikes in a floating panel; Esc closes it and
+  hands control straight back to the game. It's the same UI the main window uses, not a
+  cut-down copy, and it pays off because presets and model swaps already apply to a
+  *running* game — pick a gear set from the pits and it's on you, no restart, no alt-tab.
+  Mods downloaded from Browse still need the usual content reload before the game sees
+  them. One real limit: nothing can be drawn over a game in exclusive fullscreen, so set
+  MX Bikes to borderless or windowed — if you summon the overlay and it can't appear, the
+  main window tells you why rather than leaving you guessing. Translated into all six
+  languages alongside the rest of the app.
 - **MXB App is translated into Italian, Spanish, French, German and Brazilian
   Portuguese.** Pick a language under Settings → Appearance; the choice persists, and
   `System` follows the OS (a bare `pt` resolves to Brazilian, the only Portuguese we
@@ -35,6 +46,12 @@
   no word for "the model's own look".
 
 ### Fixed
+- **Picking a goggle paint now updates the 3D preview on its own.** The Rider tab's
+  preview re-resolves the model whenever a rider slot changes, but the list of slots it
+  watched never included the goggles — so choosing a lens did nothing on screen, and the
+  new paint only appeared once you touched some *other* slot (helmet paint, boots) and
+  dragged the goggles along with it. The backend had been reading the goggle paint
+  correctly the whole time; it was simply never asked to.
 - **Downloads that Google Drive refuses now say why, instead of "the host returned a web
   page".** Hitting a popular mod (Flow Series #1 FlowiCompound, for one) gave a message
   that blamed the page and told you to download it manually — but Drive was answering the

@@ -31,7 +31,18 @@ pub struct AppConfig {
     /// The first-run guided tour has been finished or skipped. Persisted alongside
     /// `welcome_seen`, for the same reason.
     pub tour_done: bool,
+    /// Register the global hotkey that summons the in-game overlay.
+    pub overlay_enabled: bool,
+    /// The combo that toggles the overlay, in Tauri accelerator syntax
+    /// (`"CommandOrControl+Shift+M"`). Blank falls back to [`DEFAULT_OVERLAY_HOTKEY`].
+    pub overlay_hotkey: String,
 }
+
+/// Toggle combo used until the player picks another one.
+///
+/// Ctrl+Shift+M is free in MX Bikes (its bindings are single keys and gamepad inputs)
+/// and isn't a Windows system shortcut.
+pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+M";
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -46,6 +57,8 @@ impl Default for AppConfig {
             watch_mods_reload: true,
             welcome_seen: false,
             tour_done: false,
+            overlay_enabled: true,
+            overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
         }
     }
 }

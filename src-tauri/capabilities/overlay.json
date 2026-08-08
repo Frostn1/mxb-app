@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Capabilities for the in-game overlay window. Deliberately narrower than the main window: no updater, autostart or process-restart from a window that sits over the game.",
+  "windows": ["overlay"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-hide",
+    "core:window:allow-close",
+    "dialog:default",
+    "dialog:allow-open",
+    "shell:allow-open",
+    "log:default"
+  ]
+}

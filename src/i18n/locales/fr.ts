@@ -762,4 +762,23 @@ export const fr: Translation = {
   "dest.protectionPaintsFor": "{{name}} · décos protections",
   "dest.outfitFor": "{{name}} · tenue / kit",
   "dest.glovesFor": "{{name}} · gants",
+
+  // In-game overlay — the hotkey panel drawn over MX Bikes.
+  "overlay.section": "Overlay en jeu",
+  "overlay.enable": "Activer l'overlay en jeu",
+  "overlay.enableDesc": "Appuie sur un raccourci pendant que MX Bikes tourne pour afficher Presets, Locker et Browse par-dessus le jeu — sans alt-tab. Les presets et les changements de modèle s'appliquent au jeu en cours.",
+  "overlay.shortcut": "Raccourci de l'overlay",
+  "overlay.shortcutDesc": "Fonctionne même quand le jeu a le focus. Esc ferme l'overlay et rend la main au jeu.",
+  "overlay.borderlessNote": "Passe MX Bikes en sans bordure ou en fenêtre dans Options → Video. Rien ne peut s'afficher par-dessus un jeu en plein écran exclusif — l'overlay compris.",
+  "overlay.pressKeys": "Appuie sur les touches…",
+  "overlay.needModifier": "Ajoute un modificateur",
+  "overlay.needModifierDesc": "Maintiens Ctrl, Alt ou Shift pour que le raccourci ne se déclenche pas pendant que tu écris.",
+  "overlay.shortcutUpdated": "Raccourci de l'overlay mis à jour",
+  "overlay.shortcutRejected": "Impossible d'utiliser ce raccourci",
+  "overlay.registerFailed": "Impossible d'enregistrer le raccourci de l'overlay",
+  "overlay.toClose": "{{hotkey}} pour fermer",
+  "overlay.closeTitle": "Fermer l'overlay (Esc)",
+  "overlay.needsSetup": "Termine d'abord la configuration de MXB App dans sa fenêtre principale — elle doit savoir où se trouve ton dossier MX Bikes.",
+  "overlay.fullscreenBlocked": "L'overlay ne peut pas s'afficher par-dessus le plein écran exclusif",
+  "overlay.fullscreenBlockedDesc": "Passe MX Bikes en sans bordure ou en fenêtre dans Options → Video, puis réessaie le raccourci.",
 };

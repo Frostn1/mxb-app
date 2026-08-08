@@ -729,4 +729,23 @@ export const en = {
   "dest.protectionPaintsFor": "{{name}} · protection paints",
   "dest.outfitFor": "{{name}} · outfit / kit",
   "dest.glovesFor": "{{name}} · gloves",
+
+  // In-game overlay — the hotkey panel drawn over MX Bikes.
+  "overlay.section": "In-game overlay",
+  "overlay.enable": "Enable the in-game overlay",
+  "overlay.enableDesc": "Press a shortcut while MX Bikes is running to bring up Presets, Locker and Browse over the game — no alt-tab. Presets and model swaps apply to the running game.",
+  "overlay.shortcut": "Overlay shortcut",
+  "overlay.shortcutDesc": "Works while the game has focus. Esc closes the overlay and hands control back.",
+  "overlay.borderlessNote": "Set MX Bikes to borderless or windowed in Options → Video. Nothing can be drawn over a game running in exclusive fullscreen — the overlay included.",
+  "overlay.pressKeys": "Press keys…",
+  "overlay.needModifier": "Add a modifier",
+  "overlay.needModifierDesc": "Hold Ctrl, Alt or Shift so the shortcut can't fire while you type.",
+  "overlay.shortcutUpdated": "Overlay shortcut updated",
+  "overlay.shortcutRejected": "Couldn't use that shortcut",
+  "overlay.registerFailed": "Overlay hotkey couldn't be registered",
+  "overlay.toClose": "{{hotkey}} to close",
+  "overlay.closeTitle": "Close overlay (Esc)",
+  "overlay.needsSetup": "Finish setting up MXB App in its main window first — it needs to know where your MX Bikes folder is.",
+  "overlay.fullscreenBlocked": "The overlay can't show over exclusive fullscreen",
+  "overlay.fullscreenBlockedDesc": "Set MX Bikes to borderless or windowed in Options → Video, then try the shortcut again.",
 } as const;

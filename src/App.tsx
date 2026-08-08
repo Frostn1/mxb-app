@@ -7,10 +7,18 @@ import LooseSwapPrompt from "./Components/Locker/LooseSwapPrompt";
 import { ThemeProvider } from "./Context/Theme";
 import { FrostmodProvider } from "./Context/Frostmod";
 import { ConfigContext } from "./Context/Config";
+import { toast } from "sonner";
 import { Toaster } from "@/Components/ui/sonner";
 import { TooltipProvider } from "@/Components/ui/tooltip";
-import { bikePreviewAvailable, getConfig, isConfigured, setIntroSeen } from "./api/mods";
+import {
+  bikePreviewAvailable,
+  getConfig,
+  isConfigured,
+  onOverlayFullscreenBlocked,
+  setIntroSeen,
+} from "./api/mods";
 import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
+import { useI18n } from "./i18n/context";
 import { UpdateProvider } from "./Context/Update";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config } from "./types";
@@ -26,6 +34,7 @@ import type { Config } from "./types";
 const WELCOME_SEEN_KEY = "mxb:welcomeSeen:v1";
 
 const App = () => {
+  const { t } = useI18n();
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<Config | null>(null);
   // Whether this build can decode real bike geometry (optional local module). Fixed
@@ -70,6 +79,20 @@ const App = () => {
       }
     })();
   }, [reloadConfig]);
+
+  // The overlay can't draw over a game in exclusive fullscreen, and it can't say so
+  // itself — it's behind the game. The message waits here, where the player lands the
+  // moment they alt-tab to find out why nothing happened.
+  useEffect(() => {
+    const unlisten = onOverlayFullscreenBlocked(() =>
+      toast.warning(t("overlay.fullscreenBlocked"), {
+        description: t("overlay.fullscreenBlockedDesc"),
+      }),
+    );
+    return () => {
+      void unlisten.then((off) => off()).catch(() => {});
+    };
+  }, [t]);
 
   // Block the webview's browser refresh/find shortcuts.
   useEffect(() => {
