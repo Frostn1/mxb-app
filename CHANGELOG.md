@@ -19,6 +19,19 @@
   model.
 
 ### Fixed
+- **The rider stands up.** Rider meshes don't agree on which axis is up: the stock motocross
+  rider is authored Y-up, while the supermoto rider and Rider+ are Z-up and arrived lying on
+  their back. Every piece of gear is anchored and scaled to a fraction of the body's height,
+  so a body on its side measured a quarter of a metre tall instead of a metre and a bit — the
+  helmet and boots shrank to specks and sank into the torso, which read as gear that never
+  loaded. A body whose longest axis isn't its height is now rolled upright; one that already
+  stands is left alone.
+- **A rider model loads without decoding pixels nobody sees.** Dressing a body in its own
+  baked textures used to inflate and re-encode every texture the mesh carried, then throw
+  most of them away — skin renders as a flat colour and the name and number planes render as
+  nothing at all. On a rider body that decode cost more than parsing the mesh. Only textures
+  the viewer can actually draw are decoded now, and they're kept per model so changing a
+  dropdown doesn't re-read a 67 MB body.
 - **The rider's textures are read off the model instead of memorised.** Which texture a body
   part wears was decided by its material number: 1 was gloves, 2 was the face, 3 and 4 were
   hidden. That is not a rule, it's the stock motocross rider's texture order memorised — and

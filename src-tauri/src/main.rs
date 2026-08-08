@@ -960,6 +960,11 @@ async fn load_rider_body_model(
 /// whole `rider.edf` back — 67 MB for Rider+. The viewer reloads on every loadout change, so
 /// without this a rider wearing a kit that leaves one slot bare re-reads the model each time
 /// you touch a dropdown.
+///
+/// Only textures the viewer could actually draw are decoded. Skin renders as flat colour and
+/// the `w_` planes render as nothing, so inflating and re-encoding them is time spent on
+/// pixels no one will ever see — and on a rider body that decode costs more than parsing the
+/// mesh does.
 fn body_textures(src: &BodySource, profile: &str) -> Option<Vec<paint::PaintTexture>> {
     static C: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<String, Vec<paint::PaintTexture>>>,
@@ -969,7 +974,8 @@ fn body_textures(src: &BodySource, profile: &str) -> Option<Vec<paint::PaintText
     if let Some(t) = cache.lock().ok().and_then(|c| c.get(&key).cloned()) {
         return Some(t);
     }
-    let texs = paint::extract_edf_textures(&src.read(profile)?);
+    let drawn = |name: &str| !matches!(body_slot(Some(name)).as_str(), "hide" | "face");
+    let texs = paint::extract_edf_textures_where(&src.read(profile)?, drawn);
     if let Ok(mut c) = cache.lock() {
         c.insert(key, texs.clone());
     }
@@ -1017,6 +1023,44 @@ fn load_rider_body(
         nodes,
         textures,
     })
+}
+
+/// Stand a rider body up.
+///
+/// Rider meshes don't agree on which axis is up. The stock motocross rider is authored Y-up;
+/// the supermoto rider and Rider+ are Z-up and arrive lying on their back. The viewer anchors
+/// every piece of gear to a fraction of the body's height, so a body on its side doesn't just
+/// look wrong — it measures a quarter of a metre tall instead of a metre and a bit, and the
+/// helmet and boots scale down to specks and sink into the torso.
+///
+/// A rider is a standing figure: its longest axis is its height. Where that's Z, roll it up.
+/// Where it's already Y, leave the mesh alone — guessing at a body that's already upright is
+/// how the stock rider would get broken to fix a custom one.
+fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for n in nodes.iter() {
+        for v in n.positions.chunks_exact(3) {
+            for a in 0..3 {
+                lo[a] = lo[a].min(v[a]);
+                hi[a] = hi[a].max(v[a]);
+            }
+        }
+    }
+    let ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+    if ext[2] <= ext[1] || ext[2] <= ext[0] {
+        return;
+    }
+    // A quarter turn about X: y' = -z, z' = y. This way round, and not the other, because
+    // these meshes lie head-away — the head sits at the most negative Z, so negating it puts
+    // the head at the top where the gear anchors expect to find it.
+    for n in nodes.iter_mut() {
+        for v in n.positions.chunks_exact_mut(3).chain(n.normals.chunks_exact_mut(3)) {
+            let (y, z) = (v[1], v[2]);
+            v[1] = -z;
+            v[2] = y;
+        }
+    }
+    log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
 }
 
 /// Bind each body submesh to the texture the mesh itself says it wears.
@@ -1203,7 +1247,8 @@ fn rider_body_nodes(src: &BodySource, profile: &str) -> Option<Vec<edf::EdfNode>
         return Some(n);
     }
     mesh_from_bytes(key, &src.read(profile)?, |nodes, data| {
-        bind_body_submeshes(nodes, data)
+        bind_body_submeshes(nodes, data);
+        stand_body_upright(nodes);
     })
 }
 
@@ -3263,6 +3308,50 @@ mod viewer_tests {
             super::keep_lod0(&mut nodes);
             super::bind_body_submeshes(&mut nodes, &bytes);
 
+            super::stand_body_upright(&mut nodes);
+
+            let bounds = |ns: &[crate::edf::EdfNode], only_face: bool| {
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for n in ns {
+                    for sm in &n.submeshes {
+                        if only_face && sm.texture.as_deref() != Some("face") {
+                            continue;
+                        }
+                        for i in &n.indices[sm.tri_start as usize * 3
+                            ..(sm.tri_start + sm.tri_count) as usize * 3]
+                        {
+                            let v = &n.positions[*i as usize * 3..*i as usize * 3 + 3];
+                            for a in 0..3 {
+                                lo[a] = lo[a].min(v[a]);
+                                hi[a] = hi[a].max(v[a]);
+                            }
+                        }
+                    }
+                }
+                (lo, hi)
+            };
+            let (lo, hi) = bounds(&nodes, false);
+            let (h, d) = (hi[1] - lo[1], hi[2] - lo[2]);
+            eprintln!("  upright bounds x={:.3} y={h:.3} z={d:.3}", hi[0] - lo[0]);
+
+            // A rider is a standing figure, so height is its longest axis. The viewer scales
+            // and anchors every piece of gear off this — a body on its side buries the
+            // helmet and boots in the torso at a fifth of their size.
+            assert!(h > hi[0] - lo[0] && h > d, "the body stands up");
+            // And it stands the right way up. Height alone can't tell a rider from one
+            // hanging upside down, so check the skin: the head is the highest thing on a
+            // rider. Its top, not its bottom — Rider+'s skin texture also covers the bare
+            // wrists of its rolled-sleeve variants, which reach well down the body.
+            let (_, fhi) = bounds(&nodes, true);
+            eprintln!("  skin tops out at {:.3} of {:.3}", fhi[1], hi[1]);
+            assert!(
+                fhi[1] > lo[1] + 0.9 * h,
+                "the head is at the top (skin tops at {:.3}, body {:.3}..{:.3})",
+                fhi[1],
+                lo[1],
+                hi[1],
+            );
+
             let mut slots: Vec<String> = nodes
                 .iter()
                 .flat_map(|n| n.submeshes.iter().filter_map(|s| s.texture.clone()))
@@ -3315,6 +3404,32 @@ mod viewer_tests {
 
         let src = super::rider_body_source(&cfg, &profile).expect("a body source");
         eprintln!("{profile}: {src:?}");
+
+        {
+            let t = std::time::Instant::now();
+            let data = src.read(&profile).expect("read mesh");
+            eprintln!("  read {} MB in {:?}", data.len() / 1_000_000, t.elapsed());
+            let t = std::time::Instant::now();
+            let mut n = crate::edf::parse(&data);
+            eprintln!("  parse {} nodes in {:?}", n.len(), t.elapsed());
+            let t = std::time::Instant::now();
+            crate::edf::to_right_handed(&mut n);
+            super::keep_lod0(&mut n);
+            eprintln!("  handedness + lod0 in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            super::bind_body_submeshes(&mut n, &data);
+            eprintln!("  bind in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            super::stand_body_upright(&mut n);
+            eprintln!("  stand in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            let texs = super::body_textures(&src, &profile).expect("textures");
+            eprintln!(
+                "  extract {:?} in {:?}",
+                texs.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+                t.elapsed(),
+            );
+        }
         // A profile folder that carries a mesh is a model, and beats the game archive. One
         // that only carries paints — which is what installing a kit under `default_mx`
         // leaves behind — is not, and must still fall through to the stock body.
