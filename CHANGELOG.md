@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-08-07 — the Rider preview can wear a rider model
+
+### Added
+- **Custom rider models show up on the rider.** A rider model is a whole new body mesh, not a
+  texture — Rider+ and its variants install as folders under `mods/rider/riders`, and the
+  preview never looked there. It read the body out of the game's `rider.pkz` and nowhere else,
+  so picking an installed model listed the profile, found nothing to load, and rendered gear
+  floating where the rider should be. The body is now resolved from the installed model first,
+  loose or packed as a `.pkz`, and falls back to the game's own rider only when no model
+  supplies one. A rider packed as `riders/<name>.pkz` is listed in the picker too, as gear
+  already was.
+- **A rider model wears the kits you already own.** Rider+ ships its `paints` and `gloves`
+  folders empty on purpose, because existing gear is meant to work on it. A kit or glove paint
+  is now looked for in the chosen profile, then inside its archive, then under the stock
+  profiles — by exact name at every step, so reaching further never quietly swaps in a
+  different paint. The kit dropdown lists what you own rather than going blank on a fresh
+  model.
+
+### Fixed
+- **The rider's textures are read off the model instead of memorised.** Which texture a body
+  part wears was decided by its material number: 1 was gloves, 2 was the face, 3 and 4 were
+  hidden. That is not a rule, it's the stock motocross rider's texture order memorised — and
+  no two rider models write that order the same way. The supermoto rider lists its face second
+  and its gloves third, so it has been wearing its face on its hands; Rider+ lists its gloves
+  first and its suit last, so it would have worn the glove texture over its whole body. Each
+  part now binds to the texture the mesh itself says it was drawn against, the same reading the
+  bike and gear previews already take. Anything a paint doesn't cover falls back to the
+  model's own texture, so a rider that ships no paints — or a model with pieces of its own —
+  renders as it was built rather than in flat grey.
+
 ## 2026-08-07 — a Cloudflare block on Browse can finally be diagnosed
 
 ### Changed
