@@ -79,6 +79,12 @@ export interface ModDetail {
   /** e.g. "Beta 19", when the page states it. */
   version: string | null;
   downloads: DownloadOption[];
+  /**
+   * The post's category names ("2023 KTM 450 SX-F OEM", "Liveries", "KTM"). A livery is
+   * filed under one category per bike it fits, which names its target far more precisely
+   * than the title does — see `bikesFromCategories` in `api/mods`.
+   */
+  categories: string[];
 }
 
 /** An installed `.pkz` mod file found under the type's folder (at any depth). */
@@ -249,8 +255,12 @@ export interface PaintTexture {
   name: string;
   width: number;
   height: number;
-  /** `data:image/png;base64,…` — bind straight into a three.js texture loader. */
-  png: string;
+  /**
+   * Names the pixels held on the Rust side. Fetch them with {@link textureBytes} and build
+   * a `THREE.DataTexture` — the RGBA never crosses as text, so paints cost no encode and
+   * carrying the model's base textures on every paint costs no memory.
+   */
+  token: string;
 }
 
 /** One selectable paint (livery) for a bike: a name + its textures. */
