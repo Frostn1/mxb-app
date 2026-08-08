@@ -153,6 +153,10 @@ struct SwapApplyOutcome {
     content_reload: ReloadOutcome,
     game_running: bool,
     live_refresh: gameproc::LiveRefresh,
+    /// Model swaps only (`None` for sound). `live_refresh` re-runs the *customization*
+    /// loader, which reloads paints/gear but never the mesh — the model needs FrostMod
+    /// to re-apply the bike. See `frostmod::signal_refresh_model`.
+    model_refresh: Option<frostmod::CommandOutcome>,
 }
 
 /// Re-run the game's look loader live if instant refresh is enabled, else report it off.
@@ -162,6 +166,13 @@ fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
     } else {
         gameproc::LiveRefresh::Disabled
     }
+}
+
+/// Ask FrostMod to re-apply `bike` so a just-swapped model shows live. `None` when
+/// instant refresh is off — the same switch that gates `live_refresh`, since both
+/// reach into the running game.
+fn model_refresh_cmd(enabled: bool, bike: &str) -> Option<frostmod::CommandOutcome> {
+    enabled.then(|| frostmod::signal_refresh_model(bike))
 }
 
 #[tauri::command]
@@ -189,10 +200,16 @@ fn apply_model_swap_blocking(
         eprintln!("sound reconcile after model swap failed: {e:#}");
     }
     let content_reload = frostmod::signal_reload();
+    // Ask FrostMod to re-apply the bike so the new model shows in the garage without a
+    // class switch away-and-back. Only acts if `bike` is the selected one (decided
+    // inside FrostMod, which is the only side that knows). Gated on the same
+    // instant-refresh setting as the look refresh — both poke the live game.
+    let model_refresh = model_refresh_cmd(cfg.instant_refresh, &bike);
     Ok(SwapApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
         live_refresh: live_refresh(cfg.instant_refresh),
+        model_refresh,
     })
 }
 
@@ -220,6 +237,7 @@ async fn apply_sound_swap(
             content_reload,
             game_running: gameproc::is_game_running(),
             live_refresh: live_refresh(cfg.instant_refresh),
+            model_refresh: None, // a sound swap doesn't touch the model
         })
     })
     .await
@@ -1551,7 +1569,7 @@ async fn garage_scan_bikes(app: tauri::AppHandle) -> Result<Vec<bikeswap::BikeId
 /// Ask FrostMod to swap the active bike (offline, in-garage). FrostMod enforces the
 /// offline/in-garage guard; this only sends the request.
 #[tauri::command]
-fn garage_swap_bike(bike_id: String) -> frostmod::SwapOutcome {
+fn garage_swap_bike(bike_id: String) -> frostmod::CommandOutcome {
     frostmod::signal_swap_bike(&bike_id)
 }
 
@@ -1762,6 +1780,9 @@ struct PresetApplyOutcome {
     content_reload: ReloadOutcome,
     game_running: bool,
     live_refresh: gameproc::LiveRefresh,
+    /// Set only when the preset actually performed a model swap — see the note on
+    /// `SwapApplyOutcome::model_refresh`.
+    model_refresh: Option<frostmod::CommandOutcome>,
 }
 
 #[tauri::command]
@@ -1776,16 +1797,20 @@ fn presets_apply(
     presets::apply_loadout(&cfg.profiles_dir(), &profile, &bikeid, &loadout, make_active)
         .map_err(|e| format!("{e:#}"))?;
     let want = loadout.model_swap.trim();
+    let mut model_refresh = None;
     if !want.is_empty() && !want.eq_ignore_ascii_case(&modelswap::current_active(&cfg.mods_path, &bikeid))
     {
         modelswap::apply_model_swap(&cfg.mods_path, &bikeid, want)
             .map_err(|e| format!("Cosmetics applied, but the model swap failed: {e:#}"))?;
+        // Same reason as the Locker path: the look loader won't reload the mesh.
+        model_refresh = model_refresh_cmd(cfg.instant_refresh, &bikeid);
     }
     let content_reload = frostmod::signal_reload();
     Ok(PresetApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
         live_refresh: live_refresh(cfg.instant_refresh),
+        model_refresh,
     })
 }
 
