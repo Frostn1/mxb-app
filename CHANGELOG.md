@@ -2,6 +2,16 @@
 
 ## 2026-08-07
 
+### Fixed
+- **Downloads that Google Drive refuses now say why, instead of "the host returned a web
+  page".** Hitting a popular mod (Flow Series #1 FlowiCompound, for one) gave a message
+  that blamed the page and told you to download it manually — but Drive was answering the
+  virus-scan confirm with a *Quota exceeded* page, so a browser hit the exact same wall
+  and the advice sent people in circles. The three Drive refusals we can name — download
+  limit, private file, deleted file — now come through with what actually happened and
+  what to do about it (for a quota block: copy the file to your own Drive and download
+  the copy, or wait a day). Anything unrecognised keeps the old wording.
+
 ### Added
 - **Star ratings on browse thumbnails.** A mod that people have rated on mxb-mods.com now
   shows its score on the card the same way the site does — five stars filled to the
