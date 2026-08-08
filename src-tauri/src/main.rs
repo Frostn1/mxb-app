@@ -17,6 +17,7 @@ mod modelswap;
 mod mods;
 mod modstate;
 mod modwatch;
+mod mxb_fetch;
 mod mxb_session;
 mod overlay;
 mod paint;
@@ -62,6 +63,23 @@ fn parks_in_tray(label: &str) -> bool {
     label == MAIN_WINDOW
 }
 
+/// Whether a window may make this IPC call.
+///
+/// Exists for one window. [`mxb_fetch`] parks a hidden webview on the *remote* mxb-mods.com
+/// origin, and giving it a capability is what lets its page hand fetch results back. But a
+/// capability grants IPC in general, and the commands registered with `generate_handler!`
+/// are not covered by the permission ACL — so without this, script on mxb-mods.com could
+/// call `create_config`, `install_mod` or anything else the app exposes.
+///
+/// So that window gets an allowlist of exactly one call: emitting the result event. Every
+/// other window is unaffected and keeps whatever its own capability file grants.
+fn ipc_allowed(label: &str, command: &str) -> bool {
+    if label != mxb_fetch::WINDOW {
+        return true;
+    }
+    command == "plugin:event|emit"
+}
+
 /// Whether the app is ready to use. Falls back to auto-detection when the config file
 /// is missing, so the setup screen only appears when the MX Bikes folder genuinely
 /// can't be found — not every time the saved config goes astray.
@@ -104,15 +122,20 @@ fn create_config(
     Ok(true)
 }
 
-/// Run an mxb-mods.com call; if Cloudflare refuses it, earn a `cf_clearance` in a real
-/// browser and try exactly once more.
+/// Run an mxb-mods.com call; if Cloudflare refuses it, run it again from inside a real
+/// browser and keep using that transport for the rest of the session.
 ///
-/// Once, not a loop: the handshake either produced a cookie the client didn't have or it
-/// didn't, and repeating it would just reopen the window at someone who is already stuck.
-/// Only refusals we could plausibly clear get this treatment — a 429 wants patience, not a
-/// browser window.
+/// This used to earn a `cf_clearance` in a WebView and replay the cookie through the HTTP
+/// client. A tester's log showed why that can't work: the challenge cleared in about a
+/// second, the cookie was sent correctly, and Cloudflare served the interstitial to reqwest
+/// anyway — a clearance is bound to the TLS fingerprint that earned it. So instead of moving
+/// the cookie to the request, we move the request to the browser. See [`mxb_fetch`].
+///
+/// Once, not a loop: the second attempt is on a different transport, so if that is refused
+/// too, trying a third time changes nothing. Only refusals a browser could plausibly satisfy
+/// get this treatment — a 429 wants patience, not another request.
 async fn with_clearance<T, F, Fut>(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     what: &str,
     op: F,
 ) -> Result<T, String>
@@ -127,7 +150,7 @@ where
     match err.downcast_ref::<mods::mxb::Blocked>() {
         Some(blocked) if blocked.clearable() => {
             log::info!(
-                "{what} blocked ({}) — trying to earn a cf_clearance",
+                "{what} blocked ({}) — retrying it from inside the WebView",
                 blocked
                     .status
                     .map_or_else(|| "interstitial".to_string(), |s| s.to_string())
@@ -135,27 +158,23 @@ where
         }
         // Not clearable, or not a block at all — a parse failure, a timeout, a 429.
         _ => {
-            log::warn!("{what} failed and a browser window wouldn't help: {err:#}");
+            log::warn!("{what} failed and a browser wouldn't help: {err:#}");
             return Err(format!("{err:#}"));
         }
     }
-    if !mxb_session::handshake(app).await {
-        // Deliberately not "no cf_clearance to retry with": the handshake also returns
-        // false when it couldn't run at all, and a log that claimed an empty jar while
-        // the refusal line above it listed a `cf_clearance` sent a reader the wrong way.
-        log::warn!("{what} stays blocked — the handshake produced no new clearance");
-        return Err(format!("{err:#}"));
-    }
+    // Latches for the session: once this client's fingerprint has been refused on this
+    // network, every later request would be refused the same way, so there is nothing to
+    // gain from trying the HTTP client again first.
+    mods::mxb::use_webview();
     match op().await {
         Ok(value) => {
-            log::info!("{what} succeeded on the retry with a fresh cf_clearance");
+            log::info!("{what} succeeded through the WebView");
             Ok(value)
         }
-        // The interesting failure: we passed the challenge in a real browser, replayed the
-        // cookie it earned, and were refused anyway. That is a fingerprint refusal aimed at
-        // the HTTP client, not something another window would fix.
+        // Report the browser's failure, not the original 403 — if the site is refusing a
+        // real browser too, "open mxb-mods.com and hit Retry" is the wrong advice.
         Err(e) => {
-            log::warn!("{what} refused again even with a fresh cf_clearance: {e:#}");
+            log::warn!("{what} failed through the WebView too: {e:#}");
             Err(format!("{e:#}"))
         }
     }
@@ -2592,6 +2611,9 @@ fn main() {
             }
             shop_session::load_session(handle);
             mxb_session::load(handle);
+            // Only registers the result listener and stashes the handle — the hidden window
+            // isn't built until something is actually refused.
+            mxb_fetch::init(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -2619,7 +2641,12 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        // Wrapped rather than passed straight in: `ipc_allowed` closes the hole that giving
+        // the hidden mxb-mods.com window a capability would otherwise open. See its doc.
+        .invoke_handler({
+            // The macro is generic over the runtime; naming `Wry` here is what lets the
+            // wrapper below infer what it is wrapping.
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             is_configured,
             get_config,
             create_config,
@@ -2709,8 +2736,21 @@ fn main() {
             mods_state_set,
             mods_state_delete,
             mods_state_apply,
-            mods_state_restore_all
-        ])
+                mods_state_restore_all
+            ];
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+                let (label, command) = (
+                    invoke.message.webview().label().to_string(),
+                    invoke.message.command().to_string(),
+                );
+                if !ipc_allowed(&label, &command) {
+                    log::warn!("refused IPC '{command}' from the '{label}' window");
+                    invoke.resolver.reject("not permitted from this window");
+                    return true;
+                }
+                handler(invoke)
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -2729,7 +2769,7 @@ mod window_tests {
         assert!(parks_in_tray(MAIN_WINDOW));
 
         for transient in [
-            mxb_session::WINDOW,
+            mxb_fetch::WINDOW,
             SHOP_LOGIN_WINDOW,
             overlay::LABEL, // handled earlier by its own branch, but never by this one
         ] {
@@ -2738,6 +2778,42 @@ mod window_tests {
                 "{transient} must be destroyed on close, not hidden — a stranded label \
                  makes it unopenable for the life of the process"
             );
+        }
+    }
+
+    /// The security boundary. The fetch window runs a *remote* origin — mxb-mods.com's own
+    /// page — and its capability grants IPC, which `generate_handler!` commands are not
+    /// gated by. So it gets exactly one call and nothing else; if this test ever goes green
+    /// on a second command, script on mxb-mods.com can drive that command.
+    #[test]
+    fn the_remote_fetch_window_may_only_emit_its_result() {
+        assert!(ipc_allowed(mxb_fetch::WINDOW, "plugin:event|emit"));
+
+        for forbidden in [
+            "create_config",
+            "install_mod",
+            "mods_state_delete",
+            "get_config",
+            "plugin:shell|open",
+            "plugin:dialog|open",
+            "plugin:event|listen",
+            "plugin:process|restart",
+        ] {
+            assert!(
+                !ipc_allowed(mxb_fetch::WINDOW, forbidden),
+                "mxb-mods.com script must not be able to call {forbidden}"
+            );
+        }
+    }
+
+    /// ...and the guard must not touch anything else. The app's own windows keep whatever
+    /// their capability files grant.
+    #[test]
+    fn the_apps_own_windows_are_unaffected_by_the_guard() {
+        for label in [MAIN_WINDOW, overlay::LABEL, SHOP_LOGIN_WINDOW] {
+            for command in ["create_config", "install_mod", "plugin:event|emit"] {
+                assert!(ipc_allowed(label, command), "{label} / {command}");
+            }
         }
     }
 }
