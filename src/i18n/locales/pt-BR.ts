@@ -260,6 +260,7 @@ export const ptBR: Translation = {
   "viewer.loadingModel": "Carregando o modelo…",
   "viewer.loadingPaint": "Carregando a pintura…",
   "viewer.loadingRider": "Carregando o piloto…",
+  "viewer.riderLoadFailed": "A prévia está desatualizada — não foi possível atualizá-la",
   "viewer.dragToRotate": "Arraste para girar",
   "viewer.scrollToZoom": "Role para dar zoom",
   "viewer.rightDragToPan": "Arraste com o botão direito para mover",

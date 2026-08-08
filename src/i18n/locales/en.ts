@@ -252,6 +252,7 @@ export const en = {
   "viewer.loadingModel": "Loading model…",
   "viewer.loadingPaint": "Loading paint…",
   "viewer.loadingRider": "Loading rider…",
+  "viewer.riderLoadFailed": "Preview is out of date — it couldn't be updated",
   "viewer.dragToRotate": "Drag to rotate",
   "viewer.scrollToZoom": "Scroll to zoom",
   "viewer.rightDragToPan": "Right-drag to pan",

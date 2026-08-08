@@ -259,6 +259,7 @@ export const es: Translation = {
   "viewer.loadingModel": "Cargando modelo…",
   "viewer.loadingPaint": "Cargando gráficos…",
   "viewer.loadingRider": "Cargando piloto…",
+  "viewer.riderLoadFailed": "La vista previa está desactualizada: no se pudo actualizar",
   "viewer.dragToRotate": "Arrastra para rotar",
   "viewer.scrollToZoom": "Desplaza para hacer zoom",
   "viewer.rightDragToPan": "Arrastra con el botón derecho para mover",

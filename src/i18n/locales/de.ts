@@ -264,6 +264,7 @@ export const de: Translation = {
   "viewer.loadingModel": "Modell wird geladen…",
   "viewer.loadingPaint": "Design wird geladen…",
   "viewer.loadingRider": "Fahrer wird geladen…",
+  "viewer.riderLoadFailed": "Vorschau ist veraltet — sie konnte nicht aktualisiert werden",
   "viewer.dragToRotate": "Ziehen zum Drehen",
   "viewer.scrollToZoom": "Scrollen zum Zoomen",
   "viewer.rightDragToPan": "Rechts ziehen zum Verschieben",
