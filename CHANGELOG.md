@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-08 — Browse works for players Cloudflare was blocking
+## 2026-08-08 — v0.7.1 — Browse works for players Cloudflare was blocking
 
 ### Fixed
 - **Browse loads for players mxb-mods.com was refusing.** Some players got nothing but
@@ -17,14 +17,6 @@
   of destroying it, which left its name taken, so every attempt after the first failed to
   open one and Retry quietly did nothing for the rest of the session. The shop login window
   had the same fault. Only the main window parks in the tray now.
-
-### Changed
-- Mod downloads are untouched by any of this — they come from MediaFire, Google Drive and
-  MEGA, never from mxb-mods.com.
-
-## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
-
-### Fixed
 - **The Rider preview no longer goes quiet when it fails to update.** If resolving the
   rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
   tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
@@ -53,6 +45,8 @@
   without being a Cloudflare interstitial said nothing at all. Both are logged.
 - **`MXB_LOG=debug` traces every mxb-mods.com request.** Off by default, because search runs
   on each keystroke and a line per keystroke would bury the failure worth reading.
+- Mod downloads are untouched by any of the above — they come from MediaFire, Google Drive
+  and MEGA, never from mxb-mods.com.
 
 ## 2026-08-07 — v0.7.0 — Race mode, an in-game overlay, and six languages
 
