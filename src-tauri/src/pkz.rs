@@ -196,7 +196,8 @@ fn write_cache(cache_file: &Path, path: &str, stamp: Stamp, meta: &PkzMeta) {
 
 /// Bumped when the key changes shape, so stale entries are ignored rather than
 /// misread. The previous generation was keyed on the absolute path.
-const CACHE_DIR: &str = "pkz-meta-v2";
+// v3: image ranking now prefers a bike's `logo.tga`, so v2 thumbnails are stale.
+const CACHE_DIR: &str = "pkz-meta-v3";
 
 fn cache_path(app: &tauri::AppHandle, source: &str, stamp: Stamp) -> Option<PathBuf> {
     let cache_root = app.path().app_cache_dir().ok()?;
@@ -209,11 +210,13 @@ fn cache_path(app: &tauri::AppHandle, source: &str, stamp: Stamp) -> Option<Path
     Some(cache_root.join(CACHE_DIR).join(format!("{:016x}.json", hasher.finish())))
 }
 
-/// Clear out the path-keyed generation once per run — nothing will ever read it again.
+/// Clear out superseded generations once per run — nothing will ever read them again.
 fn drop_stale_cache(cache_root: &Path) {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        let _ = std::fs::remove_dir_all(cache_root.join("pkz-meta"));
+        for old in ["pkz-meta", "pkz-meta-v2"] {
+            let _ = std::fs::remove_dir_all(cache_root.join(old));
+        }
     });
 }
 
@@ -481,6 +484,12 @@ fn image_score(name: &str) -> i32 {
     }
     if n.contains("image") || n.contains("info") || n.contains("thumb") {
         score += 10;
+    }
+    // A bike ships its manufacturer mark as `logo.tga` — a real thumbnail, and far better
+    // than the `team.tga` strip (32x64 on the OEM Kawasaki) it would otherwise tie with.
+    // Below a genuine preview, which stays the first choice when the mod has one.
+    if n.contains("logo") {
+        score += 5;
     }
     // Browser-native formats are cheaper/safer to decode than TGA.
     if n.ends_with(".png") || n.ends_with(".jpg") || n.ends_with(".jpeg") {

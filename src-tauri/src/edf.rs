@@ -410,6 +410,45 @@ pub struct EmbeddedTexture {
     pub data_len: usize, // compressed byte length
 }
 
+// Material table, right after the file header: | u32 count @ 0x1c | count records |,
+// each 56 bytes holding six 1.0f shading terms and, at +44, a ONE-BASED index into the
+// model's colour textures (0 = untextured). The mesh data starts where the table ends.
+const MAT_COUNT_OFF: usize = 0x1c;
+const MAT_TABLE_OFF: usize = 0x20;
+const MAT_STRIDE: usize = 56;
+const MAT_TEX_FROM_REC: usize = 44;
+const MAX_MATERIALS: usize = 64;
+
+/// PARTIALLY VERIFIED — which colour texture each material draws from, by position in
+/// `embedded_textures`' colour list; None where the material carries no texture.
+///
+/// Texture blobs are written in the exporter's order, not the material order — the
+/// KX250/KX450 store `w_plate` between `metals` and `plastics`, so reading a material
+/// index as a blob position puts the number plate over the bodywork. This table reads as
+/// a permutation on all 60 OEM bikes and is confirmed against UV layouts on the KX250,
+/// KX450 and YZ125 — but it disagrees with them on the KTM 125 SX, where material 0 is
+/// `plastics` and this claims `125_metals`. Empty when the header doesn't parse.
+pub fn material_slots(b: &[u8], colors: usize) -> Vec<Option<usize>> {
+    if b.len() < MAT_COUNT_OFF + 4 {
+        return Vec::new();
+    }
+    let count = u32le(b, MAT_COUNT_OFF) as usize;
+    if count == 0 || count > MAX_MATERIALS || MAT_TABLE_OFF + MAT_STRIDE * count > b.len() {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(count);
+    for k in 0..count {
+        let one_based = u32le(b, MAT_TABLE_OFF + MAT_STRIDE * k + MAT_TEX_FROM_REC) as usize;
+        // Past the colour list means this isn't the table we think it is — refuse the lot
+        // rather than bind half a bike from a misread header.
+        if one_based > colors {
+            return Vec::new();
+        }
+        out.push(one_based.checked_sub(1));
+    }
+    out
+}
+
 // Record layout from `width`: | width u32 | height u32 | md5[16] | u32 | data_size u32 | pad[8] | data |
 // data_size counts the 8 pad bytes, so payload = data_size - 8.
 const TEX_SIZE_FROM_W: usize = 28;
@@ -528,29 +567,36 @@ fn read_node(
         normals.push(f32le(b, normal_base + i * 12 + 8));
     }
 
-    let mut raw_subs = detect_submeshes(b, cands, iend, raw_tris, vc);
-    // A skinned mesh (rider body) is ONE group whose contiguous ranges are distinct
-    // materials; split it back out so each material can bind its own texture.
-    if raw_subs.len() == 1 && raw_subs[0].tri_count == raw_tris {
-        if let Some(ranges) = read_sub_group_ranges(b, raw_subs[0].block_off, raw_tris, vc) {
-            if ranges.len() > 1 {
-                let (name, block_off) = (raw_subs[0].name.clone(), raw_subs[0].block_off);
-                raw_subs = ranges
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, (ts, tc, vs2, vc2))| RawSub {
-                        name: name.clone(),
-                        tri_start: ts,
-                        tri_count: tc,
-                        block_off,
-                        vert_start: vs2,
-                        vert_count: vc2,
-                        mat: Some(i as u32),
-                    })
-                    .collect();
-            }
-        }
-    }
+    // A group can carry SEVERAL materials as contiguous ranges — a fork leg and the
+    // plastic guard strapped to it, a triple clamp and the front fender, a skinned rider
+    // body and its kit. Merging those into one submesh makes every range wear the first
+    // range's texture (the KX250's front fender comes out in bare metal), so split them
+    // back out and let each bind its own. Ranges number upward from the group's material.
+    let raw_subs: Vec<RawSub> = detect_submeshes(b, cands, iend, raw_tris, vc)
+        .into_iter()
+        .flat_map(|s| {
+            let ranges = read_sub_group_ranges(b, s.block_off, raw_tris, vc)
+                .filter(|r| r.len() > 1);
+            let Some(ranges) = ranges else { return vec![s] };
+            let base = s
+                .mat
+                .or_else(|| s.block_off.checked_sub(4).map(|o| u32le(b, o)))
+                .unwrap_or(0);
+            ranges
+                .into_iter()
+                .enumerate()
+                .map(|(i, (ts, tc, vs2, vc2))| RawSub {
+                    name: s.name.clone(),
+                    tri_start: ts,
+                    tri_count: tc,
+                    block_off: s.block_off,
+                    vert_start: vs2,
+                    vert_count: vc2,
+                    mat: Some(base + i as u32),
+                })
+                .collect()
+        })
+        .collect();
     // Covers the node when the submesh triangle counts sum to the raw total.
     let covers = !raw_subs.is_empty() && raw_subs.iter().map(|s| s.tri_count).sum::<usize>() == raw_tris;
 

@@ -629,11 +629,9 @@ fn bind_textures(
     node_part: &std::collections::HashMap<String, String>,
 ) {
     let embedded = edf::embedded_textures(edf_bytes);
-    // A submesh's material index selects its colour texture by position in the model's
-    // COLOUR-texture pool, in file order (verified against every OEM bike: plastics=0,
-    // metals=1, w_plate=2, …). The pool is every embedded texture that isn't a companion
-    // map — MX Bikes names those `_n` (normal), `_s` (specular) and `_r` (reflection).
-    // The pool must include gfx-referenced textures (chain, w_plate): the index counts
+    // The model's COLOUR textures, in file order — every embedded texture that isn't a
+    // companion map (MX Bikes names those `_n` normal, `_s` specular, `_r` reflection).
+    // The list keeps gfx-referenced textures (chain, w_plate): material indices count
     // them, so dropping any shifts every later material onto the wrong texture.
     let color: Vec<&edf::EmbeddedTexture> = embedded
         .iter()
@@ -642,12 +640,29 @@ fn bind_textures(
             !n.ends_with("_n") && !n.ends_with("_s") && !n.ends_with("_r")
         })
         .collect();
+    // material index -> colour texture. Set MXB_MAT_TABLE=0 to fall back to blob order.
+    let slots = match std::env::var("MXB_MAT_TABLE").as_deref() {
+        Ok("0") => Vec::new(),
+        _ => edf::material_slots(edf_bytes, color.len()),
+    };
 
     for n in nodes.iter_mut() {
         let part = node_part.get(&n.name.to_ascii_lowercase());
         let overrides = part.and_then(|p| gfx.get(p)).map(|p| &p.textures);
-        // A node with no submesh table is a single material — the primary body texture
-        // (plastics, by convention the first colour texture).
+        // A part that draws on ONE material numbers it 0 whichever material that is, so
+        // the index says nothing to look up — the YZ125 numbers its chassis' plastics 0
+        // and, in the rear suspension, its metals 0 too. Only a part that distinguishes
+        // materials at all gets resolved through the table.
+        let spread: std::collections::HashSet<u32> =
+            n.submeshes.iter().filter_map(|s| s.mat).collect();
+        let by_table = spread.len() > 1;
+        let texture_for = |mat: usize| -> Option<&edf::EmbeddedTexture> {
+            match slots.get(mat).filter(|_| by_table) {
+                Some(slot) => slot.and_then(|s| color.get(s)).copied(),
+                None => color.get(mat).copied(),
+            }
+        };
+        // A node with no submesh table is a single material — the first colour texture.
         n.texture = color.first().map(|t| t.name.clone());
         for sm in n.submeshes.iter_mut() {
             let group = sm.name.to_ascii_lowercase();
@@ -659,8 +674,8 @@ fn bind_textures(
                 sm.texture = Some(tex.clone());
                 continue;
             }
-            // 2. Ground truth: the material index picks the colour texture in file order.
-            if let Some(t) = sm.mat.and_then(|i| color.get(i as usize)) {
+            // 2. The material index picks its colour texture, via the table where usable.
+            if let Some(t) = sm.mat.and_then(|i| texture_for(i as usize)) {
                 sm.texture = Some(t.name.clone());
                 continue;
             }
