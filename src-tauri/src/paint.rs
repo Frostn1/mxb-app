@@ -93,6 +93,42 @@ pub fn decode(buf: &[u8]) -> Result<Vec<PntTexture>> {
     Ok(out)
 }
 
+/// The texture names a `.pnt` supplies, read from the headers alone.
+///
+/// Every image header is a fixed size and states its payload's length, so the names can be
+/// walked without inflating a single pixel — which matters because they're wanted for their
+/// own sake: they name the textures a model declares and leaves to a paint, and that decides
+/// which slot each of its materials points at.
+pub fn texture_names(buf: &[u8]) -> Result<Vec<String>> {
+    if buf.len() < HEADER_SIZE || &buf[..4] != MAGIC {
+        bail!("not a .pnt file (bad magic)");
+    }
+    let count = read_u32(buf, HEADER_SIZE - 4)? as usize;
+    let mut out = Vec::with_capacity(count);
+    let mut off = HEADER_SIZE;
+    for _ in 0..count {
+        out.push(read_name(buf, off)?);
+        let data_size = read_u32(buf, off + NAME_SIZE + 8 + 16)? as usize;
+        if data_size < IMAGE_PADDING {
+            break;
+        }
+        off = off + IMAGE_HEADER_SIZE + data_size;
+    }
+    Ok(out)
+}
+
+/// [`texture_names`], for a `.pnt` that may be sealed — the same pairing as
+/// [`decode`]/[`decode_any`].
+pub fn texture_names_any(buf: &[u8]) -> Result<Vec<String>> {
+    if buf.len() >= 4 && &buf[..4] == MAGIC {
+        return texture_names(buf);
+    }
+    if let Some(plain) = crate::pkz::read_sidecar_blob(buf) {
+        return texture_names(&plain);
+    }
+    texture_names(buf)
+}
+
 pub fn decode_any(buf: &[u8]) -> Result<Vec<PntTexture>> {
     if buf.len() >= 4 && &buf[..4] == MAGIC {
         return decode(buf);

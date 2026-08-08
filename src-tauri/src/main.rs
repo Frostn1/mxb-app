@@ -902,7 +902,9 @@ fn bind_textures(
     gfx: &std::collections::HashMap<String, cfg::GfxPart>,
     node_part: &std::collections::HashMap<String, String>,
 ) {
-    let colors = edf::color_textures(edf_bytes);
+    // A bike embeds every texture it draws, its stock livery included, so it declares
+    // nothing beyond them.
+    let colors = edf::declared_colors(edf_bytes, &[]);
 
     for n in nodes.iter_mut() {
         let part = node_part.get(&n.name.to_ascii_lowercase());
@@ -911,12 +913,12 @@ fn bind_textures(
             log::warn!("[viewer] node '{}' has no material table — falling back", n.name);
         }
         // A material id is local to its node, so ask the node's own table.
-        let material_texture = |mat: Option<u32>| -> Option<&edf::EmbeddedTexture> {
+        let material_texture = |mat: Option<u32>| -> Option<&String> {
             let slot = n.materials.get(mat? as usize).copied().flatten()?;
             colors.get(slot)
         };
         // A node with no submesh table draws on its first material.
-        n.texture = material_texture(Some(0)).or_else(|| colors.first()).map(|t| t.name.clone());
+        n.texture = material_texture(Some(0)).or_else(|| colors.first()).cloned();
         for sm in n.submeshes.iter_mut() {
             let group = sm.name.to_ascii_lowercase();
             // 1. An explicit gfx texture (animated chain, number plate) is authoritative.
@@ -929,7 +931,7 @@ fn bind_textures(
             }
             // 2. The node's material table picks the colour texture this range was drawn on.
             if let Some(t) = material_texture(sm.mat) {
-                sm.texture = Some(t.name.clone());
+                sm.texture = Some(t.clone());
                 continue;
             }
             // 3. No material recorded → leave unbound so it renders neutral grey, never smeared.
@@ -1583,9 +1585,31 @@ fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
         .or_else(|| files.iter().find(|(n, _)| is_visible_gear_mesh(n)))
         .map(|(_, d)| edf::embedded_textures(d).iter().map(|t| t.name.clone()).collect())
         .unwrap_or_default();
+    // Whether a side has a stock look to offer: the mesh carries its own copy of the sheet
+    // that side's paints replace. Asking the paints, not the texture names, is what keeps a
+    // "Stock" entry off the Bell Moto 10 — it embeds a tear-off film and a goggle, but not
+    // the shell sheet its paints supply, so picking "Stock" there drew the helmet in a
+    // near-blank film. With nothing painted on a side at all, the mesh's own look is the only
+    // one there is, so anything it carries for that side counts.
+    let supplied = |folder: &str| {
+        paint_texture_names(
+            files
+                .iter()
+                .filter(|(n, _)| gear_folder_paint_name(n, folder).is_some())
+                .map(|(_, d)| d.as_slice()),
+        )
+    };
+    let has_stock = |folder: &str, goggle_side: bool| {
+        let paints = supplied(folder);
+        let mut usable = embedded.iter().filter(|n| !is_companion_map(n));
+        if paints.is_empty() {
+            return usable.any(|n| is_goggle_name(n) == goggle_side);
+        }
+        usable.any(|e| paints.iter().any(|p| p.eq_ignore_ascii_case(e)))
+    };
     Ok(GearPaints {
-        has_stock: embedded.iter().any(|n| !is_goggle_name(n) && !is_companion_map(n)),
-        has_stock_goggles: embedded.iter().any(|n| is_goggle_name(n) && !is_companion_map(n)),
+        has_stock: has_stock("paints", false),
+        has_stock_goggles: has_stock("goggles", true),
         paints: names("paints"),
         goggles: names("goggles"),
     })
@@ -1784,6 +1808,36 @@ fn load_gear_model_blocking(
                 .filter(|t| !taken.contains(&t.name.to_ascii_lowercase())),
         );
     }
+    // Which textures this item's paints supply, whichever one is picked — the names the mesh
+    // declares and leaves to a `.pnt`, and so part of the slot order its materials count.
+    // Read even when nothing is painted: a stock preview counts the same slots.
+    let declared =
+        paint_texture_names(paints.iter().chain(goggle_paints.iter()).map(|(_, d)| d.as_slice()));
+    bind_gear_submeshes(
+        &mut nodes,
+        mesh.map(|d| d.as_slice()),
+        &main_side,
+        &goggle_side,
+        &declared,
+    );
+    // Pieces the paints don't cover keep the mesh's own texture — a tear-off film, a visor,
+    // anything the author baked in and left out of the `.pnt`. The game draws those from the
+    // mesh, so they have to travel with it; without them the Bell Moto 10's tear-off had
+    // nothing to wear and took the helmet's paint across it. Decoded by name, so a mesh
+    // holding several 4K sheets only pays for the ones actually on screen.
+    let shipped: std::collections::HashSet<String> =
+        out.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+    let worn: std::collections::HashSet<String> = nodes
+        .iter()
+        .flat_map(|n| n.texture.iter().chain(n.submeshes.iter().filter_map(|s| s.texture.as_ref())))
+        .map(|t| t.to_ascii_lowercase())
+        .filter(|t| !shipped.contains(t))
+        .collect();
+    if let (false, Some(d)) = (worn.is_empty(), mesh) {
+        out.extend(paint::extract_edf_textures_where(d, |n| {
+            worn.contains(&n.to_ascii_lowercase())
+        }));
+    }
     log::info!(
         "[viewer] {part}: paint={want:?} goggles={want_goggles:?} stock={stock}/{stock_goggles} \
          -> shell {:?}, goggles {:?} ({} textures)",
@@ -1791,7 +1845,6 @@ fn load_gear_model_blocking(
         goggle_side.primary,
         out.len(),
     );
-    bind_gear_submeshes(&mut nodes, mesh.map(|d| d.as_slice()), &main_side, &goggle_side);
     Ok(RiderPart { part, nodes, textures: out })
 }
 
@@ -1884,27 +1937,68 @@ fn pick_gear_paint(
     paint::decode_any(hit.or_else(|| paints.first())?.1).ok()
 }
 
+/// Every texture name a set of `.pnt` files supplies, deduplicated. Headers only — no pixels
+/// are inflated, so this stays cheap enough to run on every paint an item ships.
+fn paint_texture_names<'a>(paints: impl Iterator<Item = &'a [u8]>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for data in paints {
+        for name in paint::texture_names_any(data).unwrap_or_default() {
+            if !out.iter().any(|n: &String| n.eq_ignore_ascii_case(&name)) {
+                out.push(name);
+            }
+        }
+    }
+    out
+}
+
+/// Which side of the item a piece belongs to, given the texture the mesh draws it from.
+///
+/// The paints decide it. A `.pnt` replaces textures *by name*, so the side that supplies
+/// the name a piece is drawn from is the side that piece is on — the mod's own answer,
+/// stated in its own files. Only when neither side claims the name (or the mesh names none)
+/// does the piece's spelling get a say.
+///
+/// It has to be this way round, because a helmet names its goggle group after the goggle it
+/// ships: the Bell Moto 10's goggle submeshes are called `Armega.001` and drawn from
+/// `Racecraft`, neither of which reads as "goggles" — so on names alone the whole goggle
+/// went out wearing the helmet's paint.
+fn on_goggle_side(emb: Option<&str>, spelled_goggle: bool, main: &GearSide, goggle: &GearSide) -> bool {
+    match emb {
+        Some(e) if goggle.supplies(e).is_some() => true,
+        Some(e) if main.supplies(e).is_some() => false,
+        _ => spelled_goggle,
+    }
+}
+
 /// Bind each submesh (or single-material node) to the texture it should wear: goggles take
 /// the goggle paint, everything else the shell paint.
 ///
-/// The mesh settles which is which — a submesh's material names the texture the model was
-/// drawn against, the same reading the bike viewer uses. A piece's own name is only
-/// evidence on top of that, because a helmet's goggle group is as often called `mask` or
-/// nothing at all, and just as often lives in a node of its own with no submeshes. A paint
-/// replaces textures by name, so a side wearing one it doesn't supply falls back to its
-/// primary; unmatched → `None`, so the frontend renders neutral grey rather than smearing
-/// another part's texture over it.
+/// The mesh settles which texture a piece was drawn against — a submesh's material names it,
+/// the same reading the bike viewer uses — and [`on_goggle_side`] settles whose texture that
+/// is. A paint replaces textures by name, so a side wearing one it doesn't supply falls back
+/// to its primary; unmatched → `None`, so the frontend renders neutral grey rather than
+/// smearing another part's texture over it.
 fn bind_gear_submeshes(
     nodes: &mut [edf::EdfNode],
     mesh: Option<&[u8]>,
     main: &GearSide,
     goggle: &GearSide,
+    // Every texture name the item's own paints supply — see `paint_texture_names`.
+    declared: &[String],
 ) {
-    let colors = mesh.map(edf::color_textures).unwrap_or_default();
+    let colors = mesh.map(|d| edf::declared_colors(d, declared)).unwrap_or_default();
+    // Names the mesh carries pixels for, so a piece no paint covers can keep its own look.
+    let embedded: Vec<String> = mesh
+        .map(|d| edf::embedded_textures(d).into_iter().map(|t| t.name).collect())
+        .unwrap_or_default();
+    let carried = |want: &str| embedded.iter().any(|n| n.eq_ignore_ascii_case(want));
     // What this side puts on a piece the mesh draws from `emb`.
     let wear = |emb: Option<&str>, goggles_here: bool| -> Option<String> {
         let (side, other) = if goggles_here { (goggle, main) } else { (main, goggle) };
         emb.and_then(|e| side.supplies(e))
+            // No paint replaces this one, but the mesh has it: that IS the piece's look, and
+            // it beats stretching the side's paint over something it was never drawn for.
+            .or_else(|| emb.filter(|e| carried(e)).map(str::to_string))
             .or_else(|| side.primary.clone())
             // A helmet whose goggles aren't painted apart still shows them — in the shell's
             // texture, which is where they were drawn.
@@ -1914,24 +2008,23 @@ fn bind_gear_submeshes(
         // A material id is local to its node — resolve it through that node's own table.
         let material_texture = |mat: Option<u32>| -> Option<&str> {
             let slot = node.materials.get(mat? as usize).copied().flatten()?;
-            colors.get(slot).map(|t| t.name.as_str())
+            colors.get(slot).map(String::as_str)
         };
         let node_goggle = is_goggle_name(&node.name);
         if node.submeshes.is_empty() {
-            // No submesh table means no material index to look up. Take the mesh's own
-            // colour texture for this side, so a goggle node isn't handed the shell's.
+            // No submesh table means no material index to look up. Take a texture from this
+            // side of the mesh, so a goggle node isn't handed the shell's.
             let emb = colors
                 .iter()
-                .map(|t| t.name.as_str())
-                .find(|n| is_goggle_name(n) == node_goggle);
+                .map(String::as_str)
+                .find(|n| on_goggle_side(Some(n), is_goggle_name(n), main, goggle) == node_goggle);
             node.texture = wear(emb, node_goggle);
             continue;
         }
         for sm in &mut node.submeshes {
             let emb = material_texture(sm.mat);
-            let goggles_here =
-                node_goggle || is_goggle_name(&sm.name) || emb.is_some_and(is_goggle_name);
-            sm.texture = wear(emb, goggles_here);
+            let spelled = node_goggle || is_goggle_name(&sm.name) || emb.is_some_and(is_goggle_name);
+            sm.texture = wear(emb, on_goggle_side(emb, spelled, main, goggle));
         }
     }
 }
@@ -2074,7 +2167,11 @@ fn load_gear(
     // Only a goggled piece needs the mesh's own materials read back, so only that pays for
     // the extra archive read — the nodes themselves stay cached.
     let mesh = (!goggles.is_empty()).then(|| read_pkz_entry(&pkz, &entry)).flatten();
-    bind_gear_submeshes(&mut nodes, mesh.as_deref(), &main_side, &goggle_side);
+    // The stock model's own paints are what it declares — both sides' names are already in
+    // hand here, decoded from `rider.pkz` above.
+    let declared: Vec<String> =
+        main_side.names.iter().chain(goggle_side.names.iter()).cloned().collect();
+    bind_gear_submeshes(&mut nodes, mesh.as_deref(), &main_side, &goggle_side, &declared);
     log::info!(
         "[rider] {} stock '{name}' loaded: {} nodes, tex={:?} goggles={:?}",
         spec.part,
@@ -2476,7 +2573,7 @@ async fn set_mods_path(
     app: tauri::AppHandle,
     watcher: State<'_, ModWatcher>,
     path: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.mods_path = path;
     let cfg = config::finalize(cfg);
@@ -2484,7 +2581,10 @@ async fn set_mods_path(
     if cfg.watch_mods_reload {
         modwatch::start(&app, &watcher, &cfg.mods_path);
     }
-    Ok(())
+    // The folder actually adopted, which isn't always the one picked: detection fills a
+    // blank, and a pick of the `mods` folder resolves to the game folder above it. Settings
+    // says which it took, so a corrected pick is visible rather than silently different.
+    Ok(cfg.mods_path)
 }
 
 /// Remember that the intro slideshow / guided tour is done. No-ops before the config
@@ -3800,7 +3900,7 @@ mod gear_bind_tests {
     #[test]
     fn a_named_goggle_submesh_wears_the_goggle_paint() {
         let mut nodes = vec![node("helmet", &["shell", "goggle", "lens"])];
-        bind_gear_submeshes(&mut nodes, None, &side(&["hjc"]), &side(&["smoke"]));
+        bind_gear_submeshes(&mut nodes, None, &side(&["hjc"]), &side(&["smoke"]), &[]);
         assert_eq!(
             bound(&nodes),
             [Some("hjc".into()), Some("smoke".into()), Some("smoke".into())],
@@ -3812,7 +3912,7 @@ mod gear_bind_tests {
     #[test]
     fn a_goggle_node_without_submeshes_wears_the_goggle_paint() {
         let mut nodes = vec![node("helmet", &[]), node("goggles", &[])];
-        bind_gear_submeshes(&mut nodes, None, &side(&["hjc"]), &side(&["smoke"]));
+        bind_gear_submeshes(&mut nodes, None, &side(&["hjc"]), &side(&["smoke"]), &[]);
         assert_eq!(bound(&nodes), [Some("hjc".into()), Some("smoke".into())]);
     }
 
@@ -3820,7 +3920,7 @@ mod gear_bind_tests {
     #[test]
     fn a_submesh_inherits_its_node() {
         let mut nodes = vec![node("goggles", &["strap", "glass"])];
-        bind_gear_submeshes(&mut nodes, None, &side(&["hjc"]), &side(&["smoke"]));
+        bind_gear_submeshes(&mut nodes, None, &side(&["hjc"]), &side(&["smoke"]), &[]);
         assert_eq!(bound(&nodes), [Some("smoke".into()), Some("smoke".into())]);
     }
 
@@ -3828,7 +3928,7 @@ mod gear_bind_tests {
     #[test]
     fn unpainted_goggles_fall_back_to_the_shell() {
         let mut nodes = vec![node("helmet", &["shell", "goggle"])];
-        bind_gear_submeshes(&mut nodes, None, &side(&["hjc"]), &GearSide::default());
+        bind_gear_submeshes(&mut nodes, None, &side(&["hjc"]), &GearSide::default(), &[]);
         assert_eq!(bound(&nodes), [Some("hjc".into()), Some("hjc".into())]);
     }
 
@@ -3836,7 +3936,7 @@ mod gear_bind_tests {
     #[test]
     fn an_unpainted_shell_stays_bare() {
         let mut nodes = vec![node("helmet", &["shell", "goggle"])];
-        bind_gear_submeshes(&mut nodes, None, &GearSide::default(), &side(&["smoke"]));
+        bind_gear_submeshes(&mut nodes, None, &GearSide::default(), &side(&["smoke"]), &[]);
         assert_eq!(bound(&nodes), [None, Some("smoke".into())]);
     }
 
@@ -3998,9 +4098,41 @@ mod viewer_tests {
         // What the mesh itself draws each piece from — the reading the binder goes by, and
         // the one worth eyeballing when a helmet's goggles come out wearing the shell.
         if let Some((_, d)) = files.iter().find(|(n, _)| super::is_visible_gear_mesh(n)) {
-            let names: Vec<String> =
-                super::edf::color_textures(d).into_iter().map(|t| t.name).collect();
-            eprintln!("mesh colour textures: {names:?}");
+            // The slots as the loader counts them: what the mesh embeds, plus the sheets it
+            // leaves to a `.pnt`, in the order the model names them.
+            let declared = super::paint_texture_names(
+                files
+                    .iter()
+                    .filter(|(n, _)| {
+                        super::gear_folder_paint_name(n, "paints").is_some()
+                            || super::gear_folder_paint_name(n, "goggles").is_some()
+                    })
+                    .map(|(_, d)| d.as_slice()),
+            );
+            let colors = super::edf::declared_colors(d, &declared);
+            eprintln!("mesh colour textures: {colors:?}");
+            // Per piece, the texture the model was drawn against. This is the evidence the
+            // binder decides on, so when a piece ends up wearing the wrong side it says
+            // whether the reading was wrong or the choice made from it was.
+            for n in &super::edf::parse(d) {
+                eprintln!("mats    {:<28} {:?}", n.name, n.materials);
+                for sm in &n.submeshes {
+                    let emb = sm
+                        .mat
+                        .and_then(|m| n.materials.get(m as usize).copied().flatten())
+                        .and_then(|slot| colors.get(slot))
+                        .map(String::as_str);
+                    // The triangle count tells the pieces apart when their names don't: a
+                    // helmet shell dwarfs its lens, and both dwarf a tear-off film.
+                    eprintln!(
+                        "drawn   {:<28} mat={:?} tris={:<6} -> {}",
+                        format!("{}/{}", n.name, sm.name),
+                        sm.mat,
+                        sm.tri_count,
+                        emb.unwrap_or("(none)"),
+                    );
+                }
+            }
         }
         // Where the mesh sits in its own frame. Protection is authored in the rider's own
         // space, so these bounds say whether a piece is a chest-wide vest or a thin chain

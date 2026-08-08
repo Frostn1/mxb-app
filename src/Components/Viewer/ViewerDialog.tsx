@@ -23,6 +23,10 @@ interface ViewerDialogProps {
   gearSource?: string;
   gearPart?: RiderPart["part"];
   stockGearPart?: RiderPart["part"];
+  /** Open on this paint / goggle paint rather than the first in the list — set when a
+   *  paint was opened in 3D and the model shown is the one it belongs to. */
+  initialPaint?: string;
+  initialGoggles?: string;
 }
 
 const EMPTY_GEAR_PAINTS: GearPaints = {
@@ -42,6 +46,14 @@ function withStock(names: string[], hasStock: boolean): string[] {
   return hasStock ? ["Stock", ...names] : names;
 }
 
+/** Where `want` sits in a picker's list, or the first entry when it isn't in it — a paint
+ *  the model doesn't carry (or a list that hasn't loaded) leaves the picker where it was. */
+function indexOfName(names: string[], want?: string): number {
+  if (!want) return 0;
+  const i = names.findIndex((n) => n.toLowerCase() === want.toLowerCase());
+  return i < 0 ? 0 : i;
+}
+
 export function ViewerDialog({
   open,
   onOpenChange,
@@ -51,12 +63,19 @@ export function ViewerDialog({
   gearSource,
   gearPart,
   stockGearPart,
+  initialPaint,
+  initialGoggles,
 }: ViewerDialogProps) {
   const t = useT();
   // A bike model → bike; gear/rider paint → rider. No user switch.
   const isBike = !!modelSource;
   const mode: ViewerMode = isBike ? "bike" : "rider";
-  const [paintIdx, setPaintIdx] = useState(0);
+  // Null until the player picks: the selection falls back to `initialPaint`, and the
+  // names it matches against only arrive once the model (or its archive) has loaded.
+  // Deriving it rather than storing it is what lets a late-arriving list still land on
+  // the right paint without ever overriding a pick made in the meantime.
+  const [paintPick, setPaintPick] = useState<number | null>(null);
+  const [gogglesPick, setGogglesPick] = useState<number | null>(null);
   const [model, setModel] = useState<BikeModel | null>(null);
   const [loadingModel, setLoadingModel] = useState(false);
   // Gear-paint path (no bike model): textures unpacked straight from a `.pnt`.
@@ -65,11 +84,23 @@ export function ViewerDialog({
   const [bodyNodes, setBodyNodes] = useState<EdfNode[] | null>(null);
   const [gear, setGear] = useState<RiderPart | null>(null);
   const [gearPaints, setGearPaints] = useState<GearPaints>(EMPTY_GEAR_PAINTS);
-  const [gogglesIdx, setGogglesIdx] = useState(0);
   const [err, setErr] = useState<string | null>(null);
 
   const nodes = model?.nodes ?? null;
   const paints = model?.paints ?? [];
+
+  // The names behind each picker, in order — the labels shown are decorated versions of
+  // these, and matching happens here so a decoration can never break the match.
+  const paintNames = isBike
+    ? paints.map((p) => p.name)
+    : gearSource
+      ? withStock(gearPaints.paints, gearPaints.hasStock)
+      : paintPaths.map(paintLabel);
+  const goggleNames = gearSource
+    ? withStock(gearPaints.goggles, gearPaints.hasStockGoggles)
+    : [];
+  const paintIdx = paintPick ?? indexOfName(paintNames, initialPaint);
+  const gogglesIdx = gogglesPick ?? indexOfName(goggleNames, initialGoggles);
 
   // Load the real bike geometry + its paints once per open (cached backend-side).
   useEffect(() => {
@@ -88,11 +119,12 @@ export function ViewerDialog({
     };
   }, [open, modelSource]);
 
-  // Reset to the first paint each time it opens.
+  // Drop any pick each time it opens, so the next thing shown starts from its own paint
+  // rather than the index left behind by the last one.
   useEffect(() => {
     if (open) {
-      setPaintIdx(0);
-      setGogglesIdx(0);
+      setPaintPick(null);
+      setGogglesPick(null);
     }
   }, [open]);
 
@@ -236,16 +268,12 @@ export function ViewerDialog({
       ? byName(["livery", "bike_parts"]) ?? null
       : byName(["rider", "suit", "helmet", "gloves", "boots"]) ?? null;
 
-  // Paint dropdown options: a bike's paints, a gear item's packed paints, or loose `.pnt` candidates.
+  // Paint dropdown labels: a bike's paints carry a note when they can't move the preview.
   const paintOptions = isBike
-    ? paints.map((p) => (p.changesPreview ? p.name : `${p.name} — no change here`))
-    : gearSource
-      ? withStock(gearPaints.paints, gearPaints.hasStock)
-      : paintPaths.map(paintLabel);
+    ? paintNames.map((n, i) => (paints[i]?.changesPreview ? n : `${n} — no change here`))
+    : paintNames;
   // A helmet's goggles carry their own paint set (lens/strap) — a second picker.
-  const goggleOptions = gearSource
-    ? withStock(gearPaints.goggles, gearPaints.hasStockGoggles)
-    : [];
+  const goggleOptions = goggleNames;
   const paintNoChange = isBike && paints[paintIdx]?.changesPreview === false;
 
   const loading = loadingModel || loadingPaint;
@@ -271,7 +299,7 @@ export function ViewerDialog({
                 {t("viewer.paint")}
                 <select
                   value={paintIdx}
-                  onChange={(e) => setPaintIdx(Number(e.target.value))}
+                  onChange={(e) => setPaintPick(Number(e.target.value))}
                   className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
                 >
                   {paintOptions.map((name, i) => (
@@ -287,7 +315,7 @@ export function ViewerDialog({
                 {t("category.goggles")}
                 <select
                   value={gogglesIdx}
-                  onChange={(e) => setGogglesIdx(Number(e.target.value))}
+                  onChange={(e) => setGogglesPick(Number(e.target.value))}
                   className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
                 >
                   {goggleOptions.map((name, i) => (

@@ -235,9 +235,10 @@ export function createConfig(config: Config): Promise<boolean> {
 }
 
 /** Change only the MX Bikes folder — an empty string re-runs auto-detection. Unlike
- *  `createConfig`, the rest of the settings are preserved. */
-export function setModsPath(path: string): Promise<void> {
-  return invoke<void>("set_mods_path", { path });
+ *  `createConfig`, the rest of the settings are preserved. Resolves to the folder actually
+ *  adopted: picking the `mods` folder settles on the game folder above it. */
+export function setModsPath(path: string): Promise<string> {
+  return invoke<string>("set_mods_path", { path });
 }
 
 /** Persist that the intro slideshow and/or the guided tour is done. */

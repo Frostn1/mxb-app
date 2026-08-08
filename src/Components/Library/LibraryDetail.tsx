@@ -323,6 +323,8 @@ export default function LibraryDetail({
         gearSource={view?.gearSource}
         gearPart={view?.gearPart}
         stockGearPart={view?.stockGearPart}
+        initialPaint={view?.initialPaint}
+        initialGoggles={view?.initialGoggles}
       />
     </div>
   );

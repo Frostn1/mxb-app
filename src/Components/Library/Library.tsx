@@ -590,9 +590,9 @@ export default function Library({
                                   e.stopPropagation();
                                   setView3d(item);
                                 }}
-                                className="flex-none cursor-default rounded-md p-1 text-faint transition-colors hover:bg-foreground/[0.06] hover:text-primary"
+                                className="flex flex-none cursor-default items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[11px] font-semibold text-faint transition-colors hover:bg-foreground/[0.06] hover:text-primary"
                               >
-                                <Box className="size-4" />
+                                <Box className="size-3.5" /> {t("library.quick3d")}
                               </button>
                             )}
                             {!selectMode && (
@@ -692,6 +692,8 @@ export default function Library({
         gearSource={view3dProps?.gearSource}
         gearPart={view3dProps?.gearPart}
         stockGearPart={view3dProps?.stockGearPart}
+        initialPaint={view3dProps?.initialPaint}
+        initialGoggles={view3dProps?.initialGoggles}
       />
 
       <MoveDialog
