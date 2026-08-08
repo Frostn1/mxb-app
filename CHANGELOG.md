@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-07
+## 2026-08-07 — six languages, a Play button, live model swaps
 
 ### Added
 - **Browse can sort by what people actually ride, not just what landed last.** The page
@@ -13,6 +13,26 @@
   ignores them, and a sort that silently does nothing is worse than one that isn't there.
   The popular listings can't be searched, so they step aside while the search box has text
   in it and the order falls back to newest.
+- **MXB App is translated into Italian, Spanish, French, German and Brazilian
+  Portuguese.** Pick a language under Settings → Appearance; the choice persists, and
+  `System` follows the OS (a bare `pt` resolves to Brazilian, the only Portuguese we
+  ship). Every screen, dialog, toast and empty state is covered — 540 keys per language.
+  Terminology follows what the MX Bikes community actually says rather than dictionary
+  equivalents: `mod`, `setup`, `preset` and `Stock` stay as loanwords in every language,
+  while gear is translated (`casco`/`casque`/`Helm`, `maschera`/`masque`/`Brille` for
+  goggles, `livrea`/`déco`/`Lackierung` for a bike paint).
+- **Dates follow the app's language, not the OS's.** Picking Italian on an English
+  machine moves the Library's dates too, instead of leaving half the UI in English.
+- **The 3D preview now offers a gear model's stock paint, not just its liveries.** The
+  paint picker listed only the `.pnt` files a helmet, boots or protection packs, so a
+  piece that ships liveries had no way back to its own look — the textures embedded in
+  the mesh, which the preview ignored entirely. "Stock" now leads the list whenever the
+  mesh carries a texture, with a separate entry for a helmet's goggles, which are picked
+  independently of the shell. A paint reuses the mesh's texture names, so stock shell
+  plus painted goggles (and the reverse) is resolved before the textures reach the
+  viewer, which would otherwise show whichever image finished loading last. Preview only
+  — it never becomes a value in your loadout, since the game names a `.pnt` there and has
+  no word for "the model's own look".
 
 ### Fixed
 - **Downloads that Google Drive refuses now say why, instead of "the host returned a web
@@ -113,6 +133,25 @@
   box commits nothing. Pick `full` for Protection once and the only ways back were the
   game's own UI or hand-editing `profile.ini`. Every slot dropdown now leads with a
   "Stock (none)" row that clears it. (#28)
+
+### Changed
+- **Translations can't silently go missing.** Each locale is typed as
+  `Record<keyof typeof en, string>`, so a key that's absent from — or invented in — any
+  of the five translations is a compile error, not a runtime blank. `npm run typecheck`
+  passing is proof all six locales are complete and consistent. This is why the i18n
+  layer is ~120 lines of local code rather than i18next: a missing key can't reach a
+  build.
+- **Plurals use `Intl.PluralRules` rather than an `n === 1` check.** French treats 0 as
+  singular, so "0 fichier" now comes out correct without a special case, and languages
+  that don't split one/other the way English does still land right.
+- **Sentences that wrap markup are translated whole.** A `<Trans>` component splices
+  React nodes into placeholders, so word order stays the translator's choice — splitting
+  such a sentence into prefix/suffix strings would have hard-coded English grammar into
+  German and French. The same applies to the preset-apply and swap toasts, which were
+  English fragments and are now complete sentences.
+- **Nouns that read differently mid-sentence get their own key.** "Search tracks…" used
+  `label.toLowerCase()`, which produces broken German — its nouns are capitalized
+  everywhere — so mod types now carry a separate inline form.
 
 ## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
 

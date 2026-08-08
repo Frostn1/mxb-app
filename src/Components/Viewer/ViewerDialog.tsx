@@ -11,6 +11,7 @@ import {
   listGearPaints,
 } from "../../api/mods";
 import type { PaintTexture, BikeModel, EdfNode, RiderPart, GearPaints } from "../../types";
+import { useT } from "../../i18n/context";
 
 interface ViewerDialogProps {
   open: boolean;
@@ -24,9 +25,21 @@ interface ViewerDialogProps {
   stockGearPart?: RiderPart["part"];
 }
 
+const EMPTY_GEAR_PAINTS: GearPaints = {
+  paints: [],
+  goggles: [],
+  hasStock: false,
+  hasStockGoggles: false,
+};
+
 function paintLabel(path: string): string {
   const base = path.replace(/\\/g, "/").split("/").pop() ?? path;
   return base.replace(/\.pnt$/i, "");
+}
+
+/** The model's own look leads the picker, ahead of the paints it packs. */
+function withStock(names: string[], hasStock: boolean): string[] {
+  return hasStock ? ["Stock", ...names] : names;
 }
 
 export function ViewerDialog({
@@ -39,6 +52,7 @@ export function ViewerDialog({
   gearPart,
   stockGearPart,
 }: ViewerDialogProps) {
+  const t = useT();
   // A bike model → bike; gear/rider paint → rider. No user switch.
   const isBike = !!modelSource;
   const mode: ViewerMode = isBike ? "bike" : "rider";
@@ -50,7 +64,7 @@ export function ViewerDialog({
   const [loadingPaint, setLoadingPaint] = useState(false);
   const [bodyNodes, setBodyNodes] = useState<EdfNode[] | null>(null);
   const [gear, setGear] = useState<RiderPart | null>(null);
-  const [gearPaints, setGearPaints] = useState<GearPaints>({ paints: [], goggles: [] });
+  const [gearPaints, setGearPaints] = useState<GearPaints>(EMPTY_GEAR_PAINTS);
   const [gogglesIdx, setGogglesIdx] = useState(0);
   const [err, setErr] = useState<string | null>(null);
 
@@ -135,21 +149,26 @@ export function ViewerDialog({
   // Gear ships paints inside the archive — read them out for the picker.
   useEffect(() => {
     if (!open || !gearSource) {
-      setGearPaints({ paints: [], goggles: [] });
+      setGearPaints(EMPTY_GEAR_PAINTS);
       return;
     }
     let alive = true;
     listGearPaints(gearSource)
       .then((p) => alive && setGearPaints(p))
-      .catch(() => alive && setGearPaints({ paints: [], goggles: [] }));
+      .catch(() => alive && setGearPaints(EMPTY_GEAR_PAINTS));
     return () => {
       alive = false;
     };
   }, [open, gearSource]);
 
+  // A gear model's own textures are a choice of their own next to its packed paints, so
+  // "Stock" leads each list when the mesh carries one — and shifts the packed names by one.
+  const gearStock = gearPaints.hasStock && paintIdx === 0;
+  const gearStockGoggles = gearPaints.hasStockGoggles && gogglesIdx === 0;
+
   // The gear item to show: an installed gear model, or the stock model for a loose paint.
-  const gearPaint = gearPaints.paints[paintIdx];
-  const gogglePaint = gearPaints.goggles[gogglesIdx];
+  const gearPaint = gearPaints.paints[paintIdx - (gearPaints.hasStock ? 1 : 0)];
+  const gogglePaint = gearPaints.goggles[gogglesIdx - (gearPaints.hasStockGoggles ? 1 : 0)];
   useEffect(() => {
     if (!open || isBike) {
       setGear(null);
@@ -157,7 +176,14 @@ export function ViewerDialog({
     }
     let load: Promise<RiderPart> | null = null;
     if (gearSource && gearPart) {
-      load = loadGearModel(gearSource, gearPart, gearPaint, gogglePaint);
+      load = loadGearModel(
+        gearSource,
+        gearPart,
+        gearPaint,
+        gogglePaint,
+        gearStock,
+        gearStockGoggles,
+      );
     } else if (stockGearPart && gearPath) {
       load = loadStockGearModel(stockGearPart, gearPath);
     }
@@ -174,7 +200,18 @@ export function ViewerDialog({
     return () => {
       alive = false;
     };
-  }, [open, isBike, gearSource, gearPart, gearPaint, gogglePaint, stockGearPart, gearPath]);
+  }, [
+    open,
+    isBike,
+    gearSource,
+    gearPart,
+    gearPaint,
+    gogglePaint,
+    gearStock,
+    gearStockGoggles,
+    stockGearPart,
+    gearPath,
+  ]);
 
   // Rider parts for the viewer: the real body (skinned when previewing a paint) plus any gear.
   const riderParts = useMemo<RiderPart[] | null>(() => {
@@ -203,10 +240,12 @@ export function ViewerDialog({
   const paintOptions = isBike
     ? paints.map((p) => (p.changesPreview ? p.name : `${p.name} — no change here`))
     : gearSource
-      ? gearPaints.paints
+      ? withStock(gearPaints.paints, gearPaints.hasStock)
       : paintPaths.map(paintLabel);
   // A helmet's goggles carry their own paint set (lens/strap) — a second picker.
-  const goggleOptions = gearSource ? gearPaints.goggles : [];
+  const goggleOptions = gearSource
+    ? withStock(gearPaints.goggles, gearPaints.hasStockGoggles)
+    : [];
   const paintNoChange = isBike && paints[paintIdx]?.changesPreview === false;
 
   const loading = loadingModel || loadingPaint;
@@ -224,12 +263,12 @@ export function ViewerDialog({
         <div className="flex flex-none items-center justify-between gap-3 border-b border-border px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <Box className="h-4 w-4 flex-none text-muted-foreground" />
-            <span className="truncate">{title ?? "3D Preview"}</span>
+            <span className="truncate">{title ?? t("viewer.preview3d")}</span>
           </div>
           <div className="flex flex-none items-center gap-2">
             {paintOptions.length > 0 && (
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                Paint
+                {t("viewer.paint")}
                 <select
                   value={paintIdx}
                   onChange={(e) => setPaintIdx(Number(e.target.value))}
@@ -245,7 +284,7 @@ export function ViewerDialog({
             )}
             {goggleOptions.length > 0 && (
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                Goggles
+                {t("category.goggles")}
                 <select
                   value={gogglesIdx}
                   onChange={(e) => setGogglesIdx(Number(e.target.value))}
@@ -261,7 +300,7 @@ export function ViewerDialog({
             )}
             <DialogClose className="rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
               <X className="size-4" />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{t("common.close")}</span>
             </DialogClose>
           </div>
         </div>
@@ -280,17 +319,14 @@ export function ViewerDialog({
           {stockGearPart && gear && !loading && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
               <span className="rounded-md bg-black/70 px-3 py-1.5 text-center text-xs text-white/90">
-                Shown on the game&apos;s stock {stockGearPart}. A paint made for a different
-                model may not line up perfectly.
+                {t("viewer.stockGearNote", { part: stockGearPart })}
               </span>
             </div>
           )}
           {paintNoChange && !loading && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
               <span className="rounded-md bg-black/70 px-3 py-1.5 text-center text-xs text-white/90">
-                None of this paint&apos;s textures are used by the parts shown here, so the
-                preview doesn&apos;t change. It may still paint the wheels or chain, which
-                this view doesn&apos;t render.
+                {t("viewer.paintNoChange")}
               </span>
             </div>
           )}
@@ -308,7 +344,7 @@ export function ViewerDialog({
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40">
               <Loader2 className="h-6 w-6 animate-spin text-white/80" />
               <span className="text-sm text-white/80">
-                {loadingModel ? "Loading model…" : "Loading paint…"}
+                {loadingModel ? t("viewer.loadingModel") : t("viewer.loadingPaint")}
               </span>
               {/* Indeterminate bar so a slow decode/transfer never looks hung. */}
               <div className="h-1 w-52 overflow-hidden rounded-full bg-white/15">
@@ -322,7 +358,7 @@ export function ViewerDialog({
           )}
           {!loading && err && (
             <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/55 px-2 py-1 text-xs text-white/85">
-              No paint preview ({err})
+              {t("viewer.noPaintPreview", { err })}
             </div>
           )}
         </div>

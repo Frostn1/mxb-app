@@ -22,6 +22,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/Components/ui/button";
 import { cn } from "@/lib/utils";
+import { useT, type TKey } from "../../i18n/context";
 import type { DashboardView } from "../Shell/Sidebar";
 
 /** Bumped when the tour changes enough to warrant showing it again. */
@@ -41,68 +42,68 @@ interface Step {
   /** CSS selector of the element to spotlight. Omit for a centered, un-anchored step. */
   selector?: string;
   icon: LucideIcon;
-  title: string;
-  body: string;
+  title: TKey;
+  body: TKey;
 }
 
 const STEPS: Step[] = [
   {
     icon: Snowflake,
-    title: "Take a quick tour",
-    body: "A few seconds to see where everything lives. You can skip at any point.",
+    title: "tour.welcomeTour.title",
+    body: "tour.welcomeTour.body",
   },
   {
     view: "browse",
     selector: '[data-tour="browse"]',
     icon: Compass,
-    title: "Browse mods",
-    body: "Search mxb-mods.com right here and install any track, bike or paint with a single click.",
+    title: "tour.browse.title",
+    body: "tour.browse.body",
   },
   {
     view: "library",
     selector: '[data-tour="library"]',
     icon: LibraryIcon,
-    title: "Your library",
-    body: "Everything you've installed, in one place — update or remove mods without ever touching a zip file.",
+    title: "tour.library.title",
+    body: "tour.library.body",
   },
   {
     view: "locker",
     selector: '[data-tour="locker"]',
     icon: Bike,
-    title: "The locker",
-    body: "Swap bike models in and out. MXB App registers the pieces so the game picks them up.",
+    title: "tour.locker.title",
+    body: "tour.locker.body",
   },
   {
     view: "presets",
     selector: '[data-tour="presets"]',
     icon: Shirt,
-    title: "Presets",
-    body: "Save gear and paint loadouts, then apply a full look in one click — even while you're riding.",
+    title: "tour.presets.title",
+    body: "tour.presets.body",
   },
   {
     view: "rider",
     selector: '[data-tour="rider"]',
     icon: User,
-    title: "Rider studio",
-    body: "Preview your gear and paints on the 3D rider before you take them out on track.",
+    title: "tour.rider.title",
+    body: "tour.rider.body",
   },
   {
     selector: '[data-tour="frostmod"]',
     icon: RefreshCw,
-    title: "FrostMod, live",
-    body: "This shows FrostMod's status. It live-reloads MX Bikes after an install, so new content shows up without restarting the game.",
+    title: "tour.frostmod.title",
+    body: "tour.frostmod.body",
   },
   {
     view: "settings",
     selector: '[data-tour="settings"]',
     icon: SettingsIcon,
-    title: "Settings",
-    body: "Set your game folder, background behaviour and FrostMod options here. You can replay this tour from here too.",
+    title: "tour.settings.title",
+    body: "tour.settings.body",
   },
   {
     icon: Check,
-    title: "You're all set",
-    body: "That's the tour. Head to Browse and install your first mod.",
+    title: "tour.done.title",
+    body: "tour.done.body",
   },
 ];
 
@@ -142,6 +143,7 @@ interface TourProps {
 }
 
 export default function Tour({ navigate, onDone }: TourProps) {
+  const t = useT();
   const [index, setIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -172,10 +174,10 @@ export default function Tour({ navigate, onDone }: TourProps) {
       const r = el.getBoundingClientRect();
       setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
     };
-    const t = window.setTimeout(measure, 70);
+    const timer = window.setTimeout(measure, 70);
     window.addEventListener("resize", measure);
     return () => {
-      window.clearTimeout(t);
+      window.clearTimeout(timer);
       window.removeEventListener("resize", measure);
     };
   }, [index, step.selector]);
@@ -220,8 +222,12 @@ export default function Tour({ navigate, onDone }: TourProps) {
             <Icon className="size-[22px]" strokeWidth={2.5} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <h2 className="text-[17px] font-extrabold tracking-[-0.3px]">{step.title}</h2>
-            <p className="text-[13px] leading-relaxed text-muted-foreground">{step.body}</p>
+            <h2 className="text-[17px] font-extrabold tracking-[-0.3px]">
+              {t(step.title)}
+            </h2>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              {t(step.body)}
+            </p>
           </div>
         </div>
 
@@ -240,15 +246,15 @@ export default function Tour({ navigate, onDone }: TourProps) {
         <div className="flex items-center justify-between gap-3">
           {index > 0 ? (
             <Button variant="ghost" size="sm" onClick={back}>
-              <ArrowLeft /> Back
+              <ArrowLeft /> {t("common.back")}
             </Button>
           ) : (
             <Button variant="ghost" size="sm" onClick={onDone}>
-              Skip
+              {t("common.skip")}
             </Button>
           )}
           <Button size="sm" onClick={next}>
-            {isLast ? "Done" : "Next"}
+            {isLast ? t("common.done") : t("common.next")}
             {!isLast && <ArrowRight />}
           </Button>
         </div>

@@ -1,6 +1,7 @@
 import type React from "react";
 import { Combobox } from "../ui/combobox";
 import type { SlotDef } from "../../lib/presets";
+import { useT } from "../../i18n/context";
 
 /**
  * One editable customization slot: a searchable **creatable** combobox over the
@@ -24,16 +25,17 @@ export function SlotField({
   hint?: React.ReactNode;
   onChange: (v: string) => void;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-1">
       <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-        {slot.label}
+        {t(slot.label)}
         {missing && (
           <span
-            title="This mod isn't installed — shows as stock in-game"
+            title={t("presets.missingHint")}
             className="rounded bg-amber-500/15 px-1 text-[9.5px] font-semibold uppercase text-amber-500"
           >
-            missing
+            {t("presets.missing")}
           </span>
         )}
       </span>
