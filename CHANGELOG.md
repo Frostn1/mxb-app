@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased — paint studio: TGA in, `.pnt` out
+
+### Added
+- **A new Paints tab turns image files into paints the game loads.** MX Bikes reads a paint
+  as a packed container of compressed texture sheets, which no image editor writes — so
+  until now a livery drawn in GIMP or Photoshop had to go through somebody else's converter
+  before the game, or this app's 3D preview, would look at it. Pick the sheets (`.tga`,
+  `.png`, `.jpg`, `.bmp`, `.webp`), say what they're for, and the app builds the `.pnt` and
+  installs it where the game expects it: `mods/bikes/<Bike>/paints`,
+  `rider/helmets/<Helmet>/paints` or `goggles`, boots, protection, and a rider profile's
+  kit or gloves. Or save it to a folder of your own, to share.
+- **Unpack an existing paint into editable `.tga` sheets.** This is how you get a template
+  that actually fits the model: the sheets come out named the way the mesh binds them
+  (`livery`, `rider`, `shell`…), open in any editor, and go straight back in under the same
+  names. Extracted to `Documents\MXB App\Paint Templates\<paint>` and loaded into the studio
+  in one step, so the round trip is edit → **Reload from disk** → **Save paint**.
+- **Names are the part that decides whether a paint works, so the studio shows them.** A
+  `.pnt` supplies textures *by name* and the mesh binds whichever names it asked for — a
+  sheet called `livery` lands on the bodywork, the same sheet called `my_livery` lands
+  nowhere. The studio reads the names the paints already installed for that model use (from
+  their headers — no pixels decoded), lists them, and flags a sheet whose name isn't one of
+  them before you save.
+- **Preview what you just saved on the real model**, through the viewer the app already
+  has: a bike livery on its bike, a helmet or goggle paint on that helmet, a kit on the
+  rider.
+- **Sheets that aren't a power of two are resized to one, and say so.** MX Bikes is a
+  DirectX 9 title and its textures are powers of two throughout; a 1000×1000 export — which
+  GIMP will happily make — would otherwise be packed into a file the game refuses, and the
+  failure would land in-game rather than in the app.
+
+### Fixed
+- **A packed gear item and a folder of the same name are now one item, not two.** A `.pkz`
+  helmet with paints installed loose beside it (which is where the game looks, and where the
+  studio writes) only ever showed one side of itself: whichever the loader resolved first.
+  A folder holding nothing but paints hid the archive entirely — the picker listed the new
+  paint alone and the preview lost the mesh it belonged to. Both are read now, the folder
+  winning a name clash because it's what was installed last.
+
 ## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
 
 ### Added

@@ -344,6 +344,59 @@ export interface GearPaints {
   hasStockGoggles: boolean;
 }
 
+/**
+ * One source image picked in the paint studio, as the backend read it.
+ *
+ * `width`/`height` are what will be packed; `sourceWidth`/`sourceHeight` are what the file
+ * measures. They differ only when the image had to be resized onto power-of-two edges the
+ * game accepts — `resized` says so, and the studio warns rather than silently reshaping
+ * somebody's artwork.
+ */
+export interface StudioImage {
+  path: string;
+  /** The texture name it will be packed under — the file's stem, editable before saving. */
+  name: string;
+  width: number;
+  height: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  resized: boolean;
+  /**
+   * Pixels held on the Rust side, same as any decoded paint's — but shrunk for display, so
+   * they measure `previewWidth`×`previewHeight` rather than the sheet's own size.
+   */
+  token: string;
+  previewWidth: number;
+  previewHeight: number;
+}
+
+/** One texture of a paint being built: a file on disk, packed under `name`. */
+export interface BuildTexture {
+  path: string;
+  name: string;
+}
+
+/**
+ * Where a built paint is written: into the game's `mods` folder at `rel`
+ * (`bikes/<Bike>/paints`, `rider/helmets/<Helmet>/paints`…), or into a folder the player
+ * picked, for a paint they mean to share rather than install.
+ */
+export type PaintDest = { kind: "mods"; rel: string } | { kind: "folder"; path: string };
+
+export interface SavedPaint {
+  path: string;
+  /** The texture names the file ended up carrying — what the mesh will bind. */
+  textures: string[];
+  bytes: number;
+}
+
+/** A paint taken apart into editable `.tga` sheets. */
+export interface PaintTemplate {
+  dir: string;
+  files: string[];
+  textures: string[];
+}
+
 export interface PkzMeta {
   locked: boolean;
   /** Display name from the archive's `.ini`, if readable. */

@@ -90,6 +90,10 @@ notify-debouncer-mini = "0.4"
 # Check an installed FrostMod binary against the digest its GitHub release advertises,
 # so an install that only half-applied can be spotted and repaired.
 sha2 = "0.10"
+# The 16-byte digest a `.pnt`/`.edf` texture header carries beside its dimensions, written
+# when the app builds a paint of its own (`paint::encode`). Shares the `digest` traits
+# `sha2` already pulls in, so it costs one small crate.
+md-5 = "0.10"
 # Compile-time string obfuscation: sensitive endpoints/hosts are XOR-encoded in the
 # binary and decoded on the stack at use, so they don't show up in a `strings` dump.
 obfstr = "0.4"
