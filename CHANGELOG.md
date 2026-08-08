@@ -39,174 +39,123 @@
   truncates hard, and the folder id is what you need when matching a paint to its bike.
 
 ## 2026-08-07 — six languages, a Play button, live model swaps
+## 2026-08-07 — a way out of the overlay that isn't the game
 
 ### Added
-- **Browse can sort by what people actually ride, not just what landed last.** The page
-  was locked to the catalog's own newest-first order, which buries a track that thousands
-  of people have downloaded for two years under whatever went up this morning. There's now
-  a sort next to the category filters: **Most popular**, **Popular this month**, **Popular
-  this week** (ranked by views on mxb-mods.com — *Trials more pits version* leads tracks
-  all-time at 1.25M) and **Oldest**, for digging back to the 2019 originals. Alphabetical
-  and recently-updated orders aren't offered: the site accepts those requests and then
-  ignores them, and a sort that silently does nothing is worse than one that isn't there.
-  The popular listings can't be searched, so they step aside while the search box has text
-  in it and the order falls back to newest.
-- **An in-game overlay, on a hotkey.** Everything the app does still meant leaving the
-  game to do it. Ctrl+Shift+M (rebindable in Settings → In-game overlay) now brings
-  Presets, the Locker and Browse up over MX Bikes in a floating panel; Esc closes it and
-  hands control straight back to the game. It's the same UI the main window uses, not a
-  cut-down copy, and it pays off because presets and model swaps already apply to a
-  *running* game — pick a gear set from the pits and it's on you, no restart, no alt-tab.
-  Mods downloaded from Browse still need the usual content reload before the game sees
-  them. One real limit: nothing can be drawn over a game in exclusive fullscreen, so set
-  MX Bikes to borderless or windowed — if you summon the overlay and it can't appear, the
-  main window tells you why rather than leaving you guessing. Translated into all six
-  languages alongside the rest of the app.
-- **MXB App is translated into Italian, Spanish, French, German and Brazilian
-  Portuguese.** Pick a language under Settings → Appearance; the choice persists, and
-  `System` follows the OS (a bare `pt` resolves to Brazilian, the only Portuguese we
-  ship). Every screen, dialog, toast and empty state is covered — 540 keys per language.
-  Terminology follows what the MX Bikes community actually says rather than dictionary
-  equivalents: `mod`, `setup`, `preset` and `Stock` stay as loanwords in every language,
-  while gear is translated (`casco`/`casque`/`Helm`, `maschera`/`masque`/`Brille` for
-  goggles, `livrea`/`déco`/`Lackierung` for a bike paint).
-- **Dates follow the app's language, not the OS's.** Picking Italian on an English
-  machine moves the Library's dates too, instead of leaving half the UI in English.
-- **The 3D preview now offers a gear model's stock paint, not just its liveries.** The
-  paint picker listed only the `.pnt` files a helmet, boots or protection packs, so a
-  piece that ships liveries had no way back to its own look — the textures embedded in
-  the mesh, which the preview ignored entirely. "Stock" now leads the list whenever the
-  mesh carries a texture, with a separate entry for a helmet's goggles, which are picked
-  independently of the shell. A paint reuses the mesh's texture names, so stock shell
-  plus painted goggles (and the reverse) is resolved before the textures reach the
-  viewer, which would otherwise show whichever image finished loading last. Preview only
-  — it never becomes a value in your loadout, since the game names a `.pnt` there and has
-  no word for "the model's own look".
+- **"Open full app" in the in-game overlay.** The overlay carries Presets, the Locker and
+  Browse; Rider, the Library and Settings only exist in the main window, and the only way
+  there was to close the overlay — which drops you back into the game — and then alt-tab.
+  A button next to the close X now puts the overlay away and brings the main window
+  forward instead, keeping the focus where you asked for it rather than handing it back to
+  MX Bikes on the way out.
 
-### Fixed
-- **Picking a goggle paint now updates the 3D preview on its own.** The Rider tab's
-  preview re-resolves the model whenever a rider slot changes, but the list of slots it
-  watched never included the goggles — so choosing a lens did nothing on screen, and the
-  new paint only appeared once you touched some *other* slot (helmet paint, boots) and
-  dragged the goggles along with it. The backend had been reading the goggle paint
-  correctly the whole time; it was simply never asked to.
-- **Downloads that Google Drive refuses now say why, instead of "the host returned a web
-  page".** Hitting a popular mod (Flow Series #1 FlowiCompound, for one) gave a message
-  that blamed the page and told you to download it manually — but Drive was answering the
-  virus-scan confirm with a *Quota exceeded* page, so a browser hit the exact same wall
-  and the advice sent people in circles. The three Drive refusals we can name — download
-  limit, private file, deleted file — now come through with what actually happened and
-  what to do about it (for a quota block: copy the file to your own Drive and download
-  the copy, or wait a day). Anything unrecognised keeps the old wording.
+## 2026-08-07 — v0.7.0 — Six languages, an in-game overlay, and bikes wearing the right paint
 
 ### Added
-- **Star ratings on browse thumbnails.** A mod that people have rated on mxb-mods.com now
-  shows its score on the card the same way the site does — five stars filled to the
-  nearest half, the average, and the vote count — so a good mod is recognisable before you
-  open it. Unrated mods show nothing rather than five empty stars, which would read as a
-  bad score instead of "nobody has voted yet". The scores aren't in the REST API the
-  listing comes from, so they're fetched separately per page (six requests at a time,
-  cached for ten minutes) after the cards have painted: browsing never waits on them, and
-  a score that fails to load simply doesn't appear.
-- **A Play button that launches MX Bikes.** Setting a bike up in the Locker meant
-  alt-tabbing to Steam or the desktop to actually ride it, even though the app already
-  knew where the game was installed and whether it was running. The sidebar now carries a
-  Play button above the FrostMod pill, visible from every tab; it flips to "MX Bikes
-  running" while the game is up, so it can't start a second copy. Windows runs
-  `mxbikes.exe` directly, which works for standalone (non-Steam) copies too and doesn't
-  need Steam open; Linux hands `steam://rungameid/655500` to the desktop, because a
-  Proton install is Steam's to set up. If the install folder isn't set or holds no
-  `mxbikes.exe`, the error says so and points at Settings.
-- **Swapping a model now changes it in-game instantly, on the bike you have selected.**
-  A model swap moved the files and re-ran the game's *customization* loader — which
-  reloads paints and gear but never the bike mesh, so the garage kept showing the old
-  model until you switched bike class away and back. The Locker now also asks FrostMod
-  to re-apply the bike (new `refresh_bike_model` command), which re-reads it from disk
-  and brings the new model up immediately. FrostMod acts only on the bike you currently
-  have selected, so swapping any other bike never disturbs what you're looking at.
-  Presets get the same treatment when they carry a model swap. Gated on the existing
-  **Instant refresh** setting, since it reaches into the running game.
+- **An in-game overlay, on a hotkey.** Ctrl+Shift+M (rebindable in Settings → In-game
+  overlay) brings Presets, the Locker and Browse up over MX Bikes in a floating panel; Esc
+  hands control straight back to the game. It's the same UI as the main window, and it pays
+  off because presets and model swaps already apply to a *running* game — pick a gear set
+  from the pits and it's on you, no restart. One limit: nothing can draw over a game in
+  exclusive fullscreen, so run MX Bikes borderless or windowed.
+- **MXB App speaks six languages** — English, Italian, Spanish, French, German and
+  Brazilian Portuguese. Pick one under Settings → Appearance, or leave it on `System` to
+  follow the OS. Every screen, dialog, toast and empty state is covered, and the wording
+  follows what the community actually says: `mod`, `setup`, `preset` and `Stock` stay as
+  loanwords, while gear is translated (`casco`, `casque`, `Helm`). Dates follow the app's
+  language too, so picking Italian doesn't leave half the UI in English.
+- **Browse can sort by what people actually ride.** New sort next to the category filters:
+  **Most popular**, **Popular this month**, **Popular this week** (by views on
+  mxb-mods.com) and **Oldest**, for digging back to the 2019 originals — instead of being
+  locked to newest-first, which buries a track thousands of people ride under whatever went
+  up this morning. The popular listings can't be searched, so they step aside while you're
+  typing in the search box.
+- **Star ratings on browse thumbnails.** Cards now carry the mxb-mods.com score — stars,
+  average and vote count — so a well-rated mod stands out before you open it. Unrated mods
+  show nothing rather than five empty stars, and ratings load after the cards appear, so
+  browsing never waits on them.
+- **A Play button that launches MX Bikes.** It's in the sidebar on every tab, and reads
+  "MX Bikes running" while the game is up so it can't start a second copy. Windows launches
+  the game directly — Steam copies and standalone alike — and Linux hands off to Steam,
+  since a Proton install is Steam's to start.
+- **A model swap now shows up in-game straight away.** Applying a swap in the Locker, or a
+  preset that carries one, re-applies the bike you have selected — no more switching bike
+  class away and back to see it. Needs FrostMod and the **Instant refresh** setting.
+- **The 3D preview offers a gear model's stock paint, not just its liveries.** A helmet or
+  boots that ship liveries had no way back to their own look. "Stock" now leads the paint
+  list whenever the mesh carries a texture, with a separate entry for a helmet's goggles.
+  Preview only — the game names a `.pnt` in your loadout and has no word for "the model's
+  own look".
 
 ### Fixed
-- **Browse now clears mxb-mods.com's bot protection with a real browser instead of trying
-  to impersonate one.** A user on v0.6.3 still hit `403 Forbidden` on every browse, which
-  ruled out the header work shipped for v0.6.3 — that build already sent Chrome's exact
-  header set. What it couldn't send is Chrome's TLS and HTTP/2 fingerprint, which no header
-  can disguise, and Cloudflare weighs that against the caller's IP. That's why the same
-  binary is fine on one connection and refused on another; the site itself is not blocking
-  the app, and the affected user's normal browser loads mxb-mods.com fine.
-
-  So when the site refuses us, the app now opens a small mxb-mods.com window, lets
-  Cloudflare's check clear, keeps the `cf_clearance` it hands out, and retries the request
-  with it. The cookie is saved, so being blocked once doesn't mean being blocked again on
-  every launch. This is the mechanism the app already used to sign into the MX Bikes Shop,
-  now shared by both sites rather than written twice.
-  - A 403 no longer retries in place. Three identical requests from the same fingerprint
-    earn the same refusal, so the old loop only failed three times slower; 429 and 503 do
-    still retry, since those genuinely pass on their own.
-  - A Cloudflare interstitial served as a `200` now takes the same route as a 403 — it is
-    the same refusal wearing a success code.
-  - If the check window never gets a clearance, the log says so specifically. That
-    distinguishes "the browser was never challenged either" from "we got a cookie and it
-    still failed", which are different problems with different fixes.
-
-  Honest caveat, same as last time: this is still not reproducible here, so it's verified
-  by construction and tests rather than by watching it cure the reported fault.
-- **The Locker no longer claims a model swap "Refreshed live in-game" when it didn't.**
-  The note was derived purely from the look-loader call succeeding, which says nothing
-  about whether the mesh reloaded — so it read as done while the garage still showed the
-  old model. Model and sound swaps now report separately, and the model note reflects
-  what actually happened: refreshing now, FrostMod not running, or instant refresh off.
-### Fixed
-- **Browse knows what you already have.** The "Installed" badge almost never appeared —
-  one reporter's library scored 19 of 96 tracks and **0 of 96** bikes and rider items,
-  all of them installed and working in-game. Two causes. Browse asked for installed mods
-  with a scan that keeps `.pkz` files only, so extracted track folders and every `.pnt`
-  paint were invisible; since the Bikes and Rider categories are mostly liveries and gear
-  paints, nothing in them could ever be badged. And it compared the site's post title to
-  the packaged filename as exact strings, which post titles never survive — they carry
-  author credits, release tags and notes like "(READ INSTRUCTIONS)". Browse now reads the
-  same full library scan the Library tab uses, and matches titles the way a person would:
-  one name spelled inside the other, or enough distinctive words in common. Careful
-  enough to still tell two colourways of the same bike apart. (#26)
-- **Presets no longer comes up blank when your mods folder lives somewhere else.**
-  `mxbikes.ini` lets you point the mods folder at another drive, but the game has no
-  equivalent redirect for profiles — it keeps writing those to
-  `Documents\PiBoSo\MX Bikes\profiles`. The app only ever looked at
-  `<mods folder>\profiles`, found nothing, and rendered an empty Presets tab with no
-  hint that a path was involved. It now falls back to the stock `Documents` folder when
-  the one beside your mods isn't there, and Settings shows the path it actually resolved
-  to instead of the one it assumed (#27).
-- **The empty Presets tab explains itself.** Instead of "launch the game once", it names
-  the folder it read, says outright when that folder doesn't exist, points at the
-  `mxbikes.ini` split as the likely cause, and offers a button straight to the Settings
-  picker.
-- **A slot can be cleared back to stock again.** Empty is what the game writes for an
-  unmodded slot, and every layer already handled it — the trigger renders it as "Stock",
-  a cleared slot isn't flagged missing, and applying writes it through. Only the picker
-  couldn't produce it: there was no "none" option, no clear button, and an empty search
-  box commits nothing. Pick `full` for Protection once and the only ways back were the
-  game's own UI or hand-editing `profile.ini`. Every slot dropdown now leads with a
-  "Stock (none)" row that clears it. (#28)
+- **Bikes wearing the wrong texture on their bodywork.** A part's material was matched to
+  the texture list in whatever order the exporter wrote it, which only works on bikes
+  written in material order. The Kawasaki KX250/KX450 wore their blank number-plate texture
+  over the whole bike, so an installed paint changed nothing visible; the Yamaha
+  YZ125/YZ250 had chassis and engine swapped. The model's own material table now decides,
+  and where the two readings disagree the mesh breaks the tie per part — which keeps the
+  KTM 125 SX on its plastics.
+- **The front fender and fork guards rendering in bare metal.** One mesh group can hold
+  several materials — a fork leg and the plastic guard on it — and all of them wore the
+  first one's texture. Each range now binds its own.
+- **Picking a goggle paint updates the 3D preview on its own.** The preview watched every
+  rider slot except the goggles, so a new lens only appeared once you touched some *other*
+  slot. The paint was being read correctly all along; the preview was simply never asked.
+- **Installing a new version by hand no longer loops back to the "already installed"
+  page.** MXB App sits in the tray after you close its window, so an installer you started
+  yourself nearly always finds it running — and when the old uninstaller can't close it,
+  the installer bounces you back to that page instead of installing. It now closes the app
+  itself, WebView2 children and all, before anything is written or removed. The in-app
+  updater was never affected, which is why this only turned up on a manual install.
+  **Upgrading from 0.6.3 by hand?** That version's uninstaller predates the fix, so quit
+  MXB App from the tray first (right-click the tray icon → Quit) — once you're on 0.7.0,
+  it takes care of itself.
+- **Updating FrostMod with MX Bikes open no longer fails** with "the process cannot access
+  the file… (os error 32)". Windows won't let a loaded `frostmod.dll` be overwritten, so no
+  amount of retrying could outlast a running game. The old binaries are renamed aside
+  instead and the new ones take their place, so the update lands with the game still up —
+  and the toast says to restart MX Bikes if the old FrostMod is the one still loaded.
+- **A half-applied FrostMod update can't strand you on a version you never installed.**
+  Both binaries now stage together and move into place as one unit, so a failure puts the
+  previous install back and the version is recorded only once both files are really on
+  disk. An install already carrying the wrong version number is caught by checksum rather
+  than assumed fine, and repaired on next launch — or on demand with **Repair install**.
+- **Browse gets past mxb-mods.com's bot protection.** When the site refuses the app, it now
+  opens a small mxb-mods.com window, lets the Cloudflare check clear, and reuses the
+  clearance afterwards — the same route already used to sign into the MX Bikes Shop.
+  Headers alone couldn't fix this, which is why the same build worked on one connection and
+  was refused on another. Honest caveat, as last release: the block isn't reproducible
+  here, so it's verified by construction rather than by watching it cure the fault.
+- **Browse knows what you already have.** The "Installed" badge almost never showed — one
+  library scored 0 of 96 bikes, every one of them installed. It counted packed `.pkz` files
+  only, missing extracted tracks and every paint, and compared post titles as exact
+  strings, which they never survive. It now reads the full Library scan and matches titles
+  the way a person would. (#26)
+- **Downloads that Google Drive refuses now say why.** Download limit, private file and
+  deleted file each come through with what happened and what to do — for a quota block,
+  copy the file to your own Drive or wait a day — instead of blaming the page and sending
+  you to download it manually into the same wall.
+- **Presets works when your mods folder lives somewhere else.** `mxbikes.ini` can move the
+  mods folder, but the game still writes profiles to `Documents`, so Presets came up blank.
+  It now falls back there, and Settings shows the path it actually resolved to. (#27)
+- **The empty Presets tab explains itself** — the folder it read, whether that folder
+  exists, the likely cause, and a button straight to the Settings picker.
+- **A slot can be cleared back to stock.** Every slot dropdown now leads with a "Stock
+  (none)" row. Before, picking `full` for Protection could only be undone in the game's own
+  UI or by hand-editing `profile.ini`. (#28)
+- **The Locker stops saying a swap "Refreshed live in-game" when it didn't.** Model and
+  sound swaps report separately now, and the model note says what actually happened:
+  refreshing, FrostMod not running, or instant refresh off.
 
 ### Changed
-- **Translations can't silently go missing.** Each locale is typed as
-  `Record<keyof typeof en, string>`, so a key that's absent from — or invented in — any
-  of the five translations is a compile error, not a runtime blank. `npm run typecheck`
-  passing is proof all six locales are complete and consistent. This is why the i18n
-  layer is ~120 lines of local code rather than i18next: a missing key can't reach a
-  build.
-- **Plurals use `Intl.PluralRules` rather than an `n === 1` check.** French treats 0 as
-  singular, so "0 fichier" now comes out correct without a special case, and languages
-  that don't split one/other the way English does still land right.
-- **Sentences that wrap markup are translated whole.** A `<Trans>` component splices
-  React nodes into placeholders, so word order stays the translator's choice — splitting
-  such a sentence into prefix/suffix strings would have hard-coded English grammar into
-  German and French. The same applies to the preset-apply and swap toasts, which were
-  English fragments and are now complete sentences.
-- **Nouns that read differently mid-sentence get their own key.** "Search tracks…" used
-  `label.toLowerCase()`, which produces broken German — its nouns are capitalized
-  everywhere — so mod types now carry a separate inline form.
+- **Library thumbnails show a bike's manufacturer logo** instead of a coloured sliver — its
+  `logo.tga` was losing a tie to `team.tga`, a 32x64 strip. A real preview image still wins
+  where a mod ships one, and cached thumbnails are rebuilt.
+- **Hovering a name in the Library shows the full name, folder and location** — the row
+  truncates hard, and the folder id is what you need to match a paint to its bike.
+- **Translations can't silently go missing.** Each locale is typed against English, so a
+  missing or invented key is a compile error rather than a runtime blank, and plurals go
+  through `Intl.PluralRules` — French treats 0 as singular, and now so do we.
 
 ## 2026-08-06 — v0.6.3 — model swaps stop breaking bikes, Linux builds
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bike, Home, Shirt, X } from "lucide-react";
+import { Bike, ExternalLink, Home, Shirt, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/Components/ui/sonner";
 import { TooltipProvider } from "@/Components/ui/tooltip";
@@ -20,6 +20,7 @@ import {
   getOverlayState,
   isConfigured,
   overlayHide,
+  overlayOpenMain,
 } from "../../api/mods";
 import type { Config } from "../../types";
 
@@ -82,6 +83,12 @@ export default function Overlay() {
 
   const dismiss = useCallback(() => {
     void overlayHide().catch(() => {});
+  }, []);
+
+  // Rider, Library and Settings live only in the main window, so the overlay needs a
+  // way out that doesn't drop the player back into the game to go find it.
+  const openFullApp = useCallback(() => {
+    void overlayOpenMain().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -169,6 +176,14 @@ export default function Overlay() {
                       {t("overlay.toClose", { hotkey: prettyHotkey(hotkey) })}
                     </span>
                   )}
+                  <button
+                    onClick={openFullApp}
+                    title={t("overlay.openMainTitle")}
+                    className="flex h-8 cursor-default items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                  >
+                    <ExternalLink className="size-3.5" />
+                    <span>{t("overlay.openMain")}</span>
+                  </button>
                   <button
                     onClick={dismiss}
                     title={t("overlay.closeTitle")}

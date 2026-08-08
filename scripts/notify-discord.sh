@@ -39,15 +39,8 @@ if [ "$PRINT_ONLY" -eq 0 ] && [ -z "$WEBHOOK" ]; then
   exit 0
 fi
 
-if ! root="$(git rev-parse --show-toplevel 2>/dev/null)" || [ -z "$root" ]; then
-  root="$(cd "$(dirname "$0")/.." && pwd)"
-fi
-changelog="$root/CHANGELOG.md"
-
-VERSION="${TAG#v}"
-# Escape regex metacharacters so `0.6.1` can't match `0x6y1`.
-ver_re="$(printf '%s' "$VERSION" | sed 's/[].[^$*\\/]/\\&/g')"
-head_re="^## .*[[:space:]]v${ver_re}([[:space:]]|\$)"
+here="$(cd "$(dirname "$0")" && pwd)"
+section="$here/changelog-section.sh"
 
 meta="$(gh release view "$TAG" -R "$REPO" --json name,body,url,publishedAt,assets)"
 rel_url="$(jq -r '.url' <<<"$meta")"
@@ -56,56 +49,45 @@ published="$(jq -r '.publishedAt' <<<"$meta")"
 # --- title -------------------------------------------------------------------------
 # Release headings look like `## 2026-08-06 — v0.6.1 — Rider tab gear slots`; the trailing
 # segment is the human name for the release and makes a much better title than the tag.
-heading=""
-subtitle=""
-if [ -f "$changelog" ]; then
-  heading="$(awk -v re="$head_re" '$0 ~ re { print; exit }' "$changelog")"
-  subtitle="$(printf '%s' "$heading" | awk -F'—' '
-    NF >= 3 {
-      s = $3
-      for (i = 4; i <= NF; i++) s = s "—" $i
-      gsub(/^[ \t]+|[ \t]+$/, "", s)
-      print s
-    }')"
-fi
+heading="$("$section" "$TAG" --heading || true)"
+subtitle="$(printf '%s' "$heading" | awk -F'—' '
+  NF >= 3 {
+    s = $3
+    for (i = 4; i <= NF; i++) s = s "—" $i
+    gsub(/^[ \t]+|[ \t]+$/, "", s)
+    print s
+  }')"
 
 title="MXB App $TAG"
 [ -n "$subtitle" ] && title="$title — $subtitle"
 
 # --- description -------------------------------------------------------------------
-# The changelog hard-wraps mid-sentence for readability in the file; Discord renders those
-# newlines literally, so fold continuation lines back onto their bullet before sending.
-body=""
-if [ -n "$heading" ]; then
-  body="$(awk -v re="$head_re" '
-    $0 ~ re              { seen = 1; next }
-    !seen                { next }
-    seen && /^## /       { exit }
-                         { print }
-  ' "$changelog" | awk '
-    function flush() { if (buf != "") { print buf; buf = "" } }
-    /^[[:space:]]*$/     { flush(); print ""; next }
-    /^[[:space:]]*[-*] / { flush(); buf = $0; next }
-    /^#/                 { flush(); print; next }
-    buf != ""            { line = $0; sub(/^[[:space:]]+/, "", line); buf = buf " " line; next }
-                         { flush(); print }
-    END                  { flush() }
-  ' | sed -e '/./,$!d')"
+# Discord caps embed descriptions at 4096 characters; stop short of that so the footer
+# link always has room. A release big enough to blow the cap gets its headlines instead
+# of the first N characters — every item still gets named, which a hard cut can't
+# promise, and the detail is one click away on the release page.
+#
+# `--fold` because the changelog hard-wraps mid-sentence for readability in the file and
+# Discord renders those newlines literally.
+limit=3500
+more="
+
+[Full notes, with the detail →]($rel_url)"
+
+body="$("$section" "$TAG" --fold || true)"
+
+if [ -n "$body" ] && [ "${#body}" -gt "$limit" ]; then
+  short="$("$section" "$TAG" --summary || true)"
+  [ -n "$short" ] && body="$short$more"
 fi
 
-# Trim trailing blank lines.
-body="$(printf '%s' "$body" | awk 'NF { blanks = 0; for (i = 0; i < held; i++) print ""; held = 0; print; next } { held++ }')"
+# Headlines alone still over the cap (a genuinely enormous release) — now it's a trim.
+if [ "${#body}" -gt "$limit" ]; then
+  body="${body:0:$limit}…$more"
+fi
 
 if [ -z "$body" ]; then
   body="A new version is out — see the release page for details."
-fi
-
-# Discord caps embed descriptions at 4096 characters; leave room for the footer link.
-limit=3500
-if [ "${#body}" -gt "$limit" ]; then
-  body="${body:0:$limit}…
-
-[Full changelog →]($rel_url)"
 fi
 
 # --- download links ------------------------------------------------------------------

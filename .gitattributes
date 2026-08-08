@@ -1,0 +1,3 @@
+# The Windows release leg runs `scripts/release-notes.sh` through Git Bash, which chokes
+# on CRLF (`$'\r': command not found`). Keep shell scripts LF wherever they're checked out.
+*.sh text eol=lf

@@ -68,6 +68,8 @@ export const it: Translation = {
   "frostmod.installedToast": "FrostMod {{version}} installato",
   "frostmod.installedToastDesc":
     "Ricaricherà il gioco in tempo reale quando aggiungi mod.",
+  "frostmod.installedToastRestart":
+    "Riavvia MX Bikes per passare alla nuova versione — il gioco aperto sta ancora usando il vecchio FrostMod.",
   "frostmod.installFailed": "Impossibile installare FrostMod",
   "frostmod.newModsAdded": "Nuove mod aggiunte",
   "frostmod.modsAdded_one": "Nuova mod aggiunta",
@@ -467,6 +469,9 @@ export const it: Translation = {
   "settings.updateCheckFailed":
     "Impossibile controllare gli aggiornamenti — offline o GitHub non raggiungibile.",
   "settings.latestVersion": "Ultima: {{version}}",
+  "settings.frostmodNeedsRepair":
+    "I file installati non corrispondono a questa versione — reinstallando si risolve.",
+  "settings.frostmodRepair": "Ripara installazione",
   "settings.checkNewer": "Cerca una versione più recente di FrostMod",
   "settings.working": "Elaborazione…",
   "settings.installFrostmod": "Installa FrostMod",
@@ -767,6 +772,8 @@ export const it: Translation = {
   "overlay.registerFailed": "Impossibile registrare la scorciatoia dell'overlay",
   "overlay.toClose": "{{hotkey}} per chiudere",
   "overlay.closeTitle": "Chiudi overlay (Esc)",
+  "overlay.openMain": "Apri l'app completa",
+  "overlay.openMainTitle": "Chiudi l'overlay e apri la finestra principale di MXB App",
   "overlay.needsSetup": "Completa prima la configurazione di MXB App nella finestra principale — deve sapere dov'è la tua cartella MX Bikes.",
   "overlay.fullscreenBlocked": "L'overlay non può apparire sopra il fullscreen esclusivo",
   "overlay.fullscreenBlockedDesc": "Imposta MX Bikes senza bordi o in finestra in Options → Video, poi riprova con la scorciatoia.",

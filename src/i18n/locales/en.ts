@@ -67,6 +67,8 @@ export const en = {
   "frostmod.installedToast": "FrostMod {{version}} installed",
   "frostmod.installedToastDesc":
     "It'll live-reload the game when you add mods.",
+  "frostmod.installedToastRestart":
+    "Restart MX Bikes to switch over — the running game is still on the old FrostMod.",
   "frostmod.installFailed": "Couldn't install FrostMod",
   // Folder-watcher notifications.
   "frostmod.newModsAdded": "New mods added",
@@ -459,6 +461,9 @@ export const en = {
   "settings.updateCheckFailed":
     "Couldn't check for updates — offline or GitHub unavailable.",
   "settings.latestVersion": "Latest: {{version}}",
+  "settings.frostmodNeedsRepair":
+    "The installed files don't match this version — reinstalling fixes it.",
+  "settings.frostmodRepair": "Repair install",
   "settings.checkNewer": "Check for a newer FrostMod",
   "settings.working": "Working…",
   "settings.installFrostmod": "Install FrostMod",
@@ -745,6 +750,8 @@ export const en = {
   "overlay.registerFailed": "Overlay hotkey couldn't be registered",
   "overlay.toClose": "{{hotkey}} to close",
   "overlay.closeTitle": "Close overlay (Esc)",
+  "overlay.openMain": "Open full app",
+  "overlay.openMainTitle": "Close the overlay and open the main MXB App window",
   "overlay.needsSetup": "Finish setting up MXB App in its main window first — it needs to know where your MX Bikes folder is.",
   "overlay.fullscreenBlocked": "The overlay can't show over exclusive fullscreen",
   "overlay.fullscreenBlockedDesc": "Set MX Bikes to borderless or windowed in Options → Video, then try the shortcut again.",

@@ -8,6 +8,7 @@ import type {
   RegisterReport,
   Config,
   DownloadOption,
+  FrostmodInstallReport,
   FrostmodReload,
   FrostmodStatus,
   InstalledMod,
@@ -781,9 +782,10 @@ export function frostmodStatus(): Promise<FrostmodStatus> {
   return invoke<FrostmodStatus>("frostmod_status");
 }
 
-/** Download (or update to) the latest FrostMod release. Returns the version tag. */
-export function frostmodInstall(): Promise<string> {
-  return invoke<string>("frostmod_install");
+/** Download (or update to) the latest FrostMod release. All-or-nothing: it either
+ *  puts both binaries in place or leaves the previous install untouched. */
+export function frostmodInstall(): Promise<FrostmodInstallReport> {
+  return invoke<FrostmodInstallReport>("frostmod_install");
 }
 
 /** Launch the managed FrostMod process if it isn't already running. */
@@ -827,6 +829,11 @@ export function overlayToggle(): Promise<void> {
 /** Dismiss the overlay and hand keyboard focus back to MX Bikes. */
 export function overlayHide(): Promise<void> {
   return invoke<void>("overlay_hide");
+}
+
+/** Close the overlay and bring the main MXB App window to the front. */
+export function overlayOpenMain(): Promise<void> {
+  return invoke<void>("overlay_open_main");
 }
 
 export function setOverlayEnabled(enabled: boolean): Promise<void> {

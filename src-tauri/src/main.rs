@@ -29,7 +29,7 @@ mod upload;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
-use frostmod_manage::{FrostmodProcess, FrostmodStatus};
+use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
 use mods::mxb::MxbModsSource;
@@ -1848,18 +1848,20 @@ async fn frostmod_status(app: tauri::AppHandle) -> FrostmodStatus {
 async fn frostmod_install(
     app: tauri::AppHandle,
     state: State<'_, FrostmodProcess>,
-) -> Result<String, String> {
+) -> Result<InstallReport, String> {
     let was_running = frostmod::is_running();
     let was_installed = frostmod_manage::is_installed(&app);
     frostmod_manage::stop(&state);
     frostmod_manage::force_stop_exe();
 
-    let tag = frostmod_manage::install(&app).await.map_err(|e| format!("{e:#}"))?;
+    let report = frostmod_manage::install(&app)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
 
     if was_running || !was_installed {
         let _ = frostmod_manage::start(&app, &state);
     }
-    Ok(tag)
+    Ok(report)
 }
 
 #[tauri::command]
@@ -1896,6 +1898,16 @@ fn overlay_toggle(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn overlay_hide(app: tauri::AppHandle) -> Result<(), String> {
     overlay::hide(&app)
+}
+
+/// The overlay's "Open full app" button: put the overlay away and bring the main
+/// window forward. Deliberately not `overlay::hide` — that hands focus back to MX
+/// Bikes, which is the opposite of what someone leaving for the full app wants.
+#[tauri::command]
+fn overlay_open_main(app: tauri::AppHandle) -> Result<(), String> {
+    overlay::dismiss(&app)?;
+    show_main(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -2368,6 +2380,7 @@ fn main() {
             set_instant_refresh,
             overlay_toggle,
             overlay_hide,
+            overlay_open_main,
             overlay_state,
             set_overlay_enabled,
             set_overlay_hotkey,
