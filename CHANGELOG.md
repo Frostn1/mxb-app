@@ -1,5 +1,82 @@
 # Changelog
 
+## 2026-08-07 — the Rider preview can wear a rider model
+
+### Added
+- **Custom rider models show up on the rider.** A rider model is a whole new body mesh, not a
+  texture — Rider+ and its variants install as folders under `mods/rider/riders`, and the
+  preview never looked there. It read the body out of the game's `rider.pkz` and nowhere else,
+  so picking an installed model listed the profile, found nothing to load, and rendered gear
+  floating where the rider should be. The body is now resolved from the installed model first,
+  loose or packed as a `.pkz`, and falls back to the game's own rider only when no model
+  supplies one. A rider packed as `riders/<name>.pkz` is listed in the picker too, as gear
+  already was.
+- **A rider model wears the kits you already own.** Rider+ ships its `paints` and `gloves`
+  folders empty on purpose, because existing gear is meant to work on it. A kit or glove paint
+  is now looked for in the chosen profile, then inside its archive, then under the stock
+  profiles — by exact name at every step, so reaching further never quietly swaps in a
+  different paint. The kit dropdown lists what you own rather than going blank on a fresh
+  model.
+
+### Fixed
+- **The rider stands up and faces forward.** Rider meshes don't agree on which axis is up: the stock motocross
+  rider is authored Y-up, while the supermoto rider and Rider+ are Z-up and arrived lying on
+  their back. Every piece of gear is anchored and scaled to a fraction of the body's height,
+  so a body on its side measured a quarter of a metre tall instead of a metre and a bit — the
+  helmet and boots shrank to specks and sank into the torso, which read as gear that never
+  loaded. Standing it up alone left it facing backwards, which matters just as much: the
+  viewer nudges the helmet and boots forward, so a rider turned around wears its gear through
+  its own back. A body whose longest axis isn't its height is now rolled upright *and* turned
+  to face front; one that already stands is left alone.
+- **A rider model loads without decoding pixels nobody sees.** Dressing a body in its own
+  baked textures used to inflate and re-encode every texture the mesh carried, then throw
+  most of them away — skin renders as a flat colour and the name and number planes render as
+  nothing at all. On a rider body that decode cost more than parsing the mesh. Only textures
+  the viewer can actually draw are decoded now, and they're kept per model so changing a
+  dropdown doesn't re-read a 67 MB body.
+- **The rider's textures are read off the model instead of memorised.** Which texture a body
+  part wears was decided by its material number: 1 was gloves, 2 was the face, 3 and 4 were
+  hidden. That is not a rule, it's the stock motocross rider's texture order memorised — and
+  no two rider models write that order the same way. The supermoto rider lists its face second
+  and its gloves third, so it has been wearing its face on its hands; Rider+ lists its gloves
+  first and its suit last, so it would have worn the glove texture over its whole body. Each
+  part now binds to the texture the mesh itself says it was drawn against, the same reading the
+  bike and gear previews already take. Anything a paint doesn't cover falls back to the
+  model's own texture, so a rider that ships no paints — or a model with pieces of its own —
+  renders as it was built rather than in flat grey.
+
+## 2026-08-07 — v0.7.1 — the Rider preview stops failing in silence, and a blocked Browse says why
+
+### Fixed
+- **The Rider preview no longer goes quiet when it fails to update.** If resolving the
+  rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
+  tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
+  so the preview never blanks; but with no error anywhere that is indistinguishable from a
+  pick that genuinely changed nothing, and it made a real fault read as "changing this slot
+  does nothing". A failed resolve now raises a toast with the reason, leaves a badge on the
+  preview for as long as what you're looking at is out of date, and writes the error to the
+  console. The toast fires once per distinct message rather than once per pick, since a
+  persistent fault is re-hit on every slot edit.
+
+### Changed
+- **When mxb-mods.com refuses us, the log now says enough to act on.** Browse failing with
+  "mxb-mods.com refused the request (403)" wrote nothing to the log beyond whether the check
+  window earned a cookie — the request that was actually refused went unrecorded, so a report
+  of it and a screenshot of it carried the same information. A refusal now logs which endpoint
+  was blocked (the catalog API and the rendered mod page sit behind different Cloudflare
+  rules), Cloudflare's `cf-ray`, `cf-mitigated` and `retry-after` headers, the block reason
+  from the response body, and which cookies the request actually carried — by name, never by
+  value. The retry is narrated too, so the log distinguishes the two ways this fails: never
+  earning a clearance, versus earning one in a real browser and being refused anyway, which
+  points at the HTTP client's TLS fingerprint rather than at anything a cookie can fix.
+- **The 403 dialog carries a reference id.** The `cf-ray` of the refused request is appended
+  to the error, so a screenshot alone is enough to identify the block.
+- **Two silent failures now speak up.** A catalog response of 400 that isn't "you paged past
+  the end" used to render as an empty listing, and a mod page that yielded no downloads
+  without being a Cloudflare interstitial said nothing at all. Both are logged.
+- **`MXB_LOG=debug` traces every mxb-mods.com request.** Off by default, because search runs
+  on each keystroke and a line per keystroke would bury the failure worth reading.
+
 ## 2026-08-07 — v0.7.0 — Race mode, an in-game overlay, and six languages
 
 ### Added

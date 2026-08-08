@@ -1340,7 +1340,7 @@ dependencies = [
 
 [[package]]
 name = "frost"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1348,6 +1348,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "html-escape",
+ "http",
  "image",
  "log",
  "mega",

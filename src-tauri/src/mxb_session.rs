@@ -12,6 +12,7 @@
 
 use crate::cookie_session::{self, Cookies, Site};
 use reqwest::cookie::Jar;
+use reqwest::Url;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -54,6 +55,46 @@ pub fn client_builder() -> reqwest::ClientBuilder {
     cookie_session::client_builder(&SITE, jar())
 }
 
+/// Which cookies the client would actually send to mxb-mods.com, by name.
+///
+/// Names only, never values: a `cf_clearance` is a bearer token, and a log file is something
+/// users paste into Discord. The names alone answer the question a 403 raises — did we send a
+/// clearance and get refused anyway, or did we never have one to send.
+pub fn jar_summary() -> String {
+    match BASE.parse() {
+        Ok(url) => summarize(&jar(), &url),
+        Err(_) => "unknown".to_string(),
+    }
+}
+
+/// Split out from [`jar_summary`] so it can be tested against a fresh jar rather than the
+/// process-wide one.
+fn summarize(jar: &Jar, url: &Url) -> String {
+    use reqwest::cookie::CookieStore;
+
+    let Some(header) = jar.cookies(url) else {
+        return "none".to_string();
+    };
+    let Ok(header) = header.to_str() else {
+        return "unreadable".to_string();
+    };
+    let names: Vec<&str> = header
+        .split(';')
+        .filter_map(|c| c.split('=').next())
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .collect();
+    if names.is_empty() {
+        return "none".to_string();
+    }
+    let cleared = if names.contains(&"cf_clearance") {
+        ""
+    } else {
+        " (no cf_clearance)"
+    };
+    format!("{}{cleared}", names.join(", "))
+}
+
 /// Bumped whenever fresh cookies land, so a caller that waited behind another handshake can
 /// tell it now has something new to retry with instead of opening a second window.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -81,7 +122,17 @@ pub fn load(app: &AppHandle) {
         log::warn!("failed to restore mxb-mods.com cookies: {e:#}");
         return;
     }
-    log::info!("restored mxb-mods.com cookies ({})", cookies.len());
+    // Whether a clearance came back matters more than how many cookies did: without one we
+    // start the session already expecting the handshake.
+    log::info!(
+        "restored mxb-mods.com cookies ({}, {})",
+        cookies.len(),
+        if cookie_session::has(&cookies, "cf_clearance") {
+            "including a cf_clearance"
+        } else {
+            "no cf_clearance"
+        }
+    );
 }
 
 /// Open a real browser at mxb-mods.com, wait for Cloudflare to hand it a `cf_clearance`,
@@ -95,8 +146,14 @@ pub async fn handshake(app: &AppHandle) -> bool {
     let before = GENERATION.load(Ordering::Relaxed);
     let _guard = LOCK.lock().await;
     if GENERATION.load(Ordering::Relaxed) != before {
+        log::info!("another caller earned a cf_clearance while we waited — not opening a window");
         return true; // another caller earned one while we waited
     }
+
+    log::info!(
+        "opening the mxb-mods.com check window (jar currently holds: {})",
+        jar_summary()
+    );
 
     if let Some(existing) = app.get_webview_window(WINDOW) {
         let _ = existing.close();
@@ -140,6 +197,7 @@ pub async fn handshake(app: &AppHandle) -> bool {
     }
 
     let _ = window.close();
+    let names: Vec<String> = last.iter().map(|(n, _)| n.clone()).collect();
     // No clearance, but `__cf_bm` and friends still feed the bot score, so keep what we got.
     if !last.is_empty() {
         store(app, last);
@@ -149,6 +207,60 @@ pub async fn handshake(app: &AppHandle) -> bool {
     // to pass and the refusal is aimed at the HTTP client specifically — the case that
     // needs the request to be made from inside the WebView rather than merely wearing its
     // cookie. A clearance that we *did* get and that still 403s is the other case.
-    log::warn!("mxb-mods.com never issued a cf_clearance within {WAIT:?}");
+    //
+    // The names it *did* end up with separate those further: `cf_chl_*` means a challenge
+    // was served and we sat through it without passing, while nothing but `__cf_bm` means
+    // the browser was never challenged at all.
+    log::warn!(
+        "mxb-mods.com never issued a cf_clearance within {WAIT:?} (window ended with: {})",
+        if names.is_empty() {
+            "no cookies".to_string()
+        } else {
+            names.join(", ")
+        }
+    );
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn url() -> Url {
+        BASE.parse().unwrap()
+    }
+
+    /// The whole point of the summary: a user's log should say which cookies went out
+    /// without handing anyone the clearance itself, which is a bearer token.
+    #[test]
+    fn summarize_reports_names_and_never_values() {
+        let jar = Jar::default();
+        cookie_session::fill(
+            &jar,
+            &SITE,
+            &[("cf_clearance".into(), "supersecretvalue".into())],
+        )
+        .unwrap();
+
+        let summary = summarize(&jar, &url());
+        assert!(summary.contains("cf_clearance"), "{summary}");
+        assert!(!summary.contains("supersecretvalue"), "{summary}");
+    }
+
+    /// The distinction a 403 hangs on — we sent a clearance and were refused anyway, or we
+    /// never had one. The summary has to make that readable at a glance.
+    #[test]
+    fn summarize_calls_out_a_missing_clearance() {
+        let jar = Jar::default();
+        cookie_session::fill(&jar, &SITE, &[("__cf_bm".into(), "x".into())]).unwrap();
+        assert!(summarize(&jar, &url()).contains("no cf_clearance"));
+
+        cookie_session::fill(&jar, &SITE, &[("cf_clearance".into(), "y".into())]).unwrap();
+        assert!(!summarize(&jar, &url()).contains("no cf_clearance"));
+    }
+
+    #[test]
+    fn summarize_says_none_for_an_empty_jar() {
+        assert_eq!(summarize(&Jar::default(), &url()), "none");
+    }
 }

@@ -91,7 +91,11 @@ fn create_config(
 /// didn't, and repeating it would just reopen the window at someone who is already stuck.
 /// Only refusals we could plausibly clear get this treatment — a 429 wants patience, not a
 /// browser window.
-async fn with_clearance<T, F, Fut>(app: &tauri::AppHandle, op: F) -> Result<T, String>
+async fn with_clearance<T, F, Fut>(
+    app: &tauri::AppHandle,
+    what: &str,
+    op: F,
+) -> Result<T, String>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
@@ -101,13 +105,37 @@ where
         Err(err) => err,
     };
     match err.downcast_ref::<mods::mxb::Blocked>() {
-        Some(blocked) if blocked.clearable() => {}
-        _ => return Err(format!("{err:#}")),
+        Some(blocked) if blocked.clearable() => {
+            log::info!(
+                "{what} blocked ({}) — trying to earn a cf_clearance",
+                blocked
+                    .status
+                    .map_or_else(|| "interstitial".to_string(), |s| s.to_string())
+            );
+        }
+        // Not clearable, or not a block at all — a parse failure, a timeout, a 429.
+        _ => {
+            log::warn!("{what} failed and a browser window wouldn't help: {err:#}");
+            return Err(format!("{err:#}"));
+        }
     }
     if !mxb_session::handshake(app).await {
+        log::warn!("{what} stays blocked — no cf_clearance to retry with");
         return Err(format!("{err:#}"));
     }
-    op().await.map_err(|e| format!("{e:#}"))
+    match op().await {
+        Ok(value) => {
+            log::info!("{what} succeeded on the retry with a fresh cf_clearance");
+            Ok(value)
+        }
+        // The interesting failure: we passed the challenge in a real browser, replayed the
+        // cookie it earned, and were refused anyway. That is a fingerprint refusal aimed at
+        // the HTTP client, not something another window would fix.
+        Err(e) => {
+            log::warn!("{what} refused again even with a fresh cf_clearance: {e:#}");
+            Err(format!("{e:#}"))
+        }
+    }
 }
 
 #[tauri::command]
@@ -118,7 +146,7 @@ async fn search_mods(
     page: u32,
     sort: ModSort,
 ) -> Result<Vec<ModSummary>, String> {
-    with_clearance(&app, || {
+    with_clearance(&app, "search", || {
         MxbModsSource.search(&query, category_id, page, sort)
     })
     .await
@@ -133,7 +161,7 @@ async fn get_mod_ratings(ids: Vec<u64>) -> std::collections::HashMap<u64, ModRat
 
 #[tauri::command]
 async fn get_mod_detail(app: tauri::AppHandle, slug: String) -> Result<ModDetail, String> {
-    with_clearance(&app, || MxbModsSource.detail(&slug)).await
+    with_clearance(&app, "mod detail", || MxbModsSource.detail(&slug)).await
 }
 
 #[tauri::command]
@@ -882,8 +910,9 @@ fn load_rider_model_blocking(
         }
     }
 
-    let suit = load_rider_paint(&base, "suit", &loadout.rider, "paints", &loadout.suit_paint);
-    let gloves = load_rider_paint(&base, "gloves", &loadout.rider, "gloves", &loadout.gloves_paint);
+    let suit = load_rider_paint(&cfg, &base, "suit", &loadout.rider, "paints", &loadout.suit_paint);
+    let gloves =
+        load_rider_paint(&cfg, &base, "gloves", &loadout.rider, "gloves", &loadout.gloves_paint);
     if !loadout.suit_paint.is_empty() && suit.is_none() {
         log::warn!("[rider] suit paint '{}' did not load for profile '{}'", loadout.suit_paint, loadout.rider);
     }
@@ -922,18 +951,165 @@ async fn load_rider_body_model(
     .map_err(|e| format!("load_rider_body_model task failed: {e}"))?
 }
 
+/// The textures a body mesh carries itself, memoised alongside the mesh.
+///
+/// These depend on the model and not on the loadout, but reaching them means reading the
+/// whole `rider.edf` back — 67 MB for Rider+. The viewer reloads on every loadout change, so
+/// without this a rider wearing a kit that leaves one slot bare re-reads the model each time
+/// you touch a dropdown.
+///
+/// Only textures the viewer could actually draw are decoded. Skin renders as flat colour and
+/// the `w_` planes render as nothing, so inflating and re-encoding them is time spent on
+/// pixels no one will ever see — and on a rider body that decode costs more than parsing the
+/// mesh does.
+fn body_textures(src: &BodySource, profile: &str) -> Option<Vec<paint::PaintTexture>> {
+    static C: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Vec<paint::PaintTexture>>>,
+    > = std::sync::OnceLock::new();
+    let cache = C.get_or_init(Default::default);
+    let key = src.cache_key(profile);
+    if let Some(t) = cache.lock().ok().and_then(|c| c.get(&key).cloned()) {
+        return Some(t);
+    }
+    let drawn = |name: &str| !matches!(body_slot(Some(name)).as_str(), "hide" | "face");
+    let texs = paint::extract_edf_textures_where(&src.read(profile)?, drawn);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(key, texs.clone());
+    }
+    Some(texs)
+}
+
 fn load_rider_body(
     cfg: &config::AppConfig,
     profile: &str,
-    textures: Vec<paint::PaintTexture>,
+    mut textures: Vec<paint::PaintTexture>,
 ) -> Option<RiderPart> {
-    let mut nodes = load_rider_body_nodes(cfg, profile)?;
-    tag_body_materials(&mut nodes);
+    let profile = rider_profile_or_stock(profile);
+    let src = rider_body_source(cfg, profile)?;
+    let nodes = rider_body_nodes(&src, profile)?;
+
+    // Whatever the mesh asks for that no paint supplies, the model itself supplies: the
+    // supermoto rider ships no `.pnt` at all and wears its baked textures, and a custom
+    // model paints its own extra pieces into the mesh. Reading the file back costs real
+    // time on a 60 MB body, so only a name actually missing pays for it.
+    let supplied: std::collections::HashSet<String> =
+        textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+    let wanted: std::collections::HashSet<String> = nodes
+        .iter()
+        .flat_map(|n| n.submeshes.iter().filter_map(|s| s.texture.as_deref()))
+        .map(|t| t.to_ascii_lowercase())
+        // `hide` draws nothing and `face` is bare skin — neither wants a texture.
+        .filter(|t| t != "hide" && t != "face" && !supplied.contains(t))
+        .collect();
+    if !wanted.is_empty() {
+        match body_textures(&src, profile) {
+            Some(own) => textures.extend(
+                own.into_iter().filter(|t| wanted.contains(&t.name.to_ascii_lowercase())),
+            ),
+            None => log::warn!("[rider] body '{profile}' could not be re-read for {wanted:?}"),
+        }
+    }
+
+    log::info!(
+        "[rider] body '{profile}' loaded from {src:?}: {} nodes, tex={:?}",
+        nodes.len(),
+        textures.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+    );
     Some(RiderPart {
         part: "body".into(),
         nodes,
         textures,
     })
+}
+
+/// Stand a rider body up.
+///
+/// Rider meshes don't agree on which axis is up. The stock motocross rider is authored Y-up;
+/// the supermoto rider and Rider+ are Z-up and arrive lying on their back. The viewer anchors
+/// every piece of gear to a fraction of the body's height, so a body on its side doesn't just
+/// look wrong — it measures a quarter of a metre tall instead of a metre and a bit, and the
+/// helmet and boots scale down to specks and sink into the torso.
+///
+/// A rider is a standing figure: its longest axis is its height. Where that's Z, the mesh is
+/// authored in the other convention and takes that convention's one fixed rotation. Where
+/// it's already Y, leave the mesh alone — guessing at a body that's already upright is how
+/// the stock rider would get broken to fix a custom one.
+///
+/// The rotation is a half turn about Y on top of the quarter turn about X. Standing the body
+/// up alone leaves it facing backwards, which the name and number planes give away: they sit
+/// on a rider's back, and on the stock motocross rider — authored upright, so correct by
+/// construction — they sit behind its centre. On the Z-up meshes a bare quarter turn puts
+/// them in front. Both halves are needed together: `y = -z, z = -y` on its own mirrors the
+/// mesh rather than turning it, which would swap the rider's left and right hands.
+fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for n in nodes.iter() {
+        for v in n.positions.chunks_exact(3) {
+            for a in 0..3 {
+                lo[a] = lo[a].min(v[a]);
+                hi[a] = hi[a].max(v[a]);
+            }
+        }
+    }
+    let ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+    if ext[2] <= ext[1] || ext[2] <= ext[0] {
+        return;
+    }
+    for n in nodes.iter_mut() {
+        for v in n.positions.chunks_exact_mut(3).chain(n.normals.chunks_exact_mut(3)) {
+            let (x, y, z) = (v[0], v[1], v[2]);
+            v[0] = -x;
+            // Negated, not taken as-is: these meshes lie head-away, with the head at the
+            // most negative Z, so this is what puts it at the top.
+            v[1] = -z;
+            v[2] = -y;
+        }
+    }
+    log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
+}
+
+/// Bind each body submesh to the texture the mesh itself says it wears.
+///
+/// A material index is not a slot: it counts into the model's own texture list, and that
+/// list is written in the exporter's order. `default_mx` happens to put the suit first and
+/// the gloves second; `default_sm` puts the face second and its gloves third; Rider+ puts
+/// the gloves first and the suit last. So a fixed index→slot map is one model memorised —
+/// it already swaps face and gloves on the supermoto rider, and on a custom model it smears
+/// the glove texture across the whole body. Read the name the model was drawn against
+/// instead, the same reading the bike and gear viewers take.
+fn bind_body_submeshes(nodes: &mut [edf::EdfNode], mesh: &[u8]) {
+    let readings = edf::MaterialReadings::new(mesh);
+    if readings.color.is_empty() {
+        // A mesh whose texture table doesn't parse tells us nothing; the stock layout is
+        // still right for the model the app has always shown.
+        return tag_body_materials(nodes);
+    }
+    for node in nodes.iter_mut() {
+        let fit = readings.fit(node);
+        for sm in &mut node.submeshes {
+            let emb = sm
+                .mat
+                .and_then(|m| readings.texture(m as usize, &fit))
+                .map(|t| t.name.as_str());
+            sm.texture = Some(body_slot(emb));
+        }
+    }
+}
+
+/// The viewer slot an embedded texture name belongs to. The `w_` planes are decals the game
+/// composites a rider's name and number onto and carry no look of their own, and skin must
+/// never wear the kit. Everything else keeps its own name, so a paint replaces it by name
+/// and a piece the paint doesn't cover falls back to the model's own texture.
+fn body_slot(name: Option<&str>) -> String {
+    let Some(n) = name else { return "rider".into() };
+    let l = n.to_ascii_lowercase();
+    if l.starts_with("w_") {
+        return "hide".into();
+    }
+    if l.contains("face") {
+        return "face".into();
+    }
+    l
 }
 
 fn tag_body_materials(nodes: &mut [edf::EdfNode]) {
@@ -965,28 +1141,125 @@ fn keep_lod0(nodes: &mut Vec<edf::EdfNode>) {
     nodes.retain(|n| n.name.is_empty() || seen.insert(n.name.clone()));
 }
 
-fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfNode>> {
-    let key = format!("{}:{}", bike_cache_key(&pkz.to_string_lossy()), entry);
-    if let Some(n) = pkz_mesh_cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
-        return Some(n);
-    }
-    let data = read_pkz_entry(pkz, entry)?;
-    let mut nodes = edf::parse(&data);
+fn cached_mesh(key: &str) -> Option<Vec<edf::EdfNode>> {
+    pkz_mesh_cache().lock().ok().and_then(|c| c.get(key).cloned())
+}
+
+/// Parse a mesh into viewer space and memoise it. `prepare` runs once, on the parse that
+/// populates the cache, for work that depends on the file rather than on the loadout.
+fn mesh_from_bytes(
+    key: String,
+    data: &[u8],
+    prepare: impl FnOnce(&mut Vec<edf::EdfNode>, &[u8]),
+) -> Option<Vec<edf::EdfNode>> {
+    let mut nodes = edf::parse(data);
     edf::to_right_handed(&mut nodes);
     keep_lod0(&mut nodes);
     if nodes.is_empty() {
         return None;
     }
+    prepare(&mut nodes, data);
     if let Ok(mut c) = pkz_mesh_cache().lock() {
         c.insert(key, nodes.clone());
     }
     Some(nodes)
 }
 
+fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfNode>> {
+    let key = format!("{}:{}", bike_cache_key(&pkz.to_string_lossy()), entry);
+    if let Some(n) = cached_mesh(&key) {
+        return Some(n);
+    }
+    mesh_from_bytes(key, &read_pkz_entry(pkz, entry)?, |_, _| {})
+}
+
+/// The stock rider profiles the game itself ships. They're the fallback for a custom model
+/// that brings a mesh but none of the kits meant to be worn on it.
+const STOCK_RIDER_PROFILES: [&str; 2] = ["default_mx", "default_sm"];
+
+fn rider_profile_or_stock(profile: &str) -> &str {
+    if profile.is_empty() { STOCK_RIDER_PROFILES[0] } else { profile }
+}
+
+/// Where a rider profile's body mesh lives.
+///
+/// A rider model is a whole new `rider.edf`, not a texture — Rider+ and its variants install
+/// as folders under `mods/rider/riders`. The game's own archive is the last place to look,
+/// not the only one: reading only `rider.pkz` left a picked custom profile rendering no body
+/// at all, just gear floating where the rider should be.
+#[derive(Debug, Clone)]
+enum BodySource {
+    /// `mods/rider/riders/<profile>/rider.edf`, installed loose — the shape every rider
+    /// model on mxb-mods ships.
+    Loose(std::path::PathBuf),
+    /// A profile packed as `<profile>.pkz`, or the game's own `rider.pkz`.
+    Packed(std::path::PathBuf),
+}
+
+impl BodySource {
+    fn cache_key(&self, profile: &str) -> String {
+        match self {
+            Self::Loose(p) => bike_cache_key(&p.to_string_lossy()),
+            Self::Packed(p) => format!("{}:{profile}", bike_cache_key(&p.to_string_lossy())),
+        }
+    }
+
+    /// The mesh bytes. A packed profile is read at the entry the game uses, then — for a
+    /// repack that flattened the folder tree — by any `rider.edf` in the archive.
+    fn read(&self, profile: &str) -> Option<Vec<u8>> {
+        match self {
+            Self::Loose(p) => std::fs::read(p).ok(),
+            Self::Packed(p) => read_pkz_entry(p, &format!("rider/riders/{profile}/rider.edf"))
+                .or_else(|| read_pkz_basename(p, "rider.edf")),
+        }
+    }
+}
+
+/// One named file out of an archive wherever it sits in the tree, for repacks that don't
+/// keep the game's layout. Only the wanted entry is inflated.
+fn read_pkz_basename(pkz: &std::path::Path, base: &str) -> Option<Vec<u8>> {
+    let want = |n: &str| {
+        n.replace('\\', "/")
+            .rsplit('/')
+            .next()
+            .is_some_and(|b| b.eq_ignore_ascii_case(base))
+    };
+    pkz::read_selected(pkz, want).ok()?.into_iter().next().map(|(_, d)| d)
+}
+
+fn rider_body_source(cfg: &config::AppConfig, profile: &str) -> Option<BodySource> {
+    let riders = std::path::Path::new(&cfg.mods_path)
+        .join("mods")
+        .join("rider")
+        .join("riders");
+    let loose = riders.join(profile).join("rider.edf");
+    if loose.is_file() {
+        return Some(BodySource::Loose(loose));
+    }
+    let packed = riders.join(format!("{profile}.pkz"));
+    if packed.is_file() {
+        return Some(BodySource::Packed(packed));
+    }
+    resolve_game_pkz(cfg, "rider.pkz").map(BodySource::Packed)
+}
+
+/// The body mesh, submeshes already bound to their textures. Binding depends on the model
+/// and not on the loadout, so it happens on the parse that fills the cache — a paint change
+/// must not re-read a 60 MB body.
+fn rider_body_nodes(src: &BodySource, profile: &str) -> Option<Vec<edf::EdfNode>> {
+    let key = src.cache_key(profile);
+    if let Some(n) = cached_mesh(&key) {
+        return Some(n);
+    }
+    mesh_from_bytes(key, &src.read(profile)?, |nodes, data| {
+        bind_body_submeshes(nodes, data);
+        stand_body_upright(nodes);
+    })
+}
+
 fn load_rider_body_nodes(cfg: &config::AppConfig, profile: &str) -> Option<Vec<edf::EdfNode>> {
-    let profile = if profile.is_empty() { "default_mx" } else { profile };
-    let pkz = resolve_game_pkz(cfg, "rider.pkz")?;
-    load_pkz_mesh(&pkz, &format!("rider/riders/{profile}/rider.edf"))
+    let profile = rider_profile_or_stock(profile);
+    rider_body_nodes(&rider_body_source(cfg, profile)?, profile)
 }
 
 fn resolve_game_pkz(cfg: &config::AppConfig, name: &str) -> Option<std::path::PathBuf> {
@@ -1600,6 +1873,7 @@ fn read_pkz_first(pkz: &std::path::Path, prefix: &str, ext: &str) -> Option<Vec<
 }
 
 fn load_rider_paint(
+    cfg: &config::AppConfig,
     base: &std::path::Path,
     part: &str,
     profile: &str,
@@ -1612,8 +1886,8 @@ fn load_rider_paint(
     // With no profile picked the body mesh already falls back to the stock rider
     // (`load_rider_body_nodes`); do the same here so a chosen suit/glove paint still
     // resolves instead of silently dropping off the preview.
-    let profile = if profile.is_empty() { "default_mx" } else { profile };
-    let data = read_paint_file(&base.join("riders").join(profile).join(sub), paint)?;
+    let profile = rider_profile_or_stock(profile);
+    let data = read_rider_paint_file(cfg, base, profile, sub, paint)?;
     let textures: Vec<_> = paint::decode_any(&data).ok()?.iter().map(paint::to_texture).collect();
     if textures.is_empty() {
         return None;
@@ -1623,6 +1897,58 @@ fn load_rider_paint(
         nodes: Vec::new(),
         textures,
     })
+}
+
+/// A kit or glove paint for `profile`, by exact name.
+///
+/// A rider model isn't a wardrobe. Rider+ ships its `paints` and `gloves` folders empty on
+/// purpose — the kits already installed under the stock profile are meant to work on it —
+/// so looking only inside the chosen profile drops every paint the picker offered. Look in
+/// the profile's own folder, then inside its archive where it's packed, then under the
+/// stock profiles.
+///
+/// Exact name at every step, and never the first paint in a folder: reaching past the
+/// chosen profile is only safe while the name still means the same paint.
+fn read_rider_paint_file(
+    cfg: &config::AppConfig,
+    base: &std::path::Path,
+    profile: &str,
+    sub: &str,
+    paint: &str,
+) -> Option<Vec<u8>> {
+    let riders = base.join("riders");
+    let game = resolve_game_pkz(cfg, "rider.pkz");
+    let candidates =
+        std::iter::once(profile).chain(STOCK_RIDER_PROFILES.into_iter().filter(|s| *s != profile));
+
+    for from in candidates {
+        // Installed loose, then packed as `<profile>.pkz`, then — for a stock profile, whose
+        // kits ship inside the game archive and never touch the disk — the game's own copy.
+        let hit = read_paint_file(&riders.join(from).join(sub), paint)
+            .or_else(|| {
+                let packed = riders.join(format!("{from}.pkz"));
+                packed.is_file().then(|| read_pkz_paint_named(&packed, sub, paint)).flatten()
+            })
+            .or_else(|| {
+                let pkz = game.as_ref()?;
+                read_pkz_entry(pkz, &format!("rider/riders/{from}/{sub}/{paint}.pnt"))
+            });
+        if let Some(d) = hit {
+            if from != profile {
+                log::info!("[rider] {sub} '{paint}' for '{profile}' came from '{from}'");
+            }
+            return Some(d);
+        }
+    }
+    None
+}
+
+/// A named paint out of an archive, matched on its folder as well as its name — `red.pnt`
+/// under `gloves` is not the `red.pnt` under `paints`.
+fn read_pkz_paint_named(pkz: &std::path::Path, sub: &str, paint: &str) -> Option<Vec<u8>> {
+    let tail = format!("/{}/{}.pnt", sub.to_ascii_lowercase(), paint.to_ascii_lowercase());
+    let want = |n: &str| n.replace('\\', "/").to_ascii_lowercase().ends_with(&tail);
+    pkz::read_selected(pkz, want).ok()?.into_iter().next().map(|(_, d)| d)
 }
 
 fn read_paint_file(dir: &std::path::Path, paint: &str) -> Option<Vec<u8>> {
@@ -2414,11 +2740,22 @@ async fn mods_state_restore_all(app: tauri::AppHandle) -> Result<ModsStateOutcom
     .map_err(|e| format!("mods_state_restore_all task failed: {e}"))?
 }
 
+/// Normally `Info`. `MXB_LOG=debug` turns on the per-request traces that would otherwise
+/// write a line per keystroke in the search box — the switch to flip when chasing a
+/// Cloudflare block on a machine that can reproduce one.
+fn log_level() -> log::LevelFilter {
+    match std::env::var("MXB_LOG").unwrap_or_default().to_lowercase().as_str() {
+        "trace" => log::LevelFilter::Trace,
+        "debug" => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Info,
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Info)
+                .level(log_level())
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
@@ -2442,6 +2779,9 @@ fn main() {
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+            // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
+            // to the UA that earned it — a log about a block should say which one was used.
+            log::info!("mxb-mods.com user-agent: {}", mxb_session::UA);
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
@@ -2924,6 +3264,247 @@ mod viewer_tests {
                     assert!(names.contains(&t.to_ascii_lowercase()), "'{t}' is available");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn body_slot_reads_the_name_not_the_index() {
+        // The `w_` planes are decals the game composites a name and number onto.
+        for decal in ["w_name", "w_number", "w_plate", "W_Name"] {
+            assert_eq!(super::body_slot(Some(decal)), "hide");
+        }
+        // Skin, whatever the model calls it, must not wear the kit.
+        for skin in ["face_parts", "face", "Face_Parts", "rider_face"] {
+            assert_eq!(super::body_slot(Some(skin)), "face");
+        }
+        // Everything else keeps its own name, so a paint replaces it by name and a piece no
+        // paint covers falls back to the model's own texture.
+        for (name, slot) in [
+            ("rider", "rider"),
+            ("gloves", "gloves"),
+            ("rider_sm", "rider_sm"),
+            ("glovessm", "glovessm"),
+            ("Braces", "braces"),
+        ] {
+            assert_eq!(super::body_slot(Some(name)), slot);
+        }
+        // A material that names no texture still has to render as something.
+        assert_eq!(super::body_slot(None), "rider");
+    }
+
+    /// The bug this replaced: material indices count into the model's own texture list, and
+    /// no two rider models write that list in the same order.
+    ///
+    /// `MXB_REAL_BODY=<rider.edf>[,<rider.edf>…] cargo test rider_body_binding -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn rider_body_binding_from_env() {
+        let Ok(paths) = std::env::var("MXB_REAL_BODY") else {
+            eprintln!("set MXB_REAL_BODY to run");
+            return;
+        };
+        for path in paths.split(',').filter(|p| !p.is_empty()) {
+            let bytes = std::fs::read(path).expect("read rider.edf");
+            let order: Vec<String> =
+                crate::edf::color_textures(&bytes).iter().map(|t| t.name.clone()).collect();
+            let mut nodes = crate::edf::parse(&bytes);
+            crate::edf::to_right_handed(&mut nodes);
+            super::keep_lod0(&mut nodes);
+            super::bind_body_submeshes(&mut nodes, &bytes);
+
+            super::stand_body_upright(&mut nodes);
+
+            let bounds = |ns: &[crate::edf::EdfNode], only_face: bool| {
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for n in ns {
+                    for sm in &n.submeshes {
+                        if only_face && sm.texture.as_deref() != Some("face") {
+                            continue;
+                        }
+                        for i in &n.indices[sm.tri_start as usize * 3
+                            ..(sm.tri_start + sm.tri_count) as usize * 3]
+                        {
+                            let v = &n.positions[*i as usize * 3..*i as usize * 3 + 3];
+                            for a in 0..3 {
+                                lo[a] = lo[a].min(v[a]);
+                                hi[a] = hi[a].max(v[a]);
+                            }
+                        }
+                    }
+                }
+                (lo, hi)
+            };
+            let (lo, hi) = bounds(&nodes, false);
+            let (h, d) = (hi[1] - lo[1], hi[2] - lo[2]);
+            eprintln!("  upright bounds x={:.3} y={h:.3} z={d:.3}", hi[0] - lo[0]);
+
+            // A rider is a standing figure, so height is its longest axis. The viewer scales
+            // and anchors every piece of gear off this — a body on its side buries the
+            // helmet and boots in the torso at a fifth of their size.
+            assert!(h > hi[0] - lo[0] && h > d, "the body stands up");
+            // And it stands the right way up. Height alone can't tell a rider from one
+            // hanging upside down, so check the skin: the head is the highest thing on a
+            // rider. Its top, not its bottom — Rider+'s skin texture also covers the bare
+            // wrists of its rolled-sleeve variants, which reach well down the body.
+            let (_, fhi) = bounds(&nodes, true);
+            eprintln!("  skin tops out at {:.3} of {:.3}", fhi[1], hi[1]);
+
+            // Which way does it face? Report the Z centroid of each slot relative to the
+            // body's own centre, plus the head alone (the top eighth of the skin, so
+            // Rider+'s bare wrists don't drag the number toward the bars).
+            let cz = (lo[2] + hi[2]) / 2.0;
+            let mut per: std::collections::BTreeMap<String, (f64, f64, usize)> = Default::default();
+            for n in &nodes {
+                for sm in &n.submeshes {
+                    let slot = sm.texture.clone().unwrap_or_default();
+                    for i in &n.indices
+                        [sm.tri_start as usize * 3..(sm.tri_start + sm.tri_count) as usize * 3]
+                    {
+                        let v = &n.positions[*i as usize * 3..*i as usize * 3 + 3];
+                        let e = per.entry(slot.clone()).or_default();
+                        e.0 += (v[2] - cz) as f64;
+                        e.2 += 1;
+                        if slot == "face" && v[1] > hi[1] - 0.125 * h {
+                            let hd = per.entry("face(head)".into()).or_default();
+                            hd.0 += (v[2] - cz) as f64;
+                            hd.2 += 1;
+                        }
+                    }
+                }
+            }
+            for (slot, (sum, _, n)) in &per {
+                eprintln!("  {slot:>12} z-centroid {:+.4} ({n} verts)", sum / *n as f64);
+            }
+            let centroid = |slot: &str| per.get(slot).map(|(s, _, n)| s / *n as f64);
+
+            // And it faces the right way. The viewer nudges the helmet and boots forward in
+            // +Z, so a rider turned around wears its gear through its own back.
+            //
+            // The name and number planes are the tell: they go on a rider's back. Where the
+            // model has none, fall back to the head, which leans forward over the bars —
+            // a weaker signal, so it only decides when the strong one is absent.
+            match centroid("hide") {
+                Some(back) => assert!(back < 0.0, "the name and number sit on the back ({back:+.4})"),
+                None => {
+                    let head = centroid("face(head)").expect("a rider has a head");
+                    assert!(head > 0.0, "the head leans forward ({head:+.4})");
+                }
+            }
+            assert!(
+                fhi[1] > lo[1] + 0.9 * h,
+                "the head is at the top (skin tops at {:.3}, body {:.3}..{:.3})",
+                fhi[1],
+                lo[1],
+                hi[1],
+            );
+
+            let mut slots: Vec<String> = nodes
+                .iter()
+                .flat_map(|n| n.submeshes.iter().filter_map(|s| s.texture.clone()))
+                .collect();
+            slots.sort_unstable();
+            slots.dedup();
+            eprintln!("{path}\n  blob order: {order:?}\n  bound slots: {slots:?}");
+
+            assert!(!slots.is_empty(), "every body binds its submeshes to something");
+            // Whatever the model calls its suit and gloves, the binding must name the
+            // textures the model actually carries — never a slot borrowed from another model.
+            for s in &slots {
+                assert!(
+                    s == "hide"
+                        || s == "face"
+                        || order.iter().any(|t| t.eq_ignore_ascii_case(s)),
+                    "'{s}' is a texture this model carries",
+                );
+            }
+            // Skin is its own slot on every rider model shipped so far; catching its loss
+            // is what tells us a mesh stopped being read and an index map crept back in.
+            assert!(slots.iter().any(|s| s == "face"), "the face binds to bare skin");
+        }
+    }
+
+    /// The whole rider-body path against a real install: a custom model resolves out of
+    /// `mods/rider/riders`, binds, and wears a kit that only the stock profile owns.
+    ///
+    /// `MXB_MODS=~/Documents/PiBoSo/MX\ Bikes MXB_PROFILE=Rider+ cargo test rider_body_end_to_end -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn rider_body_end_to_end() {
+        let Ok(mods) = std::env::var("MXB_MODS") else {
+            eprintln!("set MXB_MODS to run");
+            return;
+        };
+        let profile = std::env::var("MXB_PROFILE").unwrap_or_else(|_| "Rider+".into());
+        let cfg = crate::config::AppConfig { mods_path: mods.clone(), ..Default::default() };
+        let base = std::path::Path::new(&mods).join("mods").join("rider");
+
+        // A model nobody can pick is a model nobody can wear. The scan reports what's on
+        // disk; the two stock riders live in `rider.pkz` and the picker adds them itself.
+        let targets = crate::library::scan_rider_targets(&mods);
+        eprintln!("profiles: {:?}", targets.profiles);
+        assert!(
+            targets.profiles.iter().any(|p| *p == profile)
+                || super::STOCK_RIDER_PROFILES.contains(&profile.as_str()),
+            "'{profile}' is offered",
+        );
+
+        let src = super::rider_body_source(&cfg, &profile).expect("a body source");
+        eprintln!("{profile}: {src:?}");
+
+        {
+            let t = std::time::Instant::now();
+            let data = src.read(&profile).expect("read mesh");
+            eprintln!("  read {} MB in {:?}", data.len() / 1_000_000, t.elapsed());
+            let t = std::time::Instant::now();
+            let mut n = crate::edf::parse(&data);
+            eprintln!("  parse {} nodes in {:?}", n.len(), t.elapsed());
+            let t = std::time::Instant::now();
+            crate::edf::to_right_handed(&mut n);
+            super::keep_lod0(&mut n);
+            eprintln!("  handedness + lod0 in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            super::bind_body_submeshes(&mut n, &data);
+            eprintln!("  bind in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            super::stand_body_upright(&mut n);
+            eprintln!("  stand in {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            let texs = super::body_textures(&src, &profile).expect("textures");
+            eprintln!(
+                "  extract {:?} in {:?}",
+                texs.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+                t.elapsed(),
+            );
+        }
+        // A profile folder that carries a mesh is a model, and beats the game archive. One
+        // that only carries paints — which is what installing a kit under `default_mx`
+        // leaves behind — is not, and must still fall through to the stock body.
+        let installed = base.join("riders").join(&profile).join("rider.edf").is_file();
+        assert_eq!(
+            matches!(src, super::BodySource::Loose(_)),
+            installed,
+            "an installed mesh wins, a paints-only folder doesn't",
+        );
+
+        let part = super::load_rider_body(&cfg, &profile, Vec::new()).expect("a body part");
+        let slots: std::collections::BTreeSet<&str> = part
+            .nodes
+            .iter()
+            .flat_map(|n| n.submeshes.iter().filter_map(|s| s.texture.as_deref()))
+            .collect();
+        let texs: std::collections::BTreeSet<String> =
+            part.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+        eprintln!("  slots={slots:?}\n  textures={texs:?}");
+        // With no paint chosen, every slot that draws something is dressed by the model.
+        for s in slots.iter().filter(|s| **s != "hide" && **s != "face") {
+            assert!(texs.contains(*s), "'{s}' is supplied by the mesh when no paint is");
+        }
+
+        // Rider+ ships `paints` empty on purpose — the kit still has to resolve.
+        if let Some(kit) = std::env::var("MXB_KIT").ok().filter(|k| !k.is_empty()) {
+            let found = super::read_rider_paint_file(&cfg, &base, &profile, "paints", &kit);
+            assert!(found.is_some(), "kit '{kit}' resolves for '{profile}'");
+            eprintln!("  kit '{kit}' resolved ({} bytes)", found.unwrap().len());
         }
     }
 
