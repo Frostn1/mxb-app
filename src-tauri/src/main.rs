@@ -42,6 +42,26 @@ use tauri::{
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
+/// The app window, as opposed to the transient ones the app opens alongside it (the
+/// overlay, the mxb-mods.com clearance check, the shop login). `tauri.conf.json` declares
+/// it without an explicit label, which is Tauri's default of `main`.
+const MAIN_WINDOW: &str = "main";
+
+/// The shop login WebView, opened on demand and closed once the session is captured.
+const SHOP_LOGIN_WINDOW: &str = "shop-login";
+
+/// Whether closing this window should park it in the tray rather than destroy it.
+///
+/// Only the main window. The transient ones are owned by the code that opened them, and
+/// hiding one instead of closing it keeps its label registered for the life of the
+/// process — the next attempt to build it then fails with "a webview with label `…`
+/// already exists" and never opens again. A tester hit exactly that on the mxb-mods.com
+/// clearance window: the first Cloudflare handshake worked, and every Retry afterwards
+/// silently did nothing.
+fn parks_in_tray(label: &str) -> bool {
+    label == MAIN_WINDOW
+}
+
 /// Whether the app is ready to use. Falls back to auto-detection when the config file
 /// is missing, so the setup screen only appears when the MX Bikes folder genuinely
 /// can't be found — not every time the saved config goes astray.
@@ -120,7 +140,10 @@ where
         }
     }
     if !mxb_session::handshake(app).await {
-        log::warn!("{what} stays blocked — no cf_clearance to retry with");
+        // Deliberately not "no cf_clearance to retry with": the handshake also returns
+        // false when it couldn't run at all, and a log that claimed an empty jar while
+        // the refusal line above it listed a `cf_clearance` sent a reader the wrong way.
+        log::warn!("{what} stays blocked — the handshake produced no new clearance");
         return Err(format!("{err:#}"));
     }
     match op().await {
@@ -2457,7 +2480,7 @@ fn set_watch_mods_reload(
 
 #[tauri::command]
 async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("shop-login") {
+    if let Some(w) = app.get_webview_window(SHOP_LOGIN_WINDOW) {
         let _ = w.set_focus();
         return Ok(());
     }
@@ -2470,7 +2493,7 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
         .parse()
         .map_err(|e| format!("{e}"))?,
     );
-    let window = tauri::WebviewWindowBuilder::new(&app, "shop-login", url)
+    let window = tauri::WebviewWindowBuilder::new(&app, SHOP_LOGIN_WINDOW, url)
         .title("Sign in to MX Bikes Shop")
         .user_agent(shop_session::UA)
         .inner_size(520.0, 760.0)
@@ -2483,7 +2506,7 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
         // ~5 minutes at 500ms intervals, then give up (user can retry).
         for _ in 0..600u32 {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let Some(win) = app.get_webview_window("shop-login") else {
+            let Some(win) = app.get_webview_window(SHOP_LOGIN_WINDOW) else {
                 break; // user closed the window before finishing
             };
             let cookies = shop_session::cookies_from_window(&win);
@@ -3011,6 +3034,10 @@ fn main() {
                     let _ = overlay::hide(window.app_handle());
                     return;
                 }
+                // Everything else — the clearance check, the shop login — closes for real.
+                if !parks_in_tray(window.label()) {
+                    return;
+                }
                 let cfg = config::load(window.app_handle()).unwrap_or_default();
                 // Never on Linux: the tray runs through libayatana-appindicator, which
                 // doesn't deliver click events to Tauri and isn't present at all on a
@@ -3117,6 +3144,33 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    /// The regression a tester's log caught: the clearance window was being parked in the
+    /// tray on close, which left its label registered, so every handshake after the first
+    /// failed to build a window and Retry silently did nothing for the rest of the session.
+    ///
+    /// Only the main window may park. Every transient window has to close for real.
+    #[test]
+    fn only_the_main_window_parks_in_the_tray() {
+        assert!(parks_in_tray(MAIN_WINDOW));
+
+        for transient in [
+            mxb_session::WINDOW,
+            SHOP_LOGIN_WINDOW,
+            overlay::LABEL, // handled earlier by its own branch, but never by this one
+        ] {
+            assert!(
+                !parks_in_tray(transient),
+                "{transient} must be destroyed on close, not hidden — a stranded label \
+                 makes it unopenable for the life of the process"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
