@@ -1,25 +1,21 @@
 # Changelog
 
-## 2026-08-07 — v0.7.0 — Six languages, an in-game overlay, and bikes wearing the right paint
+## 2026-08-07 — v0.7.0 — Race mode, an in-game overlay, and six languages
 
 ### Added
-- **A Manage section: race presets, and mods you can switch off.** MX Bikes mounts every
-  archive in your mods folder at startup, so a big library is paid for on every load —
-  even though a race needs one track, one bike, one gear set and a support pack or two.
-  A preset can now carry the content its race needs: give it the track it's ridden on and
-  pin the packs that have to stay (the OEM pack), hit **Race mode**, and the app puts the
-  preset's look on *and* takes everything else out of the game's way in one action. The
-  paint, gear and model swap in the loadout are found automatically — the same resolver
-  that packs a full share bundle — so the only things to pick by hand are the ones a
-  loadout can't express. Nothing is deleted: disabled mods move to
+- **Race mode, and mods you can switch off.** MX Bikes mounts every archive in your mods
+  folder at startup, so a big library is paid for on every load — even though a race needs
+  one track, one bike, one gear set and a support pack or two. Give a preset the track it's
+  ridden on, pin the packs that have to stay, and **Race mode** puts the preset's look on
+  *and* takes everything else out of the game's way in one action. The paint, gear and model
+  swap come from the loadout automatically, so the only things to pick by hand are the ones
+  a loadout can't express. Nothing is deleted — disabled mods move to
   `<MX Bikes>\mxbapp_disabled`, mirroring the folder they came from, and **Enable
-  everything** puts every one of them back in exactly the path it left. The Mods list
-  does the same by hand — a switch per mod, bulk enable/disable of whatever the filter is
-  showing, and delete straight to the recycle bin. Manage sits in the main window's
-  sidebar and as a tab in the in-game overlay, so the next race can be lined up between
-  sessions without leaving the game. Loose paints, model-swap sets and sound folders are
-  left alone — they aren't what a load is waiting on, and moving them would break the
-  Locker's bookkeeping.
+  everything** puts each one back in the exact path it left. The new **Manage** section does
+  it by hand too: a switch per mod, bulk enable/disable of whatever the filter shows, and
+  delete straight to the recycle bin. It's in the sidebar and in the overlay, so the next
+  race can be lined up without leaving the game. Loose paints, model-swap sets and sound
+  folders are left alone — they aren't what a load waits on.
 - **An in-game overlay, on a hotkey.** Ctrl+Shift+X (rebindable in Settings → In-game
   overlay) brings Presets, the Locker and Browse up over MX Bikes in a floating panel; Esc
   hands control straight back to the game, and **Open full app** beside it switches to the
@@ -75,14 +71,16 @@
 - **The front fender and fork guards rendering in bare metal.** One mesh group can hold
   several materials — a fork leg and the plastic guard on it — and all of them wore the
   first one's texture. Each range now binds its own.
-- **Switching goggles actually changes the goggles.** Two faults stacked: the preview
+- **Goggles: switching a lens now reaches the model.** Two faults stacked: the preview
   watched every rider slot except the goggles, so a new lens only showed once you touched
   some *other* slot — and even then it was worn by nothing, because the goggles were
   identified by mesh-group name, and a helmet's goggles are as often called `mask` or sit
   in a node with no groups at all. The mesh's own materials now say which piece draws from
   which texture, with names as a hint rather than the whole story. Goggle paints that ship
   apart from the helmet are loaded too, and the game's free helmets — which never loaded a
-  goggle paint at all — now wear one like an installed helmet does.
+  goggle paint at all — now wear one like an installed helmet does. Gear this still doesn't
+  cover is being worked on; if a lens won't take, the log now names the paint it couldn't
+  find, which is the thing to send along.
 - **The overlay shortcut no longer defaults to Discord's mute key.** Ctrl+Shift+M is
   Discord's default push-to-mute; Discord registers it globally and gets there first, so on
   many machines the overlay hotkey never bound — invisibly, since a shortcut that was never
