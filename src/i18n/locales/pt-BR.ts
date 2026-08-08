@@ -675,6 +675,23 @@ export const ptBR: Translation = {
   "servers.pairingWhere":
     "Rode o mxb-agent na máquina que hospeda seu servidor. Ele imprime esta linha sempre que inicia — copie ela inteira.",
   "servers.manualEntry": "Não tenho código de pareamento — inserir os dados à mão",
+  "servers.publish": "Adicionar à lista de servidores",
+  "servers.unpublish": "Remover da lista",
+  "servers.listed": "Na lista pública de servidores — qualquer um pode achar e entrar.",
+  "servers.notListed": "Ainda não está na lista pública de servidores.",
+  "servers.published": "Adicionado — outros jogadores já podem encontrá-lo",
+  "servers.publishedUnreachable":
+    "Salvo, mas não conseguimos alcançá-lo pela internet, então ainda não está listado. Verifique se o agente está rodando e a porta aberta.",
+  "servers.publishFailed": "Não foi possível alterar a lista de servidores",
+  "servers.unpublished": "Removido da lista de servidores",
+  "servers.createTitle": "Criar um servidor",
+  "servers.createDesc":
+    "Suba um servidor dedicado na nuvem sem ter uma máquina. Ele se desliga sozinho quando ninguém pilota nele por um tempo, então não acumula conta durante a noite.",
+  "servers.create": "Criar",
+  "servers.creating": "Criando — leva alguns minutos até ficar pronto",
+  "servers.createFailed": "Não foi possível criar esse servidor",
+  "servers.runningCount_one": "{{count}} ativo",
+  "servers.runningCount_other": "{{count}} ativos",
   "servers.pairingPlaceholder": "Cole o código de pareamento",
   "servers.pairingHint":
     "O agente imprime esta linha ao iniciar. Cole-a aqui e o endereço e o token se preenchem sozinhos — ou digite-os à mão abaixo.",

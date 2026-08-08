@@ -660,6 +660,23 @@ export const en = {
   "servers.pairingWhere":
     "Run mxb-agent on the machine hosting your server. It prints this line every time it starts — copy the whole thing.",
   "servers.manualEntry": "I don't have a pairing code — enter the details by hand",
+  "servers.publish": "Add to the server list",
+  "servers.unpublish": "Remove from the list",
+  "servers.listed": "In the public server list — anyone can find and join this.",
+  "servers.notListed": "Not in the public server list yet.",
+  "servers.published": "Added — other players can find it now",
+  "servers.publishedUnreachable":
+    "Saved, but we couldn't reach it from the internet, so it isn't listed yet. Check the agent is running and its port is open.",
+  "servers.publishFailed": "Couldn't change the server list",
+  "servers.unpublished": "Removed from the server list",
+  "servers.createTitle": "Create a server",
+  "servers.createDesc":
+    "Launch a dedicated server in the cloud without owning a machine. It shuts itself down once nobody has been riding on it for a while, so it doesn't run up a bill overnight.",
+  "servers.create": "Create",
+  "servers.creating": "Creating it — it takes a few minutes to come up",
+  "servers.createFailed": "Couldn't create that server",
+  "servers.runningCount_one": "{{count}} running",
+  "servers.runningCount_other": "{{count}} running",
 
   "settings.experimental": "Experimental",
   "settings.experimentalServers": "Servers and paint sync",

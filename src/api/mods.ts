@@ -1788,6 +1788,8 @@ export interface ServerRef {
   url: string;
   /** Bearer token from that host's `agent.json`. */
   token: string;
+  /** Control-plane id once this server is in the public list; empty when it isn't. */
+  registryId?: string;
 }
 
 /** What `mxb-agent` reports about a server. */
@@ -1867,6 +1869,66 @@ export function serverProbe(url: string, token: string): Promise<ServerStatus> {
  */
 export function onEnrollLink(cb: (code: string) => void): Promise<UnlistenFn> {
   return listen<string>("deep-link-enroll", (event) => cb(event.payload));
+}
+
+/** Where a server can be hosted, as the control plane will accept it. */
+export const SERVER_REGIONS = [
+  "eu-central-1",
+  "eu-west-1",
+  "us-east-1",
+  "us-west-2",
+  "ap-southeast-2",
+] as const;
+
+/** An EC2 instance the control plane launched, as AWS reports it. */
+export interface FleetInstance {
+  instanceId: string;
+  state: string;
+  publicIp: string | null;
+  instanceType: string;
+  launchedAt: string | null;
+}
+
+export interface FleetState {
+  region: string;
+  instances: FleetInstance[];
+}
+
+/**
+ * Create a server — the control plane launches a machine for it.
+ *
+ * The app holds no cloud credentials: a desktop binary can be unpacked, so the key lives in
+ * the control plane and this asks it, authenticated as this player.
+ */
+export function provisionServer(name: string): Promise<{ id: string; instanceId: string }> {
+  return invoke<{ id: string; instanceId: string }>("provision_server", { name });
+}
+
+/** What's running, read from EC2 — the number that turns into a bill. */
+export function fleetState(): Promise<FleetState> {
+  return invoke<FleetState>("fleet_state");
+}
+
+export interface PublishResult {
+  /** The registry id, needed to take it back out of the list. */
+  id: string;
+  /** False when the control plane couldn't reach the agent — recorded, but not advertised. */
+  published: boolean;
+}
+
+/**
+ * Put a server into the public list.
+ *
+ * Takes nothing but the region: the address is the agent's host joined to the port it
+ * reports, and the name comes from the server's own `.ini`.
+ */
+export function publishServer(id: string, region: string): Promise<PublishResult> {
+  return invoke<PublishResult>("publish_server", { id, region });
+}
+
+/** Take it back out. Only the account that registered it may. */
+export function unpublishServer(registryId: string): Promise<void> {
+  return invoke<void>("unpublish_server", { registryId });
 }
 
 /** The address and token packed into the one-line code `mxb-agent` prints at startup. */

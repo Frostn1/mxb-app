@@ -671,6 +671,23 @@ export const it: Translation = {
   "servers.pairingWhere":
     "Avvia mxb-agent sulla macchina che ospita il tuo server. Stampa questa riga a ogni avvio — copiala tutta.",
   "servers.manualEntry": "Non ho un codice di abbinamento — inserisco i dati a mano",
+  "servers.publish": "Aggiungi all'elenco dei server",
+  "servers.unpublish": "Rimuovi dall'elenco",
+  "servers.listed": "Nell'elenco pubblico dei server — chiunque può trovarlo ed entrare.",
+  "servers.notListed": "Non ancora nell'elenco pubblico dei server.",
+  "servers.published": "Aggiunto — ora gli altri giocatori possono trovarlo",
+  "servers.publishedUnreachable":
+    "Salvato, ma non siamo riusciti a raggiungerlo da internet, quindi non è ancora elencato. Controlla che l'agente sia in esecuzione e che la porta sia aperta.",
+  "servers.publishFailed": "Impossibile modificare l'elenco dei server",
+  "servers.unpublished": "Rimosso dall'elenco dei server",
+  "servers.createTitle": "Crea un server",
+  "servers.createDesc":
+    "Avvia un server dedicato nel cloud senza possedere una macchina. Si spegne da solo quando non ci corre nessuno da un po', così non accumula costi durante la notte.",
+  "servers.create": "Crea",
+  "servers.creating": "Lo sto creando — servono alcuni minuti perché sia pronto",
+  "servers.createFailed": "Impossibile creare quel server",
+  "servers.runningCount_one": "{{count}} attivo",
+  "servers.runningCount_other": "{{count}} attivi",
   "servers.pairingPlaceholder": "Incolla il codice di abbinamento",
   "servers.pairingHint":
     "L'agente stampa questa riga all'avvio. Incollala qui e indirizzo e token si compilano da soli — oppure inseriscili a mano qui sotto.",

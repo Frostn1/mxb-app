@@ -683,6 +683,23 @@ export const de: Translation = {
   "servers.pairingWhere":
     "Starte mxb-agent auf der Maschine, die deinen Server hostet. Er gibt diese Zeile bei jedem Start aus — kopiere sie vollständig.",
   "servers.manualEntry": "Ich habe keinen Kopplungscode — Daten von Hand eintragen",
+  "servers.publish": "Zur Serverliste hinzufügen",
+  "servers.unpublish": "Aus der Liste entfernen",
+  "servers.listed": "In der öffentlichen Serverliste — jeder kann ihn finden und beitreten.",
+  "servers.notListed": "Noch nicht in der öffentlichen Serverliste.",
+  "servers.published": "Hinzugefügt — andere Spieler finden ihn jetzt",
+  "servers.publishedUnreachable":
+    "Gespeichert, aber aus dem Internet nicht erreichbar, also noch nicht gelistet. Prüfe, ob der Agent läuft und sein Port offen ist.",
+  "servers.publishFailed": "Die Serverliste konnte nicht geändert werden",
+  "servers.unpublished": "Aus der Serverliste entfernt",
+  "servers.createTitle": "Server erstellen",
+  "servers.createDesc":
+    "Starte einen dedizierten Server in der Cloud, ohne eine Maschine zu besitzen. Er schaltet sich selbst ab, wenn eine Weile niemand darauf fährt — so läuft über Nacht keine Rechnung auf.",
+  "servers.create": "Erstellen",
+  "servers.creating": "Wird erstellt — es dauert ein paar Minuten, bis er bereit ist",
+  "servers.createFailed": "Dieser Server konnte nicht erstellt werden",
+  "servers.runningCount_one": "{{count}} aktiv",
+  "servers.runningCount_other": "{{count}} aktiv",
   "servers.pairingPlaceholder": "Kopplungscode einfügen",
   "servers.pairingHint":
     "Der Agent gibt diese Zeile beim Start aus. Füge sie hier ein, dann füllen sich Adresse und Token von selbst — oder trage sie unten von Hand ein.",

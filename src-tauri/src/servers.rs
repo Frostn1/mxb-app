@@ -20,6 +20,11 @@ pub struct ServerRef {
     pub url: String,
     /// Bearer token from the host's `agent.json`.
     pub token: String,
+    /// The control plane's id for this server once it has been put in the public list.
+    /// Empty until published — and it has to be persisted, because it is the only handle
+    /// that can take the row back out again after a restart.
+    #[serde(default)]
+    pub registry_id: String,
 }
 
 /// What `mxb-agent` prints at startup for the operator to paste in.
@@ -107,6 +112,28 @@ pub fn endpoint(base: &str, path: &str) -> Result<String, String> {
         return Err(format!("\"{base}\" isn't a valid agent address."));
     }
     Ok(format!("{base}{path}"))
+}
+
+/// The bare host out of an agent base URL.
+///
+/// Used to build the address players connect to: the game runs on the same box as the
+/// agent, so the agent's host plus the port the agent reports *is* the server's address.
+/// That is what makes publishing take no typing — the alternative is asking an operator to
+/// restate a host the app is already talking to.
+pub fn host_of(base: &str) -> Result<String, String> {
+    let rest = base
+        .trim()
+        .strip_prefix("http://")
+        .or_else(|| base.trim().strip_prefix("https://"))
+        .ok_or_else(|| format!("\"{base}\" isn't a valid agent address."))?;
+    // Drop anything after the authority, then the agent's own port — the game listens on a
+    // different one, and pasting the agent's would publish an address nobody can join.
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit_once(':').map(|(h, _)| h).unwrap_or(authority);
+    if host.is_empty() {
+        return Err(format!("\"{base}\" has no host in it."));
+    }
+    Ok(host.to_string())
 }
 
 async fn send(
@@ -245,6 +272,27 @@ mod tests {
     fn refuses_things_that_are_not_pairing_codes_at_all() {
         for bad in ["", "http://203.0.113.10:8787", "mxb-agent:!!!", &blob(r#"{"hi":"there"}"#)] {
             assert!(parse_pairing(bad).is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn takes_the_host_out_of_an_agent_url() {
+        assert_eq!(host_of("http://203.0.113.10:8787").unwrap(), "203.0.113.10");
+        assert_eq!(host_of("https://mx.example.com").unwrap(), "mx.example.com");
+        assert_eq!(host_of("  http://host:8787/  ").unwrap(), "host");
+    }
+
+    #[test]
+    fn drops_the_agents_own_port_rather_than_publishing_it() {
+        // The game listens on a different port to the agent. Carrying 8787 through would
+        // publish an address every player fails to connect to.
+        assert!(!host_of("http://203.0.113.10:8787").unwrap().contains("8787"));
+    }
+
+    #[test]
+    fn refuses_a_base_with_no_usable_host() {
+        for bad in ["", "host:8787", "http://", "ftp://host"] {
+            assert!(host_of(bad).is_err(), "{bad:?} must be refused");
         }
     }
 

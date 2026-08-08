@@ -7,7 +7,9 @@ import {
   RotateCw,
   Trash2,
   Plus,
+  Cloud,
   Download,
+  Globe,
   MessagesSquare,
   Shirt,
   Server as ServerIcon,
@@ -19,11 +21,15 @@ import { cn } from "@/lib/utils";
 import {
   enrollAccount,
   experimentalState,
+  fleetState,
   listServers,
   onEnrollLink,
   parsePairing,
   presetsListProfiles,
+  provisionServer,
+  publishServer,
   saveServers,
+  SERVER_REGIONS,
   serverAction,
   serverProbe,
   serverSetConfig,
@@ -31,7 +37,9 @@ import {
   serverTracks,
   setGuid as setGuidApi,
   syncPaints,
+  unpublishServer,
   type ExperimentalState,
+  type FleetState,
   type ServerAction,
   type ServerRef,
   type ServerStatus,
@@ -57,9 +65,11 @@ function uptime(secs: number): string {
 interface RowProps {
   server: ServerRef;
   onRemove: (id: string) => void;
+  /** Publishing writes the registry id back into the saved list, so the page re-reads it. */
+  onChanged: () => void;
 }
 
-const ServerRow = ({ server, onRemove }: RowProps) => {
+const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
   const t = useT();
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +79,8 @@ const ServerRow = ({ server, onRemove }: RowProps) => {
   // server box are different installs, and offering a track the host lacks restarts the
   // server into nothing. `null` while we're still asking.
   const [tracks, setTracks] = useState<string[] | null>(null);
+  // The one fact about a server no machine on this end can infer.
+  const [region, setRegion] = useState<string>(SERVER_REGIONS[0]);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +140,37 @@ const ServerRow = ({ server, onRemove }: RowProps) => {
   };
 
   const running = status?.game.running ?? false;
+  const listed = Boolean(server.registryId);
+
+  const publish = async () => {
+    setBusy(true);
+    try {
+      const r = await publishServer(server.id, region);
+      if (r.published) {
+        toast.success(t("servers.published"));
+      } else {
+        // Recorded but not advertised — the control plane couldn't reach the agent. Saying
+        // so plainly beats a success toast for a row nobody will ever see.
+        toast.warning(t("servers.publishedUnreachable"));
+      }
+      onChanged();
+    } catch (e) {
+      toast.error(t("servers.publishFailed"), { description: String(e) });
+    }
+    setBusy(false);
+  };
+
+  const unpublish = async () => {
+    setBusy(true);
+    try {
+      await unpublishServer(server.registryId!);
+      toast.success(t("servers.unpublished"));
+      onChanged();
+    } catch (e) {
+      toast.error(t("servers.publishFailed"), { description: String(e) });
+    }
+    setBusy(false);
+  };
 
   return (
     <div className="rounded-xl border border-white/[0.07] p-4">
@@ -226,6 +269,48 @@ const ServerRow = ({ server, onRemove }: RowProps) => {
             {t("servers.setTrack")}
           </Button>
         </div>
+      </div>
+
+      {/* Getting the server into everyone else's join list. Nothing is typed here: the
+          address is this agent's host plus the port it reports, and the name comes off the
+          .ini — only the region is something we can't work out. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.05] pt-3">
+        <Globe className="size-3.5 flex-none text-muted-foreground" />
+        {listed ? (
+          <>
+            <span className="text-[12px] text-muted-foreground">{t("servers.listed")}</span>
+            <Button
+              className="ml-auto"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void unpublish()}
+            >
+              {t("servers.unpublish")}
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="text-[12px] text-muted-foreground">{t("servers.notListed")}</span>
+            <div className="ml-auto flex items-center gap-2">
+              <select
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                className="h-8 rounded-md border border-white/[0.07] bg-transparent px-2 text-[12.5px]"
+              >
+                {SERVER_REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" disabled={busy} onClick={() => void publish()}>
+                {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {t("servers.publish")}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -444,6 +529,101 @@ const PaintSync = () => {
   );
 };
 
+/**
+ * Create a server without owning a machine.
+ *
+ * The control plane launches it — the app never holds a cloud credential, because a desktop
+ * binary can be unpacked and a key inside one would let anyone spend our money.
+ *
+ * The running count is shown next to the button, and it is read from EC2 rather than from
+ * our own records: that is the number being billed, and the two disagree exactly when
+ * something has already gone wrong. A player deciding whether to start another server
+ * should be looking at the real one.
+ */
+const CreateServer = ({ onCreated }: { onCreated: () => void }) => {
+  const t = useT();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [fleet, setFleet] = useState<FleetState | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    fleetState()
+      .then((f) => {
+        setFleet(f);
+        setUnavailable(null);
+      })
+      // Not enrolled, or this deployment can't provision. Either way the panel explains
+      // itself rather than showing a broken control.
+      .catch((e) => setUnavailable(String(e)));
+  }, []);
+  useEffect(refresh, [refresh]);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      await provisionServer(name.trim());
+      toast.success(t("servers.creating"));
+      setName("");
+      refresh();
+      onCreated();
+    } catch (e) {
+      toast.error(t("servers.createFailed"), { description: String(e) });
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="mb-5 rounded-xl border border-white/[0.07] p-4">
+      <div className="flex items-center gap-2">
+        <Cloud className="size-4 text-muted-foreground" />
+        <h2 className="font-semibold">{t("servers.createTitle")}</h2>
+        {fleet && (
+          <span className="ml-auto text-[12px] text-muted-foreground">
+            {t("servers.runningCount", { count: fleet.instances.length })}
+          </span>
+        )}
+      </div>
+      <p className="mt-1 text-[12.5px] text-muted-foreground">{t("servers.createDesc")}</p>
+
+      {unavailable ? (
+        <p className="mt-3 text-[11.5px] text-muted-foreground">{unavailable}</p>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t("servers.namePlaceholder")}
+            className="h-9 flex-1"
+          />
+          <Button size="sm" disabled={busy || name.trim().length < 2} onClick={() => void create()}>
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+            {t("servers.create")}
+          </Button>
+        </div>
+      )}
+
+      {fleet && fleet.instances.length > 0 && (
+        <dl className="mt-3 space-y-1">
+          {fleet.instances.map((i) => (
+            <div key={i.instanceId} className="flex items-center gap-2 text-[12px]">
+              <span
+                className={cn(
+                  "size-[7px] flex-none rounded-full",
+                  i.state === "running" ? "bg-success" : "bg-muted-foreground/50",
+                )}
+              />
+              <span className="text-muted-foreground">{i.instanceId}</span>
+              <span>{i.publicIp ?? "—"}</span>
+              <span className="ml-auto text-muted-foreground">{i.state}</span>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+};
+
 const Servers = () => {
   const t = useT();
   const [servers, setServers] = useState<ServerRef[]>([]);
@@ -473,9 +653,12 @@ const Servers = () => {
     }
   };
 
-  useEffect(() => {
+  // Re-read from the backend rather than patching local state: publishing writes the
+  // registry id into the saved list on the Rust side, so that file is the source of truth.
+  const reload = useCallback(() => {
     void listServers().then(setServers).catch(() => {});
   }, []);
+  useEffect(reload, [reload]);
 
   const persist = async (next: ServerRef[]) => {
     setServers(next);
@@ -542,6 +725,8 @@ const Servers = () => {
 
       <PaintSync />
 
+      <CreateServer onCreated={reload} />
+
       {servers.length === 0 && !adding && (
         <div className="rounded-xl border border-dashed border-white/[0.1] p-8 text-center">
           <ServerIcon className="mx-auto size-6 text-muted-foreground" />
@@ -555,6 +740,7 @@ const Servers = () => {
             key={s.id}
             server={s}
             onRemove={(id) => void persist(servers.filter((x) => x.id !== id))}
+            onChanged={reload}
           />
         ))}
       </div>

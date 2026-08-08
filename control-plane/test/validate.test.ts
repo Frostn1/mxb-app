@@ -4,8 +4,12 @@ import {
   isGuid,
   isPaintFileName,
   isPaintSize,
+  isPublicAgentUrl,
+  isPublicGameAddress,
+  isRegion,
   isRelDest,
   isRiderName,
+  isServerName,
   isSha256,
   isSlot,
   MAX_PAINT_BYTES,
@@ -145,6 +149,86 @@ describe("slots", () => {
     expect(isSlot("tyres")).toBe(false);
     expect(isSlot("wheels")).toBe(false);
     expect(isSlot(null)).toBe(false);
+  });
+});
+
+describe("server registration", () => {
+  it("accepts a routable game address", () => {
+    expect(isPublicGameAddress("203.0.113.10:54210")).toBe(true);
+    expect(isPublicGameAddress("mx.example.com:54210")).toBe(true);
+    expect(isPublicGameAddress(" 18.185.94.143:54210 ")).toBe(true);
+  });
+
+  it("rejects an address nobody outside could connect to", () => {
+    // A home server published under its LAN address is a row in everyone's join picker
+    // that can never work — and the port is what we would otherwise go and probe.
+    for (const bad of [
+      "127.0.0.1:54210",
+      "localhost:54210",
+      "10.0.0.5:54210",
+      "192.168.1.20:54210",
+      "172.16.4.4:54210",
+      "169.254.169.254:80",
+      "100.64.0.1:54210",
+      "0.0.0.0:54210",
+      "[::1]:54210",
+    ]) {
+      expect(isPublicGameAddress(bad), bad).toBe(false);
+    }
+  });
+
+  it("rejects addresses that are malformed rather than merely private", () => {
+    for (const bad of [
+      "203.0.113.10", // no port
+      "203.0.113.10:0",
+      "203.0.113.10:70000",
+      "-flag:54210",
+      "203.0.113.10:54210 -log",
+      "999.1.1.1:54210",
+      "",
+    ]) {
+      expect(isPublicGameAddress(bad), bad).toBe(false);
+    }
+  });
+
+  it("accepts an agent URL we are willing to call", () => {
+    expect(isPublicAgentUrl("http://203.0.113.10:8787")).toBe(true);
+    expect(isPublicAgentUrl("https://mx.example.com")).toBe(true);
+    expect(isPublicAgentUrl("http://203.0.113.10:8787/")).toBe(true);
+  });
+
+  it("refuses agent URLs that would turn us into a probe", () => {
+    // This value is fetched server-side, so each of these is a request-forgery attempt.
+    for (const bad of [
+      "http://127.0.0.1:8787",
+      "http://localhost:8787",
+      "http://169.254.169.254/latest/meta-data/",
+      "http://10.1.2.3:8787",
+      "http://[::1]:8787",
+      "file:///etc/passwd",
+      "ftp://203.0.113.10",
+      "http://user:pass@203.0.113.10:8787",
+      "http://203.0.113.10:8787/admin",
+      "http://203.0.113.10:8787?x=1",
+      "not a url",
+      "",
+    ]) {
+      expect(isPublicAgentUrl(bad), bad).toBe(false);
+    }
+  });
+
+  it("holds server names to something that fits a row", () => {
+    expect(isServerName("Frost Test EU")).toBe(true);
+    expect(isServerName("A")).toBe(false);
+    expect(isServerName("x".repeat(49))).toBe(false);
+    expect(isServerName("bad\nname")).toBe(false);
+    expect(isServerName(null)).toBe(false);
+  });
+
+  it("takes regions from a closed set", () => {
+    expect(isRegion("eu-central-1")).toBe(true);
+    expect(isRegion("mars-north-1")).toBe(false);
+    expect(isRegion("")).toBe(false);
   });
 });
 

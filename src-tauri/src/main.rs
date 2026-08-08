@@ -3870,6 +3870,172 @@ async fn server_tracks(app: tauri::AppHandle, id: String) -> Result<Vec<String>,
     servers::tracks(&server_by_id(&app, &id)?).await
 }
 
+/// Create a server: the control plane launches a machine for it.
+///
+/// The app never talks to AWS. A desktop binary can be unpacked, so a cloud credential
+/// inside one would let anyone create infrastructure in our account — the control plane
+/// holds the key and this asks it nicely, authenticated as this player.
+#[tauri::command]
+async fn provision_server(app: tauri::AppHandle, name: String) -> Result<serde_json::Value, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/provision", paintsync::CONTROL_PLANE))
+        .bearer_auth(&cfg.cp_token)
+        .json(&serde_json::json!({ "name": name.trim() }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+
+    let ok = resp.status().is_success();
+    let text = resp.text().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if !ok {
+        return Err(body
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(str::to_string)
+            .unwrap_or(text));
+    }
+    Ok(body)
+}
+
+/// What's running, and therefore what's being paid for.
+///
+/// Read from EC2 rather than from anyone's records, because that is the number that turns
+/// into a bill.
+#[tauri::command]
+async fn fleet_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .get(format!("{}/v1/fleet", paintsync::CONTROL_PLANE))
+        .bearer_auth(&cfg.cp_token)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    let ok = resp.status().is_success();
+    let text = resp.text().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if !ok {
+        return Err(body
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(str::to_string)
+            .unwrap_or(text));
+    }
+    Ok(body)
+}
+
+/// Put a server the player runs into the public list, so other people can find it.
+///
+/// Everything the control plane needs is already known to the agent, so nothing here is
+/// asked of the operator: the game address is the agent's own host joined to the port it
+/// reports, and the name comes from the server's `.ini`. What the player supplies is the
+/// decision to publish, and a region — which is the one fact no machine can infer.
+///
+/// The agent URL is sent so the control plane can check the box actually answers before
+/// advertising it. That check is why an unreachable home server doesn't end up as a row in
+/// everyone's join picker that nobody can connect to.
+#[tauri::command]
+async fn publish_server(
+    app: tauri::AppHandle,
+    id: String,
+    region: String,
+) -> Result<serde_json::Value, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let server = server_by_id(&app, &id)?;
+    let status = servers::status(&server).await?;
+
+    let port = status
+        .get("port")
+        .and_then(|p| p.as_u64())
+        .ok_or("The agent didn't say which port the server runs on.")?;
+    let host = servers::host_of(&server.url)?;
+    let name = status
+        .get("server")
+        .and_then(|s| s.get("name"))
+        .and_then(|n| n.as_str())
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .unwrap_or(&server.name)
+        .to_string();
+
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/servers", paintsync::CONTROL_PLANE))
+        .bearer_auth(&cfg.cp_token)
+        .json(&serde_json::json!({
+            "name": name,
+            "region": region,
+            "address": format!("{host}:{port}"),
+            "agentUrl": server.url,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+
+    let status_code = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if !status_code.is_success() {
+        return Err(body
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(str::to_string)
+            .unwrap_or(text));
+    }
+
+    // Remember the registry id: it is the only handle that can withdraw this row later, and
+    // the control plane will never hand it out a second time.
+    if let Some(registry_id) = body.get("id").and_then(|v| v.as_str()) {
+        let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+        if let Some(saved) = cfg.servers.iter_mut().find(|s| s.id == id) {
+            saved.registry_id = registry_id.to_string();
+            config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+        }
+    }
+    Ok(body)
+}
+
+/// Take a server back out of the public list.
+#[tauri::command]
+async fn unpublish_server(app: tauri::AppHandle, registry_id: String) -> Result<(), String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .delete(format!("{}/v1/servers/{registry_id}", paintsync::CONTROL_PLANE))
+        .bearer_auth(&cfg.cp_token)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    // A row already gone from the control plane is the state we wanted; clearing our end
+    // regardless keeps a 404 from stranding the local entry as permanently "published".
+    let gone = resp.status() == reqwest::StatusCode::NOT_FOUND;
+    if !resp.status().is_success() && !gone {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(text));
+    }
+
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    if let Some(saved) = cfg.servers.iter_mut().find(|s| s.registry_id == registry_id) {
+        saved.registry_id.clear();
+        config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    }
+    Ok(())
+}
+
 /// Unpack the one-line code `mxb-agent` prints, so adding a server is a paste rather than
 /// an address, a token and a name typed in by hand.
 #[tauri::command]
@@ -3885,10 +4051,9 @@ fn parse_pairing(blob: String) -> Result<servers::Pairing, String> {
 #[tauri::command]
 async fn server_probe(url: String, token: String) -> Result<serde_json::Value, String> {
     let probe = servers::ServerRef {
-        id: String::new(),
-        name: String::new(),
         url: url.trim().to_string(),
         token: token.trim().to_string(),
+        ..Default::default()
     };
     servers::status(&probe).await
 }
@@ -4931,6 +5096,10 @@ fn main() {
             server_status,
             server_tracks,
             server_probe,
+            publish_server,
+            unpublish_server,
+            provision_server,
+            fleet_state,
             parse_pairing,
             server_action,
             server_set_config,

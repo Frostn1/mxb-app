@@ -520,6 +520,61 @@ repeated below.
 Extracted archives are deliberately left alone: a link inside a download you didn't make is
 still refused, which is what stops an archive writing outside the folder it unpacks into.
 
+## 2026-08-08 — create a server without owning a machine
+
+### Added
+- **Create a server from the app.** The control plane launches an EC2 instance, installs
+  the dedicated server and the agent on it, and the server appears in the Servers page. The
+  app holds no cloud credentials — a desktop binary can be unpacked, and a key inside one
+  would let anyone create infrastructure in our account — so the AWS key lives only as a
+  Worker secret, scoped by IAM to instances tagged `mxb:managed` in a single region.
+- **The agent ships as a build artifact**, served from R2 through the control plane. A
+  booting instance holds no credentials and has no way to be given any, so that URL is
+  unauthenticated by necessity; the bucket itself stays private.
+
+### Changed
+- **Nothing runs unattended.** Four separate things have to fail before a server can bill
+  indefinitely: a cap of 2 concurrent instances counted *from EC2 rather than our own
+  records*; destruction after 20 minutes with nobody connected; termination of any instance
+  no database row points at; and a hard maximum lifetime that catches everything else — a
+  hung bootstrap, an agent that never started, a failure nobody has thought of.
+  Instances also launch with `InstanceInitiatedShutdownBehavior=terminate`, and the
+  bootstrap's failure trap shuts the machine down, so a half-built server destroys itself
+  rather than sitting idle on the bill.
+
+### Fixed
+- **The idle reaper could never have reaped anything.** It read the agent address from a
+  column that provisioning cannot fill in — EC2 assigns the public IP while the instance
+  boots, long after the row is written — so every provisioned server looked permanently
+  unreachable and was skipped forever. It now takes the address from EC2's own view.
+
+## 2026-08-08 — put your own server in the list
+
+### Added
+- **Publish a server you run to the public list, from the app.** Until now `servers` rows
+  were hand-written SQL, so running a server and *having anyone able to join it* were
+  separate problems — the second one solved by passing an address around privately. A
+  server you manage in the app now has an "Add to the server list" button, and it appears
+  in everyone's Join a server picker.
+- **Nothing is typed to publish it.** The address is the agent's own host joined to the port
+  it reports, and the name comes from the server's `.ini`. The only thing asked for is the
+  region, which is the one fact no machine on this end can work out.
+- **`POST /v1/servers` and `DELETE /v1/servers/:id`** on the control plane, with ownership:
+  a server is recorded against the account that registered it, only that account can remove
+  it, and the hand-seeded rows have no owner so the API can't touch them. Five servers per
+  account, and one registration per address.
+
+### Changed
+- **A server is only advertised once we can reach it.** The control plane calls the agent's
+  unauthenticated `/health` before publishing; an unreachable one is recorded and stays
+  manageable, but is kept out of everyone's picker. A list full of servers nobody can
+  connect to is worse than a short list. This can't prove the *game* port is open — that's
+  UDP, and a Worker can't send one — so "reachable" means the host answers.
+- **Addresses pointing into private space are refused outright**, before any request is
+  made. The control plane fetches an operator-supplied URL, which makes it a
+  request-forgery surface: `127.0.0.1`, RFC1918, carrier-grade NAT and the `169.254.169.254`
+  metadata address are all rejected, as is any URL carrying credentials, a path or a query.
+
 ## 2026-08-08 — paint sync stops being a form
 
 ### Added

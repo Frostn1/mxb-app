@@ -1,0 +1,146 @@
+/**
+ * What a freshly launched server runs on first boot.
+ *
+ * EC2 executes this once, as SYSTEM, with no console attached and nobody watching. Every
+ * failure mode therefore has to end in one of two states: a server that works, or an
+ * instance that shuts itself down. A box that boots, fails halfway and sits there is the
+ * expensive outcome — it bills by the hour and looks, from the outside, exactly like one
+ * that is merely still starting.
+ *
+ * That is why the whole script is wrapped in a trap that calls `Stop-Computer`: instances
+ * are launched with `InstanceInitiatedShutdownBehavior=terminate`, so shutting down *is*
+ * self-destruction, and a bootstrap that cannot finish takes the instance with it.
+ */
+
+export interface BootstrapInputs {
+  /** Bearer token the agent will require. Generated per server, never reused. */
+  agentToken: string;
+  /** Where to fetch the `mxb-agent` binary. Must be reachable without credentials. */
+  agentUrl: string;
+  /**
+   * The MX Bikes installer.
+   *
+   * PiBoSo publishes no separate dedicated-server package — the server lives inside the
+   * full installer, which is why this fetches a 2 GB `.exe` and unpacks it rather than
+   * pulling down a small archive. Pointed at PiBoSo's own URL so nothing is rehosted.
+   */
+  gameUrl: string;
+  /** Server name written into `dedicated.ini`, shown in the game's browser. */
+  serverName: string;
+  /** UDP port the game listens on. */
+  gamePort: number;
+  /** TCP port the agent listens on. */
+  agentPort: number;
+}
+
+/** Where everything lands on the instance. Referenced by the agent's config too. */
+const ROOT = "C:\\mxb";
+
+/**
+ * PowerShell for EC2 user-data.
+ *
+ * Wrapped in `<powershell>` because that is how EC2Launch decides to run it as PowerShell
+ * rather than as cmd, and `<persist>false</persist>` keeps it to first boot only — this
+ * script is not idempotent and re-running it on every start would rewrite live config.
+ */
+export function bootstrapScript(input: BootstrapInputs): string {
+  // Values are interpolated into a PowerShell string, so anything that could close a quote
+  // or start a new statement has to be refused rather than escaped. The callers validate
+  // too; this is the last line before it becomes code on someone's machine.
+  for (const [field, value] of Object.entries(input)) {
+    if (typeof value === "string" && /["'`$\r\n]/.test(value)) {
+      throw new Error(`${field} contains a character that can't go in the bootstrap script`);
+    }
+  }
+
+  return `<powershell>
+$ErrorActionPreference = "Stop"
+Start-Transcript -Path "C:\\mxb-bootstrap.log" -Append
+
+# Any unhandled failure below takes the instance down with it. Launched with
+# InstanceInitiatedShutdownBehavior=terminate, so this is self-destruction, not a pause:
+# a half-built server that sits idle is the one outcome that quietly costs money.
+trap {
+  Write-Output "bootstrap failed: $_"
+  Stop-Transcript
+  Stop-Computer -Force
+  exit 1
+}
+
+New-Item -ItemType Directory -Force -Path "${ROOT}" | Out-Null
+Set-Location "${ROOT}"
+
+# TLS 1.2: Server 2022 defaults are fine, but Invoke-WebRequest on a fresh image has been
+# known to negotiate down and fail against modern endpoints.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+Write-Output "fetching the MX Bikes installer (about 2 GB)"
+# BITS rather than Invoke-WebRequest: IWR buffers the whole response in memory, and two
+# gigabytes of it on a small instance is how this step fails.
+Start-BitsTransfer -Source "${input.gameUrl}" -Destination "${ROOT}\\mxbikes-installer.exe"
+
+Write-Output "extracting the server files"
+# There is no separate dedicated-server download; the installer carries it and \`-extract\`
+# unpacks it to mxbikes.zip without installing anything.
+#
+# It exits 1 on SUCCESS. Treating that as failure — which every normal convention says to
+# do — leaves the bootstrap dead at the one step that actually worked, so the exit code is
+# deliberately ignored and the *artifact* is what gets checked instead.
+$proc = Start-Process -FilePath "${ROOT}\\mxbikes-installer.exe" -ArgumentList "-extract" -WorkingDirectory "${ROOT}" -Wait -PassThru -NoNewWindow
+Write-Output "installer exited $($proc.ExitCode) (1 is normal here)"
+
+$zip = Get-ChildItem -Path "${ROOT}" -Filter "mxbikes*.zip" | Select-Object -First 1
+if (-not $zip) { throw "the installer produced no zip — extraction did not work" }
+Expand-Archive -Path $zip.FullName -DestinationPath "${ROOT}\\game" -Force
+
+if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) {
+  # A layout we did not expect. Look one level down before giving up, since repacks
+  # sometimes nest everything inside a single folder.
+  $inner = Get-ChildItem -Path "${ROOT}\\game" -Recurse -Filter "mxbikes.exe" | Select-Object -First 1
+  if (-not $inner) { throw "no mxbikes.exe in the extracted files" }
+  Move-Item -Path "$($inner.Directory.FullName)\\*" -Destination "${ROOT}\\game" -Force
+}
+
+Write-Output "fetching the agent"
+Invoke-WebRequest -Uri "${input.agentUrl}" -OutFile "${ROOT}\\mxb-agent.exe" -UseBasicParsing
+
+# The game reads this once at startup and never again, which is why changing a setting
+# through the agent restarts the process.
+@"
+[connection]
+name = ${input.serverName}
+maxclient = 20
+
+[event]
+track = Victoria
+track_layout =
+"@ | Set-Content -Path "${ROOT}\\game\\dedicated.ini" -Encoding ASCII
+
+@"
+{
+  "token": "${input.agentToken}",
+  "listen": "0.0.0.0:${input.agentPort}",
+  "game_dir": "${ROOT}\\\\game",
+  "ini": "dedicated.ini",
+  "game_port": ${input.gamePort}
+}
+"@ | Set-Content -Path "${ROOT}\\agent.json" -Encoding ASCII
+
+# The security group already gates what reaches the box; these rules are what let traffic
+# past Windows' own firewall once it is there.
+New-NetFirewallRule -DisplayName "MXB game" -Direction Inbound -Protocol UDP -LocalPort ${input.gamePort} -Action Allow | Out-Null
+New-NetFirewallRule -DisplayName "MXB agent" -Direction Inbound -Protocol TCP -LocalPort ${input.agentPort} -Action Allow | Out-Null
+
+# A scheduled task rather than a bare process: it survives the session ending, and starts
+# again by itself if the box is ever stopped and started rather than rebuilt.
+$action = New-ScheduledTaskAction -Execute "${ROOT}\\mxb-agent.exe" -Argument "${ROOT}\\agent.json" -WorkingDirectory "${ROOT}"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+Register-ScheduledTask -TaskName "mxb-agent" -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+Start-ScheduledTask -TaskName "mxb-agent"
+
+Write-Output "bootstrap complete"
+Stop-Transcript
+</powershell>
+<persist>false</persist>`;
+}

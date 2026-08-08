@@ -680,6 +680,23 @@ export const fr: Translation = {
   "servers.pairingWhere":
     "Lancez mxb-agent sur la machine qui héberge votre serveur. Il affiche cette ligne à chaque démarrage — copiez-la entièrement.",
   "servers.manualEntry": "Je n'ai pas de code d'appairage — saisir les détails à la main",
+  "servers.publish": "Ajouter à la liste des serveurs",
+  "servers.unpublish": "Retirer de la liste",
+  "servers.listed": "Dans la liste publique — n'importe qui peut le trouver et le rejoindre.",
+  "servers.notListed": "Pas encore dans la liste publique des serveurs.",
+  "servers.published": "Ajouté — les autres joueurs peuvent le trouver",
+  "servers.publishedUnreachable":
+    "Enregistré, mais nous n'avons pas pu le joindre depuis internet, donc il n'est pas encore listé. Vérifiez que l'agent tourne et que son port est ouvert.",
+  "servers.publishFailed": "Impossible de modifier la liste des serveurs",
+  "servers.unpublished": "Retiré de la liste des serveurs",
+  "servers.createTitle": "Créer un serveur",
+  "servers.createDesc":
+    "Lancez un serveur dédié dans le cloud sans posséder de machine. Il s'éteint tout seul quand plus personne n'y roule depuis un moment, donc il ne fait pas grimper la facture la nuit.",
+  "servers.create": "Créer",
+  "servers.creating": "Création en cours — quelques minutes avant qu'il soit prêt",
+  "servers.createFailed": "Impossible de créer ce serveur",
+  "servers.runningCount_one": "{{count}} actif",
+  "servers.runningCount_other": "{{count}} actifs",
   "servers.pairingPlaceholder": "Collez le code d'appairage",
   "servers.pairingHint":
     "L'agent affiche cette ligne au démarrage. Collez-la ici et l'adresse et le jeton se remplissent tout seuls — ou saisissez-les à la main ci-dessous.",
