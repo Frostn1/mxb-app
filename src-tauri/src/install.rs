@@ -1,5 +1,6 @@
 use crate::config::AppConfig;
 use futures_util::StreamExt;
+use obfstr::obfstr;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -334,7 +335,10 @@ fn resolve_gdrive(url: &str) -> String {
     match id {
         // usercontent serves the bytes; large files still hit a virus-scan interstitial.
         Some(id) => {
-            format!("https://drive.usercontent.google.com/download?id={id}&export=download")
+            format!(
+                "{}?id={id}&export=download",
+                obfstr!("https://drive.usercontent.google.com/download")
+            )
         }
         None => url.to_string(),
     }
@@ -385,7 +389,8 @@ async fn resolve_gdrive_folder(client: &Client, url: &str) -> anyhow::Result<Str
         )
     })?;
     Ok(resolve_gdrive(&format!(
-        "https://drive.google.com/file/d/{}/view",
+        "{}/file/d/{}/view",
+        obfstr!("https://drive.google.com"),
         chosen.id
     )))
 }

@@ -81,6 +81,9 @@ notify-debouncer-mini = "0.4"
 # Check an installed FrostMod binary against the digest its GitHub release advertises,
 # so an install that only half-applied can be spotted and repaired.
 sha2 = "0.10"
+# Compile-time string obfuscation: sensitive endpoints/hosts are XOR-encoded in the
+# binary and decoded on the stack at use, so they don't show up in a `strings` dump.
+obfstr = "0.4"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
@@ -94,3 +97,24 @@ tauri = { version = "2", features = ["test"] }
 # `#[tokio::test]` for the live network checks against mxb-mods.com. Dev-only, so the
 # shipped binary keeps the minimal `time`-only tokio it already had.
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
+
+# Ship a hardened, hard-to-reverse binary. cargo defaults leave the symbol table in and
+# emit no debug info; this strips symbols and leans on the optimizer to erase structure.
+# opt-level stays at 3 so the viewer's hot paths aren't sacrificed for it.
+[profile.release]
+opt-level = 3
+# Remove the symbol table (and any debug symbols) from every platform's artifact, so a
+# profiler/decompiler sees `frost.exe+0x…` rather than function names.
+strip = "symbols"
+# Fat cross-crate LTO: inlines and merges functions across crate boundaries, which both
+# speeds up hot paths and dissolves the clean call structure a decompiler leans on.
+lto = "fat"
+# One codegen unit: maximal optimization, and fewer tidy module boundaries to recover.
+codegen-units = 1
+# Abort on panic: drops the unwinding tables and landing pads (smaller, less to read).
+# Safe here — nothing in the crate relies on catching a panic (no catch_unwind).
+panic = "abort"
+# No debug info: on Windows/MSVC this means no PDB is produced at all.
+debug = false
+# Strip the overflow-check branches from release too.
+overflow-checks = false

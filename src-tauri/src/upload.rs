@@ -1,4 +1,5 @@
 use anyhow::Context;
+use obfstr::obfstr;
 use reqwest::Client;
 use serde::Deserialize;
 use std::path::Path;
@@ -33,7 +34,7 @@ async fn pixeldrain_upload(client: &Client, file: &Path) -> anyhow::Result<Strin
         .unwrap_or_else(|| "preset-bundle.zip".to_string());
 
     let resp = client
-        .put(format!("https://pixeldrain.com/api/file/{name}"))
+        .put(format!("{}/{name}", obfstr!("https://pixeldrain.com/api/file")))
         .body(bytes)
         .send()
         .await
@@ -48,7 +49,7 @@ async fn pixeldrain_upload(client: &Client, file: &Path) -> anyhow::Result<Strin
     match parsed.id {
         Some(id) if !id.is_empty() => {
             // Direct-download URL — the install downloader streams it as-is.
-            Ok(format!("https://pixeldrain.com/api/file/{id}"))
+            Ok(format!("{}/{id}", obfstr!("https://pixeldrain.com/api/file")))
         }
         _ => {
             let why = parsed.message.unwrap_or_else(|| format!("HTTP {status}"));
