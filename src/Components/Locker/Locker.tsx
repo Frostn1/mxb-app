@@ -51,20 +51,41 @@ import RegisterSwapsDialog from "./RegisterSwapsDialog";
  * **bound** to a model swap, so activating that model pulls its sound along.
  */
 
-/** Trailing feedback for a swap toast — mirrors the presets "refreshed live in-game" note. */
-function swapNote(outcome: SwapApplyOutcome): string {
+/**
+ * Trailing feedback for a swap toast.
+ *
+ * Models and sounds get different notes because they refresh by different routes.
+ * `live_refresh` re-runs the game's *customization* loader — that reloads paints and
+ * gear but never the bike mesh, so it says nothing about whether a swapped model is
+ * visible. A model only appears live if FrostMod re-applies the bike (`model_refresh`),
+ * which it does solely for the bike you currently have selected.
+ */
+function swapNote(kind: "model" | "sound", outcome: SwapApplyOutcome): string {
+  if (!outcome.game_running) return "Loads next time the game opens.";
+
+  if (kind === "model") {
+    switch (outcome.model_refresh) {
+      case "signaled":
+        return "Refreshing in-game — if it's your selected bike, it changes now.";
+      case "not_running":
+        return "Run FrostMod to see model swaps live — for now, reselect the bike in-game.";
+      case "write_failed":
+        return "Couldn't reach FrostMod — reselect the bike in-game to load it.";
+      case "unsupported":
+        return "Live model refresh is Windows-only — reselect the bike in-game.";
+      default: // null — instant refresh is switched off in Settings
+        return "Reselect the bike in MX Bikes to load it (instant refresh is off).";
+    }
+  }
+
   switch (outcome.live_refresh) {
     case "refreshed":
       return "Refreshed live in-game.";
     case "failed":
       return "Instant refresh failed — reselect your profile in-game to load it.";
     default:
-      break;
+      return "Reselect your profile in MX Bikes to load the swap.";
   }
-  if (outcome.game_running) {
-    return "Reselect your profile in MX Bikes to load the swap.";
-  }
-  return "Loads next time the game opens.";
 }
 
 /** One bike's row: its models (null for sound-only bikes) and its sounds (always present). */
@@ -172,9 +193,13 @@ export default function Locker() {
     );
 
   const onModelSwap = (bike: string, target: string) =>
-    run(bike, `Switched ${bike} model to “${target}”.`, () => applyModelSwap(bike, target), swapNote);
+    run(bike, `Switched ${bike} model to “${target}”.`, () => applyModelSwap(bike, target), (r) =>
+      swapNote("model", r),
+    );
   const onSoundSwap = (bike: string, target: string) =>
-    run(bike, `Switched ${bike} sound to “${target}”.`, () => applySoundSwap(bike, target), swapNote);
+    run(bike, `Switched ${bike} sound to “${target}”.`, () => applySoundSwap(bike, target), (r) =>
+      swapNote("sound", r),
+    );
   const onBind = (bike: string, model: string, sound: string) =>
     run(bike, `Tied “${sound}” to model “${model}”.`, () => bindSound(bike, model, sound));
   const onUnbind = (bike: string, model: string, sound: string) =>

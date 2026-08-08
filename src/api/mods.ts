@@ -12,9 +12,11 @@ import type {
   FrostmodStatus,
   InstalledMod,
   InstallProgress,
+  LaunchOutcome,
   LibraryEntry,
   Loadout,
   ModDetail,
+  ModRating,
   ModSummary,
   PkzMeta,
   PaintTexture,
@@ -97,11 +99,12 @@ export const MOD_TYPES: ModType[] = [
 
 export const DEFAULT_MOD_TYPE = MOD_TYPES[0];
 
-/** Normalize a mod title or filename for fuzzy "already installed" matching. */
+/** Normalize a mod title or filename into a comparison key. `.pnt` is in the list
+ *  because paints and liveries are installed files too — see `lib/installedMatch`. */
 export function normalizeModName(s: string): string {
   return s
     .toLowerCase()
-    .replace(/\.(pkz|zip|rar|7z)$/i, "")
+    .replace(/\.(pkz|zip|rar|7z|pnt)$/i, "")
     .replace(/[^a-z0-9]+/g, "");
 }
 
@@ -150,6 +153,12 @@ export function searchMods(
 
 export function getModDetail(slug: string): Promise<ModDetail> {
   return invoke<ModDetail>("get_mod_detail", { slug });
+}
+
+/** Community scores for the given post ids, keyed by id. Ids the site didn't answer for
+ *  are absent — ratings decorate a card, so a miss shows no stars rather than an error. */
+export function getModRatings(ids: number[]): Promise<Record<string, ModRating>> {
+  return invoke<Record<string, ModRating>>("get_mod_ratings", { ids });
 }
 
 export function getInstalledMods(subpath: string): Promise<InstalledMod[]> {
@@ -695,6 +704,16 @@ export function reloadFrostmod(): Promise<ReloadOutcome> {
 /** Is FrostMod currently running on this PC? */
 export function isFrostmodRunning(): Promise<boolean> {
   return invoke<boolean>("frostmod_running");
+}
+
+/** Start MX Bikes. Resolves to `already_running` when the game is already up. */
+export function launchGame(): Promise<LaunchOutcome> {
+  return invoke<LaunchOutcome>("launch_game");
+}
+
+/** Is MX Bikes currently running? Always false off Windows — the probe is Win32-only. */
+export function isGameRunning(): Promise<boolean> {
+  return invoke<boolean>("game_running");
 }
 
 /** Install/version/running snapshot (hits GitHub for the latest tag). */

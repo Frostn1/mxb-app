@@ -16,6 +16,16 @@ pub struct ModSummary {
     pub category_id: u32,
 }
 
+/// A mod's community score on mxb-mods.com — the same average and vote count the
+/// site prints under each listing thumbnail.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModRating {
+    /// Mean score out of 5. Meaningless when `count` is 0.
+    pub average: f32,
+    pub count: u32,
+}
+
 /// One download choice on a mod page. Hosts vary (Google Drive, MediaFire, …).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

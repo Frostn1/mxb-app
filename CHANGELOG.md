@@ -2,6 +2,34 @@
 
 ## 2026-08-07
 
+### Added
+- **Star ratings on browse thumbnails.** A mod that people have rated on mxb-mods.com now
+  shows its score on the card the same way the site does — five stars filled to the
+  nearest half, the average, and the vote count — so a good mod is recognisable before you
+  open it. Unrated mods show nothing rather than five empty stars, which would read as a
+  bad score instead of "nobody has voted yet". The scores aren't in the REST API the
+  listing comes from, so they're fetched separately per page (six requests at a time,
+  cached for ten minutes) after the cards have painted: browsing never waits on them, and
+  a score that fails to load simply doesn't appear.
+- **A Play button that launches MX Bikes.** Setting a bike up in the Locker meant
+  alt-tabbing to Steam or the desktop to actually ride it, even though the app already
+  knew where the game was installed and whether it was running. The sidebar now carries a
+  Play button above the FrostMod pill, visible from every tab; it flips to "MX Bikes
+  running" while the game is up, so it can't start a second copy. Windows runs
+  `mxbikes.exe` directly, which works for standalone (non-Steam) copies too and doesn't
+  need Steam open; Linux hands `steam://rungameid/655500` to the desktop, because a
+  Proton install is Steam's to set up. If the install folder isn't set or holds no
+  `mxbikes.exe`, the error says so and points at Settings.
+- **Swapping a model now changes it in-game instantly, on the bike you have selected.**
+  A model swap moved the files and re-ran the game's *customization* loader — which
+  reloads paints and gear but never the bike mesh, so the garage kept showing the old
+  model until you switched bike class away and back. The Locker now also asks FrostMod
+  to re-apply the bike (new `refresh_bike_model` command), which re-reads it from disk
+  and brings the new model up immediately. FrostMod acts only on the bike you currently
+  have selected, so swapping any other bike never disturbs what you're looking at.
+  Presets get the same treatment when they carry a model swap. Gated on the existing
+  **Instant refresh** setting, since it reaches into the running game.
+
 ### Fixed
 - **Browse now clears mxb-mods.com's bot protection with a real browser instead of trying
   to impersonate one.** A user on v0.6.3 still hit `403 Forbidden` on every browse, which
@@ -27,6 +55,23 @@
 
   Honest caveat, same as last time: this is still not reproducible here, so it's verified
   by construction and tests rather than by watching it cure the reported fault.
+- **The Locker no longer claims a model swap "Refreshed live in-game" when it didn't.**
+  The note was derived purely from the look-loader call succeeding, which says nothing
+  about whether the mesh reloaded — so it read as done while the garage still showed the
+  old model. Model and sound swaps now report separately, and the model note reflects
+  what actually happened: refreshing now, FrostMod not running, or instant refresh off.
+### Fixed
+- **Browse knows what you already have.** The "Installed" badge almost never appeared —
+  one reporter's library scored 19 of 96 tracks and **0 of 96** bikes and rider items,
+  all of them installed and working in-game. Two causes. Browse asked for installed mods
+  with a scan that keeps `.pkz` files only, so extracted track folders and every `.pnt`
+  paint were invisible; since the Bikes and Rider categories are mostly liveries and gear
+  paints, nothing in them could ever be badged. And it compared the site's post title to
+  the packaged filename as exact strings, which post titles never survive — they carry
+  author credits, release tags and notes like "(READ INSTRUCTIONS)". Browse now reads the
+  same full library scan the Library tab uses, and matches titles the way a person would:
+  one name spelled inside the other, or enough distinctive words in common. Careful
+  enough to still tell two colourways of the same bike apart. (#26)
 - **Presets no longer comes up blank when your mods folder lives somewhere else.**
   `mxbikes.ini` lets you point the mods folder at another drive, but the game has no
   equivalent redirect for profiles — it keeps writing those to
