@@ -186,40 +186,69 @@ pub struct RiderTargets {
     pub profiles: Vec<String>,
 }
 
-pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
-    let base = mods_subdir(mods_path, "mods/rider");
-    let models_in = |sub: &str| -> Vec<String> {
-        let mut out = Vec::new();
-        if let Ok(rd) = fs::read_dir(base.join(sub)) {
-            for e in rd.flatten() {
-                let path = e.path();
-                if path.is_dir() {
-                    if let Some(n) = e.file_name().to_str() {
-                        out.push(n.to_string());
-                    }
-                } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("pkz")) {
-                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        out.push(stem.to_string());
-                    }
+/// Installable content sitting directly in `dir`, by the name you'd address it as: a
+/// sub-folder verbatim, a `.pkz` by its stem. Sorted, case-insensitively deduped.
+fn models_in(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                if let Some(n) = e.file_name().to_str() {
+                    out.push(n.to_string());
+                }
+            } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("pkz")) {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    out.push(stem.to_string());
                 }
             }
         }
-        out.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
-        out.dedup();
-        out
-    };
+    }
+    sort_dedup(&mut out);
+    out
+}
+
+/// Sort case-insensitively and drop repeats that differ only in case — the same bike
+/// reached as a folder and as a bike id must not be offered twice.
+fn sort_dedup(v: &mut Vec<String>) {
+    v.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    v.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+}
+
+pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
+    let base = mods_subdir(mods_path, "mods/rider");
     RiderTargets {
-        helmets: models_in("helmets"),
+        helmets: models_in(&base.join("helmets")),
         // Absent for GP Bikes, which bakes boots and protection into the rider model —
         // the folders simply aren't there, and `models_in` returns empty for those.
-        boots: models_in("boots"),
-        protection: models_in("protection"),
+        boots: models_in(&base.join("boots")),
+        protection: models_in(&base.join("protection")),
         // GP Bikes' riding-style animations. Nothing writes here for MX Bikes.
-        animations: models_in("animations"),
+        animations: models_in(&base.join("animations")),
         // A rider model can be packed as `riders/<name>.pkz` just as gear can, and a
         // profile the picker never lists is a model nobody can wear.
-        profiles: models_in("riders"),
+        profiles: models_in(&base.join("riders")),
     }
+}
+
+/// Every bike a paint could be installed for.
+///
+/// Two sources, because neither is complete on its own. `mods/bikes` has the mod bikes —
+/// a `.pkz` package or an unpacked folder. OEM bikes have neither: their files live inside
+/// the game's locked archive, so until someone installs a paint for one there is nothing of
+/// it on disk at all. The profile is where their ids can still be read, since the game
+/// writes a line per bike it knows.
+pub fn scan_bike_targets(mods_path: &str, profiles_dir: &Path) -> Vec<String> {
+    let mut out = models_in(&mods_subdir(mods_path, "mods/bikes"));
+    for profile in crate::presets::list_profiles(profiles_dir) {
+        // A profile we can't read is one source short, never an error — the folders above
+        // still stand on their own.
+        if let Ok(bikes) = crate::presets::list_bikes(profiles_dir, &profile) {
+            out.extend(bikes);
+        }
+    }
+    sort_dedup(&mut out);
+    out
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -593,6 +622,45 @@ mod tests {
 
     fn cat<'a>(v: &'a [LibraryEntry], name: &str) -> Option<&'a LibraryEntry> {
         v.iter().find(|e| e.name.eq_ignore_ascii_case(name))
+    }
+
+    #[test]
+    fn bike_targets_merge_disk_folders_with_profile_bike_ids() {
+        let root = tmp("bike-targets");
+        let bikes = root.join("mods/bikes");
+        touch(&bikes.join("CLUBMX YZ450F.pkz")); // packaged mod bike
+        touch(&bikes.join("MX1OEM_2023_KTM_450_SX-F/paints/red.pnt")); // OEM, paints only
+        // Same bike again by id — the profile must not double it up.
+        touch(
+            &root.join("profiles/Rider One/profile.ini"),
+        );
+        fs::write(
+            root.join("profiles/Rider One/profile.ini"),
+            "[rider]\nMX1OEM_2023_KTM_450_SX-F=default_mx\nMX2OEM_2023_KTM_250_SX-F=default_mx\n",
+        )
+        .unwrap();
+
+        let out = scan_bike_targets(root.to_str().unwrap(), &root.join("profiles"));
+
+        assert_eq!(
+            out,
+            vec![
+                "CLUBMX YZ450F".to_string(),
+                "MX1OEM_2023_KTM_450_SX-F".to_string(),
+                // Never touched the disk — only the profile knows this one exists.
+                "MX2OEM_2023_KTM_250_SX-F".to_string(),
+            ]
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bike_targets_survive_a_missing_profiles_folder() {
+        let root = tmp("bike-targets-noprofiles");
+        touch(&root.join("mods/bikes/Some Bike.pkz"));
+        let out = scan_bike_targets(root.to_str().unwrap(), &root.join("nope"));
+        assert_eq!(out, vec!["Some Bike".to_string()]);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

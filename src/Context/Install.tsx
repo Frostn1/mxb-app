@@ -64,8 +64,9 @@ interface InstallContextValue {
     p: Omit<StartParams, "source"> & { url: string; host: string },
   ) => void;
   startImport: (p: Omit<StartParams, "source"> & { path: string }) => void;
-  /** Install a purchased MX Bikes Shop track (to the tracks root). */
-  startShopInstall: (item: ShopItem) => void;
+  /** Install a purchased MX Bikes Shop track. Defaults to the tracks root when the caller
+   *  hasn't resolved a folder (see `resolveTrackDest`). */
+  startShopInstall: (item: ShopItem, destFolder?: string) => void;
   /** Clear a finished (done/error) install card. */
   clear: () => void;
 }
@@ -245,12 +246,12 @@ export function InstallProvider({
   );
 
   const startShopInstall: InstallContextValue["startShopInstall"] = useCallback(
-    (item) =>
+    (item, destFolder = "") =>
       enqueue({
         slug: item.slug,
         title: item.title,
         subpath: "mods/tracks",
-        destFolder: "",
+        destFolder,
         source: { kind: "shop", item },
       }),
     [enqueue],

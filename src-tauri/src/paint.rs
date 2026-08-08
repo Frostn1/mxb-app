@@ -1,11 +1,3 @@
-//! `.pnt` layout, little-endian:
-//! ```text
-//! Header (108 bytes): magic[4]="PNT\0", basename[100], count u32
-//! Per record: filename[100], width u32, height u32, md5[16],
-//!             data_size u32 (= 8 padding + compressed len), padding[8],
-//!             data[data_size-8]  raw DEFLATE (wbits -15)
-//! ```
-
 use anyhow::{bail, Context, Result};
 use flate2::read::DeflateDecoder;
 use serde::Serialize;
@@ -23,7 +15,6 @@ pub struct PntTexture {
     pub name: String,
     pub width: u32,
     pub height: u32,
-    /// Row-major RGBA8, `width * height * 4` bytes, top-left origin.
     pub rgba: Vec<u8>,
 }
 
@@ -33,8 +24,6 @@ pub struct PaintTexture {
     pub name: String,
     pub width: u32,
     pub height: u32,
-    /// Names the pixels in [`crate::texstore`]. Cloning this struct is cheap, which is why
-    /// a paint can carry the model's whole base texture set without duplicating megabytes.
     pub token: String,
 }
 
@@ -80,7 +69,6 @@ pub fn decode(buf: &[u8]) -> Result<Vec<PntTexture>> {
             bail!("texture {i} '{name}': payload runs past end of file");
         }
 
-        // Raw DEFLATE (no zlib header) → RGBA, already in order (no channel swap).
         let mut rgba = Vec::with_capacity((width as usize) * (height as usize) * 4);
         DeflateDecoder::new(&buf[data_start..data_end])
             .read_to_end(&mut rgba)
@@ -112,12 +100,9 @@ pub fn decode_any(buf: &[u8]) -> Result<Vec<PntTexture>> {
     if let Some(plain) = crate::pkz::read_sidecar_blob(buf) {
         return decode(&plain);
     }
-    decode(buf) // not PNT and no sidecar reader for it → report bad magic
+    decode(buf)
 }
 
-/// Hand pixels to the store and describe them. The viewer reads RGBA straight into a
-/// `DataTexture`, so nothing is encoded here — this used to be a PNG compress plus a base64
-/// pass per texture, which is what made loading a bike peg every core for seconds.
 fn store_rgba(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> PaintTexture {
     PaintTexture {
         name: name.to_string(),
@@ -127,19 +112,12 @@ fn store_rgba(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> PaintTextur
     }
 }
 
-/// Longest edge the viewer is given. Beyond this the extra pixels cost memory without
-/// showing on a preview-sized model.
 const MAX_EDGE: u32 = 1024;
 
 pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
     extract_edf_textures_where(edf, |_| true)
 }
 
-/// The textures of [`extract_edf_textures`] whose names `want` accepts.
-///
-/// Inflating a 2048² blob and re-encoding it is the expensive part of this by a wide margin
-/// — on a rider body it dwarfs parsing the mesh. A caller that already knows it will throw a
-/// texture away shouldn't pay to decode it first.
 pub fn extract_edf_textures_where(
     edf: &[u8],
     want: impl Fn(&str) -> bool,
@@ -153,7 +131,6 @@ pub fn extract_edf_textures_where(
         .filter(|t| want(&t.name))
         .filter_map(|t| {
             let rgba = crate::edf::inflate_texture(edf, t)?;
-            // Embedded edf textures are already RGBA — no channel swap.
             let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
                 t.width, t.height, rgba,
             )?);
@@ -184,7 +161,6 @@ pub fn to_texture(t: &PntTexture) -> PaintTexture {
 }
 
 pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
-    // TGA has no magic, so try it explicitly first, then fall back to sniffing.
     let img = image::codecs::tga::TgaDecoder::new(Cursor::new(bytes))
         .ok()
         .and_then(|d| image::DynamicImage::from_decoder(d).ok())
@@ -203,7 +179,6 @@ pub fn unpack_file(path: &Path) -> Result<Vec<PaintTexture>> {
 mod tests {
     use super::*;
 
-    /// `MXB_PNT='…/gloves/x.pnt' cargo test dump_pnt_names -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn dump_pnt_names() {
@@ -234,7 +209,6 @@ mod tests {
         let t = &texs[0];
         assert_eq!(t.name, "livery");
         assert_eq!((t.width, t.height), (4, 4));
-        // Pixels come back exactly as stored — no channel reordering.
         assert_eq!(
             t.rgba,
             fixture_stored_pixels(),
@@ -242,7 +216,6 @@ mod tests {
         );
     }
 
-    /// Local-only: `MXB_REAL_EDF=<model.edf> cargo test extract_edf_textures -- --ignored --nocapture`.
     #[test]
     #[ignore]
     fn extract_edf_textures_from_env() {
@@ -272,7 +245,6 @@ mod tests {
         let texs = decode(FIXTURE_PNT).unwrap();
         let out = to_texture(&texs[0]);
         assert_eq!((out.width, out.height), (4, 4));
-        // Under MAX_EDGE, so the pixels reach the viewer untouched — no resample, no encode.
         assert_eq!(
             *crate::texstore::get(&out.token).expect("token resolves"),
             fixture_stored_pixels()
@@ -291,7 +263,6 @@ mod tests {
         assert_eq!(texs[0].rgba, fixture_stored_pixels());
     }
 
-    /// `MXB_STOCK_PNT=<…/rider.pkz extracted>/white_navy.pnt cargo test -- --ignored`.
     #[test]
     #[ignore]
     fn stock_white_navy_decodes_navy_not_brown() {
@@ -302,7 +273,6 @@ mod tests {
         let bytes = std::fs::read(&path).expect("read stock paint");
         let texs = decode_any(&bytes).expect("decode stock paint");
         let t = texs.iter().find(|t| t.name == "rider").expect("'rider' texture");
-        // The darkest saturated pixels are the navy: blue must beat red.
         let (mut blue_dom, mut red_dom) = (0u32, 0u32);
         for px in t.rgba.chunks_exact(4) {
             let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
@@ -321,7 +291,6 @@ mod tests {
         );
     }
 
-    /// `MXB_REAL_PNT=<non-PNT container> cargo test -- --ignored`
     #[test]
     #[ignore]
     fn decodes_sidecar_paint_from_env() {
@@ -339,4 +308,3 @@ mod tests {
         }
     }
 }
-

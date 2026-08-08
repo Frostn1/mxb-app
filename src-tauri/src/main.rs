@@ -260,6 +260,18 @@ fn scan_rider_targets_blocking(app: tauri::AppHandle) -> Result<library::RiderTa
 }
 
 #[tauri::command]
+async fn scan_bike_targets(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || scan_bike_targets_blocking(app))
+        .await
+        .map_err(|e| format!("scan_bike_targets task failed: {e}"))?
+}
+
+fn scan_bike_targets_blocking(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    Ok(library::scan_bike_targets(&cfg.mods_path, &cfg.profiles_dir()))
+}
+
+#[tauri::command]
 async fn scan_model_swaps(app: tauri::AppHandle) -> Result<Vec<modelswap::BikeModels>, String> {
     tauri::async_runtime::spawn_blocking(move || scan_model_swaps_blocking(app))
         .await
@@ -3205,6 +3217,7 @@ fn main() {
             list_gear_paints,
             list_installed_gear_paints,
             scan_rider_targets,
+            scan_bike_targets,
             scan_model_swaps,
             apply_model_swap,
             scan_sound_swaps,

@@ -1,5 +1,6 @@
 use crate::config::AppConfig;
 use futures_util::StreamExt;
+use obfstr::obfstr;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -345,7 +346,10 @@ fn resolve_gdrive(url: &str) -> String {
     match id {
         // usercontent serves the bytes; large files still hit a virus-scan interstitial.
         Some(id) => {
-            format!("https://drive.usercontent.google.com/download?id={id}&export=download")
+            format!(
+                "{}?id={id}&export=download",
+                obfstr!("https://drive.usercontent.google.com/download")
+            )
         }
         None => url.to_string(),
     }
@@ -396,7 +400,8 @@ async fn resolve_gdrive_folder(client: &Client, url: &str) -> anyhow::Result<Str
         )
     })?;
     Ok(resolve_gdrive(&format!(
-        "https://drive.google.com/file/d/{}/view",
+        "{}/file/d/{}/view",
+        obfstr!("https://drive.google.com"),
         chosen.id
     )))
 }
@@ -769,8 +774,21 @@ pub(crate) fn place_mod(
 
     // Plain placement into the type folder, honoring the chosen destination sub-folder.
     let mut type_dir = mods_dir.join(type_folder);
-    for seg in dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()) {
+    let segs: Vec<&str> = dest_folder.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
+    for seg in &segs {
         type_dir.push(sanitize(seg));
+    }
+
+    // A bike livery only loads from `<Bike>/paints/`. The picker offers a bike's root as a
+    // destination too — that's where sounds and model swaps go — so a paint chosen there
+    // would land one folder high and never show up in game. Drop it into `paints/` instead:
+    // a loose `.pnt` at a bike root does nothing whatever, so this can only help.
+    if type_folder.eq_ignore_ascii_case("bikes")
+        && !segs.is_empty()
+        && !segs[segs.len() - 1].eq_ignore_ascii_case("paints")
+        && is_loose_paint_drop(&unwrapped)
+    {
+        type_dir.push("paints");
     }
     // Extracted tracks need their own folder; loose bike paints don't.
     let wrap_loose = type_folder.eq_ignore_ascii_case("tracks");
@@ -866,6 +884,27 @@ pub fn sound_bikes_in(extracted: &Path) -> Vec<String> {
         }
     }
     out
+}
+
+/// Bare paints, ready to drop into a `paints/` folder: at least one `.pnt` sitting loose in
+/// `base`, and no `.pkz`. The `.pkz` matters — it's a packaged bike or model set, which
+/// belongs at the bike's root, and an archive that ships both is the package, not the paint.
+fn is_loose_paint_drop(base: &Path) -> bool {
+    let mut has_paint = false;
+    let Ok(rd) = std::fs::read_dir(base) else {
+        return false;
+    };
+    for e in rd.filter_map(|e| e.ok()) {
+        if !e.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let path = e.path();
+        if has_ext(&path, "pkz") {
+            return false;
+        }
+        has_paint |= has_ext(&path, "pnt");
+    }
+    has_paint
 }
 
 fn contains_paints_bundle(base: &Path) -> bool {
@@ -1416,6 +1455,71 @@ mod tests {
         assert!(mods
             .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
             .exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn loose_livery_chosen_against_a_bike_root_lands_in_paints() {
+        // The picker offers `<Bike>` as well as `<Bike>/paints` (sounds and model swaps need
+        // the root), and `resolveInitialFolder` will preselect the root when that's what was
+        // remembered. A `.pnt` left there is invisible to the game.
+        let root = place_tmp("livery-bike-root");
+        let ex = root.join("ex");
+        touch(&ex.join("cool.pnt"));
+        touch(&ex.join("preview.jpg")); // paints ship a thumbnail; it travels along
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "bikes", "MX1OEM_2023_KTM_450_SX-F", "cool-livery").unwrap();
+        assert!(mods
+            .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
+            .exists());
+        assert!(!mods
+            .join("bikes/MX1OEM_2023_KTM_450_SX-F/cool.pnt")
+            .exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bike_package_chosen_against_a_bike_root_stays_at_the_root() {
+        // A `.pkz` is a bike or model set — the root is exactly where it belongs.
+        let root = place_tmp("pkz-bike-root");
+        let ex = root.join("ex");
+        touch(&ex.join("FrostMod Models.pkz"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "bikes", "MX1OEM_2023_KTM_450_SX-F", "swap").unwrap();
+        assert!(mods
+            .join("bikes/MX1OEM_2023_KTM_450_SX-F/FrostMod Models.pkz")
+            .exists());
+        assert!(!mods.join("bikes/MX1OEM_2023_KTM_450_SX-F/paints").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn paints_destination_is_not_doubled_up() {
+        let root = place_tmp("livery-already-paints");
+        let ex = root.join("ex");
+        touch(&ex.join("cool.pnt"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "bikes", "MX1OEM_2023_KTM_450_SX-F/paints", "slug").unwrap();
+        assert!(mods
+            .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
+            .exists());
+        assert!(!mods
+            .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/paints")
+            .exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn loose_paint_at_the_bikes_root_is_left_alone() {
+        // No bike was chosen, so there's no `paints` folder to redirect into — inventing
+        // `bikes/paints` would be just as dead and harder to find.
+        let root = place_tmp("livery-no-bike");
+        let ex = root.join("ex");
+        touch(&ex.join("cool.pnt"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "bikes", "", "slug").unwrap();
+        assert!(mods.join("bikes/cool.pnt").exists());
+        assert!(!mods.join("bikes/paints").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

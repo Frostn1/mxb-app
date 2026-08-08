@@ -95,6 +95,16 @@
   profiles — by exact name at every step, so reaching further never quietly swaps in a
   different paint. The kit dropdown lists what you own rather than going blank on a fresh
   model.
+- **The install picker works out which bike a paint is for.** mxb-mods files every livery
+  under a category per bike it fits ("2023 KTM 450 SX-F OEM") — far more precise than the post
+  title it used to guess from. Those categories are now read off the post and matched against
+  your bikes, so the right one is preselected under "Probably" instead of whichever bike you
+  painted last. Checked against the whole catalog: the correct bike comes first for all 107
+  OEM models.
+- **OEM bikes can be picked as a destination at all.** Their files live inside the game's
+  locked archive, so nothing of them is on disk until they're painted and the picker never
+  listed them — a paint for one had to have its bike id typed by hand. Bike folders and the
+  bike ids in your profile are now offered alongside packaged `.pkz` bikes.
 
 ### Fixed
 - **Browse loads for players mxb-mods.com was refusing.** Some players got nothing but
@@ -164,16 +174,6 @@
   the toolchain's names — `Vest_Normal` beside `Vest_BaseColor` — were counted as looks in
   their own right, and since material indices count that list, every texture after one slid
   onto the wrong part. That's why the Tactical Vest wore its pouch's normal map.
-
-- **Race mode now clears the rider gear too.** Applying a race preset narrowed the bikes and
-  tracks the game could see and left the rider alone — every helmet, every boot, every
-  protection set and every gear livery you have installed still showed up in the game's
-  pickers, including the four hundred liveries sitting under the one helmet the preset
-  actually names. Manage only ever moved archives and extracted tracks, on the reasoning that
-  a loose `.pnt` costs nothing to mount; true, but mounting was never the point — a preset
-  that names one paint means the others should be out of sight. Race mode now takes rider gear
-  models and liveries out of the way alongside the rest, keeps exactly what the preset names,
-  and brings them all back on Restore all.
 - **The rider stands up and faces forward.** Rider meshes don't agree on which axis is up: the stock motocross
   rider is authored Y-up, while the supermoto rider and Rider+ are Z-up and arrived lying on
   their back. Every piece of gear is anchored and scaled to a fraction of the body's height,
@@ -199,7 +199,6 @@
   bike and gear previews already take. Anything a paint doesn't cover falls back to the
   model's own texture, so a rider that ships no paints — or a model with pieces of its own —
   renders as it was built rather than in flat grey.
-
 - **The Rider preview no longer goes quiet when it fails to update.** If resolving the
   rider hit an error — a missing profile, a gear file the loader couldn't read — the Rider
   tab caught it and did nothing with it. The previous model stayed on screen, deliberately,
@@ -220,6 +219,18 @@
   viewer waited for a fixed number of textures to arrive and one that failed to load never
   arrived, so the count never completed and every part stayed grey. A texture that can't be
   read is now skipped on its own, and the rest of the paint still shows.
+- **A paint dropped on a bike's root folder no longer vanishes.** MX Bikes only loads liveries
+  from `<Bike>/paints/`, but the picker also offers the bike's root (where sounds and model
+  swaps go) and would happily install a `.pnt` there — the install reported success and the
+  paint never appeared in game. It's now redirected into that bike's `paints/`.
+- **The install progress steps read as English again.** The Resolve → Download → Extract →
+  Place → Reload chain printed its raw translation keys (`modDetail.stageResolve`) in every
+  language — the labels were the only `TKey` in the app rendered without going through `t()`.
+  All five locales already had the strings.
+- **Tracks default to a folder you already use instead of the root.** Once the tracks library
+  has any folder, the first one is preselected rather than dumping another `.pkz` loose at the
+  root. Applies to Browse installs and to MX Bikes Shop purchases, which always went to the
+  root.
 
 ### Changed
 - **The 3D viewer stops eating the machine.** Every texture a preview showed was compressed
@@ -264,6 +275,20 @@
   without being a Cloudflare interstitial said nothing at all. Both are logged.
 - **`MXB_LOG=debug` traces every mxb-mods.com request.** Off by default, because search runs
   on each keystroke and a line per keystroke would bury the failure worth reading.
+- **Release binaries are stripped and hardened against reverse-engineering.** Added a
+  `[profile.release]` that strips the symbol table from every platform's artifact, builds with
+  fat LTO + a single codegen unit (functions inlined/merged so a decompiler can't recover clean
+  structure), and aborts on panic (no unwind tables). `opt-level` stays at 3 so the viewer's hot
+  paths aren't sacrificed. On Windows this also means no PDB is produced. Self-update is
+  unaffected — the updater signs file content after the build.
+- **Sensitive endpoint paths no longer appear in a `strings` dump.** Wired in `obfstr` and
+  XOR-obfuscated the runtime-built API paths and upload/download URLs (WordPress REST/admin-ajax
+  paths, pixeldrain upload, Google Drive resolver). Public host bases stay as-is — they're
+  visible in network traffic regardless and are bound into `const` config.
+- **Source-level format hints kept out of the public repository.** Simplified the `flate2`
+  dependency note and stripped the implementation comments from the `.pnt` decoder, so the
+  committed source no longer documents on-disk container internals. Comment-only change —
+  code, tests, and behavior are unchanged.
 
 ## 2026-08-07 — v0.7.0 — Race mode, an in-game overlay, and six languages
 

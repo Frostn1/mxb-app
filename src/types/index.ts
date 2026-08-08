@@ -122,6 +122,12 @@ export interface ModDetail {
   /** e.g. "Beta 19", when the page states it. */
   version: string | null;
   downloads: DownloadOption[];
+  /**
+   * The post's category names ("2023 KTM 450 SX-F OEM", "Liveries", "KTM"). A livery is
+   * filed under one category per bike it fits, which names its target far more precisely
+   * than the title does — see `bikesFromCategories` in `api/mods`.
+   */
+  categories: string[];
 }
 
 /** An installed `.pkz` mod file found under the type's folder (at any depth). */

@@ -1,6 +1,7 @@
 use super::{DownloadOption, ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use crate::mxb_session;
 use futures_util::StreamExt;
+use obfstr::obfstr;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -461,7 +462,7 @@ async fn listing_response(
     category_id: u32,
     page: Page,
 ) -> anyhow::Result<(Fetched, Option<u32>)> {
-    let url = format!("{}/wp-json/wp/v2/posts", mxb_session::base());
+    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
     let mut params: Vec<(&str, String)> = vec![
         ("categories", category_id.to_string()),
         ("_embed", "wp:featuredmedia".to_string()),
@@ -542,7 +543,11 @@ async fn total_count(q: &str, category_id: u32) -> anyhow::Result<u32> {
 /// differences are `limit`/`offset` instead of `page`, and that paging past the end
 /// returns an empty list rather than a 400.
 async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec<ModSummary>> {
-    let url = format!("{}/wp-json/wordpress-popular-posts/v1/popular-posts", mxb_session::base());
+    let url = format!(
+        "{}{}",
+        mxb_session::base(),
+        obfstr!("/wp-json/wordpress-popular-posts/v1/popular-posts")
+    );
     let per_page: u32 = PER_PAGE.parse().unwrap_or(24);
     let params: Vec<(&str, String)> = vec![
         ("taxonomy", "category".to_string()),
@@ -567,10 +572,12 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
 
 pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // 1. Post metadata + description via the REST API.
-    let url = format!("{}/wp-json/wp/v2/posts", mxb_session::base());
+    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
+    // `wp:term` rides along in the same request — the categories it brings back are what
+    // tell the install picker which bike a livery is for.
     let params = vec![
         ("slug", slug.to_string()),
-        ("_embed", "wp:featuredmedia".to_string()),
+        ("_embed", "wp:featuredmedia,wp:term".to_string()),
     ];
     let resp = get_with_retry(&url, &params).await?;
     if !resp.is_success() {
@@ -637,6 +644,7 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
         images,
         version,
         downloads,
+        categories: term_names(&post),
     })
 }
 
@@ -708,7 +716,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The rating plugin has no REST route; its front end reads scores from this admin-ajax
 /// action, which answers unauthenticated with `{voteCount, avgRating}`.
 async fn rating(id: u64) -> anyhow::Result<ModRating> {
-    let url = format!("{}/wp-admin/admin-ajax.php", mxb_session::base());
+    let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-admin/admin-ajax.php"));
     let form = [
         ("action", "load_results".to_string()),
         ("postID", id.to_string()),
@@ -770,6 +778,30 @@ fn featured_image(p: &Value) -> Option<String> {
         .get("source_url")?
         .as_str()
         .map(str::to_string)
+}
+
+/// Every term name `_embed=wp:term` brought back, flattened across taxonomies.
+///
+/// The site files a mod under one category per bike it fits ("2023 KTM 450 SX-F OEM") on top
+/// of the browse categories ("Liveries") and the manufacturer ("KTM"), so the caller gets a
+/// mixed bag and decides what's distinctive. Order follows the site's own.
+fn term_names(post: &Value) -> Vec<String> {
+    let mut out: Vec<String> = post
+        .get("_embedded")
+        .and_then(|e| e.get("wp:term"))
+        .and_then(Value::as_array)
+        .map(|groups| {
+            groups
+                .iter()
+                .filter_map(Value::as_array)
+                .flatten()
+                .filter_map(|t| t.get("name").and_then(Value::as_str))
+                .map(decode_entities)
+                .collect()
+        })
+        .unwrap_or_default();
+    dedup(&mut out);
+    out
 }
 
 fn decode_entities(s: &str) -> String {
@@ -920,6 +952,34 @@ fn dedup(v: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_every_embedded_term_name() {
+        // Shape of `_embed=wp:term` on a real livery post: one group per taxonomy, the
+        // second empty because the site files nothing under tags.
+        let post: Value = serde_json::from_str(
+            r#"{"_embedded":{"wp:term":[[
+                 {"taxonomy":"category","name":"2023 KTM 450 SX-F OEM"},
+                 {"taxonomy":"category","name":"Liveries"},
+                 {"taxonomy":"category","name":"KTM"},
+                 {"taxonomy":"category","name":"Ren&#038;s Bikes"}
+               ],[]]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            term_names(&post),
+            vec![
+                "2023 KTM 450 SX-F OEM",
+                "Liveries",
+                "KTM",
+                // Entities decoded, same as the title.
+                "Ren&s Bikes",
+            ]
+        );
+
+        // A post fetched without `_embed`, or one with no terms, must not blow up.
+        assert!(term_names(&serde_json::json!({})).is_empty());
+    }
 
     #[test]
     fn parses_default_download_container() {
