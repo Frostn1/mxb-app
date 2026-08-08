@@ -46,7 +46,10 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [hidden, setHidden] = useState<RiderPart["part"][]>(["protection"]);
+  // Nothing hidden to start. Protection used to be, back when it came out of the loader as
+  // a grey blob scaled to the whole torso — with the piece drawn as authored there's no
+  // reason to hide the slot the rider tab is most often opened for.
+  const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
   const [error, setError] = useState<string | null>(null);
   const [gearPaints, setGearPaints] = useState<Record<"helmet" | "boots" | "protection", GearPaints>>({
     helmet: EMPTY_GEAR_PAINTS,

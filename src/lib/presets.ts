@@ -4,6 +4,7 @@ import {
   scanLibrary,
   scanRiderTargets,
   scanModelSwaps,
+  STOCK_RIDER_PROFILES,
   type RiderTargets,
 } from "../api/mods";
 
@@ -74,6 +75,10 @@ const BUILTINS: Partial<Record<keyof Loadout, string[]>> = {
   helmet: ["default"],
   boots: ["default"],
   protection: ["full", "neck"],
+  // The two rider bodies the game ships. They live in `rider.pkz` and leave nothing on
+  // disk, so the scan can only see one of them once you've installed a kit under it —
+  // which left the supermoto rider unpickable.
+  rider: [...STOCK_RIDER_PROFILES],
   bikeFont: ["default_black", "default_white"],
   suitFont: ["default_white", "default_black"],
   ridingStyle: ["mx", "sm"],
@@ -209,6 +214,18 @@ function forProfile(map: Record<string, string[]>, profile: string): string[] {
   return profile ? (map[profile] ?? []) : Object.values(map).flat();
 }
 
+/**
+ * Kit paints for `profile`, plus every kit installed under another profile.
+ *
+ * A rider model isn't a wardrobe: Rider+ ships its `paints` folder empty on purpose, because
+ * the kits you already own are meant to work on it. Scoping the list to the chosen model
+ * just empties the dropdown. Gloves already read this way — `scans.gloves` is one flat list
+ * — so this only makes the two consistent.
+ */
+function acrossProfiles(map: Record<string, string[]>, profile: string): string[] {
+  return [...(map[profile] ?? []), ...Object.values(map).flat()];
+}
+
 export function slotOptions(
   slot: SlotDef,
   bikeid: string,
@@ -251,7 +268,7 @@ export function slotOptions(
       opts = scans.gloves;
       break;
     case "suitPaint":
-      opts = forProfile(scans.outfits, loadout.rider);
+      opts = acrossProfiles(scans.outfits, loadout.rider);
       break;
     case "rider":
       opts = scans.riderProfiles;

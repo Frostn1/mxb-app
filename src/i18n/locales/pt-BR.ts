@@ -146,6 +146,8 @@ export const ptBR: Translation = {
     "“{{label}}” aplicado em {{bike}} — salvo. Selecione seu perfil de novo no MX Bikes (menu Profile) para carregar o novo visual.",
   "presets.appliedNextTime":
     "“{{label}}” aplicado em {{bike}} — salvo. Carrega na próxima vez que o jogo abrir.",
+  "presets.appliedReselectBike":
+    "“{{label}}” aplicado em {{bike}} — as pinturas já estão valendo; selecione a moto de novo no MX Bikes para ver o modelo.",
   "presets.phaseBundling": "Empacotando os arquivos…",
   "presets.phaseUploading": "Enviando o pacote…",
   "presets.phaseDownloading": "Baixando o pacote…",
@@ -682,8 +684,8 @@ export const ptBR: Translation = {
     "Atualizando no jogo — se for a moto que você tem selecionada, ela muda agora.",
   "locker.modelFrostmodNotRunning":
     "Rode o FrostMod para ver as trocas de modelo ao vivo — por enquanto, selecione a moto de novo no jogo.",
-  "locker.modelFrostmodTooOld":
-    "Atualize o FrostMod para ver as trocas de modelo ao vivo — por enquanto, selecione a moto de novo no jogo.",
+  "locker.modelReselectBike":
+    "Modelo trocado — selecione a moto de novo no MX Bikes para vê-lo.",
   "locker.modelFrostmodUnreachable":
     "Não deu pra falar com o FrostMod — selecione a moto de novo no jogo para carregar.",
   "locker.modelRefreshWindowsOnly":
@@ -856,10 +858,15 @@ export const ptBR: Translation = {
   "manage.contentSaved": "Conteúdo de corrida salvo para “{{name}}”.",
   "manage.contentTitle": "Conteúdo de corrida de “{{name}}”",
   "manage.contentBody":
-    "A pintura, o equipamento e a troca de modelo do preset são encontrados sozinhos. Aqui fica o que um loadout não consegue dizer: a pista e os pacotes que uma corrida precisa de qualquer jeito.",
+    "A pintura, o equipamento e a troca de modelo do preset são encontrados sozinhos. Aqui fica o resto: a pista, os modelos de equipamento extras que valem a pena manter e os pacotes que uma corrida precisa de qualquer jeito.",
   "manage.paneTracks": "Pistas",
+  "manage.paneHelmets": "Capacetes",
+  "manage.paneBoots": "Botas",
+  "manage.paneProtection": "Proteções",
   "manage.paneKeep": "Manter sempre",
   "manage.paneTracksHint": "A pista (ou pistas) para as quais este preset serve.",
+  "manage.paneGearHint":
+    "Modelos extras para deixar no seletor do jogo. O equipamento do próprio preset é mantido sozinho — marque aqui o que você ainda quer poder escolher. Tudo o que ficar desmarcado sai do caminho.",
   "manage.paneKeepHint":
     "Mods que continuam ativos aconteça o que acontecer — o pacote OEM, a moto deste preset, um mod de som.",
   "manage.notInstalled": "não instalado",
