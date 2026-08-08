@@ -257,6 +257,7 @@ export const it: Translation = {
   "viewer.loadingModel": "Caricamento modello…",
   "viewer.loadingPaint": "Caricamento grafica…",
   "viewer.loadingRider": "Caricamento pilota…",
+  "viewer.riderLoadFailed": "Anteprima non aggiornata — impossibile aggiornarla",
   "viewer.dragToRotate": "Trascina per ruotare",
   "viewer.scrollToZoom": "Scorri per zoomare",
   "viewer.rightDragToPan": "Trascina col destro per spostare",

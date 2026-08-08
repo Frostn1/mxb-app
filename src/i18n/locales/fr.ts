@@ -262,6 +262,7 @@ export const fr: Translation = {
   "viewer.loadingModel": "Chargement du modèle…",
   "viewer.loadingPaint": "Chargement de la déco…",
   "viewer.loadingRider": "Chargement du pilote…",
+  "viewer.riderLoadFailed": "Aperçu obsolète — impossible de le mettre à jour",
   "viewer.dragToRotate": "Glisser pour pivoter",
   "viewer.scrollToZoom": "Molette pour zoomer",
   "viewer.rightDragToPan": "Clic droit glissé pour déplacer",
