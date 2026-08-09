@@ -1,7 +1,10 @@
 use anyhow::{bail, Context, Result};
 use flate2::read::DeflateDecoder;
+use flate2::write::DeflateEncoder;
+use flate2::Compression;
+use md5::{Digest, Md5};
 use serde::Serialize;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 const MAGIC: &[u8; 4] = b"PNT\x00";
@@ -9,6 +12,8 @@ const HEADER_SIZE: usize = 108;
 const NAME_SIZE: usize = 100;
 const IMAGE_HEADER_SIZE: usize = NAME_SIZE + 4 + 4 + 16 + 4;
 const IMAGE_PADDING: usize = 8;
+/// The digest between a texture's dimensions and its payload length — see [`encode`].
+const DIGEST_SIZE: usize = 16;
 
 #[derive(Debug, Clone)]
 pub struct PntTexture {
@@ -137,6 +142,99 @@ pub fn decode_any(buf: &[u8]) -> Result<Vec<PntTexture>> {
         return decode(&plain);
     }
     decode(buf)
+}
+
+/// Whether `buf` is a paint stored in the open format this module also writes.
+///
+/// [`decode_any`] deliberately reads a wider set than this, because a preview should show
+/// whatever the game would show. Writing a paint back out as editable sheets is not that:
+/// it hands someone an author's work in a form they can change and republish, so it is
+/// offered only for a paint that was already stored openly. Rendering is not permission.
+pub fn is_plain(buf: &[u8]) -> bool {
+    buf.len() >= 4 && &buf[..4] == MAGIC
+}
+
+/// A texture name as the format stores it: `NAME_SIZE` bytes, NUL-terminated and
+/// NUL-padded. Names are the whole binding mechanism — a paint replaces a mesh's texture
+/// by matching this string — so a name that wouldn't survive the round trip is refused
+/// rather than silently truncated into one that binds to nothing.
+fn fixed_name(name: &str) -> Result<[u8; NAME_SIZE]> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        bail!("a texture name can't be empty");
+    }
+    if !trimmed.is_ascii() {
+        bail!("texture name '{trimmed}': the game reads these as plain ASCII");
+    }
+    // One byte short of the field: the terminator has to fit too.
+    if trimmed.len() >= NAME_SIZE {
+        bail!("texture name '{trimmed}' is longer than {} characters", NAME_SIZE - 1);
+    }
+    let mut out = [0u8; NAME_SIZE];
+    out[..trimmed.len()].copy_from_slice(trimmed.as_bytes());
+    Ok(out)
+}
+
+/// Build a `.pnt` carrying `textures`, in the layout [`decode`] reads back.
+///
+/// This is the write half of the format, and it exists so a paint made anywhere else — a
+/// GIMP export, a template edited in Photoshop — can become a file MX Bikes loads. Pixels
+/// go in **RGBA**, top-left origin, exactly as [`decode`] hands them out; the game's own
+/// files are that way round (see the `white_navy` guard below), so a round trip through
+/// here has to leave a paint's colours alone.
+///
+/// The 16 bytes between a texture's dimensions and its payload length are a digest in
+/// every real file we've read, and `edf.rs` documents them as an MD5. Nothing we can
+/// observe says what it's taken over, so this writes the MD5 of the uncompressed pixels:
+/// the one reading a validator would most plausibly agree with, and harmless if — as the
+/// loader's own behaviour suggests — the field is never checked at all.
+pub fn encode(paint_name: &str, textures: &[PntTexture]) -> Result<Vec<u8>> {
+    if textures.is_empty() {
+        bail!("a paint needs at least one texture");
+    }
+    let mut seen: Vec<String> = Vec::with_capacity(textures.len());
+    let mut out = Vec::new();
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&fixed_name(paint_name).context("paint name")?);
+    out.extend_from_slice(&(textures.len() as u32).to_le_bytes());
+
+    for t in textures {
+        let name = fixed_name(&t.name)?;
+        // Two textures under one name is a paint whose second half can never be reached:
+        // the loader binds by name and takes the first match.
+        if seen.iter().any(|s| s.eq_ignore_ascii_case(t.name.trim())) {
+            bail!("texture '{}' is in this paint twice", t.name.trim());
+        }
+        seen.push(t.name.trim().to_string());
+
+        if t.width == 0 || t.height == 0 {
+            bail!("texture '{}': {}x{} has no pixels", t.name, t.width, t.height);
+        }
+        let expected = (t.width as usize) * (t.height as usize) * 4;
+        if t.rgba.len() != expected {
+            bail!(
+                "texture '{}': {} bytes of pixels, expected {expected} ({}x{} RGBA)",
+                t.name,
+                t.rgba.len(),
+                t.width,
+                t.height
+            );
+        }
+
+        let mut enc = DeflateEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(&t.rgba).with_context(|| format!("deflate texture '{}'", t.name))?;
+        let payload = enc.finish().with_context(|| format!("deflate texture '{}'", t.name))?;
+        let digest: [u8; DIGEST_SIZE] = Md5::digest(&t.rgba).into();
+
+        out.extend_from_slice(&name);
+        out.extend_from_slice(&t.width.to_le_bytes());
+        out.extend_from_slice(&t.height.to_le_bytes());
+        out.extend_from_slice(&digest);
+        out.extend_from_slice(&((payload.len() + IMAGE_PADDING) as u32).to_le_bytes());
+        out.extend_from_slice(&[0u8; IMAGE_PADDING]);
+        out.extend_from_slice(&payload);
+    }
+    Ok(out)
 }
 
 fn store_rgba(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> PaintTexture {
@@ -274,6 +372,76 @@ mod tests {
     #[test]
     fn rejects_non_pnt() {
         assert!(decode(b"not a paint file at all........").is_err());
+    }
+
+    fn tex(name: &str, w: u32, h: u32) -> PntTexture {
+        // A gradient rather than a flat fill: flat pixels deflate to almost nothing, which
+        // would hide a payload-length mistake behind a length that happens to be tiny.
+        let rgba = (0..w * h)
+            .flat_map(|i| [(i % 251) as u8, (i % 97) as u8, (i % 13) as u8, 0xff])
+            .collect();
+        PntTexture { name: name.to_string(), width: w, height: h, rgba }
+    }
+
+    #[test]
+    fn encode_round_trips_through_decode() {
+        let want = vec![tex("livery", 8, 4), tex("numberplate", 2, 2)];
+        let bytes = encode("My Paint", &want).expect("encode");
+        let back = decode(&bytes).expect("decode what we just wrote");
+        assert_eq!(back.len(), want.len());
+        for (a, b) in back.iter().zip(&want) {
+            assert_eq!(a.name, b.name);
+            assert_eq!((a.width, a.height), (b.width, b.height));
+            assert_eq!(a.rgba, b.rgba, "pixels survive the round trip unswapped");
+        }
+        assert_eq!(texture_names(&bytes).unwrap(), vec!["livery", "numberplate"]);
+    }
+
+    /// The header the game reads: magic, the paint's own name, then the texture count.
+    #[test]
+    fn encode_writes_the_documented_header() {
+        let bytes = encode("Paint Name", &[tex("livery", 4, 4)]).unwrap();
+        assert_eq!(&bytes[..4], MAGIC);
+        assert_eq!(read_name(&bytes, 4).unwrap(), "Paint Name");
+        assert_eq!(read_u32(&bytes, HEADER_SIZE - 4).unwrap(), 1);
+        // Payload length counts the 8 pad bytes, and the pad itself is zeroed.
+        let size = read_u32(&bytes, HEADER_SIZE + NAME_SIZE + 8 + 16).unwrap() as usize;
+        let pad_at = HEADER_SIZE + IMAGE_HEADER_SIZE;
+        assert_eq!(&bytes[pad_at..pad_at + IMAGE_PADDING], &[0u8; IMAGE_PADDING]);
+        assert_eq!(bytes.len(), pad_at + size, "the file ends where the header says it does");
+    }
+
+    /// The digest field is the one part of the record we can't observe the meaning of, so
+    /// pin what we write: the MD5 of the uncompressed pixels.
+    #[test]
+    fn encode_digests_the_uncompressed_pixels() {
+        let t = tex("livery", 4, 4);
+        let bytes = encode("p", std::slice::from_ref(&t)).unwrap();
+        let at = HEADER_SIZE + NAME_SIZE + 8;
+        assert_eq!(&bytes[at..at + DIGEST_SIZE], &Md5::digest(&t.rgba)[..]);
+    }
+
+    #[test]
+    fn encode_rejects_what_the_game_could_not_read() {
+        let ok = tex("livery", 4, 4);
+        assert!(encode("p", &[]).is_err(), "a paint with no textures");
+        assert!(encode("", &[ok.clone()]).is_err(), "an unnamed paint");
+        assert!(
+            encode("p", &[tex("", 4, 4)]).is_err(),
+            "an unnamed texture binds to nothing"
+        );
+        assert!(
+            encode("p", &[tex(&"x".repeat(NAME_SIZE), 4, 4)]).is_err(),
+            "a name that wouldn't fit its field"
+        );
+        assert!(
+            encode("p", &[tex("livery", 4, 4), tex("LIVERY", 2, 2)]).is_err(),
+            "the same name twice — the second could never be reached"
+        );
+        let mut short = ok.clone();
+        short.rgba.truncate(4);
+        assert!(encode("p", &[short]).is_err(), "pixels that don't fill the dimensions");
+        assert!(encode("p", &[tex("livery", 0, 4)]).is_err(), "a zero dimension");
     }
 
     #[test]
