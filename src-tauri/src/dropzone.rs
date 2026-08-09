@@ -296,7 +296,50 @@ fn from_route_rule(rule: RouteRule) -> Option<Verdict> {
     }
 }
 
-const GEAR_DIRS: [&str; 4] = ["helmets", "boots", "protection", "riders"];
+/// What classifying and placing a drop are relative to: the mods folder to look in, and the
+/// title whose folder layout applies.
+///
+/// The title is carried rather than read from [`crate::game::active`] at each use so that the
+/// whole module is a function of its inputs — one drop is classified against one title, and a
+/// test can put either one in without touching process-wide state.
+#[derive(Clone, Copy)]
+struct Ctx<'a> {
+    mods_path: &'a str,
+    game: &'static crate::game::GameProfile,
+}
+
+impl<'a> Ctx<'a> {
+    fn new(mods_path: &'a str) -> Self {
+        Ctx {
+            mods_path,
+            game: crate::game::active(),
+        }
+    }
+
+    /// Does `dir` hold the rider folders this title reads — `helmets/`, `riders/`, and
+    /// whatever else it keeps gear in?
+    ///
+    /// Per-title rather than a fixed list because the two barely overlap: MX Bikes has
+    /// `boots` and `protections`, GP Bikes bakes both into the rider model and has
+    /// `animations` instead.
+    fn has_gear_dirs(&self, dir: &Path) -> bool {
+        std::iter::once(crate::game::RIDERS_DIR)
+            .chain(self.game.rider.areas.iter().map(|a| a.folder))
+            .any(|g| install::child_dir(dir, g).is_some())
+    }
+
+    /// Whether `area` is a folder this title actually keeps content in. `goggles` and
+    /// `gloves` are folders *inside* another one rather than areas of their own, so they're
+    /// answered by the layout flags instead.
+    fn has_area(&self, area: &str) -> bool {
+        let rider = &self.game.rider;
+        match area {
+            "gloves" => rider.gloves || rider.profile_extras.iter().any(|(f, _)| *f == area),
+            "goggles" => rider.areas.iter().any(|a| a.goggles),
+            _ => self.game.installable_areas().any(|a| a.folder == area),
+        }
+    }
+}
 
 // Link-following: what's being classified here is a folder the player dragged in from
 // their own disk, and a junction in it is theirs — see `crate::linkwalk`.
@@ -312,7 +355,7 @@ fn dirs_in(dir: &Path) -> Vec<PathBuf> {
 ///
 /// Returns `None` when the directory looks like a container of other things rather than a
 /// unit in its own right, which is the signal to look one level deeper.
-fn classify_typed(dir: &Path, mods_path: &str) -> Option<Verdict> {
+fn classify_typed(dir: &Path, ctx: Ctx) -> Option<Verdict> {
     // An extracted track: `.map`/`.trh`/… sitting next to each other.
     if library::dir_has_track_markers(dir) {
         return Some(Verdict::new(ContentKind::Track, DetectReason::TrackMarkers));
@@ -332,12 +375,9 @@ fn classify_typed(dir: &Path, mods_path: &str) -> Option<Verdict> {
         );
     }
 
-    // Rider gear ships as `helmets/`, `boots/`, `protection/`, `riders/` — one level below
-    // the `rider` category folder, so `plan_placement`'s CATEGORY_DIRS rule never sees it.
-    if GEAR_DIRS
-        .iter()
-        .any(|g| install::child_dir(dir, g).is_some())
-    {
+    // Rider gear ships as `helmets/`, `riders/`, … — one level below the `rider` category
+    // folder, so `plan_placement`'s CATEGORY_DIRS rule never sees it.
+    if ctx.has_gear_dirs(dir) {
         return Some(Verdict::new(ContentKind::RiderGear, DetectReason::GearFolders));
     }
 
@@ -356,7 +396,7 @@ fn classify_typed(dir: &Path, mods_path: &str) -> Option<Verdict> {
     // where it belongs.
     if subdirs.is_empty() {
         if let Some(pnt) = files.iter().find(|p| install::has_ext(p, "pnt")) {
-            return Some(classify_paint(pnt, mods_path));
+            return Some(classify_paint(pnt, ctx));
         }
     }
 
@@ -412,14 +452,25 @@ fn classify_pkz(pkz: &Path) -> Verdict {
     Verdict::new(ContentKind::Unknown, DetectReason::Unrecognised).ask()
 }
 
-/// Gear areas a paint's texture names can name.
+/// Texture names that mean "this paints the rider's body", so it belongs on a rider model
+/// rather than on a piece of gear.
+///
+/// `rider` is MX Bikes' name for the sheet. GP Bikes' rider models don't use it: Manu's calls
+/// the suit `Suit.tga`, the casual model calls the whole thing `Outfit.tga`, and both carry
+/// an `Arms.tga`. Checked before the gear hints below, which matters most on GP — its suits
+/// carry the boots' textures too (they're part of the model), so a suit tested for `boot`
+/// first would be filed as boots, in a folder GP Bikes has no loader for.
+const RIDER_BODY_TEXTURES: [&str; 4] = ["rider", "suit", "outfit", "arms"];
+
+/// Gear areas a paint's texture names can name, as `(texture hint, area folder)`. Hints for
+/// areas the active title lacks are skipped — see [`classify_paint`].
 const GEAR_TEXTURE_HINTS: [(&str, &str); 6] = [
     ("goggle", "goggles"),
     ("lens", "goggles"),
     ("helmet", "helmets"),
     ("boot", "boots"),
     ("glove", "gloves"),
-    ("chest", "protection"),
+    ("chest", crate::game::PROTECTION_AREAS[0]),
 ];
 
 /// Identify a loose `.pnt` from the textures inside it.
@@ -434,7 +485,7 @@ const GEAR_TEXTURE_HINTS: [(&str, &str); 6] = [
 /// of its kind when there is exactly one — with two, nothing in the file picks between them.
 ///
 /// Falls back to a bike paint, the commonest case by far.
-fn classify_paint(pnt: &Path, mods_path: &str) -> Verdict {
+fn classify_paint(pnt: &Path, ctx: Ctx) -> Verdict {
     let bike = || Verdict::new(ContentKind::BikePaint, DetectReason::LoosePaint).ask();
     let Ok(bytes) = std::fs::read(pnt) else {
         return bike();
@@ -454,21 +505,40 @@ fn classify_paint(pnt: &Path, mods_path: &str) -> Verdict {
         })
         .collect();
 
-    if names.iter().any(|n| n == "rider") {
-        return Verdict::new(ContentKind::RiderGear, DetectReason::RiderTexture)
-            .dest(format!("riders/{}/paints", STOCK_RIDER_PROFILES[0]));
+    if names.iter().any(|n| RIDER_BODY_TEXTURES.contains(&n.as_str())) {
+        let v = Verdict::new(ContentKind::RiderGear, DetectReason::RiderTexture);
+        // The model the game ships if it ships one, else the only one installed. GP Bikes
+        // ships none, so there its suits genuinely have to be asked about until a rider
+        // model exists to wear them.
+        return match (
+            ctx.game.rider.stock_profiles.first(),
+            library::scan_rider_targets(ctx.mods_path).profiles.as_slice(),
+        ) {
+            (Some(stock), _) => v.dest(profile_dest(stock, "paints")),
+            (None, [only]) => v.dest(profile_dest(only, "paints")),
+            _ => v.ask(),
+        };
     }
 
     for (hint, area) in GEAR_TEXTURE_HINTS {
         if !names.iter().any(|n| n.contains(hint)) {
             continue;
         }
+        // A hint for a folder this title doesn't have is not a match — it's a texture the
+        // rider model carries because the part is built into it. Skipping keeps looking
+        // rather than filing the paint somewhere the game will never read.
+        if !ctx.has_area(area) {
+            continue;
+        }
         let v = Verdict::new(ContentKind::RiderGear, DetectReason::GearTexture);
         // Gloves hang off a rider profile; the rest hang off a gear model.
         if area == "gloves" {
-            return v.dest(format!("riders/{}/gloves", STOCK_RIDER_PROFILES[0]));
+            return match ctx.game.rider.stock_profiles.first() {
+                Some(stock) => v.dest(profile_dest(stock, "gloves")),
+                None => v.ask(),
+            };
         }
-        let t = library::scan_rider_targets(mods_path);
+        let t = library::scan_rider_targets(ctx.mods_path);
         let models = match area {
             "helmets" | "goggles" => &t.helmets,
             "boots" => &t.boots,
@@ -485,11 +555,16 @@ fn classify_paint(pnt: &Path, mods_path: &str) -> Verdict {
     bike()
 }
 
+/// `riders/<model>/<sub>` — where everything worn on the rider itself lives.
+fn profile_dest(profile: &str, sub: &str) -> String {
+    format!("{}/{profile}/{sub}", crate::game::RIDERS_DIR)
+}
+
 /// Split a staged root into the units the user will see as rows.
 fn units_in(
     dir: &Path,
     mods_dir: &Path,
-    mods_path: &str,
+    ctx: Ctx,
     slug: &str,
     depth: usize,
 ) -> Vec<Unit> {
@@ -505,7 +580,7 @@ fn units_in(
     // not the wrapper, or a `Mod v2/` folder would hide the bike inside it.
     let base = install::unwrap_wrapper(dir);
 
-    if let Some(verdict) = classify_typed(&base, mods_path) {
+    if let Some(verdict) = classify_typed(&base, ctx) {
         return vec![Unit {
             path: base,
             verdict,
@@ -522,7 +597,7 @@ fn units_in(
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| slug.to_string());
-                    units_in(c, mods_dir, mods_path, &child_slug, depth + 1)
+                    units_in(c, mods_dir, ctx, &child_slug, depth + 1)
                 })
                 .collect();
             // Only accept the split if it actually identified something; otherwise a folder
@@ -564,66 +639,67 @@ fn bike_choices(mods_path: &str, paints: bool) -> Vec<DestChoice> {
         .collect()
 }
 
-/// Rider profiles that exist whether or not anything is installed — MX Bikes ships them, so
-/// an outfit always has somewhere to go even on an empty mods folder.
-const STOCK_RIDER_PROFILES: [&str; 2] = ["default_mx", "default_sm"];
-
 /// Gear destinations: every installed model, plus the fixed places new gear and outfits go.
+///
+/// Built from the active title's own layout, because the two games' rider folders barely
+/// overlap — offering GP Bikes a `boots` folder would file a mod where its loader never
+/// looks, and offering it `riders/default_mx` would invent a rider model that doesn't exist.
 ///
 /// This must never come back empty. An earlier version listed only what was installed, so on
 /// a fresh mods folder the picker opened onto "Nothing installed to put this on yet" and the
 /// row could not be corrected at all — a dead end for the one case that most needs a choice.
-fn gear_choices(mods_path: &str) -> Vec<DestChoice> {
-    let t = library::scan_rider_targets(mods_path);
+fn gear_choices(ctx: Ctx) -> Vec<DestChoice> {
+    let game = ctx.game;
+    let t = library::scan_rider_targets(ctx.mods_path);
     let mut out = Vec::new();
+    let mut choice = |value: String, label: String| {
+        out.push(DestChoice {
+            value,
+            label,
+            subpath: "mods/rider".into(),
+        })
+    };
 
-    for (area, models) in [
-        ("helmets", &t.helmets),
-        ("boots", &t.boots),
-        ("protection", &t.protection),
-    ] {
+    for area in game.installable_areas() {
+        let folder = area.folder;
+        let models = match folder {
+            "helmets" => &t.helmets,
+            "boots" => &t.boots,
+            "animations" => &t.animations,
+            _ => &t.protection,
+        };
         for m in models {
-            out.push(DestChoice {
-                value: format!("{area}/{m}/paints"),
-                label: format!("{m} — {area} paints"),
-                subpath: "mods/rider".into(),
-            });
-            if area == "helmets" {
-                out.push(DestChoice {
-                    value: format!("helmets/{m}/goggles"),
-                    label: format!("{m} — goggles"),
-                    subpath: "mods/rider".into(),
-                });
+            if area.paint_cat.is_some() {
+                choice(format!("{folder}/{m}/paints"), format!("{m} — {folder} paints"));
+            }
+            if area.goggles {
+                choice(format!("{folder}/{m}/goggles"), format!("{m} — goggles"));
             }
         }
     }
 
     let mut profiles: Vec<String> = t.profiles.clone();
-    for p in STOCK_RIDER_PROFILES {
+    for p in game.rider.stock_profiles {
         if !profiles.iter().any(|x| x.eq_ignore_ascii_case(p)) {
             profiles.push(p.to_string());
         }
     }
+    // MX Bikes wears a kit over its rider; GP Bikes' rider *is* the suit.
+    let worn = if game.rider.stock_profiles.is_empty() { "suit paints" } else { "outfit" };
     for p in &profiles {
-        out.push(DestChoice {
-            value: format!("riders/{p}/paints"),
-            label: format!("{p} — outfit"),
-            subpath: "mods/rider".into(),
-        });
-        out.push(DestChoice {
-            value: format!("riders/{p}/gloves"),
-            label: format!("{p} — gloves"),
-            subpath: "mods/rider".into(),
-        });
+        choice(profile_dest(p, "paints"), format!("{p} — {worn}"));
+        for (extra, _) in game.rider.profile_extras {
+            choice(profile_dest(p, extra), format!("{p} — {extra}"));
+        }
     }
 
     // Somewhere to put a brand new model, which by definition isn't installed yet.
-    for area in ["helmets", "boots", "protection"] {
-        out.push(DestChoice {
-            value: area.to_string(),
-            label: format!("{area} — new model"),
-            subpath: "mods/rider".into(),
-        });
+    choice(
+        crate::game::RIDERS_DIR.to_string(),
+        format!("{} — new rider model", crate::game::RIDERS_DIR),
+    );
+    for area in game.installable_areas() {
+        choice(area.folder.to_string(), format!("{} — new model", area.folder));
     }
     out
 }
@@ -658,9 +734,9 @@ fn folder_choices(mods_path: &str, subpath: &str) -> Vec<DestChoice> {
 }
 
 /// Everywhere a dropped item could plausibly go, for the rows we can't place ourselves.
-fn all_choices(mods_path: &str, paints: bool) -> Vec<DestChoice> {
-    let mut c = bike_choices(mods_path, paints);
-    c.extend(gear_choices(mods_path));
+fn all_choices(ctx: Ctx, paints: bool) -> Vec<DestChoice> {
+    let mut c = bike_choices(ctx.mods_path, paints);
+    c.extend(gear_choices(ctx));
     // Unidentified content still has to be placeable — offer the bare category roots so a
     // dropped file the classifier couldn't name can at least be filed by hand.
     for (label, subpath) in [
@@ -681,7 +757,7 @@ fn all_choices(mods_path: &str, paints: bool) -> Vec<DestChoice> {
 /// Resolve a unit into the row the user reviews.
 fn to_item(
     unit: Unit,
-    mods_path: &str,
+    ctx: Ctx,
     mods_dir: &Path,
     slug: &str,
     source_name: &str,
@@ -712,20 +788,20 @@ fn to_item(
         DetectReason::RiderTexture | DetectReason::GearTexture
     ) {
         // Textures already said it's worn, not ridden — lead with gear and profiles.
-        let mut c = gear_choices(mods_path);
-        c.extend(bike_choices(mods_path, true));
+        let mut c = gear_choices(ctx);
+        c.extend(bike_choices(ctx.mods_path, true));
         c
     } else if needs_choice {
-        all_choices(mods_path, matches!(verdict.kind, ContentKind::BikePaint))
+        all_choices(ctx, matches!(verdict.kind, ContentKind::BikePaint))
     } else if matches!(
         verdict.kind,
         ContentKind::BikePaint | ContentKind::SoundSet | ContentKind::RiderGear
     ) {
-        let mut c = bike_choices(mods_path, matches!(verdict.kind, ContentKind::BikePaint));
-        c.extend(gear_choices(mods_path));
+        let mut c = bike_choices(ctx.mods_path, matches!(verdict.kind, ContentKind::BikePaint));
+        c.extend(gear_choices(ctx));
         c
     } else {
-        folder_choices(mods_path, verdict.kind.subpath().unwrap_or("mods/misc"))
+        folder_choices(ctx.mods_path, verdict.kind.subpath().unwrap_or("mods/misc"))
     };
 
     let subpath = if needs_choice {
@@ -823,6 +899,7 @@ pub fn plan(mods_path: &str, paths: &[String]) -> anyhow::Result<DropPlan> {
         anyhow::bail!("no MX Bikes folder configured");
     }
     let mods_dir = library::mods_subdir(mods_path, "mods");
+    let ctx = Ctx::new(mods_path);
 
     let plan_id = next_id("drop");
     let work = install::staging_dir("drop");
@@ -861,8 +938,8 @@ pub fn plan(mods_path: &str, paths: &[String]) -> anyhow::Result<DropPlan> {
             }
         };
 
-        for unit in units_in(&root, &mods_dir, mods_path, &slug, 0) {
-            let (item, st) = to_item(unit, mods_path, &mods_dir, &slug, &name);
+        for unit in units_in(&root, &mods_dir, ctx, &slug, 0) {
+            let (item, st) = to_item(unit, ctx, &mods_dir, &slug, &name);
             staged.insert(item.id.clone(), st);
             items.push(item);
         }
@@ -1051,7 +1128,26 @@ pub fn sound_bikes(plan_id: &str, ids: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::Game;
     use std::fs;
+
+    /// The title a test classifies against. Passed in rather than set process-wide, so a GP
+    /// Bikes case and an MX Bikes case can run side by side — which, since `cargo test` runs
+    /// them in parallel threads, they do.
+    fn ctx(game: Game, mods_path: &str) -> Ctx<'_> {
+        Ctx {
+            mods_path,
+            game: game.profile(),
+        }
+    }
+
+    fn mx(mods_path: &str) -> Ctx<'_> {
+        ctx(Game::Mxb, mods_path)
+    }
+
+    fn gpb(mods_path: &str) -> Ctx<'_> {
+        ctx(Game::Gpb, mods_path)
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("frost-dz-test-{name}-{}", std::process::id()));
@@ -1121,7 +1217,7 @@ mod tests {
         let root = tmp("track");
         write(&root.join("Hangtown.map"), "m");
         write(&root.join("Hangtown.trh"), "t");
-        let v = classify_typed(&root, "").expect("classified");
+        let v = classify_typed(&root, mx("")).expect("classified");
         let (kind, reason) = (v.kind, v.reason);
         assert_eq!(kind, ContentKind::Track);
         assert_eq!(reason, DetectReason::TrackMarkers);
@@ -1133,7 +1229,7 @@ mod tests {
         let bike = root.join("MX1OEM_2023");
         write(&bike.join("MX1OEM_2023.ini"), "[info]\nname = Test 450\n[data]\ncat = MX1\n");
         write(&bike.join("MX1OEM_2023.cfg"), "ID = MX1OEM_2023\n");
-        let v = classify_typed(&bike, "").expect("classified");
+        let v = classify_typed(&bike, mx("")).expect("classified");
         let (kind, reason, detail) = (v.kind, v.reason, v.detail.clone());
         assert_eq!(kind, ContentKind::Bike);
         assert_eq!(reason, DetectReason::BikeConfig);
@@ -1144,7 +1240,7 @@ mod tests {
     fn loose_paints_demand_a_bike() {
         let root = tmp("paints");
         write(&root.join("Blue.pnt"), "PNT\0");
-        let v = classify_typed(&root, "").expect("classified");
+        let v = classify_typed(&root, mx("")).expect("classified");
         let (kind, reason) = (v.kind, v.reason);
         assert_eq!(kind, ContentKind::BikePaint);
         assert_eq!(reason, DetectReason::LoosePaint);
@@ -1153,7 +1249,7 @@ mod tests {
             path: root.clone(),
             verdict: v,
         };
-        let (item, _) = to_item(unit, "", &root.join("mods"), "Blue", "Blue.pnt");
+        let (item, _) = to_item(unit, mx(""), &root.join("mods"), "Blue", "Blue.pnt");
         assert!(item.needs_choice, "nothing says which bike these paint");
         assert!(item.subpath.is_empty(), "must not guess a category");
     }
@@ -1162,7 +1258,7 @@ mod tests {
     fn gear_folders_route_to_rider() {
         let root = tmp("gear");
         write(&root.join("helmets/Airoh/paints/Red.pnt"), "PNT\0");
-        let v = classify_typed(&root, "").expect("classified");
+        let v = classify_typed(&root, mx("")).expect("classified");
         let (kind, reason) = (v.kind, v.reason);
         assert_eq!(kind, ContentKind::RiderGear);
         assert_eq!(reason, DetectReason::GearFolders);
@@ -1179,7 +1275,7 @@ mod tests {
         );
         write(&root.join("drop/MX1OEM_2023/MX1OEM_2023.cfg"), "ID = X\n");
 
-        let units = units_in(&root.join("drop"), &mods, "", "drop", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0);
         let kinds: Vec<ContentKind> = units.iter().map(|u| u.verdict.kind).collect();
         assert!(kinds.contains(&ContentKind::Track), "{kinds:?}");
         assert!(kinds.contains(&ContentKind::Bike), "{kinds:?}");
@@ -1193,7 +1289,7 @@ mod tests {
         write(&root.join("drop/Hangtown v2/Hangtown.map"), "m");
         write(&root.join("drop/Hangtown v2/readme.txt"), "hi");
 
-        let units = units_in(&root.join("drop"), &mods, "", "drop", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].verdict.kind, ContentKind::Track);
     }
@@ -1204,7 +1300,7 @@ mod tests {
         let mods = root.join("mods");
         write(&root.join("drop/mods/tracks/Hangtown/Hangtown.map"), "m");
 
-        let units = units_in(&root.join("drop"), &mods, "", "drop", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].verdict.kind, ContentKind::ModsTree);
         assert_eq!(units[0].verdict.reason, DetectReason::ModsTree);
@@ -1216,7 +1312,7 @@ mod tests {
         write(&root.join("drop/frame.edf"), "\0\0\0");
 
         let mods = root.join("mods");
-        let units = units_in(&root.join("drop"), &mods, "", "drop", 0);
+        let units = units_in(&root.join("drop"), &mods, mx(""), "drop", 0);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].verdict.kind, ContentKind::Unknown);
 
@@ -1225,7 +1321,7 @@ mod tests {
                 path: units[0].path.clone(),
                 verdict: units[0].verdict.clone(),
             },
-            "",
+            mx(""),
             &mods,
             "frame",
             "frame.edf",
@@ -1446,7 +1542,7 @@ mod tests {
         assert_eq!(reason, DetectReason::TrackPackage);
 
         // And the same shape reached through the normal classifier.
-        let k = classify_typed(&root, "").expect("classified").kind;
+        let k = classify_typed(&root, mx("")).expect("classified").kind;
         assert_eq!(k, ContentKind::Track);
         let _ = fs::remove_dir_all(&root);
     }
@@ -1476,7 +1572,7 @@ mod tests {
     fn destinations_are_offered_even_on_an_empty_mods_folder() {
         let root = tmp("emptymods");
         let mods_path = root.to_string_lossy().into_owned();
-        let choices = all_choices(&mods_path, true);
+        let choices = all_choices(mx(&mods_path), true);
         assert!(!choices.is_empty(), "a picker with no options is a dead end");
         assert!(
             choices.iter().any(|c| c.value == "riders/default_mx/paints"),
@@ -1496,7 +1592,7 @@ mod tests {
         let pnt = root.join("Astars.pnt");
         write_pnt(&pnt, &["rider", "rider_n"]);
 
-        let v = classify_paint(&pnt, "");
+        let v = classify_paint(&pnt, mx(""));
         assert_eq!(v.kind, ContentKind::RiderGear);
         assert_eq!(v.reason, DetectReason::RiderTexture);
         assert!(!v.needs_choice, "an outfit has a real default");
@@ -1507,7 +1603,7 @@ mod tests {
                 path: root.clone(),
                 verdict: v,
             },
-            "",
+            mx(""),
             &mods,
             "Astars",
             "Astars.pnt",
@@ -1518,13 +1614,102 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// GP Bikes' suits carry the boots' textures, because the boots are part of the rider
+    /// model — `(S) Suit 1 + Boots Alpinestars` is one mesh. Tested for `boot` first, a suit
+    /// was filed as boots: a folder GP Bikes has no loader for, so the paint vanished from
+    /// the game while the app reported it installed.
+    #[test]
+    fn a_gp_suit_is_not_mistaken_for_boots() {
+        let root = tmp("gpsuit");
+        let mods_path = root.to_string_lossy().into_owned();
+        // Manu's Modern Rider, the model nearly every GP suit is made for.
+        fs::create_dir_all(root.join("mods/rider/riders/Modern Type 1/paints")).unwrap();
+        let pnt = root.join("Alpinestars.pnt");
+        write_pnt(&pnt, &["Suit", "Suit_n", "Boots", "Arms"]);
+
+        let v = classify_paint(&pnt, gpb(&mods_path));
+        assert_eq!(v.kind, ContentKind::RiderGear);
+        assert_eq!(v.reason, DetectReason::RiderTexture, "the suit is read before the boots");
+        assert_eq!(v.dest_folder, "riders/Modern Type 1/paints");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// With no rider model installed there is nowhere a GP suit will load from, and the app
+    /// must say so rather than invent MX Bikes' `default_mx` — which GP Bikes doesn't have.
+    #[test]
+    fn a_gp_suit_asks_when_no_rider_model_is_installed() {
+        let root = tmp("gpsuit-empty");
+        let mods_path = root.to_string_lossy().into_owned();
+        let pnt = root.join("Alpinestars.pnt");
+        write_pnt(&pnt, &["Suit", "Boots"]);
+
+        let v = classify_paint(&pnt, gpb(&mods_path));
+        assert!(v.needs_choice, "nothing installed can wear it");
+        assert!(v.dest_folder.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The picker is the user's way out of a wrong guess, so it must offer this title's
+    /// folders — and only those.
+    #[test]
+    fn gp_bikes_is_offered_its_own_folders_and_no_others() {
+        let root = tmp("gpchoices");
+        let mods_path = root.to_string_lossy().into_owned();
+        fs::create_dir_all(root.join("mods/rider/riders/Modern Type 1")).unwrap();
+        let values: Vec<String> = gear_choices(gpb(&mods_path))
+            .into_iter()
+            .map(|c| c.value)
+            .collect();
+
+        assert!(values.contains(&"riders/Modern Type 1/paints".to_string()), "{values:?}");
+        assert!(values.contains(&"riders".to_string()), "somewhere for a new rider model");
+        assert!(values.contains(&"animations".to_string()), "riding styles are GP content");
+        for absent in ["boots", "protections", "riders/default_mx/paints"] {
+            assert!(
+                !values.iter().any(|v| v.starts_with(absent)),
+                "GP Bikes never reads `{absent}`: {values:?}",
+            );
+        }
+        assert!(
+            !values.iter().any(|v| v.ends_with("/gloves") || v.ends_with("/goggles")),
+            "gloves are built into the suit, and road helmets have visors: {values:?}",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// MX Bikes keeps every folder it had, including the ones GP lacks.
+    #[test]
+    fn mx_bikes_still_gets_its_full_set_of_gear_folders() {
+        let root = tmp("mxchoices");
+        let mods_path = root.to_string_lossy().into_owned();
+        let values: Vec<String> = gear_choices(mx(&mods_path))
+            .into_iter()
+            .map(|c| c.value)
+            .collect();
+
+        for expected in [
+            "helmets",
+            "boots",
+            "protections",
+            "riders/default_mx/paints",
+            "riders/default_mx/gloves",
+        ] {
+            assert!(values.contains(&expected.to_string()), "{expected} missing: {values:?}");
+        }
+        assert!(
+            !values.iter().any(|v| v == "protection"),
+            "the legacy spelling is read, never written: {values:?}",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// A bike paint is the fallback, and it still has to ask which bike.
     #[test]
     fn a_bike_paint_is_told_apart_from_an_outfit() {
         let root = tmp("bikepaint");
         let pnt = root.join("96STOCK.pnt");
         write_pnt(&pnt, &["framecompletemap", "wheels"]);
-        let v = classify_paint(&pnt, "");
+        let v = classify_paint(&pnt, mx(""));
         assert_eq!(v.kind, ContentKind::BikePaint);
         assert!(v.needs_choice, "nothing says which bike");
         let _ = fs::remove_dir_all(&root);
@@ -1539,10 +1724,10 @@ mod tests {
         let src = root.join("Hangtown");
         write(&src.join("Hangtown.map"), "m");
 
-        let units = units_in(&src, &mods, "", "Hangtown", 0);
+        let units = units_in(&src, &mods, mx(""), "Hangtown", 0);
         let (item, _) = to_item(
             units.into_iter().next().unwrap(),
-            "",
+            mx(""),
             &mods,
             "Hangtown",
             "Hangtown",

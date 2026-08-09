@@ -18,6 +18,13 @@ const MXB_FALLBACK: GameInfo = {
   display: "MX Bikes",
   modsDirs: ["bikes", "tracks", "rider", "tyres", "misc"],
   catalogDomain: "mxb-mods.com",
+  riderAreas: [
+    { folder: "helmets", paints: true, goggles: true },
+    { folder: "boots", paints: true, goggles: false },
+    { folder: "protections", paints: true, goggles: false },
+  ],
+  riderStockProfiles: ["default_mx", "default_sm"],
+  riderProfileExtras: ["gloves", "goggles"],
   caps: MXB_CAPS,
 };
 

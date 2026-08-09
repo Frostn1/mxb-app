@@ -19,6 +19,16 @@ export interface GameCaps {
   servers: boolean;
 }
 
+/** One gear folder under `mods/rider` that new content installs into. */
+export interface RiderArea {
+  /** Folder name, e.g. `helmets`. */
+  folder: string;
+  /** Models here keep their liveries in `<model>/paints`. */
+  paints: boolean;
+  /** …and a `<model>/goggles` folder besides. */
+  goggles: boolean;
+}
+
 /** One title the app can drive, as reported by `listGames()`. */
 export interface GameInfo {
   id: GameId;
@@ -29,6 +39,15 @@ export interface GameInfo {
   /** Host of this title's catalog, e.g. `mxb-mods.com`. Shown wherever the UI names
    *  the site it links out to. */
   catalogDomain: string;
+  /** Gear areas under `mods/rider`, in the order to offer them. The two titles share
+   *  almost nothing here — MX Bikes has boots and protection, GP Bikes bakes those into
+   *  the rider model and has riding-style animations instead. */
+  riderAreas: RiderArea[];
+  /** Rider models the title ships, so a paint has somewhere to go on an empty mods
+   *  folder. Empty for GP Bikes: every suit there is made for a downloaded model. */
+  riderStockProfiles: string[];
+  /** Folders inside `riders/<model>/` beyond `paints` — MX Bikes' `gloves`, `goggles`. */
+  riderProfileExtras: string[];
   caps: GameCaps;
 }
 

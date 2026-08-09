@@ -881,11 +881,14 @@ export const fr: Translation = {
   "dest.helmetsNewModel": "Casques (nouveau modèle)",
   "dest.bootsNewModel": "Bottes (nouveau modèle)",
   "dest.protectionNewModel": "Protections (nouveau modèle)",
+  "dest.riderModelsNew": "Modèles de pilote (nouveau modèle)",
+  "dest.animationsNewStyle": "Styles de pilotage (nouvelle animation)",
   "dest.helmetPaintsFor": "{{name}} · décos casque",
   "dest.gogglesFor": "{{name}} · masque",
   "dest.bootPaintsFor": "{{name}} · décos bottes",
   "dest.protectionPaintsFor": "{{name}} · décos protections",
   "dest.outfitFor": "{{name}} · tenue / kit",
+  "dest.suitPaintsFor": "{{name}} · décos combinaison",
   "dest.glovesFor": "{{name}} · gants",
 
   // In-game overlay — the hotkey panel drawn over MX Bikes.
