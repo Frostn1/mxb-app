@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-09 — Gear with no paint picked wears its own look
+
+### Fixed
+- **An empty paint slot shows the model's own look, not a paint you never chose.** The stock
+  helmet came out bronze on the Rider tab while the Library showed that same helmet white
+  under "Stock", and picking a helmet mod without naming a paint quietly dressed it in
+  whichever paint that mod happened to list first. Leaving a paint slot empty is how a
+  loadout says "the model's own look" — but the loader read it as a name it couldn't find,
+  and that case deliberately falls back to the first paint in the folder so a renamed livery
+  still shows up textured rather than bare grey. The game's own helmet folder happens to list
+  `black_yellow` first, and that is the bronze. An empty slot now reaches the texture baked
+  into the mesh, which is exactly what the Library means by "Stock" — both ask the model the
+  same question now, so the two views can't disagree about it again. A paint that *is* named
+  but missing still falls back as it always did, and a mod that ships paints without baking a
+  shell texture into its mesh keeps that fallback too, rather than turning up bare.
 ## 2026-08-09 — custom riding styles
 
 ### Added

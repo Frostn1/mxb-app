@@ -1802,8 +1802,16 @@ async fn load_stock_gear_model(
         let pkz = resolve_game_pkz(&cfg, "rider.pkz")
             .ok_or_else(|| "game path not set or rider.pkz not found".to_string())?;
         let folder = format!("rider/{}/{}", spec.pkz_kind, spec.default_name);
-        let nodes = load_pkz_mesh(&pkz, &format!("{folder}/{}", spec.mesh))
-            .or_else(|| stock_gear_entry(&pkz, &folder).and_then(|e| load_pkz_mesh(&pkz, &e)))
+        // The entry is kept, not just the nodes: with no paint to show, the mesh's own
+        // textures are the look, and they're read back out of the file it came from.
+        let named = format!("{folder}/{}", spec.mesh);
+        let (entry, nodes) = load_pkz_mesh(&pkz, &named)
+            .map(|n| (named, n))
+            .or_else(|| {
+                let alt = stock_gear_entry(&pkz, &folder)?;
+                let n = load_pkz_mesh(&pkz, &alt)?;
+                Some((alt, n))
+            })
             .ok_or_else(|| format!("stock {part} mesh not found in rider.pkz"))?;
         let textures = match paint_path.filter(|s| !s.is_empty()) {
             Some(p) => std::fs::read(&p)
@@ -1811,7 +1819,14 @@ async fn load_stock_gear_model(
                 .and_then(|d| paint::decode_any(&d).ok())
                 .map(|pnt| pnt.iter().map(paint::to_texture).collect())
                 .unwrap_or_default(),
-            None => load_pkz_paint(&pkz, &folder, "paints", ""),
+            // Nothing to preview → the stock look, which is what the mesh carries. Not the
+            // first `.pnt` in the folder: that's a paint like any other, and picking it here
+            // is what showed the stock helmet bronze everywhere else. Companion maps are
+            // skipped — the viewer never draws a normal or roughness sheet, so inflating
+            // one is time spent on pixels no one sees.
+            None => read_pkz_entry(&pkz, &entry)
+                .map(|d| paint::extract_edf_textures_where(&d, |n| !is_companion_map(n)))
+                .unwrap_or_default(),
         };
         Ok(RiderPart {
             part: spec.part.into(),
@@ -1891,12 +1906,6 @@ fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
             }
         }
     }
-    // Whether a side has a stock look to offer: the mesh carries its own copy of the sheet
-    // that side's paints replace. Asking the paints, not the texture names, is what keeps a
-    // "Stock" entry off the Bell Moto 10 — it embeds a tear-off film and a goggle, but not
-    // the shell sheet its paints supply, so picking "Stock" there drew the helmet in a
-    // near-blank film. With nothing painted on a side at all, the mesh's own look is the only
-    // one there is, so anything it carries for that side counts.
     let supplied = |folder: &str| {
         paint_texture_names(
             files
@@ -1905,20 +1914,32 @@ fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
                 .map(|(_, d)| d.as_slice()),
         )
     };
-    let has_stock = |folder: &str, goggle_side: bool| {
-        let paints = supplied(folder);
-        let mut usable = embedded.iter().filter(|n| !is_companion_map(n));
-        if paints.is_empty() {
-            return usable.any(|n| is_goggle_name(n) == goggle_side);
-        }
-        usable.any(|e| paints.iter().any(|p| p.eq_ignore_ascii_case(e)))
-    };
     Ok(GearPaints {
-        has_stock: has_stock("paints", false),
-        has_stock_goggles: has_stock("goggles", true),
+        has_stock: mesh_supplies_side(&embedded, &supplied("paints"), false),
+        has_stock_goggles: mesh_supplies_side(&embedded, &supplied("goggles"), true),
         paints: names("paints"),
         goggles: names("goggles"),
     })
+}
+
+/// Whether a side has a stock look to offer: the mesh carries its own copy of the sheet that
+/// side's paints replace.
+///
+/// Asking the paints, not the texture names, is what keeps a "Stock" entry off the Bell Moto 10 —
+/// it embeds a tear-off film and a goggle, but not the shell sheet its paints supply, so picking
+/// "Stock" there drew the helmet in a near-blank film. With nothing painted on a side at all, the
+/// mesh's own look is the only one there is, so anything it carries for that side counts.
+///
+/// One function rather than two readings of the same question: it decides both whether the
+/// library's picker offers "Stock" and whether an empty paint slot resolves to it
+/// ([`load_gear_model_blocking`]). Those two have to agree — the rider tab rendering a helmet
+/// the library's "Stock" entry says doesn't exist is the drift worth designing out.
+fn mesh_supplies_side(embedded: &[String], side_paints: &[String], goggle_side: bool) -> bool {
+    let mut usable = embedded.iter().filter(|n| !is_companion_map(n));
+    if side_paints.is_empty() {
+        return usable.any(|n| is_goggle_name(n) == goggle_side);
+    }
+    usable.any(|e| side_paints.iter().any(|p| p.eq_ignore_ascii_case(e)))
 }
 
 #[tauri::command]
@@ -2107,16 +2128,45 @@ fn load_gear_model_blocking(
     if drawn.is_empty() {
         return Err(format!("no gear mesh found in {path}"));
     }
+    // Which textures each side's paints supply — the names the mesh declares and leaves to a
+    // `.pnt`, and so part of the slot order its materials count. Headers only, no pixels, and
+    // wanted twice over: to decide whether a side has a stock look at all, and (rejoined
+    // below) to bind the submeshes.
+    let shell_declared = paint_texture_names(paints.iter().map(|(_, d)| d.as_slice()));
+    let goggle_declared = paint_texture_names(goggle_paints.iter().map(|(_, d)| d.as_slice()));
+    // Whether the meshes carry the shell sheet themselves. Reads headers, never pixels — but
+    // it still walks each mesh's bytes looking for them, so it's a closure rather than a
+    // value: the rider viewer reloads on every slot edit, and a load that names its paint has
+    // already answered the question without asking.
+    let mesh_carries_shell = || {
+        let mut names: Vec<String> = Vec::new();
+        for (d, _) in &drawn {
+            for t in edf::embedded_textures(d) {
+                if !names.iter().any(|h| h.eq_ignore_ascii_case(&t.name)) {
+                    names.push(t.name);
+                }
+            }
+        }
+        mesh_supplies_side(&names, &shell_declared, false)
+    };
     // With no `.pnt` to offer, the shell wears what the mesh already carries. Helmets and
     // boots nearly always ship a paint, so this reads as an edge case there — on the
     // protection slot it's the norm: a chain, a bib or a chest protector bakes its look into
     // the `.edf` and ships an empty `paints/` folder. Asked for a paint that doesn't exist,
     // the binder had nothing to hand each piece and the whole item came out bare grey.
     //
+    // Naming no paint at all is that same answer arrived at from the other side: an empty
+    // slot is the loadout saying "the model's own look", not "any paint will do", and letting
+    // it fall through to `pick_gear_paint` dressed the rider in whichever paint the mod
+    // happened to list first. Only where the mesh actually carries the shell sheet, though —
+    // the Bell Moto 10 ships paints and embeds only a tear-off film, and forcing stock there
+    // would draw the helmet near-blank instead. Same question the library's picker asks
+    // before it offers "Stock", asked through the same function, so the two can't disagree.
+    //
     // Only the shell. Unpainted goggles already have somewhere to go — they fall back to the
     // shell's texture, which is where a helmet that doesn't paint them apart drew them — and
     // a helmet whose shell paint repaints the goggles too would lose that to the mesh's own.
-    let stock = stock || paints.is_empty();
+    let stock = stock || paints.is_empty() || (want.is_none() && mesh_carries_shell());
     // A stock side decodes nothing from `paints/` — the mesh already carries that texture.
     let main_pnt = (!stock)
         .then(|| pick_gear_paint(&paints, want.as_deref(), &part))
@@ -2172,11 +2222,14 @@ fn load_gear_model_blocking(
                 .filter(|t| !taken.contains(&t.name.to_ascii_lowercase())),
         );
     }
-    // Which textures this item's paints supply, whichever one is picked — the names the mesh
-    // declares and leaves to a `.pnt`, and so part of the slot order its materials count.
-    // Read even when nothing is painted: a stock preview counts the same slots.
-    let declared =
-        paint_texture_names(paints.iter().chain(goggle_paints.iter()).map(|(_, d)| d.as_slice()));
+    // Both sides' names as one list, for the binder — counted even when nothing is painted,
+    // since a stock preview counts the same slots.
+    let mut declared = shell_declared;
+    for n in goggle_declared {
+        if !declared.iter().any(|h| h.eq_ignore_ascii_case(&n)) {
+            declared.push(n);
+        }
+    }
     for (d, nodes) in &mut drawn {
         bind_gear_submeshes(nodes, Some(d.as_slice()), &main_side, &goggle_side, &declared);
     }
@@ -2782,18 +2835,24 @@ fn loose_paint_named(
 }
 
 /// A paint the game itself ships, from `<folder>/<sub>/<paint>.pnt` — `sub` being `paints`
-/// for the piece's own look or `goggles` for the goggles worn with it. Falls back to the
-/// first paint in the folder so a stale name still shows the piece textured.
+/// for the piece's own look or `goggles` for the goggles worn with it.
+///
+/// A name that misses falls back to the first paint in the folder, so a stale name still shows
+/// the piece textured rather than bare grey. *No name* is a different answer and must not reach
+/// that fallback: an empty slot is the loadout saying "the model's own look", and dressing it in
+/// whichever `.pnt` sorts first is how the stock helmet came out bronze — `black_yellow` leads
+/// `rider/helmets/default/paints/`, while the mesh's own sheet is white. Nothing here, and the
+/// caller falls through to the mesh's embedded textures, which is what stock means.
 fn load_pkz_paint(
     pkz: &std::path::Path,
     folder: &str,
     sub: &str,
     paint: &str,
 ) -> Vec<paint::PaintTexture> {
-    let named = (!paint.is_empty())
-        .then(|| read_pkz_entry(pkz, &format!("{folder}/{sub}/{paint}.pnt")))
-        .flatten();
-    named
+    if paint.is_empty() {
+        return Vec::new();
+    }
+    read_pkz_entry(pkz, &format!("{folder}/{sub}/{paint}.pnt"))
         .or_else(|| read_pkz_first(pkz, &format!("{folder}/{sub}/"), ".pnt"))
         .and_then(|d| paint::decode_any(&d).ok())
         .map(|p| p.iter().map(paint::to_texture).collect())
@@ -4802,6 +4861,62 @@ mod gear_paint_merge_tests {
     }
 }
 
+/// Whether a side has a stock look at all — the question behind both the library's "Stock"
+/// entry and what an empty paint slot resolves to on the rider. They read the same function,
+/// so these cases pin down both at once.
+#[cfg(test)]
+mod stock_side_tests {
+    use super::mesh_supplies_side;
+
+    fn v(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    // The ordinary helmet: the mesh carries the sheet its paints replace, so there is a stock
+    // look to show and an empty slot means it.
+    #[test]
+    fn the_mesh_carrying_the_painted_sheet_is_a_stock_look() {
+        assert!(mesh_supplies_side(&v(&["helmet", "visor"]), &v(&["helmet"]), false));
+    }
+
+    // Case is the mod author's business, not ours — a `.pnt` replaces by name regardless.
+    #[test]
+    fn the_match_ignores_case() {
+        assert!(mesh_supplies_side(&v(&["Helmet"]), &v(&["helmet"]), false));
+    }
+
+    // The Bell Moto 10: it embeds a tear-off film and a goggle, but the shell sheet comes from
+    // its paints. Calling that a stock look drew the helmet near-blank — and now it would also
+    // make an empty slot render bare, which is worse than the first-paint fallback it keeps.
+    #[test]
+    fn a_mesh_that_leaves_the_shell_to_its_paints_has_no_stock_look() {
+        assert!(!mesh_supplies_side(&v(&["tearoff", "Racecraft"]), &v(&["airoh_shell"]), false));
+    }
+
+    // Normal and roughness maps are never the look. A mesh carrying only companions carries
+    // nothing to show.
+    #[test]
+    fn companion_maps_dont_count_as_a_look() {
+        assert!(!mesh_supplies_side(&v(&["boots_n", "boots_r"]), &v(&[]), false));
+        assert!(!mesh_supplies_side(&v(&["helmet_n"]), &v(&["helmet_n"]), false));
+    }
+
+    // Nothing painted on a side at all — the stock protection slot — so whatever the mesh
+    // carries for that side is the only look there is.
+    #[test]
+    fn with_no_paints_the_mesh_is_the_only_look() {
+        assert!(mesh_supplies_side(&v(&["armor"]), &v(&[]), false));
+    }
+
+    // ...and the sides don't borrow from each other: an embedded goggle is not a shell look.
+    #[test]
+    fn an_unpainted_side_only_counts_its_own_sheets() {
+        let embedded = v(&["goggles"]);
+        assert!(mesh_supplies_side(&embedded, &v(&[]), true), "the goggle side has one");
+        assert!(!mesh_supplies_side(&embedded, &v(&[]), false), "the shell does not");
+    }
+}
+
 #[cfg(test)]
 mod viewer_tests {
     #[test]
@@ -5660,6 +5775,128 @@ mod viewer_tests {
             .collect();
         out.push_str(&format!("],\"paints\":[{}]}}", paints.join(",")));
         println!("AUDIT {out}");
+    }
+
+    /// The average colour of a stored texture, and how far off neutral it is.
+    ///
+    /// Neutrality rather than "is it white" on purpose: it holds whichever way round the
+    /// channels are stored, so this can't pass or fail for the wrong reason if that ever
+    /// moves. A white or grey sheet has its three channels together; a painted one doesn't.
+    fn avg_and_spread(tex: &crate::paint::PaintTexture) -> ([u32; 3], u32) {
+        let px = crate::texstore::get(&tex.token).expect("token resolves");
+        let mut sum = [0u64; 3];
+        let mut n = 0u64;
+        for p in px.chunks_exact(4) {
+            if p[3] < 128 {
+                continue; // fully transparent regions are not the look
+            }
+            for k in 0..3 {
+                sum[k] += p[k] as u64;
+            }
+            n += 1;
+        }
+        assert!(n > 0, "'{}' has no opaque pixels", tex.name);
+        let avg = [(sum[0] / n) as u32, (sum[1] / n) as u32, (sum[2] / n) as u32];
+        (avg, avg.iter().max().unwrap() - avg.iter().min().unwrap())
+    }
+
+    /// The reported bug, pinned to the archive it came from: the rider tab drew the stock
+    /// helmet bronze while the library's "Stock" entry drew it white.
+    ///
+    /// Both halves matter and they pull in opposite directions — an empty name must reach no
+    /// paint at all, while a *stale* name must still reach one, or gear whose paint was
+    /// renamed comes out bare grey. A single assertion would let the fix overshoot.
+    #[test]
+    #[ignore]
+    fn an_unnamed_stock_paint_is_the_mesh_not_the_first_pnt() {
+        let Ok(pkz) = std::env::var("MXB_RIDER_PKZ") else {
+            eprintln!("set MXB_RIDER_PKZ to the game's rider.pkz to run");
+            return;
+        };
+        let pkz = std::path::Path::new(&pkz);
+        let folder = "rider/helmets/default";
+
+        // No name → no paint, so the caller falls through to the mesh's own textures.
+        assert!(
+            super::load_pkz_paint(pkz, folder, "paints", "").is_empty(),
+            "an empty slot must not resolve to a paint",
+        );
+        // A name that misses → still a paint, so a renamed livery shows textured.
+        assert!(
+            !super::load_pkz_paint(pkz, folder, "paints", "no_such_paint_ea7b").is_empty(),
+            "a stale name must still fall back to a paint",
+        );
+
+        // And what the two answers actually look like. The mesh's own sheet is the white one
+        // the library shows; the paint that used to stand in for it is not.
+        let mesh = super::read_pkz_entry(pkz, &format!("{folder}/helmet.edf")).expect("helmet.edf");
+        let stock = crate::paint::extract_edf_textures_where(&mesh, |n| n.eq_ignore_ascii_case("helmet"));
+        let stock = stock.first().expect("the mesh carries its own 'helmet' sheet");
+        let (stock_avg, stock_spread) = avg_and_spread(stock);
+
+        let first = super::load_pkz_paint(pkz, folder, "paints", "black_yellow");
+        let first = first.iter().find(|t| t.name.eq_ignore_ascii_case("helmet"));
+        let first = first.expect("black_yellow paints 'helmet'");
+        let (first_avg, first_spread) = avg_and_spread(first);
+
+        eprintln!("stock mesh sheet  avg={stock_avg:?} spread={stock_spread}");
+        eprintln!("black_yellow.pnt  avg={first_avg:?} spread={first_spread}");
+        assert!(stock_spread < 12, "the stock helmet is neutral (white/grey), got {stock_avg:?}");
+        assert!(
+            first_spread > 40,
+            "black_yellow is a colour, not a neutral — if this fails the fixture archive \
+             changed and the test above proves less than it looks like ({first_avg:?})",
+        );
+    }
+
+    /// The invariant behind the fix, for whatever gear is on this machine: an empty paint
+    /// slot renders exactly what the library's "Stock" entry renders — and where there is no
+    /// stock look to render, it still renders *something* rather than going bare.
+    ///
+    /// Stated as an equality between the two code paths rather than as an expected texture
+    /// name, because the point is that they agree, not what they agree on.
+    #[test]
+    #[ignore]
+    fn an_empty_slot_renders_what_the_library_calls_stock() {
+        let Ok(path) = std::env::var("MXB_REAL_GEAR") else {
+            eprintln!("set MXB_REAL_GEAR to an installed gear folder/.pkz to run");
+            return;
+        };
+        let slot = std::env::var("MXB_REAL_GEAR_PART").unwrap_or_else(|_| "helmet".into());
+        let names = |p: super::RiderPart| {
+            let mut v: Vec<String> = p.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+            v.sort_unstable();
+            v
+        };
+        let load = |paint: Option<&str>, stock: bool| {
+            names(
+                super::load_gear_model_blocking(
+                    path.clone(),
+                    slot.clone(),
+                    paint.map(str::to_string),
+                    None,
+                    stock,
+                    false,
+                    Vec::new(),
+                )
+                .expect("load gear"),
+            )
+        };
+
+        let offers_stock = super::gear_paints_at(std::path::Path::new(&path))
+            .expect("read gear paints")
+            .has_stock;
+        // The rider tab's empty slot, and the library's picker on "Stock".
+        let empty = load(Some(""), false);
+        eprintln!("has_stock={offers_stock} empty slot -> {empty:?}");
+        assert!(!empty.is_empty(), "an empty slot must never render untextured");
+        if offers_stock {
+            assert_eq!(empty, load(None, true), "empty slot != the library's Stock");
+        } else {
+            // No stock look to fall back on, so the first-paint fallback still stands —
+            // forcing stock here is what would draw the Bell Moto 10 in a near-blank film.
+            assert_eq!(empty, load(None, false), "kept the first-paint fallback");
+        }
     }
 }
 
