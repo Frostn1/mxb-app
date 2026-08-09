@@ -26,6 +26,7 @@ mod mxb_fetch;
 mod mxb_session;
 mod overlay;
 mod paint;
+mod paintstudio;
 mod pkz;
 #[cfg(sidecar)]
 mod sidecar;
@@ -594,6 +595,274 @@ async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> 
 
 fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+}
+
+// ── Paint studio ────────────────────────────────────────────────────────────────────
+//
+// A `.pnt` is a packed container no image editor can write, so a livery drawn in GIMP has
+// always needed somebody else's converter before the game would load it. These commands are
+// both halves of that: images in (`paint_studio_save`), sheets out as editable TGA
+// templates (`paint_studio_extract`), and the texture names a destination expects
+// (`paint_studio_hints`) so a new paint binds to the same parts as the ones already there.
+
+/// Where a built paint is written.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum PaintDest {
+    /// Under the game's `mods` folder — `bikes/<Bike>/paints`,
+    /// `rider/helmets/<Helmet>/paints`, `rider/riders/<Profile>/gloves`…
+    Mods { rel: String },
+    /// A folder the player picked themselves, for a paint they mean to share rather than
+    /// install.
+    Folder { path: String },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedPaint {
+    path: String,
+    textures: Vec<String>,
+    bytes: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaintTarget {
+    path: String,
+    exists: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaintTemplate {
+    dir: String,
+    files: Vec<String>,
+    textures: Vec<String>,
+}
+
+/// Read source images for the studio — the pixels land in the texture store, so the UI
+/// previews them through exactly the same path as a decoded paint's.
+#[tauri::command]
+async fn paint_studio_load(paths: Vec<String>) -> Result<Vec<paintstudio::StudioImage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .iter()
+            .map(|p| paintstudio::inspect(std::path::Path::new(p)).map_err(|e| format!("{e:#}")))
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("paint_studio_load task failed: {e}"))?
+}
+
+/// The file a save would write, resolved but not written — so the UI can ask before
+/// replacing a paint that's already there.
+#[tauri::command]
+fn paint_studio_target(
+    app: tauri::AppHandle,
+    file_name: String,
+    dest: PaintDest,
+) -> Result<PaintTarget, String> {
+    let path = resolve_paint_dest(&app, &file_name, &dest)?;
+    Ok(PaintTarget { exists: path.is_file(), path: path.to_string_lossy().into_owned() })
+}
+
+/// `<dir>/<name>.pnt` for a destination, refusing anything that isn't a paint sitting where
+/// a paint belongs.
+///
+/// The `Mods` arm goes through [`paintsync::safe_dest`] — the same check that vets a
+/// destination sent by another player over paint sync. Nothing here is remote, but the rule
+/// it enforces (a relative path, no traversal, at least two segments deep, ending in
+/// `.pnt`) is exactly the rule a paint destination has to satisfy, and one boundary with
+/// tests beats a second one written from memory.
+fn resolve_paint_dest(
+    app: &tauri::AppHandle,
+    file_name: &str,
+    dest: &PaintDest,
+) -> Result<std::path::PathBuf, String> {
+    let stem = install::sanitize(file_name.trim())
+        .trim()
+        .trim_end_matches('.')
+        .trim_end_matches(".pnt")
+        .trim()
+        .to_string();
+    if stem.is_empty() {
+        return Err("Name this paint before saving it.".into());
+    }
+    let file = format!("{stem}.pnt");
+    match dest {
+        PaintDest::Mods { rel } => {
+            let cfg = config::load(app).map_err(|e| format!("{e:#}"))?;
+            let mods_dir = library::mods_subdir(&cfg.mods_path, "mods");
+            let rel = rel.replace('\\', "/");
+            let rel = rel.trim_matches('/');
+            paintsync::safe_dest(&mods_dir, &format!("{rel}/{file}"))
+                .ok_or_else(|| format!("'{rel}' isn't a folder a paint can be installed into"))
+        }
+        PaintDest::Folder { path } => {
+            let dir = std::path::PathBuf::from(path);
+            if !dir.is_dir() {
+                return Err(format!("{} isn't a folder", dir.display()));
+            }
+            Ok(dir.join(file))
+        }
+    }
+}
+
+/// Build a `.pnt` from the chosen images and write it.
+#[tauri::command]
+async fn paint_studio_save(
+    app: tauri::AppHandle,
+    name: String,
+    file_name: String,
+    textures: Vec<paintstudio::BuildTexture>,
+    dest: PaintDest,
+    overwrite: bool,
+) -> Result<SavedPaint, String> {
+    let target = resolve_paint_dest(&app, &file_name, &dest)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if !overwrite && target.exists() {
+            return Err(format!("{} is already there.", target.display()));
+        }
+        // The paint's own name is the one the game shows; an empty one falls back to the
+        // file name, which is what every paint on disk is picked by anyway.
+        let title = if name.trim().is_empty() {
+            target.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+        } else {
+            name.trim().to_string()
+        };
+        let bytes = paintstudio::build(&title, &textures).map_err(|e| format!("{e:#}"))?;
+        let names = paint::texture_names(&bytes).map_err(|e| format!("{e:#}"))?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create {}: {e}", parent.display()))?;
+        }
+        std::fs::write(&target, &bytes)
+            .map_err(|e| format!("write {}: {e}", target.display()))?;
+        log::info!(
+            "[paint studio] wrote {} ({} bytes, textures: {})",
+            target.display(),
+            bytes.len(),
+            names.join(", ")
+        );
+        Ok(SavedPaint {
+            path: target.to_string_lossy().into_owned(),
+            textures: names,
+            bytes: bytes.len() as u64,
+        })
+    })
+    .await
+    .map_err(|e| format!("paint_studio_save task failed: {e}"))?
+}
+
+/// Write a paint's sheets out as `.tga` files to edit — the way to start from a livery
+/// that already fits the model instead of from a blank sheet.
+#[tauri::command]
+async fn paint_studio_extract(
+    app: tauri::AppHandle,
+    path: String,
+    dest: Option<String>,
+) -> Result<PaintTemplate, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let src = std::path::PathBuf::from(&path);
+        let stem = src
+            .file_stem()
+            .map(|s| install::sanitize(&s.to_string_lossy()))
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "paint".to_string());
+        let dir = match dest {
+            Some(d) => std::path::PathBuf::from(d).join(&stem),
+            None => templates_root(&app).join(&stem),
+        };
+        let bytes = std::fs::read(&src).map_err(|e| format!("read {}: {e}", src.display()))?;
+        let files = paintstudio::extract(&bytes, &dir).map_err(|e| format!("{e:#}"))?;
+        let textures = files
+            .iter()
+            .filter_map(|f| f.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .collect();
+        Ok(PaintTemplate {
+            dir: dir.to_string_lossy().into_owned(),
+            files: files.iter().map(|f| f.to_string_lossy().into_owned()).collect(),
+            textures,
+        })
+    })
+    .await
+    .map_err(|e| format!("paint_studio_extract task failed: {e}"))?
+}
+
+/// Where templates go when the player doesn't pick somewhere: their Documents folder, not
+/// the mods folder — the game scans that, and a folder of loose sheets isn't a mod.
+fn templates_root(app: &tauri::AppHandle) -> std::path::PathBuf {
+    dirs_next::document_dir()
+        .or_else(|| app.path().app_data_dir().ok())
+        .unwrap_or_else(std::env::temp_dir)
+        .join("MXB App")
+        .join("Paint Templates")
+}
+
+/// The texture names a destination's existing paints supply.
+///
+/// A paint binds by name: call a sheet `livery` and it lands on the bodywork that asked for
+/// `livery`, call it `my_livery` and it lands nowhere. Nothing in a `.pnt` says which names
+/// a model wants, but the paints already installed for that model do — read from their
+/// headers, so this costs no pixels.
+#[tauri::command]
+async fn paint_studio_hints(app: tauri::AppHandle, rel: String) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let rel = rel.replace('\\', "/").trim_matches('/').to_string();
+        let dir = library::mods_subdir(&cfg.mods_path, &format!("mods/{rel}"));
+        let mut names: Vec<String> = Vec::new();
+        fn add(names: &mut Vec<String>, bytes: &[u8]) {
+            let Ok(found) = paint::texture_names_any(bytes) else { return };
+            for n in found {
+                if !n.is_empty() && !names.iter().any(|s| s.eq_ignore_ascii_case(&n)) {
+                    names.push(n);
+                }
+            }
+        }
+
+        // A handful is plenty: paints for one model overwhelmingly supply the same names,
+        // and this runs every time the destination changes.
+        const SAMPLE: usize = 8;
+        let mut seen = 0usize;
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for entry in rd.flatten() {
+                let p = entry.path();
+                if seen >= SAMPLE
+                    || !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pnt"))
+                {
+                    continue;
+                }
+                if let Ok(bytes) = std::fs::read(&p) {
+                    add(&mut names, &bytes);
+                    seen += 1;
+                }
+            }
+        }
+        // Nothing installed loose: the model may be packed, and its own paints are the
+        // same evidence. `<Model>.pkz` sits beside the `<Model>` folder this destination
+        // lives in — for a bike as much as for a helmet.
+        if names.is_empty() {
+            if let (Some(sub), Some(model_dir)) = (dir.file_name(), dir.parent()) {
+                let pkz = model_dir.with_extension("pkz");
+                let tail = format!("/{}/", sub.to_string_lossy().to_ascii_lowercase());
+                if pkz.is_file() {
+                    let want = |n: &str| {
+                        let n = n.replace('\\', "/").to_ascii_lowercase();
+                        n.contains(&tail) && n.ends_with(".pnt")
+                    };
+                    let packed = pkz::read_selected(&pkz, want).unwrap_or_default();
+                    for (_, bytes) in packed.iter().take(SAMPLE) {
+                        add(&mut names, bytes);
+                    }
+                }
+            }
+        }
+        names.sort_by_key(|n| n.to_lowercase());
+        Ok(names)
+    })
+    .await
+    .map_err(|e| format!("paint_studio_hints task failed: {e}"))?
 }
 
 /// Raw RGBA for a texture the viewer was handed a token for.
@@ -2147,7 +2416,55 @@ fn read_gear_file(path: &std::path::Path) -> Option<Vec<u8>> {
     Some(pkz::read_sidecar_blob(&bytes).unwrap_or(bytes))
 }
 
+/// Every file a gear item is made of — from its folder *and* from the `.pkz` beside it.
+///
+/// A packed helmet is one file, but a paint installed for it later is a loose `.pnt` in a
+/// folder of the same name next to it: that's where the game looks, and it's where this
+/// app's paint studio writes one. Reading only whichever of the two the caller resolved
+/// meant a folder holding nothing but paints hid the archive entirely — the picker listed
+/// the new paint alone and the preview lost the mesh it belongs to. So both are read, the
+/// folder's copy winning a name clash because it's the one installed last.
 fn read_gear_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    let stem = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = stem.strip_suffix(".pkz").unwrap_or(&stem);
+    let (dir, pkz) = match p.parent() {
+        Some(parent) => (parent.join(stem), parent.join(format!("{stem}.pkz"))),
+        None => return read_gear_source(p),
+    };
+    if !dir.is_dir() || !pkz.is_file() {
+        return read_gear_source(p);
+    }
+    // Neither side is allowed to take the other down with it: a `.pkz` that won't open is a
+    // reason to show the folder's paints on their own, not to fail the whole item.
+    let mut out = read_gear_source(&dir).unwrap_or_default();
+    let mut have: Vec<String> = out.iter().map(|(n, _)| gear_entry_key(n)).collect();
+    for (name, bytes) in read_gear_source(&pkz).unwrap_or_default() {
+        let key = gear_entry_key(&name);
+        if !have.contains(&key) {
+            have.push(key);
+            out.push((name, bytes));
+        }
+    }
+    // Both empty says nothing about *why*; let the caller's own path report it.
+    if out.is_empty() {
+        return read_gear_source(p);
+    }
+    Ok(out)
+}
+
+/// What two spellings of the same gear file have in common: `helmets/Foo/paints/red.pnt`
+/// from an archive and `paints/red.pnt` from the folder beside it are one entry, while
+/// `paints/red.pnt` and `goggles/red.pnt` stay two.
+fn gear_entry_key(name: &str) -> String {
+    let n = name.replace('\\', "/").to_ascii_lowercase();
+    let base = n.rsplit('/').next().unwrap_or(&n).to_string();
+    match n.rsplit('/').nth(1) {
+        Some(folder @ ("paints" | "goggles")) => format!("{folder}/{base}"),
+        _ => base,
+    }
+}
+
+fn read_gear_source(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     use anyhow::Context;
     if p.is_dir() {
         let mut out = Vec::new();
@@ -3220,9 +3537,14 @@ fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Resul
     frostmod_manage::start(&app, &state).map_err(|e| format!("{e:#}"))
 }
 
+/// Stop FrostMod now, whoever started it — ours to kill or not. `false` means it's still
+/// running (elevated, or another user's), which the UI reports rather than papering over.
+///
+/// Async for the same reason as `set_mods_path`: a sync command runs on the UI thread, and
+/// this one waits out the moment between the kill and the process actually going.
 #[tauri::command]
-fn frostmod_stop(state: State<FrostmodProcess>) {
-    frostmod_manage::stop(&state);
+async fn frostmod_stop(state: State<'_, FrostmodProcess>) -> Result<bool, String> {
+    Ok(frostmod_manage::stop_running(&state))
 }
 
 #[tauri::command]
@@ -3759,7 +4081,37 @@ fn log_level() -> log::LevelFilter {
 }
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // One app, one process. Closing the window parks MXB App in the tray rather than
+    // quitting it, so without this a second launch doesn't reveal the copy already
+    // running — it builds a whole new one: another window, another tray icon, another
+    // FrostMod, another mod watcher. Five launches in a day left five of everything, and
+    // only the tray overflow to clean them up from.
+    //
+    // Registered before every other plugin: the guard's setup hook is what kills the
+    // second process, and it should do so before anything else has started work that
+    // would then need unwinding. `show_main` is the same path the tray's "Show MXB App"
+    // takes, so relaunching behaves exactly like clicking the tray icon.
+    //
+    // Release builds only, for the same reason close-to-tray is (see `CloseRequested`
+    // below): a `tauri dev` run must still start while the installed MXB App is sitting
+    // in the tray, otherwise it would silently exit and just re-show the shipped app.
+    //
+    // The updater's restart is safe against this by construction, and it's worth knowing
+    // why, because it looks like it shouldn't be: a restart spawns the replacement before
+    // this process is gone, so a guard still held would make the new app mistake itself
+    // for a second copy and quit — an update that leaves nothing running. It doesn't,
+    // because `relaunch()` goes through `request_restart()`, and Tauri hands plugins
+    // `RunEvent::Exit` — where this one releases the guard — before it spawns anything.
+    // A restart that skipped the event loop would not be safe.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        log::info!("another instance was launched — showing the window already running");
+        show_main(app);
+    }));
+
+    builder
         // Thumbnails for both catalogs, served from a disk cache instead of refetched on
         // every scroll. Registered here rather than per-window so the overlay — which
         // renders the same `ModCard` — gets it too.
@@ -3950,6 +4302,11 @@ fn main() {
             load_stock_gear_model,
             list_gear_paints,
             list_installed_gear_paints,
+            paint_studio_load,
+            paint_studio_target,
+            paint_studio_save,
+            paint_studio_extract,
+            paint_studio_hints,
             scan_rider_targets,
             scan_bike_targets,
             scan_model_swaps,
@@ -4273,6 +4630,41 @@ mod gear_bind_tests {
     fn an_exporter_named_map_is_never_the_primary() {
         let s = side(&["Vest_Normal", "Vest_BaseColor"]);
         assert_eq!(s.primary.as_deref(), Some("Vest_BaseColor"));
+    }
+}
+
+/// A packed gear item and a folder of the same name are one item, not two — the case the
+/// paint studio creates every time it installs a paint for a `.pkz` helmet.
+#[cfg(test)]
+mod gear_source_tests {
+    use super::{gear_entry_key, read_gear_files};
+
+    #[test]
+    fn one_entry_however_it_is_spelled() {
+        assert_eq!(gear_entry_key("helmets/Foo/paints/red.pnt"), gear_entry_key("paints/red.pnt"));
+        assert_eq!(gear_entry_key("helmets/Foo/helmet.edf"), gear_entry_key("helmet.edf"));
+        assert_ne!(gear_entry_key("paints/red.pnt"), gear_entry_key("goggles/red.pnt"));
+    }
+
+    #[test]
+    fn a_folder_of_paints_beside_a_pkz_reads_as_both() {
+        let root = std::env::temp_dir().join(format!("frost-gear-merge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("Helmet");
+        std::fs::create_dir_all(dir.join("paints")).unwrap();
+        std::fs::write(dir.join("paints").join("mine.pnt"), b"PNT\0mine").unwrap();
+        // Not a real archive — `pkz::read_all` returning nothing is enough to prove the
+        // folder's paint isn't lost, and a genuine `.pkz` is exercised by the pkz tests.
+        std::fs::write(root.join("Helmet.pkz"), b"not really an archive").unwrap();
+
+        for from in [dir.clone(), root.join("Helmet.pkz")] {
+            let files = read_gear_files(&from).unwrap_or_default();
+            assert!(
+                files.iter().any(|(n, _)| n.ends_with("mine.pnt")),
+                "the loose paint has to be visible whichever side the caller resolved ({from:?})"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 
