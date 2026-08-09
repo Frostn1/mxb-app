@@ -19,8 +19,7 @@ import {
   isBlockedDownload,
   isLiveryContext,
   isSoundContext,
-  riderProfileSub,
-  riderPaintKind,
+  riderTarget,
   resolveInitialFolder,
   scanBikeTargets,
   scanRiderTargets,
@@ -100,10 +99,13 @@ export default function ModDetail({
   const { game } = useConfig();
   const livery = isLiveryContext(modType, categoryId);
   const sound = isSoundContext(modType, categoryId);
-  // For rider kit/gloves, which profile sub-folder to target (`null` for gear paints).
-  const profileSub = riderProfileSub(modType, categoryId);
-  // For a gear paint (Boot/Helmet/Protection Paints), which model kind it targets.
-  const paintKind = riderPaintKind(modType, categoryId);
+  // Which rider folder this category installs into — a gear model's paints, something worn
+  // on the rider model, or a model of its own. `null` when the category doesn't say.
+  const rider = useMemo(
+    () => riderTarget(game, modType, categoryId),
+    [game, modType, categoryId],
+  );
+  const [derivedDest, setDerivedDest] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The raw file list — only for destination folders and their counts. The badge uses
@@ -131,6 +133,7 @@ export default function ModDetail({
     setDestOptions([]);
     setGuess("");
     setSuggestions([]);
+    setDerivedDest(false);
     getModDetail(slug)
       .then(async (d) => {
         if (cancelled) return;
@@ -144,11 +147,17 @@ export default function ModDetail({
           const bikeTargets =
             modType.id === "bikes" ? await scanBikeTargets().catch(() => []) : [];
           if (cancelled) return;
-          // Rider paints route into a model's/profile's folder; everything else
-          // uses the generic (track/bike) destination logic.
+          // Rider content routes into a gear model's, or the rider model's, own folder;
+          // everything else uses the generic (track/bike) destination logic.
           const dest =
             modType.id === "rider"
-              ? buildRiderDestinations(await scanRiderTargets(), d.title, profileSub, paintKind)
+              ? buildRiderDestinations(
+                  game,
+                  await scanRiderTargets(),
+                  d.title,
+                  d.categories,
+                  rider,
+                )
               : buildDestinations(
                   modType,
                   d.title,
@@ -162,6 +171,7 @@ export default function ModDetail({
           setDestOptions(dest.options);
           setGuess(dest.guess);
           setSuggestions(dest.suggestions);
+          setDerivedDest("derived" in dest && dest.derived === true);
         } catch {
           setInstalledFiles([]);
           setDestOptions([]);
@@ -171,7 +181,7 @@ export default function ModDetail({
     return () => {
       cancelled = true;
     };
-  }, [slug, modType, livery, sound]);
+  }, [slug, modType, livery, sound, game, rider]);
 
   const folderCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -186,10 +196,14 @@ export default function ModDetail({
   const format = primary ? fileFormat(primary.url) : null;
   const mirrorNames = [...new Set(mirrors.map((m) => m.host))].join(" · ");
 
-  const destKey = destStorageKey(modType);
+  const destKey = destStorageKey(game, modType);
   const initialFolder = useMemo(
-    () => resolveInitialFolder(modType, destOptions, guess, livery, sound, paintKind),
-    [modType, destOptions, guess, livery, sound, paintKind],
+    () =>
+      resolveInitialFolder(game, modType, destOptions, guess, livery, sound, {
+        target: rider,
+        derived: derivedDest,
+      }),
+    [game, modType, destOptions, guess, livery, sound, rider, derivedDest],
   );
 
   const isInstalled = detail !== null && installed.has(detail.title);

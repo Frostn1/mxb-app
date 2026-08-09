@@ -870,11 +870,14 @@ export const ptBR: Translation = {
   "dest.helmetsNewModel": "Capacetes (modelo novo)",
   "dest.bootsNewModel": "Botas (modelo novo)",
   "dest.protectionNewModel": "Proteções (modelo novo)",
+  "dest.riderModelsNew": "Modelos de piloto (modelo novo)",
+  "dest.animationsNewStyle": "Estilos de pilotagem (nova animação)",
   "dest.helmetPaintsFor": "{{name}} · pinturas de capacete",
   "dest.gogglesFor": "{{name}} · óculos",
   "dest.bootPaintsFor": "{{name}} · pinturas de botas",
   "dest.protectionPaintsFor": "{{name}} · pinturas de proteções",
   "dest.outfitFor": "{{name}} · uniforme / kit",
+  "dest.suitPaintsFor": "{{name}} · pinturas de macacão",
   "dest.glovesFor": "{{name}} · luvas",
 
   // In-game overlay — the hotkey panel drawn over MX Bikes.

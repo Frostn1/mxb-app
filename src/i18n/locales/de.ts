@@ -892,11 +892,14 @@ export const de: Translation = {
   "dest.helmetsNewModel": "Helme (neues Modell)",
   "dest.bootsNewModel": "Stiefel (neues Modell)",
   "dest.protectionNewModel": "Protektoren (neues Modell)",
+  "dest.riderModelsNew": "Fahrermodelle (neues Modell)",
+  "dest.animationsNewStyle": "Fahrstile (neue Animation)",
   "dest.helmetPaintsFor": "{{name}} · Helm-Designs",
   "dest.gogglesFor": "{{name}} · Brille",
   "dest.bootPaintsFor": "{{name}} · Stiefel-Designs",
   "dest.protectionPaintsFor": "{{name}} · Protektoren-Designs",
   "dest.outfitFor": "{{name}} · Outfit / Kit",
+  "dest.suitPaintsFor": "{{name}} · Kombi-Designs",
   "dest.glovesFor": "{{name}} · Handschuhe",
 
   // In-game overlay — the hotkey panel drawn over MX Bikes.

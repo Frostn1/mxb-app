@@ -879,11 +879,14 @@ export const es: Translation = {
   "dest.helmetsNewModel": "Cascos (modelo nuevo)",
   "dest.bootsNewModel": "Botas (modelo nuevo)",
   "dest.protectionNewModel": "Protecciones (modelo nuevo)",
+  "dest.riderModelsNew": "Modelos de piloto (modelo nuevo)",
+  "dest.animationsNewStyle": "Estilos de pilotaje (animación nueva)",
   "dest.helmetPaintsFor": "{{name}} · gráficos de casco",
   "dest.gogglesFor": "{{name}} · gafas",
   "dest.bootPaintsFor": "{{name}} · gráficos de botas",
   "dest.protectionPaintsFor": "{{name}} · gráficos de protecciones",
   "dest.outfitFor": "{{name}} · equipación / kit",
+  "dest.suitPaintsFor": "{{name}} · gráficos de mono",
   "dest.glovesFor": "{{name}} · guantes",
 
   // In-game overlay — the hotkey panel drawn over MX Bikes.

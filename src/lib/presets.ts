@@ -4,8 +4,8 @@ import {
   scanLibrary,
   scanRiderTargets,
   scanModelSwaps,
+  EMPTY_RIDER_TARGETS,
   STOCK_RIDER_PROFILES,
-  type RiderTargets,
 } from "../api/mods";
 
 export interface SlotDef {
@@ -152,7 +152,7 @@ export async function loadScans(): Promise<Scans> {
     scanLibrary("mods/rider").catch(() => [] as LibraryEntry[]),
     scanLibrary("mods/tyres").catch(() => [] as LibraryEntry[]),
     scanRiderTargets().catch(
-      () => ({ helmets: [], boots: [], protection: [], profiles: [] }) as RiderTargets,
+      () => EMPTY_RIDER_TARGETS,
     ),
     scanModelSwaps().catch(() => [] as BikeModels[]),
   ]);

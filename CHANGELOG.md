@@ -3,6 +3,27 @@
 ## 2026-08-09
 
 ### Fixed
+- **GP Bikes suits go where GP Bikes reads them.** Every rider install landed in `mods/rider`
+  itself — the game never opens that folder, so a suit you'd just installed was nowhere in
+  the game. Suit paints now default to `riders/<your rider model>/paints`, rider models to
+  `riders`, helmet paints to `helmets/<model>/paints` and riding styles to `animations`,
+  which is exactly the set the game's loader reads and nothing else.
+- **The rider picker offers your game's folders, not the other one's.** GP Bikes was being
+  shown MX Bikes' `boots`, `protections`, gloves, goggles and `default_mx` rider — none of
+  which exist there — while `riders` and `animations` were missing entirely. Each title now
+  lists its own, and the folder you last picked is remembered per game.
+- **A suit paint knows which rider model it's for.** gpb-mods files suits under the model
+  family they fit — Modern 1, Modern 2, MGP 21 — and that now picks the installed model,
+  instead of falling back to whichever folder you used last.
+- **Quick-install stops dumping rider mods in the root.** One-click and bulk installs from
+  the Browse grid never asked the rider logic at all, so a helmet, kit or suit installed that
+  way ignored every gear folder. Both games.
+- **A dropped GP suit isn't filed as boots.** GP's suits carry the boots' textures because
+  the boots are part of the rider model, and the drop classifier read that as a boot paint —
+  aiming it at a folder GP Bikes has no loader for. Suit, outfit and arm textures now read as
+  the rider's body, and gear hints for folders your game doesn't have are ignored.
+- **A dropped protection paint goes to `protections`.** The drop route was still aiming at
+  the old singular spelling the game stopped reading.
 - **Protection is drawn the right way up.** Every piece in the slot rendered on its side: the
   viewer assumed protection was authored the way the rider's body is, and it isn't — it takes
   the same up-axis as a helmet, turned a quarter turn about it. Read off the meshes rather

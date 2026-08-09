@@ -850,11 +850,14 @@ export const en = {
   "dest.helmetsNewModel": "Helmets (new model)",
   "dest.bootsNewModel": "Boots (new model)",
   "dest.protectionNewModel": "Protection (new model)",
+  "dest.riderModelsNew": "Rider models (new model)",
+  "dest.animationsNewStyle": "Riding styles (new animation)",
   "dest.helmetPaintsFor": "{{name}} · helmet paints",
   "dest.gogglesFor": "{{name}} · goggles",
   "dest.bootPaintsFor": "{{name}} · boot paints",
   "dest.protectionPaintsFor": "{{name}} · protection paints",
   "dest.outfitFor": "{{name}} · outfit / kit",
+  "dest.suitPaintsFor": "{{name}} · suit paints",
   "dest.glovesFor": "{{name}} · gloves",
 
   // In-game overlay — the hotkey panel drawn over MX Bikes.
