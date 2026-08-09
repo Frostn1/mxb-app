@@ -8,7 +8,7 @@ import Servers from "../Servers/Servers";
 import RiderStudio from "../Rider/RiderStudio";
 import PaintStudio from "../PaintStudio/PaintStudio";
 import Browse from "../Browse/Browse";
-import ShopCatalog from "../Shop/ShopCatalog";
+import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
 import Settings, { type SectionId } from "../Settings/Settings";
@@ -16,6 +16,7 @@ import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
 import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
+import { DropReviewProvider } from "../../Context/DropReview";
 import { useConfig } from "../../Context/Config";
 import { setIntroSeen } from "../../api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
@@ -113,10 +114,13 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   return (
     <TourContext.Provider value={{ startTour }}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
+      {/* Wraps the views because two of them stage plans: a drop anywhere in the window, and
+          the Shop's purchases grid. Both finish in the one review sheet this renders. */}
+      <DropReviewProvider onInstalled={onInstalled}>
       {/* Mounted here rather than in `App` so a drop only works once the app is set up —
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
-      <DropZone onInstalled={onInstalled} />
+      <DropZone />
       <div className="flex min-h-0 flex-1">
         <Sidebar view={view} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -137,7 +141,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onChangeType={changeType}
             />
           ) : view === "shop" ? (
-            <ShopCatalog />
+            <Shop refreshKey={libraryVersion} />
           ) : view === "library" ? (
             <Library
               modType={modType}
@@ -179,6 +183,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           onOpenSettings={openSettingsSection}
         />
       )}
+      </DropReviewProvider>
     </InstallProvider>
     </TourContext.Provider>
   );

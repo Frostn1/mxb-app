@@ -47,7 +47,7 @@ export default function ShopDetail({ id, currency, onBack }: ShopDetailProps) {
 
   if (error) {
     return (
-      <div className="flex h-full flex-col px-7 pt-5">
+      <div className="flex min-h-0 flex-1 flex-col px-7">
         <BackButton label={t("common.back")} onBack={onBack} />
         <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
           <p className="text-[13px] font-semibold text-destructive">
@@ -63,7 +63,7 @@ export default function ShopDetail({ id, currency, onBack }: ShopDetailProps) {
 
   if (!detail) {
     return (
-      <div className="flex h-full flex-col px-7 pt-5">
+      <div className="flex min-h-0 flex-1 flex-col px-7">
         <BackButton label={t("common.back")} onBack={onBack} />
         <div className="mt-4 flex gap-6">
           <Skeleton className="aspect-video flex-1 rounded-xl" />
@@ -74,7 +74,7 @@ export default function ShopDetail({ id, currency, onBack }: ShopDetailProps) {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden px-7 pb-6 pt-5">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-7 pb-6">
       <div className="flex flex-none items-center gap-3">
         <BackButton label={t("common.back")} onBack={onBack} />
         <h1 className="truncate text-[17px] font-bold tracking-[-0.2px]">

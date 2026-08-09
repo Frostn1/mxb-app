@@ -745,3 +745,73 @@ fn ordering_survives_a_catalog_with_no_published_dates() {
     assert_eq!(ordered, vec![2, 1], "newest falls back to `updated`");
 }
 
+
+// ───────────────────────────── matching purchases to the catalog ─────────────────────────────
+
+/// The scraped purchases page gives a product name and nothing else, so the join back to the
+/// catalog is what supplies the artwork. It has to be exact enough that a paid product never
+/// wears another's image.
+#[test]
+fn matches_a_purchase_to_its_catalog_entry() {
+    let (catalog, _) = sample();
+    let found = match_in(&catalog, &["Alpha Supercross Pack".to_string()], NOW);
+    assert_eq!(found[0].as_ref().map(|m| m.id), Some(101));
+    assert_eq!(found[0].as_ref().unwrap().author.as_deref(), Some("Niko"));
+}
+
+#[test]
+fn case_and_punctuation_do_not_block_a_match() {
+    let (catalog, _) = sample();
+    // Store markup and the purchases page disagree on dashes, case and spacing constantly.
+    let names = vec![
+        "alpha supercross pack".to_string(),
+        "ALPHA — SUPERCROSS   PACK!".to_string(),
+    ];
+    let found = match_in(&catalog, &names, NOW);
+    assert!(found.iter().all(|m| m.as_ref().map(|m| m.id) == Some(101)));
+}
+
+#[test]
+fn a_near_miss_does_not_match() {
+    let (catalog, _) = sample();
+    // One extra word is a different product. Guessing here would put the wrong artwork, author
+    // and store link on a card for something the user paid for.
+    let names = vec![
+        "Alpha Supercross Pack 2".to_string(),
+        "Supercross Pack".to_string(),
+        "Completely Unrelated Track".to_string(),
+    ];
+    assert!(match_in(&catalog, &names, NOW).iter().all(|m| m.is_none()));
+}
+
+#[test]
+fn results_line_up_with_the_names_given() {
+    let (catalog, _) = sample();
+    let names = vec![
+        "Not In The Catalog".to_string(),
+        "Bravo Expired Sale Track".to_string(),
+        "Also Not In The Catalog".to_string(),
+    ];
+    let found = match_in(&catalog, &names, NOW);
+    // Position matters — the caller zips this back onto its own list.
+    assert_eq!(found.len(), 3);
+    assert!(found[0].is_none());
+    assert_eq!(found[1].as_ref().map(|m| m.id), Some(102));
+    assert!(found[2].is_none());
+}
+
+#[test]
+fn two_catalog_items_with_the_same_name_resolve_to_neither() {
+    // Ambiguity is not a coin toss: if the catalog can't say which product was bought, the
+    // card stays plain rather than borrowing a 50/50 guess.
+    let dump = r#"{"mods":[
+        {"id":1,"name":"Twin Peaks","image":"a.jpg"},
+        {"id":2,"name":"twin  peaks!","image":"b.jpg"},
+        {"id":3,"name":"Only One Of Me","image":"c.jpg"}
+    ]}"#;
+    let (catalog, _) = build(parse_dump(dump, NOW).unwrap());
+    let names = vec!["Twin Peaks".to_string(), "Only One Of Me".to_string()];
+    let found = match_in(&catalog, &names, NOW);
+    assert!(found[0].is_none(), "ambiguous name must not resolve");
+    assert_eq!(found[1].as_ref().map(|m| m.id), Some(3));
+}

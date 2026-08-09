@@ -264,6 +264,26 @@ export const ptBR: Translation = {
   "update.updateAndRestart": "Atualizar e reiniciar",
   "update.dismiss": "Dispensar o aviso de atualização",
   "update.onLatest": "Você já está na versão mais recente",
+
+  // ── Runtime do Visual C++ ausente ──────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.bannerGame":
+    "O MX Bikes precisa do {{what}} antes que o FrostMod consiga entrar nele.",
+  "runtime.bannerFrostmod": "O FrostMod precisa do {{what}} para funcionar.",
+  "runtime.pitch":
+    "Sem isso o Windows mostra o erro \"dll was not found\". Leva segundos para resolver.",
+  "runtime.fixIt": "Instalar",
+  "runtime.installing": "Instalando…",
+  "runtime.dismiss": "Dispensar este aviso",
+  "runtime.installed": "Componente instalado",
+  "runtime.installedDesc":
+    "O FrostMod já deve alcançar o jogo. Reinicie o MX Bikes se ele estiver aberto.",
+  "runtime.cancelled": "Nada foi instalado",
+  "runtime.cancelledDesc":
+    "O Windows precisa da sua permissão. Abrindo o download da Microsoft no lugar.",
+  "runtime.installFailed": "Não foi possível instalar o componente",
+  "runtime.downloadManually": "Baixar por conta própria",
   "update.checkFailed": "Não foi possível verificar as atualizações",
   "update.failed": "A atualização falhou",
 
@@ -356,22 +376,31 @@ export const ptBR: Translation = {
   "browse.bulkFailedDesc_other":
     "Todos os {{count}} precisam ser baixados pelo navegador.",
 
-  // ── Loja ───────────────────────────────────────────────────────────────────
-  "shop.myDownloads": "Meus downloads",
+  // ── Loja (MX Bikes Shop — downloads comprados) ─────────────────────────────
+  "shop.help":
+    "Navegue pelo catálogo do mxbikes-shop.com e instale o que você já comprou. A compra continua sendo feita no site da loja; entre em Minhas compras para instalar seus pedidos por aqui.",
+  "shopTab.catalog": "Catálogo",
+  "shopTab.purchases": "Minhas compras",
+  "shop.myDownloads": "Minhas compras",
   "shop.signInTitle": "Entre na MX Bikes Shop",
   "shop.signInBody":
-    "Entre no mxbikes-shop.com para ver e instalar as pistas que você comprou. A gente abre o site de verdade — sua senha nunca passa por este app.",
+    "Entre no mxbikes-shop.com para ver e instalar tudo o que você comprou. Abrimos o site real — sua senha nunca passa por este aplicativo.",
   "shop.signIn": "Entrar",
   "shop.logOut": "Sair",
   "shop.signedIn": "Conectado à MX Bikes Shop",
   "shop.sessionFailed": "Não foi possível capturar sua sessão da MX Bikes Shop",
-  "shop.queuedDesc": "Instalando na sua pasta de pistas.",
-  "shop.loadFailed": "Não foi possível carregar seus downloads: {{error}}",
+  "shop.loadFailed": "Não foi possível carregar suas compras: {{error}}",
   "shop.empty": "Nenhum download comprado encontrado na sua conta ainda.",
+  "purchases.count_one": "{{count}} compra",
+  "purchases.count_other": "{{count}} compras",
+  "purchases.fileCount_one": "{{count}} arquivo",
+  "purchases.fileCount_other": "{{count}} arquivos",
+  "purchases.install": "Instalar",
+  "purchases.reinstall": "Reinstalar",
+  "purchases.installed": "Instalado",
+  "purchases.downloading": "Baixando…",
+  "purchases.downloadFailed": "Não foi possível baixar {{title}}",
   // ── Catálogo da MX Bikes Shop (só navegação; a compra é na loja) ───────────
-  "shopCatalog.title": "Loja",
-  "shopCatalog.help":
-    "Explore o catálogo da mxbikes-shop.com: busque, filtre e compare preços. A compra e o download continuam acontecendo no site da loja; este app apenas mostra o que há lá.",
   "shopCatalog.searchPlaceholder": "Buscar na loja…",
   "shopCatalog.allCategories": "Tudo",
   "shopCatalog.onSaleOnly": "Em promoção",
@@ -538,6 +567,8 @@ export const ptBR: Translation = {
   "settings.updateCheckFailed":
     "Não foi possível verificar as atualizações — sem conexão ou GitHub indisponível.",
   "settings.latestVersion": "Última: {{version}}",
+  "settings.frostmodRuntimeMissing":
+    "Falta ao Windows um componente do Visual C++ que o FrostMod precisa — instale-o para acabar com o erro \"dll was not found\".",
   "settings.frostmodNeedsRepair":
     "Os arquivos instalados não batem com esta versão — reinstalar resolve.",
   "settings.frostmodRepair": "Reparar instalação",

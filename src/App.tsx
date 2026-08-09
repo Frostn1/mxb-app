@@ -23,6 +23,7 @@ import { TOUR_DONE_KEY } from "./Components/Tour/Tour";
 import { useI18n } from "./i18n/context";
 import { setAmbientVars } from "./i18n/core";
 import { UpdateProvider } from "./Context/Update";
+import RuntimeBanner from "./Components/RuntimeBanner/RuntimeBanner";
 import UpdateBanner from "./Components/UpdateBanner/UpdateBanner";
 import type { Config, GameId, GameInfo } from "./types";
 
@@ -148,6 +149,10 @@ const App = () => {
               <div className="h-[42px] flex-none">
                 <TitleBar />
               </div>
+              {/* Above the update banner on purpose: one is a broken state the player
+                  can fix right now, the other is an offer. Updating the app wouldn't
+                  put the missing runtime on their PC anyway. */}
+              <RuntimeBanner />
               <UpdateBanner />
               <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
                 {ready && (

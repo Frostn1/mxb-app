@@ -1,8 +1,53 @@
 # Changelog
 
-## 2026-08-09
+## 2026-08-09 — The app spots the missing Windows component behind a dead FrostMod
 
 ### Added
+- **"msvcr90.dll was not found" is now something the app explains and fixes.** MX Bikes is
+  a Visual C++ 2008 build, and it asks Windows for that runtime by manifest rather than by
+  path — which resolves either machine-wide or out of a private copy sitting in the game
+  folder. On a PC living on the second one the game launches perfectly while nothing loaded
+  from anywhere else can find the runtime, and FrostMod is loaded from somewhere else. The
+  result was the worst kind of bug report: the game works, FrostMod doesn't, and Windows
+  puts a bare error box over the screen that names a DLL and nothing else. The app now
+  checks for that runtime, and for the newer one `frostmod.dll` itself needs, says which is
+  missing in plain language, and installs it from Microsoft with one button.
+- **The warning goes where it'll be seen.** A bar at the top of the app, not just a line in
+  Settings — nothing about the symptom suggests Settings is where to look.
+
+### Changed
+- **FrostMod still starts when a runtime is missing.** It's a warning, not a gate: we can't
+  tell from outside which PCs manage to inject anyway, and refusing to launch would take
+  FrostMod away from anyone the check is wrong about.
+
+### Fixed
+- **Settings offers Stop for a FrostMod it didn't install.** The button was hidden unless
+  the app had put FrostMod there itself — so the one case that most needs a stop, a
+  `frostmod.exe` running that the app didn't start, had no button. The backend could
+  always kill it; only the button was missing. (The sidebar's stop control was unaffected.)
+
+## 2026-08-09
+
+### Fixed
+- **The Linux app opens to its interface instead of a white screen.** On SteamOS the window
+  appeared, the title bar drew, and the inside stayed blank with nothing in the terminal to
+  explain it. The AppImage carries its own copy of the web engine, and that engine tries to
+  hand frames to the graphics driver through a fast path the host's driver answers
+  differently than the one it was built against — so it drew nothing at all, silently. It now
+  takes the ordinary path by default, which paints on every machine and costs nothing anyone
+  will notice on a UI this static. A machine that handles the fast path can still ask for it
+  back with `WEBKIT_DISABLE_DMABUF_RENDERER=0`. The startup log now records which path a run
+  took, so the next report of a blank window can be read straight from the log.
+### Added
+- **Install what you bought on the MX Bikes Shop, from inside the app.** The Shop tab now has
+  two halves — **Catalog**, the store's public listing as before, and **My purchases**, which
+  signs in to your own mxbikes-shop.com account and shows everything you've already paid for.
+  Cards carry the store's own artwork and author, a product that ships several files (PRO/AMS
+  and the like) is one card with a picker rather than several, and anything already in your
+  library is badged as installed.
+- **Purchases install through the same review sheet a drag-and-drop uses.** The file is
+  downloaded with a progress bar, then read to see what it actually contains, and the sheet
+  says where each piece will land and warns about collisions before anything is written.
 - **Pick a ReShade preset from Settings.** A new ReShade card lists every preset you have —
   the ones the app installed and any already sitting loose in your game folder — and switching
   between them is one click. There's an "Off" entry that runs no effects, so you can compare a
@@ -35,6 +80,10 @@ redistributed, so the app detects it and links out rather than bundling or downl
   folder it will make (taken from the mod's own descriptor) and lists exactly what will
   move before you press Repair. Packaged `.pkz` models and models already filed correctly
   are left alone.
+- **A purchased bike or gear set no longer installs as if it were a track.** The old path
+  picked a destination by looking for keywords in the *product name* and otherwise assumed
+  tracks, so bikes, paints and gear were filed into a tracks-derived folder silently, with no
+  preview and no collision check. Destination now comes from the archive's contents.
 - **A mods folder you moved with `mxbikes.ini` now works.** Plenty of players keep their
   content somewhere short like `C:\mods` — junctioning one rider paint into six model
   folders needs paths that OneDrive and a deep `Documents` tree can't give you. The app

@@ -262,6 +262,26 @@ export const es: Translation = {
   "update.updateAndRestart": "Actualizar y reiniciar",
   "update.dismiss": "Descartar la notificación de actualización",
   "update.onLatest": "Ya tienes la última versión",
+
+  // ── Falta el runtime de Visual C++ ─────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.bannerGame":
+    "MX Bikes necesita {{what}} antes de que FrostMod pueda entrar en el juego.",
+  "runtime.bannerFrostmod": "FrostMod necesita {{what}} para funcionar.",
+  "runtime.pitch":
+    "Sin esto Windows muestra el error «dll was not found». Se arregla en segundos.",
+  "runtime.fixIt": "Instalarlo",
+  "runtime.installing": "Instalando…",
+  "runtime.dismiss": "Descartar este aviso",
+  "runtime.installed": "Componente instalado",
+  "runtime.installedDesc":
+    "FrostMod ya debería llegar al juego. Reinicia MX Bikes si lo tienes abierto.",
+  "runtime.cancelled": "No se instaló nada",
+  "runtime.cancelledDesc":
+    "Windows necesita tu permiso para instalarlo. Abriendo la descarga de Microsoft.",
+  "runtime.installFailed": "No se pudo instalar el componente",
+  "runtime.downloadManually": "Descargarlo tú mismo",
   "update.checkFailed": "No se pudieron comprobar las actualizaciones",
   "update.failed": "La actualización falló",
 
@@ -355,23 +375,31 @@ export const es: Translation = {
   "browse.bulkFailedDesc_other":
     "Los {{count}} requieren descarga desde el navegador.",
 
-  // ── Tienda ─────────────────────────────────────────────────────────────────
-  "shop.myDownloads": "Mis descargas",
+  // ── Tienda (MX Bikes Shop — descargas compradas) ───────────────────────────
+  "shop.help":
+    "Explora el catálogo de mxbikes-shop.com e instala lo que ya has comprado. La compra sigue haciéndose en el sitio de la tienda; inicia sesión en Mis compras para instalar tus pedidos desde aquí.",
+  "shopTab.catalog": "Catálogo",
+  "shopTab.purchases": "Mis compras",
+  "shop.myDownloads": "Mis compras",
   "shop.signInTitle": "Inicia sesión en MX Bikes Shop",
   "shop.signInBody":
-    "Inicia sesión en mxbikes-shop.com para ver e instalar las pistas que has comprado. Abrimos el sitio real — tu contraseña nunca pasa por esta aplicación.",
+    "Inicia sesión en mxbikes-shop.com para ver e instalar todo lo que has comprado. Abrimos el sitio real — tu contraseña nunca pasa por esta aplicación.",
   "shop.signIn": "Iniciar sesión",
   "shop.logOut": "Cerrar sesión",
   "shop.signedIn": "Sesión iniciada en MX Bikes Shop",
-  "shop.sessionFailed":
-    "No se pudo capturar tu sesión de MX Bikes Shop",
-  "shop.queuedDesc": "Instalando en tu carpeta de pistas.",
-  "shop.loadFailed": "No se pudieron cargar tus descargas: {{error}}",
+  "shop.sessionFailed": "No se pudo capturar tu sesión de MX Bikes Shop",
+  "shop.loadFailed": "No se pudieron cargar tus compras: {{error}}",
   "shop.empty": "Aún no hay descargas compradas en tu cuenta.",
+  "purchases.count_one": "{{count}} compra",
+  "purchases.count_other": "{{count}} compras",
+  "purchases.fileCount_one": "{{count}} archivo",
+  "purchases.fileCount_other": "{{count}} archivos",
+  "purchases.install": "Instalar",
+  "purchases.reinstall": "Reinstalar",
+  "purchases.installed": "Instalado",
+  "purchases.downloading": "Descargando…",
+  "purchases.downloadFailed": "No se pudo descargar {{title}}",
   // ── Catálogo de MX Bikes Shop (solo explorar; la compra es en la tienda) ───
-  "shopCatalog.title": "Tienda",
-  "shopCatalog.help":
-    "Explora el catálogo de mxbikes-shop.com: busca, filtra y compara precios. La compra y la descarga siguen haciéndose en la web de la tienda; esta app solo te muestra lo que hay.",
   "shopCatalog.searchPlaceholder": "Buscar en la tienda…",
   "shopCatalog.allCategories": "Todo",
   "shopCatalog.onSaleOnly": "En oferta",
@@ -539,6 +567,8 @@ export const es: Translation = {
   "settings.updateCheckFailed":
     "No se pudieron comprobar las actualizaciones — sin conexión o GitHub no disponible.",
   "settings.latestVersion": "Última: {{version}}",
+  "settings.frostmodRuntimeMissing":
+    "A Windows le falta un componente de Visual C++ que FrostMod necesita — instálalo para quitar el error «dll was not found».",
   "settings.frostmodNeedsRepair":
     "Los archivos instalados no coinciden con esta versión — reinstalar lo arregla.",
   "settings.frostmodRepair": "Reparar instalación",

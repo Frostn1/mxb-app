@@ -99,8 +99,11 @@ cargo test           # unit tests (REST/HTML parsing, download resolution)
 
 ### Building with the shop catalog
 
-The **Shop** tab browses the [mxbikes-shop.com](https://mxbikes-shop.com) catalog, which
-needs an API credential supplied by the store. Copy the example file and fill it in:
+The **Shop** tab has two halves. **My purchases** signs in to
+[mxbikes-shop.com](https://mxbikes-shop.com) with the user's own account and installs what
+they have already bought — it needs no build-time credential. **Catalog** browses the store's
+public listing, and that half needs an API credential supplied by the store. Copy the example
+file and fill it in:
 
 ```sh
 cp .env.local.example .env.local   # gitignored; never commit it
@@ -114,13 +117,15 @@ The store authenticates with a single custom header, so `MXB_SHOP_API_HEADER` is
 ship the key to anyone who unzips the app. Setting the same names in the environment
 overrides the file, which is how CI supplies them.
 
-**Building without it is fully supported**: the Shop tab simply doesn't appear, and nothing
-else changes. That's what forks build. Official releases get the values from the
-`MXB_SHOP_API_HEADER` and `MXB_SHOP_API_KEY` repository secrets — **without those secrets,
-released builds ship with no Shop tab.**
+**Building without it is fully supported**: the Catalog tab simply doesn't appear, the Shop
+opens straight on My purchases, and nothing else changes. That's what forks build. Official
+releases get the values from the `MXB_SHOP_API_HEADER` and `MXB_SHOP_API_KEY` repository
+secrets — **without those secrets, released builds ship with no catalog.**
 
 The catalog is browse-only: it shows what the store sells and links out to the product page.
-Buying and downloading happen on the store's own site.
+Buying happens on the store's own site. Installing something already bought goes through My
+purchases, which downloads the file and hands it to the same review sheet a drag-and-drop
+uses, so it lands by what the archive contains rather than by what its title suggests.
 
 ## Releases
 

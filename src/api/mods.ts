@@ -15,6 +15,8 @@ import type {
   FrostmodInstallReport,
   FrostmodReload,
   FrostmodStatus,
+  RuntimeInstallOutcome,
+  VcRuntime,
   InstalledMod,
   InstallProgress,
   LaunchOutcome,
@@ -1273,18 +1275,6 @@ export function resolveInitialFolder(
   return guess;
 }
 
-/**
- * Where a track goes when there's no picker to ask — the MX Bikes Shop installs straight from
- * the purchase list. Same answer the Browse dialog would preselect: the remembered folder, or
- * the first one the library already has.
- */
-export async function resolveTrackDest(game: GameInfo): Promise<string> {
-  const modType = DEFAULT_MOD_TYPE;
-  const installed = await getInstalledMods(modType.installSubpath).catch(() => []);
-  const { options, guess } = buildDestinations(modType, "", installed);
-  return resolveInitialFolder(game, modType, options, guess);
-}
-
 export interface QuickInstallParams {
   slug: string;
   title: string;
@@ -1390,6 +1380,14 @@ export function onInstallProgress(
 }
 
 export interface ShopItem extends ModSummary {
+  /**
+   * The product's own name, without the file label. `title` is the display string (and folds
+   * the file label in for a multi-file product); this is the string that groups a product's
+   * files onto one card and matches it against the public catalog.
+   */
+  product: string;
+  /** Which file of the product this is (`PRO`, `AMS`, …). Empty for a single-file product. */
+  fileLabel: string;
   downloadUrl: string;
 }
 
@@ -1412,9 +1410,15 @@ export function shopMyDownloads(): Promise<ShopItem[]> {
   return invoke<ShopItem[]>("shop_my_downloads");
 }
 
-/** Download + install a purchased item. Progress arrives via `onInstallProgress`. */
-export function shopInstall(item: ShopItem, destFolder: string): Promise<void> {
-  return invoke<void>("shop_install", { item, destFolder });
+/**
+ * Download a purchased file and stage it for review. Nothing is written under `mods/`.
+ *
+ * Returns an ordinary `DropPlan`, so a purchase finishes through the same review sheet and the
+ * same `commitDrop` a drag-and-drop does — and lands where its *contents* say it belongs
+ * rather than where its title was guessed to. Progress arrives via `onInstallProgress`.
+ */
+export function shopStage(item: ShopItem): Promise<DropPlan> {
+  return invoke<DropPlan>("shop_stage", { item });
 }
 
 /** Fires after a WebView sign-in completes; payload is whether it succeeded. */
@@ -1462,6 +1466,26 @@ export function frostmodStatus(): Promise<FrostmodStatus> {
 export function frostmodInstall(): Promise<FrostmodInstallReport> {
   return invoke<FrostmodInstallReport>("frostmod_install");
 }
+
+/** Install a Visual C++ runtime `frostmodStatus` reported missing.
+ *
+ *  Raises a Windows UAC prompt — Microsoft's redistributables need admin rights. A
+ *  declined prompt resolves to `"cancelled"` rather than throwing, so the caller can
+ *  offer the manual download instead of reporting a failure. */
+export function frostmodInstallRuntime(
+  runtime: VcRuntime,
+): Promise<RuntimeInstallOutcome> {
+  return invoke<RuntimeInstallOutcome>("frostmod_install_runtime", { runtime });
+}
+
+/** Where to send someone whose UAC prompt we can't raise (or who declined it).
+ *
+ *  Microsoft's own direct downloads, the same ones the backend fetches — a download page
+ *  would make them pick an architecture, and picking x86 here fixes nothing. */
+export const RUNTIME_DOWNLOAD_URL: Record<VcRuntime, string> = {
+  vc90: "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x64.exe",
+  vc140: "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+};
 
 /** Launch the managed FrostMod process if it isn't already running. */
 export function frostmodStart(): Promise<boolean> {

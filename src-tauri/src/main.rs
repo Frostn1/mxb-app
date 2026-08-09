@@ -41,6 +41,7 @@ mod shop_session;
 mod soundmods;
 mod texstore;
 mod upload;
+mod vcruntime;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
@@ -3709,6 +3710,21 @@ async fn frostmod_install(
     Ok(report)
 }
 
+/// Install a Visual C++ runtime `frostmod_status` reported missing.
+///
+/// Raises a UAC prompt — Microsoft's redistributables require admin, and only the shell
+/// can ask. A declined prompt comes back as `cancelled`, not an error, so the UI can fall
+/// back to handing over the download link instead of reading as broken.
+#[tauri::command]
+async fn frostmod_install_runtime(
+    app: tauri::AppHandle,
+    runtime: vcruntime::Runtime,
+) -> Result<vcruntime::InstallOutcome, String> {
+    vcruntime::install(&app, runtime)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Result<bool, String> {
     frostmod_manage::start(&app, &state).map_err(|e| format!("{e:#}"))
@@ -3887,29 +3903,73 @@ async fn shop_my_downloads(
         .map_err(|e| format!("{e:#}"))
 }
 
+/// The catalog entry for each purchased product name, positionally, so the purchases grid can
+/// show real artwork instead of a grey placeholder.
 #[tauri::command]
-async fn shop_install(
+async fn shop_match_catalog(
+    app: tauri::AppHandle,
+    names: Vec<String>,
+) -> Result<Vec<Option<mods::shop_catalog::ShopMod>>, String> {
+    mods::shop_catalog::match_products(&app, &names)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Download a purchased file and stage it for review. **Nothing is written under `mods/`.**
+///
+/// The returned plan is an ordinary [`dropzone::DropPlan`], so the purchases grid hands it to
+/// the same review sheet a drag-and-drop produces and finishes through the existing
+/// `repreview_drop` / `commit_drop` / `cancel_drop` commands.
+///
+/// That reuse is the point. The previous `shop_install` chose a `mods/` subfolder by matching
+/// keywords against the *product title* and always resolved the destination as if the purchase
+/// were a track — so a bought bike or gear set landed in a tracks-derived folder, silently and
+/// with no collision check. Routing by what the archive actually contains is the dropzone's job
+/// and it already does it well; this command's only work is getting the bytes to it.
+#[tauri::command]
+async fn shop_stage(
     app: tauri::AppHandle,
     state: State<'_, shop_session::ShopSession>,
     item: mods::mxbshop::ShopItem,
-    dest_folder: String,
-) -> Result<(), String> {
+) -> Result<dropzone::DropPlan, String> {
     let client = state
         .client()
         .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    let subpath = format!("mods/{}", mods::mxbshop::guess_mod_type(&item.title));
-    install::download_and_place(
-        &app,
-        &cfg,
-        &client,
-        &item.slug,
-        &item.download_url,
-        &subpath,
-        &dest_folder,
-    )
+    // Asked before the download, not after: `dropzone::plan` refuses an unconfigured folder
+    // too, but by then a track archive is several hundred megabytes already spent.
+    if cfg.mods_path.trim().is_empty() {
+        return Err("No MX Bikes folder is configured yet.".to_string());
+    }
+
+    // Its own staging directory, separate from the one `dropzone::plan` will make: this holds
+    // the downloaded archive, and the plan gets its own extracted copy.
+    let work = install::staging_dir("shop");
+    std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
+
+    let archive = match install::download(&app, &client, &item.slug, &item.download_url, &work).await
+    {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(format!("{e:#}"));
+        }
+    };
+
+    let planned = tauri::async_runtime::spawn_blocking({
+        let mods_path = cfg.mods_path.clone();
+        let paths = vec![archive.to_string_lossy().into_owned()];
+        move || dropzone::plan(&mods_path, &paths)
+    })
     .await
-    .map_err(|e| format!("{e:#}"))
+    .map_err(|e| format!("shop_stage task failed: {e}"))?;
+
+    // `plan` staged its own copy of everything it found, so the download has done its job
+    // either way — and leaving it behind would strand a whole archive in the temp directory
+    // for every purchase installed.
+    let _ = std::fs::remove_dir_all(&work);
+
+    planned.map_err(|e| format!("{e:#}"))
 }
 
 fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -4257,7 +4317,28 @@ fn log_level() -> log::LevelFilter {
     }
 }
 
+/// WebKitGTK renders through DMA-BUF by default, which asks the WebKit our AppImage carries
+/// from Ubuntu 22.04 to negotiate buffers with whatever Mesa/EGL the host happens to ship.
+/// On SteamOS that negotiation fails silently: the window appears, the web process never
+/// paints, and the user is left looking at a white rectangle with nothing on stdout to say
+/// why. The shared-memory fallback costs a copy per frame — imperceptible on a UI that is
+/// mostly static lists — and paints everywhere.
+///
+/// A default, not an override: an explicit `WEBKIT_DISABLE_DMABUF_RENDERER=0` still wins, so
+/// a machine whose driver stack handles the fast path can ask for it back.
+///
+/// Has to run before the first window is built, since WebKit reads this when it spawns the
+/// web process, and before any other thread exists — being `main`'s first statement gives
+/// both.
+fn prepare_webview_env() {
+    if cfg!(target_os = "linux") && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 fn main() {
+    prepare_webview_env();
+
     let builder = tauri::Builder::default();
 
     // One app, one process. Closing the window parks MXB App in the tray rather than
@@ -4329,6 +4410,14 @@ fn main() {
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
             log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
+            // A blank webview leaves nothing else behind to diagnose from, so record which
+            // renderer path this run took. See `prepare_webview_env`.
+            if cfg!(target_os = "linux") {
+                log::info!(
+                    "webview dmabuf renderer disabled: {}",
+                    std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap_or_default() == "1"
+                );
+            }
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
@@ -4535,6 +4624,7 @@ fn main() {
             garage_swap_bike,
             frostmod_status,
             frostmod_install,
+            frostmod_install_runtime,
             frostmod_start,
             frostmod_stop,
             launch_game,
@@ -4555,7 +4645,8 @@ fn main() {
             shop_status,
             shop_logout,
             shop_my_downloads,
-            shop_install,
+            shop_match_catalog,
+            shop_stage,
             shop_catalog_available,
             shop_catalog_status,
             shop_catalog_categories,

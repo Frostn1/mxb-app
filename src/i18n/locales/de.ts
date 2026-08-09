@@ -268,6 +268,26 @@ export const de: Translation = {
   "update.updateAndRestart": "Aktualisieren und neu starten",
   "update.dismiss": "Update-Benachrichtigung ausblenden",
   "update.onLatest": "Du hast bereits die neueste Version",
+
+  // ── Fehlende Visual-C++-Laufzeit ───────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.bannerGame":
+    "MX Bikes braucht {{what}}, bevor FrostMod sich einklinken kann.",
+  "runtime.bannerFrostmod": "FrostMod braucht {{what}}, um zu laufen.",
+  "runtime.pitch":
+    "Sonst zeigt Windows stattdessen den Fehler „dll was not found“. In Sekunden behoben.",
+  "runtime.fixIt": "Installieren",
+  "runtime.installing": "Wird installiert…",
+  "runtime.dismiss": "Hinweis ausblenden",
+  "runtime.installed": "Komponente installiert",
+  "runtime.installedDesc":
+    "FrostMod sollte das Spiel jetzt erreichen. Starte MX Bikes neu, falls es schon läuft.",
+  "runtime.cancelled": "Es wurde nichts installiert",
+  "runtime.cancelledDesc":
+    "Windows braucht dafür deine Erlaubnis. Der Download von Microsoft wird stattdessen geöffnet.",
+  "runtime.installFailed": "Komponente konnte nicht installiert werden",
+  "runtime.downloadManually": "Selbst herunterladen",
   "update.checkFailed": "Updates konnten nicht geprüft werden",
   "update.failed": "Update fehlgeschlagen",
 
@@ -363,24 +383,31 @@ export const de: Translation = {
   "browse.bulkFailedDesc_other":
     "Alle {{count}} müssen über den Browser heruntergeladen werden.",
 
-  // ── Shop ───────────────────────────────────────────────────────────────────
-  "shop.myDownloads": "Meine Downloads",
-  "shop.signInTitle": "Bei MX Bikes Shop anmelden",
+  // ── Shop (MX Bikes Shop — gekaufte Downloads) ──────────────────────────────
+  "shop.help":
+    "Durchsuche den Katalog von mxbikes-shop.com und installiere, was du bereits gekauft hast. Gekauft wird weiterhin auf der Seite des Shops; melde dich unter „Meine Käufe“ an, um deine Bestellungen von hier aus zu installieren.",
+  "shopTab.catalog": "Katalog",
+  "shopTab.purchases": "Meine Käufe",
+  "shop.myDownloads": "Meine Käufe",
+  "shop.signInTitle": "Beim MX Bikes Shop anmelden",
   "shop.signInBody":
-    "Melde dich bei mxbikes-shop.com an, um deine gekauften Strecken zu sehen und zu installieren. Wir öffnen die echte Seite — dein Passwort kommt nie mit dieser App in Berührung.",
+    "Melde dich bei mxbikes-shop.com an, um alles zu sehen und zu installieren, was du gekauft hast. Wir öffnen die echte Seite — dein Passwort erreicht diese App nie.",
   "shop.signIn": "Anmelden",
   "shop.logOut": "Abmelden",
-  "shop.signedIn": "Bei MX Bikes Shop angemeldet",
-  "shop.sessionFailed":
-    "Deine MX-Bikes-Shop-Sitzung konnte nicht übernommen werden",
-  "shop.queuedDesc": "Wird in deinen Streckenordner installiert.",
-  "shop.loadFailed":
-    "Deine Downloads konnten nicht geladen werden: {{error}}",
-  "shop.empty": "Noch keine gekauften Downloads in deinem Konto gefunden.",
+  "shop.signedIn": "Beim MX Bikes Shop angemeldet",
+  "shop.sessionFailed": "Sitzung des MX Bikes Shop konnte nicht übernommen werden",
+  "shop.loadFailed": "Deine Käufe konnten nicht geladen werden: {{error}}",
+  "shop.empty": "Für dein Konto wurden noch keine gekauften Downloads gefunden.",
+  "purchases.count_one": "{{count}} Kauf",
+  "purchases.count_other": "{{count}} Käufe",
+  "purchases.fileCount_one": "{{count}} Datei",
+  "purchases.fileCount_other": "{{count}} Dateien",
+  "purchases.install": "Installieren",
+  "purchases.reinstall": "Neu installieren",
+  "purchases.installed": "Installiert",
+  "purchases.downloading": "Wird heruntergeladen…",
+  "purchases.downloadFailed": "{{title}} konnte nicht heruntergeladen werden",
   // ── MX Bikes Shop-Katalog (nur Stöbern; gekauft wird im Shop) ──────────────
-  "shopCatalog.title": "Shop",
-  "shopCatalog.help":
-    "Stöbere im Katalog von mxbikes-shop.com — suchen, filtern und Preise vergleichen. Gekauft und heruntergeladen wird weiterhin auf der Seite des Shops; diese App zeigt dir nur, was es dort gibt.",
   "shopCatalog.searchPlaceholder": "Shop durchsuchen…",
   "shopCatalog.allCategories": "Alle",
   "shopCatalog.onSaleOnly": "Im Angebot",
@@ -548,6 +575,8 @@ export const de: Translation = {
   "settings.updateCheckFailed":
     "Updates konnten nicht geprüft werden — offline oder GitHub nicht erreichbar.",
   "settings.latestVersion": "Neueste: {{version}}",
+  "settings.frostmodRuntimeMissing":
+    "Windows fehlt eine Visual-C++-Komponente, die FrostMod braucht — installiere sie, um den Fehler „dll was not found“ loszuwerden.",
   "settings.frostmodNeedsRepair":
     "Die installierten Dateien passen nicht zu dieser Version — eine Neuinstallation behebt das.",
   "settings.frostmodRepair": "Installation reparieren",

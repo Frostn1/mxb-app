@@ -265,6 +265,26 @@ export const fr: Translation = {
   "update.updateAndRestart": "Mettre à jour et redémarrer",
   "update.dismiss": "Ignorer la notification de mise à jour",
   "update.onLatest": "Vous avez déjà la dernière version",
+
+  // ── Runtime Visual C++ manquant ────────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.bannerGame":
+    "MX Bikes a besoin de {{what}} pour que FrostMod puisse s'y greffer.",
+  "runtime.bannerFrostmod": "FrostMod a besoin de {{what}} pour fonctionner.",
+  "runtime.pitch":
+    "Sans ça, Windows affiche l'erreur « dll was not found ». Réglé en quelques secondes.",
+  "runtime.fixIt": "L'installer",
+  "runtime.installing": "Installation…",
+  "runtime.dismiss": "Masquer cet avertissement",
+  "runtime.installed": "Composant installé",
+  "runtime.installedDesc":
+    "FrostMod devrait maintenant atteindre le jeu. Relancez MX Bikes s'il est déjà ouvert.",
+  "runtime.cancelled": "Rien n'a été installé",
+  "runtime.cancelledDesc":
+    "Windows a besoin de votre autorisation. Ouverture du téléchargement Microsoft à la place.",
+  "runtime.installFailed": "Impossible d'installer le composant",
+  "runtime.downloadManually": "Le télécharger soi-même",
   "update.checkFailed": "Impossible de vérifier les mises à jour",
   "update.failed": "Échec de la mise à jour",
 
@@ -359,23 +379,31 @@ export const fr: Translation = {
   "browse.bulkFailedDesc_other":
     "Les {{count}} doivent être téléchargés depuis le navigateur.",
 
-  // ── Boutique ───────────────────────────────────────────────────────────────
-  "shop.myDownloads": "Mes téléchargements",
+  // ── Boutique (MX Bikes Shop — téléchargements achetés) ─────────────────────
+  "shop.help":
+    "Parcourez le catalogue de mxbikes-shop.com et installez ce que vous avez déjà acheté. L'achat se fait toujours sur le site de la boutique ; connectez-vous dans Mes achats pour installer vos commandes depuis ici.",
+  "shopTab.catalog": "Catalogue",
+  "shopTab.purchases": "Mes achats",
+  "shop.myDownloads": "Mes achats",
   "shop.signInTitle": "Connectez-vous à MX Bikes Shop",
   "shop.signInBody":
-    "Connectez-vous à mxbikes-shop.com pour voir et installer les circuits que vous avez achetés. Nous ouvrons le vrai site — votre mot de passe ne passe jamais par cette application.",
+    "Connectez-vous à mxbikes-shop.com pour voir et installer tout ce que vous avez acheté. Nous ouvrons le vrai site — votre mot de passe ne touche jamais cette application.",
   "shop.signIn": "Se connecter",
   "shop.logOut": "Se déconnecter",
   "shop.signedIn": "Connecté à MX Bikes Shop",
   "shop.sessionFailed": "Impossible de récupérer votre session MX Bikes Shop",
-  "shop.queuedDesc": "Installation dans votre dossier circuits.",
-  "shop.loadFailed":
-    "Impossible de charger vos téléchargements : {{error}}",
+  "shop.loadFailed": "Impossible de charger vos achats : {{error}}",
   "shop.empty": "Aucun téléchargement acheté trouvé sur votre compte.",
+  "purchases.count_one": "{{count}} achat",
+  "purchases.count_other": "{{count}} achats",
+  "purchases.fileCount_one": "{{count}} fichier",
+  "purchases.fileCount_other": "{{count}} fichiers",
+  "purchases.install": "Installer",
+  "purchases.reinstall": "Réinstaller",
+  "purchases.installed": "Installé",
+  "purchases.downloading": "Téléchargement…",
+  "purchases.downloadFailed": "Impossible de télécharger {{title}}",
   // ── Catalogue MX Bikes Shop (consultation seule ; l'achat se fait sur le site) ─
-  "shopCatalog.title": "Boutique",
-  "shopCatalog.help":
-    "Parcourez le catalogue de mxbikes-shop.com : recherchez, filtrez et comparez les prix. L'achat et le téléchargement se font toujours sur le site de la boutique ; cette app vous montre seulement ce qui s'y trouve.",
   "shopCatalog.searchPlaceholder": "Rechercher dans la boutique…",
   "shopCatalog.allCategories": "Tout",
   "shopCatalog.onSaleOnly": "En promo",
@@ -544,6 +572,8 @@ export const fr: Translation = {
   "settings.updateCheckFailed":
     "Impossible de vérifier les mises à jour — hors ligne ou GitHub indisponible.",
   "settings.latestVersion": "Dernière : {{version}}",
+  "settings.frostmodRuntimeMissing":
+    "Il manque à Windows un composant Visual C++ dont FrostMod a besoin — installez-le pour faire disparaître l'erreur « dll was not found ».",
   "settings.frostmodNeedsRepair":
     "Les fichiers installés ne correspondent pas à cette version — une réinstallation corrige ça.",
   "settings.frostmodRepair": "Réparer l'installation",
