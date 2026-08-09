@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-09 — an installer that can always replace the app it's updating
+
+### Fixed
+- **Installing over a running copy no longer stops at "error opening file for writing".**
+  The file it named, `frost.exe`, is the app's own program file, and Windows won't let
+  anything overwrite a program image that is still held — which the app's often is, since it
+  hides in the tray, starts at login, and launches the installer from inside itself when you
+  update in-app. Closing it first isn't enough on its own: the hold can outlive the process,
+  by a copy still tearing down or an antivirus reading the image as it exits, which is why
+  the installer's own "MXB App is running" prompt never appeared before the failure. The
+  installer now clears the name by whatever means Windows allows — delete it, retry for a
+  couple of seconds while a dying copy lets go, and failing that rename it aside, which
+  Windows permits even for a file in use — then sweeps up what it moved once the new build
+  is in place. The uninstaller does the same, since it's the installed build's uninstaller
+  that the next version runs, and a failed one is what used to bounce you back to the
+  "already installed" page for good.
+- **An in-app update can no longer kill its own installer.** Closing the app took the whole
+  process tree with it, and the installer the app had just launched was part of that tree.
+  It now closes the app alone; the browser processes that the tree kill was there for exit
+  with it anyway.
+
 ## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 
 A patch on top of v0.8.0 — everything that release added is still the news, and its notes are
