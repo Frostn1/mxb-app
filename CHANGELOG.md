@@ -2,6 +2,16 @@
 
 ## 2026-08-09
 
+### Fixed
+- **The Linux app opens to its interface instead of a white screen.** On SteamOS the window
+  appeared, the title bar drew, and the inside stayed blank with nothing in the terminal to
+  explain it. The AppImage carries its own copy of the web engine, and that engine tries to
+  hand frames to the graphics driver through a fast path the host's driver answers
+  differently than the one it was built against — so it drew nothing at all, silently. It now
+  takes the ordinary path by default, which paints on every machine and costs nothing anyone
+  will notice on a UI this static. A machine that handles the fast path can still ask for it
+  back with `WEBKIT_DISABLE_DMABUF_RENDERER=0`. The startup log now records which path a run
+  took, so the next report of a blank window can be read straight from the log.
 ### Added
 - **Pick a ReShade preset from Settings.** A new ReShade card lists every preset you have —
   the ones the app installed and any already sitting loose in your game folder — and switching

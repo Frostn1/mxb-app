@@ -4233,7 +4233,28 @@ fn log_level() -> log::LevelFilter {
     }
 }
 
+/// WebKitGTK renders through DMA-BUF by default, which asks the WebKit our AppImage carries
+/// from Ubuntu 22.04 to negotiate buffers with whatever Mesa/EGL the host happens to ship.
+/// On SteamOS that negotiation fails silently: the window appears, the web process never
+/// paints, and the user is left looking at a white rectangle with nothing on stdout to say
+/// why. The shared-memory fallback costs a copy per frame — imperceptible on a UI that is
+/// mostly static lists — and paints everywhere.
+///
+/// A default, not an override: an explicit `WEBKIT_DISABLE_DMABUF_RENDERER=0` still wins, so
+/// a machine whose driver stack handles the fast path can ask for it back.
+///
+/// Has to run before the first window is built, since WebKit reads this when it spawns the
+/// web process, and before any other thread exists — being `main`'s first statement gives
+/// both.
+fn prepare_webview_env() {
+    if cfg!(target_os = "linux") && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 fn main() {
+    prepare_webview_env();
+
     let builder = tauri::Builder::default();
 
     // One app, one process. Closing the window parks MXB App in the tray rather than
@@ -4305,6 +4326,14 @@ fn main() {
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
             log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
+            // A blank webview leaves nothing else behind to diagnose from, so record which
+            // renderer path this run took. See `prepare_webview_env`.
+            if cfg!(target_os = "linux") {
+                log::info!(
+                    "webview dmabuf renderer disabled: {}",
+                    std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap_or_default() == "1"
+                );
+            }
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
