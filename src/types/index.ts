@@ -34,6 +34,9 @@ export interface GameInfo {
   id: GameId;
   /** Product name, shown verbatim — never translated. */
   display: string;
+  /** The executable's file name, for when the UI has to name the file another tool
+   *  should be pointed at (ReShade's installer asks for exactly this one). */
+  exe: string;
   /** Top-level folders under `<modsPath>/mods` for this title. */
   modsDirs: string[];
   /** Host of this title's catalog, e.g. `mxb-mods.com`. Shown wherever the UI names
@@ -438,6 +441,7 @@ export type DropKind =
   | "bikePaint"
   | "soundSet"
   | "riderGear"
+  | "reshadePreset"
   | "unknown";
 
 /** Why it decided that. A key, not prose — the UI translates it. */
@@ -453,6 +457,7 @@ export type DropReason =
   | "gearFolders"
   | "riderTexture"
   | "gearTexture"
+  | "reshadePreset"
   | "unrecognised";
 
 export interface DropChoice {
@@ -583,6 +588,39 @@ export interface PresetApplyOutcome {
   live_refresh: LiveRefresh;
   /** Set only when the preset performed a model swap. See `SwapApplyOutcome`. */
   model_refresh: CommandOutcome | null;
+}
+
+/** One ReShade preset the app can switch to. Mirrors `reshade::Preset`. */
+export interface ReshadePreset {
+  name: string;
+  path: string;
+  active: boolean;
+  /** In the app's `FrostMod ReShade` folder, so it can be deleted. A preset found loose in
+   *  the game folder is someone else's file and is only ever read. */
+  managed: boolean;
+  /** Effects the preset asks for that aren't installed — it will render without them.
+   *  Always empty when `hasShaders` is false; that case is reported once, on the status. */
+  missingEffects: string[];
+}
+
+/** State of the ReShade install and its presets. Mirrors `reshade::Status`. */
+export interface ReshadeStatus {
+  /** The game's install dir. Empty means it isn't configured — "don't know", not "absent". */
+  gameDir: string;
+  /** A ReShade `opengl32.dll` is in place. MX Bikes and GP Bikes are OpenGL. */
+  installed: boolean;
+  /** ReShade is here under a DirectX name these games never load — a fixable mistake. */
+  wrongApi: string | null;
+  version: string | null;
+  hasShaders: boolean;
+  /** Name of the active preset, empty when none resolves. */
+  active: string;
+  presets: ReshadePreset[];
+}
+
+/** Outcome of switching preset. Thin by nature — nothing of ours reloads. */
+export interface ReshadeApplyOutcome {
+  gameRunning: boolean;
 }
 
 /** Outcome of a Locker model/sound swap — same shape/feedback as a preset apply. */

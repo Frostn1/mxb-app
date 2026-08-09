@@ -40,12 +40,18 @@ pub enum ContentKind {
     BikePaint,
     SoundSet,
     RiderGear,
+    /// A ReShade preset `.ini`. The one kind that doesn't live in the mods tree at all —
+    /// see [`crate::reshade`].
+    ReshadePreset,
     /// Recognised as game content but we can't say what kind — the user must place it.
     Unknown,
 }
 
 impl ContentKind {
-    /// The `mods/<x>` subpath this kind installs into, or `None` when only the user knows.
+    /// The subpath this kind installs into, or `None` when only the user knows.
+    ///
+    /// Everything here is a `mods/<x>` folder except [`ContentKind::ReshadePreset`], whose
+    /// destination is in the game's install dir and which the install side routes on by name.
     fn subpath(self) -> Option<&'static str> {
         match self {
             ContentKind::ModsTree => Some("mods"),
@@ -54,6 +60,7 @@ impl ContentKind {
                 Some("mods/bikes")
             }
             ContentKind::RiderGear => Some("mods/rider"),
+            ContentKind::ReshadePreset => Some(crate::reshade::SUBPATH),
             ContentKind::Unknown => None,
         }
     }
@@ -89,6 +96,8 @@ pub enum DetectReason {
     RiderTexture,
     /// The paint's textures name a piece of gear (helmet, boots, goggles…).
     GearTexture,
+    /// An `.ini` listing ReShade techniques.
+    ReshadePreset,
     /// Nothing identified it.
     Unrecognised,
 }
@@ -359,6 +368,17 @@ fn classify_typed(dir: &Path, ctx: Ctx) -> Option<Verdict> {
     // An extracted track: `.map`/`.trh`/… sitting next to each other.
     if library::dir_has_track_markers(dir) {
         return Some(Verdict::new(ContentKind::Track, DetectReason::TrackMarkers));
+    }
+
+    // ReShade presets, before the bike check and not after it. `read_identity` accepts a
+    // folder on the strength of `<folder>.ini` alone, so a preset staged as `Realistic
+    // MXB/Realistic MXB.ini` — the shape a bare `.ini` drop takes — came back as a bike named
+    // "Realistic MXB". Nothing else here reads a `Techniques=` line, so asking first is safe.
+    if files_in(dir).iter().any(|p| crate::reshade::is_preset_file(p)) {
+        return Some(Verdict::new(
+            ContentKind::ReshadePreset,
+            DetectReason::ReshadePreset,
+        ));
     }
 
     // A bike folder names itself in `<stem>.ini` + `<stem>.cfg`.
@@ -780,8 +800,12 @@ fn to_item(
 
     // Every row gets a picker: identifying content correctly is not the same as knowing
     // which folder the user files it under.
-    let choices = if matches!(verdict.kind, ContentKind::ModsTree) {
-        // A mods tree lands by its own internal layout; there is no folder to choose.
+    let choices = if matches!(
+        verdict.kind,
+        ContentKind::ModsTree | ContentKind::ReshadePreset
+    ) {
+        // A mods tree lands by its own internal layout, and a ReShade preset has exactly one
+        // home in the game folder. Neither leaves the user a folder to choose.
         Vec::new()
     } else if matches!(
         verdict.reason,
@@ -1304,6 +1328,50 @@ mod tests {
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].verdict.kind, ContentKind::ModsTree);
         assert_eq!(units[0].verdict.reason, DetectReason::ModsTree);
+    }
+
+    /// A dropped preset is staged as `<slug>/<slug>.ini`, which is exactly the shape
+    /// `bikeswap::read_identity` accepts as a bike folder. The ReShade check runs first for
+    /// this reason — without it, every preset drop offered to install a bike.
+    #[test]
+    fn a_dropped_preset_is_a_preset_not_a_bike() {
+        let root = tmp("reshade-drop");
+        let mods = root.join("mods");
+        write(
+            &root.join("drop/Realistic MXB/Realistic MXB.ini"),
+            "Techniques=Clarity@Clarity.fx\n[Clarity.fx]\nAmount=1.0\n",
+        );
+
+        let units = units_in(&root.join("drop"), &mods, mx(""), "Realistic MXB", 0);
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].verdict.kind, ContentKind::ReshadePreset);
+        assert_eq!(units[0].verdict.reason, DetectReason::ReshadePreset);
+
+        let (item, _) = to_item(
+            Unit {
+                path: units[0].path.clone(),
+                verdict: units[0].verdict.clone(),
+            },
+            mx(""),
+            &mods,
+            "Realistic MXB",
+            "Realistic MXB.ini",
+        );
+        assert!(!item.needs_choice, "a preset has exactly one home");
+        assert_eq!(item.subpath, crate::reshade::SUBPATH);
+        assert!(item.choices.is_empty(), "there is no folder to choose");
+    }
+
+    /// A real bike still has to classify as one — the preset check must not shadow it.
+    #[test]
+    fn a_bike_ini_is_still_a_bike() {
+        let root = tmp("reshade-drop-bike");
+        let mods = root.join("mods");
+        write(&root.join("drop/KX450/KX450.ini"), "name = KX450\n");
+        write(&root.join("drop/KX450/KX450.cfg"), "id { KX450 }\n");
+
+        let units = units_in(&root.join("drop"), &mods, mx(""), "KX450", 0);
+        assert_eq!(units[0].verdict.kind, ContentKind::Bike);
     }
 
     #[test]

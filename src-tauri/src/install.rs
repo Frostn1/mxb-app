@@ -148,6 +148,16 @@ fn extract_and_place(
     extract_archive(archive, &extracted)?;
 
     emit(app, slug, "placing", None, None);
+
+    // A ReShade preset lands in the game's *install* dir, not the mods tree, and is sorted by
+    // file type rather than routed by folder — none of the placement planner below applies.
+    if crate::reshade::is_reshade_subpath(subpath) {
+        crate::reshade::install_extracted(&extracted, &cfg.install_dir())?;
+        let _ = std::fs::remove_dir_all(work);
+        emit(app, slug, "done", None, None);
+        return Ok(());
+    }
+
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
     place_mod(&extracted, &mods_dir, type_folder, dest_folder, slug)?;
@@ -288,7 +298,20 @@ pub fn import_file(
     let extracted = work.join("extracted");
     std::fs::create_dir_all(&extracted)?;
 
-    extract_archive(src, &extracted)?;
+    // A bare `.ini` isn't an archive — `extract_archive` would reject it — but it is the most
+    // common way a preset arrives. Stage it as if it had been extracted.
+    if crate::reshade::is_reshade_subpath(subpath) && crate::reshade::is_preset_file(src) {
+        std::fs::copy(src, extracted.join(src.file_name().unwrap_or_default()))?;
+    } else {
+        extract_archive(src, &extracted)?;
+    }
+
+    if crate::reshade::is_reshade_subpath(subpath) {
+        crate::reshade::install_extracted(&extracted, &cfg.install_dir())?;
+        let _ = std::fs::remove_dir_all(&work);
+        return Ok(());
+    }
+
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
     let slug = src

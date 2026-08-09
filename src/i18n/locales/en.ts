@@ -1062,6 +1062,7 @@ export const en = {
   "drop.kind.bikePaint": "Paint",
   "drop.kind.soundSet": "Sound",
   "drop.kind.riderGear": "Rider gear",
+  "drop.kind.reshadePreset": "ReShade preset",
   "drop.kind.unknown": "Unknown",
   "drop.reason.modsTree": "Contains a full mods folder",
   "drop.reason.categoryDirs": "Contains bikes/tracks/rider folders",
@@ -1074,8 +1075,41 @@ export const en = {
   "drop.reason.gearFolders": "Found rider gear folders",
   "drop.reason.riderTexture": "Paints the rider body — an outfit",
   "drop.reason.gearTexture": "Paints a piece of rider gear",
+  "drop.reason.reshadePreset": "Lists ReShade techniques",
   "drop.reason.unrecognised": "Not recognised — you'll need to place it",
 
+  // ── ReShade ────────────────────────────────────────────────────────────────
+  // ReShade is a product name and stays untranslated everywhere, capital S included.
+  "settings.reshade": "ReShade",
+  "settings.reshadeDesc": "Post-processing presets — how {{game}} looks on screen.",
+  "modType.reshade": "ReShade",
+  "modType.reshadeInline": "ReShade presets",
+  "reshade.needsGameFolder":
+    "Set your {{game}} folder above and ReShade presets show up here.",
+  "reshade.intro":
+    "ReShade adds post-processing to {{game}}. It's a separate free tool — install it once, then pick a preset here.",
+  "reshade.wrongApi":
+    "ReShade is installed as {{dll}}, which {{game}} never loads — it renders with OpenGL. Run the ReShade installer again and choose OpenGL.",
+  "reshade.step1": "Download the installer from reshade.me.",
+  "reshade.step2": "Run it and pick {{exe}} in your {{game}} folder.",
+  "reshade.step3": "Choose OpenGL when it asks — not DirectX.",
+  "reshade.getIt": "Get ReShade",
+  "reshade.recheck": "Re-check",
+  "reshade.installed": "Installed",
+  "reshade.installedVersion": "Installed · {{version}}",
+  "reshade.off": "Off — no effects",
+  "reshade.delete": "Delete preset",
+  "reshade.deleted": "Deleted {{name}}",
+  "reshade.applied": "{{name}} is now active",
+  "reshade.appliedNextLaunch": "{{name}} is set — it applies next time you launch",
+  "reshade.loosePreset": "In your game folder — not installed by MXB App",
+  "reshade.missingEffects_one": "Needs {{list}}, which isn't installed",
+  "reshade.missingEffects_other": "Needs {{count}} effects that aren't installed: {{list}}",
+  "reshade.noShaders":
+    "No ReShade effects are installed, so presets will render as-is. Re-run the ReShade installer and pick a shader pack.",
+  "reshade.noPresets": "No presets yet — install some from Browse, or drop an .ini here.",
+  "reshade.browseHint": "More presets in Browse → ReShade.",
+  "reshade.nextLaunchHint": "{{game}} is running — a change applies on the next launch.",
   // ── Paint studio ───────────────────────────────────────────────────────────
   "paints.help":
     "Turn .tga or .png sheets drawn in GIMP or Photoshop into a .pnt the game loads — and unpack an existing paint to start from.",

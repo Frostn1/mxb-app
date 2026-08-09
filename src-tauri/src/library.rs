@@ -106,6 +106,20 @@ pub fn mods_subdir(mods_path: &str, subpath: &str) -> PathBuf {
     p
 }
 
+/// True when `s` names one folder or file and nothing else — no separators, no drive letter,
+/// no `.`/`..`.
+///
+/// The guard every "name came from the frontend, now join it onto a path" call site needs, so
+/// a crafted name can't walk out of the folder it's meant to stay in.
+pub fn is_simple_name(s: &str) -> bool {
+    !s.is_empty()
+        && s != "."
+        && s != ".."
+        && !s.contains('/')
+        && !s.contains('\\')
+        && !s.contains(':')
+}
+
 fn sanitize_seg(seg: &str) -> String {
     seg.chars()
         .map(|c| match c {

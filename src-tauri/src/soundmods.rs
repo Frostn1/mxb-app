@@ -102,14 +102,7 @@ fn variant_dir(mods_path: &str, bike: &str, name: &str) -> PathBuf {
     lib_dir(mods_path, bike).join(name)
 }
 
-fn is_simple_name(s: &str) -> bool {
-    !s.is_empty()
-        && s != "."
-        && s != ".."
-        && !s.contains('/')
-        && !s.contains('\\')
-        && !s.contains(':')
-}
+use crate::library::is_simple_name;
 
 /// A file that belongs to a sound set: the two must-files or any `.wav`/`.mp3`.
 /// Shared with `modelswap`, which excludes these so a model swap never drags

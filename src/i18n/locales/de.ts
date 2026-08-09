@@ -1102,6 +1102,7 @@ export const de: Translation = {
   "drop.kind.bikePaint": "Lackierung",
   "drop.kind.soundSet": "Sound",
   "drop.kind.riderGear": "Fahrer-Ausrüstung",
+  "drop.kind.reshadePreset": "ReShade-Preset",
   "drop.kind.unknown": "Unbekannt",
   "drop.reason.modsTree": "Enthält einen kompletten Mods-Ordner",
   "drop.reason.categoryDirs": "Enthält Ordner für Motorräder/Strecken/Fahrer",
@@ -1114,8 +1115,43 @@ export const de: Translation = {
   "drop.reason.gearFolders": "Ordner für Fahrer-Ausrüstung gefunden",
   "drop.reason.riderTexture": "Bemalt den Fahrerkörper — ein Outfit",
   "drop.reason.gearTexture": "Bemalt ein Teil der Fahrer-Ausrüstung",
+  "drop.reason.reshadePreset": "Listet ReShade-Techniken auf",
   "drop.reason.unrecognised": "Nicht erkannt — du musst es zuordnen",
 
+  // ── ReShade ────────────────────────────────────────────────────────────────
+  "settings.reshade": "ReShade",
+  "settings.reshadeDesc": "Postprocessing-Presets — wie {{game}} auf dem Bildschirm aussieht.",
+  "modType.reshade": "ReShade",
+  "modType.reshadeInline": "ReShade-Presets",
+  "reshade.needsGameFolder":
+    "Lege oben deinen {{game}}-Ordner fest, dann erscheinen die ReShade-Presets hier.",
+  "reshade.intro":
+    "ReShade fügt {{game}} Postprocessing hinzu. Es ist ein separates, kostenloses Tool — einmal installieren, dann hier ein Preset wählen.",
+  "reshade.wrongApi":
+    "ReShade ist als {{dll}} installiert, was {{game}} nie lädt — es rendert mit OpenGL. Starte den ReShade-Installer erneut und wähle OpenGL.",
+  "reshade.step1": "Lade den Installer von reshade.me herunter.",
+  "reshade.step2": "Starte ihn und wähle {{exe}} in deinem {{game}}-Ordner.",
+  "reshade.step3": "Wähle OpenGL, wenn er fragt — nicht DirectX.",
+  "reshade.getIt": "ReShade holen",
+  "reshade.recheck": "Erneut prüfen",
+  "reshade.installed": "Installiert",
+  "reshade.installedVersion": "Installiert · {{version}}",
+  "reshade.off": "Aus — keine Effekte",
+  "reshade.delete": "Preset löschen",
+  "reshade.deleted": "{{name}} gelöscht",
+  "reshade.applied": "{{name}} ist jetzt aktiv",
+  "reshade.appliedNextLaunch": "{{name}} ist gesetzt — wirkt beim nächsten Start",
+  "reshade.loosePreset": "In deinem Spielordner — nicht von MXB App installiert",
+  "reshade.missingEffects_one": "Braucht {{list}}, was nicht installiert ist",
+  "reshade.missingEffects_other":
+    "Braucht {{count}} Effekte, die nicht installiert sind: {{list}}",
+  "reshade.noShaders":
+    "Es sind keine ReShade-Effekte installiert, Presets bewirken daher nichts. Starte den ReShade-Installer erneut und wähle ein Shader-Paket.",
+  "reshade.noPresets":
+    "Noch keine Presets — installiere welche über Durchsuchen oder zieh eine .ini hierher.",
+  "reshade.browseHint": "Mehr Presets unter Durchsuchen → ReShade.",
+  "reshade.nextLaunchHint":
+    "{{game}} läuft — die Änderung wirkt beim nächsten Start.",
   // ── Paint studio ───────────────────────────────────────────────────────────
   "paints.help":
     "Macht aus .tga- oder .png-Dateien aus GIMP oder Photoshop eine .pnt, die das Spiel lädt — und entpackt ein vorhandenes Design als Ausgangspunkt.",

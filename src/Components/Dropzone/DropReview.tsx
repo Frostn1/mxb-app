@@ -11,6 +11,7 @@ import {
   Map as MapIcon,
   Palette,
   Shirt,
+  Sparkles,
   Volume2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/Components/ui/dialog";
@@ -55,6 +56,7 @@ const KIND_LABEL: Record<DropKind, TKey> = {
   bikePaint: "drop.kind.bikePaint",
   soundSet: "drop.kind.soundSet",
   riderGear: "drop.kind.riderGear",
+  reshadePreset: "drop.kind.reshadePreset",
   unknown: "drop.kind.unknown",
 };
 
@@ -70,6 +72,7 @@ const REASON_LABEL: Record<DropReason, TKey> = {
   gearFolders: "drop.reason.gearFolders",
   riderTexture: "drop.reason.riderTexture",
   gearTexture: "drop.reason.gearTexture",
+  reshadePreset: "drop.reason.reshadePreset",
   unrecognised: "drop.reason.unrecognised",
 };
 
@@ -80,6 +83,7 @@ const KIND_ICON: Record<DropKind, typeof BikeIcon> = {
   bikePaint: Palette,
   soundSet: Volume2,
   riderGear: Shirt,
+  reshadePreset: Sparkles,
   unknown: FileQuestion,
 };
 

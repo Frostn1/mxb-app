@@ -12,7 +12,26 @@
 - **Purchases install through the same review sheet a drag-and-drop uses.** The file is
   downloaded with a progress bar, then read to see what it actually contains, and the sheet
   says where each piece will land and warns about collisions before anything is written.
+- **Pick a ReShade preset from Settings.** A new ReShade card lists every preset you have —
+  the ones the app installed and any already sitting loose in your game folder — and switching
+  between them is one click. There's an "Off" entry that runs no effects, so you can compare a
+  preset against the stock look without uninstalling anything.
+- **Browse and install ReShade presets like any other mod.** mxb-mods' ReShade Presets
+  category is now a tab in Browse. Installing one files the preset where the app can find it,
+  and puts any effects and lookup textures the download bundles where ReShade looks for them —
+  the usual reason a preset "does nothing" after a manual install.
+- **Drop a preset on the app.** A `.ini` or an archive of them is recognised as a ReShade
+  preset and goes straight to the right place.
+- **The app says when ReShade is installed for the wrong graphics API.** MX Bikes and GP Bikes
+  render with OpenGL, and ReShade's installer offers DirectX first — a DirectX install is
+  never loaded by the game and looks like ReShade simply not working. The card names that
+  specifically, and points at the fix.
+- **Presets warn when they need effects you don't have.** A preset that switches on a shader
+  that isn't installed renders without it and looks like it did nothing; the card lists what's
+  missing instead.
 
+Getting ReShade itself is still a trip to reshade.me — it asks that its binaries not be
+redistributed, so the app detects it and links out rather than bundling or downloading it.
 ### Fixed
 - **A purchased bike or gear set no longer installs as if it were a track.** The old path
   picked a destination by looking for keywords in the *product name* and otherwise assumed

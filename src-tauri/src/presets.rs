@@ -147,13 +147,19 @@ pub struct Preset {
     pub content: Option<PresetContent>,
 }
 
-struct IniDoc {
+/// A `[section] key=value` file edited in place, line by line.
+///
+/// Rewriting one key must not disturb anything else in the file: `profile.ini` carries slots
+/// this app has no name for, and `ReShade.ini` carries the player's keybinds and overlay
+/// settings. Keeping the original lines and touching only the one that matches is what makes
+/// that true by construction — see [`crate::reshade`], the other user of this.
+pub(crate) struct IniDoc {
     lines: Vec<String>,
     crlf: bool,
 }
 
 impl IniDoc {
-    fn parse(text: &str) -> Self {
+    pub(crate) fn parse(text: &str) -> Self {
         let crlf = text.contains("\r\n");
         let lines = text
             .split('\n')
@@ -162,7 +168,7 @@ impl IniDoc {
         IniDoc { lines, crlf }
     }
 
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         let sep = if self.crlf { "\r\n" } else { "\n" };
         self.lines.join(sep)
     }
@@ -197,7 +203,7 @@ impl IniDoc {
         Some((h, end))
     }
 
-    fn get(&self, section: &str, key: &str) -> Option<String> {
+    pub(crate) fn get(&self, section: &str, key: &str) -> Option<String> {
         let (h, end) = self.section_span(section)?;
         for line in &self.lines[h + 1..end] {
             if let Some(eq) = line.find('=') {
@@ -209,7 +215,7 @@ impl IniDoc {
         None
     }
 
-    fn set(&mut self, section: &str, key: &str, value: &str) {
+    pub(crate) fn set(&mut self, section: &str, key: &str, value: &str) {
         if let Some((h, end)) = self.section_span(section) {
             for idx in (h + 1)..end {
                 if let Some(eq) = self.lines[idx].find('=') {

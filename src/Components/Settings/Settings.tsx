@@ -41,6 +41,7 @@ import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
+import ReshadeCard from "./ReshadeCard";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
@@ -73,6 +74,7 @@ export type SectionId =
   | "overlay"
   | "appearance"
   | "frostmod"
+  | "reshade"
   | "about";
 const SECTIONS: { id: SectionId; label: TKey }[] = [
   { id: "game", label: "game.label" },
@@ -81,6 +83,7 @@ const SECTIONS: { id: SectionId; label: TKey }[] = [
   { id: "overlay", label: "overlay.section" },
   { id: "appearance", label: "settings.appearance" },
   { id: "frostmod", label: "settings.frostmod" },
+  { id: "reshade", label: "settings.reshade" },
   { id: "about", label: "settings.about" },
 ];
 
@@ -210,6 +213,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     overlay: null,
     appearance: null,
     frostmod: null,
+    reshade: null,
     about: null,
   });
 
@@ -1010,6 +1014,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             </div>
           </Section>
           )}
+
+          {/* reshade — post-processing presets. Not gated on a capability: both titles are
+              OpenGL, so ReShade attaches to either one the same way. */}
+          <Section
+            title={t("settings.reshade")}
+            desc={t("settings.reshadeDesc")}
+            innerRef={(el) => (refs.current.reshade = el)}
+          >
+            <ReshadeCard />
+          </Section>
 
           {/* experimental */}
           <Section title={t("settings.experimental")} innerRef={() => {}}>
