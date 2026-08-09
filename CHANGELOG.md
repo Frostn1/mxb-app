@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Retrying a failed install no longer breaks the install.** Downloads are meant to run one
+  at a time, but the Retry button on a failure went straight to the installer instead of the
+  queue — so a second, impatient click started a *parallel* run of the same mod. Both runs
+  used a staging folder named after the mod, and the newcomer wiped it clean on the way in,
+  deleting the files the first run was still copying. The failure landed as a bare
+  "os error 2", most often on a livery, and clicking Retry again only made it likelier. Retry
+  now joins the queue, a mod already installing to the same place ignores a repeat click, and
+  every install stages into a folder of its own.
+- **A failed install says which file it failed on.** The error reached you as a raw system
+  code with no path in it — nothing to act on and nothing to report. It now names the file
+  and where it was going, and the failure is written to the log rather than living only in a
+  toast you have to catch before it goes.
+- **One unreadable file no longer sinks a whole install.** A shortcut whose target has gone
+  away, or a file an antivirus pulls out mid-install, used to fail everything that came with
+  it. Those entries are skipped and noted in the log; the rest of the mod installs.
+
 ## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 
 A patch on top of v0.8.0 — everything that release added is still the news, and its notes are
