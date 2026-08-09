@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-08-09 — The app spots the missing Windows component behind a dead FrostMod
+
+### Added
+- **"msvcr90.dll was not found" is now something the app explains and fixes.** MX Bikes is
+  a Visual C++ 2008 build, and it asks Windows for that runtime by manifest rather than by
+  path — which resolves either machine-wide or out of a private copy sitting in the game
+  folder. On a PC living on the second one the game launches perfectly while nothing loaded
+  from anywhere else can find the runtime, and FrostMod is loaded from somewhere else. The
+  result was the worst kind of bug report: the game works, FrostMod doesn't, and Windows
+  puts a bare error box over the screen that names a DLL and nothing else. The app now
+  checks for that runtime, and for the newer one `frostmod.dll` itself needs, says which is
+  missing in plain language, and installs it from Microsoft with one button.
+- **The warning goes where it'll be seen.** A bar at the top of the app, not just a line in
+  Settings — nothing about the symptom suggests Settings is where to look.
+
+### Changed
+- **FrostMod still starts when a runtime is missing.** It's a warning, not a gate: we can't
+  tell from outside which PCs manage to inject anyway, and refusing to launch would take
+  FrostMod away from anyone the check is wrong about.
+
+### Fixed
+- **Settings offers Stop for a FrostMod it didn't install.** The button was hidden unless
+  the app had put FrostMod there itself — so the one case that most needs a stop, a
+  `frostmod.exe` running that the app didn't start, had no button. The backend could
+  always kill it; only the button was missing. (The sidebar's stop control was unaffected.)
+
 ## 2026-08-09
 
 ### Fixed

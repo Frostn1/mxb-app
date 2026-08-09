@@ -254,6 +254,26 @@ export const it: Translation = {
   "update.updateAndRestart": "Aggiorna e riavvia",
   "update.dismiss": "Ignora la notifica di aggiornamento",
   "update.onLatest": "Hai già l'ultima versione",
+
+  // ── Runtime Visual C++ mancante ────────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.bannerGame":
+    "MX Bikes ha bisogno di {{what}} prima che FrostMod possa agganciarsi.",
+  "runtime.bannerFrostmod": "FrostMod ha bisogno di {{what}} per funzionare.",
+  "runtime.pitch":
+    "Senza, Windows mostra l'errore «dll was not found». Si risolve in pochi secondi.",
+  "runtime.fixIt": "Installalo",
+  "runtime.installing": "Installazione…",
+  "runtime.dismiss": "Nascondi questo avviso",
+  "runtime.installed": "Componente installato",
+  "runtime.installedDesc":
+    "Ora FrostMod dovrebbe raggiungere il gioco. Riavvia MX Bikes se è già aperto.",
+  "runtime.cancelled": "Non è stato installato nulla",
+  "runtime.cancelledDesc":
+    "Windows ha bisogno del tuo permesso. Apro invece il download di Microsoft.",
+  "runtime.installFailed": "Impossibile installare il componente",
+  "runtime.downloadManually": "Scaricalo da solo",
   "update.checkFailed": "Impossibile controllare gli aggiornamenti",
   "update.failed": "Aggiornamento non riuscito",
 
@@ -527,6 +547,8 @@ export const it: Translation = {
   "settings.updateCheckFailed":
     "Impossibile controllare gli aggiornamenti — offline o GitHub non raggiungibile.",
   "settings.latestVersion": "Ultima: {{version}}",
+  "settings.frostmodRuntimeMissing":
+    "A Windows manca un componente Visual C++ che serve a FrostMod — installalo per togliere l'errore «dll was not found».",
   "settings.frostmodNeedsRepair":
     "I file installati non corrispondono a questa versione — reinstallando si risolve.",
   "settings.frostmodRepair": "Ripara installazione",

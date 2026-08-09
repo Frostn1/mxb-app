@@ -621,7 +621,23 @@ export interface FrostmodStatus {
    * that rather than a start; the backend refuses to launch it either way.
    */
   supportedForGame: boolean;
+  /**
+   * Visual C++ runtimes this PC is short of. Empty is the normal case, and always the
+   * case off Windows.
+   *
+   * `vc90` is what the *game* imports (`MSVCR90`) and `vc140` what `frostmod.dll` does.
+   * Either being absent means FrostMod will most likely fail to attach with a bare
+   * "…dll was not found" box over the game. Unlike the flags above this doesn't stop
+   * FrostMod starting — it's a warning with a one-click fix attached.
+   */
+  missingRuntimes: VcRuntime[];
 }
+
+/** A Visual C++ runtime the FrostMod chain needs. Matches `vcruntime::Runtime`. */
+export type VcRuntime = "vc90" | "vc140";
+
+/** What a runtime install did. `cancelled` is the user dismissing the UAC prompt. */
+export type RuntimeInstallOutcome = "installed" | "cancelled";
 
 /** What an install landed, beyond succeeding. */
 export interface FrostmodInstallReport {

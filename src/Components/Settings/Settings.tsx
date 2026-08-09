@@ -185,7 +185,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const isWindows = platform === "windows";
   const isMac = platform === "macos";
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus } =
+  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
@@ -902,7 +902,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                     ? t("settings.checkingGitHub")
                     : statusError
                       ? t("settings.updateCheckFailed")
-                      : status?.needsRepair
+                      : // Above everything else: a missing Visual C++ runtime stops
+                        // FrostMod attaching at all, and no amount of repairing or
+                        // updating FrostMod puts one on the machine.
+                        missingRuntime
+                        ? t("settings.frostmodRuntimeMissing")
+                        : status?.needsRepair
                         ? t("settings.frostmodNeedsRepair")
                         : // Ranked above "latest version" on purpose: a build too old for
                           // this game can't run at all, which the version line alone
@@ -917,6 +922,20 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
+                {/* Its own button rather than a mode of the one below: the FrostMod
+                    install and the Windows component are separate things to fix, and
+                    someone can genuinely need both. */}
+                {missingRuntime && (
+                  <Button
+                    size="sm"
+                    onClick={() => void installRuntime(missingRuntime)}
+                    disabled={installingRuntime}
+                  >
+                    {installingRuntime
+                      ? t("runtime.installing")
+                      : t("runtime.fixIt")}
+                  </Button>
+                )}
                 {status?.installed && (
                   <Button
                     variant="ghost"
@@ -994,16 +1013,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             />
 
             <div className="flex gap-2">
-              {status?.installed &&
-                (running ? (
-                  <Button variant="outline" size="sm" onClick={stop}>
-                    <Square className="size-3.5" /> {t("frostmod.stop")}
-                  </Button>
-                ) : (
+              {/* Stop is offered whenever FrostMod is running, installed by us or not —
+                  `frostmod_stop` kills a hand-launched `frostmod.exe` too, and gating it
+                  on `installed` left the one case that needs it most (something running
+                  that we didn't put there) with no button at all. Start still needs an
+                  install to start. */}
+              {running ? (
+                <Button variant="outline" size="sm" onClick={stop}>
+                  <Square className="size-3.5" /> {t("frostmod.stop")}
+                </Button>
+              ) : (
+                status?.installed && (
                   <Button variant="default" size="sm" onClick={start}>
                     <Play className="size-3.5" /> {t("frostmod.start")}
                   </Button>
-                ))}
+                )
+              )}
               <Button variant="outline" size="sm" onClick={reloadGame} disabled={!running}>
                 <RefreshCw className="size-3.5" /> Reload game now
               </Button>
