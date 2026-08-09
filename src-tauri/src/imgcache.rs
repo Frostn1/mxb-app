@@ -29,18 +29,28 @@ pub const SCHEME: &str = "imgcache";
 /// Bumped when the on-disk layout changes, so old entries are dropped rather than misread.
 const CACHE_DIR: &str = "img-v1";
 
-/// Hosts we're willing to fetch from.
+/// The store's hosts. `mxbikes-shop.b-cdn.net` is its own Bunny pull zone, named in full
+/// rather than as `b-cdn.net` — that suffix is shared by every Bunny customer, and matching
+/// it would open the proxy to all of them. A few dozen product descriptions embed images
+/// from it.
+const SHOP_HOSTS: [&str; 2] = ["mxbikes-shop.com", "mxbikes-shop.b-cdn.net"];
+
+/// Is `host` one we're willing to fetch from?
 ///
 /// Not paranoia: the scheme handler will fetch whatever URL it's handed, so without this it
 /// would be a general-purpose proxy that any injected markup could aim anywhere.
-/// `mxbikes-shop.b-cdn.net` is the store's own Bunny pull zone, named in full rather than as
-/// `b-cdn.net` — that suffix is shared by every Bunny customer, and matching it would open the
-/// proxy to all of them. A few dozen product descriptions embed images from it.
-const ALLOWED_HOSTS: [&str; 3] = [
-    "mxb-mods.com",
-    "mxbikes-shop.com",
-    "mxbikes-shop.b-cdn.net",
-];
+///
+/// The catalogs come from the game table rather than a list written out here, because a list
+/// written out here is a list that gets forgotten: gpb-mods.com wasn't on it, so every GP
+/// Bikes thumbnail was refused and Browse showed a grid of blank cards. A third title's
+/// catalog is now covered the moment its `GameProfile` exists.
+fn is_allowed(host: &str) -> bool {
+    let under = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
+    crate::game::Game::ALL
+        .iter()
+        .any(|g| under(g.profile().catalog.domain))
+        || SHOP_HOSTS.iter().any(|h| under(h))
+}
 
 /// Roughly a few thousand thumbnails. Generous, because the whole point is not refetching.
 const MAX_CACHE_BYTES: u64 = 256 * 1024 * 1024;
@@ -135,10 +145,7 @@ fn source_url(uri: &str) -> Option<String> {
         return None;
     }
     let host = url.host_str()?.to_ascii_lowercase();
-    let allowed = ALLOWED_HOSTS
-        .iter()
-        .any(|a| host == *a || host.ends_with(&format!(".{a}")));
-    allowed.then(|| url.to_string())
+    is_allowed(&host).then(|| url.to_string())
 }
 
 /// The `?w=` the caller asked for, if any.
@@ -348,14 +355,27 @@ fn touch(path: &Path) {
 
 /// Images are fetched with the same session as the catalog they belong to, so a
 /// `cf_clearance` earned for a site applies to its images too.
+///
+/// Which site that is comes from the URL's host, not from the active game: the two catalogs
+/// keep separate jars precisely because a clearance is scoped to the host that minted it, so
+/// serving a gpb-mods.com thumbnail through mxb-mods.com's session — or, as it did before,
+/// through the store's — sends a cookie that can only fail.
 fn client_for(url: &str) -> Option<&'static reqwest::Client> {
     static MXB: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    static GPB: OnceLock<Option<reqwest::Client>> = OnceLock::new();
     static SHOP: OnceLock<Option<reqwest::Client>> = OnceLock::new();
 
     let host = reqwest::Url::parse(url).ok()?.host_str()?.to_ascii_lowercase();
-    if host == "mxb-mods.com" || host.ends_with(".mxb-mods.com") {
-        MXB.get_or_init(|| crate::mxb_session::client_builder().build().ok())
+    let under = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
+
+    let catalog = |slot: &'static OnceLock<Option<reqwest::Client>>, site| {
+        slot.get_or_init(|| crate::mxb_session::client_builder_for(site).build().ok())
             .as_ref()
+    };
+    if under(crate::mxb_session::MXB_SITE.domain) {
+        catalog(&MXB, &crate::mxb_session::MXB_SITE)
+    } else if under(crate::mxb_session::GPB_SITE.domain) {
+        catalog(&GPB, &crate::mxb_session::GPB_SITE)
     } else {
         SHOP.get_or_init(|| crate::shop_catalog_session::client_builder().build().ok())
             .as_ref()
@@ -520,9 +540,10 @@ mod tests {
     }
 
     #[test]
-    fn accepts_the_two_catalog_origins_and_their_cdns() {
+    fn accepts_the_catalog_origins_and_their_cdns() {
         for url in [
             "https://mxb-mods.com/wp-content/uploads/a.jpg",
+            "https://gpb-mods.com/wp-content/uploads/a.jpg",
             "https://mxbikes-shop.com/img/1.png",
             "https://cdn.mxbikes-shop.com/img/1.png",
             // The store's Bunny pull zone — where some product descriptions embed from.
@@ -530,6 +551,52 @@ mod tests {
         ] {
             assert_eq!(source_url(&encoded(url)).as_deref(), Some(url), "{url}");
         }
+    }
+
+    /// Every catalog the app can browse has to be fetchable, or that title's Browse is a
+    /// grid of blank cards — which is exactly what shipped for GP Bikes. Driven off the game
+    /// table so adding a title can't quietly leave its thumbnails refused.
+    #[test]
+    fn every_titles_catalog_is_fetchable() {
+        for game in crate::game::Game::ALL {
+            let url = format!(
+                "https://{}/wp-content/uploads/2026/01/thumb.jpg",
+                game.profile().catalog.domain,
+            );
+            assert_eq!(
+                source_url(&encoded(&url)).as_deref(),
+                Some(url.as_str()),
+                "{} browses {} — its images must load",
+                game.id(),
+                game.profile().catalog.domain,
+            );
+        }
+    }
+
+    /// End-to-end against the live catalog: take a real thumbnail off gpb-mods.com's API,
+    /// put it through the same three steps a `<img src="imgcache://…">` does — allowlist,
+    /// session-picked client, fetch — and check what comes back is a real image the cache
+    /// would serve. The unit tests above prove the allowlist; only this proves a GP Bikes
+    /// card actually gets pixels.
+    ///
+    /// Ignored by default because it hits the network. Run it with
+    /// `cargo test gp_bikes_thumbnails_really_load -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "hits live gpb-mods.com"]
+    async fn gp_bikes_thumbnails_really_load() {
+        let api = "https://gpb-mods.com/wp-json/wp/v2/posts\
+                   ?categories=18&per_page=1&_embed=wp:featuredmedia";
+        let posts: serde_json::Value = reqwest::get(api).await.unwrap().json().await.unwrap();
+        let origin = posts[0]["_embedded"]["wp:featuredmedia"][0]["source_url"]
+            .as_str()
+            .expect("the catalog gives its posts a featured image")
+            .to_string();
+
+        let url = source_url(&encoded(&origin)).expect("a GP thumbnail must not be refused");
+        let bytes = fetch(&url).await.expect("and it must actually fetch");
+        let mime = sniff(&bytes).expect("what comes back has to be an image");
+        assert!(bytes.len() > 1024, "{mime} of only {} bytes", bytes.len());
+        println!("{origin}\n  -> {mime}, {} bytes", bytes.len());
     }
 
     /// The pull zone is allowed by its full name. `b-cdn.net` is Bunny's shared domain, so

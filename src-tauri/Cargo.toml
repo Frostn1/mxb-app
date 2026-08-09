@@ -1,6 +1,6 @@
 [package]
 name = "frost"
-version = "0.8.0"
+version = "0.8.1"
 description = "Frost — MX Bikes mod manager"
 authors = ["Frost"]
 edition = "2021"

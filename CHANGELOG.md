@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
+
+A patch on top of v0.8.0 — everything that release added is still the news, and its notes are
+repeated below.
+
+### Fixed
+- **GP Bikes mods show their pictures in Browse.** Every card in the GP grid came up blank,
+  and so did the pictures inside a mod's page. The app fetches thumbnails through its own
+  cache rather than letting the page load them directly, and that cache only ever knew
+  mxb-mods.com and the store — gpb-mods.com wasn't on the list, so every GP image was refused
+  before it was ever requested. The list is now built from the games the app drives, so a
+  title's catalog can't be added without its pictures working.
+- **GP thumbnails are fetched as GP Bikes' own visitor.** They were going out through the
+  store's session, which holds cookies for a different site. The two catalogs keep separate
+  sessions on purpose — Cloudflare scopes a clearance to the host that issued it — and images
+  now follow the host they came from rather than whichever game is selected.
+
 ## 2026-08-09 — v0.8.0 — GP Bikes, the MXB Shop, and a dropzone that takes anything
 
 ### Added
