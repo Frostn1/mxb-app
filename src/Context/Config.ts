@@ -16,6 +16,7 @@ const MXB_CAPS: GameCaps = {
 const MXB_FALLBACK: GameInfo = {
   id: "mxb",
   display: "MX Bikes",
+  exe: "mxbikes.exe",
   modsDirs: ["bikes", "tracks", "rider", "tyres", "misc"],
   catalogDomain: "mxb-mods.com",
   riderAreas: [

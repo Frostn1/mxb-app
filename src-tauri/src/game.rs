@@ -337,6 +337,9 @@ pub struct RiderAreaInfo {
 pub struct GameInfo {
     pub id: &'static str,
     pub display: &'static str,
+    /// The executable's file name. The UI names it when telling someone to point another
+    /// tool at the game — ReShade's installer asks for exactly this file.
+    pub exe: &'static str,
     pub mods_dirs: &'static [&'static str],
     /// Host of the catalog this title browses, e.g. `mxb-mods.com`. The UI names the site
     /// it is linking to, and naming the wrong one is worse than naming none.
@@ -363,6 +366,7 @@ impl GameProfile {
         GameInfo {
             id: self.id,
             display: self.display,
+            exe: self.exe,
             mods_dirs: self.mods_dirs,
             catalog_domain: self.catalog.domain,
             rider_areas: self

@@ -31,6 +31,7 @@ mod pkz;
 mod sidecar;
 mod presets;
 mod paintsync;
+mod reshade;
 mod servers;
 mod shop_catalog_session;
 mod shop_credentials;
@@ -313,6 +314,25 @@ fn scan_library_blocking(
     subpath: String,
 ) -> Result<Vec<library::LibraryEntry>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    // ReShade presets aren't in the mods tree, so the scanner below would look in a folder
+    // that doesn't exist and report every preset as not installed. Browse compares these
+    // names against catalog titles to draw its "Installed" badge, so it has to be the real
+    // list. See `reshade::status`.
+    if reshade::is_reshade_subpath(&subpath) {
+        return Ok(reshade::status(&cfg.install_dir())
+            .presets
+            .into_iter()
+            .map(|p| library::LibraryEntry {
+                name: p.name,
+                path: p.path,
+                folder: String::new(),
+                size: 0,
+                kind: "loose".into(),
+                category: "reshade".into(),
+                parent: None,
+            })
+            .collect());
+    }
     let sound_bikes = sound_bikes_of(&app);
     library::scan_library(&cfg.mods_path, &subpath, &sound_bikes, cfg.game()).map_err(|e| format!("{e:#}"))
 }
@@ -364,6 +384,18 @@ struct SwapApplyOutcome {
     /// loader, which reloads paints/gear but never the mesh — the model needs FrostMod
     /// to re-apply the bike. See `frostmod::signal_refresh_model`.
     model_refresh: Option<frostmod::CommandOutcome>,
+}
+
+/// Outcome of switching ReShade preset.
+///
+/// Much thinner than [`SwapApplyOutcome`] because switching a preset touches nothing this app
+/// owns: no content to reload, no loader to re-run. ReShade picks the file up itself, so the
+/// only thing the UI can't work out on its own is whether a session is already running and
+/// therefore whether the player sees it now or next launch.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReshadeApplyOutcome {
+    game_running: bool,
 }
 
 /// Re-run the game's look loader live if instant refresh is enabled, else report it off.
@@ -469,6 +501,46 @@ async fn apply_sound_swap(
     })
     .await
     .map_err(|e| format!("apply_sound_swap task failed: {e}"))?
+}
+
+/// The ReShade card's whole state, read fresh from the game folder — see [`reshade`].
+#[tauri::command]
+async fn reshade_status(app: tauri::AppHandle) -> Result<reshade::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(reshade::status(&cfg.install_dir()))
+    })
+    .await
+    .map_err(|e| format!("reshade_status task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn apply_reshade_preset(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<ReshadeApplyOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        reshade::apply(&cfg.install_dir(), &name).map_err(|e| format!("{e:#}"))?;
+        // Unlike a content swap there is nothing to signal: ReShade owns its own config and
+        // FrostMod has no part in it. All the UI needs is whether the player will see this
+        // now or on the next launch.
+        Ok(ReshadeApplyOutcome {
+            game_running: gameproc::is_game_running(),
+        })
+    })
+    .await
+    .map_err(|e| format!("apply_reshade_preset task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn delete_reshade_preset(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        reshade::delete(&cfg.install_dir(), &name).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("delete_reshade_preset task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -3958,6 +4030,9 @@ fn main() {
             apply_sound_swap,
             bind_sound,
             unbind_sound,
+            reshade_status,
+            apply_reshade_preset,
+            delete_reshade_preset,
             detect_loose_swaps,
             register_loose_swaps,
             detect_orphaned_setup,

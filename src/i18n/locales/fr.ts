@@ -1078,6 +1078,7 @@ export const fr: Translation = {
   "drop.kind.bikePaint": "Déco",
   "drop.kind.soundSet": "Son",
   "drop.kind.riderGear": "Équipement",
+  "drop.kind.reshadePreset": "Préréglage ReShade",
   "drop.kind.unknown": "Inconnu",
   "drop.reason.modsTree": "Contient un dossier mods complet",
   "drop.reason.categoryDirs": "Contient des dossiers motos/circuits/pilote",
@@ -1090,5 +1091,42 @@ export const fr: Translation = {
   "drop.reason.gearFolders": "Dossiers d'équipement trouvés",
   "drop.reason.riderTexture": "Peint le corps du pilote — une tenue",
   "drop.reason.gearTexture": "Peint un élément d'équipement",
+  "drop.reason.reshadePreset": "Liste des techniques ReShade",
   "drop.reason.unrecognised": "Non reconnu — à vous de le placer",
+
+  // ── ReShade ────────────────────────────────────────────────────────────────
+  "settings.reshade": "ReShade",
+  "settings.reshadeDesc": "Préréglages de post-traitement — le rendu de {{game}} à l'écran.",
+  "modType.reshade": "ReShade",
+  "modType.reshadeInline": "préréglages ReShade",
+  "reshade.needsGameFolder":
+    "Indique ton dossier {{game}} ci-dessus et les préréglages ReShade apparaîtront ici.",
+  "reshade.intro":
+    "ReShade ajoute du post-traitement à {{game}}. C'est un outil gratuit distinct : installe-le une fois, puis choisis un préréglage ici.",
+  "reshade.wrongApi":
+    "ReShade est installé sous le nom {{dll}}, que {{game}} ne charge jamais — il utilise OpenGL. Relance l'installateur ReShade et choisis OpenGL.",
+  "reshade.step1": "Télécharge l'installateur sur reshade.me.",
+  "reshade.step2": "Lance-le et sélectionne {{exe}} dans ton dossier {{game}}.",
+  "reshade.step3": "Choisis OpenGL quand il le demande — pas DirectX.",
+  "reshade.getIt": "Obtenir ReShade",
+  "reshade.recheck": "Revérifier",
+  "reshade.installed": "Installé",
+  "reshade.installedVersion": "Installé · {{version}}",
+  "reshade.off": "Désactivé — aucun effet",
+  "reshade.delete": "Supprimer le préréglage",
+  "reshade.deleted": "{{name}} supprimé",
+  "reshade.applied": "{{name}} est maintenant actif",
+  "reshade.appliedNextLaunch":
+    "{{name}} est défini — il s'appliquera au prochain lancement",
+  "reshade.loosePreset": "Dans ton dossier de jeu — pas installé par MXB App",
+  "reshade.missingEffects_one": "Nécessite {{list}}, qui n'est pas installé",
+  "reshade.missingEffects_other":
+    "Nécessite {{count}} effets non installés : {{list}}",
+  "reshade.noShaders":
+    "Aucun effet ReShade n'est installé, les préréglages ne changeront donc rien. Relance l'installateur ReShade et choisis un pack de shaders.",
+  "reshade.noPresets":
+    "Aucun préréglage — installes-en depuis Parcourir, ou dépose un .ini ici.",
+  "reshade.browseHint": "Plus de préréglages dans Parcourir → ReShade.",
+  "reshade.nextLaunchHint":
+    "{{game}} est lancé — le changement s'appliquera au prochain démarrage.",
 };
