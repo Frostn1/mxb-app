@@ -1208,6 +1208,16 @@ export const en = {
   "drop.reason.reshadePreset": "Lists ReShade techniques",
   "drop.reason.unrecognised": "Not recognised — you'll need to place it",
 
+  // ── Import (the same install flow, reached by picking instead of dropping) ──
+  "import.action": "Import",
+  "import.staging": "Reading…",
+  "import.pickFiles": "Choose files…",
+  "import.pickFolder": "Choose a folder…",
+  "import.modFiles": "Mods and paints",
+  "import.allFiles": "All files",
+  "import.pickFailed": "Couldn't open the file picker",
+  "import.readFailed": "Couldn't read what you picked",
+
   // ── ReShade ────────────────────────────────────────────────────────────────
   // ReShade is a product name and stays untranslated everywhere, capital S included.
   "settings.reshade": "ReShade",
