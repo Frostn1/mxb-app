@@ -4,6 +4,7 @@ import {
   RefreshCw,
   ExternalLink,
   Play,
+  Square,
   Compass,
   MessagesSquare,
   Monitor,
@@ -184,7 +185,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const isWindows = platform === "windows";
   const isMac = platform === "macos";
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, checking, statusError, install, start, refreshStatus } =
+  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
@@ -993,11 +994,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             />
 
             <div className="flex gap-2">
-              {status?.installed && !running && (
-                <Button variant="default" size="sm" onClick={start}>
-                  <Play className="size-3.5" /> Start FrostMod
-                </Button>
-              )}
+              {status?.installed &&
+                (running ? (
+                  <Button variant="outline" size="sm" onClick={stop}>
+                    <Square className="size-3.5" /> {t("frostmod.stop")}
+                  </Button>
+                ) : (
+                  <Button variant="default" size="sm" onClick={start}>
+                    <Play className="size-3.5" /> {t("frostmod.start")}
+                  </Button>
+                ))}
               <Button variant="outline" size="sm" onClick={reloadGame} disabled={!running}>
                 <RefreshCw className="size-3.5" /> Reload game now
               </Button>

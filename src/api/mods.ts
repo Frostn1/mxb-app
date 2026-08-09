@@ -28,6 +28,11 @@ import type {
   StatePlan,
   PkzMeta,
   PaintTexture,
+  StudioImage,
+  BuildTexture,
+  PaintDest,
+  SavedPaint,
+  PaintTemplate,
   BikeModel,
   EdfNode,
   RiderModel,
@@ -331,7 +336,7 @@ export interface RiderTargets {
   helmets: string[];
   boots: string[];
   protection: string[];
-  /** GP Bikes riding-style animations. Always empty for MX Bikes. */
+  /** Riding-style animations. Both titles read `mods/rider/animations/<name>/`. */
   animations: string[];
   /** What `mods/rider/riders` holds: MX Bikes' rider profiles, GP Bikes' rider models. */
   profiles: string[];
@@ -430,6 +435,41 @@ export function getPkzPreview(path: string): Promise<string | null> {
 
 export function unpackPaint(path: string): Promise<PaintTexture[]> {
   return invoke<PaintTexture[]>("unpack_paint", { path });
+}
+
+/* ── Paint studio ──────────────────────────────────────────────────────────────────── */
+
+/** Read image files as textures — non-power-of-two sizes come back resized, flagged. */
+export function paintStudioLoad(paths: string[]): Promise<StudioImage[]> {
+  return invoke<StudioImage[]>("paint_studio_load", { paths });
+}
+
+/** The file a save would write, resolved but not written — so we can ask before replacing. */
+export function paintStudioTarget(
+  fileName: string,
+  dest: PaintDest,
+): Promise<{ path: string; exists: boolean }> {
+  return invoke<{ path: string; exists: boolean }>("paint_studio_target", { fileName, dest });
+}
+
+export function paintStudioSave(req: {
+  name: string;
+  fileName: string;
+  textures: BuildTexture[];
+  dest: PaintDest;
+  overwrite: boolean;
+}): Promise<SavedPaint> {
+  return invoke<SavedPaint>("paint_studio_save", req);
+}
+
+/** Write an existing paint's sheets out as `.tga` files to edit. */
+export function paintStudioExtract(path: string, dest?: string): Promise<PaintTemplate> {
+  return invoke<PaintTemplate>("paint_studio_extract", { path, dest: dest ?? null });
+}
+
+/** The texture names the paints already installed at `rel` supply — what to call yours. */
+export function paintStudioHints(rel: string): Promise<string[]> {
+  return invoke<string[]>("paint_studio_hints", { rel });
 }
 
 /**
@@ -1364,9 +1404,10 @@ export function frostmodStart(): Promise<boolean> {
   return invoke<boolean>("frostmod_start");
 }
 
-/** Stop the managed FrostMod process. */
-export function frostmodStop(): Promise<void> {
-  return invoke<void>("frostmod_stop");
+/** Stop FrostMod, whoever started it — a hand-launched `frostmod.exe` included.
+ *  Resolves to whether it's actually gone; `false` means it outlived the kill. */
+export function frostmodStop(): Promise<boolean> {
+  return invoke<boolean>("frostmod_stop");
 }
 
 /** Toggle auto-running FrostMod when the app opens. */

@@ -115,6 +115,10 @@ fn resolve(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
         Spec { slot: "boots_paint", value: loadout.boots_paint.clone(), scan: Scan::Rider, cats: &["bootPaint"], parent: Some(loadout.boots.clone()) },
         Spec { slot: "protection", value: loadout.protection.clone(), scan: Scan::Rider, cats: &["protection"], parent: None },
         Spec { slot: "protection_paint", value: loadout.protection_paint.clone(), scan: Scan::Rider, cats: &["protectionPaint"], parent: Some(loadout.protection.clone()) },
+        // A custom riding style is a mod like any other. The two stock ones live in
+        // `rider.pkz` and leave nothing on disk, which `is_builtin` skips rather than
+        // reporting unresolved.
+        Spec { slot: "riding_style", value: loadout.riding_style.clone(), scan: Scan::Rider, cats: &["animation"], parent: None },
         Spec { slot: "tyres", value: loadout.tyres.clone(), scan: Scan::Tyres, cats: &["misc"], parent: None },
     ];
 
@@ -488,8 +492,31 @@ mod tests {
         let mut lo = Loadout::default();
         lo.helmet = "default".into();
         lo.tyres = "p_mx".into();
+        lo.riding_style = "mx".into();
         let plan = plan(&cfg, &lo).unwrap();
         assert!(plan.assets.is_empty());
+        assert!(plan.unresolved.is_empty(), "a stock style ships in rider.pkz, nothing to pack");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A shared preset has to carry the riding style, or it lands on the other player's
+    /// machine naming a style they have no way to get.
+    #[test]
+    fn plan_packs_a_custom_riding_style() {
+        let root = tmp("riding-style");
+        touch(&root.join("mods/rider/animations/Scrub/Scrub.ini"));
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        let mut lo = Loadout::default();
+        lo.riding_style = "Scrub".into();
+
+        let plan = plan(&cfg, &lo).unwrap();
+        let asset = plan.assets.iter().find(|a| a.slot == "riding_style");
+        assert_eq!(
+            asset.map(|a| a.rel_dest.as_str()),
+            Some("rider/animations/Scrub"),
+            "assets: {:?}",
+            plan.assets.iter().map(|a| &a.rel_dest).collect::<Vec<_>>(),
+        );
         assert!(plan.unresolved.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -26,6 +26,7 @@ mod mxb_fetch;
 mod mxb_session;
 mod overlay;
 mod paint;
+mod paintstudio;
 mod pkz;
 #[cfg(sidecar)]
 mod sidecar;
@@ -594,6 +595,274 @@ async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> 
 
 fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+}
+
+// ── Paint studio ────────────────────────────────────────────────────────────────────
+//
+// A `.pnt` is a packed container no image editor can write, so a livery drawn in GIMP has
+// always needed somebody else's converter before the game would load it. These commands are
+// both halves of that: images in (`paint_studio_save`), sheets out as editable TGA
+// templates (`paint_studio_extract`), and the texture names a destination expects
+// (`paint_studio_hints`) so a new paint binds to the same parts as the ones already there.
+
+/// Where a built paint is written.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum PaintDest {
+    /// Under the game's `mods` folder — `bikes/<Bike>/paints`,
+    /// `rider/helmets/<Helmet>/paints`, `rider/riders/<Profile>/gloves`…
+    Mods { rel: String },
+    /// A folder the player picked themselves, for a paint they mean to share rather than
+    /// install.
+    Folder { path: String },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedPaint {
+    path: String,
+    textures: Vec<String>,
+    bytes: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaintTarget {
+    path: String,
+    exists: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaintTemplate {
+    dir: String,
+    files: Vec<String>,
+    textures: Vec<String>,
+}
+
+/// Read source images for the studio — the pixels land in the texture store, so the UI
+/// previews them through exactly the same path as a decoded paint's.
+#[tauri::command]
+async fn paint_studio_load(paths: Vec<String>) -> Result<Vec<paintstudio::StudioImage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .iter()
+            .map(|p| paintstudio::inspect(std::path::Path::new(p)).map_err(|e| format!("{e:#}")))
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("paint_studio_load task failed: {e}"))?
+}
+
+/// The file a save would write, resolved but not written — so the UI can ask before
+/// replacing a paint that's already there.
+#[tauri::command]
+fn paint_studio_target(
+    app: tauri::AppHandle,
+    file_name: String,
+    dest: PaintDest,
+) -> Result<PaintTarget, String> {
+    let path = resolve_paint_dest(&app, &file_name, &dest)?;
+    Ok(PaintTarget { exists: path.is_file(), path: path.to_string_lossy().into_owned() })
+}
+
+/// `<dir>/<name>.pnt` for a destination, refusing anything that isn't a paint sitting where
+/// a paint belongs.
+///
+/// The `Mods` arm goes through [`paintsync::safe_dest`] — the same check that vets a
+/// destination sent by another player over paint sync. Nothing here is remote, but the rule
+/// it enforces (a relative path, no traversal, at least two segments deep, ending in
+/// `.pnt`) is exactly the rule a paint destination has to satisfy, and one boundary with
+/// tests beats a second one written from memory.
+fn resolve_paint_dest(
+    app: &tauri::AppHandle,
+    file_name: &str,
+    dest: &PaintDest,
+) -> Result<std::path::PathBuf, String> {
+    let stem = install::sanitize(file_name.trim())
+        .trim()
+        .trim_end_matches('.')
+        .trim_end_matches(".pnt")
+        .trim()
+        .to_string();
+    if stem.is_empty() {
+        return Err("Name this paint before saving it.".into());
+    }
+    let file = format!("{stem}.pnt");
+    match dest {
+        PaintDest::Mods { rel } => {
+            let cfg = config::load(app).map_err(|e| format!("{e:#}"))?;
+            let mods_dir = library::mods_subdir(&cfg.mods_path, "mods");
+            let rel = rel.replace('\\', "/");
+            let rel = rel.trim_matches('/');
+            paintsync::safe_dest(&mods_dir, &format!("{rel}/{file}"))
+                .ok_or_else(|| format!("'{rel}' isn't a folder a paint can be installed into"))
+        }
+        PaintDest::Folder { path } => {
+            let dir = std::path::PathBuf::from(path);
+            if !dir.is_dir() {
+                return Err(format!("{} isn't a folder", dir.display()));
+            }
+            Ok(dir.join(file))
+        }
+    }
+}
+
+/// Build a `.pnt` from the chosen images and write it.
+#[tauri::command]
+async fn paint_studio_save(
+    app: tauri::AppHandle,
+    name: String,
+    file_name: String,
+    textures: Vec<paintstudio::BuildTexture>,
+    dest: PaintDest,
+    overwrite: bool,
+) -> Result<SavedPaint, String> {
+    let target = resolve_paint_dest(&app, &file_name, &dest)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if !overwrite && target.exists() {
+            return Err(format!("{} is already there.", target.display()));
+        }
+        // The paint's own name is the one the game shows; an empty one falls back to the
+        // file name, which is what every paint on disk is picked by anyway.
+        let title = if name.trim().is_empty() {
+            target.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+        } else {
+            name.trim().to_string()
+        };
+        let bytes = paintstudio::build(&title, &textures).map_err(|e| format!("{e:#}"))?;
+        let names = paint::texture_names(&bytes).map_err(|e| format!("{e:#}"))?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create {}: {e}", parent.display()))?;
+        }
+        std::fs::write(&target, &bytes)
+            .map_err(|e| format!("write {}: {e}", target.display()))?;
+        log::info!(
+            "[paint studio] wrote {} ({} bytes, textures: {})",
+            target.display(),
+            bytes.len(),
+            names.join(", ")
+        );
+        Ok(SavedPaint {
+            path: target.to_string_lossy().into_owned(),
+            textures: names,
+            bytes: bytes.len() as u64,
+        })
+    })
+    .await
+    .map_err(|e| format!("paint_studio_save task failed: {e}"))?
+}
+
+/// Write a paint's sheets out as `.tga` files to edit — the way to start from a livery
+/// that already fits the model instead of from a blank sheet.
+#[tauri::command]
+async fn paint_studio_extract(
+    app: tauri::AppHandle,
+    path: String,
+    dest: Option<String>,
+) -> Result<PaintTemplate, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let src = std::path::PathBuf::from(&path);
+        let stem = src
+            .file_stem()
+            .map(|s| install::sanitize(&s.to_string_lossy()))
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "paint".to_string());
+        let dir = match dest {
+            Some(d) => std::path::PathBuf::from(d).join(&stem),
+            None => templates_root(&app).join(&stem),
+        };
+        let bytes = std::fs::read(&src).map_err(|e| format!("read {}: {e}", src.display()))?;
+        let files = paintstudio::extract(&bytes, &dir).map_err(|e| format!("{e:#}"))?;
+        let textures = files
+            .iter()
+            .filter_map(|f| f.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .collect();
+        Ok(PaintTemplate {
+            dir: dir.to_string_lossy().into_owned(),
+            files: files.iter().map(|f| f.to_string_lossy().into_owned()).collect(),
+            textures,
+        })
+    })
+    .await
+    .map_err(|e| format!("paint_studio_extract task failed: {e}"))?
+}
+
+/// Where templates go when the player doesn't pick somewhere: their Documents folder, not
+/// the mods folder — the game scans that, and a folder of loose sheets isn't a mod.
+fn templates_root(app: &tauri::AppHandle) -> std::path::PathBuf {
+    dirs_next::document_dir()
+        .or_else(|| app.path().app_data_dir().ok())
+        .unwrap_or_else(std::env::temp_dir)
+        .join("MXB App")
+        .join("Paint Templates")
+}
+
+/// The texture names a destination's existing paints supply.
+///
+/// A paint binds by name: call a sheet `livery` and it lands on the bodywork that asked for
+/// `livery`, call it `my_livery` and it lands nowhere. Nothing in a `.pnt` says which names
+/// a model wants, but the paints already installed for that model do — read from their
+/// headers, so this costs no pixels.
+#[tauri::command]
+async fn paint_studio_hints(app: tauri::AppHandle, rel: String) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let rel = rel.replace('\\', "/").trim_matches('/').to_string();
+        let dir = library::mods_subdir(&cfg.mods_path, &format!("mods/{rel}"));
+        let mut names: Vec<String> = Vec::new();
+        fn add(names: &mut Vec<String>, bytes: &[u8]) {
+            let Ok(found) = paint::texture_names_any(bytes) else { return };
+            for n in found {
+                if !n.is_empty() && !names.iter().any(|s| s.eq_ignore_ascii_case(&n)) {
+                    names.push(n);
+                }
+            }
+        }
+
+        // A handful is plenty: paints for one model overwhelmingly supply the same names,
+        // and this runs every time the destination changes.
+        const SAMPLE: usize = 8;
+        let mut seen = 0usize;
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for entry in rd.flatten() {
+                let p = entry.path();
+                if seen >= SAMPLE
+                    || !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pnt"))
+                {
+                    continue;
+                }
+                if let Ok(bytes) = std::fs::read(&p) {
+                    add(&mut names, &bytes);
+                    seen += 1;
+                }
+            }
+        }
+        // Nothing installed loose: the model may be packed, and its own paints are the
+        // same evidence. `<Model>.pkz` sits beside the `<Model>` folder this destination
+        // lives in — for a bike as much as for a helmet.
+        if names.is_empty() {
+            if let (Some(sub), Some(model_dir)) = (dir.file_name(), dir.parent()) {
+                let pkz = model_dir.with_extension("pkz");
+                let tail = format!("/{}/", sub.to_string_lossy().to_ascii_lowercase());
+                if pkz.is_file() {
+                    let want = |n: &str| {
+                        let n = n.replace('\\', "/").to_ascii_lowercase();
+                        n.contains(&tail) && n.ends_with(".pnt")
+                    };
+                    let packed = pkz::read_selected(&pkz, want).unwrap_or_default();
+                    for (_, bytes) in packed.iter().take(SAMPLE) {
+                        add(&mut names, bytes);
+                    }
+                }
+            }
+        }
+        names.sort_by_key(|n| n.to_lowercase());
+        Ok(names)
+    })
+    .await
+    .map_err(|e| format!("paint_studio_hints task failed: {e}"))?
 }
 
 /// Raw RGBA for a texture the viewer was handed a token for.
@@ -1528,8 +1797,16 @@ async fn load_stock_gear_model(
         let pkz = resolve_game_pkz(&cfg, "rider.pkz")
             .ok_or_else(|| "game path not set or rider.pkz not found".to_string())?;
         let folder = format!("rider/{}/{}", spec.pkz_kind, spec.default_name);
-        let nodes = load_pkz_mesh(&pkz, &format!("{folder}/{}", spec.mesh))
-            .or_else(|| stock_gear_entry(&pkz, &folder).and_then(|e| load_pkz_mesh(&pkz, &e)))
+        // The entry is kept, not just the nodes: with no paint to show, the mesh's own
+        // textures are the look, and they're read back out of the file it came from.
+        let named = format!("{folder}/{}", spec.mesh);
+        let (entry, nodes) = load_pkz_mesh(&pkz, &named)
+            .map(|n| (named, n))
+            .or_else(|| {
+                let alt = stock_gear_entry(&pkz, &folder)?;
+                let n = load_pkz_mesh(&pkz, &alt)?;
+                Some((alt, n))
+            })
             .ok_or_else(|| format!("stock {part} mesh not found in rider.pkz"))?;
         let textures = match paint_path.filter(|s| !s.is_empty()) {
             Some(p) => std::fs::read(&p)
@@ -1537,7 +1814,14 @@ async fn load_stock_gear_model(
                 .and_then(|d| paint::decode_any(&d).ok())
                 .map(|pnt| pnt.iter().map(paint::to_texture).collect())
                 .unwrap_or_default(),
-            None => load_pkz_paint(&pkz, &folder, "paints", ""),
+            // Nothing to preview → the stock look, which is what the mesh carries. Not the
+            // first `.pnt` in the folder: that's a paint like any other, and picking it here
+            // is what showed the stock helmet bronze everywhere else. Companion maps are
+            // skipped — the viewer never draws a normal or roughness sheet, so inflating
+            // one is time spent on pixels no one sees.
+            None => read_pkz_entry(&pkz, &entry)
+                .map(|d| paint::extract_edf_textures_where(&d, |n| !is_companion_map(n)))
+                .unwrap_or_default(),
         };
         Ok(RiderPart {
             part: spec.part.into(),
@@ -1617,12 +1901,6 @@ fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
             }
         }
     }
-    // Whether a side has a stock look to offer: the mesh carries its own copy of the sheet
-    // that side's paints replace. Asking the paints, not the texture names, is what keeps a
-    // "Stock" entry off the Bell Moto 10 — it embeds a tear-off film and a goggle, but not
-    // the shell sheet its paints supply, so picking "Stock" there drew the helmet in a
-    // near-blank film. With nothing painted on a side at all, the mesh's own look is the only
-    // one there is, so anything it carries for that side counts.
     let supplied = |folder: &str| {
         paint_texture_names(
             files
@@ -1631,20 +1909,32 @@ fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
                 .map(|(_, d)| d.as_slice()),
         )
     };
-    let has_stock = |folder: &str, goggle_side: bool| {
-        let paints = supplied(folder);
-        let mut usable = embedded.iter().filter(|n| !is_companion_map(n));
-        if paints.is_empty() {
-            return usable.any(|n| is_goggle_name(n) == goggle_side);
-        }
-        usable.any(|e| paints.iter().any(|p| p.eq_ignore_ascii_case(e)))
-    };
     Ok(GearPaints {
-        has_stock: has_stock("paints", false),
-        has_stock_goggles: has_stock("goggles", true),
+        has_stock: mesh_supplies_side(&embedded, &supplied("paints"), false),
+        has_stock_goggles: mesh_supplies_side(&embedded, &supplied("goggles"), true),
         paints: names("paints"),
         goggles: names("goggles"),
     })
+}
+
+/// Whether a side has a stock look to offer: the mesh carries its own copy of the sheet that
+/// side's paints replace.
+///
+/// Asking the paints, not the texture names, is what keeps a "Stock" entry off the Bell Moto 10 —
+/// it embeds a tear-off film and a goggle, but not the shell sheet its paints supply, so picking
+/// "Stock" there drew the helmet in a near-blank film. With nothing painted on a side at all, the
+/// mesh's own look is the only one there is, so anything it carries for that side counts.
+///
+/// One function rather than two readings of the same question: it decides both whether the
+/// library's picker offers "Stock" and whether an empty paint slot resolves to it
+/// ([`load_gear_model_blocking`]). Those two have to agree — the rider tab rendering a helmet
+/// the library's "Stock" entry says doesn't exist is the drift worth designing out.
+fn mesh_supplies_side(embedded: &[String], side_paints: &[String], goggle_side: bool) -> bool {
+    let mut usable = embedded.iter().filter(|n| !is_companion_map(n));
+    if side_paints.is_empty() {
+        return usable.any(|n| is_goggle_name(n) == goggle_side);
+    }
+    usable.any(|e| side_paints.iter().any(|p| p.eq_ignore_ascii_case(e)))
 }
 
 #[tauri::command]
@@ -1833,16 +2123,45 @@ fn load_gear_model_blocking(
     if drawn.is_empty() {
         return Err(format!("no gear mesh found in {path}"));
     }
+    // Which textures each side's paints supply — the names the mesh declares and leaves to a
+    // `.pnt`, and so part of the slot order its materials count. Headers only, no pixels, and
+    // wanted twice over: to decide whether a side has a stock look at all, and (rejoined
+    // below) to bind the submeshes.
+    let shell_declared = paint_texture_names(paints.iter().map(|(_, d)| d.as_slice()));
+    let goggle_declared = paint_texture_names(goggle_paints.iter().map(|(_, d)| d.as_slice()));
+    // Whether the meshes carry the shell sheet themselves. Reads headers, never pixels — but
+    // it still walks each mesh's bytes looking for them, so it's a closure rather than a
+    // value: the rider viewer reloads on every slot edit, and a load that names its paint has
+    // already answered the question without asking.
+    let mesh_carries_shell = || {
+        let mut names: Vec<String> = Vec::new();
+        for (d, _) in &drawn {
+            for t in edf::embedded_textures(d) {
+                if !names.iter().any(|h| h.eq_ignore_ascii_case(&t.name)) {
+                    names.push(t.name);
+                }
+            }
+        }
+        mesh_supplies_side(&names, &shell_declared, false)
+    };
     // With no `.pnt` to offer, the shell wears what the mesh already carries. Helmets and
     // boots nearly always ship a paint, so this reads as an edge case there — on the
     // protection slot it's the norm: a chain, a bib or a chest protector bakes its look into
     // the `.edf` and ships an empty `paints/` folder. Asked for a paint that doesn't exist,
     // the binder had nothing to hand each piece and the whole item came out bare grey.
     //
+    // Naming no paint at all is that same answer arrived at from the other side: an empty
+    // slot is the loadout saying "the model's own look", not "any paint will do", and letting
+    // it fall through to `pick_gear_paint` dressed the rider in whichever paint the mod
+    // happened to list first. Only where the mesh actually carries the shell sheet, though —
+    // the Bell Moto 10 ships paints and embeds only a tear-off film, and forcing stock there
+    // would draw the helmet near-blank instead. Same question the library's picker asks
+    // before it offers "Stock", asked through the same function, so the two can't disagree.
+    //
     // Only the shell. Unpainted goggles already have somewhere to go — they fall back to the
     // shell's texture, which is where a helmet that doesn't paint them apart drew them — and
     // a helmet whose shell paint repaints the goggles too would lose that to the mesh's own.
-    let stock = stock || paints.is_empty();
+    let stock = stock || paints.is_empty() || (want.is_none() && mesh_carries_shell());
     // A stock side decodes nothing from `paints/` — the mesh already carries that texture.
     let main_pnt = (!stock)
         .then(|| pick_gear_paint(&paints, want.as_deref(), &part))
@@ -1898,11 +2217,14 @@ fn load_gear_model_blocking(
                 .filter(|t| !taken.contains(&t.name.to_ascii_lowercase())),
         );
     }
-    // Which textures this item's paints supply, whichever one is picked — the names the mesh
-    // declares and leaves to a `.pnt`, and so part of the slot order its materials count.
-    // Read even when nothing is painted: a stock preview counts the same slots.
-    let declared =
-        paint_texture_names(paints.iter().chain(goggle_paints.iter()).map(|(_, d)| d.as_slice()));
+    // Both sides' names as one list, for the binder — counted even when nothing is painted,
+    // since a stock preview counts the same slots.
+    let mut declared = shell_declared;
+    for n in goggle_declared {
+        if !declared.iter().any(|h| h.eq_ignore_ascii_case(&n)) {
+            declared.push(n);
+        }
+    }
     for (d, nodes) in &mut drawn {
         bind_gear_submeshes(nodes, Some(d.as_slice()), &main_side, &goggle_side, &declared);
     }
@@ -2142,7 +2464,55 @@ fn read_gear_file(path: &std::path::Path) -> Option<Vec<u8>> {
     Some(pkz::read_sidecar_blob(&bytes).unwrap_or(bytes))
 }
 
+/// Every file a gear item is made of — from its folder *and* from the `.pkz` beside it.
+///
+/// A packed helmet is one file, but a paint installed for it later is a loose `.pnt` in a
+/// folder of the same name next to it: that's where the game looks, and it's where this
+/// app's paint studio writes one. Reading only whichever of the two the caller resolved
+/// meant a folder holding nothing but paints hid the archive entirely — the picker listed
+/// the new paint alone and the preview lost the mesh it belongs to. So both are read, the
+/// folder's copy winning a name clash because it's the one installed last.
 fn read_gear_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    let stem = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = stem.strip_suffix(".pkz").unwrap_or(&stem);
+    let (dir, pkz) = match p.parent() {
+        Some(parent) => (parent.join(stem), parent.join(format!("{stem}.pkz"))),
+        None => return read_gear_source(p),
+    };
+    if !dir.is_dir() || !pkz.is_file() {
+        return read_gear_source(p);
+    }
+    // Neither side is allowed to take the other down with it: a `.pkz` that won't open is a
+    // reason to show the folder's paints on their own, not to fail the whole item.
+    let mut out = read_gear_source(&dir).unwrap_or_default();
+    let mut have: Vec<String> = out.iter().map(|(n, _)| gear_entry_key(n)).collect();
+    for (name, bytes) in read_gear_source(&pkz).unwrap_or_default() {
+        let key = gear_entry_key(&name);
+        if !have.contains(&key) {
+            have.push(key);
+            out.push((name, bytes));
+        }
+    }
+    // Both empty says nothing about *why*; let the caller's own path report it.
+    if out.is_empty() {
+        return read_gear_source(p);
+    }
+    Ok(out)
+}
+
+/// What two spellings of the same gear file have in common: `helmets/Foo/paints/red.pnt`
+/// from an archive and `paints/red.pnt` from the folder beside it are one entry, while
+/// `paints/red.pnt` and `goggles/red.pnt` stay two.
+fn gear_entry_key(name: &str) -> String {
+    let n = name.replace('\\', "/").to_ascii_lowercase();
+    let base = n.rsplit('/').next().unwrap_or(&n).to_string();
+    match n.rsplit('/').nth(1) {
+        Some(folder @ ("paints" | "goggles")) => format!("{folder}/{base}"),
+        _ => base,
+    }
+}
+
+fn read_gear_source(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     use anyhow::Context;
     if p.is_dir() {
         let mut out = Vec::new();
@@ -2460,18 +2830,24 @@ fn loose_paint_named(
 }
 
 /// A paint the game itself ships, from `<folder>/<sub>/<paint>.pnt` — `sub` being `paints`
-/// for the piece's own look or `goggles` for the goggles worn with it. Falls back to the
-/// first paint in the folder so a stale name still shows the piece textured.
+/// for the piece's own look or `goggles` for the goggles worn with it.
+///
+/// A name that misses falls back to the first paint in the folder, so a stale name still shows
+/// the piece textured rather than bare grey. *No name* is a different answer and must not reach
+/// that fallback: an empty slot is the loadout saying "the model's own look", and dressing it in
+/// whichever `.pnt` sorts first is how the stock helmet came out bronze — `black_yellow` leads
+/// `rider/helmets/default/paints/`, while the mesh's own sheet is white. Nothing here, and the
+/// caller falls through to the mesh's embedded textures, which is what stock means.
 fn load_pkz_paint(
     pkz: &std::path::Path,
     folder: &str,
     sub: &str,
     paint: &str,
 ) -> Vec<paint::PaintTexture> {
-    let named = (!paint.is_empty())
-        .then(|| read_pkz_entry(pkz, &format!("{folder}/{sub}/{paint}.pnt")))
-        .flatten();
-    named
+    if paint.is_empty() {
+        return Vec::new();
+    }
+    read_pkz_entry(pkz, &format!("{folder}/{sub}/{paint}.pnt"))
         .or_else(|| read_pkz_first(pkz, &format!("{folder}/{sub}/"), ".pnt"))
         .and_then(|d| paint::decode_any(&d).ok())
         .map(|p| p.iter().map(paint::to_texture).collect())
@@ -3242,9 +3618,14 @@ fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Resul
     frostmod_manage::start(&app, &state).map_err(|e| format!("{e:#}"))
 }
 
+/// Stop FrostMod now, whoever started it — ours to kill or not. `false` means it's still
+/// running (elevated, or another user's), which the UI reports rather than papering over.
+///
+/// Async for the same reason as `set_mods_path`: a sync command runs on the UI thread, and
+/// this one waits out the moment between the kill and the process actually going.
 #[tauri::command]
-fn frostmod_stop(state: State<FrostmodProcess>) {
-    frostmod_manage::stop(&state);
+async fn frostmod_stop(state: State<'_, FrostmodProcess>) -> Result<bool, String> {
+    Ok(frostmod_manage::stop_running(&state))
 }
 
 #[tauri::command]
@@ -3781,7 +4162,37 @@ fn log_level() -> log::LevelFilter {
 }
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // One app, one process. Closing the window parks MXB App in the tray rather than
+    // quitting it, so without this a second launch doesn't reveal the copy already
+    // running — it builds a whole new one: another window, another tray icon, another
+    // FrostMod, another mod watcher. Five launches in a day left five of everything, and
+    // only the tray overflow to clean them up from.
+    //
+    // Registered before every other plugin: the guard's setup hook is what kills the
+    // second process, and it should do so before anything else has started work that
+    // would then need unwinding. `show_main` is the same path the tray's "Show MXB App"
+    // takes, so relaunching behaves exactly like clicking the tray icon.
+    //
+    // Release builds only, for the same reason close-to-tray is (see `CloseRequested`
+    // below): a `tauri dev` run must still start while the installed MXB App is sitting
+    // in the tray, otherwise it would silently exit and just re-show the shipped app.
+    //
+    // The updater's restart is safe against this by construction, and it's worth knowing
+    // why, because it looks like it shouldn't be: a restart spawns the replacement before
+    // this process is gone, so a guard still held would make the new app mistake itself
+    // for a second copy and quit — an update that leaves nothing running. It doesn't,
+    // because `relaunch()` goes through `request_restart()`, and Tauri hands plugins
+    // `RunEvent::Exit` — where this one releases the guard — before it spawns anything.
+    // A restart that skipped the event loop would not be safe.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        log::info!("another instance was launched — showing the window already running");
+        show_main(app);
+    }));
+
+    builder
         // Thumbnails for both catalogs, served from a disk cache instead of refetched on
         // every scroll. Registered here rather than per-window so the overlay — which
         // renders the same `ModCard` — gets it too.
@@ -3972,6 +4383,11 @@ fn main() {
             load_stock_gear_model,
             list_gear_paints,
             list_installed_gear_paints,
+            paint_studio_load,
+            paint_studio_target,
+            paint_studio_save,
+            paint_studio_extract,
+            paint_studio_hints,
             scan_rider_targets,
             scan_bike_targets,
             scan_model_swaps,
@@ -4299,6 +4715,41 @@ mod gear_bind_tests {
     }
 }
 
+/// A packed gear item and a folder of the same name are one item, not two — the case the
+/// paint studio creates every time it installs a paint for a `.pkz` helmet.
+#[cfg(test)]
+mod gear_source_tests {
+    use super::{gear_entry_key, read_gear_files};
+
+    #[test]
+    fn one_entry_however_it_is_spelled() {
+        assert_eq!(gear_entry_key("helmets/Foo/paints/red.pnt"), gear_entry_key("paints/red.pnt"));
+        assert_eq!(gear_entry_key("helmets/Foo/helmet.edf"), gear_entry_key("helmet.edf"));
+        assert_ne!(gear_entry_key("paints/red.pnt"), gear_entry_key("goggles/red.pnt"));
+    }
+
+    #[test]
+    fn a_folder_of_paints_beside_a_pkz_reads_as_both() {
+        let root = std::env::temp_dir().join(format!("frost-gear-merge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("Helmet");
+        std::fs::create_dir_all(dir.join("paints")).unwrap();
+        std::fs::write(dir.join("paints").join("mine.pnt"), b"PNT\0mine").unwrap();
+        // Not a real archive — `pkz::read_all` returning nothing is enough to prove the
+        // folder's paint isn't lost, and a genuine `.pkz` is exercised by the pkz tests.
+        std::fs::write(root.join("Helmet.pkz"), b"not really an archive").unwrap();
+
+        for from in [dir.clone(), root.join("Helmet.pkz")] {
+            let files = read_gear_files(&from).unwrap_or_default();
+            assert!(
+                files.iter().any(|(n, _)| n.ends_with("mine.pnt")),
+                "the loose paint has to be visible whichever side the caller resolved ({from:?})"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
 #[cfg(test)]
 mod gear_scene_tests {
     use super::gear_scenes;
@@ -4430,6 +4881,62 @@ mod gear_paint_merge_tests {
         assert!(all.has_stock);
         all.absorb(GearPaints::default());
         assert!(all.has_stock, "a later source without one doesn't take it away");
+    }
+}
+
+/// Whether a side has a stock look at all — the question behind both the library's "Stock"
+/// entry and what an empty paint slot resolves to on the rider. They read the same function,
+/// so these cases pin down both at once.
+#[cfg(test)]
+mod stock_side_tests {
+    use super::mesh_supplies_side;
+
+    fn v(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    // The ordinary helmet: the mesh carries the sheet its paints replace, so there is a stock
+    // look to show and an empty slot means it.
+    #[test]
+    fn the_mesh_carrying_the_painted_sheet_is_a_stock_look() {
+        assert!(mesh_supplies_side(&v(&["helmet", "visor"]), &v(&["helmet"]), false));
+    }
+
+    // Case is the mod author's business, not ours — a `.pnt` replaces by name regardless.
+    #[test]
+    fn the_match_ignores_case() {
+        assert!(mesh_supplies_side(&v(&["Helmet"]), &v(&["helmet"]), false));
+    }
+
+    // The Bell Moto 10: it embeds a tear-off film and a goggle, but the shell sheet comes from
+    // its paints. Calling that a stock look drew the helmet near-blank — and now it would also
+    // make an empty slot render bare, which is worse than the first-paint fallback it keeps.
+    #[test]
+    fn a_mesh_that_leaves_the_shell_to_its_paints_has_no_stock_look() {
+        assert!(!mesh_supplies_side(&v(&["tearoff", "Racecraft"]), &v(&["airoh_shell"]), false));
+    }
+
+    // Normal and roughness maps are never the look. A mesh carrying only companions carries
+    // nothing to show.
+    #[test]
+    fn companion_maps_dont_count_as_a_look() {
+        assert!(!mesh_supplies_side(&v(&["boots_n", "boots_r"]), &v(&[]), false));
+        assert!(!mesh_supplies_side(&v(&["helmet_n"]), &v(&["helmet_n"]), false));
+    }
+
+    // Nothing painted on a side at all — the stock protection slot — so whatever the mesh
+    // carries for that side is the only look there is.
+    #[test]
+    fn with_no_paints_the_mesh_is_the_only_look() {
+        assert!(mesh_supplies_side(&v(&["armor"]), &v(&[]), false));
+    }
+
+    // ...and the sides don't borrow from each other: an embedded goggle is not a shell look.
+    #[test]
+    fn an_unpainted_side_only_counts_its_own_sheets() {
+        let embedded = v(&["goggles"]);
+        assert!(mesh_supplies_side(&embedded, &v(&[]), true), "the goggle side has one");
+        assert!(!mesh_supplies_side(&embedded, &v(&[]), false), "the shell does not");
     }
 }
 
@@ -5291,6 +5798,128 @@ mod viewer_tests {
             .collect();
         out.push_str(&format!("],\"paints\":[{}]}}", paints.join(",")));
         println!("AUDIT {out}");
+    }
+
+    /// The average colour of a stored texture, and how far off neutral it is.
+    ///
+    /// Neutrality rather than "is it white" on purpose: it holds whichever way round the
+    /// channels are stored, so this can't pass or fail for the wrong reason if that ever
+    /// moves. A white or grey sheet has its three channels together; a painted one doesn't.
+    fn avg_and_spread(tex: &crate::paint::PaintTexture) -> ([u32; 3], u32) {
+        let px = crate::texstore::get(&tex.token).expect("token resolves");
+        let mut sum = [0u64; 3];
+        let mut n = 0u64;
+        for p in px.chunks_exact(4) {
+            if p[3] < 128 {
+                continue; // fully transparent regions are not the look
+            }
+            for k in 0..3 {
+                sum[k] += p[k] as u64;
+            }
+            n += 1;
+        }
+        assert!(n > 0, "'{}' has no opaque pixels", tex.name);
+        let avg = [(sum[0] / n) as u32, (sum[1] / n) as u32, (sum[2] / n) as u32];
+        (avg, avg.iter().max().unwrap() - avg.iter().min().unwrap())
+    }
+
+    /// The reported bug, pinned to the archive it came from: the rider tab drew the stock
+    /// helmet bronze while the library's "Stock" entry drew it white.
+    ///
+    /// Both halves matter and they pull in opposite directions — an empty name must reach no
+    /// paint at all, while a *stale* name must still reach one, or gear whose paint was
+    /// renamed comes out bare grey. A single assertion would let the fix overshoot.
+    #[test]
+    #[ignore]
+    fn an_unnamed_stock_paint_is_the_mesh_not_the_first_pnt() {
+        let Ok(pkz) = std::env::var("MXB_RIDER_PKZ") else {
+            eprintln!("set MXB_RIDER_PKZ to the game's rider.pkz to run");
+            return;
+        };
+        let pkz = std::path::Path::new(&pkz);
+        let folder = "rider/helmets/default";
+
+        // No name → no paint, so the caller falls through to the mesh's own textures.
+        assert!(
+            super::load_pkz_paint(pkz, folder, "paints", "").is_empty(),
+            "an empty slot must not resolve to a paint",
+        );
+        // A name that misses → still a paint, so a renamed livery shows textured.
+        assert!(
+            !super::load_pkz_paint(pkz, folder, "paints", "no_such_paint_ea7b").is_empty(),
+            "a stale name must still fall back to a paint",
+        );
+
+        // And what the two answers actually look like. The mesh's own sheet is the white one
+        // the library shows; the paint that used to stand in for it is not.
+        let mesh = super::read_pkz_entry(pkz, &format!("{folder}/helmet.edf")).expect("helmet.edf");
+        let stock = crate::paint::extract_edf_textures_where(&mesh, |n| n.eq_ignore_ascii_case("helmet"));
+        let stock = stock.first().expect("the mesh carries its own 'helmet' sheet");
+        let (stock_avg, stock_spread) = avg_and_spread(stock);
+
+        let first = super::load_pkz_paint(pkz, folder, "paints", "black_yellow");
+        let first = first.iter().find(|t| t.name.eq_ignore_ascii_case("helmet"));
+        let first = first.expect("black_yellow paints 'helmet'");
+        let (first_avg, first_spread) = avg_and_spread(first);
+
+        eprintln!("stock mesh sheet  avg={stock_avg:?} spread={stock_spread}");
+        eprintln!("black_yellow.pnt  avg={first_avg:?} spread={first_spread}");
+        assert!(stock_spread < 12, "the stock helmet is neutral (white/grey), got {stock_avg:?}");
+        assert!(
+            first_spread > 40,
+            "black_yellow is a colour, not a neutral — if this fails the fixture archive \
+             changed and the test above proves less than it looks like ({first_avg:?})",
+        );
+    }
+
+    /// The invariant behind the fix, for whatever gear is on this machine: an empty paint
+    /// slot renders exactly what the library's "Stock" entry renders — and where there is no
+    /// stock look to render, it still renders *something* rather than going bare.
+    ///
+    /// Stated as an equality between the two code paths rather than as an expected texture
+    /// name, because the point is that they agree, not what they agree on.
+    #[test]
+    #[ignore]
+    fn an_empty_slot_renders_what_the_library_calls_stock() {
+        let Ok(path) = std::env::var("MXB_REAL_GEAR") else {
+            eprintln!("set MXB_REAL_GEAR to an installed gear folder/.pkz to run");
+            return;
+        };
+        let slot = std::env::var("MXB_REAL_GEAR_PART").unwrap_or_else(|_| "helmet".into());
+        let names = |p: super::RiderPart| {
+            let mut v: Vec<String> = p.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+            v.sort_unstable();
+            v
+        };
+        let load = |paint: Option<&str>, stock: bool| {
+            names(
+                super::load_gear_model_blocking(
+                    path.clone(),
+                    slot.clone(),
+                    paint.map(str::to_string),
+                    None,
+                    stock,
+                    false,
+                    Vec::new(),
+                )
+                .expect("load gear"),
+            )
+        };
+
+        let offers_stock = super::gear_paints_at(std::path::Path::new(&path))
+            .expect("read gear paints")
+            .has_stock;
+        // The rider tab's empty slot, and the library's picker on "Stock".
+        let empty = load(Some(""), false);
+        eprintln!("has_stock={offers_stock} empty slot -> {empty:?}");
+        assert!(!empty.is_empty(), "an empty slot must never render untextured");
+        if offers_stock {
+            assert_eq!(empty, load(None, true), "empty slot != the library's Stock");
+        } else {
+            // No stock look to fall back on, so the first-paint fallback still stands —
+            // forcing stock here is what would draw the Bell Moto 10 in a near-blank film.
+            assert_eq!(empty, load(None, false), "kept the first-paint fallback");
+        }
     }
 }
 
