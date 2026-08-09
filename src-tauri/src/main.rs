@@ -1550,7 +1550,7 @@ async fn load_stock_gear_model(
     .map_err(|e| format!("load_stock_gear_model task failed: {e}"))?
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct GearPaints {
     paints: Vec<String>,
@@ -1560,6 +1560,34 @@ struct GearPaints {
     /// the game names a `.pnt` there and has no word for "the model's own look".
     has_stock: bool,
     has_stock_goggles: bool,
+}
+
+impl GearPaints {
+    /// Fold another source's paints into this one.
+    ///
+    /// A name that turns up twice is the same look twice — a paint pack installed loose
+    /// beside the `.pkz` it was made for ships the same file names — so repeats are dropped
+    /// rather than offered as two choices.
+    fn absorb(&mut self, other: GearPaints) {
+        let merge = |into: &mut Vec<String>, more: Vec<String>| {
+            for n in more {
+                if !into.iter().any(|have| have.eq_ignore_ascii_case(&n)) {
+                    into.push(n);
+                }
+            }
+        };
+        merge(&mut self.paints, other.paints);
+        merge(&mut self.goggles, other.goggles);
+        self.has_stock |= other.has_stock;
+        self.has_stock_goggles |= other.has_stock_goggles;
+    }
+
+    /// Alphabetical across the merged set — sources arrive sorted individually, which on its
+    /// own would list one source after the other rather than one list of paints.
+    fn sort(&mut self) {
+        self.paints.sort_by_key(|s| s.to_lowercase());
+        self.goggles.sort_by_key(|s| s.to_lowercase());
+    }
 }
 
 fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
@@ -1630,33 +1658,91 @@ async fn list_installed_gear_paints(
     model: String,
 ) -> Result<GearPaints, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let empty = GearPaints {
-            paints: Vec::new(),
-            goggles: Vec::new(),
-            has_stock: false,
-            has_stock_goggles: false,
-        };
         if model.trim().is_empty() {
-            return Ok(empty);
+            return Ok(GearPaints::default());
         }
         let Some(spec) = GEAR.iter().find(|g| g.part == part) else {
-            return Ok(empty);
+            return Ok(GearPaints::default());
         };
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        let kind_dir = std::path::Path::new(&cfg.mods_path)
-            .join("mods")
-            .join("rider")
-            .join(spec.mods_kind);
-        let stem = model.trim_end_matches(".pkz");
-        for src in [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))] {
-            if src.exists() {
-                return gear_paints_at(&src);
-            }
-        }
-        Ok(empty)
+        Ok(gear_paints_for(&cfg, spec, &model))
     })
     .await
     .map_err(|e| format!("list_installed_gear_paints task failed: {e}"))?
+}
+
+/// Every paint a gear model can be worn in, from every place one can live.
+///
+/// A model reaches the game three ways, and more than one is true at once more often than
+/// not: an unpacked `<model>/` folder, a `<model>.pkz`, and — for the pieces the game itself
+/// ships — a folder inside `rider.pkz`. A paint pack for a packaged mod installs loose in a
+/// folder beside it, because nothing can write into the `.pkz`. So a picker that stopped at
+/// the first source it found showed one of those sets and never the other.
+fn gear_paints_for(cfg: &config::AppConfig, spec: &GearSpec, model: &str) -> GearPaints {
+    let stem = model.trim_end_matches(".pkz");
+    let kind_dir = std::path::Path::new(&cfg.mods_path)
+        .join("mods")
+        .join("rider")
+        .join(spec.mods_kind);
+    let mut out = GearPaints::default();
+    for src in [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))] {
+        if !src.exists() {
+            continue;
+        }
+        match gear_paints_at(&src) {
+            Ok(found) => out.absorb(found),
+            // One unreadable source must not cost the others their paints.
+            Err(e) => log::warn!("[rider] {} paints from {src:?}: {e}", spec.part),
+        }
+    }
+    // The game's own copy of the piece. This is all a stock name — `default`, `full`, `neck`
+    // — has instead of a folder, and a mod installed under a stock name gets both.
+    if let Some(pkz) = resolve_game_pkz(cfg, "rider.pkz") {
+        let folder = format!("rider/{}/{}", spec.pkz_kind, stem);
+        out.absorb(GearPaints {
+            paints: pkz_paint_names(&pkz, &folder, "paints"),
+            goggles: pkz_paint_names(&pkz, &folder, "goggles"),
+            // Whether the stock mesh has a look of its own is a question about the mesh, and
+            // answering it would mean pulling that mesh out of a 100 MB archive every time a
+            // picker opens. The installed sources above answer it where a "Stock" entry is
+            // actually offered.
+            ..GearPaints::default()
+        });
+    }
+    out.sort();
+    out
+}
+
+/// The `.pnt` names under `<folder>/<sub>/` inside a pkz, without reading a byte of pixels.
+///
+/// Names come out of the archive's own directory, which keeps this cheap enough to run every
+/// time a picker opens — the game's `rider.pkz` is around 100 MB, and reading it to list a
+/// dozen names would be felt. That shortcut is the same assumption [`read_pkz_first`] makes,
+/// that the game's own archives are plain zips, with the general reader behind it for
+/// anything else.
+fn pkz_paint_names(pkz: &std::path::Path, folder: &str, sub: &str) -> Vec<String> {
+    let prefix = format!("{folder}/{sub}/").to_ascii_lowercase();
+    let stem = |name: &str| -> Option<String> {
+        let n = name.replace('\\', "/");
+        let lower = n.to_ascii_lowercase();
+        if !lower.starts_with(&prefix) || !lower.ends_with(".pnt") {
+            return None;
+        }
+        let base = n.rsplit('/').next()?;
+        Some(base[..base.len() - ".pnt".len()].to_string())
+    };
+    if pkz::is_plain_zip(pkz) {
+        let Ok(file) = std::fs::File::open(pkz) else {
+            return Vec::new();
+        };
+        let Ok(zip) = zip::ZipArchive::new(file) else {
+            return Vec::new();
+        };
+        return zip.file_names().filter_map(stem).collect();
+    }
+    pkz::read_selected(pkz, |n| stem(n).is_some())
+        .map(|hits| hits.iter().filter_map(|(n, _)| stem(n)).collect())
+        .unwrap_or_default()
 }
 
 fn gear_folder_paint_name(entry: &str, folder: &str) -> Option<String> {
@@ -2112,9 +2198,20 @@ fn load_gear(
     }
 
     if !model.is_empty() {
-        for src in [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))] {
+        let sources = [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))];
+        for (i, src) in sources.iter().enumerate() {
             if !src.exists() {
                 continue;
+            }
+            // The same model can be installed both ways at once — a paint pack for a
+            // packaged mod has nowhere to go but a folder beside it — and only one of the
+            // two is opened here. Carry the named paint over from the other, so a name the
+            // picker offered can't quietly render as whichever paint happened to be first.
+            let mut extra = extra.clone();
+            let other = &sources[1 - i];
+            if other.exists() {
+                extra.extend(gear_paint_from(other, "paints", paint));
+                extra.extend(gear_paint_from(other, "goggles", goggles));
             }
             match load_gear_model_blocking(
                 src.to_string_lossy().into_owned(),
@@ -2124,7 +2221,7 @@ fn load_gear(
                 // The rider wears what the loadout names; "stock" is a preview-only choice.
                 false,
                 false,
-                extra.clone(),
+                extra,
             ) {
                 Ok(part) => {
                     log::info!("[rider] {} '{model}' loaded: {} nodes", spec.part, part.nodes.len());
@@ -2209,6 +2306,30 @@ fn stock_gear_entry(pkz: &std::path::Path, folder: &str) -> Option<String> {
     let hit = found.into_iter().next()?;
     log::info!("[rider] stock '{folder}' doesn't carry the slot's mesh; using '{hit}'");
     Some(hit)
+}
+
+/// One named `.pnt` out of a gear source — an unpacked folder or a `.pkz`, whichever it is —
+/// named the way a gear archive carries it so the loader reads it like any packed paint.
+///
+/// Just the one paint: a helmet folder holds dozens, and this runs to cover the *other*
+/// install of a model the loader already has open, so reading them all would be paying a
+/// hundred megabytes for a file it needs one of. No name wanted, or a source that doesn't
+/// carry it → nothing, and the loader falls back exactly as it did before.
+fn gear_paint_from(src: &std::path::Path, sub: &str, want: &str) -> Vec<(String, Vec<u8>)> {
+    if want.is_empty() {
+        return Vec::new();
+    }
+    let entry = format!("{sub}/{want}.pnt");
+    if src.is_dir() {
+        return std::fs::read(src.join(sub).join(format!("{want}.pnt")))
+            .map(|d| vec![(entry, d)])
+            .unwrap_or_default();
+    }
+    pkz::read_selected(src, |n| {
+        gear_folder_paint_name(n, sub).is_some_and(|p| p.eq_ignore_ascii_case(want))
+    })
+    .map(|hits| hits.into_iter().map(|(_, d)| (entry.clone(), d)).collect())
+    .unwrap_or_default()
 }
 
 /// Loose `.pnt` files in a folder, named as a gear archive would carry them so the loader
@@ -2545,6 +2666,7 @@ fn list_games() -> Vec<game::GameInfo> {
 async fn set_active_game(
     app: tauri::AppHandle,
     watcher: State<'_, ModWatcher>,
+    frostmod_state: State<'_, FrostmodProcess>,
     game: game::Game,
 ) -> Result<AppConfig, String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -2558,6 +2680,18 @@ async fn set_active_game(
     // in the game we just left.
     if cfg.watch_mods_reload {
         modwatch::start(&app, &watcher, &cfg.mods_path);
+    }
+    // FrostMod reads `--game` and `--mods` once, at launch, and `start` no-ops while one
+    // is already running — so without this a switch leaves FrostMod waiting for the game
+    // we just left while the status pill still reads "running". `force_stop_exe` because
+    // the running one may not be ours to `stop`: a hand-launched frostmod.exe claims the
+    // same named event, and that is exactly how this was first reported.
+    if frostmod::is_running() {
+        frostmod_manage::stop(&frostmod_state);
+        frostmod_manage::force_stop_exe();
+        if let Err(e) = frostmod_manage::start(&app, &frostmod_state) {
+            log::warn!("could not restart FrostMod for {}: {e:#}", cfg.game().display);
+        }
     }
     Ok(cfg)
 }
@@ -2712,13 +2846,39 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// The version to *show*, which is the release tag when this build came from one.
+///
+/// `tauri.conf.json` carries a plain `x.y.z` that the release workflow never rewrites, so a
+/// build cut from `v0.8.0-beta.1` packages itself as `0.8.0` — indistinguishable from the
+/// full release that follows. The tag is baked in by `build.rs` (`MXB_RELEASE_TAG`) and is
+/// the only place the pre-release suffix survives.
+///
+/// Deliberately scoped to what the UI displays: the updater and the release showcase compare
+/// against `package_info().version` and must keep doing so.
+///
+/// A tag is only believed when it looks like a version, so a stray `MXB_RELEASE_TAG=main`
+/// can't put a branch name in the About box.
+fn release_version(packaged: String) -> String {
+    pick_release_version(option_env!("MXB_RELEASE_TAG"), packaged)
+}
+
+/// The rule behind [`release_version`], split out because `option_env!` resolves at compile
+/// time — testing it in place would mean a rebuild per case.
+fn pick_release_version(tag: Option<&str>, packaged: String) -> String {
+    tag.map(str::trim)
+        .map(|tag| tag.strip_prefix('v').unwrap_or(tag))
+        .filter(|tag| tag.starts_with(|c: char| c.is_ascii_digit()))
+        .map(str::to_string)
+        .unwrap_or(packaged)
+}
+
 /// Whether the unfinished multiplayer features should be shown, and whether this build is
 /// a pre-release. The frontend gates the Servers tab and the paint-sync UI on the first and
 /// badges the version with the second.
 #[tauri::command]
 fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    let version = app.package_info().version.to_string();
+    let version = release_version(app.package_info().version.to_string());
     serde_json::json!({
         "enabled": cfg.experimental_enabled(),
         // Set by the env var rather than the setting, so the UI can explain why the toggle
@@ -3623,6 +3783,15 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // The overlay is a HUD over a running game, so clicking back into the game
+            // has to put it away — an unfocused webview stops repainting and leaves an
+            // empty frame over the game that still eats clicks.
+            if let WindowEvent::Focused(false) = event {
+                if window.label() == overlay::LABEL {
+                    overlay::on_focus_lost(window.app_handle());
+                    return;
+                }
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 // Closing the overlay (Alt+F4, its own button) parks it rather than
                 // destroying it, so the next hotkey press doesn't rebuild the webview.
@@ -3786,6 +3955,48 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod release_version_tests {
+    use super::*;
+
+    /// The bug this exists for: a build cut from `v0.8.0-beta.1` packages itself as `0.8.0`,
+    /// so the Beta badge — which keys off a pre-release suffix — never fired on any beta.
+    #[test]
+    fn a_release_tag_carries_its_prerelease_suffix() {
+        assert_eq!(
+            pick_release_version(Some("v0.8.0-beta.1"), "0.8.0".into()),
+            "0.8.0-beta.1",
+        );
+    }
+
+    /// Local builds, and the `workflow_dispatch` runs that pass an empty tag.
+    #[test]
+    fn no_tag_leaves_the_packaged_version_alone() {
+        assert_eq!(pick_release_version(None, "0.8.0".into()), "0.8.0");
+        assert_eq!(pick_release_version(Some("  "), "0.8.0".into()), "0.8.0");
+    }
+
+    /// `github.ref_name` is a *branch* outside a tag push. Believing it would put "main" in
+    /// the About box, which reads as a broken build rather than a misconfigured workflow.
+    #[test]
+    fn a_tag_that_isnt_a_version_is_ignored() {
+        for junk in ["main", "chore/harden-release-binary", "vNext"] {
+            assert_eq!(
+                pick_release_version(Some(junk), "0.8.0".into()),
+                "0.8.0",
+                "{junk} should not have been believed",
+            );
+        }
+    }
+
+    /// The `v` is a tag convention, not part of the version — the UI adds its own.
+    #[test]
+    fn the_tags_v_prefix_is_optional() {
+        assert_eq!(pick_release_version(Some("0.9.0"), "0.8.0".into()), "0.9.0");
+        assert_eq!(pick_release_version(Some("v0.9.0"), "0.8.0".into()), "0.9.0");
+    }
 }
 
 #[cfg(test)]
@@ -4028,6 +4239,58 @@ mod gear_mount_tests {
         }];
         offset_nodes(&mut nodes, [0.5, -0.11, 0.25]);
         assert_eq!(nodes[0].positions, vec![0.5, 1.89, 3.25]);
+    }
+}
+
+#[cfg(test)]
+mod gear_paint_merge_tests {
+    use super::GearPaints;
+
+    fn paints(names: &[&str]) -> GearPaints {
+        GearPaints {
+            paints: names.iter().map(|s| s.to_string()).collect(),
+            ..GearPaints::default()
+        }
+    }
+
+    // The whole point: a model installed as a `.pkz` *and* as a folder of extra paints
+    // offers both sets. Taking the first source is what showed one and hid the other.
+    #[test]
+    fn sources_add_up() {
+        let mut all = paints(&["Black", "Red"]);
+        all.absorb(paints(&["Purple White", "RDS Leopard"]));
+        all.sort();
+        assert_eq!(all.paints, ["Black", "Purple White", "RDS Leopard", "Red"]);
+    }
+
+    // A paint pack ships the same file names as the mod it was made for, so the same look
+    // arrives twice. Twice in a dropdown is a bug, not a choice.
+    #[test]
+    fn a_repeat_is_the_same_look_twice() {
+        let mut all = paints(&["Black", "Red"]);
+        all.absorb(paints(&["black", "Flo"]));
+        all.sort();
+        assert_eq!(all.paints, ["Black", "Flo", "Red"]);
+    }
+
+    // Each source sorts its own names; merged, they have to sort as one list rather than
+    // as one source appended to the next.
+    #[test]
+    fn the_merged_list_sorts_as_one() {
+        let mut all = paints(&["Alpha", "Zulu"]);
+        all.absorb(paints(&["Bravo"]));
+        all.sort();
+        assert_eq!(all.paints, ["Alpha", "Bravo", "Zulu"]);
+    }
+
+    // A "Stock" entry is worth offering as soon as any source's mesh carries its own look.
+    #[test]
+    fn stock_carries_across() {
+        let mut all = GearPaints::default();
+        all.absorb(GearPaints { has_stock: true, ..GearPaints::default() });
+        assert!(all.has_stock);
+        all.absorb(GearPaints::default());
+        assert!(all.has_stock, "a later source without one doesn't take it away");
     }
 }
 
@@ -4289,6 +4552,76 @@ mod viewer_tests {
                 }
             }
         }
+    }
+
+    /// The picker's paint list against a real install: whatever any single source can
+    /// supply for a model, the merged list offers.
+    ///
+    /// `MXB_MODS=~/Documents/PiBoSo/MX\ Bikes MXB_GEAR_PART=boots \
+    ///   MXB_GEAR_MODEL='Fox Instinct 2.0 by Aeffertz' \
+    ///   cargo test gear_paints_merge_every_source -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn gear_paints_merge_every_source() {
+        let Ok(mods) = std::env::var("MXB_MODS") else {
+            eprintln!("set MXB_MODS to run");
+            return;
+        };
+        let part = std::env::var("MXB_GEAR_PART").unwrap_or_else(|_| "boots".into());
+        let Ok(model) = std::env::var("MXB_GEAR_MODEL") else {
+            eprintln!("set MXB_GEAR_MODEL to run");
+            return;
+        };
+        let cfg = crate::config::AppConfig { mods_path: mods.clone(), ..Default::default() };
+        let spec = super::GEAR.iter().find(|g| g.part == part).expect("a gear slot");
+
+        let merged = super::gear_paints_for(&cfg, spec, &model);
+        eprintln!("merged paints ({}): {:?}", merged.paints.len(), merged.paints);
+        eprintln!("merged goggles ({}): {:?}", merged.goggles.len(), merged.goggles);
+
+        let has = |set: &[String], want: &str| set.iter().any(|n| n.eq_ignore_ascii_case(want));
+
+        // Every source, asked on its own. Each one's paints have to survive the merge —
+        // taking the first source is exactly what dropped the others.
+        let kind_dir =
+            std::path::Path::new(&mods).join("mods").join("rider").join(spec.mods_kind);
+        let stem = model.trim_end_matches(".pkz");
+        let mut sources = 0;
+        for src in [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))] {
+            if !src.exists() {
+                continue;
+            }
+            sources += 1;
+            let alone = super::gear_paints_at(&src).expect("list one source");
+            eprintln!("  {src:?}: {:?}", alone.paints);
+            for p in &alone.paints {
+                assert!(has(&merged.paints, p), "'{p}' from {src:?} survives the merge");
+            }
+            for g in &alone.goggles {
+                assert!(has(&merged.goggles, g), "goggle '{g}' from {src:?} survives the merge");
+            }
+        }
+
+        // The game's own copy, which is all a stock name has and which nothing listed before.
+        if let Some(pkz) = super::resolve_game_pkz(&cfg, "rider.pkz") {
+            let folder = format!("rider/{}/{}", spec.pkz_kind, stem);
+            let stock = super::pkz_paint_names(&pkz, &folder, "paints");
+            eprintln!("  rider.pkz {folder}: {stock:?}");
+            if !stock.is_empty() {
+                sources += 1;
+            }
+            for p in &stock {
+                assert!(has(&merged.paints, p), "stock '{p}' survives the merge");
+            }
+        }
+        assert!(sources > 0, "'{model}' resolved to at least one source");
+        // Nothing is offered twice — a paint pack installed beside the mod it was made for
+        // ships the same names, and the same look twice is not two choices.
+        let mut seen: Vec<String> = merged.paints.iter().map(|s| s.to_lowercase()).collect();
+        let total = seen.len();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), total, "no paint is offered twice");
     }
 
     #[test]

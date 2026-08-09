@@ -484,6 +484,9 @@ export const it: Translation = {
     "Dove vengono installate le mod. Scegli la cartella che contiene le cartelle mods e profiles \u2014 quella sopra mods, non la cartella mods stessa. Cambiandola, la libreria viene riscansionata.",
   "settings.insideModsFolder": "Dentro la tua cartella {{game}}",
   "settings.notSet": "Non impostata",
+  "settings.selectFolderFor": "Seleziona una cartella per {{game}}",
+  "settings.gameDesc":
+    "Quale titolo sta gestendo MXB App. Cartelle, libreria e preset appartengono tutti al gioco che scegli qui.",
   "settings.change": "Cambia…",
   "settings.set": "Imposta…",
   "settings.theme": "Tema",
@@ -521,6 +524,9 @@ export const it: Translation = {
   "settings.frostmodNeedsRepair":
     "I file installati non corrispondono a questa versione — reinstallando si risolve.",
   "settings.frostmodRepair": "Ripara installazione",
+  "settings.frostmodUnsupportedForGame":
+    "Questa versione di FrostMod non è sicura su {{game}} — aggiornala per usare FrostMod qui.",
+  "settings.frostmodUpdateRequired": "Aggiornamento necessario",
   "settings.checkNewer": "Cerca una versione più recente di FrostMod",
   "settings.working": "Elaborazione…",
   "settings.installFrostmod": "Installa FrostMod",

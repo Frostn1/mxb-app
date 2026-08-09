@@ -497,6 +497,9 @@ export const de: Translation = {
     "Wohin Mods installiert werden. Wähle den Ordner, der die Ordner mods und profiles enthält \u2014 also den Ordner über mods, nicht den mods-Ordner selbst. Eine Änderung scannt deine Bibliothek neu.",
   "settings.insideModsFolder": "In deinem {{game}}-Ordner",
   "settings.notSet": "Nicht festgelegt",
+  "settings.selectFolderFor": "Ordner für {{game}} auswählen",
+  "settings.gameDesc":
+    "Welchen Titel MXB App steuert. Deine Ordner, deine Bibliothek und deine Presets gehören alle zu dem Spiel, das du hier auswählst.",
   "settings.change": "Ändern…",
   "settings.set": "Festlegen…",
   "settings.theme": "Design",
@@ -535,6 +538,9 @@ export const de: Translation = {
   "settings.frostmodNeedsRepair":
     "Die installierten Dateien passen nicht zu dieser Version — eine Neuinstallation behebt das.",
   "settings.frostmodRepair": "Installation reparieren",
+  "settings.frostmodUnsupportedForGame":
+    "Diese FrostMod-Version ist für {{game}} nicht sicher — aktualisiere sie, um FrostMod hier zu nutzen.",
+  "settings.frostmodUpdateRequired": "Update erforderlich",
   "settings.checkNewer": "Nach einer neueren FrostMod-Version suchen",
   "settings.working": "Wird ausgeführt…",
   "settings.installFrostmod": "FrostMod installieren",
