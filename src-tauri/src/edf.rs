@@ -157,18 +157,45 @@ fn finite_pos(b: &[u8], o: usize) -> bool {
     })
 }
 
+/// The file's own bounds, as `(min, max)` in authored space — the six floats behind the
+/// magic. Written by the exporter over the *placed* mesh, so it is the one statement in the
+/// file about where the geometry ends up, and the way to tell a placement that ran twice
+/// from one that ran once. Covers every node and LOD in the file.
+pub fn header_aabb(b: &[u8]) -> Option<([f32; 3], [f32; 3])> {
+    if b.len() < HEADER_START || &b[0..4] != b"EDF\0" {
+        return None;
+    }
+    let f = |i: usize| f32le(b, 4 + i * 4);
+    let (lo, hi) = ([f(0), f(1), f(2)], [f(3), f(4), f(5)]);
+    (0..3)
+        .all(|k| lo[k].is_finite() && hi[k].is_finite() && lo[k] <= hi[k])
+        .then_some((lo, hi))
+}
+
 // Parse an .edf into its renderable mesh nodes (highest-detail LOD of each part).
 pub fn parse(b: &[u8]) -> Vec<EdfNode> {
-    parse_impl(b, &[])
+    parse_impl(b, &[], false)
+}
+
+/// Parse a gear mesh: as [`parse`], but a node whose geometry is a single group takes its
+/// orientation once rather than twice — see [`submesh_transform`].
+///
+/// Every gear mesh checked lands exactly on the bounds its own header states this way,
+/// including the chains that make up most of the protection slot and which were otherwise
+/// drawn 35 cm below the rider. Bikes and rider bodies keep the older reading: it moves their
+/// fork and swingarm too, and re-checking a whole bike's assembly against these bounds is
+/// its own piece of work.
+pub fn parse_gear(b: &[u8]) -> Vec<EdfNode> {
+    parse_impl(b, &[], true)
 }
 
 // Parse keeping exactly the nodes the bike's .hrc declares as level0; empty slice
 // falls back to level0_only's name heuristic.
 pub fn parse_with_levels(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
-    parse_impl(b, level0)
+    parse_impl(b, level0, false)
 }
 
-fn parse_impl(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
+fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool) -> Vec<EdfNode> {
     let n = b.len();
     if n < HEADER_START + 8 || &b[0..4] != b"EDF\0" {
         return Vec::new();
@@ -206,7 +233,9 @@ fn parse_impl(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
                     if let (true, Some(name)) = (ok, plausible_name(b, iend)) {
                         // `o` is the node's vertex-count word — its material table ends there.
                         let mats = node_material_table(b, o, textures);
-                        nodes.push(read_node(b, &cands, vs, vc, raw, iend, tc, name, mats));
+                        nodes.push(read_node(
+                            b, &cands, vs, vc, raw, iend, tc, name, mats, node_matrix_once,
+                        ));
                         o = iend; // jump past this block
                         continue;
                     }
@@ -699,6 +728,8 @@ fn read_node(
     raw_tris: usize,
     name: String,
     materials: Vec<Option<usize>>,
+    // See `submesh_transform`: whether a one-group node takes its orientation once.
+    node_matrix_once: bool,
 ) -> EdfNode {
     // Positions: contiguous vc*3 f32.
     let mut positions = Vec::with_capacity(vc * 3);
@@ -766,7 +797,7 @@ fn read_node(
     ) {
         placed = true;
         for s in &raw_subs {
-            let chain = submesh_transform(b, iend, s.block_off);
+            let chain = submesh_transform(b, iend, s.block_off, node_matrix_once);
             let hi_v = (s.vert_start + s.vert_count).min(vc);
             for i in s.vert_start..hi_v {
                 placed_vert[i] = true;
@@ -1102,11 +1133,27 @@ const NODE_MAT_OFF: usize = 104;
 const NODE_MAT_END: usize = 168;
 
 // Resolve a submesh's full local transform chain, innermost-first.
-fn submesh_transform(b: &[u8], name_off: usize, block_off: usize) -> Vec<Mat4> {
+fn submesh_transform(
+    b: &[u8],
+    name_off: usize,
+    block_off: usize,
+    node_matrix_once: bool,
+) -> Vec<Mat4> {
     let mut chain = Vec::new();
     let Some(base) = block_off.checked_sub(SUB_MAT_BACK) else {
         return chain;
     };
+    // A node's first geometry group has no matrix of its own: its block sits at name+252, so
+    // `base` lands back inside the node matrix at name+104, and reading it there applies that
+    // orientation a second time. Invisible where it's identity — every mesh the game itself
+    // ships — and 35 cm out of place on a chain exported from Blender, which is most of the
+    // protection slot. The parent walk below already stops at this same boundary.
+    //
+    // Gear only ([`parse_gear`]): the same correction moves a bike's fork and swingarm, which
+    // is right by their own headers but needs the whole assembly re-checked against it.
+    if node_matrix_once && base < name_off + NODE_MAT_END {
+        return chain;
+    }
     let Some(m) = read_mat4(b, base) else {
         return chain;
     };
