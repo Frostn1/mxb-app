@@ -37,11 +37,70 @@ pub fn resolve_child(dir: &Path, seg: &str) -> PathBuf {
     exact
 }
 
+/// Whether `dir` is itself a mods tree — the folder the game reads `bikes/`, `tracks/`
+/// and `rider/` straight out of.
+///
+/// Judged by its contents first and its name second, in that order of trust. A tree
+/// holding type folders is one no matter what it's called (`mxbikes.ini` lets the folder
+/// be named and placed freely, and extracted archives arrive under any name); a folder
+/// *called* `mods` is one even while it's still empty, which is what makes a fresh
+/// relocated folder recognisable before anything has been installed into it.
+pub fn is_mods_tree(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    if crate::game::ALL_MODS_DIRS.iter().any(|k| resolve_child(dir, k).is_dir()) {
+        return true;
+    }
+    dir.file_name()
+        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("mods"))
+}
+
+/// The folder the game's content actually lives in, given whatever the player pointed the
+/// app at.
+///
+/// `mods_path` has two legal shapes, and this is the one place that tells them apart:
+///
+/// * the game's **user folder** — the usual `Documents\PiBoSo\MX Bikes`, holding `mods/`
+///   and `profiles/` side by side. The content root is its `mods` child.
+/// * the **mods tree itself**, e.g. `C:\mods`. `mxbikes.ini`'s `[mods] folder` lets the
+///   game read its content from anywhere, and players use it: junctioning one rider paint
+///   into six model folders needs short paths off OneDrive, so the tree gets moved to the
+///   drive root while `profiles/` stays behind in `Documents`. There is no useful folder
+///   above such a tree — the parent is `C:\` — so it has to be usable as the root itself.
+///
+/// An existing `mods` child wins, so the ordinary layout is decided without touching the
+/// second rule, and a user folder that is *itself* named `mods` still resolves to the
+/// child rather than to itself. When neither applies the answer is `<mods_path>/mods`:
+/// the path to create, which is what a first install needs.
+pub fn mods_root(mods_path: &str) -> PathBuf {
+    let base = Path::new(mods_path.trim());
+    let child = resolve_child(base, "mods");
+    if child.is_dir() {
+        return child;
+    }
+    if is_mods_tree(base) {
+        return base.to_path_buf();
+    }
+    child
+}
+
 /// Resolve `mods/bikes`-style relative paths under the MX Bikes folder. The single funnel
 /// for these lookups, so making it case-tolerant covers the whole app at once.
+///
+/// A leading `mods` segment is resolved through [`mods_root`] rather than joined blindly,
+/// which is what lets every caller keep writing `"mods/bikes"` while the player's
+/// `mods_path` may already *be* the mods tree.
 pub fn mods_subdir(mods_path: &str, subpath: &str) -> PathBuf {
-    let mut p = PathBuf::from(mods_path);
-    for seg in subpath.split(['/', '\\']).filter(|s| !s.is_empty()) {
+    let mut segs = subpath.split(['/', '\\']).filter(|s| !s.is_empty()).peekable();
+    let mut p = match segs.peek() {
+        Some(first) if first.eq_ignore_ascii_case("mods") => {
+            segs.next();
+            mods_root(mods_path)
+        }
+        _ => PathBuf::from(mods_path.trim()),
+    };
+    for seg in segs {
         p = resolve_child(&p, seg);
     }
     p
@@ -195,7 +254,8 @@ pub struct RiderTargets {
     pub helmets: Vec<String>,
     pub boots: Vec<String>,
     pub protection: Vec<String>,
-    /// GP Bikes riding-style animations. Always empty for MX Bikes.
+    /// Riding-style animations. Both titles read `mods/rider/animations/<name>/` and record
+    /// the pick in `profile.ini`'s `[riding_style]`.
     pub animations: Vec<String>,
     pub profiles: Vec<String>,
 }
@@ -244,7 +304,7 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
         // the folders simply aren't there, and `models_in` returns empty for those.
         boots: models_in(&base.join("boots")),
         protection: models_in_areas(&base, crate::game::PROTECTION_AREAS),
-        // GP Bikes' riding-style animations. Nothing writes here for MX Bikes.
+        // Riding-style animations, which both titles keep here.
         animations: models_in(&base.join("animations")),
         // A rider model can be packed as `riders/<name>.pkz` just as gear can, and a
         // profile the picker never lists is a model nobody can wear.
@@ -825,6 +885,8 @@ mod tests {
         touch(&base.join("gloves/Flexair.pnt"));
         touch(&base.join("riders/default_mx/paints/Kit.pnt"));
         touch(&base.join("riders/default_mx/gloves/G.pnt"));
+        touch(&base.join("animations/Scrub/Scrub.ini"));
+        touch(&base.join("animations/Whip.pkz"));
 
         let v = scan_library(root.to_str().unwrap(), "mods/rider", &[], &crate::game::MXB).unwrap();
         let has = |c: &str| v.iter().any(|e| e.category == c);
@@ -840,12 +902,35 @@ mod tests {
         assert!(has("gloves"), "gloves");
         assert!(has("outfit"), "outfit/kit");
         assert_eq!(cat(&v, "Kit.pnt").unwrap().parent.as_deref(), Some("default_mx"));
+        // Riding styles are not a GP Bikes exclusive: `mxbikes.exe` reads the same
+        // `rider\animations\<name>\` folder, so both packagings have to surface here or the
+        // Riding style picker has nothing to offer but the two stock styles.
+        assert!(has("animation"), "riding-style animation as a folder");
+        assert!(
+            cat(&v, "Whip.pkz").is_some_and(|e| e.category == "animation"),
+            "a riding style packaged as a bare .pkz counts too",
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// GP Bikes' `mods/rider` is a different shape: helmets and riding-style animations,
-    /// no boots/protection/gloves folders (those are baked into the rider model), and no
-    /// goggles (road helmets use visors).
+    /// What the Riding style picker is fed. `scan_rider_targets` is game-agnostic, so this
+    /// is the same list for either title — the two stock styles (`mx`, `sm`) are not in it
+    /// because they live inside `rider.pkz` and leave nothing on disk to find.
+    #[test]
+    fn rider_targets_list_installed_riding_styles() {
+        let root = tmp("targets-animations");
+        let base = root.join("mods/rider");
+        touch(&base.join("animations/Scrub/Scrub.ini"));
+        touch(&base.join("animations/Whip.pkz"));
+
+        let t = scan_rider_targets(root.to_str().unwrap());
+        assert_eq!(t.animations, vec!["Scrub", "Whip"], "folder and .pkz both count");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// GP Bikes' `mods/rider` is a different shape: helmets and riding-style animations and
+    /// nothing else — no boots/protection/gloves folders (those are baked into the rider
+    /// model), and no goggles (road helmets use visors).
     #[test]
     fn surfaces_gp_bikes_rider_categories() {
         let root = tmp("lib-rider-gp");
@@ -935,6 +1020,55 @@ mod path_case_tests {
         let probe = dir.join("CaseProbe");
         std::fs::create_dir_all(&probe).unwrap();
         !dir.join("caseprobe").exists()
+    }
+
+    /// `mods_path` may be the game's user folder or the mods tree itself, and every
+    /// `"mods/..."` lookup in the app goes through here — so this is where the two shapes
+    /// have to come out the same.
+    #[test]
+    fn mods_lookups_work_whether_the_path_is_the_user_folder_or_the_tree() {
+        let root = std::env::temp_dir().join(format!("frost-modsroot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        // The ordinary layout: `<user folder>/mods/...`.
+        let user = root.join("MX Bikes");
+        std::fs::create_dir_all(user.join("mods").join("bikes")).unwrap();
+        std::fs::create_dir_all(user.join("profiles")).unwrap();
+        let user_s = user.to_string_lossy().into_owned();
+        assert_eq!(mods_root(&user_s), user.join("mods"));
+        assert_eq!(mods_subdir(&user_s, "mods/bikes"), user.join("mods").join("bikes"));
+
+        // The relocated one: `mods_path` *is* the tree, so the leading `mods` is it.
+        let tree = root.join("mods");
+        std::fs::create_dir_all(tree.join("bikes")).unwrap();
+        let tree_s = tree.to_string_lossy().into_owned();
+        assert_eq!(mods_root(&tree_s), tree);
+        assert_eq!(mods_subdir(&tree_s, "mods/bikes"), tree.join("bikes"));
+        assert_eq!(mods_subdir(&tree_s, "mods"), tree, "the bare root resolves too");
+
+        // A tree recognised by its contents rather than its name — an extracted archive,
+        // or a folder `mxbikes.ini` points at under any name at all.
+        let odd = root.join("MyStuff");
+        std::fs::create_dir_all(odd.join("tracks")).unwrap();
+        let odd_s = odd.to_string_lossy().into_owned();
+        assert!(is_mods_tree(&odd));
+        assert_eq!(mods_subdir(&odd_s, "mods/tracks"), odd.join("tracks"));
+
+        // A user folder that is *itself* named `mods` still resolves to its child, because
+        // an existing `mods` child outranks the folder's own name.
+        let confusing = root.join("weird").join("mods");
+        std::fs::create_dir_all(confusing.join("mods").join("rider")).unwrap();
+        let confusing_s = confusing.to_string_lossy().into_owned();
+        assert_eq!(mods_root(&confusing_s), confusing.join("mods"));
+
+        // Nothing on disk yet → the path to create, exactly as before.
+        let fresh = root.join("Fresh");
+        std::fs::create_dir_all(&fresh).unwrap();
+        let fresh_s = fresh.to_string_lossy().into_owned();
+        assert_eq!(mods_root(&fresh_s), fresh.join("mods"));
+        assert!(!is_mods_tree(&fresh), "an unrelated empty folder is not a tree");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

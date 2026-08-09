@@ -92,9 +92,11 @@ struct WatchReload {
     mods: Vec<String>,
 }
 
-/// The content root we watch: `<mods_path>/mods` holds `tracks/` and `bikes/`.
+/// The content root we watch — the folder holding `tracks/` and `bikes/`. Usually
+/// `<mods_path>/mods`, but `mods_path` may already be the mods tree, so it goes through
+/// the resolver rather than joining `mods` blind.
 fn watch_root(mods_path: &str) -> PathBuf {
-    Path::new(mods_path).join("mods")
+    crate::library::mods_root(mods_path)
 }
 
 /// Changes seen since the last reload, plus when the most recent one landed.
@@ -235,6 +237,14 @@ fn mod_key(root: &Path, path: &Path) -> Option<String> {
         _ => None,
     });
     let kind = segs.next()?;
+    // Manage's parking lot. It normally sits beside the mods tree and never shows up
+    // here, but a player who relocated their tree with `mxbikes.ini` has `mods_path`
+    // *as* the tree, which puts the shadow folder inside the watched root. Parking a
+    // track would then announce "mxbapp_disabled/Red Bud" and pulse a reload for files
+    // the game is no longer meant to see.
+    if kind.eq_ignore_ascii_case(crate::modstate::SHADOW_DIR) {
+        return None;
+    }
     let name = segs.next()?;
     Some(format!("{kind}/{name}"))
 }
@@ -350,6 +360,21 @@ mod tests {
         // Must be `<mods_path>/mods`, never the root (which also holds churny profiles/).
         assert_eq!(watch_root("/games/mxb"), PathBuf::from("/games/mxb").join("mods"));
         assert!(watch_root("/games/mxb").ends_with("mods"));
+    }
+
+    /// Manage's parking lot normally sits beside the mods tree, out of the watcher's way.
+    /// A player who relocated their tree has it *inside* the watched root — parking a
+    /// track would otherwise announce a mod called "mxbapp_disabled/Red Bud" and pulse a
+    /// reload for files the game is no longer meant to see.
+    #[test]
+    fn the_parking_lot_is_not_watched_as_content() {
+        let root = Path::new("/games/mxb/mods");
+        assert_eq!(
+            mod_key(root, &root.join("tracks").join("Red Bud").join("a.pkz")),
+            Some("tracks/Red Bud".to_string()),
+        );
+        assert_eq!(mod_key(root, &root.join("mxbapp_disabled/tracks/Red Bud.pkz")), None);
+        assert_eq!(mod_key(root, &root.join("MXBApp_Disabled/tracks/Red Bud.pkz")), None);
     }
 
     #[test]

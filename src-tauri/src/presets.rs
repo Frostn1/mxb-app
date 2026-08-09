@@ -568,9 +568,14 @@ KTM250=p_mx
         d
     }
 
-    /// A GP Bikes `profile.ini`: the sections it shares with MX Bikes, an `animation`
-    /// slot MX Bikes has no field for, and — critically — no `goggles_paint`, `boots` or
-    /// `protection`, which GP bakes into the rider model.
+    /// A GP Bikes `profile.ini`: the sections it shares with MX Bikes and — critically —
+    /// no `goggles_paint`, `boots` or `protection`, which GP bakes into the rider model.
+    ///
+    /// `riding_style` is one of the shared ones. Both executables carry the same
+    /// `%sprofiles\%s\profile.ini` / `riding_style` pair beside their `ID_CURRIDINGSTYLE`
+    /// control, and both load the style itself from `rider\animations\<name>\<name>.ini`.
+    /// (`animation` does appear in both binaries, but in their `usage.ini` cluster — it is
+    /// the content-type label written into mod-usage bookkeeping, not a profile section.)
     const GP_SAMPLE: &str = "\
 [info]
 bikeid=BSB23_Ducati_V4R
@@ -591,19 +596,23 @@ BSB23_Ducati_V4R=Mugello
 [suit_paint]
 BSB23_Ducati_V4R=Team
 
-[animation]
+[riding_style]
 BSB23_Ducati_V4R=Elbow Down
 
 [tyres]
 BSB23_Ducati_V4R=BS_Racing_Battlax
 ";
 
-    fn write_gp_sample(dir: &Path, profile: &str) -> PathBuf {
+    fn write_ini(dir: &Path, profile: &str, text: &str) -> PathBuf {
         let p = dir.join("profiles").join(profile);
         fs::create_dir_all(&p).unwrap();
         let ini = p.join("profile.ini");
-        fs::write(&ini, GP_SAMPLE).unwrap();
+        fs::write(&ini, text).unwrap();
         ini
+    }
+
+    fn write_gp_sample(dir: &Path, profile: &str) -> PathBuf {
+        write_ini(dir, profile, GP_SAMPLE)
     }
 
     /// The slot list comes from the file, so a game the app has no hardcoded list for
@@ -614,32 +623,43 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         write_gp_sample(&root, "rider1");
         let slots = slots_for(&root.join("profiles"), "rider1").unwrap();
 
-        assert!(slots.contains(&"animation".to_string()), "GP-only slot: {slots:?}");
+        assert!(slots.contains(&"riding_style".to_string()), "shared slot: {slots:?}");
         assert!(slots.contains(&"helmet_paint".to_string()));
         assert!(!slots.contains(&"info".to_string()), "[info] is not a slot");
-        assert!(!slots.contains(&"goggles_paint".to_string()), "GP has no goggles");
+        // The proof the list is the file's and not MX Bikes': these three are in
+        // `SLOT_SECTIONS` but not in this profile, so a hardcoded list would offer them.
+        for mx_only in ["goggles_paint", "boots", "protection"] {
+            assert!(!slots.contains(&mx_only.to_string()), "GP has no {mx_only}: {slots:?}");
+        }
         let _ = fs::remove_dir_all(&root);
     }
 
     /// A section with no named `Loadout` field still round-trips: read into `extra`,
     /// written back to the same place.
+    ///
+    /// `visor_tint` is invented — no shipped title writes it. That is the point: this is the
+    /// forward-compatibility path for a section a *future* game patch adds, which by
+    /// definition can't be named here in advance. Every section either title writes today
+    /// has a `Loadout` field, so only a made-up one exercises `extra`.
     #[test]
     fn an_unknown_slot_round_trips_through_extra() {
         let root = tmp("gp-extra");
-        let ini = write_gp_sample(&root, "rider1");
+        let text = format!("{GP_SAMPLE}\n[visor_tint]\nBSB23_Ducati_V4R=Smoke\n");
+        let ini = write_ini(&root, "rider1", &text);
         let profiles = root.join("profiles");
 
         let mut lo = read_loadout(&profiles, "rider1", "BSB23_Ducati_V4R").unwrap();
-        assert_eq!(lo.extra.get("animation").map(String::as_str), Some("Elbow Down"));
+        assert_eq!(lo.extra.get("visor_tint").map(String::as_str), Some("Smoke"));
         assert_eq!(lo.helmet, "AGV Pista GP RR", "shared slots still use their fields");
+        assert_eq!(lo.riding_style, "Elbow Down", "riding_style is a named field, not extra");
 
-        lo.set_slot("animation", "Balanced".into());
+        lo.set_slot("visor_tint", "Clear".into());
         apply_loadout(&profiles, "rider1", "BSB23_Ducati_V4R", &lo, false).unwrap();
 
         let text = fs::read_to_string(&ini).unwrap();
-        assert!(text.contains("BSB23_Ducati_V4R=Balanced"), "animation was written: {text}");
+        assert!(text.contains("BSB23_Ducati_V4R=Clear"), "visor_tint was written: {text}");
         let back = read_loadout(&profiles, "rider1", "BSB23_Ducati_V4R").unwrap();
-        assert_eq!(back.extra.get("animation").map(String::as_str), Some("Balanced"));
+        assert_eq!(back.extra.get("visor_tint").map(String::as_str), Some("Clear"));
         let _ = fs::remove_dir_all(&root);
     }
 
