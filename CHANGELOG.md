@@ -29,6 +29,13 @@
 ## 2026-08-09
 
 ### Fixed
+- **Browse keeps your place when you look at a mod and come back.** Opening a mod used to
+  throw away the search you typed, the category you picked, the sort order, every page you'd
+  loaded with "Load more" and how far you'd scrolled — Back dropped you at the top of a fresh,
+  unfiltered listing, which made working through a long category one mod at a time miserable.
+  The grid now sits exactly where you left it, down to the row of cards, and nothing is
+  re-fetched on the way back. It survives a trip to Library or Settings too, and the in-game
+  overlay behaves the same way.
 - **The Linux app opens to its interface instead of a white screen.** On SteamOS the window
   appeared, the title bar drew, and the inside stayed blank with nothing in the terminal to
   explain it. The AppImage carries its own copy of the web engine, and that engine tries to

@@ -6,6 +6,7 @@ import {
   buildInstalledIndex,
   type InstalledIndex,
 } from "./installedMatch";
+import { useModListing } from "./useModListing";
 import type { ModTarget } from "../Context/Install";
 
 /**
@@ -32,6 +33,9 @@ export function useModBrowsing(
   const [libraryVersion, setLibraryVersion] = useState(0);
   // What's on disk for the active type, as a fuzzy lookup (for "in library" badges).
   const [installed, setInstalled] = useState<InstalledIndex>(EMPTY_INSTALLED_INDEX);
+  // The grid's own state — filters, fetched pages, scroll offset. Held here, above the
+  // Browse/ModDetail swap, so opening a mod and coming back lands on the same screen.
+  const listing = useModListing(modType);
 
   // Follow a game switch. The two catalogs don't share category ids, so carrying the old
   // `modType` over would query the new site with the old site's numbers and come back
@@ -92,6 +96,8 @@ export function useModBrowsing(
     /** The active game's browse tree — what the type selector offers. */
     modTypes,
     changeType,
+    /** Everything the browse grid renders from — see `useModListing`. */
+    listing,
     selectedSlug,
     selectedCategoryId,
     installed,

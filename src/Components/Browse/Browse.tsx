@@ -1,18 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Search, Download, X, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
-import {
-  MOD_SORTS,
-  SEARCH_PAGE_SIZE,
-  getModRatings,
-  resolveQuickInstall,
-  searchMods,
-  type ModSort,
-  type ModType,
-} from "../../api/mods";
+import { resolveQuickInstall, type ModSort, type ModType } from "../../api/mods";
 import { useConfig } from "../../Context/Config";
 import type { InstalledIndex } from "../../lib/installedMatch";
-import type { ModRating, ModSummary } from "../../types";
+import type { ModListing } from "../../lib/useModListing";
+import type { ModSummary } from "../../types";
 import { useInstall } from "../../Context/Install";
 import { useT } from "../../i18n/context";
 import ModCard from "./ModCard";
@@ -43,6 +36,12 @@ interface BrowseProps {
   modType: ModType;
   /** The active game's browse tree — the catalogs differ per title. */
   modTypes: ModType[];
+  /**
+   * Filters, fetched pages and scroll offset. Owned by `useModBrowsing` above this
+   * component, which is what lets it survive a trip into a mod's detail page — see
+   * `useModListing`.
+   */
+  listing: ModListing;
   installed: InstalledIndex;
   onOpenMod: (slug: string, categoryId: number) => void;
   onChangeType: (type: ModType) => void;
@@ -51,29 +50,35 @@ interface BrowseProps {
 export default function Browse({
   modType,
   modTypes,
+  listing,
   installed,
   onOpenMod,
   onChangeType,
 }: BrowseProps) {
   const t = useT();
   const { game } = useConfig();
-  const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
-  const [categoryId, setCategoryId] = useState(modType.categoryId);
-  const [sort, setSort] = useState<ModSort>("newest");
-  const [mods, setMods] = useState<ModSummary[]>([]);
-  const [ratings, setRatings] = useState<Map<number, ModRating>>(new Map());
-  // Ids we've already asked about, so a mod the site had no answer for isn't re-requested
-  // on every render. Cleared when the listing is rebuilt (the Rust side caches, so asking
-  // again after a category switch costs nothing).
-  const askedForRatings = useRef<Set<number>>(new Set());
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [selected, setSelected] = useState<Map<string, ModSummary>>(new Map());
+  const {
+    query,
+    setQuery,
+    categoryId,
+    setCategoryId,
+    setSort,
+    sortOptions,
+    activeSort,
+    mods,
+    ratings,
+    hasMore,
+    loading,
+    loadingMore,
+    error,
+    reload,
+    loadMore,
+    selected,
+    toggleSelect,
+    clearSelection,
+    selectAll,
+    scrollTop,
+  } = listing;
   const [bulkBusy, setBulkBusy] = useState(false);
   // A pending reinstall the user must confirm (they already have these mods).
   const [reinstall, setReinstall] = useState<
@@ -83,35 +88,19 @@ export default function Browse({
   const { startInstall } = useInstall();
   const selectionActive = selected.size > 0;
 
-  // The popular listings are ranked by views by a part of the site that takes no search
-  // term, so they step aside while the box has text in it and the order falls back to
-  // newest — the control always names the order actually on screen. The pick itself is
-  // kept, so clearing the search puts it back.
-  const sortOptions = MOD_SORTS.filter((s) => !s.noSearch || !debounced);
-  const activeSort = sortOptions.some((s) => s.value === sort) ? sort : "newest";
+  // The grid scroller. Its offset is kept in `listing` rather than here, so opening a mod
+  // and coming back — which unmounts this component — lands on the same row of cards.
+  const grid = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // Before paint, so the lazy thumbnails load for the row we're actually on and there
+    // is no jump from the top.
+    if (grid.current) grid.current.scrollTop = scrollTop.current;
+  }, [scrollTop]);
 
   const isInstalled = useCallback(
     (mod: ModSummary) => installed.has(mod.title),
     [installed],
   );
-
-  // Reset the category filter (and any selection) when the mod type changes —
-  // selection + quick-install resolve against the current type's folders.
-  useEffect(() => {
-    setCategoryId(modType.categoryId);
-    setSelected(new Map());
-  }, [modType]);
-
-  const toggleSelect = useCallback((mod: ModSummary) => {
-    setSelected((prev) => {
-      const next = new Map(prev);
-      if (next.has(mod.slug)) next.delete(mod.slug);
-      else next.set(mod.slug, mod);
-      return next;
-    });
-  }, []);
-
-  const clearSelection = useCallback(() => setSelected(new Map()), []);
 
   // Silent quick-install: resolve the mirror + folder, then enqueue.
   const doQuickInstall = useCallback(
@@ -200,78 +189,6 @@ export default function Browse({
     else void doBulkInstall(pending.mods);
   }, [reinstall, doQuickInstall, doBulkInstall]);
 
-  const selectAll = useCallback(() => {
-    setSelected((prev) => {
-      const next = new Map(prev);
-      for (const m of mods) next.set(m.slug, m);
-      return next;
-    });
-  }, [mods]);
-
-  // Debounce the search input so we don't hammer the API on every keystroke.
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), 350);
-    return () => clearTimeout(t);
-  }, [query]);
-
-  // (Re)load the first page whenever the query, category or sort changes.
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setPage(1);
-    askedForRatings.current = new Set();
-    searchMods(debounced, categoryId, 1, activeSort)
-      .then((res) => {
-        if (cancelled) return;
-        setMods(res);
-        setHasMore(res.length >= SEARCH_PAGE_SIZE);
-      })
-      .catch((e) => !cancelled && setError(String(e)))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [debounced, categoryId, activeSort, reloadKey]);
-
-  // Scores aren't part of the search response — they come in a second pass keyed by post
-  // id, for whatever is on screen. Never awaited by the grid: cards paint immediately and
-  // stars appear a moment later, and a failure just leaves them off.
-  useEffect(() => {
-    const wanted = mods.map((m) => m.id).filter((id) => !askedForRatings.current.has(id));
-    if (wanted.length === 0) return;
-    for (const id of wanted) askedForRatings.current.add(id);
-    let cancelled = false;
-    getModRatings(wanted)
-      .then((res) => {
-        if (cancelled) return;
-        setRatings((prev) => {
-          const next = new Map(prev);
-          for (const [id, rating] of Object.entries(res)) next.set(Number(id), rating);
-          return next;
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [mods]);
-
-  const loadMore = useCallback(async () => {
-    const next = page + 1;
-    setLoadingMore(true);
-    try {
-      const res = await searchMods(debounced, categoryId, next, activeSort);
-      setMods((prev) => [...prev, ...res]);
-      setHasMore(res.length >= SEARCH_PAGE_SIZE);
-      setPage(next);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [debounced, categoryId, activeSort, page]);
-
   const isBike = modType.id === "bikes";
 
   return (
@@ -346,7 +263,11 @@ export default function Browse({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6">
+      <div
+        ref={grid}
+        onScroll={(e) => (scrollTop.current = e.currentTarget.scrollTop)}
+        className="min-h-0 flex-1 overflow-y-auto px-7 pb-6"
+      >
         {error ? (
           <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
             <p className="text-[13px] font-semibold text-destructive">
@@ -357,7 +278,7 @@ export default function Browse({
             <p className="select-text text-[12.5px] leading-relaxed text-muted-foreground">
               {error.replace(/^Error:\s*/, "")}
             </p>
-            <Button variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)}>
+            <Button variant="outline" size="sm" onClick={reload}>
               {t("common.retry")}
             </Button>
           </div>
