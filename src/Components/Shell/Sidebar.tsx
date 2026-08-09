@@ -22,7 +22,6 @@ import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
 import { experimentalState, launchGame } from "../../api/mods";
-import { shopCatalogAvailable } from "../../api/shop";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
@@ -68,15 +67,14 @@ const NAV: NavEntry[] = [
 ];
 
 /**
- * The shop catalog needs an API credential baked in at build time, and builds without one
- * (forks, and CI runs with no repo secret) simply can't reach it. Those get no Shop entry at
- * all rather than a permanently-greyed row no user action could ever fix.
- *
  * Sits second, next to Browse, because it is the other catalog — unlike the experimental
  * entry below, which is appended.
  *
- * `cap: "shop"` on top of that: the catalog is mxbikes-shop.com, so it has nothing to sell
- * a player on another title.
+ * Gated only on `cap: "shop"`: the store is mxbikes-shop.com, so it has nothing to sell a
+ * player on another title. Deliberately *not* gated on the build-time catalog credential any
+ * more — the view's other half is the account's own purchases, which needs nothing but the
+ * user's login, so a build without the credential still has a working Shop tab. `Shop.tsx`
+ * hides the Catalog half in that case and opens on purchases.
  */
 const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store, cap: "shop" };
 
@@ -114,23 +112,12 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       .catch(() => {});
   }, [view]);
 
-  // Asked once per mount. It's a compile-time fact on the Rust side, so it can't change
-  // under us; the state is only here because the answer arrives over IPC.
-  const [shopAvailable, setShopAvailable] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    shopCatalogAvailable()
-      .then((ok) => !cancelled && setShopAvailable(ok))
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  // Three independent gates: the shop needs a build-time credential, servers needs the
-  // experimental toggle, and every entry needs the active game to support it. Built here
-  // rather than inline so the JSX stays one `.map`.
+  // Two independent gates: servers needs the experimental toggle, and every entry needs the
+  // active game to support it. Built here rather than inline so the JSX stays one `.map`.
   const nav = [
-    ...(shopAvailable ? [NAV[0], SHOP_ENTRY, ...NAV.slice(1)] : NAV),
+    NAV[0],
+    SHOP_ENTRY,
+    ...NAV.slice(1),
     ...(experimental ? [EXPERIMENTAL_NAV] : []),
   ].filter(({ cap }) => !cap || caps[cap]);
 

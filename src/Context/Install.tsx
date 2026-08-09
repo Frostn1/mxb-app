@@ -15,18 +15,17 @@ import {
   importFile,
   onFrostmodReload,
   onInstallProgress,
-  shopInstall,
-  type ShopItem,
 } from "../api/mods";
 import type { InstallStage, ReloadOutcome } from "../types";
 import { useT } from "../i18n/context";
 
-/** Where the bytes come from — a resolvable host, a file the user picked, or a
- * purchased item from the authenticated MX Bikes Shop. */
+/** Where the bytes come from — a resolvable host, or a file the user picked.
+ *
+ * MX Bikes Shop purchases are deliberately absent: they stage a plan and finish through the
+ * review sheet (`DropReviewProvider`), not through this one-shot installer. */
 export type InstallSource =
   | { kind: "download"; url: string; host: string }
-  | { kind: "import"; path: string }
-  | { kind: "shop"; item: ShopItem };
+  | { kind: "import"; path: string };
 
 interface StartParams {
   slug: string;
@@ -39,8 +38,7 @@ interface StartParams {
   source: InstallSource;
 }
 
-/** Where a failed install can send the user back to. Shop installs have no
- *  browse page, so they get no target. */
+/** Where a failed install can send the user back to. */
 export interface ModTarget {
   slug: string;
   subpath: string;
@@ -64,9 +62,6 @@ interface InstallContextValue {
     p: Omit<StartParams, "source"> & { url: string; host: string },
   ) => void;
   startImport: (p: Omit<StartParams, "source"> & { path: string }) => void;
-  /** Install a purchased MX Bikes Shop track. Defaults to the tracks root when the caller
-   *  hasn't resolved a folder (see `resolveTrackDest`). */
-  startShopInstall: (item: ShopItem, destFolder?: string) => void;
   /** Clear a finished (done/error) install card. */
   clear: () => void;
 }
@@ -142,8 +137,6 @@ export function InstallProvider({
     try {
       if (source.kind === "download") {
         await addToLibrary(slug, source.url, source.host, subpath, destFolder);
-      } else if (source.kind === "shop") {
-        await shopInstall(source.item, destFolder);
       } else {
         await importFile(source.path, subpath, destFolder);
       }
@@ -168,40 +161,28 @@ export function InstallProvider({
       setActive((cur) =>
         cur && cur.slug === slug ? { ...cur, stage: "error", message } : cur,
       );
-      // Shop items have no browse page, so their failure stays a plain toast.
-      const target: ModTarget | null =
-        source.kind === "shop"
-          ? null
-          : { slug, subpath, categoryId: params.categoryId };
-      if (!target) {
-        toast.error(tRef.current("install.failed", { title }), {
-          description: message,
-          duration: Infinity,
-          action: {
-            label: tRef.current("common.retry"),
-            onClick: () => void run(params),
-          },
-        });
-      } else {
-        toast.custom(
-          (id) => (
-            <InstallFailedToast
-              title={title}
-              message={message}
-              onOpen={() => {
-                toast.dismiss(id);
-                onOpenModRef.current?.(target);
-              }}
-              onRetry={() => {
-                toast.dismiss(id);
-                void run(params);
-              }}
-              onDismiss={() => toast.dismiss(id)}
-            />
-          ),
-          { duration: Infinity },
-        );
-      }
+      // Both remaining sources are started from a mod's detail page, so a failure can always
+      // offer the way back to it. (Purchases used to be the exception — they had nowhere to
+      // send anyone — and they now fail inside the review sheet instead, which is on screen.)
+      const target: ModTarget = { slug, subpath, categoryId: params.categoryId };
+      toast.custom(
+        (id) => (
+          <InstallFailedToast
+            title={title}
+            message={message}
+            onOpen={() => {
+              toast.dismiss(id);
+              onOpenModRef.current?.(target);
+            }}
+            onRetry={() => {
+              toast.dismiss(id);
+              void run(params);
+            }}
+            onDismiss={() => toast.dismiss(id)}
+          />
+        ),
+        { duration: Infinity },
+      );
     } finally {
       unlisten();
       unlistenFrost();
@@ -245,18 +226,6 @@ export function InstallProvider({
     [enqueue],
   );
 
-  const startShopInstall: InstallContextValue["startShopInstall"] = useCallback(
-    (item, destFolder = "") =>
-      enqueue({
-        slug: item.slug,
-        title: item.title,
-        subpath: "mods/tracks",
-        destFolder,
-        source: { kind: "shop", item },
-      }),
-    [enqueue],
-  );
-
   const clear = useCallback(() => setActive(null), []);
 
   const value = useMemo(
@@ -265,10 +234,9 @@ export function InstallProvider({
       queueLength,
       startInstall,
       startImport,
-      startShopInstall,
       clear,
     }),
-    [active, queueLength, startInstall, startImport, startShopInstall, clear],
+    [active, queueLength, startInstall, startImport, clear],
   );
 
   return (

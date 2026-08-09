@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-09
+
+### Added
+- **Install what you bought on the MX Bikes Shop, from inside the app.** The Shop tab now has
+  two halves — **Catalog**, the store's public listing as before, and **My purchases**, which
+  signs in to your own mxbikes-shop.com account and shows everything you've already paid for.
+  Cards carry the store's own artwork and author, a product that ships several files (PRO/AMS
+  and the like) is one card with a picker rather than several, and anything already in your
+  library is badged as installed.
+- **Purchases install through the same review sheet a drag-and-drop uses.** The file is
+  downloaded with a progress bar, then read to see what it actually contains, and the sheet
+  says where each piece will land and warns about collisions before anything is written.
+
+### Fixed
+- **A purchased bike or gear set no longer installs as if it were a track.** The old path
+  picked a destination by looking for keywords in the *product name* and otherwise assumed
+  tracks, so bikes, paints and gear were filed into a tracks-derived folder silently, with no
+  preview and no collision check. Destination now comes from the archive's contents.
+
 ## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 
 A patch on top of v0.8.0 — everything that release added is still the news, and its notes are

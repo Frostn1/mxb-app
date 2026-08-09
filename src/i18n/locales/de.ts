@@ -350,24 +350,31 @@ export const de: Translation = {
   "browse.bulkFailedDesc_other":
     "Alle {{count}} müssen über den Browser heruntergeladen werden.",
 
-  // ── Shop ───────────────────────────────────────────────────────────────────
-  "shop.myDownloads": "Meine Downloads",
-  "shop.signInTitle": "Bei MX Bikes Shop anmelden",
+  // ── Shop (MX Bikes Shop — gekaufte Downloads) ──────────────────────────────
+  "shop.help":
+    "Durchsuche den Katalog von mxbikes-shop.com und installiere, was du bereits gekauft hast. Gekauft wird weiterhin auf der Seite des Shops; melde dich unter „Meine Käufe“ an, um deine Bestellungen von hier aus zu installieren.",
+  "shopTab.catalog": "Katalog",
+  "shopTab.purchases": "Meine Käufe",
+  "shop.myDownloads": "Meine Käufe",
+  "shop.signInTitle": "Beim MX Bikes Shop anmelden",
   "shop.signInBody":
-    "Melde dich bei mxbikes-shop.com an, um deine gekauften Strecken zu sehen und zu installieren. Wir öffnen die echte Seite — dein Passwort kommt nie mit dieser App in Berührung.",
+    "Melde dich bei mxbikes-shop.com an, um alles zu sehen und zu installieren, was du gekauft hast. Wir öffnen die echte Seite — dein Passwort erreicht diese App nie.",
   "shop.signIn": "Anmelden",
   "shop.logOut": "Abmelden",
-  "shop.signedIn": "Bei MX Bikes Shop angemeldet",
-  "shop.sessionFailed":
-    "Deine MX-Bikes-Shop-Sitzung konnte nicht übernommen werden",
-  "shop.queuedDesc": "Wird in deinen Streckenordner installiert.",
-  "shop.loadFailed":
-    "Deine Downloads konnten nicht geladen werden: {{error}}",
-  "shop.empty": "Noch keine gekauften Downloads in deinem Konto gefunden.",
+  "shop.signedIn": "Beim MX Bikes Shop angemeldet",
+  "shop.sessionFailed": "Sitzung des MX Bikes Shop konnte nicht übernommen werden",
+  "shop.loadFailed": "Deine Käufe konnten nicht geladen werden: {{error}}",
+  "shop.empty": "Für dein Konto wurden noch keine gekauften Downloads gefunden.",
+  "purchases.count_one": "{{count}} Kauf",
+  "purchases.count_other": "{{count}} Käufe",
+  "purchases.fileCount_one": "{{count}} Datei",
+  "purchases.fileCount_other": "{{count}} Dateien",
+  "purchases.install": "Installieren",
+  "purchases.reinstall": "Neu installieren",
+  "purchases.installed": "Installiert",
+  "purchases.downloading": "Wird heruntergeladen…",
+  "purchases.downloadFailed": "{{title}} konnte nicht heruntergeladen werden",
   // ── MX Bikes Shop-Katalog (nur Stöbern; gekauft wird im Shop) ──────────────
-  "shopCatalog.title": "Shop",
-  "shopCatalog.help":
-    "Stöbere im Katalog von mxbikes-shop.com — suchen, filtern und Preise vergleichen. Gekauft und heruntergeladen wird weiterhin auf der Seite des Shops; diese App zeigt dir nur, was es dort gibt.",
   "shopCatalog.searchPlaceholder": "Shop durchsuchen…",
   "shopCatalog.allCategories": "Alle",
   "shopCatalog.onSaleOnly": "Im Angebot",

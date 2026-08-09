@@ -1151,18 +1151,6 @@ export function resolveInitialFolder(
   return guess;
 }
 
-/**
- * Where a track goes when there's no picker to ask — the MX Bikes Shop installs straight from
- * the purchase list. Same answer the Browse dialog would preselect: the remembered folder, or
- * the first one the library already has.
- */
-export async function resolveTrackDest(game: GameInfo): Promise<string> {
-  const modType = DEFAULT_MOD_TYPE;
-  const installed = await getInstalledMods(modType.installSubpath).catch(() => []);
-  const { options, guess } = buildDestinations(modType, "", installed);
-  return resolveInitialFolder(game, modType, options, guess);
-}
-
 export interface QuickInstallParams {
   slug: string;
   title: string;
@@ -1268,6 +1256,14 @@ export function onInstallProgress(
 }
 
 export interface ShopItem extends ModSummary {
+  /**
+   * The product's own name, without the file label. `title` is the display string (and folds
+   * the file label in for a multi-file product); this is the string that groups a product's
+   * files onto one card and matches it against the public catalog.
+   */
+  product: string;
+  /** Which file of the product this is (`PRO`, `AMS`, …). Empty for a single-file product. */
+  fileLabel: string;
   downloadUrl: string;
 }
 
@@ -1290,9 +1286,15 @@ export function shopMyDownloads(): Promise<ShopItem[]> {
   return invoke<ShopItem[]>("shop_my_downloads");
 }
 
-/** Download + install a purchased item. Progress arrives via `onInstallProgress`. */
-export function shopInstall(item: ShopItem, destFolder: string): Promise<void> {
-  return invoke<void>("shop_install", { item, destFolder });
+/**
+ * Download a purchased file and stage it for review. Nothing is written under `mods/`.
+ *
+ * Returns an ordinary `DropPlan`, so a purchase finishes through the same review sheet and the
+ * same `commitDrop` a drag-and-drop does — and lands where its *contents* say it belongs
+ * rather than where its title was guessed to. Progress arrives via `onInstallProgress`.
+ */
+export function shopStage(item: ShopItem): Promise<DropPlan> {
+  return invoke<DropPlan>("shop_stage", { item });
 }
 
 /** Fires after a WebView sign-in completes; payload is whether it succeeded. */
