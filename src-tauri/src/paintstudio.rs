@@ -206,8 +206,16 @@ pub fn build(paint_name: &str, textures: &[BuildTexture]) -> Result<Vec<u8>> {
 /// TGA because that's the format MX Bikes' own loose textures use and every editor reads
 /// it, and lossless because a template that shifted colours on the way out would shift
 /// them again on every round trip.
+///
+/// Only a paint stored in the open format is unpacked — see [`paint::is_plain`]. The
+/// viewer reads more than that, and this is the one place a paint leaves the app as files
+/// somebody can edit, so it takes the narrower reading and `decode` rather than
+/// `decode_any` keeps that true even if the check above it ever moved.
 pub fn extract(pnt: &[u8], dir: &Path) -> Result<Vec<PathBuf>> {
-    let textures = paint::decode_any(pnt).context("read the paint")?;
+    if !paint::is_plain(pnt) {
+        bail!("this paint can't be unpacked into sheets");
+    }
+    let textures = paint::decode(pnt).context("read the paint")?;
     if textures.is_empty() {
         bail!("this paint carries no textures");
     }
@@ -347,6 +355,19 @@ mod tests {
         )
         .expect("build");
         assert_eq!(paint::texture_names(&bytes).unwrap(), vec!["livery"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extract_only_unpacks_a_paint_stored_in_the_open_format() {
+        let dir = tmpdir("notplain");
+        let out = dir.join("sheets");
+        // A paint the viewer can still render, but which wasn't stored openly, reaches here
+        // as a buffer that isn't the plain format. Rendering it is fine; turning it into
+        // files somebody can edit and republish is not, so nothing is written at all.
+        let err = extract(b"NOTPNT\x00\x00 followed by a paint", &out).expect_err("must refuse");
+        assert!(format!("{err:#}").contains("can't be unpacked"));
+        assert!(!out.exists(), "refused before anything reached disk");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

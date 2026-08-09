@@ -144,6 +144,16 @@ pub fn decode_any(buf: &[u8]) -> Result<Vec<PntTexture>> {
     decode(buf)
 }
 
+/// Whether `buf` is a paint stored in the open format this module also writes.
+///
+/// [`decode_any`] deliberately reads a wider set than this, because a preview should show
+/// whatever the game would show. Writing a paint back out as editable sheets is not that:
+/// it hands someone an author's work in a form they can change and republish, so it is
+/// offered only for a paint that was already stored openly. Rendering is not permission.
+pub fn is_plain(buf: &[u8]) -> bool {
+    buf.len() >= 4 && &buf[..4] == MAGIC
+}
+
 /// A texture name as the format stores it: `NAME_SIZE` bytes, NUL-terminated and
 /// NUL-padded. Names are the whole binding mechanism — a paint replaces a mesh's texture
 /// by matching this string — so a name that wouldn't survive the round trip is refused
