@@ -963,6 +963,19 @@ export const it: Translation = {
   "showcase.whileGameRunning": "mentre MX Bikes è in esecuzione",
   "showcase.releaseNotes": "Leggi le note di rilascio",
   "showcase.gotIt": "Ho capito",
+  "showcase.v090.hero.title": "Trasforma le tue immagini in una livrea che il gioco carica",
+  "showcase.v090.hero.body":
+    "Una nuova scheda Livree costruisce le livree da normali file immagine — TGA, PNG, JPG — e le installa dove il gioco le cerca: la livrea di una moto, la grafica di un casco o di una maschera, il completo o i guanti del tuo pilota. Estrai una livrea che hai già per ottenere un template che calza davvero sul modello, modificalo in qualsiasi editor e rimettilo dentro così com'è. Lo studio controlla i nomi dei tuoi file contro quelli che la mesh usa prima del salvataggio, poi mostra il risultato sul modello vero.",
+  "showcase.v090.reshade":
+    "Sfoglia, installa e cambia i preset ReShade dall'app — con una voce Nessuno per confrontare con l'aspetto originale, e un avviso quando a un preset mancano degli effetti.",
+  "showcase.v090.purchases":
+    "I miei acquisti accede al tuo account mxbikes-shop.com e installa ciò che hai già pagato, con lo stesso riepilogo usato dal trascinamento.",
+  "showcase.v090.ridingStyles":
+    "I preset possono usare uno stile di guida che hai installato, non solo i due del gioco — e un preset condiviso se lo porta dietro.",
+  "showcase.v090.frostmod":
+    "Quando FrostMod muore per una libreria di Windows mancante, l'app la indica in parole chiare e la installa per te. FrostMod si può anche fermare dall'app, chiunque lo abbia avviato.",
+  "showcase.v090.updates":
+    "Installare sopra una copia in esecuzione non si ferma più su «errore nell'apertura del file in scrittura», e un secondo avvio riporta la finestra che avevi invece di aprirne una seconda.",
   "showcase.v080.hero.title": "MXB App gestisce anche GP Bikes",
   "showcase.v080.hero.body":
     "Scegli il gioco al primo avvio, o cambialo quando vuoi nelle Impostazioni: tutta l'app lo segue — Libreria, Gestisci, Preset, Play e una scheda Sfoglia servita da gpb-mods.com. Le cartelle pilota di GP vengono lette come quelle di GP, non di MX Bikes, e anche lì FrostMod ricarica al volo. Ogni gioco tiene le proprie cartelle, quindi la tua configurazione di MX Bikes resta intatta.",
