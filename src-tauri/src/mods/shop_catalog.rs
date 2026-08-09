@@ -1707,5 +1707,57 @@ pub async fn force_refresh(app: &tauri::AppHandle) -> anyhow::Result<ShopStatus>
     Ok(status(app))
 }
 
+/// Look up each product name in the catalog, in order, so a purchase can borrow the artwork,
+/// author and category the store already publishes for it.
+///
+/// The scraped "All My Downloads" page carries a product name and a download link and nothing
+/// else — no image, no category. Joining the two lists here is what turns the purchases grid
+/// into something worth looking at.
+///
+/// **Exact match only**, on [`normalize`] — the same fold the catalog's own search uses, so
+/// case and punctuation differences agree while genuinely different names do not. This is not
+/// the place for the fuzzy scoring in `src/lib/installedMatch.ts`: that one decides whether to
+/// show a badge, and a wrong answer costs a misplaced tick. A wrong answer *here* puts one paid
+/// product's artwork and author on another's card. A name that doesn't match resolves to
+/// `None` and the card falls back to plain — the honest outcome.
+///
+/// A build with no catalog credential answers all-`None` rather than erroring: purchases work
+/// on their own, and only the enrichment is missing.
+pub async fn match_products(
+    app: &tauri::AppHandle,
+    names: &[String],
+) -> anyhow::Result<Vec<Option<ShopMod>>> {
+    if !available() || names.is_empty() {
+        return Ok(vec![None; names.len()]);
+    }
+
+    let current = ensure_loaded(app).await?;
+    Ok(match_in(&current.0, names, now()))
+}
+
+/// [`match_products`] with the loading taken out, so the matching itself is testable.
+fn match_in(catalog: &Catalog, names: &[String], now: i64) -> Vec<Option<ShopMod>> {
+    // Two catalog items that fold to the same key make the purchase ambiguous, and picking
+    // either would be a guess. `None` marks them so they never resolve.
+    let mut by_name: HashMap<String, Option<usize>> = HashMap::new();
+    for (i, item) in catalog.items.iter().enumerate() {
+        by_name
+            .entry(normalize(&item.title))
+            .and_modify(|slot| *slot = None)
+            .or_insert(Some(i));
+    }
+
+    names
+        .iter()
+        .map(|name| {
+            by_name
+                .get(&normalize(name))
+                .copied()
+                .flatten()
+                .map(|i| summary_of(&catalog.items[i], now))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

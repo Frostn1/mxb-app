@@ -349,22 +349,31 @@ export const ptBR: Translation = {
   "browse.bulkFailedDesc_other":
     "Todos os {{count}} precisam ser baixados pelo navegador.",
 
-  // ── Loja ───────────────────────────────────────────────────────────────────
-  "shop.myDownloads": "Meus downloads",
+  // ── Loja (MX Bikes Shop — downloads comprados) ─────────────────────────────
+  "shop.help":
+    "Navegue pelo catálogo do mxbikes-shop.com e instale o que você já comprou. A compra continua sendo feita no site da loja; entre em Minhas compras para instalar seus pedidos por aqui.",
+  "shopTab.catalog": "Catálogo",
+  "shopTab.purchases": "Minhas compras",
+  "shop.myDownloads": "Minhas compras",
   "shop.signInTitle": "Entre na MX Bikes Shop",
   "shop.signInBody":
-    "Entre no mxbikes-shop.com para ver e instalar as pistas que você comprou. A gente abre o site de verdade — sua senha nunca passa por este app.",
+    "Entre no mxbikes-shop.com para ver e instalar tudo o que você comprou. Abrimos o site real — sua senha nunca passa por este aplicativo.",
   "shop.signIn": "Entrar",
   "shop.logOut": "Sair",
   "shop.signedIn": "Conectado à MX Bikes Shop",
   "shop.sessionFailed": "Não foi possível capturar sua sessão da MX Bikes Shop",
-  "shop.queuedDesc": "Instalando na sua pasta de pistas.",
-  "shop.loadFailed": "Não foi possível carregar seus downloads: {{error}}",
+  "shop.loadFailed": "Não foi possível carregar suas compras: {{error}}",
   "shop.empty": "Nenhum download comprado encontrado na sua conta ainda.",
+  "purchases.count_one": "{{count}} compra",
+  "purchases.count_other": "{{count}} compras",
+  "purchases.fileCount_one": "{{count}} arquivo",
+  "purchases.fileCount_other": "{{count}} arquivos",
+  "purchases.install": "Instalar",
+  "purchases.reinstall": "Reinstalar",
+  "purchases.installed": "Instalado",
+  "purchases.downloading": "Baixando…",
+  "purchases.downloadFailed": "Não foi possível baixar {{title}}",
   // ── Catálogo da MX Bikes Shop (só navegação; a compra é na loja) ───────────
-  "shopCatalog.title": "Loja",
-  "shopCatalog.help":
-    "Explore o catálogo da mxbikes-shop.com: busque, filtre e compare preços. A compra e o download continuam acontecendo no site da loja; este app apenas mostra o que há lá.",
   "shopCatalog.searchPlaceholder": "Buscar na loja…",
   "shopCatalog.allCategories": "Tudo",
   "shopCatalog.onSaleOnly": "Em promoção",

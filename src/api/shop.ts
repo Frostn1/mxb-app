@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import type {
   ShopCategory,
+  ShopMod,
   ShopModDetail,
   ShopPage,
   ShopSort,
@@ -13,8 +14,10 @@ import type { TKey } from "../i18n/core";
  * The mxbikes-shop.com catalog.
  *
  * Kept out of `api/mods.ts`, which is already the mxb-mods + install + library layer at
- * nearly a thousand lines. Nothing here installs or buys — the catalog is read-only and a
- * purchase is a link out to the store.
+ * nearly a thousand lines. Nothing here installs or buys — the catalog is read-only and
+ * buying is a link out to the store. Installing something *already* bought is a different
+ * path entirely: it needs the user's own session, so it lives with the rest of the install
+ * machinery in `api/mods.ts` (`shopMyDownloads`, `shopStage`).
  *
  * The API credential never reaches this file: every call goes through Rust, which holds the
  * token. See `src-tauri/src/shop_credentials.rs`.
@@ -72,6 +75,19 @@ export function shopCatalogSearch(
 
 export function shopCatalogDetail(id: number): Promise<ShopModDetail> {
   return invoke<ShopModDetail>("shop_catalog_detail", { id });
+}
+
+/**
+ * The catalog entry for each product name, positionally — `null` where the store has nothing
+ * by that name.
+ *
+ * The purchases page is scraped HTML: it gives a product name and a download link and nothing
+ * else, so this is what supplies the artwork, author and store link that make the grid worth
+ * looking at. Matching is exact (on the same fold the catalog search uses); a build with no
+ * catalog credential answers all-`null` and the cards simply stay plain.
+ */
+export function shopMatchCatalog(names: string[]): Promise<(ShopMod | null)[]> {
+  return invoke<(ShopMod | null)[]>("shop_match_catalog", { names });
 }
 
 /** Ignores the cache age and any stored ETag — "Refresh" has to mean refresh. */

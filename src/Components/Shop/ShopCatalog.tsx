@@ -12,7 +12,6 @@ import {
 } from "../../api/shop";
 import ShopCard from "./ShopCard";
 import ShopDetail from "./ShopDetail";
-import HelpHint from "@/Components/ui/help-hint";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
 import {
@@ -166,16 +165,10 @@ export default function ShopCatalog() {
   const showStale = status?.stale && !staleDismissed;
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-none flex-col gap-4 px-7 pb-3.5 pt-5">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* No title of its own — `Shop` owns the heading and the tab strip above this. */}
+      <header className="flex flex-none flex-col gap-4 px-7 pb-3.5">
         <div className="flex items-center gap-3.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("shopCatalog.title")}
-          </h1>
-          <HelpHint
-            title={t("shopCatalog.title")}
-            description={t("shopCatalog.help")}
-          />
           <Button
             variant="ghost"
             size="sm"

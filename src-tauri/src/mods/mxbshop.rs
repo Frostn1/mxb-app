@@ -11,6 +11,13 @@ pub struct ShopItem {
     pub id: u64,
     pub slug: String,
     pub title: String,
+    /// The product's own name, without the file label — what the store sells, and so the only
+    /// string that can be matched against the public catalog or used to group a product's
+    /// files under one card. Never empty: falls back to the file label, then "Untitled".
+    pub product: String,
+    /// Which file of the product this row is (`PRO`, `AMS`, …). Empty when the product ships
+    /// a single file, which is the common case.
+    pub file_label: String,
     pub link: String,
     pub date: String,
     pub image: Option<String>,
@@ -101,8 +108,20 @@ fn parse_edd_blocks(doc: &Html) -> Vec<ShopItem> {
                 (false, false) => product.clone(),
                 // Multiple files: keep the variant (PRO/AMS/…) distinct.
                 (false, true) => format!("{product} — {label}"),
-                (true, _) if !label.is_empty() => label,
+                (true, _) if !label.is_empty() => label.clone(),
                 (true, _) => "Untitled".to_string(),
+            };
+            // The product name is kept whole and separate rather than recovered by splitting
+            // `title` back on the em-dash: a product is free to have one in its own name, and
+            // this is the string the catalog match and the card grouping both key on.
+            let named = if product.is_empty() {
+                if label.is_empty() {
+                    "Untitled".to_string()
+                } else {
+                    label.clone()
+                }
+            } else {
+                product.clone()
             };
 
             id += 1;
@@ -110,6 +129,10 @@ fn parse_edd_blocks(doc: &Html) -> Vec<ShopItem> {
                 id,
                 slug: format!("shop-{id}"),
                 title,
+                product: named,
+                // Only meaningful when the product ships more than one file; a lone file's
+                // label is the file's own name and would just repeat the product on screen.
+                file_label: if multi { label } else { String::new() },
                 link: download_url.clone(),
                 date: String::new(),
                 image: None,
@@ -153,7 +176,11 @@ fn parse_generic_anchors(doc: &Html) -> Vec<ShopItem> {
         items.push(ShopItem {
             id,
             slug: format!("shop-{id}"),
+            // This path finds one anchor at a time, so there is no product/file split to
+            // make — the heading it climbed to *is* the product.
+            product: title.clone(),
             title,
+            file_label: String::new(),
             link: download_url.clone(),
             date: String::new(),
             image,
@@ -163,30 +190,6 @@ fn parse_generic_anchors(doc: &Html) -> Vec<ShopItem> {
     }
 
     items
-}
-
-/// Best-effort mod-type guess (a `mods/` subfolder). Defaults to `tracks`.
-pub fn guess_mod_type(title: &str) -> &'static str {
-    let t = title.to_lowercase();
-
-    const RIDER: [&str; 10] = [
-        "helmet", "boots", "glove", "goggle", "jersey", "gear set", "gearset",
-        "neck brace", "rider paint", "rider kit",
-    ];
-    // `replica` excluded — the shop tags tracks with it too.
-    const BIKE: [&str; 18] = [
-        "ktm", "husqvarna", "husky", "gasgas", "gas gas", "yamaha", "honda",
-        "kawasaki", "suzuki", "fantic", "sherco", "sx-f", "sxf", "crf", "livery",
-        "oem bike", " bike ", "bike paint",
-    ];
-
-    if RIDER.iter().any(|k| t.contains(k)) {
-        "rider"
-    } else if BIKE.iter().any(|k| t.contains(k)) {
-        "bikes"
-    } else {
-        "tracks"
-    }
 }
 
 /// Does this href point at a downloadable file (EDD action or archive)?
@@ -295,13 +298,48 @@ mod tests {
         let items = parse_my_downloads(html);
         // 1 file from the first product + 2 from the second.
         assert_eq!(items.len(), 3);
-        // Single-file product uses the product name verbatim (entities decoded).
+        // Single-file product uses the product name verbatim (entities decoded), and carries
+        // no file label — there is no variant to tell apart.
         assert_eq!(items[0].title, "2022 ARL MX RD1 – Fox Raceway");
+        assert_eq!(items[0].product, "2022 ARL MX RD1 – Fox Raceway");
+        assert_eq!(items[0].file_label, "");
         assert!(items[0].download_url.contains("eddfile="));
         assert!(items[0].image.is_none());
         // Multi-file product keeps each variant distinct.
         assert_eq!(items[1].title, "2024 ARLMX RD10 – MARYLAND — 2024_ARLMX_RD10_MARYLAND PRO");
         assert_eq!(items[2].title, "2024 ARLMX RD10 – MARYLAND — 2024_ARLMX_RD10_MARYLAND AMS");
+        // …and both name the same product, which is what groups them onto one card.
+        assert_eq!(items[1].product, "2024 ARLMX RD10 – MARYLAND");
+        assert_eq!(items[2].product, "2024 ARLMX RD10 – MARYLAND");
+        assert_eq!(items[1].file_label, "2024_ARLMX_RD10_MARYLAND PRO");
+        assert_eq!(items[2].file_label, "2024_ARLMX_RD10_MARYLAND AMS");
+    }
+
+    #[test]
+    fn product_survives_an_em_dash_in_its_own_name() {
+        // The reason `product` is a field rather than `title.split(" — ")`: a product name may
+        // contain the very separator the multi-file title is built with.
+        let html = r#"
+            <div class="edd-blocks__row edd-order-item__product">
+              <div class="edd-blocks__row-column--product">Red Bull — Straight Rhythm</div>
+              <div class="edd-blocks__row-column--files">
+                <div class="edd-order-item__file">
+                  <a href="/?eddfile=9&token=z" class="edd-order-item__file-link">RBSR PRO</a>
+                </div>
+                <div class="edd-order-item__file">
+                  <a href="/?eddfile=8&token=y" class="edd-order-item__file-link">RBSR AMS</a>
+                </div>
+              </div>
+            </div>
+        "#;
+
+        let items = parse_my_downloads(html);
+        assert_eq!(items.len(), 2);
+        for item in &items {
+            assert_eq!(item.product, "Red Bull — Straight Rhythm");
+        }
+        assert_eq!(items[0].file_label, "RBSR PRO");
+        assert_eq!(items[1].file_label, "RBSR AMS");
     }
 
     #[test]
@@ -326,6 +364,9 @@ mod tests {
         let items = parse_my_downloads(html);
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].title, "Sunset MX Park");
+        // One anchor per card, so the heading is the product and there is no variant.
+        assert_eq!(items[0].product, "Sunset MX Park");
+        assert_eq!(items[0].file_label, "");
         assert_eq!(
             items[0].image.as_deref(),
             Some("https://mxbikes-shop.com/wp-content/uploads/track-a.jpg")
@@ -342,18 +383,5 @@ mod tests {
             <a href="/files/x.zip">Download again</a>
         "#;
         assert_eq!(parse_my_downloads(html).len(), 1);
-    }
-
-    #[test]
-    fn guesses_mod_type_from_title() {
-        // Tracks are the default (real product titles from the shop).
-        assert_eq!(guess_mod_type("2022 ARL MX RD1 – Fox Raceway"), "tracks");
-        assert_eq!(guess_mod_type("2024 ARLMX RD10 – MARYLAND"), "tracks");
-        // Bike content by manufacturer/model or explicit livery wording.
-        assert_eq!(guess_mod_type("2023 KTM 450 SX-F"), "bikes");
-        assert_eq!(guess_mod_type("Factory Yamaha Livery Pack"), "bikes");
-        // Rider gear/paints.
-        assert_eq!(guess_mod_type("Fox V3 Helmet Paint"), "rider");
-        assert_eq!(guess_mod_type("Alpinestars Boots + Gloves"), "rider");
     }
 }

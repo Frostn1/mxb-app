@@ -13,6 +13,15 @@
   back with `WEBKIT_DISABLE_DMABUF_RENDERER=0`. The startup log now records which path a run
   took, so the next report of a blank window can be read straight from the log.
 ### Added
+- **Install what you bought on the MX Bikes Shop, from inside the app.** The Shop tab now has
+  two halves — **Catalog**, the store's public listing as before, and **My purchases**, which
+  signs in to your own mxbikes-shop.com account and shows everything you've already paid for.
+  Cards carry the store's own artwork and author, a product that ships several files (PRO/AMS
+  and the like) is one card with a picker rather than several, and anything already in your
+  library is badged as installed.
+- **Purchases install through the same review sheet a drag-and-drop uses.** The file is
+  downloaded with a progress bar, then read to see what it actually contains, and the sheet
+  says where each piece will land and warns about collisions before anything is written.
 - **Pick a ReShade preset from Settings.** A new ReShade card lists every preset you have —
   the ones the app installed and any already sitting loose in your game folder — and switching
   between them is one click. There's an "Off" entry that runs no effects, so you can compare a
@@ -34,6 +43,10 @@
 Getting ReShade itself is still a trip to reshade.me — it asks that its binaries not be
 redistributed, so the app detects it and links out rather than bundling or downloading it.
 ### Fixed
+- **A purchased bike or gear set no longer installs as if it were a track.** The old path
+  picked a destination by looking for keywords in the *product name* and otherwise assumed
+  tracks, so bikes, paints and gear were filed into a tracks-derived folder silently, with no
+  preview and no collision check. Destination now comes from the archive's contents.
 - **A mods folder you moved with `mxbikes.ini` now works.** Plenty of players keep their
   content somewhere short like `C:\mods` — junctioning one rider paint into six model
   folders needs paths that OneDrive and a deep `Documents` tree can't give you. The app

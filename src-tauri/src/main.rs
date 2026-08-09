@@ -3863,29 +3863,73 @@ async fn shop_my_downloads(
         .map_err(|e| format!("{e:#}"))
 }
 
+/// The catalog entry for each purchased product name, positionally, so the purchases grid can
+/// show real artwork instead of a grey placeholder.
 #[tauri::command]
-async fn shop_install(
+async fn shop_match_catalog(
+    app: tauri::AppHandle,
+    names: Vec<String>,
+) -> Result<Vec<Option<mods::shop_catalog::ShopMod>>, String> {
+    mods::shop_catalog::match_products(&app, &names)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Download a purchased file and stage it for review. **Nothing is written under `mods/`.**
+///
+/// The returned plan is an ordinary [`dropzone::DropPlan`], so the purchases grid hands it to
+/// the same review sheet a drag-and-drop produces and finishes through the existing
+/// `repreview_drop` / `commit_drop` / `cancel_drop` commands.
+///
+/// That reuse is the point. The previous `shop_install` chose a `mods/` subfolder by matching
+/// keywords against the *product title* and always resolved the destination as if the purchase
+/// were a track — so a bought bike or gear set landed in a tracks-derived folder, silently and
+/// with no collision check. Routing by what the archive actually contains is the dropzone's job
+/// and it already does it well; this command's only work is getting the bytes to it.
+#[tauri::command]
+async fn shop_stage(
     app: tauri::AppHandle,
     state: State<'_, shop_session::ShopSession>,
     item: mods::mxbshop::ShopItem,
-    dest_folder: String,
-) -> Result<(), String> {
+) -> Result<dropzone::DropPlan, String> {
     let client = state
         .client()
         .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    let subpath = format!("mods/{}", mods::mxbshop::guess_mod_type(&item.title));
-    install::download_and_place(
-        &app,
-        &cfg,
-        &client,
-        &item.slug,
-        &item.download_url,
-        &subpath,
-        &dest_folder,
-    )
+    // Asked before the download, not after: `dropzone::plan` refuses an unconfigured folder
+    // too, but by then a track archive is several hundred megabytes already spent.
+    if cfg.mods_path.trim().is_empty() {
+        return Err("No MX Bikes folder is configured yet.".to_string());
+    }
+
+    // Its own staging directory, separate from the one `dropzone::plan` will make: this holds
+    // the downloaded archive, and the plan gets its own extracted copy.
+    let work = install::staging_dir("shop");
+    std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
+
+    let archive = match install::download(&app, &client, &item.slug, &item.download_url, &work).await
+    {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(format!("{e:#}"));
+        }
+    };
+
+    let planned = tauri::async_runtime::spawn_blocking({
+        let mods_path = cfg.mods_path.clone();
+        let paths = vec![archive.to_string_lossy().into_owned()];
+        move || dropzone::plan(&mods_path, &paths)
+    })
     .await
-    .map_err(|e| format!("{e:#}"))
+    .map_err(|e| format!("shop_stage task failed: {e}"))?;
+
+    // `plan` staged its own copy of everything it found, so the download has done its job
+    // either way — and leaving it behind would strand a whole archive in the temp directory
+    // for every purchase installed.
+    let _ = std::fs::remove_dir_all(&work);
+
+    planned.map_err(|e| format!("{e:#}"))
 }
 
 fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -4558,7 +4602,8 @@ fn main() {
             shop_status,
             shop_logout,
             shop_my_downloads,
-            shop_install,
+            shop_match_catalog,
+            shop_stage,
             shop_catalog_available,
             shop_catalog_status,
             shop_catalog_categories,

@@ -340,22 +340,31 @@ export const en = {
   "browse.bulkFailedDesc_other": "All {{count}} need a browser download.",
 
   // ── Shop (MX Bikes Shop — purchased downloads) ─────────────────────────────
-  "shop.myDownloads": "My Downloads",
+  "shop.help":
+    "Browse the mxbikes-shop.com catalog, and install what you've already bought. Buying still happens on the store's own site; sign in under My purchases to install your orders from here.",
+  "shopTab.catalog": "Catalog",
+  "shopTab.purchases": "My purchases",
+  "shop.myDownloads": "My purchases",
   "shop.signInTitle": "Sign in to MX Bikes Shop",
   "shop.signInBody":
-    "Log in to mxbikes-shop.com to see and install the tracks you've purchased. We open the real site — your password never touches this app.",
+    "Log in to mxbikes-shop.com to see and install everything you've purchased. We open the real site — your password never touches this app.",
   "shop.signIn": "Sign in",
   "shop.logOut": "Log out",
   "shop.signedIn": "Signed in to MX Bikes Shop",
   "shop.sessionFailed": "Couldn't capture your MX Bikes Shop session",
-  "shop.queuedDesc": "Installing to your tracks folder.",
-  "shop.loadFailed": "Couldn't load your downloads: {{error}}",
+  "shop.loadFailed": "Couldn't load your purchases: {{error}}",
   "shop.empty": "No purchased downloads found on your account yet.",
+  "purchases.count_one": "{{count}} purchase",
+  "purchases.count_other": "{{count}} purchases",
+  "purchases.fileCount_one": "{{count}} file",
+  "purchases.fileCount_other": "{{count}} files",
+  "purchases.install": "Install",
+  "purchases.reinstall": "Reinstall",
+  "purchases.installed": "Installed",
+  "purchases.downloading": "Downloading…",
+  "purchases.downloadFailed": "Couldn't download {{title}}",
 
   // ── MX Bikes Shop catalog (browse-only; buying happens on the store) ───────
-  "shopCatalog.title": "Shop",
-  "shopCatalog.help":
-    "Browse the mxbikes-shop.com catalog — search, filter and compare prices. Buying and downloading still happen on the store's own site; this app only shows you what's there.",
   "shopCatalog.searchPlaceholder": "Search the shop…",
   "shopCatalog.allCategories": "All",
   "shopCatalog.onSaleOnly": "On sale",

@@ -352,23 +352,31 @@ export const fr: Translation = {
   "browse.bulkFailedDesc_other":
     "Les {{count}} doivent être téléchargés depuis le navigateur.",
 
-  // ── Boutique ───────────────────────────────────────────────────────────────
-  "shop.myDownloads": "Mes téléchargements",
+  // ── Boutique (MX Bikes Shop — téléchargements achetés) ─────────────────────
+  "shop.help":
+    "Parcourez le catalogue de mxbikes-shop.com et installez ce que vous avez déjà acheté. L'achat se fait toujours sur le site de la boutique ; connectez-vous dans Mes achats pour installer vos commandes depuis ici.",
+  "shopTab.catalog": "Catalogue",
+  "shopTab.purchases": "Mes achats",
+  "shop.myDownloads": "Mes achats",
   "shop.signInTitle": "Connectez-vous à MX Bikes Shop",
   "shop.signInBody":
-    "Connectez-vous à mxbikes-shop.com pour voir et installer les circuits que vous avez achetés. Nous ouvrons le vrai site — votre mot de passe ne passe jamais par cette application.",
+    "Connectez-vous à mxbikes-shop.com pour voir et installer tout ce que vous avez acheté. Nous ouvrons le vrai site — votre mot de passe ne touche jamais cette application.",
   "shop.signIn": "Se connecter",
   "shop.logOut": "Se déconnecter",
   "shop.signedIn": "Connecté à MX Bikes Shop",
   "shop.sessionFailed": "Impossible de récupérer votre session MX Bikes Shop",
-  "shop.queuedDesc": "Installation dans votre dossier circuits.",
-  "shop.loadFailed":
-    "Impossible de charger vos téléchargements : {{error}}",
+  "shop.loadFailed": "Impossible de charger vos achats : {{error}}",
   "shop.empty": "Aucun téléchargement acheté trouvé sur votre compte.",
+  "purchases.count_one": "{{count}} achat",
+  "purchases.count_other": "{{count}} achats",
+  "purchases.fileCount_one": "{{count}} fichier",
+  "purchases.fileCount_other": "{{count}} fichiers",
+  "purchases.install": "Installer",
+  "purchases.reinstall": "Réinstaller",
+  "purchases.installed": "Installé",
+  "purchases.downloading": "Téléchargement…",
+  "purchases.downloadFailed": "Impossible de télécharger {{title}}",
   // ── Catalogue MX Bikes Shop (consultation seule ; l'achat se fait sur le site) ─
-  "shopCatalog.title": "Boutique",
-  "shopCatalog.help":
-    "Parcourez le catalogue de mxbikes-shop.com : recherchez, filtrez et comparez les prix. L'achat et le téléchargement se font toujours sur le site de la boutique ; cette app vous montre seulement ce qui s'y trouve.",
   "shopCatalog.searchPlaceholder": "Rechercher dans la boutique…",
   "shopCatalog.allCategories": "Tout",
   "shopCatalog.onSaleOnly": "En promo",
