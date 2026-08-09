@@ -82,6 +82,7 @@ export default function Overlay() {
     modType,
     modTypes,
     changeType,
+    listing,
     selectedSlug,
     selectedCategoryId,
     installed,
@@ -271,6 +272,7 @@ export default function Overlay() {
                             <Browse
                               modType={modType}
                               modTypes={modTypes}
+                              listing={listing}
                               installed={installed}
                               onOpenMod={openMod}
                               onChangeType={changeType}

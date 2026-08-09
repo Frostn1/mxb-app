@@ -40,6 +40,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     modType,
     modTypes,
     changeType,
+    listing,
     selectedSlug,
     selectedCategoryId,
     installed,
@@ -136,6 +137,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             <Browse
               modType={modType}
               modTypes={modTypes}
+              listing={listing}
               installed={installed}
               onOpenMod={openMod}
               onChangeType={changeType}
