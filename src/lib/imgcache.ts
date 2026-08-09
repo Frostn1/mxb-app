@@ -53,7 +53,12 @@ export function cachedImage(
  * mod authors, which can point anywhere. Routing a host the handler refuses would turn an
  * image that loads today into one that can't load at all, so those are left alone.
  */
-const CACHEABLE_HOSTS = ["mxb-mods.com", "mxbikes-shop.com", "mxbikes-shop.b-cdn.net"];
+const CACHEABLE_HOSTS = [
+  "mxb-mods.com",
+  "gpb-mods.com",
+  "mxbikes-shop.com",
+  "mxbikes-shop.b-cdn.net",
+];
 
 /** Whether [`cachedImage`] would resolve to something the handler is willing to serve. */
 export function isCacheableImage(url: string): boolean {
