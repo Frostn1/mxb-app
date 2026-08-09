@@ -209,6 +209,13 @@ export const it: Translation = {
   "rider.namePlaceholder": "Dai un nome a questo pilota…",
   "rider.nameFirst": "Prima dai un nome a questo look.",
   "rider.showOnModel": "Mostra sul modello",
+  "rider.repairTitle": "Un mod in {{area}} è stato installato sparso",
+  "rider.repairBody":
+    "I suoi file stanno direttamente in {{area}} invece che in una cartella, quindi né il gioco né questa app possono caricarlo. Raccoglierli in “{{model}}”?",
+  "rider.repairAction": "Ripara",
+  "rider.repairDone_one": "Raccolto {{count}} file in “{{model}}”.",
+  "rider.repairDone_other": "Raccolti {{count}} file in “{{model}}”.",
+  "rider.repairNothing": "Non c'è più niente da raccogliere.",
 
   // ── Tour guidato ───────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Fai un giro veloce",

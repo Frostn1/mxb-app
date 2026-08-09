@@ -24,6 +24,17 @@
 Getting ReShade itself is still a trip to reshade.me — it asks that its binaries not be
 redistributed, so the app detects it and links out rather than bundling or downloading it.
 ### Fixed
+- **Helmets, boots and protection now install into a folder of their own.** A gear mod
+  packaged as a `.pkz` — which is how locked mods are distributed — unpacks to a single
+  folder, and the app was unwrapping it and dropping the contents straight into
+  `mods/rider/helmets`. The game only loads a model as `helmets/<Model>/…`, so the helmet
+  became unloadable and invisible: it never appeared in the Rider tab's picker, and the
+  `paints` and `goggles` folders it arrived with were listed there in its place.
+- **The Rider tab offers to gather a gear mod that was installed loose.** Anything already
+  scattered by the above stays broken until it's moved, so the tab now spots it, names the
+  folder it will make (taken from the mod's own descriptor) and lists exactly what will
+  move before you press Repair. Packaged `.pkz` models and models already filed correctly
+  are left alone.
 - **A mods folder you moved with `mxbikes.ini` now works.** Plenty of players keep their
   content somewhere short like `C:\mods` — junctioning one rider paint into six model
   folders needs paths that OneDrive and a deep `Documents` tree can't give you. The app

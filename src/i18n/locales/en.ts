@@ -206,6 +206,13 @@ export const en = {
   "rider.namePlaceholder": "Name this rider…",
   "rider.nameFirst": "Name this rider look first.",
   "rider.showOnModel": "Show on model",
+  "rider.repairTitle": "A {{area}} mod was installed loose",
+  "rider.repairBody":
+    "Its files sit directly in {{area}} instead of in a folder, so neither the game nor this app can load it. Gather them into “{{model}}”?",
+  "rider.repairAction": "Repair",
+  "rider.repairDone_one": "Gathered {{count}} file into “{{model}}”.",
+  "rider.repairDone_other": "Gathered {{count}} files into “{{model}}”.",
+  "rider.repairNothing": "Nothing left to gather.",
 
   // ── Guided tour ────────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Take a quick tour",

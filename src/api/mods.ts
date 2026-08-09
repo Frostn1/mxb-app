@@ -371,6 +371,26 @@ export function scanRiderTargets(): Promise<RiderTargets> {
   return invoke<RiderTargets>("scan_rider_targets");
 }
 
+/** A gear area whose model was installed loose in the area root instead of in a folder. */
+export interface GearRepair {
+  /** The area folder under `mods/rider` — `helmets`, `boots`, … */
+  area: string;
+  /** The folder the loose content will be gathered into. */
+  model: string;
+  dest: string;
+  /** What moves, by name. */
+  items: string[];
+}
+
+export function scanGearRepairs(): Promise<GearRepair[]> {
+  return invoke<GearRepair[]>("scan_gear_repairs");
+}
+
+/** Gather one area's loose content into its own folder; resolves with the entries moved. */
+export function repairGearArea(area: string): Promise<number> {
+  return invoke<number>("repair_gear_area", { area });
+}
+
 /** What a failed scan stands in for: nothing installed, which every picker handles. */
 export const EMPTY_RIDER_TARGETS: RiderTargets = {
   helmets: [],

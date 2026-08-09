@@ -986,6 +986,9 @@ pub(crate) fn plan_placement(
     for seg in &segs {
         type_dir.push(sanitize(seg));
     }
+    if let Some(name) = gear_model_folder(type_folder, &segs, extracted, &unwrapped, slug) {
+        type_dir.push(name);
+    }
 
     // A bike livery only loads from `<Bike>/paints/`. The picker offers a bike's root as a
     // destination too — that's where sounds and model swaps go — so a paint chosen there
@@ -1009,6 +1012,45 @@ pub(crate) fn plan_placement(
             wrap_loose,
         },
     )
+}
+
+/// The folder a whole gear model needs under its area, or `None` when this placement isn't
+/// installing one.
+///
+/// A gear model *is* a folder: the game loads `helmets/<Model>/helmet.edf`, and every picker
+/// lists the folders an area contains. But the destination offered for a new model is the
+/// bare area (`helmets`), and [`unwrap_wrapper`] has by then stripped the mod's own folder —
+/// which is exactly the shape a packaged `.pkz` extracts to. Without this the model's files
+/// landed loose in `mods/rider/helmets`, where nothing lists them and nothing can load them,
+/// and the area picked up `paints`/`goggles` as if those were models of their own.
+///
+/// Named as the mod named itself, because that name is what the pickers will show. A mod
+/// that ships its files bare has only the slug to go on.
+///
+/// Two placements are deliberately left alone. A paint drop names the model it belongs to
+/// (`helmets/<Model>/paints`), so it is more than one segment and merges as before. And an
+/// archive packed area-first — a `helmets/` folder holding the models — is already in the
+/// shape the destination expects; wrapping it would bury the models a level down.
+fn gear_model_folder(
+    type_folder: &str,
+    segs: &[&str],
+    extracted: &Path,
+    unwrapped: &Path,
+    slug: &str,
+) -> Option<String> {
+    if !type_folder.eq_ignore_ascii_case("rider") {
+        return None;
+    }
+    let [area] = segs else { return None };
+    if !crate::game::is_rider_model_area(area) {
+        return None;
+    }
+    let own = (unwrapped != extracted)
+        .then(|| unwrapped.file_name()?.to_str())
+        .flatten()
+        .filter(|n| !crate::game::is_rider_model_area(n));
+    let name = sanitize(own.unwrap_or(slug));
+    (!name.trim().is_empty()).then_some(name)
 }
 
 pub(crate) fn place_mod(
@@ -1735,6 +1777,68 @@ mod tests {
         place_mod(&ex, &mods, "rider", "riders/default_mx/paints", "kit").unwrap();
         assert!(mods.join("rider/riders/default_mx/paints/kit.pnt").exists());
         assert!(!mods.join("bikes/default_mx").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A packaged helmet extracts to a single `<Model>/` folder, which `unwrap_wrapper`
+    /// strips — and the destination offered for a new model is the bare area. Together
+    /// those scattered the mesh and its `paints/` straight into `mods/rider/helmets`,
+    /// where the game can't load it and the picker lists `paints` as a helmet.
+    #[test]
+    fn a_new_gear_model_keeps_a_folder_of_its_own() {
+        let root = place_tmp("gear-model-folder");
+        let ex = root.join("ex");
+        touch(&ex.join("Astars_SM10_EKS/gfx.cfg"));
+        touch(&ex.join("Astars_SM10_EKS/helmet.edf"));
+        touch(&ex.join("Astars_SM10_EKS/paints/Red.pnt"));
+        touch(&ex.join("Astars_SM10_EKS/goggles/Smoke.pnt"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "helmets", "astars-sm10").unwrap();
+
+        let model = mods.join("rider/helmets/Astars_SM10_EKS");
+        assert!(model.join("helmet.edf").exists(), "the mesh is under the model's own name");
+        assert!(model.join("gfx.cfg").exists());
+        assert!(model.join("paints/Red.pnt").exists(), "paints travel with the model");
+        assert!(model.join("goggles/Smoke.pnt").exists());
+        assert!(
+            !mods.join("rider/helmets/helmet.edf").exists(),
+            "nothing is left loose in the area folder"
+        );
+        assert!(
+            !mods.join("rider/helmets/paints").exists(),
+            "`paints` must not become a sibling of the models — the picker reads it as one"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Nothing to take the name from, so the slug is what's left. Still a folder: loose
+    /// files in the area root are unloadable however they got there.
+    #[test]
+    fn a_bare_gear_model_is_named_from_the_slug() {
+        let root = place_tmp("gear-model-slug");
+        let ex = root.join("ex");
+        touch(&ex.join("gfx.cfg"));
+        touch(&ex.join("boots.edf"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "boots", "tech-10").unwrap();
+        assert!(mods.join("rider/boots/tech-10/boots.edf").exists());
+        assert!(!mods.join("rider/boots/boots.edf").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Packed area-first: the archive's `helmets/` already *is* the destination, so its
+    /// children are the models. Wrapping that would bury every one of them a level down.
+    #[test]
+    fn an_area_first_archive_is_not_wrapped_again() {
+        let root = place_tmp("gear-area-first");
+        let ex = root.join("ex");
+        touch(&ex.join("helmets/Fox V3/gfx.cfg"));
+        touch(&ex.join("helmets/Fox V3/helmet.edf"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "helmets", "fox-v3").unwrap();
+        assert!(mods.join("rider/helmets/Fox V3/helmet.edf").exists());
+        assert!(!mods.join("rider/helmets/helmets").exists(), "no doubled area folder");
+        assert!(!mods.join("rider/helmets/fox-v3").exists(), "no slug folder over the models");
         let _ = std::fs::remove_dir_all(&root);
     }
 

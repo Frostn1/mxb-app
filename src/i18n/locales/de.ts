@@ -216,6 +216,13 @@ export const de: Translation = {
   "rider.namePlaceholder": "Diesem Fahrer einen Namen geben…",
   "rider.nameFirst": "Gib diesem Fahrer-Look zuerst einen Namen.",
   "rider.showOnModel": "Am Modell zeigen",
+  "rider.repairTitle": "Ein {{area}}-Mod wurde lose installiert",
+  "rider.repairBody":
+    "Seine Dateien liegen direkt in {{area}} statt in einem Ordner — weder das Spiel noch diese App können ihn so laden. In „{{model}}“ zusammenfassen?",
+  "rider.repairAction": "Reparieren",
+  "rider.repairDone_one": "{{count}} Datei in „{{model}}“ zusammengefasst.",
+  "rider.repairDone_other": "{{count}} Dateien in „{{model}}“ zusammengefasst.",
+  "rider.repairNothing": "Es gibt nichts mehr zusammenzufassen.",
 
   // ── Rundgang ───────────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Mach einen kurzen Rundgang",
