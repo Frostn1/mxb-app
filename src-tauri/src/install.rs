@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use anyhow::Context;
 use futures_util::StreamExt;
 use obfstr::obfstr;
 use regex::Regex;
@@ -110,6 +111,12 @@ pub async fn add_to_library(
     download_and_place(app, cfg, &client, slug, &direct, subpath, dest_folder).await
 }
 
+/// Download one mod and install it.
+///
+/// The staging directory is [`staging_dir`]'s, not a name derived from the slug: the retry
+/// on a failed install starts a *second* run of the same slug, and a shared path meant the
+/// newcomer's `remove_dir_all` deleted the files the first run was still copying — which
+/// surfaced as a bare "os error 2" from the copy, on the install the user was retrying.
 pub async fn download_and_place(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -119,8 +126,7 @@ pub async fn download_and_place(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<()> {
-    let work = std::env::temp_dir().join(format!("frost-{}", sanitize(slug)));
-    let _ = std::fs::remove_dir_all(&work);
+    let work = staging_dir("dl");
     std::fs::create_dir_all(&work)?;
 
     let archive = download(app, client, slug, direct_url, &work).await?;
@@ -172,8 +178,7 @@ async fn download_mega_and_place(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<()> {
-    let work = std::env::temp_dir().join(format!("frost-{}", sanitize(slug)));
-    let _ = std::fs::remove_dir_all(&work);
+    let work = staging_dir("dl");
     std::fs::create_dir_all(&work)?;
 
     let archive = download_mega(app, client, slug, url, &work).await?;
@@ -991,7 +996,15 @@ pub(crate) fn place_mod(
     slug: &str,
 ) -> anyhow::Result<usize> {
     let route = plan_placement(extracted, mods_dir, type_folder, dest_folder, slug);
-    apply(&route.placement)
+    apply(&route.placement).inspect_err(|e| {
+        // The one place every install — download, import, drop — funnels through, so one
+        // log line here covers all three. Without it a failed install left no trace at all
+        // beyond a toast the player had already dismissed by the time they reported it.
+        log::error!(
+            "installing {slug} into {type_folder}/{dest_folder} ({:?}) failed: {e:#}",
+            route.rule
+        );
+    })
 }
 
 /// Every `(source file, destination file)` a placement would produce, in order.
@@ -1030,16 +1043,27 @@ fn roots_for(placement: &Placement) -> Vec<PathBuf> {
     }
 }
 
+/// Perform a placement, naming the file that failed.
+///
+/// The errors here reach the user verbatim, and an unadorned `io::Error` is close to
+/// useless in a bug report: "os error 2" says a path was missing without saying which one,
+/// or even whether it was the source or the destination. Every step says what it was doing
+/// to what, and a failure is logged as well as returned — the toast is transient, the log
+/// is what a player can send back.
 fn apply(placement: &Placement) -> anyhow::Result<usize> {
     for root in roots_for(placement) {
-        std::fs::create_dir_all(&root)?;
+        std::fs::create_dir_all(&root)
+            .with_context(|| format!("creating {}", root.display()))?;
     }
     let writes = writes_for(placement);
     for (src, dst) in &writes {
         if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
         }
-        std::fs::copy(src, dst)?;
+        std::fs::copy(src, dst).with_context(|| {
+            format!("copying {} to {}", src.display(), dst.display())
+        })?;
     }
     Ok(writes.len())
 }
@@ -1056,8 +1080,15 @@ fn walk_merge(src: &Path, dst: &Path, out: &mut Vec<(PathBuf, PathBuf)>) {
         let target = dst.join(entry.file_name());
         match entry.file_type() {
             Ok(t) if t.is_dir() => walk_merge(&entry.path(), &target, out),
-            Ok(_) => out.push((entry.path(), target)),
-            Err(_) => {}
+            Ok(t) if t.is_file() => out.push((entry.path(), target)),
+            // Neither a file nor a directory: a symlink, a junction, or a link whose target
+            // has gone away. Handing one of these to `fs::copy` fails the *entire* install
+            // over a single entry — a dangling link with "os error 2", a junction with a
+            // permission error — so leave it out and say so. Following it is not the
+            // alternative: this walk runs over freshly extracted archives too, where a link
+            // is a stranger's idea of where our files should go (see `linkwalk`).
+            Ok(_) => log::warn!("skipping {} — not a regular file", entry.path().display()),
+            Err(e) => log::warn!("skipping {} — {e}", entry.path().display()),
         }
     }
 }
@@ -1828,6 +1859,57 @@ mod tests {
         place_mod(&ex, &mods, "bikes", "", "slug").unwrap();
         assert!(mods.join("bikes/cool.pnt").exists());
         assert!(!mods.join("bikes/paints").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Two installs alive at once must not share a staging folder.
+    ///
+    /// The download path used to name its work folder after the slug and wipe it on entry,
+    /// so retrying a failed install — a second run of the *same* slug — deleted the first
+    /// run's extracted files while it was still copying them. The player saw the copy fail
+    /// on a file that had been there a moment earlier ("os error 2").
+    #[test]
+    fn staging_dirs_never_collide() {
+        let a = staging_dir("dl");
+        let b = staging_dir("dl");
+        assert_ne!(a, b, "a second install would wipe the first one's files");
+    }
+
+    /// An install that fails must say which file it died on. "os error 2" on its own is
+    /// unactionable in a bug report — it names neither the path nor which end it was.
+    #[test]
+    fn a_failed_copy_names_both_paths() {
+        let root = place_tmp("copy-err");
+        let ex = root.join("ex");
+        touch(&ex.join("cool.pnt"));
+        // A directory sitting where the file has to land: `copy` cannot overwrite it.
+        let mods = root.join("mods");
+        std::fs::create_dir_all(mods.join("bikes/cool.pnt")).unwrap();
+
+        let err = place_mod(&ex, &mods, "bikes", "", "slug").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("copying"), "{msg}");
+        assert!(msg.contains("cool.pnt"), "{msg}");
+        assert!(msg.contains(&mods.display().to_string()), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A link whose target is gone is one entry, not a reason to fail the whole install.
+    /// `fs::copy` follows it into nothing and reports the same "os error 2" a missing
+    /// source does, which used to take the other files down with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_link_is_skipped_rather_than_fatal() {
+        let root = place_tmp("dangling");
+        let ex = root.join("ex");
+        touch(&ex.join("real.pnt"));
+        std::os::unix::fs::symlink(ex.join("gone.pnt"), ex.join("broken.pnt")).unwrap();
+
+        let mods = root.join("mods");
+        let n = place_mod(&ex, &mods, "bikes", "KTM/paints", "slug").unwrap();
+        assert_eq!(n, 1, "only the real file is installed");
+        assert!(mods.join("bikes/KTM/paints/real.pnt").exists());
+        assert!(!mods.join("bikes/KTM/paints/broken.pnt").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
