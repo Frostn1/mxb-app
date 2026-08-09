@@ -102,7 +102,7 @@ pub struct RiderArea {
     /// Library category for a model in this area.
     pub model_cat: &'static str,
     /// Library category for a paint in `<model>/paints`. `None` when the area holds
-    /// models that can't be painted — GP Bikes' `animations` are riding styles, not gear.
+    /// models that can't be painted — `animations` are riding styles, not gear.
     pub paint_cat: Option<&'static str>,
     /// The area's models can carry a `goggles/` folder alongside `paints/`. MX Bikes
     /// helmets do; GP Bikes' road helmets use visors and have no such folder.
@@ -237,6 +237,16 @@ pub static MXB: GameProfile = GameProfile {
                 paint_cat: Some("protectionPaint"),
                 goggles: false,
                 installable: false,
+            },
+            // Riding-style animations, same folder and same `[riding_style]` profile slot as
+            // GP Bikes — `mxbikes.exe` reads `rider\animations\<name>\<name>.ini` exactly as
+            // `gpbikes.exe` does. Models with nothing to paint, so no paint category.
+            RiderArea {
+                folder: "animations",
+                model_cat: "animation",
+                paint_cat: None,
+                goggles: false,
+                installable: true,
             },
         ],
         gloves: true,

@@ -183,7 +183,7 @@ export type LibraryCategory =
   | "protectionPaint"
   | "gloves"
   | "outfit"
-  /** GP Bikes riding-style animation. */
+  /** A riding-style animation from `mods/rider/animations`. Both titles. */
   | "animation"
   | "misc";
 
@@ -774,7 +774,7 @@ export type SlotSource =
   | "protection" // protection models
   | "protectionPaint" // paints for the selected protection
   | "rider" // rider profile (default_mx / default_sm)
-  | "ridingStyle" // mx / sm
+  | "ridingStyle" // stock mx / sm, plus installed `rider/animations` styles
   | "tyres" // tyre models
   | "font"; // number-plate / suit fonts (free text)
 

@@ -336,7 +336,7 @@ export interface RiderTargets {
   helmets: string[];
   boots: string[];
   protection: string[];
-  /** GP Bikes riding-style animations. Always empty for MX Bikes. */
+  /** Riding-style animations. Both titles read `mods/rider/animations/<name>/`. */
   animations: string[];
   /** What `mods/rider/riders` holds: MX Bikes' rider profiles, GP Bikes' rider models. */
   profiles: string[];

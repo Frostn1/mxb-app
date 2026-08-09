@@ -181,7 +181,8 @@ pub struct RiderTargets {
     pub helmets: Vec<String>,
     pub boots: Vec<String>,
     pub protection: Vec<String>,
-    /// GP Bikes riding-style animations. Always empty for MX Bikes.
+    /// Riding-style animations. Both titles read `mods/rider/animations/<name>/` and record
+    /// the pick in `profile.ini`'s `[riding_style]`.
     pub animations: Vec<String>,
     pub profiles: Vec<String>,
 }
@@ -230,7 +231,7 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
         // the folders simply aren't there, and `models_in` returns empty for those.
         boots: models_in(&base.join("boots")),
         protection: models_in_areas(&base, crate::game::PROTECTION_AREAS),
-        // GP Bikes' riding-style animations. Nothing writes here for MX Bikes.
+        // Riding-style animations, which both titles keep here.
         animations: models_in(&base.join("animations")),
         // A rider model can be packed as `riders/<name>.pkz` just as gear can, and a
         // profile the picker never lists is a model nobody can wear.
@@ -811,6 +812,8 @@ mod tests {
         touch(&base.join("gloves/Flexair.pnt"));
         touch(&base.join("riders/default_mx/paints/Kit.pnt"));
         touch(&base.join("riders/default_mx/gloves/G.pnt"));
+        touch(&base.join("animations/Scrub/Scrub.ini"));
+        touch(&base.join("animations/Whip.pkz"));
 
         let v = scan_library(root.to_str().unwrap(), "mods/rider", &[], &crate::game::MXB).unwrap();
         let has = |c: &str| v.iter().any(|e| e.category == c);
@@ -826,12 +829,35 @@ mod tests {
         assert!(has("gloves"), "gloves");
         assert!(has("outfit"), "outfit/kit");
         assert_eq!(cat(&v, "Kit.pnt").unwrap().parent.as_deref(), Some("default_mx"));
+        // Riding styles are not a GP Bikes exclusive: `mxbikes.exe` reads the same
+        // `rider\animations\<name>\` folder, so both packagings have to surface here or the
+        // Riding style picker has nothing to offer but the two stock styles.
+        assert!(has("animation"), "riding-style animation as a folder");
+        assert!(
+            cat(&v, "Whip.pkz").is_some_and(|e| e.category == "animation"),
+            "a riding style packaged as a bare .pkz counts too",
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// GP Bikes' `mods/rider` is a different shape: helmets and riding-style animations,
-    /// no boots/protection/gloves folders (those are baked into the rider model), and no
-    /// goggles (road helmets use visors).
+    /// What the Riding style picker is fed. `scan_rider_targets` is game-agnostic, so this
+    /// is the same list for either title — the two stock styles (`mx`, `sm`) are not in it
+    /// because they live inside `rider.pkz` and leave nothing on disk to find.
+    #[test]
+    fn rider_targets_list_installed_riding_styles() {
+        let root = tmp("targets-animations");
+        let base = root.join("mods/rider");
+        touch(&base.join("animations/Scrub/Scrub.ini"));
+        touch(&base.join("animations/Whip.pkz"));
+
+        let t = scan_rider_targets(root.to_str().unwrap());
+        assert_eq!(t.animations, vec!["Scrub", "Whip"], "folder and .pkz both count");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// GP Bikes' `mods/rider` is a different shape: helmets and riding-style animations and
+    /// nothing else — no boots/protection/gloves folders (those are baked into the rider
+    /// model), and no goggles (road helmets use visors).
     #[test]
     fn surfaces_gp_bikes_rider_categories() {
         let root = tmp("lib-rider-gp");
