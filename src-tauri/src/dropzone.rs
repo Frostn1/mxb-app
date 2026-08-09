@@ -298,30 +298,14 @@ fn from_route_rule(rule: RouteRule) -> Option<Verdict> {
 
 const GEAR_DIRS: [&str; 4] = ["helmets", "boots", "protection", "riders"];
 
+// Link-following: what's being classified here is a folder the player dragged in from
+// their own disk, and a junction in it is theirs — see `crate::linkwalk`.
 fn files_in(dir: &Path) -> Vec<PathBuf> {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut v: Vec<PathBuf> = rd
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-        .map(|e| e.path())
-        .collect();
-    v.sort();
-    v
+    crate::linkwalk::files(dir)
 }
 
 fn dirs_in(dir: &Path) -> Vec<PathBuf> {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut v: Vec<PathBuf> = rd
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .map(|e| e.path())
-        .collect();
-    v.sort();
-    v
+    crate::linkwalk::subdirs(dir)
 }
 
 /// Identify a directory that `plan_placement` had no opinion about.

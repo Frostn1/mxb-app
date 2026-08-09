@@ -16,6 +16,7 @@ mod gameproc;
 mod imgcache;
 mod install;
 mod library;
+mod linkwalk;
 mod lru;
 mod modelswap;
 mod mods;

@@ -1,9 +1,9 @@
 use crate::game::GameProfile;
+use crate::linkwalk;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,7 +142,7 @@ pub fn scan_mods(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<Installed
     }
 
     let mut items = Vec::new();
-    for entry in WalkDir::new(&dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in linkwalk::walk(&dir).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
             continue;
         }
@@ -403,7 +403,7 @@ fn sort_entries(v: &mut [LibraryEntry]) {
 /// every track found so far.
 fn scan_tracks(dir: &Path) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
-    let mut walk = WalkDir::new(dir).into_iter();
+    let mut walk = linkwalk::walk(dir).into_iter();
 
     loop {
         let entry = match walk.next() {
@@ -457,7 +457,7 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
         }
     }
 
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in linkwalk::walk(dir).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
             continue;
         }
@@ -554,7 +554,7 @@ fn scan_rider(dir: &Path, game: &GameProfile) -> Vec<LibraryEntry> {
 
 fn scan_generic(dir: &Path) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in linkwalk::walk(dir).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() && has_ext(entry.path(), "pkz") {
             out.push(make_entry(dir, entry.path(), "misc", None));
         }
@@ -698,6 +698,71 @@ mod tests {
         let swap = cat(&v, "OEM2024.pkz").unwrap();
         assert_eq!(swap.category, "bikeModelSwap");
         assert_eq!(swap.parent.as_deref(), Some("KTM450"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The shared-paints layout, which is what a player with six rider models and one set
+    /// of liveries actually has on disk: the `paints` folders are links to a single folder
+    /// living somewhere else entirely. The game reads them; before this the app didn't,
+    /// and the only way to use it was six copies of every paint.
+    #[cfg(unix)]
+    #[test]
+    fn finds_paints_in_a_folder_that_is_really_a_link() {
+        let root = tmp("lib-linked-paints");
+        let shared = root.join("D_drive/Shared Paints");
+        touch(&shared.join("Frost.pnt"));
+
+        let bikes = root.join("mods/bikes");
+        touch(&bikes.join("KTM450/model.edf"));
+        std::os::unix::fs::symlink(&shared, bikes.join("KTM450/paints")).unwrap();
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let paint = cat(&v, "Frost.pnt").expect("the livery behind the link is found");
+        assert_eq!(paint.category, "bikePaint");
+        assert_eq!(paint.parent.as_deref(), Some("KTM450"));
+        assert_eq!(
+            paint.folder, "KTM450/paints",
+            "and is addressed where it appears in the tree, not where it's stored",
+        );
+
+        // Same folder, reached through two rider models — each must list it.
+        let riders = root.join("mods/rider/riders");
+        for who in ["Male", "Female"] {
+            fs::create_dir_all(riders.join(who)).unwrap();
+            std::os::unix::fs::symlink(&shared, riders.join(who).join("paints")).unwrap();
+        }
+        let v = scan_library(root.to_str().unwrap(), "mods/rider", &[], &crate::game::MXB).unwrap();
+        let owners: Vec<&str> = v
+            .iter()
+            .filter(|e| e.name == "Frost.pnt")
+            .filter_map(|e| e.parent.as_deref())
+            .collect();
+        assert_eq!(owners, vec!["Female", "Male"], "one paint, worn by both models");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A whole content folder moved to another drive and linked back in — the split
+    /// layout, rather than a single shared leaf.
+    #[cfg(unix)]
+    #[test]
+    fn scans_a_type_folder_that_lives_on_another_drive() {
+        let root = tmp("lib-linked-tracks");
+        let elsewhere = root.join("D_drive/tracks");
+        touch(&elsewhere.join("Packed.pkz"));
+        touch(&elsewhere.join("Loose Track/Loose.map"));
+        fs::create_dir_all(root.join("mods")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, root.join("mods/tracks")).unwrap();
+
+        let v = scan_library(root.to_str().unwrap(), "mods/tracks", &[], &crate::game::MXB).unwrap();
+        assert!(cat(&v, "Packed.pkz").is_some());
+        assert!(cat(&v, "Loose Track").is_some_and(|e| e.category == "track"));
+
+        // And the plain `.pkz` listing Manage reads is the same tree.
+        let mods = scan_mods(root.to_str().unwrap(), "mods/tracks").unwrap();
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0].name, "Packed.pkz");
+
         let _ = fs::remove_dir_all(&root);
     }
 

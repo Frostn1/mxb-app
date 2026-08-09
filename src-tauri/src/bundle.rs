@@ -249,7 +249,7 @@ fn dedup_assets(assets: &mut Vec<AssetRef>) {
 
 fn dir_size_deep(dir: &Path) -> u64 {
     let mut total = 0;
-    for e in walkdir::WalkDir::new(dir).into_iter().flatten() {
+    for e in crate::linkwalk::walk(dir).into_iter().flatten() {
         if e.file_type().is_file() {
             total += e.metadata().map(|m| m.len()).unwrap_or(0);
         }
@@ -378,18 +378,11 @@ fn rel_to_native(rel: &str) -> PathBuf {
     p
 }
 
+/// Copy an asset folder into the bundle, resolving any links inside it — a bundle is for
+/// someone else's machine, where the far end of the sender's junction doesn't exist. See
+/// [`crate::linkwalk::copy_tree`].
 fn copy_tree(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let target = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
+    Ok(crate::linkwalk::copy_tree(src, dst)?)
 }
 
 fn zip_dir(root: &Path, zip_path: &Path) -> anyhow::Result<()> {
