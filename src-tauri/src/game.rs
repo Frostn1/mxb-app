@@ -326,6 +326,21 @@ pub static GPB: GameProfile = GameProfile {
 /// correctly-packed archive.
 pub const ALL_MODS_DIRS: [&str; 5] = ["bikes", "tracks", "rider", "tyres", "misc"];
 
+/// Every folder under `mods/rider` that holds *models*, each model a folder of its own.
+///
+/// The union across titles, for the reason [`ALL_MODS_DIRS`] is one: its job is recognition
+/// — deciding whether a chosen destination names an *area* (so what is being installed is a
+/// new model, which needs a folder) or names a model already (so the content merges into
+/// it). Routing stays per-game. `riders` is listed too: a profile is a folder of files
+/// exactly as a helmet is, even though it carries no [`RiderArea`] of its own.
+pub const RIDER_MODEL_AREAS: [&str; 6] =
+    ["helmets", "boots", "protections", "protection", "animations", "riders"];
+
+/// Whether `name` is one of [`RIDER_MODEL_AREAS`], case-insensitively.
+pub fn is_rider_model_area(name: &str) -> bool {
+    RIDER_MODEL_AREAS.iter().any(|a| a.eq_ignore_ascii_case(name))
+}
+
 /// One gear area as the install pickers need it: where it is, and what may sit inside.
 ///
 /// The library's own view of an area is [`RiderArea`], which also carries the categories a
@@ -444,6 +459,23 @@ mod tests {
                     ALL_MODS_DIRS.contains(dir),
                     "{} has a `{dir}` folder that ALL_MODS_DIRS doesn't list",
                     g.id(),
+                );
+            }
+        }
+    }
+
+    /// `RIDER_MODEL_AREAS` only works as a recogniser if it really is the union — an area
+    /// it doesn't list would have a new model installed loose into the area folder instead
+    /// of into a folder of its own.
+    #[test]
+    fn rider_model_areas_covers_every_game() {
+        for g in Game::ALL {
+            for area in g.profile().rider.areas {
+                assert!(
+                    is_rider_model_area(area.folder),
+                    "{} has a `{}` area that RIDER_MODEL_AREAS doesn't list",
+                    g.id(),
+                    area.folder,
                 );
             }
         }

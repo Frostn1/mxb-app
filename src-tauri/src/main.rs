@@ -13,6 +13,7 @@ mod frostmod;
 mod frostmod_manage;
 mod game;
 mod gameproc;
+mod gearrepair;
 mod imgcache;
 mod install;
 mod library;
@@ -349,6 +350,29 @@ async fn scan_rider_targets(app: tauri::AppHandle) -> Result<library::RiderTarge
 fn scan_rider_targets_blocking(app: tauri::AppHandle) -> Result<library::RiderTargets, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     Ok(library::scan_rider_targets(&cfg.mods_path))
+}
+
+/// Gear areas holding a model the game can't reach, because its files sit loose in the area
+/// root instead of in a folder. See [`gearrepair`] for how that happened and what moves.
+#[tauri::command]
+async fn scan_gear_repairs(app: tauri::AppHandle) -> Result<Vec<gearrepair::GearRepair>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(gearrepair::plan(&cfg.mods_path))
+    })
+    .await
+    .map_err(|e| format!("scan_gear_repairs task failed: {e}"))?
+}
+
+/// Gather one area's loose content into a folder of its own. Returns how many entries moved.
+#[tauri::command]
+async fn repair_gear_area(app: tauri::AppHandle, area: String) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        gearrepair::apply_one(&cfg.mods_path, &area).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("repair_gear_area task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -4550,6 +4574,8 @@ fn main() {
             paint_studio_extract,
             paint_studio_hints,
             scan_rider_targets,
+            scan_gear_repairs,
+            repair_gear_area,
             scan_bike_targets,
             scan_model_swaps,
             apply_model_swap,
@@ -5164,6 +5190,7 @@ mod viewer_tests {
             }
         }
     }
+
 
     #[test]
     #[ignore]

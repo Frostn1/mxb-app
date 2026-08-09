@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, AlertTriangle, Save, Loader2 } from "lucide-react";
+import { RefreshCw, AlertTriangle, Save, Loader2, FolderInput } from "lucide-react";
 import { toast } from "sonner";
 import { useT, type TKey } from "../../i18n/context";
 import { Button } from "../ui/button";
@@ -7,7 +7,12 @@ import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import type { Loadout, RiderPart } from "../../types";
-import { presetsSave } from "../../api/mods";
+import {
+  presetsSave,
+  scanGearRepairs,
+  repairGearArea,
+  type GearRepair,
+} from "../../api/mods";
 import { ViewerPanel } from "../Viewer/ViewerPanel";
 import { SlotField } from "../Presets/SlotField";
 import {
@@ -43,6 +48,11 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   // reason to hide the slot the rider tab is most often opened for.
   const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Gear installed loose in an area root — see `gearrepair` on the Rust side. Surfaced here
+  // because this is the tab where the damage shows: the model is missing from its picker and
+  // `paints` is offered in its place.
+  const [repairs, setRepairs] = useState<GearRepair[]>([]);
+  const [repairing, setRepairing] = useState<string | null>(null);
   // Paints the chosen models carry, merged with the loose ones the scan found.
   const { optionsFor, missingFor } = useGearPaints(loadout);
 
@@ -95,11 +105,37 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
     } catch (e) {
       setError(String(e));
     }
+    // Never fatal: a mods folder that can't be inspected for this is still a mods folder,
+    // and the tab has to open either way.
+    setRepairs(await scanGearRepairs().catch(() => []));
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const onRepair = useCallback(
+    async (r: GearRepair) => {
+      setRepairing(r.area);
+      try {
+        const moved = await repairGearArea(r.area);
+        toast.success(
+          moved
+            ? t("rider.repairDone", { count: moved, model: r.model })
+            : t("rider.repairNothing"),
+        );
+        // Re-scan rather than dropping the banner locally: gathering changes what the
+        // pickers can offer, and the model that was invisible a moment ago is the whole
+        // point of having done it.
+        await load();
+      } catch (e) {
+        toast.error(String(e).replace(/^Error:\s*/, ""));
+      } finally {
+        setRepairing(null);
+      }
+    },
+    [load, t],
+  );
 
   const grouped = useMemo(
     () => RIDER_GROUPS.map((g) => ({ ...g, slots: SLOTS.filter((s) => s.group === g.id) })),
@@ -143,6 +179,42 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
           {error}
         </div>
       )}
+
+      {repairs.map((r) => (
+        <div
+          key={r.area}
+          className="mx-7 mb-3 flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[12.5px]"
+        >
+          <FolderInput className="mt-0.5 size-4 flex-none text-amber-500" />
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="font-semibold">
+              {t("rider.repairTitle", { area: r.area })}
+            </span>
+            <span className="text-muted-foreground">
+              {t("rider.repairBody", { area: r.area, model: r.model })}
+            </span>
+            {/* The exact list, because this moves files on disk and the person clicking
+                should be able to see what it will touch before it does. */}
+            <span className="truncate text-[11px] text-faint" title={r.items.join(", ")}>
+              {r.items.join(", ")}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-none"
+            disabled={repairing !== null}
+            onClick={() => void onRepair(r)}
+          >
+            {repairing === r.area ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <FolderInput className="size-3.5" />
+            )}
+            {t("rider.repairAction")}
+          </Button>
+        </div>
+      ))}
 
       <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
         {/* Picker column */}

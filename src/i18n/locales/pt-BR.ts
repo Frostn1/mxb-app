@@ -212,6 +212,13 @@ export const ptBR: Translation = {
   "rider.namePlaceholder": "Dê um nome a este piloto…",
   "rider.nameFirst": "Primeiro dê um nome a este visual.",
   "rider.showOnModel": "Mostrar no modelo",
+  "rider.repairTitle": "Um mod de {{area}} foi instalado solto",
+  "rider.repairBody":
+    "Os arquivos dele estão direto em {{area}} em vez de numa pasta, então nem o jogo nem este app conseguem carregá-lo. Juntar tudo em “{{model}}”?",
+  "rider.repairAction": "Reparar",
+  "rider.repairDone_one": "{{count}} arquivo juntado em “{{model}}”.",
+  "rider.repairDone_other": "{{count}} arquivos juntados em “{{model}}”.",
+  "rider.repairNothing": "Não sobrou nada para juntar.",
 
   // ── Tour guiado ────────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Faça um tour rápido",
