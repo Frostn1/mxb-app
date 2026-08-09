@@ -67,6 +67,11 @@ export const en = {
   "frostmod.started": "FrostMod started",
   "frostmod.alreadyRunning": "FrostMod is already running",
   "frostmod.startFailed": "Couldn't start FrostMod",
+  "frostmod.stop": "Stop FrostMod",
+  "frostmod.stopped": "FrostMod stopped",
+  "frostmod.stopFailed": "Couldn't stop FrostMod",
+  "frostmod.stopFailedDesc":
+    "It's still running — it may have been started by another user or with administrator rights.",
   "frostmod.installedToast": "FrostMod {{version}} installed",
   "frostmod.installedToastDesc":
     "It'll live-reload the game when you add mods.",

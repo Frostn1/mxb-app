@@ -68,6 +68,11 @@ export const es: Translation = {
   "frostmod.started": "FrostMod iniciado",
   "frostmod.alreadyRunning": "FrostMod ya está en ejecución",
   "frostmod.startFailed": "No se pudo iniciar FrostMod",
+  "frostmod.stop": "Detener FrostMod",
+  "frostmod.stopped": "FrostMod detenido",
+  "frostmod.stopFailed": "No se pudo detener FrostMod",
+  "frostmod.stopFailedDesc":
+    "Sigue en ejecución: puede que lo haya iniciado otro usuario o que se ejecute con permisos de administrador.",
   "frostmod.installedToast": "FrostMod {{version}} instalado",
   "frostmod.installedToastDesc":
     "Recargará el juego en caliente cuando añadas mods.",

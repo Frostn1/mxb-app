@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
 /// FrostMod's GitHub repo — releases carry `frostmod.exe` + `frostmod.dll`.
@@ -518,6 +518,37 @@ pub fn force_stop_exe() {
 
 #[cfg(not(windows))]
 pub fn force_stop_exe() {}
+
+/// How long to wait for a stopped FrostMod to actually go before calling it a failure.
+const STOP_TIMEOUT: Duration = Duration::from_millis(1000);
+const STOP_POLL: Duration = Duration::from_millis(50);
+
+/// Stop FrostMod however it was started, reporting whether it's actually gone.
+///
+/// `stop` alone only reaches a child *this* app session spawned, so a FrostMod left behind
+/// by a previous session — or one the player launched by hand — walked away from it while
+/// the status pill kept reading "running". `force_stop_exe` is what reaches those; the two
+/// together are the same pair `set_active_game` uses to make a game switch take.
+///
+/// `taskkill` returns before the process has finished exiting, so the reload event can
+/// outlive the call by a moment. Wait for it to go rather than report a kill we never saw
+/// land: a "FrostMod stopped" toast over a FrostMod that's still running is worse than no
+/// button at all, and the honest failure is actionable (it's elevated, or another user's).
+pub fn stop_running(state: &FrostmodProcess) -> bool {
+    stop(state);
+    force_stop_exe();
+    let deadline = Instant::now() + STOP_TIMEOUT;
+    loop {
+        if !crate::frostmod::is_running() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            log::warn!("FrostMod is still running {STOP_TIMEOUT:?} after being asked to stop");
+            return false;
+        }
+        std::thread::sleep(STOP_POLL);
+    }
+}
 
 #[cfg(test)]
 mod tests {

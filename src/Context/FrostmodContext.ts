@@ -22,6 +22,8 @@ export interface FrostmodContextValue {
   install: () => Promise<void>;
   /** Launch FrostMod now if it isn't already running. */
   start: () => Promise<void>;
+  /** Stop FrostMod now, whether or not this app started it. */
+  stop: () => Promise<void>;
 }
 
 // Kept in a component-free module (like Config.ts) so the context identity stays

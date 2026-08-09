@@ -3537,9 +3537,14 @@ fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Resul
     frostmod_manage::start(&app, &state).map_err(|e| format!("{e:#}"))
 }
 
+/// Stop FrostMod now, whoever started it — ours to kill or not. `false` means it's still
+/// running (elevated, or another user's), which the UI reports rather than papering over.
+///
+/// Async for the same reason as `set_mods_path`: a sync command runs on the UI thread, and
+/// this one waits out the moment between the kill and the process actually going.
 #[tauri::command]
-fn frostmod_stop(state: State<FrostmodProcess>) {
-    frostmod_manage::stop(&state);
+async fn frostmod_stop(state: State<'_, FrostmodProcess>) -> Result<bool, String> {
+    Ok(frostmod_manage::stop_running(&state))
 }
 
 #[tauri::command]

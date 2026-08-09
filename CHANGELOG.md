@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-09 — stopping FrostMod from the app
+
+### Added
+- **FrostMod can be stopped from the app.** The sidebar pill and the FrostMod section in
+  Settings now offer a stop control while it's running, next to the reload and start ones —
+  until now the only way out was Task Manager or quitting the app from the tray. It stops
+  FrostMod whoever started it: a `frostmod.exe` left behind by an earlier session, or one
+  launched by hand, is no longer out of reach just because this app didn't spawn it. The app
+  waits for the process to actually go before saying it stopped, so a FrostMod that survives
+  the attempt (running elevated, or as another user) is reported rather than papered over with
+  a success message the status pill contradicts a second later. Stopping is a one-off — it
+  doesn't touch the "Run FrostMod automatically" setting, so the next app launch behaves as
+  configured.
 ## 2026-08-09 — an installer that can always replace the app it's updating
 
 ### Fixed

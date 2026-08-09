@@ -8,6 +8,7 @@ import {
   Settings,
   RefreshCw,
   Play,
+  Square,
   Loader2,
   Gamepad2,
   SlidersHorizontal,
@@ -102,7 +103,7 @@ const STARTING_TIMEOUT_MS = 15000;
 
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const t = useT();
-  const { running, reload, status, start } = useFrostmod();
+  const { running, reload, status, start, stop } = useFrostmod();
   const { active, queueLength } = useInstall();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const { game } = useConfig();
@@ -324,13 +325,22 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
                 : t("frostmod.notRunning")}
           </span>
           {running ? (
-            <button
-              onClick={onReload}
-              title={t("frostmod.reloadGame")}
-              className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <RefreshCw className="size-3.5" />
-            </button>
+            <>
+              <button
+                onClick={onReload}
+                title={t("frostmod.reloadGame")}
+                className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <RefreshCw className="size-3.5" />
+              </button>
+              <button
+                onClick={stop}
+                title={t("frostmod.stop")}
+                className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Square className="size-3.5" />
+              </button>
+            </>
           ) : (
             status?.installed && (
               <button
