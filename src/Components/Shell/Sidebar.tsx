@@ -13,6 +13,7 @@ import {
   Gamepad2,
   SlidersHorizontal,
   Store,
+  Palette,
   Server as ServerIcon,
   Plug,
 } from "lucide-react";
@@ -36,6 +37,7 @@ export type DashboardView =
   | "locker"
   | "presets"
   | "rider"
+  | "paints"
   | "servers"
   | "manage"
   | "settings";
@@ -65,6 +67,9 @@ const NAV: NavEntry[] = [
   { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
   { id: "presets", label: "nav.presets", icon: Shirt },
   { id: "rider", label: "nav.rider", icon: User, cap: "viewer" },
+  // Building a `.pnt` needs nothing game-specific, but its whole point is seeing the
+  // result on the model — so it rides with the rest of the 3D preview.
+  { id: "paints", label: "nav.paints", icon: Palette, cap: "viewer" },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
