@@ -1073,6 +1073,7 @@ export const ptBR: Translation = {
   "drop.kind.bikePaint": "Pintura",
   "drop.kind.soundSet": "Som",
   "drop.kind.riderGear": "Equipamento",
+  "drop.kind.reshadePreset": "Preset do ReShade",
   "drop.kind.unknown": "Desconhecido",
   "drop.reason.modsTree": "Contém uma pasta mods completa",
   "drop.reason.categoryDirs": "Contém pastas de motos/pistas/piloto",
@@ -1085,8 +1086,43 @@ export const ptBR: Translation = {
   "drop.reason.gearFolders": "Pastas de equipamento encontradas",
   "drop.reason.riderTexture": "Pinta o corpo do piloto — um equipamento",
   "drop.reason.gearTexture": "Pinta uma peça de equipamento",
+  "drop.reason.reshadePreset": "Lista técnicas do ReShade",
   "drop.reason.unrecognised": "Não reconhecido — você precisa colocá-lo",
 
+  // ── ReShade ────────────────────────────────────────────────────────────────
+  "settings.reshade": "ReShade",
+  "settings.reshadeDesc": "Presets de pós-processamento — como {{game}} aparece na tela.",
+  "modType.reshade": "ReShade",
+  "modType.reshadeInline": "presets do ReShade",
+  "reshade.needsGameFolder":
+    "Defina a pasta do {{game}} acima e os presets do ReShade aparecem aqui.",
+  "reshade.intro":
+    "O ReShade adiciona pós-processamento ao {{game}}. É uma ferramenta gratuita à parte: instale uma vez e depois escolha um preset aqui.",
+  "reshade.wrongApi":
+    "O ReShade está instalado como {{dll}}, que o {{game}} nunca carrega — ele usa OpenGL. Rode o instalador do ReShade de novo e escolha OpenGL.",
+  "reshade.step1": "Baixe o instalador em reshade.me.",
+  "reshade.step2": "Execute e escolha {{exe}} na sua pasta do {{game}}.",
+  "reshade.step3": "Escolha OpenGL quando perguntar — não DirectX.",
+  "reshade.getIt": "Obter o ReShade",
+  "reshade.recheck": "Verificar de novo",
+  "reshade.installed": "Instalado",
+  "reshade.installedVersion": "Instalado · {{version}}",
+  "reshade.off": "Desligado — sem efeitos",
+  "reshade.delete": "Excluir preset",
+  "reshade.deleted": "{{name}} excluído",
+  "reshade.applied": "{{name}} está ativo agora",
+  "reshade.appliedNextLaunch": "{{name}} está definido — vale na próxima vez que abrir",
+  "reshade.loosePreset": "Na sua pasta do jogo — não foi o MXB App que instalou",
+  "reshade.missingEffects_one": "Precisa de {{list}}, que não está instalado",
+  "reshade.missingEffects_other":
+    "Precisa de {{count}} efeitos que não estão instalados: {{list}}",
+  "reshade.noShaders":
+    "Nenhum efeito do ReShade está instalado, então os presets não vão mudar nada. Rode o instalador do ReShade de novo e escolha um pacote de shaders.",
+  "reshade.noPresets":
+    "Nenhum preset ainda — instale alguns em Explorar, ou solte um .ini aqui.",
+  "reshade.browseHint": "Mais presets em Explorar → ReShade.",
+  "reshade.nextLaunchHint":
+    "{{game}} está aberto — a mudança vale na próxima vez que abrir.",
   // ── Paint studio ───────────────────────────────────────────────────────────
   "paints.help":
     "Transforma arquivos .tga ou .png feitos no GIMP ou Photoshop em um .pnt que o jogo carrega — e descompacta uma pintura existente para usar como base.",

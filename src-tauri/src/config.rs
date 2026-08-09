@@ -229,6 +229,21 @@ impl AppConfig {
     /// keeps writing them to `Documents`. Anyone who uses that documented feature ends
     /// up with a split layout, and without this the app looked for profiles in a folder
     /// that never existed.
+    /// The game's *install* dir — where the executable and its core archives live.
+    ///
+    /// Deliberately never falls back to `mods_path` the way content lookups do. The two are
+    /// different places on a stock install (`Documents\PiBoSo\…` vs the Steam library), and
+    /// the things that want this one — ReShade's proxy DLL, the game's own files — are only
+    /// ever beside the executable. Returns an empty string when it isn't configured and Steam
+    /// detection finds nothing, which callers must treat as "don't know", not as "not there".
+    pub fn install_dir(&self) -> String {
+        let gp = self.game_path.trim();
+        if !gp.is_empty() {
+            return gp.to_string();
+        }
+        detect_game_path(self.game()).unwrap_or_default()
+    }
+
     pub fn profiles_dir(&self) -> PathBuf {
         let custom = self.profiles_path.trim();
         if !custom.is_empty() {

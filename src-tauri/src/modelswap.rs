@@ -78,14 +78,7 @@ fn variant_dir(mods_path: &str, bike: &str, name: &str) -> PathBuf {
     lib_dir(mods_path, bike).join(name)
 }
 
-fn is_simple_name(s: &str) -> bool {
-    !s.is_empty()
-        && s != "."
-        && s != ".."
-        && !s.contains('/')
-        && !s.contains('\\')
-        && !s.contains(':')
-}
+use crate::library::is_simple_name;
 
 fn read_active(mods_path: &str, bike: &str) -> String {
     fs::read_to_string(lib_dir(mods_path, bike).join(MARKER))

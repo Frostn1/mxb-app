@@ -1278,6 +1278,30 @@ mod client_tests {
         assert!(!d.title.is_empty());
     }
 
+    /// The ReShade Presets category the Settings card sends people to is real, populated,
+    /// and its posts carry downloads like any other mod.
+    ///
+    /// It is the one browse category whose id isn't shared with a folder in the mods tree,
+    /// so nothing else would notice if the site renumbered it — the tab would just come back
+    /// empty. `cargo test live_ -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_reshade_category_has_presets() {
+        const RESHADE: u32 = 174;
+        let mods = search("", RESHADE, 1, ModSort::Newest)
+            .await
+            .expect("search works");
+        eprintln!("ReShade category returned {} presets", mods.len());
+        assert!(!mods.is_empty(), "category {RESHADE} should not be empty");
+
+        let d = detail(&mods[0].slug).await.expect("detail works");
+        eprintln!("'{}': {} downloads", d.title, d.downloads.len());
+        assert!(
+            !d.downloads.is_empty(),
+            "a preset with no download can't be installed",
+        );
+    }
+
     /// Every sort the UI offers really is accepted by the catalog, and each one changes
     /// the order it hands back. `cargo test live_ -- --ignored --nocapture`
     #[tokio::test]
