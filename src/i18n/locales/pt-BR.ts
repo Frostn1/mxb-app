@@ -919,6 +919,19 @@ export const ptBR: Translation = {
   "showcase.whileGameRunning": "enquanto o MX Bikes está aberto",
   "showcase.releaseNotes": "Ler as notas da versão",
   "showcase.gotIt": "Entendi",
+  "showcase.v080.hero.title": "O MXB App também comanda o GP Bikes",
+  "showcase.v080.hero.body":
+    "Escolha seu jogo no primeiro início, ou troque quando quiser nas Configurações — o app inteiro acompanha: Biblioteca, Gerenciar, Presets, Jogar e uma aba Explorar servida pelo gpb-mods.com. As pastas de piloto do GP são lidas como do GP, não como as do MX Bikes, e o FrostMod recarrega ao vivo lá também. Cada jogo guarda suas próprias pastas, então sua configuração do MX Bikes fica intacta.",
+  "showcase.v080.shop":
+    "Uma aba Loja navega pelo mxbikes-shop.com e instala o que você comprou, sem sair do app.",
+  "showcase.v080.dropzone":
+    "Arraste qualquer coisa para a janela. Ele descobre o que é cada arquivo, mostra para onde vai e o que substituiria, e deixa você remanejar qualquer linha antes de instalar.",
+  "showcase.v080.destinations":
+    "Os mods caem na pasta que o jogo realmente lê — uma pintura na moto dela, uma pintura de capacete no capacete dele, um macacão de GP no seu modelo de piloto.",
+  "showcase.v080.protection":
+    "O slot de proteções funciona: cada peça desenhada em pé e inteira, e instalada onde o jogo procura.",
+  "showcase.v080.faster":
+    "As miniaturas ficam em cache e são desenhadas no tamanho exibido, então Explorar e a Loja abrem bem mais rápido.",
   "showcase.v070.hero.title": "Um overlay dentro do jogo, num atalho",
   "showcase.v070.hero.body": "Abre Preset, Locker e Browse por cima do MX Bikes — sem alt-tab. Esc devolve o controle na hora, e um preset escolhido aqui cai na sessão que você já está pilotando. Jogue sem bordas ou em janela: nada é desenhado por cima da tela cheia exclusiva.",
   "showcase.v070.hero.action": "Configurar o overlay",

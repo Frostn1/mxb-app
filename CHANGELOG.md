@@ -1,123 +1,15 @@
 # Changelog
 
-## 2026-08-09
-
-### Fixed
-- **GP Bikes suits go where GP Bikes reads them.** Every rider install landed in `mods/rider`
-  itself — the game never opens that folder, so a suit you'd just installed was nowhere in
-  the game. Suit paints now default to `riders/<your rider model>/paints`, rider models to
-  `riders`, helmet paints to `helmets/<model>/paints` and riding styles to `animations`,
-  which is exactly the set the game's loader reads and nothing else.
-- **The rider picker offers your game's folders, not the other one's.** GP Bikes was being
-  shown MX Bikes' `boots`, `protections`, gloves, goggles and `default_mx` rider — none of
-  which exist there — while `riders` and `animations` were missing entirely. Each title now
-  lists its own, and the folder you last picked is remembered per game.
-- **A suit paint knows which rider model it's for.** gpb-mods files suits under the model
-  family they fit — Modern 1, Modern 2, MGP 21 — and that now picks the installed model,
-  instead of falling back to whichever folder you used last.
-- **Quick-install stops dumping rider mods in the root.** One-click and bulk installs from
-  the Browse grid never asked the rider logic at all, so a helmet, kit or suit installed that
-  way ignored every gear folder. Both games.
-- **A dropped GP suit isn't filed as boots.** GP's suits carry the boots' textures because
-  the boots are part of the rider model, and the drop classifier read that as a boot paint —
-  aiming it at a folder GP Bikes has no loader for. Suit, outfit and arm textures now read as
-  the rider's body, and gear hints for folders your game doesn't have are ignored.
-- **A dropped protection paint goes to `protections`.** The drop route was still aiming at
-  the old singular spelling the game stopped reading.
-- **Protection is drawn the right way up.** Every piece in the slot rendered on its side: the
-  viewer assumed protection was authored the way the rider's body is, and it isn't — it takes
-  the same up-axis as a helmet, turned a quarter turn about it. Read off the meshes rather
-  than assumed, and checked against the game's own chest protector and neck brace, a tactical
-  vest, a Leatt, long hair and two chains. The library's quick-view had the same fault and now
-  faces a piece forward too.
-- **Installed protections show up at all.** The game keeps them in `mods/rider/protections`;
-  the app looked in — and installed to — `protection`, so nothing you dropped in the game's
-  folder was offered in the picker, and nothing the app installed was visible to the game.
-  New installs go to the game's folder; the old one is still read, so anything already there
-  keeps working.
-- **A protection set wears all of its pieces.** The game's own "Full" is a chest protector
-  *and* the neck brace worn with it, and only one of the two was drawn — a different one from
-  one run to the next. Every piece a mod declares is now drawn, each bound to its own mesh's
-  textures.
-- **Stock protection isn't a grey shape any more.** "Full" and "Neck" ship no paint of their
-  own, and the loader had nothing to dress them in; they now wear the texture baked into their
-  mesh, the same way a paintless mod already did.
-- **Chains hang where they belong.** A mesh whose geometry is a single group was placed twice,
-  which put a chain 35 cm below the rider and off to one side — most of the protection
-  category is chains. Gear now lands exactly on the bounds its own file states.
-- **A protection that ships sealed files loads out of a `.pkz` too**, not only out of a folder.
-- **The expanded 3D preview gives the model the window.** The title bar was taking half of it,
-  because the dialog laid its two rows out as an even grid.
-
-## 2026-08-08 — content behind a folder link is found
-
-### Fixed
-- **Paint folders shared between models with a junction or symlink are read again.** If you
-  keep one set of liveries and point several rider models at it — `mklink /J` on Windows, a
-  symlink on Linux and macOS — the app walked straight past the shared folder and showed
-  nothing in it, while the game loaded it fine. The only way to use the app was a copy of
-  every rider and glove paint per model. It now follows the link, so one folder can serve
-  all six of your rider models, and the paint is listed under each of them.
-
-  The cause is the same everywhere it bit: a junction is a *link*, and a directory listing
-  reports it as one rather than as a folder, so a scan that trusted the listing never
-  looked inside. That affected every content scan, not just paints — the Library, Manage,
-  the mod-detail panel, preset bundles and paint sync all shared it.
-- **A content folder that lives on another drive and is linked into place is scanned.** The
-  split layout — `mods\tracks` (or `bikes`, or `rider`) junctioned to somewhere with room
-  for it — used to come up empty.
-- **Auto-reload notices changes made behind a link.** A recursive watch stops at a
-  junction, so dropping a paint into the shared folder never pulsed FrostMod. The folders
-  those links point at are now watched too, and a change in one names every mod pointing
-  at it.
-- **Bundling a preset whose gear folder contains a link no longer fails.** The linked
-  folder's contents are copied into the bundle as real files, since the far end of your
-  junction doesn't exist on the machine that opens it.
-
-Extracted archives are deliberately left alone: a link inside a download you didn't make is
-still refused, which is what stops an archive writing outside the folder it unpacks into.
-
-## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
+## 2026-08-09 — v0.8.0 — GP Bikes, the MXB Shop, and a dropzone that takes anything
 
 ### Added
+
 - **Opening a paint in 3D now shows the model it was painted for, wearing it.** Click a
   livery, a helmet paint or a goggle paint and the viewer loads the bike or helmet it belongs
   to and selects that paint in the picker, instead of draping the textures over a stock body
   that was never the shape they were drawn against. A paint whose model isn't installed still
   previews the way it did before.
 
-### Changed
-- **The Library's 3D button says what it does.** The bare square on each row is now a
-  labelled **View in 3D**.
-- **Settings spells out which folder to pick.** The app wants your MX Bikes folder — the one
-  holding `mods` and `profiles` — not the `mods` folder inside it, which is one click deeper
-  in the picker and easy to land on. The setting now says so, and picking `mods` by mistake
-  quietly resolves to the folder above it (Settings says which one it took) rather than
-  leaving you with a library that scans nothing and a path that looks perfectly reasonable.
-
-### Fixed
-- **Helmets whose goggles came out wearing the helmet's paint.** The Bell Moto 10 packs are
-  the clear case: shell, tear-off, lens and goggle frame each ended up in the wrong texture,
-  the goggle worst of all. Three faults behind it, all in how a model's textures are counted
-  and matched:
-  - A helmet needn't ship the sheet its paints replace, and the Moto 10 doesn't — it names
-    it and leaves the pixels to the `.pnt`. That slot was going uncounted, so every piece
-    was drawn from its neighbour's texture.
-  - A one-character texture name (the Oakley pack calls its goggle sheet `O`) was skipped
-    entirely, sliding everything after it by one.
-  - Which pieces are the goggles was decided from their names, and a helmet names its
-    goggle group after the goggle it ships — `Armega`, `Airbrake` — not "goggles". It is now
-    decided by which paint supplies the texture the piece is drawn from, which is the mod's
-    own answer.
-- **Pieces no paint covers keep their own look.** A tear-off film, a visor, anything an author
-  baked into the mesh and left out of the `.pnt` used to have the shell's paint stretched
-  across it.
-- **A "Stock" option that showed a helmet in the wrong texture.** It's offered only where the
-  mesh really carries the sheet that side's paints replace.
-
-## 2026-08-08 — v0.8.0 — GP Bikes, dedicated servers, and paint sync
-
-### Added
 - **FrostMod's live mod reload now works for GP Bikes.** The status panel, the reload button
   and the watch-the-folder auto-reload are all available when GP Bikes is the active game —
   they were hidden before because FrostMod only knew about MX Bikes. The app launches it
@@ -284,6 +176,15 @@ still refused, which is what stops an archive writing outside the folder it unpa
   called itself the release it precedes.
 
 ### Changed
+
+- **The Library's 3D button says what it does.** The bare square on each row is now a
+  labelled **View in 3D**.
+- **Settings spells out which folder to pick.** The app wants your MX Bikes folder — the one
+  holding `mods` and `profiles` — not the `mods` folder inside it, which is one click deeper
+  in the picker and easy to land on. The setting now says so, and picking `mods` by mistake
+  quietly resolves to the folder above it (Settings says which one it took) rather than
+  leaving you with a library that scans nothing and a path that looks perfectly reasonable.
+
 - **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
   is a compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for
   GP Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
@@ -334,6 +235,97 @@ still refused, which is what stops an archive writing outside the folder it unpa
   was built for it.
 
 ### Fixed
+
+- **GP Bikes suits go where GP Bikes reads them.** Every rider install landed in `mods/rider`
+  itself — the game never opens that folder, so a suit you'd just installed was nowhere in
+  the game. Suit paints now default to `riders/<your rider model>/paints`, rider models to
+  `riders`, helmet paints to `helmets/<model>/paints` and riding styles to `animations`,
+  which is exactly the set the game's loader reads and nothing else.
+- **The rider picker offers your game's folders, not the other one's.** GP Bikes was being
+  shown MX Bikes' `boots`, `protections`, gloves, goggles and `default_mx` rider — none of
+  which exist there — while `riders` and `animations` were missing entirely. Each title now
+  lists its own, and the folder you last picked is remembered per game.
+- **A suit paint knows which rider model it's for.** gpb-mods files suits under the model
+  family they fit — Modern 1, Modern 2, MGP 21 — and that now picks the installed model,
+  instead of falling back to whichever folder you used last.
+- **Quick-install stops dumping rider mods in the root.** One-click and bulk installs from
+  the Browse grid never asked the rider logic at all, so a helmet, kit or suit installed that
+  way ignored every gear folder. Both games.
+- **A dropped GP suit isn't filed as boots.** GP's suits carry the boots' textures because
+  the boots are part of the rider model, and the drop classifier read that as a boot paint —
+  aiming it at a folder GP Bikes has no loader for. Suit, outfit and arm textures now read as
+  the rider's body, and gear hints for folders your game doesn't have are ignored.
+- **A dropped protection paint goes to `protections`.** The drop route was still aiming at
+  the old singular spelling the game stopped reading.
+- **Protection is drawn the right way up.** Every piece in the slot rendered on its side: the
+  viewer assumed protection was authored the way the rider's body is, and it isn't — it takes
+  the same up-axis as a helmet, turned a quarter turn about it. Read off the meshes rather
+  than assumed, and checked against the game's own chest protector and neck brace, a tactical
+  vest, a Leatt, long hair and two chains. The library's quick-view had the same fault and now
+  faces a piece forward too.
+- **Installed protections show up at all.** The game keeps them in `mods/rider/protections`;
+  the app looked in — and installed to — `protection`, so nothing you dropped in the game's
+  folder was offered in the picker, and nothing the app installed was visible to the game.
+  New installs go to the game's folder; the old one is still read, so anything already there
+  keeps working.
+- **A protection set wears all of its pieces.** The game's own "Full" is a chest protector
+  *and* the neck brace worn with it, and only one of the two was drawn — a different one from
+  one run to the next. Every piece a mod declares is now drawn, each bound to its own mesh's
+  textures.
+- **Stock protection isn't a grey shape any more.** "Full" and "Neck" ship no paint of their
+  own, and the loader had nothing to dress them in; they now wear the texture baked into their
+  mesh, the same way a paintless mod already did.
+- **Chains hang where they belong.** A mesh whose geometry is a single group was placed twice,
+  which put a chain 35 cm below the rider and off to one side — most of the protection
+  category is chains. Gear now lands exactly on the bounds its own file states.
+- **A protection that ships sealed files loads out of a `.pkz` too**, not only out of a folder.
+- **The expanded 3D preview gives the model the window.** The title bar was taking half of it,
+  because the dialog laid its two rows out as an even grid.
+
+- **Paint folders shared between models with a junction or symlink are read again.** If you
+  keep one set of liveries and point several rider models at it — `mklink /J` on Windows, a
+  symlink on Linux and macOS — the app walked straight past the shared folder and showed
+  nothing in it, while the game loaded it fine. The only way to use the app was a copy of
+  every rider and glove paint per model. It now follows the link, so one folder can serve
+  all six of your rider models, and the paint is listed under each of them.
+
+  The cause is the same everywhere it bit: a junction is a *link*, and a directory listing
+  reports it as one rather than as a folder, so a scan that trusted the listing never
+  looked inside. That affected every content scan, not just paints — the Library, Manage,
+  the mod-detail panel, preset bundles and paint sync all shared it.
+- **A content folder that lives on another drive and is linked into place is scanned.** The
+  split layout — `mods\tracks` (or `bikes`, or `rider`) junctioned to somewhere with room
+  for it — used to come up empty.
+- **Auto-reload notices changes made behind a link.** A recursive watch stops at a
+  junction, so dropping a paint into the shared folder never pulsed FrostMod. The folders
+  those links point at are now watched too, and a change in one names every mod pointing
+  at it.
+- **Bundling a preset whose gear folder contains a link no longer fails.** The linked
+  folder's contents are copied into the bundle as real files, since the far end of your
+  junction doesn't exist on the machine that opens it.
+
+Extracted archives are deliberately left alone: a link inside a download you didn't make is
+still refused, which is what stops an archive writing outside the folder it unpacks into.
+
+- **Helmets whose goggles came out wearing the helmet's paint.** The Bell Moto 10 packs are
+  the clear case: shell, tear-off, lens and goggle frame each ended up in the wrong texture,
+  the goggle worst of all. Three faults behind it, all in how a model's textures are counted
+  and matched:
+  - A helmet needn't ship the sheet its paints replace, and the Moto 10 doesn't — it names
+    it and leaves the pixels to the `.pnt`. That slot was going uncounted, so every piece
+    was drawn from its neighbour's texture.
+  - A one-character texture name (the Oakley pack calls its goggle sheet `O`) was skipped
+    entirely, sliding everything after it by one.
+  - Which pieces are the goggles was decided from their names, and a helmet names its
+    goggle group after the goggle it ships — `Armega`, `Airbrake` — not "goggles". It is now
+    decided by which paint supplies the texture the piece is drawn from, which is the mod's
+    own answer.
+- **Pieces no paint covers keep their own look.** A tear-off film, a visor, anything an author
+  baked into the mesh and left out of the `.pnt` used to have the shell's paint stretched
+  across it.
+- **A "Stock" option that showed a helmet in the wrong texture.** It's offered only where the
+  mesh really carries the sheet that side's paints replace.
+
 - **A config written by an older build lost track of which game was active.** Builds that
   predate multi-game support read the config fine but rewrite it without `activeGame` and
   `games` — so running one once (a downgrade, or the shipped app alongside a newer build)
@@ -446,10 +438,12 @@ still refused, which is what stops an archive writing outside the folder it unpa
   other.
 
 ### Notes
+
 - Instant profile refresh stays MX Bikes only. Unlike FrostMod's reload, it calls a
   hardcoded `mxbikes.exe` function offset, and there's no GP equivalent yet.
 
 ### Security
+
 - A paint carries the destination it should be written to, and that path arrives from
   another player. It's validated twice — once by the service and again in the app before it
   becomes a real path — because only the second check actually protects a disk. Anything

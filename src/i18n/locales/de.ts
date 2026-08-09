@@ -941,6 +941,19 @@ export const de: Translation = {
   "showcase.whileGameRunning": "während MX Bikes läuft",
   "showcase.releaseNotes": "Release Notes lesen",
   "showcase.gotIt": "Alles klar",
+  "showcase.v080.hero.title": "MXB App steuert jetzt auch GP Bikes",
+  "showcase.v080.hero.body":
+    "Wähl dein Spiel beim ersten Start, oder wechsle jederzeit in den Einstellungen — die ganze App folgt: Bibliothek, Verwalten, Presets, Play und ein Durchsuchen-Tab von gpb-mods.com. GPs Fahrer-Ordner werden als GPs gelesen, nicht als die von MX Bikes, und FrostMod lädt auch dort live nach. Jedes Spiel behält seine eigenen Ordner, dein MX-Bikes-Setup bleibt also unangetastet.",
+  "showcase.v080.shop":
+    "Ein Shop-Tab durchsucht mxbikes-shop.com und installiert deine Käufe, ohne die App zu verlassen.",
+  "showcase.v080.dropzone":
+    "Zieh irgendwas auf das Fenster. Die App erkennt, was jede Datei ist, zeigt wohin sie geht und was sie ersetzen würde, und lässt dich jede Zeile vorher umlegen.",
+  "showcase.v080.destinations":
+    "Mods landen in dem Ordner, den das Spiel wirklich liest — eine Lackierung auf ihrem Bike, ein Helm-Design auf seinem Helm, eine GP-Kombi auf deinem Fahrermodell.",
+  "showcase.v080.protection":
+    "Der Protektoren-Slot funktioniert: jedes Teil aufrecht und vollständig gezeichnet, und dort installiert, wo das Spiel danach sucht.",
+  "showcase.v080.faster":
+    "Vorschaubilder werden zwischengespeichert und in der gezeigten Größe gezeichnet — Durchsuchen und Shop öffnen deutlich schneller.",
   "showcase.v070.hero.title": "Ein Overlay im Spiel, auf einem Kürzel",
   "showcase.v070.hero.body": "Holt Preset, Locker und Browse über MX Bikes — ohne Alt-Tab. Esc gibt die Kontrolle sofort zurück, und ein hier gewähltes Preset landet in der Session, die du gerade fährst. Spiele randlos oder im Fenster: über exklusivem Vollbild lässt sich nichts zeichnen.",
   "showcase.v070.hero.action": "Overlay einrichten",

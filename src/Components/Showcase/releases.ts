@@ -8,7 +8,19 @@
  * Adding a release means adding an entry here and its strings to every locale. Nothing
  * else knows about versions.
  */
-import { Monitor, Languages, ListOrdered, Play, Bike } from "lucide-react";
+import {
+  Monitor,
+  Languages,
+  ListOrdered,
+  Play,
+  Bike,
+  Gamepad2,
+  Store,
+  FolderInput,
+  Wand2,
+  Shield,
+  Gauge,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
 
@@ -34,6 +46,21 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.8.0",
+    hero: {
+      icon: Gamepad2,
+      title: "showcase.v080.hero.title",
+      body: "showcase.v080.hero.body",
+    },
+    highlights: [
+      { icon: Store, text: "showcase.v080.shop" },
+      { icon: FolderInput, text: "showcase.v080.dropzone" },
+      { icon: Wand2, text: "showcase.v080.destinations" },
+      { icon: Shield, text: "showcase.v080.protection" },
+      { icon: Gauge, text: "showcase.v080.faster" },
+    ],
+  },
   {
     version: "0.7.0",
     hero: {
