@@ -4,6 +4,7 @@ import {
   RefreshCw,
   ExternalLink,
   Play,
+  Square,
   Compass,
   MessagesSquare,
   Monitor,
@@ -17,6 +18,7 @@ import { toast } from "sonner";
 import {
   countProfilesIn,
   detectGamePath,
+  getModsRoot,
   getOverlayState,
   overlayToggle,
   presetsListProfiles,
@@ -183,7 +185,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const isWindows = platform === "windows";
   const isMac = platform === "macos";
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, checking, statusError, install, start, refreshStatus } =
+  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
@@ -226,6 +228,20 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       .then((scan) => setResolvedProfilesPath(scan.dir))
       .catch(() => setResolvedProfilesPath(""));
   }, [config.modsPath, config.profilesPath]);
+
+  // Where content is really read from. `modsPath` no longer answers it on its own: it can
+  // be the game folder (the root is its `mods` child) or a relocated tree that *is* the
+  // root. Showing it turns "my paints are missing" into something a player can see.
+  const [modsRoot, setModsRoot] = useState<{
+    path: string;
+    exists: boolean;
+    relocated: boolean;
+  } | null>(null);
+  useEffect(() => {
+    getModsRoot()
+      .then(setModsRoot)
+      .catch(() => setModsRoot(null));
+  }, [config.modsPath]);
 
   const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
   const defaultProfilesPath =
@@ -565,6 +581,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             >
               Detect automatically
             </button>
+
+            {/* The resolved content root. Only worth a line when it isn't the obvious
+                `<picked>/mods` — a relocated tree, or a folder that isn't there yet, are
+                exactly the two cases where an empty library needs explaining. */}
+            {config.modsPath && modsRoot && (modsRoot.relocated || !modsRoot.exists) && (
+              <p
+                className={cn(
+                  "-mt-0.5 text-[11.5px] leading-relaxed",
+                  modsRoot.exists ? "text-muted-foreground" : "text-warning",
+                )}
+              >
+                {modsRoot.exists ? "Reading mods from " : "No mods folder at "}
+                <span className="font-mono">{modsRoot.path}</span>
+                {!modsRoot.exists && " — nothing will show up until it's there."}
+              </p>
+            )}
 
             {/* Profiles folder — a customization nested under the mods folder. It
                 normally lives at <mods>/profiles; override only for the split case. */}
@@ -962,11 +994,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             />
 
             <div className="flex gap-2">
-              {status?.installed && !running && (
-                <Button variant="default" size="sm" onClick={start}>
-                  <Play className="size-3.5" /> Start FrostMod
-                </Button>
-              )}
+              {status?.installed &&
+                (running ? (
+                  <Button variant="outline" size="sm" onClick={stop}>
+                    <Square className="size-3.5" /> {t("frostmod.stop")}
+                  </Button>
+                ) : (
+                  <Button variant="default" size="sm" onClick={start}>
+                    <Play className="size-3.5" /> {t("frostmod.start")}
+                  </Button>
+                ))}
               <Button variant="outline" size="sm" onClick={reloadGame} disabled={!running}>
                 <RefreshCw className="size-3.5" /> Reload game now
               </Button>

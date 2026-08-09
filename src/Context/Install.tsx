@@ -38,6 +38,13 @@ interface StartParams {
   source: InstallSource;
 }
 
+/** What makes two install requests the same job: the same mod going to the same place.
+ *  A repeat click (most often Retry on a failure that is still on screen) collapses onto
+ *  the one already running; the same paint sent to a second bike does not. */
+function installKey({ slug, subpath, destFolder }: StartParams): string {
+  return JSON.stringify([slug, subpath, destFolder]);
+}
+
 /** Where a failed install can send the user back to. */
 export interface ModTarget {
   slug: string;
@@ -95,6 +102,12 @@ export function InstallProvider({
   // requests wait in this queue and are drained sequentially.
   const queueRef = useRef<StartParams[]>([]);
   const runningRef = useRef(false);
+  // What the queue is draining right now, so `enqueue` can turn a repeat request away.
+  const activeKeyRef = useRef<string | null>(null);
+  // `run`'s retry buttons enqueue rather than re-run, but `enqueue` is defined further
+  // down (it needs `pump`, which needs `run`). A ref breaks the cycle without costing
+  // `run` its empty dep list.
+  const enqueueRef = useRef<((params: StartParams) => void) | null>(null);
 
   useEffect(
     () => () => {
@@ -164,6 +177,9 @@ export function InstallProvider({
       // Both remaining sources are started from a mod's detail page, so a failure can always
       // offer the way back to it. (Purchases used to be the exception — they had nowhere to
       // send anyone — and they now fail inside the review sheet instead, which is on screen.)
+      //
+      // Retry goes through `enqueue`, never straight to `run`: a second impatient click used
+      // to start a *parallel* run of the same job.
       const target: ModTarget = { slug, subpath, categoryId: params.categoryId };
       toast.custom(
         (id) => (
@@ -176,7 +192,7 @@ export function InstallProvider({
             }}
             onRetry={() => {
               toast.dismiss(id);
-              void run(params);
+              enqueueRef.current?.(params);
             }}
             onDismiss={() => toast.dismiss(id)}
           />
@@ -198,7 +214,12 @@ export function InstallProvider({
       while (queueRef.current.length) {
         const next = queueRef.current.shift()!;
         setQueueLength(queueRef.current.length);
-        await run(next);
+        activeKeyRef.current = installKey(next);
+        try {
+          await run(next);
+        } finally {
+          activeKeyRef.current = null;
+        }
       }
     } finally {
       runningRef.current = false;
@@ -207,12 +228,23 @@ export function InstallProvider({
 
   const enqueue = useCallback(
     (params: StartParams) => {
+      // Nothing gets installed twice at once. The retry on a failed install used to call
+      // `run` straight out of the toast, so a second, impatient click started a *parallel*
+      // run of the same download — two runs racing over one job, which is how an install
+      // ended up copying a file the other one had already cleaned up.
+      //
+      // Keyed on the destination as well as the mod: installing one livery onto two
+      // different bikes is two real installs and both belong in the queue.
+      const key = installKey(params);
+      if (activeKeyRef.current === key) return;
+      if (queueRef.current.some((q) => installKey(q) === key)) return;
       queueRef.current.push(params);
       setQueueLength(queueRef.current.length);
       void pump();
     },
     [pump],
   );
+  enqueueRef.current = enqueue;
 
   const startInstall: InstallContextValue["startInstall"] = useCallback(
     ({ url, host, ...rest }) =>

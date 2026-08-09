@@ -6,6 +6,7 @@ import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
 import Servers from "../Servers/Servers";
 import RiderStudio from "../Rider/RiderStudio";
+import PaintStudio from "../PaintStudio/PaintStudio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
@@ -158,6 +159,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           ) : view === "rider" ? (
             <RiderStudio initialLoadout={riderPreset} onLoaded={clearRiderPreset} />
+          ) : view === "paints" ? (
+            <PaintStudio />
           ) : view === "servers" ? (
             <Servers />
           ) : view === "manage" ? (

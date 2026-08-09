@@ -45,6 +45,10 @@ hours), then downloads and installs them on restart.
   `.pkz` / `.pnt` files are placed as-is.
 - **Live reload**: a debounced watcher on `<modsPath>/mods` signals FrostMod to
   reload the game when mods are added — including ones installed outside the app.
+- **Paint studio**: builds a `.pnt` from `.tga`/`.png` sheets drawn in GIMP or
+  Photoshop, and unpacks an existing paint back into editable sheets that keep the
+  texture names the model binds — so a livery can be made, installed and previewed
+  on the model without leaving the app.
 - **Self-update**: `tauri-plugin-updater` against the `latest.json` published with
   each release; signature-verified, installs on restart.
 
