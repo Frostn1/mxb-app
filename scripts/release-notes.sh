@@ -33,25 +33,44 @@ EOF
     ;;
 esac
 
+# `## 2026-08-07 — v0.7.0 — Six languages, …` → the part after the version.
+release_name() {
+  "$here/changelog-section.sh" "$1" --heading | awk -F'—' '
+    NF >= 3 { s = $3; for (i = 4; i <= NF; i++) s = s "—" $i
+              gsub(/^[ \t]+|[ \t]+$/, "", s); print s }'
+}
+
+# One version's section under its own "What's new in …" heading.
+section_block() {
+  local ver="$1" lead="$2" body name title
+  body="$("$here/changelog-section.sh" "$ver")" || return 1
+  [ -n "$body" ] || return 1
+  name="$(release_name "$ver")"
+  title="$lead ${ver%%-*}"
+  [ -n "$name" ] && title="$title — $name"
+  printf '## %s\n\n%s\n\n---\n\n' "$title" "$body"
+}
+
 # A build with no changelog section (a `workflow_dispatch` test build, tagged
 # `v<run_number>`) still gets the download guidance — it just has nothing to announce.
-if section="$("$here/changelog-section.sh" "$TAG")" && [ -n "$section" ]; then
-  heading="$("$here/changelog-section.sh" "$TAG" --heading)"
-  # `## 2026-08-07 — v0.7.0 — Six languages, …` → the part after the version.
-  name="$(printf '%s' "$heading" | awk -F'—' '
-    NF >= 3 { s = $3; for (i = 4; i <= NF; i++) s = s "—" $i
-              gsub(/^[ \t]+|[ \t]+$/, "", s); print s }')"
-  title="What's new in ${TAG%%-*}"
-  [ -n "$name" ] && title="$title — $name"
-  cat <<EOF
-## $title
+section_block "$TAG" "What's new in" || true
 
-$section
-
----
-
-EOF
-fi
+# A patch is the same app as the `.0` it patches, so its page repeats that release's notes:
+# someone landing on v0.8.1 came for MXB App, not for the two lines that changed since v0.8.0,
+# and the features are what tells them whether they want it. Discord is deliberately left
+# alone — `notify-discord.sh` reads only the tag's own section, because re-dumping a whole
+# feature list into a chat channel for a patch is noise.
+version="${TAG#v}"
+version="${version%%-*}"
+case "$version" in
+  *.*.*)
+    patch="${version##*.}"
+    minor_zero="${version%.*}.0"
+    if [ "$patch" != "0" ]; then
+      section_block "v$minor_zero" "Everything new in" || true
+    fi
+    ;;
+esac
 
 cat <<'EOF'
 ## Which file do I download?

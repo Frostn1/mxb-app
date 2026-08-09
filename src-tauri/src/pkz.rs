@@ -8,7 +8,6 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex, Once, OnceLock};
 use tauri::Manager;
-use walkdir::WalkDir;
 
 /// ZIP local-file-header magic ("PK\x03\x04").
 const ZIP_MAGIC: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
@@ -307,8 +306,7 @@ fn inspect_zip(path: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
 fn inspect_dir(dir: &Path) -> Result<(PkzMeta, Option<(String, Vec<u8>)>)> {
     // Walk a few levels deep — enough to find the `.ini` and a preview.
     let mut rels: Vec<(String, PathBuf)> = Vec::new();
-    for entry in WalkDir::new(dir)
-        .max_depth(3)
+    for entry in crate::linkwalk::walk_depth(dir, 3)
         .into_iter()
         .filter_map(|e| e.ok())
     {

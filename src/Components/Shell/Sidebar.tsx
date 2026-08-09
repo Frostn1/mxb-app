@@ -272,10 +272,13 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           </span>
         </button>
 
-        {/* Join-by-address launches the game with `-directconnect`. Both the argv parser
-            offset it was found at and the default port it assumes are MX Bikes', so it
-            stays behind a capability until GP's are confirmed. */}
-        {caps.joinByAddress && (
+        {/* Join-by-address launches the game with `-directconnect`. Behind the experimental
+            toggle with the rest of the unfinished multiplayer surface: the flag is
+            undocumented by PiBoSo, so it's opt-in rather than something a player finds by
+            accident. Capability-gated on top — both the argv parser offset it was found at
+            and the default port it assumes are MX Bikes', so it waits until GP's are
+            confirmed. */}
+        {experimental && caps.joinByAddress && (
         <>
         <button
           onClick={() => setJoinOpen(true)}

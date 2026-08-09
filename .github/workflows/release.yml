@@ -124,6 +124,12 @@ jobs:
           # Shop-less variant rather than failing, same as the sidecar step above.
           MXB_SHOP_API_HEADER: ${{ secrets.MXB_SHOP_API_HEADER }}
           MXB_SHOP_API_KEY: ${{ secrets.MXB_SHOP_API_KEY }}
+          # The tag this build came from, baked in by src-tauri/build.rs. tauri.conf.json
+          # carries the plain `0.8.0` and nothing here rewrites it, so the suffix that makes
+          # `v0.8.0-beta.1` a pre-release would otherwise be invisible to the running app —
+          # a beta install would call itself 0.8.0 and show no Beta badge. Only set for real
+          # tags: a workflow_dispatch build's ref_name is a branch, not a version.
+          MXB_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
           releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"

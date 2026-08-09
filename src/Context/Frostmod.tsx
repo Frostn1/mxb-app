@@ -166,6 +166,11 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   // press anything — and the binaries it's short of are the ones the game actually
   // loads. Repairing it unasked is the only thing that reaches those players.
   //
+  // So does `supportedForGame`: a build too old for the active title can't be started at
+  // all, and the player has no way to know why. Updating unasked is the fix — and if the
+  // newest release is still too old, the attempt is capped at one per session and the
+  // panel falls back to telling them.
+  //
   // Runs at most once per session; a failed status check (`statusError`) is skipped so
   // we only act on a confirmed snapshot, never an offline guess.
   const autoInstallTried = useRef(false);
@@ -173,7 +178,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     if (
       !autoInstallTried.current &&
       status &&
-      (!status.installed || status.needsRepair) &&
+      (!status.installed || status.needsRepair || !status.supportedForGame) &&
       !statusError &&
       !installing
     ) {

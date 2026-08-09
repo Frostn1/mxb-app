@@ -53,6 +53,20 @@ pub const WATCH_SLUG: &str = "__mods_watch__";
 /// one of these would fire against a file that isn't finished being written.
 const PARTIAL_SUFFIXES: [&str; 6] = [".tmp", ".part", ".partial", ".crdownload", ".download", ".!ut"];
 
+/// How deep to look for folders that are really links to somewhere else.
+///
+/// A recursive watch does not cross a junction — `ReadDirectoryChangesW` stops at a
+/// reparse point — so a player who shares one paints folder between rider models gets no
+/// events for it unless the target is watched in its own right. Four levels reaches every
+/// place such a link is put in practice (`bikes/<bike>/paints`,
+/// `rider/riders/<model>/paints`, `rider/helmets/<helmet>/goggles`) without descending
+/// into a track's interior looking for one.
+const LINK_DEPTH: usize = 4;
+
+/// Upper bound on the extra watches. Each is a real OS handle; a tree with more links
+/// than this is doing something we shouldn't try to keep up with.
+const LINK_CAP: usize = 64;
+
 /// A watcher and the flag that retires it.
 pub struct Running {
     /// Dropping the debouncer stops its background thread.
@@ -145,12 +159,16 @@ pub fn start(app: &AppHandle, state: &ModWatcher, mods_path: &str) {
     let pending: Arc<Mutex<Pending>> = Arc::default();
     let live = Arc::new(AtomicBool::new(true));
     let watched = root.clone();
+    // Folders inside the tree that really live somewhere else. Resolved before the
+    // debouncer is built because its callback needs them to name what changed.
+    let links = crate::linkwalk::dir_links(&root, LINK_DEPTH, LINK_CAP);
+    let event_links = links.clone();
 
     let batch_live = Arc::clone(&live);
     let mut debouncer = match new_debouncer(DEBOUNCE, move |res: DebounceEventResult| match res {
         Ok(events) if !events.is_empty() => {
             let changed: Vec<PathBuf> = events.into_iter().map(|e| e.path).collect();
-            on_batch(&handle, &pending, &batch_live, &watched, changed);
+            on_batch(&handle, &pending, &batch_live, &watched, &event_links, changed);
         }
         Ok(_) => {}
         Err(e) => log::warn!("mods watcher: event error: {e:?}"),
@@ -165,6 +183,20 @@ pub fn start(app: &AppHandle, state: &ModWatcher, mods_path: &str) {
     if let Err(e) = debouncer.watcher().watch(&root, RecursiveMode::Recursive) {
         log::warn!("mods watcher: could not watch {}: {e}", root.display());
         return;
+    }
+
+    // One watch per distinct target: six rider models sharing a paints folder is six
+    // links and one place to watch.
+    let mut targets: Vec<&PathBuf> = links.iter().map(|(_, t)| t).collect();
+    targets.sort();
+    targets.dedup();
+    for target in targets {
+        match debouncer.watcher().watch(target, RecursiveMode::Recursive) {
+            Ok(()) => log::info!("mods watcher: also watching linked folder {}", target.display()),
+            // Best-effort, exactly like the root: a target we can't watch costs the
+            // auto-reload for that folder, not the watcher.
+            Err(e) => log::warn!("mods watcher: could not watch {}: {e}", target.display()),
+        }
     }
 
     log::info!("mods watcher: watching {} for changes", root.display());
@@ -207,6 +239,31 @@ fn mod_key(root: &Path, path: &Path) -> Option<String> {
     Some(format!("{kind}/{name}"))
 }
 
+/// Every mod a changed path belongs to.
+///
+/// Usually exactly one. More than one when the change landed in a folder several mods
+/// link to — dropping a livery into a shared paints folder changes it for all six rider
+/// models pointing at it, and each of them needs naming. The path arrives as the watcher
+/// saw it (under the link's *target*), so it's put back where it appears in the tree
+/// before being reduced.
+fn mod_keys(root: &Path, links: &[(PathBuf, PathBuf)], path: &Path) -> Vec<String> {
+    if let Some(key) = mod_key(root, path) {
+        return vec![key];
+    }
+    let mut out = Vec::new();
+    for (link, target) in links {
+        let Ok(rest) = path.strip_prefix(target) else {
+            continue;
+        };
+        if let Some(key) = mod_key(root, &link.join(rest)) {
+            if !out.contains(&key) {
+                out.push(key);
+            }
+        }
+    }
+    out
+}
+
 /// A debounced batch landed. Fold it into the pending set and make sure something is
 /// waiting for the folder to go quiet.
 fn on_batch(
@@ -214,6 +271,7 @@ fn on_batch(
     pending: &Arc<Mutex<Pending>>,
     live: &Arc<AtomicBool>,
     root: &Path,
+    links: &[(PathBuf, PathBuf)],
     changed: Vec<PathBuf>,
 ) {
     if !live.load(Ordering::SeqCst) {
@@ -222,7 +280,7 @@ fn on_batch(
     let keys: Vec<String> = changed
         .iter()
         .filter(|p| !is_partial(p))
-        .filter_map(|p| mod_key(root, p))
+        .flat_map(|p| mod_keys(root, links, p))
         .collect();
     if keys.is_empty() {
         // Everything in the batch was scratch files, or churn directly in the root.
@@ -321,6 +379,36 @@ mod tests {
         assert_eq!(mod_key(root, root), None);
         // Somewhere else entirely (a watcher restart racing a path change).
         assert_eq!(mod_key(root, Path::new("/elsewhere/x.pkz")), None);
+    }
+
+    /// A livery dropped into a folder that several rider models link to changes all of
+    /// them, and the watcher sees it at the target's own path — outside the tree.
+    #[test]
+    fn a_change_behind_a_link_names_every_mod_pointing_at_it() {
+        let root = Path::new("/games/mxb/mods");
+        let shared = PathBuf::from("/paints/shared");
+        let links = vec![
+            (root.join("rider/riders/Male/paints"), shared.clone()),
+            (root.join("rider/riders/Female/paints"), shared.clone()),
+            (root.join("bikes/KTM 450/paints"), PathBuf::from("/paints/bikes")),
+        ];
+
+        assert_eq!(
+            mod_keys(root, &links, &shared.join("Frost.pnt")),
+            vec!["rider/riders"],
+            "the change is placed back in the tree — both models reduce to the same key",
+        );
+        assert_eq!(
+            mod_keys(root, &links, Path::new("/paints/bikes/Frost.pnt")),
+            vec!["bikes/KTM 450"],
+        );
+        // A path inside the tree still resolves directly, without consulting the links.
+        assert_eq!(
+            mod_keys(root, &links, &root.join("tracks/Red Bud/x.map")),
+            vec!["tracks/Red Bud"],
+        );
+        // And something that is neither still yields nothing.
+        assert!(mod_keys(root, &links, Path::new("/elsewhere/x.pkz")).is_empty());
     }
 
     /// A batch of changed mod keys, as `on_batch` would hand them over.

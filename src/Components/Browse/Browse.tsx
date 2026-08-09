@@ -5,12 +5,12 @@ import {
   MOD_SORTS,
   SEARCH_PAGE_SIZE,
   getModRatings,
-  isLiveryContext,
   resolveQuickInstall,
   searchMods,
   type ModSort,
   type ModType,
 } from "../../api/mods";
+import { useConfig } from "../../Context/Config";
 import type { InstalledIndex } from "../../lib/installedMatch";
 import type { ModRating, ModSummary } from "../../types";
 import { useInstall } from "../../Context/Install";
@@ -56,6 +56,7 @@ export default function Browse({
   onChangeType,
 }: BrowseProps) {
   const t = useT();
+  const { game } = useConfig();
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [categoryId, setCategoryId] = useState(modType.categoryId);
@@ -116,11 +117,7 @@ export default function Browse({
   const doQuickInstall = useCallback(
     async (mod: ModSummary) => {
       try {
-        const res = await resolveQuickInstall(
-          mod.slug,
-          modType,
-          isLiveryContext(modType, categoryId),
-        );
+        const res = await resolveQuickInstall(mod.slug, modType, game, categoryId);
         if (res.ok) {
           startInstall({ ...res.params, categoryId });
           toast.success(t("browse.queued", { title: res.params.title }), {
@@ -141,7 +138,7 @@ export default function Browse({
         });
       }
     },
-    [modType, categoryId, startInstall, t],
+    [modType, categoryId, game, startInstall, t],
   );
 
   // Guard: if the mod is already installed, confirm before overwriting.
@@ -160,11 +157,7 @@ export default function Browse({
       const skipped: string[] = [];
       for (const mod of list) {
         try {
-          const res = await resolveQuickInstall(
-            mod.slug,
-            modType,
-            isLiveryContext(modType, categoryId),
-          );
+          const res = await resolveQuickInstall(mod.slug, modType, game, categoryId);
           if (res.ok) {
             startInstall({ ...res.params, categoryId });
             queued++;
@@ -189,7 +182,7 @@ export default function Browse({
         });
       }
     },
-    [modType, categoryId, startInstall, clearSelection, t],
+    [modType, categoryId, game, startInstall, clearSelection, t],
   );
 
   const bulkInstall = useCallback(() => {

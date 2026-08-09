@@ -6,8 +6,8 @@ import { Button } from "../ui/button";
 import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
-import type { GearPaints, Loadout, RiderPart } from "../../types";
-import { listInstalledGearPaints, presetsSave } from "../../api/mods";
+import type { Loadout, RiderPart } from "../../types";
+import { presetsSave } from "../../api/mods";
 import { ViewerPanel } from "../Viewer/ViewerPanel";
 import { SlotField } from "../Presets/SlotField";
 import {
@@ -15,17 +15,9 @@ import {
   SLOT_GROUPS,
   EMPTY_LOADOUT,
   loadScans,
-  slotOptions,
   type Scans,
-  type SlotDef,
 } from "../../lib/presets";
-
-const EMPTY_GEAR_PAINTS: GearPaints = {
-  paints: [],
-  goggles: [],
-  hasStock: false,
-  hasStockGoggles: false,
-};
+import { useGearPaints } from "../../lib/useGearPaints";
 
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
 
@@ -51,11 +43,8 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   // reason to hide the slot the rider tab is most often opened for.
   const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [gearPaints, setGearPaints] = useState<Record<"helmet" | "boots" | "protection", GearPaints>>({
-    helmet: EMPTY_GEAR_PAINTS,
-    boots: EMPTY_GEAR_PAINTS,
-    protection: EMPTY_GEAR_PAINTS,
-  });
+  // Paints the chosen models carry, merged with the loose ones the scan found.
+  const { optionsFor, missingFor } = useGearPaints(loadout);
 
   const setSlot = useCallback((key: keyof Loadout, value: string) => {
     setLoadout((prev) => ({ ...prev, [key]: value }));
@@ -111,57 +100,6 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    let alive = true;
-    const grab = (part: RiderPart["part"], model: string) =>
-      listInstalledGearPaints(part, model).catch(() => EMPTY_GEAR_PAINTS);
-    Promise.all([
-      grab("helmet", loadout.helmet),
-      grab("boots", loadout.boots),
-      grab("protection", loadout.protection),
-    ]).then(([helmet, boots, protection]) => {
-      if (alive) setGearPaints({ helmet, boots, protection });
-    });
-    return () => {
-      alive = false;
-    };
-  }, [loadout.helmet, loadout.boots, loadout.protection]);
-
-  const packedFor = useCallback(
-    (key: keyof Loadout): string[] => {
-      switch (key) {
-        case "helmetPaint":
-          return gearPaints.helmet.paints;
-        case "gogglesPaint":
-          return gearPaints.helmet.goggles;
-        case "bootsPaint":
-          return gearPaints.boots.paints;
-        case "protectionPaint":
-          return gearPaints.protection.paints;
-        default:
-          return [];
-      }
-    },
-    [gearPaints],
-  );
-
-  const optionsFor = useCallback(
-    (slot: SlotDef): string[] => {
-      const base = scans ? slotOptions(slot, "", loadout, scans) : [];
-      return [...new Set([...base, ...packedFor(slot.key)])];
-    },
-    [scans, loadout, packedFor],
-  );
-
-  const missingFor = useCallback(
-    (slot: SlotDef): boolean => {
-      const val = loadout[slot.key];
-      if (slot.freeText || !val) return false;
-      return !optionsFor(slot).includes(val);
-    },
-    [loadout, optionsFor],
-  );
 
   const grouped = useMemo(
     () => RIDER_GROUPS.map((g) => ({ ...g, slots: SLOTS.filter((s) => s.group === g.id) })),
@@ -234,8 +172,8 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
                     key={slot.key}
                     slot={slot}
                     value={loadout[slot.key]}
-                    options={optionsFor(slot)}
-                    missing={missingFor(slot)}
+                    options={optionsFor(slot, "", scans)}
+                    missing={missingFor(slot, "", scans)}
                     onChange={(v) => setSlot(slot.key, v)}
                   />
                 ))}

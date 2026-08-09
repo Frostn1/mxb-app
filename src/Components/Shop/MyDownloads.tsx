@@ -26,6 +26,7 @@ import {
   type InstalledIndex,
 } from "../../lib/installedMatch";
 import { useInstall } from "../../Context/Install";
+import { useConfig } from "../../Context/Config";
 import { useT, type TFunc } from "../../i18n/context";
 import ModCard from "../Browse/ModCard";
 import { Button } from "@/Components/ui/button";
@@ -45,6 +46,7 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   const [error, setError] = useState<string | null>(null);
 
   const { startShopInstall } = useInstall();
+  const { game } = useConfig();
 
   const loadDownloads = useCallback(async () => {
     setLoading(true);
@@ -111,12 +113,12 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
     async (item: ShopItem) => {
       // No picker here, so land it where the Browse dialog would have preselected rather
       // than always at the tracks root.
-      startShopInstall(item, await resolveTrackDest());
+      startShopInstall(item, await resolveTrackDest(game));
       toast.success(t("browse.queued", { title: item.title }), {
         description: t("shop.queuedDesc"),
       });
     },
-    [startShopInstall, t],
+    [startShopInstall, game, t],
   );
 
   const logout = useCallback(async () => {

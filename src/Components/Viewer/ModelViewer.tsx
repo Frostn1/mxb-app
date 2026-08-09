@@ -235,8 +235,16 @@ const GEAR_ROT: [number, number, number] = [0, 0, -Math.PI / 2];
 // both feet as separate nodes (`boot_l`/`boot_r`) coincident at the ankle, split by bootSides.
 const BOOT_ROT: [number, number, number] = [0, 0, Math.PI / 2];
 
-// Protection is authored Y-up (the rider body's own frame), so no roll.
-const PROT_ROT: [number, number, number] = [0, 0, 0];
+// Protection shares the helmet's up-axis (GEAR_ROT) but is rolled a quarter turn about it:
+// its left-right axis is Z where a helmet's is Y. So the piece stands up on the roll alone
+// and then needs a −90° yaw to face the way the body does.
+//
+// Measured off the meshes rather than assumed: in the frame the loader hands over, every
+// piece — the game's own chest protector and neck brace, a tactical vest, a Leatt, two
+// chains — is mirror-symmetric about Z and stacks along X, and the Long Hair mod sits wholly
+// at −Y, which is the rider's back. Front is +Y, and after the roll that lands on +Z, the
+// way the body faces.
+const PROT_YAW = -Math.PI / 2;
 
 // Downward nod so the helmet gazes ahead / slightly down rather than skyward.
 const HELMET_PITCH = 0.25;
@@ -366,10 +374,49 @@ function RiderGearMesh({
   );
 }
 
-// Boots ship both feet as separate nodes coincident at the ankle; split by their
-// native left-right (Y) centre, one to each side.
-function bootSides(part: RiderPart): { node: EdfNode; side: number }[] {
-  const withY = part.nodes.map((node) => {
+/**
+ * Which leg a boot node belongs on: −1 for the rider's right (−X), +1 for their left (+X).
+ *
+ * The rider faces +Z — the body's name and number planes, which sit on a rider's back, are
+ * at its most negative Z — and in a right-handed Y-up frame a figure facing +Z wears its
+ * left on +X.
+ *
+ * `null` where the mesh doesn't say, which the geometric split below then settles.
+ */
+function namedBootSide(node: EdfNode): number | null {
+  // The node's own name first, then its groups': a pair comes as `boot_l`/`boot_r`, or as
+  // one node holding `lboots`/`rboots`, and either alone identifies the foot.
+  for (const name of [node.name, ...node.submeshes.map((s) => s.name)]) {
+    // Drop the word the piece is named for, leaving the side marker to read on its own:
+    // `boot_l` → `_l`, `lboots` → `l`, `Boot_Right` → `_right`. Whole-word only, so
+    // `boot_lod0` and a group called `plastic` say nothing.
+    const rest = name.toLowerCase().replace(/boots?/g, "");
+    if (/(^|[^a-z])l(eft)?([^a-z]|$)/.test(rest)) return 1;
+    if (/(^|[^a-z])r(ight)?([^a-z]|$)/.test(rest)) return -1;
+  }
+  return null;
+}
+
+/**
+ * Boots ship both feet as separate nodes, near enough coincident at the ankle. Put each on
+ * the leg the mesh says it belongs to.
+ *
+ * The two nodes differ laterally by around a centimetre and a half — that's each foot's own
+ * asymmetry about the mirror plane it was copied across, not a left-right layout — so
+ * splitting them on that centre was a coin toss decided by how an author happened to bias
+ * the mesh, and came out mirrored on the mods that biased it the other way. Names are the
+ * mesh's own statement of which foot is which; the centre only settles a pair that has none.
+ */
+function bootSideOf(part: RiderPart): number[] {
+  const named = part.nodes.map(namedBootSide);
+  // Both feet named, and named as opposites — a lone "left", or two nodes both reading
+  // left, is a naming accident rather than an answer, and the geometry below is better
+  // evidence than half a statement.
+  if (named.length === 2 && named[0] !== null && named[1] !== null && named[0] !== named[1]) {
+    return named as number[];
+  }
+  // Nothing to read: fall back to the pair's own lateral centres, lower to the right.
+  const ys = part.nodes.map((node) => {
     let lo = Infinity;
     let hi = -Infinity;
     for (let i = 1; i < node.positions.length; i += 3) {
@@ -377,10 +424,16 @@ function bootSides(part: RiderPart): { node: EdfNode; side: number }[] {
       if (v < lo) lo = v;
       if (v > hi) hi = v;
     }
-    return { node, y: (lo + hi) / 2 };
+    return (lo + hi) / 2;
   });
-  withY.sort((a, b) => a.y - b.y);
-  return withY.map((w, i) => ({ node: w.node, side: i === 0 ? -1 : 1 }));
+  const lowest = ys.reduce((best, y, i) => (y < ys[best] ? i : best), 0);
+  return part.nodes.map((_, i) => (i === lowest ? -1 : 1));
+}
+
+/** The same split as [`bootSideOf`], paired back up with the nodes it describes. */
+function bootSides(part: RiderPart): { node: EdfNode; side: number }[] {
+  const sides = bootSideOf(part);
+  return part.nodes.map((node, i) => ({ node, side: sides[i] }));
 }
 
 function partBounds(nodes: EdfNode[]) {
@@ -545,8 +598,11 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
   const tex = useTextureMap(part.textures);
   const geoms = useNodeGeometries(part.nodes);
   const mats = useGearMaterials(part, tex);
-  const rot =
-    part.part === "boots" ? BOOT_ROT : part.part === "protection" ? PROT_ROT : GEAR_ROT;
+  const rot = part.part === "boots" ? BOOT_ROT : GEAR_ROT;
+  // The quarter turn that faces a protection piece forward, the same one the on-body render
+  // gives it — a preview that showed a chest protector edge-on was the piece being right and
+  // only this view disagreeing.
+  const baseYaw = part.part === "protection" ? PROT_YAW : 0;
   // Measure in the rotated frame; for a coincident two-node boots pair, push each foot
   // to its own side, straighten each toe, then scale and recentre on the origin ourselves.
   const layout = useMemo(() => {
@@ -562,14 +618,14 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
       part.part === "boots" && boxes.length === 2 && !boxes.some((b) => b.isEmpty());
     if (pair) {
       const w = Math.max(boxes[0].max.x - boxes[0].min.x, boxes[1].max.x - boxes[1].min.x);
-      // Place each foot on its correct side (camera looks from +X).
-      const firstIsPlusX =
-        boxes[0].min.x + boxes[0].max.x >= boxes[1].min.x + boxes[1].max.x;
-      offsets[0] = (firstIsPlusX ? -1 : 1) * w * 0.55;
-      offsets[1] = (firstIsPlusX ? 1 : -1) * w * 0.55;
+      // Each foot to the side it belongs on — read off the mesh by the same rule the
+      // on-body render uses, so the preview and the rider can't disagree about a boot.
+      const sides = bootSideOf(part);
+      offsets[0] = sides[0] * w * 0.55;
+      offsets[1] = sides[1] * w * 0.55;
     }
     // Straighten each foot so its toe points forward instead of splaying in.
-    const yaws = geoms.map((g) => (pair ? straightenYaw(g, rotM) : 0));
+    const yaws = geoms.map((g) => (pair ? straightenYaw(g, rotM) : baseYaw));
     // Arranged bounds: each foot as T(offset)·RotY(yaw)·rot.
     const total = new THREE.Box3();
     geoms.forEach((g, i) => {
@@ -586,7 +642,7 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
     const center = new THREE.Vector3();
     total.getCenter(center);
     return { scale: 1.1 / (Math.max(size.x, size.y, size.z) || 1), offsets, yaws, center };
-  }, [geoms, rot, part.part]);
+  }, [geoms, rot, baseYaw, part]);
   if (!layout) return null;
   return (
     <group scale={layout.scale}>
@@ -638,7 +694,11 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   // slot shares one mount: a chest protector, a neck brace, a chain and a bib are all
   // authored around the same point in the rider's own frame, so this anchor places every
   // one of them and their own geometry does the rest.
-  const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.62 * h, cz] : [0, 1.16, 0.03];
+  //
+  // Mid-chest, which the game's own two pieces locate between them: the chest protector
+  // reaches 21 cm above the mount and 12 cm below, and the neck brace sits 11–25 cm above it,
+  // i.e. around the base of the neck.
+  const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.74 * h, cz] : [0, 1.16, 0.03];
   const bootTarget = hasBody ? 0.44 * h : 0.32;
 
   if (solo) return <RiderGearSolo part={solo} />;
@@ -667,7 +727,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
         <RiderGearMesh
           part={protection!}
           anchor={protAnchor}
-          rot={PROT_ROT}
+          yaw={PROT_YAW}
           fit="native"
         />
       )}

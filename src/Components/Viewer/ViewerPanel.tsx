@@ -207,22 +207,25 @@ export function ViewerPanel({
       </div>
 
       <Dialog open={expanded} onOpenChange={setExpanded}>
-        <DialogContent className="h-[85vh] w-[92vw] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none">
-          <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        {/* `flex flex-col`, because a dialog is a grid by default: its two rows then stretch
+            to equal heights, which gave the title bar half the window and left the canvas —
+            absolutely positioned, so no height of its own — with the rest. */}
+        <DialogContent className="flex h-[85vh] w-[92vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+          <div className="flex flex-none items-center justify-between border-b border-border px-4 py-2.5">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Box className="h-4 w-4 text-muted-foreground" />
               {t("viewer.preview3d")}
             </div>
             {!riderOnly && <ModeToggle mode={mode} onChange={setMode} />}
           </div>
-          <div className="relative flex-1">
+          <div className="relative min-h-0 flex-1">
             <ModelViewer
-            mode={mode}
-            texture={texture}
-            riderParts={shownParts}
-            loading={riderLoading}
-            className="absolute inset-0"
-          />
+              mode={mode}
+              texture={texture}
+              riderParts={shownParts}
+              loading={riderLoading}
+              className="absolute inset-0"
+            />
             {overlay}
           </div>
         </DialogContent>

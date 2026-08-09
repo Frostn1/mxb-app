@@ -80,7 +80,15 @@ fn jar_for(site: &Site) -> Arc<Jar> {
 /// The mods client is built from this so its User-Agent, jar and timeouts cannot drift from
 /// the fetch WebView's. Callers add their own default headers.
 pub fn client_builder() -> reqwest::ClientBuilder {
-    let site = site();
+    client_builder_for(site())
+}
+
+/// A builder for a *named* catalog rather than the active one.
+///
+/// The image cache needs this: a thumbnail's host says which site it belongs to, and that is
+/// not always the game currently selected — a description can embed an image from either, and
+/// a fetch already in flight outlives a game switch.
+pub fn client_builder_for(site: &'static Site) -> reqwest::ClientBuilder {
     cookie_session::client_builder(site, jar_for(site))
 }
 

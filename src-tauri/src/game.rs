@@ -77,6 +77,24 @@ impl Game {
     pub const ALL: [Game; 2] = [Game::Mxb, Game::Gpb];
 }
 
+/// The folders MX Bikes' protection models live in under `mods/rider`, in the order they're
+/// looked in.
+///
+/// `protections` is the game's own name for the slot: it is what `rider.pkz` calls the folder,
+/// what the game's loader asks the mods tree for, and what mods on mxb-mods package themselves
+/// as. Earlier versions of this app installed to the singular `protection`, so that is still
+/// read — nothing is ever written to it.
+pub const PROTECTION_AREAS: &[&str] = &["protections", "protection"];
+
+/// The folder every title keeps its rider models in, under `mods/rider`.
+///
+/// MX Bikes calls what lives here a rider *profile* and hangs the kit, gloves and goggles off
+/// it; GP Bikes calls the same thing a rider *model* and bakes the boots and gloves into it,
+/// so its suits are `riders/<model>/paints`. Same folder, so it isn't a per-title constant —
+/// but it *is* a destination both games install into, which is why it's named rather than
+/// spelled out at each call site.
+pub const RIDERS_DIR: &str = "riders";
+
 /// One gear area under `mods/rider` — a folder of models, each of which may carry paints.
 pub struct RiderArea {
     /// Folder name under `mods/rider`.
@@ -89,6 +107,10 @@ pub struct RiderArea {
     /// The area's models can carry a `goggles/` folder alongside `paints/`. MX Bikes
     /// helmets do; GP Bikes' road helmets use visors and have no such folder.
     pub goggles: bool,
+    /// New content of this kind may be installed here. False only for a folder that is
+    /// read for what earlier versions put there — see MX Bikes' singular `protection`.
+    /// Scans use every area; the pickers offer only these.
+    pub installable: bool,
 }
 
 /// How `mods/rider` is laid out for a title.
@@ -100,6 +122,15 @@ pub struct RiderLayout {
     /// Subfolders inside `mods/rider/riders/<profile>/` beyond `paints`, as
     /// `(folder, library category)`.
     pub profile_extras: &'static [(&'static str, &'static str)],
+    /// Rider models the game itself ships, so a paint for one has somewhere to go on a mods
+    /// folder that is otherwise empty.
+    ///
+    /// Empty for GP Bikes, and that is the fact rather than an omission: nothing there
+    /// paints the stock rider. Every GP suit is made for a downloaded model — Manu's
+    /// "Modern Type 1", Bar's "(S) Suit 1 + Boots …" — and the catalog files them under
+    /// that model's name. Offering an invented default would send a suit to a folder the
+    /// game never reads.
+    pub stock_profiles: &'static [&'static str],
 }
 
 /// Features that only exist for some titles. Gating on these rather than on `Game`
@@ -182,22 +213,35 @@ pub static MXB: GameProfile = GameProfile {
                 model_cat: "helmet",
                 paint_cat: Some("helmetPaint"),
                 goggles: true,
+                installable: true,
             },
             RiderArea {
                 folder: "boots",
                 model_cat: "boots",
                 paint_cat: Some("bootPaint"),
                 goggles: false,
+                installable: true,
             },
             RiderArea {
-                folder: "protection",
+                folder: PROTECTION_AREAS[0],
                 model_cat: "protection",
                 paint_cat: Some("protectionPaint"),
                 goggles: false,
+                installable: true,
+            },
+            // The same slot under the name earlier versions installed to, so what they put
+            // there still shows up in the library and the pickers.
+            RiderArea {
+                folder: PROTECTION_AREAS[1],
+                model_cat: "protection",
+                paint_cat: Some("protectionPaint"),
+                goggles: false,
+                installable: false,
             },
         ],
         gloves: true,
         profile_extras: &[("gloves", "gloves"), ("goggles", "goggles")],
+        stock_profiles: &["default_mx", "default_sm"],
     },
     catalog: &crate::mxb_session::MXB_SITE,
     caps: Caps {
@@ -231,6 +275,7 @@ pub static GPB: GameProfile = GameProfile {
                 paint_cat: Some("helmetPaint"),
                 // Road helmets have visors, not goggles: no `goggles/` folder exists.
                 goggles: false,
+                installable: true,
             },
             // Riding-style animations. Models with nothing to paint, so no paint category
             // — a `.pnt` under here would be a stray.
@@ -239,6 +284,7 @@ pub static GPB: GameProfile = GameProfile {
                 model_cat: "animation",
                 paint_cat: None,
                 goggles: false,
+                installable: true,
             },
         ],
         // GP Bikes bakes gloves and boots into the rider model — the `riders` folder is
@@ -246,6 +292,7 @@ pub static GPB: GameProfile = GameProfile {
         // pick separately, so there are no folders for them.
         gloves: false,
         profile_extras: &[],
+        stock_profiles: &[],
     },
     catalog: &crate::mxb_session::GPB_SITE,
     caps: Caps {
@@ -269,6 +316,21 @@ pub static GPB: GameProfile = GameProfile {
 /// correctly-packed archive.
 pub const ALL_MODS_DIRS: [&str; 5] = ["bikes", "tracks", "rider", "tyres", "misc"];
 
+/// One gear area as the install pickers need it: where it is, and what may sit inside.
+///
+/// The library's own view of an area is [`RiderArea`], which also carries the categories a
+/// scan tags entries with. Those mean nothing to a picker, and the legacy folders a scan
+/// reads are not places to write — so what crosses to the frontend is this narrower thing.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RiderAreaInfo {
+    pub folder: &'static str,
+    /// Models here keep their liveries in `<model>/paints`.
+    pub paints: bool,
+    /// …and a `<model>/goggles` folder besides.
+    pub goggles: bool,
+}
+
 /// What the frontend needs to render the game switcher and gate features.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -279,16 +341,40 @@ pub struct GameInfo {
     /// Host of the catalog this title browses, e.g. `mxb-mods.com`. The UI names the site
     /// it is linking to, and naming the wrong one is worse than naming none.
     pub catalog_domain: &'static str,
+    /// The gear areas under `mods/rider` new content installs into, in the order to offer
+    /// them. Sent for the same reason `mods_dirs` is: the install picker has to name real
+    /// folders, and which ones exist is the title's fact, not the UI's.
+    pub rider_areas: Vec<RiderAreaInfo>,
+    /// Rider models the title ships — `riders/<name>` that exist before anything is
+    /// installed. Empty for GP Bikes; see [`RiderLayout::stock_profiles`].
+    pub rider_stock_profiles: &'static [&'static str],
+    /// Folders inside `riders/<model>/` beyond `paints` — MX Bikes' `gloves` and `goggles`.
+    pub rider_profile_extras: Vec<&'static str>,
     pub caps: Caps,
 }
 
 impl GameProfile {
+    /// The gear areas new content may be installed into, in profile order.
+    pub fn installable_areas(&'static self) -> impl Iterator<Item = &'static RiderArea> {
+        self.rider.areas.iter().filter(|a| a.installable)
+    }
+
     pub fn info(&'static self) -> GameInfo {
         GameInfo {
             id: self.id,
             display: self.display,
             mods_dirs: self.mods_dirs,
             catalog_domain: self.catalog.domain,
+            rider_areas: self
+                .installable_areas()
+                .map(|a| RiderAreaInfo {
+                    folder: a.folder,
+                    paints: a.paint_cat.is_some(),
+                    goggles: a.goggles,
+                })
+                .collect(),
+            rider_stock_profiles: self.rider.stock_profiles,
+            rider_profile_extras: self.rider.profile_extras.iter().map(|(f, _)| *f).collect(),
             caps: self.caps,
         }
     }
@@ -347,6 +433,47 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The legacy singular `protection` is read so nothing already filed there vanishes,
+    /// but it is not a place to write: the game's loader asks for `protections`.
+    #[test]
+    fn the_legacy_protection_folder_is_never_installed_to() {
+        let mxb = Game::Mxb.profile();
+        assert!(
+            mxb.rider.areas.iter().any(|a| a.folder == PROTECTION_AREAS[1]),
+            "the old spelling is still scanned",
+        );
+        assert!(
+            !mxb.installable_areas().any(|a| a.folder == PROTECTION_AREAS[1]),
+            "…but nothing is offered it as a destination",
+        );
+    }
+
+    /// The install pickers are built from this list, so an MX-only folder appearing here
+    /// would be offered on GP Bikes — where the loader never opens it, leaving the mod
+    /// installed as far as the app is concerned and absent as far as the game is.
+    #[test]
+    fn gp_bikes_offers_only_the_folders_its_loader_reads() {
+        let gpb = Game::Gpb.profile().info();
+        let folders: Vec<&str> = gpb.rider_areas.iter().map(|a| a.folder).collect();
+        assert_eq!(folders, ["helmets", "animations"]);
+        for absent in ["boots", "protections", "protection", "gloves"] {
+            assert!(!folders.contains(&absent), "GP Bikes has no `{absent}` folder");
+        }
+        assert!(
+            gpb.rider_areas.iter().all(|a| !a.goggles),
+            "road helmets have visors, not goggles",
+        );
+        assert!(
+            !gpb.rider_areas.iter().any(|a| a.folder == "animations" && a.paints),
+            "riding styles have nothing to paint",
+        );
+        assert!(gpb.rider_profile_extras.is_empty(), "gloves are part of the suit");
+        assert!(
+            gpb.rider_stock_profiles.is_empty(),
+            "every GP suit is made for a downloaded rider model",
+        );
     }
 
     #[test]

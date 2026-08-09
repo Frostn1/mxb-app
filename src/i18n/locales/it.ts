@@ -485,6 +485,9 @@ export const it: Translation = {
     "Dove vengono installate le mod. Scegli la cartella che contiene le cartelle mods e profiles \u2014 quella sopra mods, non la cartella mods stessa. Cambiandola, la libreria viene riscansionata.",
   "settings.insideModsFolder": "Dentro la tua cartella {{game}}",
   "settings.notSet": "Non impostata",
+  "settings.selectFolderFor": "Seleziona una cartella per {{game}}",
+  "settings.gameDesc":
+    "Quale titolo sta gestendo MXB App. Cartelle, libreria e preset appartengono tutti al gioco che scegli qui.",
   "settings.change": "Cambia…",
   "settings.set": "Imposta…",
   "settings.theme": "Tema",
@@ -522,6 +525,9 @@ export const it: Translation = {
   "settings.frostmodNeedsRepair":
     "I file installati non corrispondono a questa versione — reinstallando si risolve.",
   "settings.frostmodRepair": "Ripara installazione",
+  "settings.frostmodUnsupportedForGame":
+    "Questa versione di FrostMod non è sicura su {{game}} — aggiornala per usare FrostMod qui.",
+  "settings.frostmodUpdateRequired": "Aggiornamento necessario",
   "settings.checkNewer": "Cerca una versione più recente di FrostMod",
   "settings.working": "Elaborazione…",
   "settings.installFrostmod": "Installa FrostMod",
@@ -866,11 +872,14 @@ export const it: Translation = {
   "dest.helmetsNewModel": "Caschi (nuovo modello)",
   "dest.bootsNewModel": "Stivali (nuovo modello)",
   "dest.protectionNewModel": "Protezioni (nuovo modello)",
+  "dest.riderModelsNew": "Modelli pilota (nuovo modello)",
+  "dest.animationsNewStyle": "Stili di guida (nuova animazione)",
   "dest.helmetPaintsFor": "{{name}} · grafiche casco",
   "dest.gogglesFor": "{{name}} · maschera",
   "dest.bootPaintsFor": "{{name}} · grafiche stivali",
   "dest.protectionPaintsFor": "{{name}} · grafiche protezioni",
   "dest.outfitFor": "{{name}} · completo / kit",
+  "dest.suitPaintsFor": "{{name}} · grafiche tuta",
   "dest.glovesFor": "{{name}} · guanti",
 
   // In-game overlay — the hotkey panel drawn over MX Bikes.
@@ -912,6 +921,19 @@ export const it: Translation = {
   "showcase.whileGameRunning": "mentre MX Bikes è in esecuzione",
   "showcase.releaseNotes": "Leggi le note di rilascio",
   "showcase.gotIt": "Ho capito",
+  "showcase.v080.hero.title": "MXB App gestisce anche GP Bikes",
+  "showcase.v080.hero.body":
+    "Scegli il gioco al primo avvio, o cambialo quando vuoi nelle Impostazioni: tutta l'app lo segue — Libreria, Gestisci, Preset, Play e una scheda Sfoglia servita da gpb-mods.com. Le cartelle pilota di GP vengono lette come quelle di GP, non di MX Bikes, e anche lì FrostMod ricarica al volo. Ogni gioco tiene le proprie cartelle, quindi la tua configurazione di MX Bikes resta intatta.",
+  "showcase.v080.shop":
+    "La scheda Shop naviga mxbikes-shop.com e installa ciò che hai acquistato, senza uscire dall'app.",
+  "showcase.v080.dropzone":
+    "Trascina qualsiasi cosa sulla finestra. Capisce cos'è ogni file, mostra dove finirà e cosa sostituirebbe, e ti lascia ricollocare ogni riga prima di installare.",
+  "showcase.v080.destinations":
+    "I mod finiscono nella cartella che il gioco legge davvero — una livrea sulla sua moto, una grafica casco sul suo casco, una tuta GP sul tuo modello pilota.",
+  "showcase.v080.protection":
+    "Lo slot protezioni funziona: ogni pezzo disegnato dritto e completo, e installato dove il gioco lo cerca.",
+  "showcase.v080.faster":
+    "Le anteprime sono in cache e disegnate alla dimensione mostrata, così Sfoglia e Shop si aprono molto più in fretta.",
   "showcase.v070.hero.title": "Un overlay in gioco, su una scorciatoia",
   "showcase.v070.hero.body": "Apre Preset, Locker e Browse sopra MX Bikes — senza alt-tab. Esc restituisce subito il controllo e un preset scelto qui arriva sulla sessione che stai già guidando. Gioca senza bordi o in finestra: sopra il fullscreen esclusivo non si può disegnare nulla.",
   "showcase.v070.hero.action": "Configura l'overlay",

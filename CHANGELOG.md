@@ -39,51 +39,27 @@
   winning a name clash because it's what was installed last.
 
 ## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
+## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 
-### Added
-- **Opening a paint in 3D now shows the model it was painted for, wearing it.** Click a
-  livery, a helmet paint or a goggle paint and the viewer loads the bike or helmet it belongs
-  to and selects that paint in the picker, instead of draping the textures over a stock body
-  that was never the shape they were drawn against. A paint whose model isn't installed still
-  previews the way it did before.
-
-### Changed
-- **The Library's 3D button says what it does.** The bare square on each row is now a
-  labelled **View in 3D**.
-- **Settings spells out which folder to pick.** The app wants your MX Bikes folder — the one
-  holding `mods` and `profiles` — not the `mods` folder inside it, which is one click deeper
-  in the picker and easy to land on. The setting now says so, and picking `mods` by mistake
-  quietly resolves to the folder above it (Settings says which one it took) rather than
-  leaving you with a library that scans nothing and a path that looks perfectly reasonable.
+A patch on top of v0.8.0 — everything that release added is still the news, and its notes are
+repeated below.
 
 ### Fixed
-- **Helmets whose goggles came out wearing the helmet's paint.** The Bell Moto 10 packs are
-  the clear case: shell, tear-off, lens and goggle frame each ended up in the wrong texture,
-  the goggle worst of all. Three faults behind it, all in how a model's textures are counted
-  and matched:
-  - A helmet needn't ship the sheet its paints replace, and the Moto 10 doesn't — it names
-    it and leaves the pixels to the `.pnt`. That slot was going uncounted, so every piece
-    was drawn from its neighbour's texture.
-  - A one-character texture name (the Oakley pack calls its goggle sheet `O`) was skipped
-    entirely, sliding everything after it by one.
-  - Which pieces are the goggles was decided from their names, and a helmet names its
-    goggle group after the goggle it ships — `Armega`, `Airbrake` — not "goggles". It is now
-    decided by which paint supplies the texture the piece is drawn from, which is the mod's
-    own answer.
-- **Pieces no paint covers keep their own look.** A tear-off film, a visor, anything an author
-  baked into the mesh and left out of the `.pnt` used to have the shell's paint stretched
-  across it.
-- **A "Stock" option that showed a helmet in the wrong texture.** It's offered only where the
-  mesh really carries the sheet that side's paints replace.
+- **GP Bikes mods show their pictures in Browse.** Every card in the GP grid came up blank,
+  and so did the pictures inside a mod's page. The app fetches thumbnails through its own
+  cache rather than letting the page load them directly, and that cache only ever knew
+  mxb-mods.com and the store — gpb-mods.com wasn't on the list, so every GP image was refused
+  before it was ever requested. The list is now built from the games the app drives, so a
+  title's catalog can't be added without its pictures working.
+- **GP thumbnails are fetched as GP Bikes' own visitor.** They were going out through the
+  store's session, which holds cookies for a different site. The two catalogs keep separate
+  sessions on purpose — Cloudflare scopes a clearance to the host that issued it — and images
+  now follow the host they came from rather than whichever game is selected.
 
-## 2026-08-08 — v0.8.0 — GP Bikes, dedicated servers, and paint sync
+## 2026-08-09 — v0.8.0 — GP Bikes, the MXB Shop, and a dropzone that takes anything
 
 ### Added
-- **FrostMod's live mod reload now works for GP Bikes.** FrostMod v0.10.0 attaches to
-  `gpbikes.exe`, so the status panel, the reload button and the watch-the-folder auto-reload
-  are all available when GP Bikes is the active game — they were hidden before because
-  FrostMod only knew about MX Bikes. The app launches it with the game it's driving, which
-  is what makes it attach; without that it would sit running and never hook anything.
+
 - **The app now drives GP Bikes as well as MX Bikes.** First launch asks which game you're
   setting up before anything else, and the game picker lives in Settings from then on;
   picking a title points the whole app — Library, Manage, Presets, Browse and the
@@ -103,45 +79,16 @@
   Paints, Helmets and Helmet Models, plus Plugins, Tools and Menu Backgrounds. Each site
   keeps its own cookie jar, since a Cloudflare clearance only works on the host that issued
   it.
+- **FrostMod's live mod reload now works for GP Bikes.** The status panel, the reload button
+  and the watch-the-folder auto-reload are all available when GP Bikes is the active game —
+  they were hidden before because FrostMod only knew about MX Bikes. The app launches it
+  with the game it's driving and the folder that game's mods live in, which is what makes it
+  attach to the right process and read the right files. This needs **FrostMod v0.11.0 or
+  newer**: v0.10.0 attaches to GP Bikes but reloads using MX Bikes' internals, which crashes
+  it, so the app won't run that build there and updates you to one that works.
 - **Presets read the slots a profile actually has.** Rather than assuming MX Bikes' fifteen,
   the editor reads the sections out of the profile's own `profile.ini` and shows those. GP
   Bikes profiles get their riding-style slot, and don't get pickers that would write nothing.
-- **Proton Drive downloads.** `drive.proton.me` links are now recognised and labelled as
-  Proton Drive, and a mod offering one alongside another mirror prefers the other. Proton
-  shares are end-to-end encrypted — the key lives in the part of the URL that never
-  reaches the server — so they can't be fetched automatically; picking one now opens the
-  guided "download it, then choose the file" flow instead of downloading the web page and
-  failing later with "couldn't determine the archive type".
-- **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
-  whatever file on *your* disk happens to match the name they picked, so a full grid shows
-  up in default liveries. The game can't tell us what they picked either — its plugin API
-  carries rider names, bikes and lap data, and no paint field at all. So the loop is closed
-  outside the game. Your app publishes what your rider is wearing; every other app pulls it
-  back and installs it. Paints are content-addressed by SHA-256, so twenty riders sharing a
-  livery is one stored object and nineteen uploads that never happen, and a second sync
-  installs nothing it already has.
-
-  Everyone on the server needs the app for this to work — that's inherent, not a limitation
-  we chose.
-- **A Servers tab**, for running dedicated servers: start, stop and restart the game on a
-  host, watch its uptime and how many times it came back on its own, and change the track.
-  It talks to `mxb-agent` on the host rather than to a cloud provider, because a desktop app
-  that shipped provider credentials could create infrastructure from any machine it ran on.
-- **An Experimental switch in Settings**, off by default, gating both of the above. They
-  talk to a live service and write files other players uploaded, so they're opt-in rather
-  than something you find by accident. `MXB_EXPERIMENTAL=1` turns them on for a single run
-  without touching your saved settings — and the switch says so rather than looking stuck.
-- **Beta builds now say they're beta**, next to the version in Settings → About. The badge
-  keys off a semver pre-release suffix, which is the same thing the release workflow uses to
-  mark a build as a pre-release, so the two can't disagree.
-- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
-  free text you can change between sessions and two people can pick the same one; a GUID is
-  stable per install, and the dedicated server writes it next to the name on every
-  connection. The agent reads the server's own log to know who is actually connected —
-  which turns out to be a far easier route to a live roster than decoding the live-timing
-  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
-  GUID is first-come, so nobody can assert someone else's identity and have their paints
-  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 - **A Shop tab that browses the mxbikes-shop.com catalog.** The store hands us its whole
   catalog as one JSON document, so the app fetches it once and does the searching, filtering,
   sorting and paging locally — browsing is instant and keeps working with the network down.
@@ -158,16 +105,9 @@
   A catalog served from cache says how old it is, and one that's days old says so in a way you
   can't wave away. This is browse-only: **Buy** opens the product page in your own browser, and
   nothing here installs or purchases anything.
-- **Thumbnails are cached on disk, and downscaled to the size they're drawn at.** Both
-  catalogs previously put remote image URLs straight into the page, so every scroll through
-  the grid re-downloaded the same images — and neither store offers a thumbnail size, so a
-  card roughly 300px wide was being handed a 1000–1280px original weighing about half a
-  megabyte. Images now go through an on-disk cache served over the app's own URL scheme,
-  which keeps lazy loading and the webview's native image cache intact, and grid thumbnails
-  are resized on the way in: a page of cards dropped from ~12 MB to ~2 MB, about 85 KB per
-  card instead of 490 KB. Transparency is preserved, and each size is cached separately so
-  opening an item still shows the full-resolution screenshot. Capped at 256 MB, evicted
-  oldest-first, and restricted to the two catalog domains.
+- **Shop items now show the store's own description.** The catalog started carrying them
+  today — every one of its 1311 products, screenshots and all — and the detail page shows it
+  under **About**, the same way a Browse mod's description reads.
 - **The whole window is a dropzone.** Drag anything MX Bikes onto the app — a `.zip`, `.rar`
   or `.7z`, a bare `.pkz` or `.pnt`, an already-extracted folder, or a fistful of all of them
   at once — and it works out what each one is, where it belongs, and shows you the list
@@ -191,6 +131,49 @@
   expandable, exactly which existing files it would overwrite — so re-dropping an updated mod
   no longer silently replaces a bike's configs. Nothing installs until you press Install, and
   rows can be unticked individually.
+- **Opening a paint in 3D now shows the model it was painted for, wearing it.** Click a
+  livery, a helmet paint or a goggle paint and the viewer loads the bike or helmet it belongs
+  to and selects that paint in the picker, instead of draping the textures over a stock body
+  that was never the shape they were drawn against. A paint whose model isn't installed still
+  previews the way it did before.
+- **Thumbnails are cached on disk, and downscaled to the size they're drawn at.** Both
+  catalogs previously put remote image URLs straight into the page, so every scroll through
+  the grid re-downloaded the same images — and neither store offers a thumbnail size, so a
+  card roughly 300px wide was being handed a 1000–1280px original weighing about half a
+  megabyte. Images now go through an on-disk cache served over the app's own URL scheme,
+  which keeps lazy loading and the webview's native image cache intact, and grid thumbnails
+  are resized on the way in: a page of cards dropped from ~12 MB to ~2 MB, about 85 KB per
+  card instead of 490 KB. Transparency is preserved, and each size is cached separately so
+  opening an item still shows the full-resolution screenshot. Capped at 256 MB, evicted
+  oldest-first, and restricted to the two catalog domains.
+- **Proton Drive downloads.** `drive.proton.me` links are now recognised and labelled as
+  Proton Drive, and a mod offering one alongside another mirror prefers the other. Proton
+  shares are end-to-end encrypted — the key lives in the part of the URL that never
+  reaches the server — so they can't be fetched automatically; picking one now opens the
+  guided "download it, then choose the file" flow instead of downloading the web page and
+  failing later with "couldn't determine the archive type".
+- **Beta builds now say they're beta**, next to the version in Settings → About. The badge
+  keys off a semver pre-release suffix, which is the same thing the release workflow uses to
+  mark a build as a pre-release, so the two can't disagree.
+- **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
+  whatever file on *your* disk happens to match the name they picked, so a full grid shows
+  up in default liveries. The game can't tell us what they picked either — its plugin API
+  carries rider names, bikes and lap data, and no paint field at all. So the loop is closed
+  outside the game. Your app publishes what your rider is wearing; every other app pulls it
+  back and installs it. Paints are content-addressed by SHA-256, so twenty riders sharing a
+  livery is one stored object and nineteen uploads that never happen, and a second sync
+  installs nothing it already has.
+
+  Everyone on the server needs the app for this to work — that's inherent, not a limitation
+  we chose.
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 - **A Servers tab that manages the dedicated servers you run.** Start, stop and restart the
   game on a host, see whether it's up, how long it's been up, how many times it came back on
   its own, and switch the track — all without an RDP session or a shell. Each server is added
@@ -207,12 +190,9 @@
   provider credentials could create infrastructure on any machine it ran on. What it holds
   instead is a bearer token for one server you already administer.
 
-  Settings changes patch the server's `.ini` **in place**: the one operation that matters is
-  changing a single key while leaving every other byte alone, which is what general INI
-  parsers are worst at — a parse/serialise round-trip reorders keys and drops comments, and
-  this is a file server owners edit by hand. Only `track`, `name` and `maxclient` are exposed,
-  values containing newlines are rejected so a caller can't inject unrelated keys, and the
-  game is restarted afterwards because it reads its `.ini` only at startup.
+  Settings changes patch the server's `.ini` in place, exposing only `track`, `name` and
+  `maxclient`, and the game is restarted afterwards because it reads its `.ini` only at
+  startup.
 
   Note the agent speaks plain HTTP, so its token crosses the network in clear. Terminate TLS
   in front of it, or keep it on a private network, before exposing it to the open internet.
@@ -228,11 +208,20 @@
   whitespace, a leading `-` — is rejected there, so a pasted address can't quietly turn into
   a different flag. The connect flag is only read at startup, so asking to join while MX
   Bikes is already running says so instead of appearing to work.
-- **Shop items now show the store's own description.** The catalog started carrying them
-  today — every one of its 1311 products, screenshots and all — and the detail page shows it
-  under **About**, the same way a Browse mod's description reads.
+- **An Experimental switch in Settings**, off by default, gating both of the above. They
+  talk to a live service and write files other players uploaded, so they're opt-in rather
+  than something you find by accident. `MXB_EXPERIMENTAL=1` turns them on for a single run
+  without touching your saved settings — and the switch says so rather than looking stuck.
 
 ### Changed
+
+- **The Library's 3D button says what it does.** The bare square on each row is now a
+  labelled **View in 3D**.
+- **Settings spells out which folder to pick.** The app wants your MX Bikes folder — the one
+  holding `mods` and `profiles` — not the `mods` folder inside it, which is one click deeper
+  in the picker and easy to land on. The setting now says so, and picking `mods` by mistake
+  quietly resolves to the folder above it (Settings says which one it took) rather than
+  leaving you with a library that scans nothing and a path that looks perfectly reasonable.
 - **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
   is a compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for
   GP Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
@@ -242,7 +231,6 @@
   opens as the MX Bikes config it always was, with the same folders; preset share codes are
   unchanged. Applying a preset no longer creates `profile.ini` sections that the game
   doesn't use.
-
 - The signed-in "All My Downloads" page moved to `MyDownloads.tsx` and the `shop` route now
   goes to the new catalog. That feature is intact and still hidden from the sidebar.
 - **Placement decides once, then acts.** Split `place_mod` into `plan_placement` (decide) and
@@ -259,8 +247,111 @@
   them was being cleaned up for display the moment the catalog loaded — before the grid could
   paint, for 1311 products of which you open maybe two. That work now happens when you open an
   item.
+- **The game picker moved out of the folder setting.** MX Bikes / GP Bikes now sits in its own
+  **Game** card at the top of Settings, above the folders it scopes, instead of inside the
+  card whose own title it changes. Builds that know one title don't show it at all.
+- **Switching to a game you haven't set up says what to do.** The folder row read a bare "Not
+  set" next to a **Change…** button; it now reads *Select a folder for GP Bikes* next to
+  **Set…**.
+- **FrostMod builds that aren't safe on the current game are no longer offered for it.**
+  FrostMod v0.10.0 is the first that attaches to GP Bikes, but its mod reload runs MX
+  Bikes' internals there and takes the game down the first time it's used. On GP Bikes the
+  app now requires v0.11.0 or newer, updates to it automatically, and says so instead of
+  starting a build that would crash. MX Bikes is unaffected — every FrostMod ever released
+  was built for it.
+- **"Join a server" is behind the Experimental toggle.** It launches the game with an
+  undocumented connect flag, so it belongs with the rest of the unfinished multiplayer surface
+  rather than being something you find by accident.
 
 ### Fixed
+
+- **GP Bikes suits go where GP Bikes reads them.** Every rider install landed in `mods/rider`
+  itself — the game never opens that folder, so a suit you'd just installed was nowhere in
+  the game. Suit paints now default to `riders/<your rider model>/paints`, rider models to
+  `riders`, helmet paints to `helmets/<model>/paints` and riding styles to `animations`,
+  which is exactly the set the game's loader reads and nothing else.
+- **The rider picker offers your game's folders, not the other one's.** GP Bikes was being
+  shown MX Bikes' `boots`, `protections`, gloves, goggles and `default_mx` rider — none of
+  which exist there — while `riders` and `animations` were missing entirely. Each title now
+  lists its own, and the folder you last picked is remembered per game.
+- **A suit paint knows which rider model it's for.** gpb-mods files suits under the model
+  family they fit — Modern 1, Modern 2, MGP 21 — and that now picks the installed model,
+  instead of falling back to whichever folder you used last.
+- **Quick-install stops dumping rider mods in the root.** One-click and bulk installs from
+  the Browse grid never asked the rider logic at all, so a helmet, kit or suit installed that
+  way ignored every gear folder. Both games.
+- **A dropped GP suit isn't filed as boots.** GP's suits carry the boots' textures because
+  the boots are part of the rider model, and the drop classifier read that as a boot paint —
+  aiming it at a folder GP Bikes has no loader for. Suit, outfit and arm textures now read as
+  the rider's body, and gear hints for folders your game doesn't have are ignored.
+- **A dropped protection paint goes to `protections`.** The drop route was still aiming at
+  the old singular spelling the game stopped reading.
+- **Protection is drawn the right way up.** Every piece in the slot rendered on its side: the
+  viewer assumed protection was authored the way the rider's body is, and it isn't — it takes
+  the same up-axis as a helmet, turned a quarter turn about it. Read off the meshes rather
+  than assumed, and checked against the game's own chest protector and neck brace, a tactical
+  vest, a Leatt, long hair and two chains. The library's quick-view had the same fault and now
+  faces a piece forward too.
+- **Installed protections show up at all.** The game keeps them in `mods/rider/protections`;
+  the app looked in — and installed to — `protection`, so nothing you dropped in the game's
+  folder was offered in the picker, and nothing the app installed was visible to the game.
+  New installs go to the game's folder; the old one is still read, so anything already there
+  keeps working.
+- **A protection set wears all of its pieces.** The game's own "Full" is a chest protector
+  *and* the neck brace worn with it, and only one of the two was drawn — a different one from
+  one run to the next. Every piece a mod declares is now drawn, each bound to its own mesh's
+  textures.
+- **Stock protection isn't a grey shape any more.** "Full" and "Neck" ship no paint of their
+  own, and the loader had nothing to dress them in; they now wear the texture baked into their
+  mesh, the same way a paintless mod already did.
+- **Chains hang where they belong.** A mesh whose geometry is a single group was placed twice,
+  which put a chain 35 cm below the rider and off to one side — most of the protection
+  category is chains. Gear now lands exactly on the bounds its own file states.
+- **A protection that ships sealed files loads out of a `.pkz` too**, not only out of a folder.
+- **The expanded 3D preview gives the model the window.** The title bar was taking half of it,
+  because the dialog laid its two rows out as an even grid.
+- **Paint folders shared between models with a junction or symlink are read again.** If you
+  keep one set of liveries and point several rider models at it — `mklink /J` on Windows, a
+  symlink on Linux and macOS — the app walked straight past the shared folder and showed
+  nothing in it, while the game loaded it fine. The only way to use the app was a copy of
+  every rider and glove paint per model. It now follows the link, so one folder can serve
+  all six of your rider models, and the paint is listed under each of them.
+
+  The cause is the same everywhere it bit: a junction is a *link*, and a directory listing
+  reports it as one rather than as a folder, so a scan that trusted the listing never
+  looked inside. That affected every content scan, not just paints — the Library, Manage,
+  the mod-detail panel, preset bundles and paint sync all shared it.
+- **A content folder that lives on another drive and is linked into place is scanned.** The
+  split layout — `mods\tracks` (or `bikes`, or `rider`) junctioned to somewhere with room
+  for it — used to come up empty.
+- **Auto-reload notices changes made behind a link.** A recursive watch stops at a
+  junction, so dropping a paint into the shared folder never pulsed FrostMod. The folders
+  those links point at are now watched too, and a change in one names every mod pointing
+  at it.
+- **Bundling a preset whose gear folder contains a link no longer fails.** The linked
+  folder's contents are copied into the bundle as real files, since the far end of your
+  junction doesn't exist on the machine that opens it.
+
+Extracted archives are deliberately left alone: a link inside a download you didn't make is
+still refused, which is what stops an archive writing outside the folder it unpacks into.
+- **Helmets whose goggles came out wearing the helmet's paint.** The Bell Moto 10 packs are
+  the clear case: shell, tear-off, lens and goggle frame each ended up in the wrong texture,
+  the goggle worst of all. Three faults behind it, all in how a model's textures are counted
+  and matched:
+  - A helmet needn't ship the sheet its paints replace, and the Moto 10 doesn't — it names
+    it and leaves the pixels to the `.pnt`. That slot was going uncounted, so every piece
+    was drawn from its neighbour's texture.
+  - A one-character texture name (the Oakley pack calls its goggle sheet `O`) was skipped
+    entirely, sliding everything after it by one.
+  - Which pieces are the goggles was decided from their names, and a helmet names its
+    goggle group after the goggle it ships — `Armega`, `Airbrake` — not "goggles". It is now
+    decided by which paint supplies the texture the piece is drawn from, which is the mod's
+    own answer.
+- **Pieces no paint covers keep their own look.** A tear-off film, a visor, anything an author
+  baked into the mesh and left out of the `.pnt` used to have the shell's paint stretched
+  across it.
+- **A "Stock" option that showed a helmet in the wrong texture.** It's offered only where the
+  mesh really carries the sheet that side's paints replace.
 - **A config written by an older build lost track of which game was active.** Builds that
   predate multi-game support read the config fine but rewrite it without `activeGame` and
   `games` — so running one once (a downgrade, or the shipped app alongside a newer build)
@@ -315,12 +406,52 @@
   and the app window has no address bar or Back button to escape with. They now open in your
   own browser and leave the app where it was. Browse descriptions had the same fault and are
   fixed with it.
+- **The overlay's empty frame left sitting over the game.** Clicking back into MX Bikes with
+  the overlay open stopped drawing the panel but kept its window there — a box over the game
+  that still swallowed clicks. The overlay now closes itself when you click away, to the game
+  or to anything else, and the hotkey brings it straight back. Its own file picker doesn't
+  count, so importing a mod from the overlay no longer risks closing it.
+- **FrostMod now reads the mods folder of the game you're actually playing.** It was told
+  which game to attach to but not where that game's mods live, and its own default was MX
+  Bikes' folder whatever it attached to — so on GP Bikes its track manager, inactive-tracks
+  store and model swap all worked against MX Bikes' folders. The app knows the real folder
+  (including a moved one), so it now sends it.
+- **Switching game restarts FrostMod.** FrostMod reads which game to watch once, at launch,
+  and the app skips starting one when a FrostMod is already running — so switching to GP
+  Bikes left it waiting for MX Bikes forever while the status pill still read "running".
+  This also clears a FrostMod the app didn't launch, which is the case that made it look
+  like nothing was wrong.
+- **Helmet and boots paint lists showed one source and hid the rest.** A gear model can carry
+  its paints in three places — packed inside its `.pkz`, loose in a folder of the same name
+  beside it, or shipped with the game — and the picker stopped at whichever it found first.
+  So a mod installed as a `.pkz` offered only the paint pack you'd added next to it and none
+  of its own, a mod installed as a folder offered only that folder, and the stock helmet and
+  boots offered nothing the game ships at all. Every source is now merged into one list, with
+  a paint that appears in more than one offered once.
+- **The Presets tab never asked a model what paints it carries.** It listed only what the
+  library scan found loose on disk, which is why the same helmet offered a different set of
+  paints in Presets than it did in Rider. Both tabs now read the same list, so they can't
+  disagree, and the "slots reference a mod that is not installed" count is taken from that
+  same list rather than contradicting the dropdown above it.
+- **A paint the picker offered could render as a different one.** With a model installed both
+  as a `.pkz` and as a folder, the viewer opened one of the two and quietly fell back to some
+  other paint when the name you picked lived in the other. It now looks in both.
+- **Boots on the wrong legs.** Which foot went on which side was decided by the two boot
+  meshes' lateral centres, which differ by about a centimetre and a half — each foot's own
+  asymmetry about the mirror plane it was copied across, not a left-right layout. That made it
+  a coin toss settled by how each author happened to build the mesh, so some boots came out
+  mirrored, buckles facing inward. The side is now read from the mesh's own node names
+  (`boot_l` / `boot_r`), with the old measurement kept for meshes that don't say. The preview
+  and the on-body render share the rule, so a boot can't look right in one and wrong in the
+  other.
 
 ### Notes
+
 - Instant profile refresh stays MX Bikes only. Unlike FrostMod's reload, it calls a
   hardcoded `mxbikes.exe` function offset, and there's no GP equivalent yet.
 
 ### Security
+
 - A paint carries the destination it should be written to, and that path arrives from
   another player. It's validated twice — once by the service and again in the app before it
   becomes a real path — because only the second check actually protects a disk. Anything

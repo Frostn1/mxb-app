@@ -336,12 +336,24 @@ export interface RiderTargets {
   helmets: string[];
   boots: string[];
   protection: string[];
+  /** GP Bikes riding-style animations. Always empty for MX Bikes. */
+  animations: string[];
+  /** What `mods/rider/riders` holds: MX Bikes' rider profiles, GP Bikes' rider models. */
   profiles: string[];
 }
 
 export function scanRiderTargets(): Promise<RiderTargets> {
   return invoke<RiderTargets>("scan_rider_targets");
 }
+
+/** What a failed scan stands in for: nothing installed, which every picker handles. */
+export const EMPTY_RIDER_TARGETS: RiderTargets = {
+  helmets: [],
+  boots: [],
+  protection: [],
+  animations: [],
+  profiles: [],
+};
 
 /**
  * Every bike a paint can be installed for — folders and `.pkz` packages under `mods/bikes`,
@@ -807,46 +819,180 @@ export function buildDestinations(
 
 export const STOCK_RIDER_PROFILES = ["default_mx", "default_sm"];
 
-const RIDER_KIT_CATEGORY_IDS = [35, 129, 52];
-const RIDER_GLOVES_CATEGORY_ID = 32;
+/**
+ * The folder both titles keep their rider models in, under `mods/rider`.
+ *
+ * MX Bikes calls what lives here a rider *profile* and hangs the kit, gloves and goggles off
+ * it. GP Bikes calls the same thing a rider *model*, bakes the boots and gloves into it, and
+ * keeps the suits at `riders/<model>/paints` — verified against the loader, which opens
+ * `rider\riders\<model>\paints\<paint>.pnt` and nothing else for a suit.
+ */
+const RIDERS_DIR = "riders";
 
-export type GearPaintKind = "helmets" | "boots" | "protection";
+/** Where a rider category's content belongs, once we know which title's catalog it is. */
+export type RiderTarget =
+  /** A livery for one model in a gear area — `<area>/<model>/paints`. */
+  | { kind: "gearPaint"; area: string }
+  /** Something worn by the rider model itself — `riders/<model>/<sub>`. */
+  | { kind: "profile"; sub: string }
+  /** A model of its own, which by definition isn't installed yet — the area's root. */
+  | { kind: "newModel"; folder: string };
 
-const RIDER_PAINT_CATEGORY_KIND: Record<number, GearPaintKind> = {
-  127: "helmets",
-  126: "boots",
-  135: "protection",
+const gearPaint = (area: string): RiderTarget => ({ kind: "gearPaint", area });
+const profileSub = (sub: string): RiderTarget => ({ kind: "profile", sub });
+const newModel = (folder: string): RiderTarget => ({ kind: "newModel", folder });
+
+/**
+ * What each catalog's rider categories install, per title.
+ *
+ * The two sites run the same WordPress build but numbered their taxonomies independently, so
+ * an id means nothing without the title it came from — GP's **52** is Helmets › Replicas
+ * while MX's **52** is a rider kit. Keying by game is what keeps those apart.
+ *
+ * GP's Suit Paints tree (55) is deep: every child names the *rider model* the suit fits
+ * ("Modern 1", "MGP 21"), and each of those has Replicas and Personal Suits under it. They
+ * all install the same way, so the whole subtree maps to the suit slot and the model itself
+ * is worked out by `rankRiderProfiles`.
+ */
+const RIDER_CATEGORIES_BY_GAME: Record<GameId, Record<number, RiderTarget>> = {
+  mxb: {
+    35: profileSub("paints"), // Rider Kit
+    129: profileSub("paints"),
+    52: profileSub("paints"),
+    32: profileSub("gloves"), // Gloves
+    313: newModel("helmets"), // Helmets (models)
+    127: gearPaint("helmets"), // Helmet Paints
+    343: newModel("boots"),
+    126: gearPaint("boots"), // Boot Paints
+    36: newModel("protections"),
+    135: gearPaint("protection"), // Protection Paints
+  },
+  gpb: {
+    54: newModel(RIDERS_DIR), // Rider Models
+    70: newModel("helmets"), // Helmet Models
+    51: gearPaint("helmets"), // Helmets, and its Replicas / Personal Paints
+    52: gearPaint("helmets"),
+    53: gearPaint("helmets"),
+    // Suit Paints, and every branch of it.
+    ...Object.fromEntries(
+      [55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67].map((id) => [
+        id,
+        profileSub("paints"),
+      ]),
+    ),
+  },
 };
 
-export function riderPaintKind(
+export interface RiderDestinations {
+  options: DestOption[];
+  /** The preselected folder. */
+  guess: string;
+  /** The post itself decided the guess (its categories or title named the model), rather
+   *  than a default standing in. Only then does the guess outrank a remembered folder. */
+  derived: boolean;
+  /** Ranked "probably this one" values, shown above the full list. */
+  suggestions: string[];
+}
+
+/** Where the mod being viewed belongs, or `null` when its category doesn't say. */
+export function riderTarget(
+  game: GameInfo,
   modType: ModType,
   categoryId: number | null | undefined,
-): GearPaintKind | null {
+): RiderTarget | null {
   if (modType.id !== "rider" || categoryId == null) return null;
-  return RIDER_PAINT_CATEGORY_KIND[categoryId] ?? null;
+  return RIDER_CATEGORIES_BY_GAME[game.id]?.[categoryId] ?? null;
 }
 
-export function riderProfileSub(
-  modType: ModType,
-  categoryId: number | null | undefined,
-): "paints" | "gloves" | null {
-  if (modType.id !== "rider") return null;
-  if (categoryId === RIDER_GLOVES_CATEGORY_ID) return "gloves";
-  if (categoryId != null && RIDER_KIT_CATEGORY_IDS.includes(categoryId)) return "paints";
-  return null;
+/** `RiderTargets` keys its lists by slot, which is what every other consumer wants; only
+ *  the pickers need them addressed by the folder they live in. */
+function modelsInArea(targets: RiderTargets, folder: string): string[] {
+  switch (folder) {
+    case "helmets":
+      return targets.helmets;
+    case "boots":
+      return targets.boots;
+    case "protections":
+      return targets.protection;
+    case "animations":
+      return targets.animations ?? [];
+    default:
+      return [];
+  }
 }
 
+/** The gear paint slot an area's paints fill — `RiderTarget.area`, which for protection is
+ *  the slot's name rather than its folder's. */
+function areaSlot(folder: string): string {
+  return folder === "protections" ? "protection" : folder;
+}
+
+const AREA_LABELS: Record<string, { newModel: TKey; paints?: TKey; goggles?: TKey }> = {
+  helmets: {
+    newModel: "dest.helmetsNewModel",
+    paints: "dest.helmetPaintsFor",
+    goggles: "dest.gogglesFor",
+  },
+  boots: { newModel: "dest.bootsNewModel", paints: "dest.bootPaintsFor" },
+  protections: { newModel: "dest.protectionNewModel", paints: "dest.protectionPaintsFor" },
+  animations: { newModel: "dest.animationsNewStyle" },
+};
+
+/** Digit runs, which the tokenizer drops as too short: `"MGP 21"` → `["21"]`. */
+const digitRuns = (s: string): string[] => s.match(/\d+/g) ?? [];
+
+/**
+ * Installed rider models ranked against a post, best first.
+ *
+ * The catalog files a GP suit under the model family it fits, so the post's own categories
+ * name the target: "Modern 1" is Manu's `Modern Type 1`. Those families differ from one
+ * another *only* by a number, which `tokens` drops as too short — hence the digit pass,
+ * which only ever breaks a tie between models that already share a word.
+ */
+function rankRiderProfiles(
+  profiles: string[],
+  title: string,
+  categories: string[],
+): string[] {
+  const wanted = tokens([...categories, title].join(" "));
+  const wantedDigits = new Set(categories.flatMap(digitRuns));
+  return profiles
+    .map((name) => {
+      let score = 0;
+      for (const t of tokens(name)) if (wanted.has(t)) score++;
+      if (score > 0 && digitRuns(name).some((d) => wantedDigits.has(d))) score += 2;
+      return { name, score };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .map((s) => s.name);
+}
+
+/**
+ * Every folder under `mods/rider` this title installs into, with a default.
+ *
+ * Driven by the title's own layout (`GameInfo.riderAreas`) rather than a fixed list, because
+ * the two games barely overlap here: offering GP Bikes a `boots` folder would file a mod
+ * somewhere its loader never looks, which reads as "installed" in the app and as missing in
+ * the game.
+ */
 export function buildRiderDestinations(
+  game: GameInfo,
   targets: RiderTargets,
   title: string,
-  profileSub: "paints" | "gloves" | null = null,
-  paintKind: GearPaintKind | null = null,
-): { options: DestOption[]; guess: string; suggestions: string[] } {
+  categories: string[] = [],
+  target: RiderTarget | null = null,
+): RiderDestinations {
   const seen = new Set<string>();
   const options: DestOption[] = [];
-  const add = (value: string, labelKey: TKey, labelVars?: Record<string, string>) => {
+  const add = (value: string, labelKey: TKey | null, labelVars?: Record<string, string>) => {
     if (!seen.has(value)) {
-      options.push({ value, label: "", labelKey, labelVars });
+      // A folder a future title adds has no phrasing of its own; its name is the honest label.
+      options.push(
+        labelKey
+          ? { value, label: "", labelKey, labelVars }
+          : { value, label: labelVars?.name ?? value },
+      );
       seen.add(value);
     }
   };
@@ -858,53 +1004,91 @@ export function buildRiderDestinations(
     return s;
   };
 
-  add("helmets", "dest.helmetsNewModel");
-  add("boots", "dest.bootsNewModel");
-  add("protection", "dest.protectionNewModel");
-
-  const scoredPaints: { value: string; score: number; kind: GearPaintKind }[] = [];
-  for (const h of targets.helmets) {
-    add(`helmets/${h}/paints`, "dest.helmetPaintsFor", { name: h });
-    add(`helmets/${h}/goggles`, "dest.gogglesFor", { name: h });
-    scoredPaints.push({ value: `helmets/${h}/paints`, score: score(h), kind: "helmets" });
-  }
-  for (const b of targets.boots) {
-    add(`boots/${b}/paints`, "dest.bootPaintsFor", { name: b });
-    scoredPaints.push({ value: `boots/${b}/paints`, score: score(b), kind: "boots" });
-  }
-  for (const p of targets.protection) {
-    add(`protection/${p}/paints`, "dest.protectionPaintsFor", { name: p });
-    scoredPaints.push({ value: `protection/${p}/paints`, score: score(p), kind: "protection" });
+  // Somewhere to put a brand new model, which by definition isn't installed yet.
+  add(RIDERS_DIR, "dest.riderModelsNew");
+  for (const area of game.riderAreas) {
+    add(area.folder, AREA_LABELS[area.folder]?.newModel ?? null, { name: area.folder });
   }
 
-  const profiles = [...new Set([...targets.profiles, ...STOCK_RIDER_PROFILES])].sort(
-    (a, b) => a.toLowerCase().localeCompare(b.toLowerCase()),
-  );
+  const scoredPaints: { value: string; score: number; area: string }[] = [];
+  for (const area of game.riderAreas) {
+    const labels = AREA_LABELS[area.folder];
+    for (const model of modelsInArea(targets, area.folder)) {
+      if (area.paints) {
+        const value = `${area.folder}/${model}/paints`;
+        add(value, labels?.paints ?? null, { name: model });
+        scoredPaints.push({ value, score: score(model), area: areaSlot(area.folder) });
+      }
+      if (area.goggles) {
+        add(`${area.folder}/${model}/goggles`, labels?.goggles ?? null, { name: model });
+      }
+    }
+  }
+
+  // The models the game ships exist whether or not anything is installed, so a paint for one
+  // always has somewhere to go. GP Bikes ships none that mods target — see `stock_profiles`.
+  const profiles = [
+    ...new Set([...targets.profiles, ...game.riderStockProfiles]),
+  ].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  const rankedProfiles = rankRiderProfiles(profiles, title, categories);
+  // Both games keep these in the same folder; each has its own word for what's in it. MX
+  // Bikes' kit is worn *with* the boots and gloves, GP Bikes' suit has them built in.
+  const profilePaints: TKey = game.id === "gpb" ? "dest.suitPaintsFor" : "dest.outfitFor";
   for (const prof of profiles) {
-    add(`riders/${prof}/paints`, "dest.outfitFor", { name: prof });
-    add(`riders/${prof}/gloves`, "dest.glovesFor", { name: prof });
+    add(`${RIDERS_DIR}/${prof}/paints`, profilePaints, { name: prof });
+    for (const extra of game.riderProfileExtras) {
+      add(
+        `${RIDERS_DIR}/${prof}/${extra}`,
+        extra === "gloves" ? "dest.glovesFor" : "dest.gogglesFor",
+        { name: prof },
+      );
+    }
   }
 
-  const kindPaints = paintKind
-    ? scoredPaints.filter((s) => s.kind === paintKind)
-    : scoredPaints;
-  const topPaints = kindPaints
-    .filter((s) => s.score >= 1)
-    .sort((a, b) => b.score - a.score);
+  const areaPaints =
+    target?.kind === "gearPaint"
+      ? scoredPaints.filter((s) => s.area === target.area)
+      : scoredPaints;
+  const topPaints = areaPaints.filter((s) => s.score >= 1).sort((a, b) => b.score - a.score);
+
+  // The rider model a suit belongs on: the one the game ships if it ships one, else the
+  // installed model the post points at, else the best guess left — its first model.
+  const sub = target?.kind === "profile" ? target.sub : "paints";
+  const profileFor = (p: string) => `${RIDERS_DIR}/${p}/${sub}`;
+  const bestProfile =
+    game.riderStockProfiles[0] ?? rankedProfiles[0] ?? profiles[0] ?? null;
+
   const suggestions = [
     ...topPaints.slice(0, 4).map((s) => s.value),
-    ...profiles.map((p) => `riders/${p}/${profileSub ?? "paints"}`),
+    ...[...rankedProfiles, ...profiles].map(profileFor),
   ];
 
-  const guess = profileSub
-    ? `riders/${STOCK_RIDER_PROFILES[0]}/${profileSub}`
-    : paintKind
-      ? topPaints[0]?.value ?? (kindPaints.length === 1 ? kindPaints[0].value : "")
-      : topPaints[0] && topPaints[0].score >= 2
-        ? topPaints[0].value
-        : "";
+  let guess: string;
+  // Whether the post itself settled this, rather than a default standing in. A derived
+  // destination outranks the folder used last time — the same rule bike liveries follow,
+  // and for the same reason: this content is per model, so last time's folder was another
+  // model's.
+  let derived = false;
+  switch (target?.kind) {
+    case "profile":
+      // Never the `mods/rider` root: a suit dropped there is invisible to the game.
+      guess = bestProfile ? profileFor(bestProfile) : RIDERS_DIR;
+      derived = !game.riderStockProfiles.length && !!rankedProfiles[0];
+      break;
+    case "newModel":
+      // Structural, not a preference: a model belongs at its area's root, never inside
+      // another model's `paints`.
+      guess = target.folder;
+      derived = true;
+      break;
+    case "gearPaint":
+      guess = topPaints[0]?.value ?? (areaPaints.length === 1 ? areaPaints[0].value : "");
+      break;
+    default:
+      guess = topPaints[0] && topPaints[0].score >= 2 ? topPaints[0].value : "";
+  }
 
-  return { options, guess, suggestions };
+  return { options, guess, derived, suggestions: [...new Set(suggestions)] };
 }
 
 /**
@@ -955,19 +1139,37 @@ export function pickDownloadForBike(
   return best && best.score > 0 ? best.m : fallback();
 }
 
-export function destStorageKey(modType: ModType): string {
-  return `frost-dest-${modType.id}`;
+/**
+ * Where the last-used folder for a kind of mod is remembered.
+ *
+ * Keyed by title as well as kind: the two games' rider folders barely overlap, so an MX
+ * Bikes choice preselecting on GP Bikes would put a suit in `boots`.
+ */
+export function destStorageKey(game: GameInfo, modType: ModType): string {
+  return game.id === "mxb"
+    ? // The key MX Bikes has always used — renaming it would forget every existing choice.
+      `frost-dest-${modType.id}`
+    : `frost-dest-${game.id}-${modType.id}`;
+}
+
+/** `helmets/AGV/paints` → `helmets/*\/paints`. Two destinations of the same shape are
+ *  interchangeable choices; different shapes are different *kinds* of place, and a folder
+ *  remembered from one is no answer for the other. */
+function destShape(value: string): string {
+  const segs = value.split("/").filter(Boolean);
+  return segs.length > 1 ? `${segs[0]}/*/${segs[segs.length - 1]}` : (segs[0] ?? "");
 }
 
 export function resolveInitialFolder(
+  game: GameInfo,
   modType: ModType,
   destOptions: DestOption[],
   guess: string,
   livery = false,
   sound = false,
-  paintKind: GearPaintKind | null = null,
+  rider: { target: RiderTarget | null; derived: boolean } | null = null,
 ): string {
-  const remembered = localStorage.getItem(destStorageKey(modType)) ?? "";
+  const remembered = localStorage.getItem(destStorageKey(game, modType)) ?? "";
   const rememberedIsPaints = /\/paints$/i.test(remembered);
   // An empty remembered value can't be told apart from never having chosen — both read as
   // `""`. For tracks that's the root, the one destination worth talking someone out of, so
@@ -978,7 +1180,13 @@ export function resolveInitialFolder(
   // not this mod's. Whenever we could work out which bike this one is for — its categories
   // name it — that beats the memory. With no match at all, fall through and keep it.
   if (modType.id === "bikes" && (livery || sound) && guess) return guess;
-  if (paintKind && remembered && !remembered.startsWith(`${paintKind}/`)) return guess;
+  if (rider?.target) {
+    // The post named the model this is for; that outranks the last folder used.
+    if (rider.derived) return guess;
+    // Otherwise the memory stands, but only where it's the same kind of place: a helmet
+    // paint's folder is no home for a helmet model, nor a boot paint for a suit.
+    if (destShape(remembered) !== destShape(guess)) return guess;
+  }
   if (destOptions.some((o) => o.value === remembered)) return remembered;
   return guess;
 }
@@ -988,11 +1196,11 @@ export function resolveInitialFolder(
  * the purchase list. Same answer the Browse dialog would preselect: the remembered folder, or
  * the first one the library already has.
  */
-export async function resolveTrackDest(): Promise<string> {
+export async function resolveTrackDest(game: GameInfo): Promise<string> {
   const modType = DEFAULT_MOD_TYPE;
   const installed = await getInstalledMods(modType.installSubpath).catch(() => []);
   const { options, guess } = buildDestinations(modType, "", installed);
-  return resolveInitialFolder(modType, options, guess);
+  return resolveInitialFolder(game, modType, options, guess);
 }
 
 export interface QuickInstallParams {
@@ -1008,10 +1216,19 @@ export type QuickInstallResult =
   | { ok: true; params: QuickInstallParams }
   | { ok: false; reason: "blocked" | "none"; title: string; host?: string };
 
+/**
+ * The folder a one-click install from the Browse grid uses — the same answer the install
+ * dialog would have preselected, worked out without opening it.
+ *
+ * Rider mods route through `buildRiderDestinations` exactly as the dialog does. They used to
+ * fall through the generic (track/bike) logic instead, which knows nothing of gear models and
+ * so filed every quick-installed helmet, kit and suit in the `mods/rider` root.
+ */
 export async function resolveQuickInstall(
   slug: string,
   modType: ModType,
-  livery = false,
+  game: GameInfo,
+  categoryId: number | null | undefined,
 ): Promise<QuickInstallResult> {
   const detail = await getModDetail(slug);
   const mirrors = sortMirrors(detail);
@@ -1019,6 +1236,34 @@ export async function resolveQuickInstall(
   if (!primary) return { ok: false, reason: "none", title: detail.title };
   if (isBlockedDownload(primary))
     return { ok: false, reason: "blocked", title: detail.title, host: primary.host };
+
+  const livery = isLiveryContext(modType, categoryId);
+
+  if (modType.id === "rider") {
+    const target = riderTarget(game, modType, categoryId);
+    const targets = await scanRiderTargets().catch(() => EMPTY_RIDER_TARGETS);
+    const { options, guess, derived } = buildRiderDestinations(
+      game,
+      targets,
+      detail.title,
+      detail.categories,
+      target,
+    );
+    return {
+      ok: true,
+      params: {
+        slug,
+        title: detail.title,
+        subpath: modType.installSubpath,
+        destFolder: resolveInitialFolder(game, modType, options, guess, false, false, {
+          target,
+          derived,
+        }),
+        url: primary.url,
+        host: primary.host,
+      },
+    };
+  }
 
   let installed: InstalledMod[] = [];
   let bikeTargets: string[] = [];
@@ -1039,7 +1284,7 @@ export async function resolveQuickInstall(
     detail.categories,
     bikeTargets,
   );
-  const destFolder = resolveInitialFolder(modType, options, guess, livery);
+  const destFolder = resolveInitialFolder(game, modType, options, guess, livery);
 
   return {
     ok: true,
