@@ -1346,9 +1346,10 @@ export function frostmodStart(): Promise<boolean> {
   return invoke<boolean>("frostmod_start");
 }
 
-/** Stop the managed FrostMod process. */
-export function frostmodStop(): Promise<void> {
-  return invoke<void>("frostmod_stop");
+/** Stop FrostMod, whoever started it — a hand-launched `frostmod.exe` included.
+ *  Resolves to whether it's actually gone; `false` means it outlived the kill. */
+export function frostmodStop(): Promise<boolean> {
+  return invoke<boolean>("frostmod_stop");
 }
 
 /** Toggle auto-running FrostMod when the app opens. */
