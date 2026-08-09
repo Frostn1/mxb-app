@@ -8,10 +8,12 @@ import {
   Settings,
   RefreshCw,
   Play,
+  Square,
   Loader2,
   Gamepad2,
   SlidersHorizontal,
   Store,
+  Palette,
   Server as ServerIcon,
   Plug,
 } from "lucide-react";
@@ -35,6 +37,7 @@ export type DashboardView =
   | "locker"
   | "presets"
   | "rider"
+  | "paints"
   | "servers"
   | "manage"
   | "settings";
@@ -64,6 +67,9 @@ const NAV: NavEntry[] = [
   { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
   { id: "presets", label: "nav.presets", icon: Shirt },
   { id: "rider", label: "nav.rider", icon: User, cap: "viewer" },
+  // Building a `.pnt` needs nothing game-specific, but its whole point is seeing the
+  // result on the model — so it rides with the rest of the 3D preview.
+  { id: "paints", label: "nav.paints", icon: Palette, cap: "viewer" },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
@@ -97,7 +103,7 @@ const STARTING_TIMEOUT_MS = 15000;
 
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const t = useT();
-  const { running, reload, status, start } = useFrostmod();
+  const { running, reload, status, start, stop } = useFrostmod();
   const { active, queueLength } = useInstall();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const { game } = useConfig();
@@ -319,13 +325,22 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
                 : t("frostmod.notRunning")}
           </span>
           {running ? (
-            <button
-              onClick={onReload}
-              title={t("frostmod.reloadGame")}
-              className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <RefreshCw className="size-3.5" />
-            </button>
+            <>
+              <button
+                onClick={onReload}
+                title={t("frostmod.reloadGame")}
+                className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <RefreshCw className="size-3.5" />
+              </button>
+              <button
+                onClick={stop}
+                title={t("frostmod.stop")}
+                className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Square className="size-3.5" />
+              </button>
+            </>
           ) : (
             status?.installed && (
               <button

@@ -15,6 +15,108 @@
   and offers `mods/rider/animations` when you install one. GP Bikes already did both; MX
   Bikes was treated as if it had no such folder, so a riding style installed there was
   invisible to the app.
+## Unreleased
+
+### Fixed
+- **Retrying a failed install no longer breaks the install.** Downloads are meant to run one
+  at a time, but the Retry button on a failure went straight to the installer instead of the
+  queue — so a second, impatient click started a *parallel* run of the same mod. Both runs
+  used a staging folder named after the mod, and the newcomer wiped it clean on the way in,
+  deleting the files the first run was still copying. The failure landed as a bare
+  "os error 2", most often on a livery, and clicking Retry again only made it likelier. Retry
+  now joins the queue, a mod already installing to the same place ignores a repeat click, and
+  every install stages into a folder of its own.
+- **A failed install says which file it failed on.** The error reached you as a raw system
+  code with no path in it — nothing to act on and nothing to report. It now names the file
+  and where it was going, and the failure is written to the log rather than living only in a
+  toast you have to catch before it goes.
+- **One unreadable file no longer sinks a whole install.** A shortcut whose target has gone
+  away, or a file an antivirus pulls out mid-install, used to fail everything that came with
+  it. Those entries are skipped and noted in the log; the rest of the mod installs.
+## 2026-08-09 — stopping FrostMod from the app
+
+### Added
+- **FrostMod can be stopped from the app.** The sidebar pill and the FrostMod section in
+  Settings now offer a stop control while it's running, next to the reload and start ones —
+  until now the only way out was Task Manager or quitting the app from the tray. It stops
+  FrostMod whoever started it: a `frostmod.exe` left behind by an earlier session, or one
+  launched by hand, is no longer out of reach just because this app didn't spawn it. The app
+  waits for the process to actually go before saying it stopped, so a FrostMod that survives
+  the attempt (running elevated, or as another user) is reported rather than papered over with
+  a success message the status pill contradicts a second later. Stopping is a one-off — it
+  doesn't touch the "Run FrostMod automatically" setting, so the next app launch behaves as
+  configured.
+## 2026-08-09 — an installer that can always replace the app it's updating
+
+### Fixed
+- **Installing over a running copy no longer stops at "error opening file for writing".**
+  The file it named, `frost.exe`, is the app's own program file, and Windows won't let
+  anything overwrite a program image that is still held — which the app's often is, since it
+  hides in the tray, starts at login, and launches the installer from inside itself when you
+  update in-app. Closing it first isn't enough on its own: the hold can outlive the process,
+  by a copy still tearing down or an antivirus reading the image as it exits, which is why
+  the installer's own "MXB App is running" prompt never appeared before the failure. The
+  installer now clears the name by whatever means Windows allows — delete it, retry for a
+  couple of seconds while a dying copy lets go, and failing that rename it aside, which
+  Windows permits even for a file in use — then sweeps up what it moved once the new build
+  is in place. The uninstaller does the same, since it's the installed build's uninstaller
+  that the next version runs, and a failed one is what used to bounce you back to the
+  "already installed" page for good.
+- **An in-app update can no longer kill its own installer.** Closing the app took the whole
+  process tree with it, and the installer the app had just launched was part of that tree.
+  It now closes the app alone; the browser processes that the tree kill was there for exit
+  with it anyway.
+
+## Unreleased — paint studio: TGA in, `.pnt` out
+
+### Added
+- **A new Paints tab turns image files into paints the game loads.** MX Bikes reads a paint
+  as a packed container of compressed texture sheets, which no image editor writes — so
+  until now a livery drawn in GIMP or Photoshop had to go through somebody else's converter
+  before the game, or this app's 3D preview, would look at it. Pick the sheets (`.tga`,
+  `.png`, `.jpg`, `.bmp`, `.webp`), say what they're for, and the app builds the `.pnt` and
+  installs it where the game expects it: `mods/bikes/<Bike>/paints`,
+  `rider/helmets/<Helmet>/paints` or `goggles`, boots, protection, and a rider profile's
+  kit or gloves. Or save it to a folder of your own, to share.
+- **Unpack an existing paint into editable `.tga` sheets.** This is how you get a template
+  that actually fits the model: the sheets come out named the way the mesh binds them
+  (`livery`, `rider`, `shell`…), open in any editor, and go straight back in under the same
+  names. Extracted to `Documents\MXB App\Paint Templates\<paint>` and loaded into the studio
+  in one step, so the round trip is edit → **Reload from disk** → **Save paint**.
+- **Names are the part that decides whether a paint works, so the studio shows them.** A
+  `.pnt` supplies textures *by name* and the mesh binds whichever names it asked for — a
+  sheet called `livery` lands on the bodywork, the same sheet called `my_livery` lands
+  nowhere. The studio reads the names the paints already installed for that model use (from
+  their headers — no pixels decoded), lists them, and flags a sheet whose name isn't one of
+  them before you save.
+- **Preview what you just saved on the real model**, through the viewer the app already
+  has: a bike livery on its bike, a helmet or goggle paint on that helmet, a kit on the
+  rider.
+- **Sheets that aren't a power of two are resized to one, and say so.** MX Bikes is a
+  DirectX 9 title and its textures are powers of two throughout; a 1000×1000 export — which
+  GIMP will happily make — would otherwise be packed into a file the game refuses, and the
+  failure would land in-game rather than in the app.
+
+### Fixed
+- **A packed gear item and a folder of the same name are now one item, not two.** A `.pkz`
+  helmet with paints installed loose beside it (which is where the game looks, and where the
+  studio writes) only ever showed one side of itself: whichever the loader resolved first.
+  A folder holding nothing but paints hid the archive entirely — the picker listed the new
+  paint alone and the preview lost the mesh it belonged to. Both are read now, the folder
+  winning a name clash because it's what was installed last.
+
+## 2026-08-09
+
+### Fixed
+- **Opening MXB App while it's already running shows the window you had, instead of starting
+  a second copy.** Closing the window parks the app in the tray rather than quitting it —
+  that part is deliberate, it's what keeps FrostMod connected — but nothing stopped the next
+  launch from building a whole new app beside it. Open it five times over a day and you ended
+  up with five of everything: five windows, five tray icons to go and quit one by one under
+  the overflow arrow, five FrostMods. A launch now hands off to the copy already running and
+  brings its window forward, the same as clicking the tray icon. Launch-at-login is covered
+  too — the instance that started with Windows is the one your first launch of the day
+  reveals, rather than the one it stacks on top of.
 
 ## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 

@@ -11,6 +11,7 @@ import {
   frostmodInstall,
   frostmodStart,
   frostmodStatus,
+  frostmodStop,
   isFrostmodRunning,
   MODS_WATCH_SLUG,
   onFrostmodReload,
@@ -132,6 +133,24 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     }
   }, [probe, t]);
 
+  const stop = useCallback(async () => {
+    try {
+      const stopped = await frostmodStop();
+      await probe();
+      // The backend waits for the process to actually go, so a `false` here is a
+      // FrostMod that survived the kill — say so rather than let the pill contradict
+      // a success toast a second later.
+      if (stopped) toast.success(t("frostmod.stopped"));
+      else
+        toast.error(t("frostmod.stopFailed"), {
+          description: t("frostmod.stopFailedDesc"),
+        });
+    } catch (e) {
+      await probe();
+      toast.error(t("frostmod.stopFailed"), { description: String(e) });
+    }
+  }, [probe, t]);
+
   const install = useCallback(async () => {
     setInstalling(true);
     try {
@@ -199,8 +218,9 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       refreshStatus,
       install,
       start,
+      stop,
     }),
-    [running, status, installing, checking, statusError, reload, probe, refreshStatus, install, start],
+    [running, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop],
   );
 
   return (
