@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-09 — custom riding styles
+
+### Added
+- **Presets can use a custom riding style.** The **Riding style** slot only ever offered the
+  two styles the game ships, so a style you had installed could not be picked — you could
+  type its name in by hand, but the preset then flagged it as a mod you were missing, never
+  packed it into a share code, and Manage was free to park it right before a race. The slot
+  now lists what is installed in `mods/rider/animations` alongside the stock `mx` and `sm`,
+  a shared preset carries the style with it like it already carries helmets and paints, and
+  Manage keeps it. **MX Bikes and GP Bikes both**, which is the point: the two games load
+  riding styles from the same folder and record the pick in the same `[riding_style]` line.
+- **MX Bikes lists riding styles in the Library**, in the Rider tab under their own heading,
+  and offers `mods/rider/animations` when you install one. GP Bikes already did both; MX
+  Bikes was treated as if it had no such folder, so a riding style installed there was
+  invisible to the app.
+
 ## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 
 A patch on top of v0.8.0 — everything that release added is still the news, and its notes are

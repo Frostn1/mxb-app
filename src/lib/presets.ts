@@ -111,6 +111,9 @@ const BUILTINS: Partial<Record<keyof Loadout, string[]>> = {
   rider: [...STOCK_RIDER_PROFILES],
   bikeFont: ["default_black", "default_white"],
   suitFont: ["default_white", "default_black"],
+  // The two styles the game ships. Like the stock rider bodies they live in `rider.pkz`
+  // and leave nothing on disk, so no scan can see them — installed styles come from
+  // `mods/rider/animations` and join these in `slotOptions`.
   ridingStyle: ["mx", "sm"],
   tyres: ["p_mx"],
 };
@@ -135,6 +138,7 @@ export interface Scans {
   gloves: string[];
   outfits: Record<string, string[]>; // rider profile → kit paints
   riderProfiles: string[];
+  ridingStyles: string[]; // installed `mods/rider/animations` styles
   tyres: string[];
 }
 
@@ -170,6 +174,7 @@ export async function loadScans(): Promise<Scans> {
     gloves: [],
     outfits: {},
     riderProfiles: [...targets.profiles],
+    ridingStyles: [...targets.animations],
     tyres: [],
   };
 
@@ -213,6 +218,7 @@ export async function loadScans(): Promise<Scans> {
   s.protection = tidy(s.protection);
   s.gloves = tidy(s.gloves);
   s.riderProfiles = tidy(s.riderProfiles);
+  s.ridingStyles = tidy(s.ridingStyles);
   s.tyres = tidy(s.tyres);
   for (const m of [s.bikePaints, s.helmetPaints, s.goggles, s.bootPaints, s.protectionPaints, s.outfits])
     for (const k of Object.keys(m)) m[k] = tidy(m[k]);
@@ -302,6 +308,9 @@ export function slotOptions(
       break;
     case "rider":
       opts = scans.riderProfiles;
+      break;
+    case "ridingStyle":
+      opts = scans.ridingStyles;
       break;
     case "tyres":
       opts = scans.tyres;
