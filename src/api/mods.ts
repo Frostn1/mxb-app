@@ -28,6 +28,11 @@ import type {
   StatePlan,
   PkzMeta,
   PaintTexture,
+  StudioImage,
+  BuildTexture,
+  PaintDest,
+  SavedPaint,
+  PaintTemplate,
   BikeModel,
   EdfNode,
   RiderModel,
@@ -35,6 +40,8 @@ import type {
   GearPaints,
   Preset,
   PresetApplyOutcome,
+  ReshadeApplyOutcome,
+  ReshadeStatus,
   SwapApplyOutcome,
   ReloadOutcome,
   BundlePlan,
@@ -68,6 +75,11 @@ export interface ModType {
   /** Relative folder under the game root, e.g. `mods/tracks`. */
   installSubpath: string;
 }
+
+/** Routes an install to the ReShade preset folder instead of the mods tree. Must match
+ *  `reshade::SUBPATH` in the backend. Declared here rather than beside the mod type that
+ *  uses it because that one is a `const` array evaluated at module load. */
+export const RESHADE_SUBPATH = "reshade";
 
 /**
  * Browse categories per game.
@@ -182,7 +194,25 @@ export const MOD_TYPES: ModType[] = [
       { id: 135, label: "browseCat.protectionPaints" },
     ],
   },
+  {
+    id: "reshade",
+    label: "modType.reshade",
+    labelInline: "modType.reshadeInline",
+    // mxb-mods' "ReShade Presets" category. Scoped to it alone rather than to its Misc
+    // parent (40): the installer knows how to route a preset, and would have nowhere to
+    // put the plugins and tools filed alongside it.
+    categoryId: 174,
+    // Not a `mods/` folder at all — the game's install dir. `reshade::SUBPATH` is what the
+    // backend routes on; see `install::extract_and_place`.
+    installSubpath: RESHADE_SUBPATH,
+    categories: [{ id: 174, label: "browseCat.all" }],
+  },
 ];
+
+/** Does this mod type install outside the mods tree? Only ReShade presets do. */
+export function installsOutsideMods(modType: ModType): boolean {
+  return modType.installSubpath === RESHADE_SUBPATH;
+}
 
 MOD_TYPES_BY_GAME.mxb = MOD_TYPES;
 
@@ -331,7 +361,7 @@ export interface RiderTargets {
   helmets: string[];
   boots: string[];
   protection: string[];
-  /** GP Bikes riding-style animations. Always empty for MX Bikes. */
+  /** Riding-style animations. Both titles read `mods/rider/animations/<name>/`. */
   animations: string[];
   /** What `mods/rider/riders` holds: MX Bikes' rider profiles, GP Bikes' rider models. */
   profiles: string[];
@@ -371,6 +401,25 @@ export function applyModelSwap(bike: string, target: string): Promise<SwapApplyO
 export function scanSoundSwaps(): Promise<BikeSounds[]> {
   return invoke<BikeSounds[]>("scan_sound_swaps");
 }
+
+/** ReShade's install state and every preset the app can switch to. */
+export function reshadeStatus(): Promise<ReshadeStatus> {
+  return invoke<ReshadeStatus>("reshade_status");
+}
+
+/** Make `name` the active preset. `RESHADE_OFF` is the no-effects preset. */
+export function applyReshadePreset(name: string): Promise<ReshadeApplyOutcome> {
+  return invoke<ReshadeApplyOutcome>("apply_reshade_preset", { name });
+}
+
+/** Remove a preset the app installed. Presets loose in the game folder aren't ours to
+ *  delete — `ReshadePreset.managed` says which is which. */
+export function deleteReshadePreset(name: string): Promise<void> {
+  return invoke<void>("delete_reshade_preset", { name });
+}
+
+/** The no-effects preset — matches `reshade::OFF`, which resolves it to a real file. */
+export const RESHADE_OFF = "Off";
 
 export function applySoundSwap(bike: string, target: string): Promise<SwapApplyOutcome> {
   return invoke<SwapApplyOutcome>("apply_sound_swap", { bike, target });
@@ -430,6 +479,41 @@ export function getPkzPreview(path: string): Promise<string | null> {
 
 export function unpackPaint(path: string): Promise<PaintTexture[]> {
   return invoke<PaintTexture[]>("unpack_paint", { path });
+}
+
+/* ── Paint studio ──────────────────────────────────────────────────────────────────── */
+
+/** Read image files as textures — non-power-of-two sizes come back resized, flagged. */
+export function paintStudioLoad(paths: string[]): Promise<StudioImage[]> {
+  return invoke<StudioImage[]>("paint_studio_load", { paths });
+}
+
+/** The file a save would write, resolved but not written — so we can ask before replacing. */
+export function paintStudioTarget(
+  fileName: string,
+  dest: PaintDest,
+): Promise<{ path: string; exists: boolean }> {
+  return invoke<{ path: string; exists: boolean }>("paint_studio_target", { fileName, dest });
+}
+
+export function paintStudioSave(req: {
+  name: string;
+  fileName: string;
+  textures: BuildTexture[];
+  dest: PaintDest;
+  overwrite: boolean;
+}): Promise<SavedPaint> {
+  return invoke<SavedPaint>("paint_studio_save", req);
+}
+
+/** Write an existing paint's sheets out as `.tga` files to edit. */
+export function paintStudioExtract(path: string, dest?: string): Promise<PaintTemplate> {
+  return invoke<PaintTemplate>("paint_studio_extract", { path, dest: dest ?? null });
+}
+
+/** The texture names the paints already installed at `rel` supply — what to call yours. */
+export function paintStudioHints(rel: string): Promise<string[]> {
+  return invoke<string[]>("paint_studio_hints", { rel });
 }
 
 /**
@@ -543,6 +627,24 @@ export function setProfilesPath(path: string): Promise<void> {
 /** Count profiles (dirs with a `profile.ini`) under a folder — validate a pick. */
 export function countProfilesIn(path: string): Promise<number> {
   return invoke<number>("count_profiles_in", { path });
+}
+
+/** Where the app actually reads mods from — see {@link getModsRoot}. */
+export type ModsRootInfo = {
+  path: string;
+  exists: boolean;
+  /** The folder picked *is* the mods tree, rather than the game folder above it. */
+  relocated: boolean;
+};
+
+/**
+ * The folder content is really read from. `modsPath` can be the game's user folder (the
+ * root is its `mods` child) or a relocated tree that is the root itself, so this is the
+ * only thing that answers "where is the app looking" — the first question when the
+ * library comes up empty.
+ */
+export function getModsRoot(): Promise<ModsRootInfo> {
+  return invoke<ModsRootInfo>("get_mods_root");
 }
 
 /** Launch-at-login toggle (also flips the OS autostart entry). */
@@ -1346,9 +1448,10 @@ export function frostmodStart(): Promise<boolean> {
   return invoke<boolean>("frostmod_start");
 }
 
-/** Stop the managed FrostMod process. */
-export function frostmodStop(): Promise<void> {
-  return invoke<void>("frostmod_stop");
+/** Stop FrostMod, whoever started it — a hand-launched `frostmod.exe` included.
+ *  Resolves to whether it's actually gone; `false` means it outlived the kill. */
+export function frostmodStop(): Promise<boolean> {
+  return invoke<boolean>("frostmod_stop");
 }
 
 /** Toggle auto-running FrostMod when the app opens. */

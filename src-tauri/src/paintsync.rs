@@ -262,7 +262,7 @@ pub async fn pull(cfg: &AppConfig, token: &str, server_id: &str) -> anyhow::Resu
         .json()
         .await?;
 
-    let mods_dir = PathBuf::from(&cfg.mods_path).join("mods");
+    let mods_dir = crate::library::mods_root(&cfg.mods_path);
     let mut out = PullOutcome { riders: roster.riders.len(), ..Default::default() };
 
     for rider in &roster.riders {

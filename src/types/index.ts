@@ -34,6 +34,9 @@ export interface GameInfo {
   id: GameId;
   /** Product name, shown verbatim — never translated. */
   display: string;
+  /** The executable's file name, for when the UI has to name the file another tool
+   *  should be pointed at (ReShade's installer asks for exactly this one). */
+  exe: string;
   /** Top-level folders under `<modsPath>/mods` for this title. */
   modsDirs: string[];
   /** Host of this title's catalog, e.g. `mxb-mods.com`. Shown wherever the UI names
@@ -183,7 +186,7 @@ export type LibraryCategory =
   | "protectionPaint"
   | "gloves"
   | "outfit"
-  /** GP Bikes riding-style animation. */
+  /** A riding-style animation from `mods/rider/animations`. Both titles. */
   | "animation"
   | "misc";
 
@@ -363,6 +366,59 @@ export interface GearPaints {
   hasStockGoggles: boolean;
 }
 
+/**
+ * One source image picked in the paint studio, as the backend read it.
+ *
+ * `width`/`height` are what will be packed; `sourceWidth`/`sourceHeight` are what the file
+ * measures. They differ only when the image had to be resized onto power-of-two edges the
+ * game accepts — `resized` says so, and the studio warns rather than silently reshaping
+ * somebody's artwork.
+ */
+export interface StudioImage {
+  path: string;
+  /** The texture name it will be packed under — the file's stem, editable before saving. */
+  name: string;
+  width: number;
+  height: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  resized: boolean;
+  /**
+   * Pixels held on the Rust side, same as any decoded paint's — but shrunk for display, so
+   * they measure `previewWidth`×`previewHeight` rather than the sheet's own size.
+   */
+  token: string;
+  previewWidth: number;
+  previewHeight: number;
+}
+
+/** One texture of a paint being built: a file on disk, packed under `name`. */
+export interface BuildTexture {
+  path: string;
+  name: string;
+}
+
+/**
+ * Where a built paint is written: into the game's `mods` folder at `rel`
+ * (`bikes/<Bike>/paints`, `rider/helmets/<Helmet>/paints`…), or into a folder the player
+ * picked, for a paint they mean to share rather than install.
+ */
+export type PaintDest = { kind: "mods"; rel: string } | { kind: "folder"; path: string };
+
+export interface SavedPaint {
+  path: string;
+  /** The texture names the file ended up carrying — what the mesh will bind. */
+  textures: string[];
+  bytes: number;
+}
+
+/** A paint taken apart into editable `.tga` sheets. */
+export interface PaintTemplate {
+  dir: string;
+  files: string[];
+  textures: string[];
+}
+
 export interface PkzMeta {
   locked: boolean;
   /** Display name from the archive's `.ini`, if readable. */
@@ -385,6 +441,7 @@ export type DropKind =
   | "bikePaint"
   | "soundSet"
   | "riderGear"
+  | "reshadePreset"
   | "unknown";
 
 /** Why it decided that. A key, not prose — the UI translates it. */
@@ -400,6 +457,7 @@ export type DropReason =
   | "gearFolders"
   | "riderTexture"
   | "gearTexture"
+  | "reshadePreset"
   | "unrecognised";
 
 export interface DropChoice {
@@ -530,6 +588,39 @@ export interface PresetApplyOutcome {
   live_refresh: LiveRefresh;
   /** Set only when the preset performed a model swap. See `SwapApplyOutcome`. */
   model_refresh: CommandOutcome | null;
+}
+
+/** One ReShade preset the app can switch to. Mirrors `reshade::Preset`. */
+export interface ReshadePreset {
+  name: string;
+  path: string;
+  active: boolean;
+  /** In the app's `FrostMod ReShade` folder, so it can be deleted. A preset found loose in
+   *  the game folder is someone else's file and is only ever read. */
+  managed: boolean;
+  /** Effects the preset asks for that aren't installed — it will render without them.
+   *  Always empty when `hasShaders` is false; that case is reported once, on the status. */
+  missingEffects: string[];
+}
+
+/** State of the ReShade install and its presets. Mirrors `reshade::Status`. */
+export interface ReshadeStatus {
+  /** The game's install dir. Empty means it isn't configured — "don't know", not "absent". */
+  gameDir: string;
+  /** A ReShade `opengl32.dll` is in place. MX Bikes and GP Bikes are OpenGL. */
+  installed: boolean;
+  /** ReShade is here under a DirectX name these games never load — a fixable mistake. */
+  wrongApi: string | null;
+  version: string | null;
+  hasShaders: boolean;
+  /** Name of the active preset, empty when none resolves. */
+  active: string;
+  presets: ReshadePreset[];
+}
+
+/** Outcome of switching preset. Thin by nature — nothing of ours reloads. */
+export interface ReshadeApplyOutcome {
+  gameRunning: boolean;
 }
 
 /** Outcome of a Locker model/sound swap — same shape/feedback as a preset apply. */
@@ -721,7 +812,7 @@ export type SlotSource =
   | "protection" // protection models
   | "protectionPaint" // paints for the selected protection
   | "rider" // rider profile (default_mx / default_sm)
-  | "ridingStyle" // mx / sm
+  | "ridingStyle" // stock mx / sm, plus installed `rider/animations` styles
   | "tyres" // tyre models
   | "font"; // number-plate / suit fonts (free text)
 

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  installsOutsideMods,
   modTypesFor,
   scanLibrary,
   moveMod,
@@ -336,7 +337,10 @@ export default function Library({
   );
 
   const { bikePreview, game } = useConfig();
-  const modTypes = modTypesFor(game.id);
+  // The Library is a view of the mods tree, so the one type that installs outside it —
+  // ReShade presets, which live in the game's install folder — has no tab here. They're
+  // managed in Settings, where their install status can be shown alongside them.
+  const modTypes = modTypesFor(game.id).filter((mt) => !installsOutsideMods(mt));
   const view3dProps = view3d ? entryViewerProps(view3d, entries, bikePreview) : null;
 
   const doMove = async (item: LibraryEntry, toFolder: string) => {

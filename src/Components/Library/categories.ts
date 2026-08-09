@@ -90,8 +90,7 @@ export const RIDER_SECTION_ORDER: LibraryCategory[] = [
   "protectionPaint",
   "gloves",
   "outfit",
-  // GP Bikes riding styles. MX Bikes never produces this category, so listing it
-  // unconditionally costs nothing.
+  // Riding styles, which both titles keep in `mods/rider/animations`.
   "animation",
   "misc",
 ];

@@ -7,6 +7,7 @@ import { labelOf } from "../../i18n/core";
 import { Badge } from "@/Components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
+  installsOutsideMods,
   isBlockedDownload,
   pickDownloadForBike,
   sortMirrors,
@@ -38,6 +39,10 @@ interface InstallDialogProps {
   onConfirm: (choice: InstallChoice) => void;
 }
 
+/** Where a ReShade preset lands, shown verbatim. Mirrors `reshade::PRESET_DIR`, under the
+ *  game's install folder rather than the mods tree. */
+const RESHADE_DEST = "FrostMod ReShade";
+
 /** Ordered, de-duped playable mirrors with the "official" default first. */
 function useMirrors(detail: Detail): DownloadOption[] {
   return useMemo(() => sortMirrors(detail), [detail]);
@@ -57,6 +62,7 @@ export default function InstallDialog({
 }: InstallDialogProps) {
   const t = useT();
   const mirrors = useMirrors(detail);
+  const outsideMods = installsOutsideMods(modType);
   const [folder, setFolder] = useState(initialFolder);
   const [folderOpen, setFolderOpen] = useState(false);
   const [folderSearch, setFolderSearch] = useState("");
@@ -206,21 +212,32 @@ export default function InstallDialog({
             <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
               {t("installDialog.installTo")}
             </span>
-            <button
-              onClick={() => setFolderOpen((v) => !v)}
-              className="flex cursor-default items-center gap-2.5 rounded-[9px] border border-input bg-background px-3 py-2.5"
-            >
-              <ChevronRight className="size-3.5 flex-none text-primary" />
-              <span className="flex-1 truncate text-left font-mono text-[12px] text-muted-foreground">
-                {modType.installSubpath.replace(/\//g, "\\")}\
-                <b className="text-foreground">{folderLabel}</b>
-              </span>
-              <span className="flex flex-none items-center gap-1 text-[11px] text-muted-foreground">
-                {t("installDialog.change")} <ChevronDown className="size-3" />
-              </span>
-            </button>
+            {/* A ReShade preset doesn't live in the mods tree and has exactly one home, so
+                it shows where it lands and offers no folder to change. */}
+            {outsideMods ? (
+              <div className="flex items-center gap-2.5 rounded-[9px] border border-input bg-background px-3 py-2.5">
+                <ChevronRight className="size-3.5 flex-none text-primary" />
+                <span className="flex-1 truncate text-left font-mono text-[12px] text-muted-foreground">
+                  <b className="text-foreground">{RESHADE_DEST}</b>
+                </span>
+              </div>
+            ) : (
+              <button
+                onClick={() => setFolderOpen((v) => !v)}
+                className="flex cursor-default items-center gap-2.5 rounded-[9px] border border-input bg-background px-3 py-2.5"
+              >
+                <ChevronRight className="size-3.5 flex-none text-primary" />
+                <span className="flex-1 truncate text-left font-mono text-[12px] text-muted-foreground">
+                  {modType.installSubpath.replace(/\//g, "\\")}\
+                  <b className="text-foreground">{folderLabel}</b>
+                </span>
+                <span className="flex flex-none items-center gap-1 text-[11px] text-muted-foreground">
+                  {t("installDialog.change")} <ChevronDown className="size-3" />
+                </span>
+              </button>
+            )}
 
-            {folderOpen && (
+            {folderOpen && !outsideMods && (
               <div className="flex flex-col overflow-hidden rounded-[10px] border border-input bg-popover shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
                 {/* command-style search */}
                 <div className="flex items-center gap-2 border-b border-border px-3 py-2">
