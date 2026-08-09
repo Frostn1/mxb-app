@@ -920,6 +920,19 @@ export const it: Translation = {
   "showcase.whileGameRunning": "mentre MX Bikes è in esecuzione",
   "showcase.releaseNotes": "Leggi le note di rilascio",
   "showcase.gotIt": "Ho capito",
+  "showcase.v080.hero.title": "MXB App gestisce anche GP Bikes",
+  "showcase.v080.hero.body":
+    "Scegli il gioco al primo avvio, o cambialo quando vuoi nelle Impostazioni: tutta l'app lo segue — Libreria, Gestisci, Preset, Play e una scheda Sfoglia servita da gpb-mods.com. Le cartelle pilota di GP vengono lette come quelle di GP, non di MX Bikes, e anche lì FrostMod ricarica al volo. Ogni gioco tiene le proprie cartelle, quindi la tua configurazione di MX Bikes resta intatta.",
+  "showcase.v080.shop":
+    "La scheda Shop naviga mxbikes-shop.com e installa ciò che hai acquistato, senza uscire dall'app.",
+  "showcase.v080.dropzone":
+    "Trascina qualsiasi cosa sulla finestra. Capisce cos'è ogni file, mostra dove finirà e cosa sostituirebbe, e ti lascia ricollocare ogni riga prima di installare.",
+  "showcase.v080.destinations":
+    "I mod finiscono nella cartella che il gioco legge davvero — una livrea sulla sua moto, una grafica casco sul suo casco, una tuta GP sul tuo modello pilota.",
+  "showcase.v080.protection":
+    "Lo slot protezioni funziona: ogni pezzo disegnato dritto e completo, e installato dove il gioco lo cerca.",
+  "showcase.v080.faster":
+    "Le anteprime sono in cache e disegnate alla dimensione mostrata, così Sfoglia e Shop si aprono molto più in fretta.",
   "showcase.v070.hero.title": "Un overlay in gioco, su una scorciatoia",
   "showcase.v070.hero.body": "Apre Preset, Locker e Browse sopra MX Bikes — senza alt-tab. Esc restituisce subito il controllo e un preset scelto qui arriva sulla sessione che stai già guidando. Gioca senza bordi o in finestra: sopra il fullscreen esclusivo non si può disegnare nulla.",
   "showcase.v070.hero.action": "Configura l'overlay",

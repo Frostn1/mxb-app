@@ -899,6 +899,19 @@ export const en = {
   "showcase.whileGameRunning": "while MX Bikes is running",
   "showcase.releaseNotes": "Read the release notes",
   "showcase.gotIt": "Got it",
+  "showcase.v080.hero.title": "MXB App drives GP Bikes too",
+  "showcase.v080.hero.body":
+    "Pick your game at first launch, or switch any time in Settings — the whole app follows: Library, Manage, Presets, Play, and a Browse tab served by gpb-mods.com. GP's rider folders are read as GP's, not as MX Bikes', and FrostMod hot-reloads there as well. Each game keeps its own folders, so your MX Bikes setup is untouched.",
+  "showcase.v080.shop":
+    "A Shop tab browses mxbikes-shop.com and installs what you've bought, without leaving the app.",
+  "showcase.v080.dropzone":
+    "Drag anything onto the window. It works out what each file is, shows where it's going and what it would replace, and lets you re-file any row before it installs.",
+  "showcase.v080.destinations":
+    "Mods land in the folder the game actually reads — a livery on its bike, a helmet paint on its helmet, a GP suit on your rider model.",
+  "showcase.v080.protection":
+    "The protection slot works: every piece drawn upright and whole, and installed where the game looks for it.",
+  "showcase.v080.faster":
+    "Thumbnails are cached and drawn at the size they're shown, so Browse and the Shop open far quicker.",
   "showcase.v070.hero.title": "An in-game overlay, on a hotkey",
   "showcase.v070.hero.body": "Brings Presets, the Locker and Browse up over MX Bikes — no alt-tab. Esc hands control straight back, and a preset picked here lands on the session you're already riding. Run the game borderless or windowed: nothing can be drawn over exclusive fullscreen.",
   "showcase.v070.hero.action": "Set up the overlay",
