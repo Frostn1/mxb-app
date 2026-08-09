@@ -34,6 +34,7 @@ import type { EntryViewerProps } from "../Viewer/entryViewer";
 import { SheetThumb } from "./SheetThumb";
 import {
   bikePreviewAvailable,
+  EMPTY_RIDER_TARGETS,
   paintStudioExtract,
   paintStudioHints,
   paintStudioLoad,
@@ -118,8 +119,6 @@ function relFor(kind: PaintKind, model: string): string {
   }
 }
 
-const EMPTY_TARGETS: RiderTargets = { helmets: [], boots: [], protection: [], profiles: [] };
-
 function fileStem(path: string): string {
   return (path.replace(/\\/g, "/").split("/").pop() ?? path).replace(/\.[^.]+$/, "");
 }
@@ -133,7 +132,7 @@ export default function PaintStudio() {
   const [kind, setKind] = useState<PaintKind>("bike");
   const [model, setModel] = useState("");
   const [bikes, setBikes] = useState<string[]>([]);
-  const [targets, setTargets] = useState<RiderTargets>(EMPTY_TARGETS);
+  const [targets, setTargets] = useState<RiderTargets>(EMPTY_RIDER_TARGETS);
   const [bikePreview, setBikePreview] = useState(true);
   const [sheets, setSheets] = useState<StudioImage[]>([]);
   const [name, setName] = useState("");
@@ -148,7 +147,7 @@ export default function PaintStudio() {
     let alive = true;
     void Promise.all([
       scanBikeTargets().catch(() => [] as string[]),
-      scanRiderTargets().catch(() => EMPTY_TARGETS),
+      scanRiderTargets().catch(() => EMPTY_RIDER_TARGETS),
       bikePreviewAvailable().catch(() => true),
     ]).then(([b, r, preview]) => {
       if (!alive) return;

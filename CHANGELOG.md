@@ -1,5 +1,6 @@
 # Changelog
 
+<<<<<<< HEAD
 ## Unreleased — paint studio: TGA in, `.pnt` out
 
 ### Added
@@ -38,7 +39,19 @@
   paint alone and the preview lost the mesh it belonged to. Both are read now, the folder
   winning a name clash because it's what was installed last.
 
-## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
+## 2026-08-09
+
+### Fixed
+- **Opening MXB App while it's already running shows the window you had, instead of starting
+  a second copy.** Closing the window parks the app in the tray rather than quitting it —
+  that part is deliberate, it's what keeps FrostMod connected — but nothing stopped the next
+  launch from building a whole new app beside it. Open it five times over a day and you ended
+  up with five of everything: five windows, five tray icons to go and quit one by one under
+  the overflow arrow, five FrostMods. A launch now hands off to the copy already running and
+  brings its window forward, the same as clicking the tray icon. Launch-at-login is covered
+  too — the instance that started with Windows is the one your first launch of the day
+  reveals, rather than the one it stacks on top of.
+
 ## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 
 A patch on top of v0.8.0 — everything that release added is still the news, and its notes are

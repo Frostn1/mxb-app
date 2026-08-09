@@ -14,6 +14,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
+# One app, one process. Closing the window parks MXB App in the tray, so without this
+# every launch after the first stacks up another copy — another tray icon, another
+# FrostMod, another mod watcher.
+tauri-plugin-single-instance = "2"
 # Self-update: check GitHub Releases, download + install, then relaunch.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"

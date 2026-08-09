@@ -4076,7 +4076,37 @@ fn log_level() -> log::LevelFilter {
 }
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // One app, one process. Closing the window parks MXB App in the tray rather than
+    // quitting it, so without this a second launch doesn't reveal the copy already
+    // running — it builds a whole new one: another window, another tray icon, another
+    // FrostMod, another mod watcher. Five launches in a day left five of everything, and
+    // only the tray overflow to clean them up from.
+    //
+    // Registered before every other plugin: the guard's setup hook is what kills the
+    // second process, and it should do so before anything else has started work that
+    // would then need unwinding. `show_main` is the same path the tray's "Show MXB App"
+    // takes, so relaunching behaves exactly like clicking the tray icon.
+    //
+    // Release builds only, for the same reason close-to-tray is (see `CloseRequested`
+    // below): a `tauri dev` run must still start while the installed MXB App is sitting
+    // in the tray, otherwise it would silently exit and just re-show the shipped app.
+    //
+    // The updater's restart is safe against this by construction, and it's worth knowing
+    // why, because it looks like it shouldn't be: a restart spawns the replacement before
+    // this process is gone, so a guard still held would make the new app mistake itself
+    // for a second copy and quit — an update that leaves nothing running. It doesn't,
+    // because `relaunch()` goes through `request_restart()`, and Tauri hands plugins
+    // `RunEvent::Exit` — where this one releases the guard — before it spawns anything.
+    // A restart that skipped the event loop would not be safe.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        log::info!("another instance was launched — showing the window already running");
+        show_main(app);
+    }));
+
+    builder
         // Thumbnails for both catalogs, served from a disk cache instead of refetched on
         // every scroll. Registered here rather than per-window so the overlay — which
         // renders the same `ModCard` — gets it too.
