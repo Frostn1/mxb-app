@@ -479,9 +479,15 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     // real folder — the user may well have moved it — so send it rather than let FrostMod
     // guess. Harmless on every FrostMod that ever shipped: `--mods` predates `--game`.
     let cfg = crate::config::load(app).unwrap_or_default();
+    // The *mods tree*, not the folder above it. FrostMod appends `\tracks` and `\bikes`
+    // to whatever `--mods` gives it (its own default is `…\MX Bikes\mods`), so sending
+    // `cfg.mods_path` pointed its track manager and model swap at folders that don't
+    // exist — silently, since neither reports an empty root as an error.
+    let mods_root = crate::library::mods_root(&cfg.mods_path);
+    let mods_root = mods_root.to_string_lossy();
     let mut args: Vec<&str> = vec!["--game", cfg.active_game.id()];
-    if !cfg.mods_path.is_empty() {
-        args.extend(["--mods", cfg.mods_path.as_str()]);
+    if !cfg.mods_path.trim().is_empty() {
+        args.extend(["--mods", mods_root.as_ref()]);
     }
     let child = std::process::Command::new(&exe)
         .current_dir(frostmod_dir(app))

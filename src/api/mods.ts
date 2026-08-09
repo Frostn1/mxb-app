@@ -585,6 +585,24 @@ export function countProfilesIn(path: string): Promise<number> {
   return invoke<number>("count_profiles_in", { path });
 }
 
+/** Where the app actually reads mods from — see {@link getModsRoot}. */
+export type ModsRootInfo = {
+  path: string;
+  exists: boolean;
+  /** The folder picked *is* the mods tree, rather than the game folder above it. */
+  relocated: boolean;
+};
+
+/**
+ * The folder content is really read from. `modsPath` can be the game's user folder (the
+ * root is its `mods` child) or a relocated tree that is the root itself, so this is the
+ * only thing that answers "where is the app looking" — the first question when the
+ * library comes up empty.
+ */
+export function getModsRoot(): Promise<ModsRootInfo> {
+  return invoke<ModsRootInfo>("get_mods_root");
+}
+
 /** Launch-at-login toggle (also flips the OS autostart entry). */
 export function setLaunchAtStartup(enabled: boolean): Promise<void> {
   return invoke<void>("set_launch_at_startup", { enabled });

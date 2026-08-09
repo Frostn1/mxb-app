@@ -30,6 +30,15 @@ pub struct AppConfig {
     /// a config that keeps meaning what it always meant is also one an older build can
     /// still read.
     pub games: BTreeMap<String, GamePaths>,
+    /// Where the active game's content lives. Two shapes are legal and
+    /// [`crate::library::mods_root`] is the one place that tells them apart: the game's
+    /// *user* folder (`Documents\PiBoSo\MX Bikes`, holding `mods/` and `profiles/`), or
+    /// the mods tree itself (`C:\mods`) for a player who relocated it with
+    /// `mxbikes.ini`'s `[mods] folder`.
+    ///
+    /// Never join `mods` onto this by hand — go through
+    /// [`crate::library::mods_subdir`] / [`crate::library::mods_root`], or a relocated
+    /// tree resolves to `C:\mods\mods`.
     pub mods_path: String,
     /// Active game's install dir (its executable + core archives); distinct from
     /// `mods_path`.
@@ -212,10 +221,10 @@ impl AppConfig {
     /// `profile.ini`).
     ///
     /// An explicit `profiles_path` always wins. Otherwise it's `<mods_path>/profiles`
-    /// — the normal, combined layout — falling back to the stock
-    /// `Documents\PiBoSo\MX Bikes\profiles` when that folder doesn't exist.
+    /// — the normal, combined layout — falling back to the folder beside a relocated
+    /// mods tree and then to the stock `Documents\PiBoSo\MX Bikes\profiles`.
     ///
-    /// The fallback is not exotic: `mxbikes.ini` lets a player point the *mods* folder
+    /// The fallbacks are not exotic: `mxbikes.ini` lets a player point the *mods* folder
     /// at another drive, and the game has no equivalent redirect for profiles, so it
     /// keeps writing them to `Documents`. Anyone who uses that documented feature ends
     /// up with a split layout, and without this the app looked for profiles in a folder
@@ -227,9 +236,29 @@ impl AppConfig {
         }
         // Case-tolerant join: under Proton the folder can come back as `Profiles`.
         let primary = crate::library::resolve_child(Path::new(self.mods_path.trim()), "profiles");
+        let game = self.game();
+        // The folder above a mods tree, when `mods_path` is one. Covers a pick of
+        // `…\MX Bikes\mods` on an install the game has never run — no `profiles/` inside
+        // the tree, and none to fall back to in `Documents` either, but the right folder
+        // is one level up and about to be written.
+        let beside = self.mods_tree_parent().map(|p| crate::library::resolve_child(&p, "profiles"));
         resolve_profiles_dir(primary, || {
-            default_user_dir(self.game()).map(|d| d.join("profiles"))
+            beside
+                .filter(|p| p.is_dir())
+                .or_else(|| default_user_dir(game).map(|d| d.join("profiles")))
         })
+    }
+
+    /// The folder above `mods_path` when `mods_path` is the mods tree itself, else
+    /// `None`. A drive root (`C:\mods` → `C:\`) is no use to anyone, so it doesn't count.
+    fn mods_tree_parent(&self) -> Option<PathBuf> {
+        let dir = Path::new(self.mods_path.trim());
+        if crate::library::mods_root(&self.mods_path) != dir {
+            return None;
+        }
+        dir.parent()
+            .filter(|p| p.parent().is_some() && p.is_dir())
+            .map(Path::to_path_buf)
     }
 }
 
@@ -333,11 +362,13 @@ pub fn load(app: &AppHandle) -> anyhow::Result<AppConfig> {
     Ok(cfg)
 }
 
-/// Whether `path` is really a player's MX Bikes folder — the game keeps `profiles/`
-/// there, and `mods/` shows up as soon as anything is installed. Checking for those
-/// rather than just "the folder exists" keeps auto-detection from quietly adopting an
-/// empty `Documents\PiBoSo\MX Bikes` for someone whose setup lives elsewhere; they
-/// still get the setup screen to point us at it.
+/// Whether `path` is a folder the app can actually work from — the game's user folder
+/// (the game keeps `profiles/` there, and `mods/` shows up as soon as anything is
+/// installed), or a relocated mods tree itself.
+///
+/// Checking for those rather than just "the folder exists" keeps auto-detection from
+/// quietly adopting an empty `Documents\PiBoSo\MX Bikes` for someone whose setup lives
+/// elsewhere; they still get the setup screen to point us at it.
 fn looks_like_mods_dir(path: &str) -> bool {
     let dir = Path::new(path.trim());
     if path.trim().is_empty() || !dir.is_dir() {
@@ -345,41 +376,48 @@ fn looks_like_mods_dir(path: &str) -> bool {
     }
     // Case-insensitive: under Proton these can come back as `Mods`/`Profiles` on a
     // case-sensitive filesystem, and an exact match would reject a perfectly good folder.
-    crate::library::resolve_child(dir, "profiles").is_dir()
+    is_user_dir(dir)
         || crate::library::resolve_child(dir, "mods").is_dir()
+        // `mxbikes.ini` can put the mods tree anywhere, and there is nothing above such a
+        // folder to point at instead — so the tree itself has to be an acceptable answer.
+        || crate::library::is_mods_tree(dir)
 }
 
-/// The parent of `path` when the pick is the `mods` folder rather than the game folder
-/// above it, else `None`.
+/// Whether `dir` is the game's *user* folder. `profiles/` is the marker: the game writes
+/// it on first run and never puts one inside a mods tree, which is what makes it the one
+/// signal that separates the two folders a picker offers.
+fn is_user_dir(dir: &Path) -> bool {
+    crate::library::resolve_child(dir, "profiles").is_dir()
+}
+
+/// The parent of `path` when the pick is the `mods` folder *inside the game's user
+/// folder*, else `None`.
 ///
-/// What the app wants is the game's *user* folder — the one holding `mods/` and
-/// `profiles/`. In a folder picker the two are one click apart, and getting it wrong is
-/// invisible afterwards: every scan then looks under `<mods>/mods`, finds nothing, and the
-/// library comes up empty next to a path that reads perfectly reasonably in Settings.
+/// In a folder picker those two are one click apart, and getting it wrong used to be
+/// invisible afterwards: every scan then looked under `<mods>/mods`, found nothing, and
+/// the library came up empty next to a path that read perfectly reasonably in Settings.
 ///
-/// The folder's contents decide it, not just its name — a mods tree is called `mods` by
-/// convention, but what identifies it is the type folders the game reads out of it, and an
-/// extracted one can arrive under any name at all.
-fn climb_out_of_mods(path: &str, game: &GameProfile) -> Option<PathBuf> {
+/// What it must *not* do is climb out of a **relocated** tree. `mxbikes.ini`'s
+/// `[mods] folder` lets a player keep their content anywhere — `C:\mods` is the shape
+/// people actually use, because junctioning one rider paint into six model folders needs
+/// short paths off OneDrive — and the folder above that is the drive root. Rewriting the
+/// pick to `C:\` left the app writing `mxbapp_disabled` to a folder that needs admin and
+/// handing FrostMod a mods folder that doesn't exist. So the climb is gated on the parent
+/// actually being the user folder; anything else is adopted as the mods root it is, which
+/// [`crate::library::mods_root`] then resolves.
+fn climb_out_of_mods(path: &str) -> Option<PathBuf> {
     let dir = Path::new(path.trim());
     if path.trim().is_empty() || !dir.is_dir() {
         return None;
     }
-    // Already the game folder: it holds the `mods`/`profiles` children itself.
-    if looks_like_mods_dir(path) {
+    // Already the user folder: it holds the `mods`/`profiles` children itself.
+    if is_user_dir(dir) || crate::library::resolve_child(dir, "mods").is_dir() {
         return None;
     }
-    let named_mods = dir
-        .file_name()
-        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("mods"));
-    let holds_type_folders = game
-        .mods_dirs
-        .iter()
-        .any(|k| crate::library::resolve_child(dir, k).is_dir());
-    if !named_mods && !holds_type_folders {
+    if !crate::library::is_mods_tree(dir) {
         return None;
     }
-    dir.parent().filter(|p| p.is_dir()).map(Path::to_path_buf)
+    dir.parent().filter(|p| is_user_dir(p)).map(Path::to_path_buf)
 }
 
 /// The saved config, or one built on the spot when the MX Bikes folder sits where it
@@ -433,7 +471,7 @@ pub fn finalize(mut cfg: AppConfig) -> AppConfig {
     // Picked one level too deep — take the folder above `mods`, which is the one every
     // other path in the app is built from. Done here so it covers both ways in: first-run
     // setup (`create_config`) and Change… in Settings (`set_mods_path`).
-    if let Some(up) = climb_out_of_mods(&cfg.mods_path, game) {
+    if let Some(up) = climb_out_of_mods(&cfg.mods_path) {
         log::info!(
             "{} folder was set to the mods folder ({}) — using the folder above it: {}",
             game.display,
@@ -469,14 +507,123 @@ pub fn finalize(mut cfg: AppConfig) -> AppConfig {
         }
     }
     // Auto-detect the Steam game install so the 3D preview works out of the box. Only
-    // fills a blank — never overrides a manual pick.
+    // fills a blank — never overrides a manual pick. Before the mods folder is settled,
+    // because the game's own `.ini` lives in there and is what names a relocated one.
     if cfg.game_path.trim().is_empty() {
         if let Some(gp) = detect_game_path(game) {
             cfg.game_path = gp;
         }
     }
+    adopt_relocated_mods_folder(&mut cfg);
     cfg.stash_active();
     cfg
+}
+
+/// Follow `mxbikes.ini`'s `[mods] folder` when the player has pointed the game at a mods
+/// tree somewhere else.
+///
+/// Auto-detection alone lands on `Documents\PiBoSo\MX Bikes` because that folder exists —
+/// it holds `profiles/` — and then every scan looks in its `mods` child, which for these
+/// players is empty or absent. The library comes up missing gear, paints and bikes with
+/// no hint as to why. The game already knows the answer; this reads it.
+///
+/// Only ever *replaces a folder whose `mods` child isn't there*: a player whose content is
+/// where the app already found it is never second-guessed, and neither is one who picked a
+/// folder by hand and has content in it. The profiles folder is pinned at the same time,
+/// because the game has no redirect for profiles — they stay behind in the user folder,
+/// and after this `mods_path` no longer points anywhere near them.
+fn adopt_relocated_mods_folder(cfg: &mut AppConfig) {
+    let user_dir = cfg.mods_path.trim().to_string();
+    if user_dir.is_empty() || crate::library::resolve_child(Path::new(&user_dir), "mods").is_dir() {
+        return;
+    }
+    let game = cfg.game();
+    let Some(relocated) = ini_mods_folder(game, &cfg.game_path, &user_dir) else {
+        return;
+    };
+    let relocated = relocated.to_string_lossy().into_owned();
+    if relocated == user_dir {
+        return;
+    }
+    log::info!(
+        "{}'s {} points its mods folder at {relocated} — using that instead of {user_dir}",
+        game.display,
+        game_ini_name(game),
+    );
+    cfg.mods_path = relocated;
+    // `profiles/` doesn't move with the mods tree, and the folder we just left is where it
+    // stayed. Recording it beats re-deriving it later: `profiles_dir`'s stock fallback
+    // assumes `Documents\PiBoSo\<game>`, which is only right while nothing was moved.
+    let profiles = crate::library::resolve_child(Path::new(&user_dir), "profiles");
+    if cfg.profiles_path.trim().is_empty() && profiles.is_dir() {
+        cfg.profiles_path = profiles.to_string_lossy().into_owned();
+    }
+}
+
+/// The game's own config file — `mxbikes.exe` → `mxbikes.ini`. Derived rather than listed
+/// per title so a new `GameProfile` can't forget it.
+fn game_ini_name(game: &GameProfile) -> String {
+    let stem = game.exe.strip_suffix(".exe").unwrap_or(game.exe);
+    format!("{stem}.ini")
+}
+
+/// The mods folder named by the game's `.ini`, if it names one that's really there.
+///
+/// Looked for beside the executable first (where the stock file ships) and then in the
+/// user folder. Nothing here is trusted blind: the value is only used when it resolves to
+/// a folder that is actually a mods tree, so a key we've misread, a stale path, or an
+/// offline drive all fall through to the folder we already had.
+fn ini_mods_folder(game: &GameProfile, game_path: &str, user_dir: &str) -> Option<PathBuf> {
+    let name = game_ini_name(game);
+    [game_path.trim(), user_dir.trim()]
+        .into_iter()
+        .filter(|d| !d.is_empty())
+        .map(|d| crate::library::resolve_child(Path::new(d), &name))
+        .filter(|p| p.is_file())
+        .find_map(|ini| {
+            let raw = parse_ini_mods_folder(&std::fs::read(&ini).ok()?)?;
+            // A relative value is relative to the `.ini` itself, which is how the game
+            // reads it — `folder = mods` in the install folder means the one beside it.
+            let candidate = match Path::new(&raw).is_absolute() {
+                true => PathBuf::from(&raw),
+                false => ini.parent()?.join(&raw),
+            };
+            crate::library::is_mods_tree(&candidate).then_some(candidate)
+        })
+}
+
+/// Pull `[mods] folder = …` out of a PiBoSo `.ini`.
+///
+/// Their files are Windows-1252 and `[section]`/`key = value`, with `;` comments. Both a
+/// `folder` key under `[mods]` and a bare `mods = …` are accepted — the section layout is
+/// read off the binary's string table rather than documented anywhere, so the reader is
+/// deliberately forgiving. It costs nothing: [`ini_mods_folder`] throws away anything that
+/// doesn't resolve to a real mods tree.
+fn parse_ini_mods_folder(bytes: &[u8]) -> Option<String> {
+    // Latin-1: lossless byte→char, same as the profile reader. `read_to_string` would
+    // fail outright on an accented path.
+    let text: String = bytes.iter().map(|&b| b as char).collect();
+    let mut section = String::new();
+    let mut fallback = None;
+    for line in text.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            section = name.trim().to_ascii_lowercase();
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"').trim());
+        if v.is_empty() {
+            continue;
+        }
+        if section == "mods" && k == "folder" {
+            return Some(v.to_string());
+        }
+        if k == "mods" {
+            fallback.get_or_insert_with(|| v.to_string());
+        }
+    }
+    fallback
 }
 
 /// The game's user folder inside a Proton prefix.
@@ -777,12 +924,52 @@ mod tests {
         let out = finalize(cfg);
         assert_eq!(Path::new(&out.mods_path), game);
 
-        // An extracted tree under any other name is still recognised by what's inside it.
-        let odd = root.join("MX Bikes 2").join("Mods_backup");
-        std::fs::create_dir_all(odd.join("tracks")).unwrap();
+        // A tree under any other name climbs too, as long as the folder above it is
+        // really the game's — `profiles/` is what says so.
+        let odd = root.join("MX Bikes 2");
+        std::fs::create_dir_all(odd.join("Mods_backup").join("tracks")).unwrap();
+        std::fs::create_dir_all(odd.join("profiles")).unwrap();
         let mut cfg = AppConfig::default();
-        cfg.mods_path = odd.to_string_lossy().into_owned();
-        assert_eq!(Path::new(&finalize(cfg).mods_path), odd.parent().unwrap());
+        cfg.mods_path = odd.join("Mods_backup").to_string_lossy().into_owned();
+        assert_eq!(Path::new(&finalize(cfg).mods_path), odd);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The case this whole resolver exists for: `mxbikes.ini` puts the mods tree on its own
+    /// at `C:\mods`, and the folder above it is the drive root. Climbing there used to
+    /// rewrite the pick to `C:\`, which then had the app writing `mxbapp_disabled` to a
+    /// folder that needs admin and handing FrostMod a mods folder that isn't there.
+    ///
+    /// The pick must survive exactly as given, and resolve to itself.
+    #[test]
+    fn a_relocated_mods_tree_is_kept_not_climbed_out_of() {
+        let root = std::env::temp_dir().join(format!("frost-reloc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // Stands in for `C:\mods`: a mods tree whose parent is not a game folder.
+        let tree = root.join("mods");
+        std::fs::create_dir_all(tree.join("rider").join("helmets")).unwrap();
+        std::fs::create_dir_all(tree.join("tracks")).unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = tree.to_string_lossy().into_owned();
+        let out = finalize(cfg);
+        assert_eq!(Path::new(&out.mods_path), tree, "the pick is kept as-is");
+
+        // ...and every content lookup lands inside it rather than in a `mods` child.
+        assert_eq!(crate::library::mods_root(&out.mods_path), tree);
+        assert_eq!(
+            crate::library::mods_subdir(&out.mods_path, "mods/rider"),
+            tree.join("rider"),
+        );
+
+        // A tree that hasn't had anything installed into it yet is recognised by name
+        // alone — otherwise a freshly relocated folder can't be picked at all.
+        let empty = root.join("elsewhere").join("mods");
+        std::fs::create_dir_all(&empty).unwrap();
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = empty.to_string_lossy().into_owned();
+        assert_eq!(Path::new(&finalize(cfg).mods_path), empty);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -846,6 +1033,147 @@ mod tests {
         assert_eq!(resolve_profiles_dir(nowhere.clone(), || None), nowhere);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Picking `…\MX Bikes\mods` on an install the game has never run: no `profiles/`
+    /// inside the tree to find, and none in `Documents` either, but the right folder is
+    /// one level up and about to be written. Without this step the app pointed at a
+    /// profiles folder on the wrong drive entirely.
+    #[test]
+    fn profiles_are_found_beside_a_mods_tree() {
+        let root = std::env::temp_dir().join(format!("frost-profiles-beside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let game = root.join("D_Games").join("MX Bikes");
+        std::fs::create_dir_all(game.join("mods").join("bikes")).unwrap();
+        std::fs::create_dir_all(game.join("profiles").join("Player")).unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = game.join("mods").to_string_lossy().into_owned();
+        assert_eq!(cfg.profiles_dir(), game.join("profiles"));
+
+        // A tree with no usable parent (the `C:\mods` shape) must not reach for a
+        // drive-root `profiles` — it falls through to the stock folder instead.
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = root.join("mods").to_string_lossy().into_owned();
+        std::fs::create_dir_all(root.join("mods").join("tracks")).unwrap();
+        assert_ne!(cfg.profiles_dir(), root.join("profiles"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `mxbikes.ini`'s `[mods] folder` is the game's own answer to "where is my content",
+    /// and for a split setup it is the *only* one — auto-detection lands on
+    /// `Documents\PiBoSo\MX Bikes` because `profiles/` is there, then finds no `mods`
+    /// child and comes up empty with no explanation.
+    #[test]
+    fn a_relocated_mods_folder_is_read_out_of_the_games_ini() {
+        let root = std::env::temp_dir().join(format!("frost-ini-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let install = root.join("Steam").join("MX Bikes");
+        let user = root.join("Documents").join("PiBoSo").join("MX Bikes");
+        let tree = root.join("mods");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::create_dir_all(user.join("profiles")).unwrap();
+        std::fs::create_dir_all(tree.join("rider")).unwrap();
+        std::fs::write(
+            install.join("mxbikes.ini"),
+            format!("[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = {}\n", tree.display()),
+        )
+        .unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = user.to_string_lossy().into_owned();
+        cfg.game_path = install.to_string_lossy().into_owned();
+        let out = finalize(cfg);
+
+        assert_eq!(Path::new(&out.mods_path), tree, "the ini's folder wins");
+        // ...and profiles, which don't move with it, are pinned to where they stayed.
+        assert_eq!(out.profiles_dir(), user.join("profiles"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A folder that already has content in it is never second-guessed, however the ini
+    /// reads — someone who moved back, or who runs two setups, keeps what they picked.
+    #[test]
+    fn the_ini_never_overrides_a_folder_that_already_has_mods() {
+        let root = std::env::temp_dir().join(format!("frost-ini-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let user = root.join("MX Bikes");
+        let tree = root.join("elsewhere").join("mods");
+        std::fs::create_dir_all(user.join("mods").join("bikes")).unwrap();
+        std::fs::create_dir_all(user.join("profiles")).unwrap();
+        std::fs::create_dir_all(tree.join("tracks")).unwrap();
+        std::fs::write(
+            user.join("mxbikes.ini"),
+            format!("[mods]\nfolder = {}\n", tree.display()),
+        )
+        .unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.mods_path = user.to_string_lossy().into_owned();
+        assert_eq!(Path::new(&finalize(cfg).mods_path), user);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The section layout is read off the binary's string table rather than any published
+    /// spec, so the parser is forgiving — and everything it returns is checked against the
+    /// filesystem before it's used, which is what makes forgiving safe.
+    #[test]
+    fn parses_the_mods_folder_out_of_a_piboso_ini() {
+        let ini = b"; comment\n[master]\nserver = master.mx-bikes.com:54200\n\n[mods]\nfolder = C:\\mods   ; where my stuff is\n";
+        assert_eq!(parse_ini_mods_folder(ini), Some("C:\\mods".to_string()));
+
+        // Quoted, and a bare `mods =` outside any section.
+        assert_eq!(
+            parse_ini_mods_folder(b"[mods]\nfolder = \"D:\\My Mods\"\n"),
+            Some("D:\\My Mods".to_string()),
+        );
+        assert_eq!(parse_ini_mods_folder(b"mods = E:\\stuff\n"), Some("E:\\stuff".to_string()));
+
+        // A `folder` key belonging to some other section is not ours.
+        assert_eq!(parse_ini_mods_folder(b"[replay]\nfolder = C:\\replays\n"), None);
+        // Nothing to say, an empty value, and a non-UTF-8 file must all be survivable.
+        assert_eq!(parse_ini_mods_folder(b"[mods]\nfolder =\n"), None);
+        assert_eq!(parse_ini_mods_folder(b""), None);
+        assert_eq!(
+            parse_ini_mods_folder(b"[mods]\nfolder = C:\\mods\xe9\n"),
+            Some("C:\\modsé".to_string()),
+            "Windows-1252, like every other file these games write",
+        );
+    }
+
+    /// A value that doesn't resolve to a real mods tree is thrown away rather than
+    /// adopted, so a misread key or a stale path costs nothing.
+    #[test]
+    fn an_ini_pointing_nowhere_is_ignored() {
+        let root = std::env::temp_dir().join(format!("frost-ini-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let install = root.join("install");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("mxbikes.ini"), "[mods]\nfolder = Z:\\gone\n").unwrap();
+        let gone = install.to_string_lossy().into_owned();
+        assert_eq!(ini_mods_folder(&crate::game::MXB, &gone, ""), None);
+
+        // A folder that exists but holds nothing of ours is not a mods tree either.
+        let bare = root.join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::write(
+            install.join("mxbikes.ini"),
+            format!("[mods]\nfolder = {}\n", bare.display()),
+        )
+        .unwrap();
+        assert_eq!(ini_mods_folder(&crate::game::MXB, &gone, ""), None);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Derived from the executable so a new `GameProfile` can't forget it.
+    #[test]
+    fn each_game_looks_for_its_own_ini() {
+        assert_eq!(game_ini_name(&crate::game::MXB), "mxbikes.ini");
+        assert_eq!(game_ini_name(&crate::game::GPB), "gpbikes.ini");
     }
 
     #[test]
