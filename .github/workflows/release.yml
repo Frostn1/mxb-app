@@ -8,9 +8,9 @@ name: Release
 # A tag with a suffix — `v0.7.0-beta.1`, `v0.7.0-rc.2` — builds the same three
 # platforms but publishes as a PRE-RELEASE: GitHub keeps it off `releases/latest`,
 # which is the endpoint the in-app updater reads, so existing installs are not
-# offered it and the Discord announcement is held back. Beta testers install it by
-# downloading the installer from the release page. Tagging the plain `v0.7.0`
-# afterwards is what ships it to everyone.
+# offered it. It's announced in the beta Discord channel rather than the release
+# one, and beta testers install it by downloading the installer from the release
+# page. Tagging the plain `v0.7.0` afterwards is what ships it to everyone.
 
 on:
   push:
@@ -189,12 +189,14 @@ jobs:
   # Announce the finished release in Discord. Runs after `finalize` so the download links
   # point at the renamed installers, and only for real tags on the canonical repo — forks
   # stay silent, and `workflow_dispatch` test builds (throwaway `v<run_number>` tags) don't
-  # spam the channel. Pre-release tags stay quiet too: a beta goes to the people who asked
-  # for it, and the channel hears about the version once, when everyone can have it.
+  # spam a channel, since their ref is a branch rather than a tag. Which channel is the tag's
+  # decision: a suffixed tag posts to the beta webhook, a plain one to the release webhook, so
+  # testers hear about a beta straight away while the release channel hears about a version
+  # once, when everyone can have it.
   # (`scripts/notify-discord.sh <tag> --print` renders the message without sending it.)
   notify:
     needs: finalize
-    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+    if: ${{ github.repository == 'Frostn1/mxb-app' && github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -206,6 +208,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          # Missing secret is a warning, not a failure — see the script.
+          # Missing secret is a warning, not a failure — see the script. The script picks one
+          # of the two by the tag and never falls back to the other.
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_BETA_WEBHOOK_URL: ${{ secrets.DISCORD_BETA_WEBHOOK_URL }}
         run: bash scripts/notify-discord.sh "${{ github.ref_name }}"
