@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-09 — The gear repair no longer invents a helmet
+
+### Fixed
+- **"A helmets mod was installed loose" no longer fires on a paint pack.** The repair asked
+  to gather anything it found sitting in `mods/rider/helmets` — including a bare
+  `paints/`/`goggles/` pair, which is not a scattered helmet at all but liveries for one that
+  is already installed. Paints for a packaged helmet have nowhere else to live, since nothing
+  can be written inside a `.pkz`. Repairing them built a helmet out of the liveries: a folder
+  with no mesh, offered by every picker as a model, with the real helmet's paints filed under
+  a name the loader never looks for. The repair now only offers itself when a model is
+  genuinely there — a mesh in the gear areas, a descriptor for riding-style animations, which
+  ship no mesh and no paints either.
+- **Two mods scattered into one folder are left alone instead of fused.** Nothing on disk
+  says which mesh, config or livery came from which mod, so gathering them under one name
+  produced a model that never existed. Two descriptors in an area root is now a refusal, with
+  the reason in the log.
+- **A repair that fails part-way puts everything back.** It stopped at the first file that
+  wouldn't move — a file the running game holds open, on Windows — leaving the mesh gathered
+  and `paints/`/`goggles/` still in the area root, which shows the model *and* both strays in
+  the picker and reads as the repair having split the helmet up. It is now all-or-nothing.
+
 ## 2026-08-09 — Import from the Library
 
 ### Added

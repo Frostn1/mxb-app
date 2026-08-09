@@ -341,6 +341,24 @@ pub fn is_rider_model_area(name: &str) -> bool {
     RIDER_MODEL_AREAS.iter().any(|a| a.eq_ignore_ascii_case(name))
 }
 
+/// Whether models in this area can be painted — i.e. whether a `paints/` folder found here
+/// means anything at all.
+///
+/// The union across titles, like [`is_rider_model_area`]: an area is paintable if any title
+/// gives it a paint category. Riding-style `animations` are the ones that aren't, and the
+/// difference matters to anything reasoning about stray `paints/` folders — in a paintable
+/// area they are liveries that belong to some model, and in a non-paintable one they cannot
+/// be liveries at all. See [`crate::gearrepair`], which is what asks.
+pub fn rider_area_is_paintable(name: &str) -> bool {
+    Game::ALL.iter().any(|g| {
+        g.profile()
+            .rider
+            .areas
+            .iter()
+            .any(|a| a.folder.eq_ignore_ascii_case(name) && a.paint_cat.is_some())
+    })
+}
+
 /// One gear area as the install pickers need it: where it is, and what may sit inside.
 ///
 /// The library's own view of an area is [`RiderArea`], which also carries the categories a
@@ -462,6 +480,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The gear areas are paintable and riding styles are not. `gearrepair` leans on this to
+    /// tell a scattered model from a paint pack, and getting it backwards would either let it
+    /// invent a helmet out of liveries again or stop it repairing riding styles at all.
+    #[test]
+    fn only_gear_areas_are_paintable() {
+        for area in ["helmets", "boots", "protections", "protection"] {
+            assert!(rider_area_is_paintable(area), "{area} holds paints");
+        }
+        assert!(!rider_area_is_paintable("animations"), "riding styles have nothing to paint");
+        assert!(!rider_area_is_paintable("nonsense"), "and an unknown folder is not a claim");
     }
 
     /// `RIDER_MODEL_AREAS` only works as a recogniser if it really is the union — an area
