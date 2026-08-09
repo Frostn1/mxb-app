@@ -1939,6 +1939,15 @@ export const SERVER_REGIONS = [
   "ap-southeast-2",
 ] as const;
 
+/**
+ * What the region picker starts on.
+ *
+ * Where somebody else's hardware physically sits is unknowable from here, so this is a
+ * guess either way — but the control plane provisions in `us-west-2` and nothing else, so
+ * that is the better guess than whichever region happened to be first in the list.
+ */
+export const DEFAULT_SERVER_REGION = "us-west-2";
+
 /** An EC2 instance the control plane launched, as AWS reports it. */
 export interface FleetInstance {
   instanceId: string;
