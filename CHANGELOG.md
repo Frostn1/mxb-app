@@ -4,19 +4,6 @@
 
 ### Added
 
-- **Opening a paint in 3D now shows the model it was painted for, wearing it.** Click a
-  livery, a helmet paint or a goggle paint and the viewer loads the bike or helmet it belongs
-  to and selects that paint in the picker, instead of draping the textures over a stock body
-  that was never the shape they were drawn against. A paint whose model isn't installed still
-  previews the way it did before.
-
-- **FrostMod's live mod reload now works for GP Bikes.** The status panel, the reload button
-  and the watch-the-folder auto-reload are all available when GP Bikes is the active game —
-  they were hidden before because FrostMod only knew about MX Bikes. The app launches it
-  with the game it's driving and the folder that game's mods live in, which is what makes it
-  attach to the right process and read the right files. This needs **FrostMod v0.11.0 or
-  newer**: v0.10.0 attaches to GP Bikes but reloads using MX Bikes' internals, which crashes
-  it, so the app won't run that build there and updates you to one that works.
 - **The app now drives GP Bikes as well as MX Bikes.** First launch asks which game you're
   setting up before anything else, and the game picker lives in Settings from then on;
   picking a title points the whole app — Library, Manage, Presets, Browse and the
@@ -36,45 +23,16 @@
   Paints, Helmets and Helmet Models, plus Plugins, Tools and Menu Backgrounds. Each site
   keeps its own cookie jar, since a Cloudflare clearance only works on the host that issued
   it.
+- **FrostMod's live mod reload now works for GP Bikes.** The status panel, the reload button
+  and the watch-the-folder auto-reload are all available when GP Bikes is the active game —
+  they were hidden before because FrostMod only knew about MX Bikes. The app launches it
+  with the game it's driving and the folder that game's mods live in, which is what makes it
+  attach to the right process and read the right files. This needs **FrostMod v0.11.0 or
+  newer**: v0.10.0 attaches to GP Bikes but reloads using MX Bikes' internals, which crashes
+  it, so the app won't run that build there and updates you to one that works.
 - **Presets read the slots a profile actually has.** Rather than assuming MX Bikes' fifteen,
   the editor reads the sections out of the profile's own `profile.ini` and shows those. GP
   Bikes profiles get their riding-style slot, and don't get pickers that would write nothing.
-- **Proton Drive downloads.** `drive.proton.me` links are now recognised and labelled as
-  Proton Drive, and a mod offering one alongside another mirror prefers the other. Proton
-  shares are end-to-end encrypted — the key lives in the part of the URL that never
-  reaches the server — so they can't be fetched automatically; picking one now opens the
-  guided "download it, then choose the file" flow instead of downloading the web page and
-  failing later with "couldn't determine the archive type".
-- **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
-  whatever file on *your* disk happens to match the name they picked, so a full grid shows
-  up in default liveries. The game can't tell us what they picked either — its plugin API
-  carries rider names, bikes and lap data, and no paint field at all. So the loop is closed
-  outside the game. Your app publishes what your rider is wearing; every other app pulls it
-  back and installs it. Paints are content-addressed by SHA-256, so twenty riders sharing a
-  livery is one stored object and nineteen uploads that never happen, and a second sync
-  installs nothing it already has.
-
-  Everyone on the server needs the app for this to work — that's inherent, not a limitation
-  we chose.
-- **A Servers tab**, for running dedicated servers: start, stop and restart the game on a
-  host, watch its uptime and how many times it came back on its own, and change the track.
-  It talks to `mxb-agent` on the host rather than to a cloud provider, because a desktop app
-  that shipped provider credentials could create infrastructure from any machine it ran on.
-- **An Experimental switch in Settings**, off by default, gating both of the above. They
-  talk to a live service and write files other players uploaded, so they're opt-in rather
-  than something you find by accident. `MXB_EXPERIMENTAL=1` turns them on for a single run
-  without touching your saved settings — and the switch says so rather than looking stuck.
-- **Beta builds now say they're beta**, next to the version in Settings → About. The badge
-  keys off a semver pre-release suffix, which is the same thing the release workflow uses to
-  mark a build as a pre-release, so the two can't disagree.
-- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
-  free text you can change between sessions and two people can pick the same one; a GUID is
-  stable per install, and the dedicated server writes it next to the name on every
-  connection. The agent reads the server's own log to know who is actually connected —
-  which turns out to be a far easier route to a live roster than decoding the live-timing
-  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
-  GUID is first-come, so nobody can assert someone else's identity and have their paints
-  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 - **A Shop tab that browses the mxbikes-shop.com catalog.** The store hands us its whole
   catalog as one JSON document, so the app fetches it once and does the searching, filtering,
   sorting and paging locally — browsing is instant and keeps working with the network down.
@@ -91,16 +49,9 @@
   A catalog served from cache says how old it is, and one that's days old says so in a way you
   can't wave away. This is browse-only: **Buy** opens the product page in your own browser, and
   nothing here installs or purchases anything.
-- **Thumbnails are cached on disk, and downscaled to the size they're drawn at.** Both
-  catalogs previously put remote image URLs straight into the page, so every scroll through
-  the grid re-downloaded the same images — and neither store offers a thumbnail size, so a
-  card roughly 300px wide was being handed a 1000–1280px original weighing about half a
-  megabyte. Images now go through an on-disk cache served over the app's own URL scheme,
-  which keeps lazy loading and the webview's native image cache intact, and grid thumbnails
-  are resized on the way in: a page of cards dropped from ~12 MB to ~2 MB, about 85 KB per
-  card instead of 490 KB. Transparency is preserved, and each size is cached separately so
-  opening an item still shows the full-resolution screenshot. Capped at 256 MB, evicted
-  oldest-first, and restricted to the two catalog domains.
+- **Shop items now show the store's own description.** The catalog started carrying them
+  today — every one of its 1311 products, screenshots and all — and the detail page shows it
+  under **About**, the same way a Browse mod's description reads.
 - **The whole window is a dropzone.** Drag anything MX Bikes onto the app — a `.zip`, `.rar`
   or `.7z`, a bare `.pkz` or `.pnt`, an already-extracted folder, or a fistful of all of them
   at once — and it works out what each one is, where it belongs, and shows you the list
@@ -124,6 +75,49 @@
   expandable, exactly which existing files it would overwrite — so re-dropping an updated mod
   no longer silently replaces a bike's configs. Nothing installs until you press Install, and
   rows can be unticked individually.
+- **Opening a paint in 3D now shows the model it was painted for, wearing it.** Click a
+  livery, a helmet paint or a goggle paint and the viewer loads the bike or helmet it belongs
+  to and selects that paint in the picker, instead of draping the textures over a stock body
+  that was never the shape they were drawn against. A paint whose model isn't installed still
+  previews the way it did before.
+- **Thumbnails are cached on disk, and downscaled to the size they're drawn at.** Both
+  catalogs previously put remote image URLs straight into the page, so every scroll through
+  the grid re-downloaded the same images — and neither store offers a thumbnail size, so a
+  card roughly 300px wide was being handed a 1000–1280px original weighing about half a
+  megabyte. Images now go through an on-disk cache served over the app's own URL scheme,
+  which keeps lazy loading and the webview's native image cache intact, and grid thumbnails
+  are resized on the way in: a page of cards dropped from ~12 MB to ~2 MB, about 85 KB per
+  card instead of 490 KB. Transparency is preserved, and each size is cached separately so
+  opening an item still shows the full-resolution screenshot. Capped at 256 MB, evicted
+  oldest-first, and restricted to the two catalog domains.
+- **Proton Drive downloads.** `drive.proton.me` links are now recognised and labelled as
+  Proton Drive, and a mod offering one alongside another mirror prefers the other. Proton
+  shares are end-to-end encrypted — the key lives in the part of the URL that never
+  reaches the server — so they can't be fetched automatically; picking one now opens the
+  guided "download it, then choose the file" flow instead of downloading the web page and
+  failing later with "couldn't determine the archive type".
+- **Beta builds now say they're beta**, next to the version in Settings → About. The badge
+  keys off a semver pre-release suffix, which is the same thing the release workflow uses to
+  mark a build as a pre-release, so the two can't disagree.
+- **Paint sync.** MX Bikes never transmits custom content: a remote rider renders using
+  whatever file on *your* disk happens to match the name they picked, so a full grid shows
+  up in default liveries. The game can't tell us what they picked either — its plugin API
+  carries rider names, bikes and lap data, and no paint field at all. So the loop is closed
+  outside the game. Your app publishes what your rider is wearing; every other app pulls it
+  back and installs it. Paints are content-addressed by SHA-256, so twenty riders sharing a
+  livery is one stored object and nineteen uploads that never happen, and a second sync
+  installs nothing it already has.
+
+  Everyone on the server needs the app for this to work — that's inherent, not a limitation
+  we chose.
+- **Riders are identified by their MX Bikes GUID**, not just their rider name. A name is
+  free text you can change between sessions and two people can pick the same one; a GUID is
+  stable per install, and the dedicated server writes it next to the name on every
+  connection. The agent reads the server's own log to know who is actually connected —
+  which turns out to be a far easier route to a live roster than decoding the live-timing
+  UDP feed, since the game's plugin API exposes no GUID for anyone but yourself. Claiming a
+  GUID is first-come, so nobody can assert someone else's identity and have their paints
+  served under it. Rider-name matching stays as the fallback until a GUID is supplied.
 - **A Servers tab that manages the dedicated servers you run.** Start, stop and restart the
   game on a host, see whether it's up, how long it's been up, how many times it came back on
   its own, and switch the track — all without an RDP session or a shell. Each server is added
@@ -140,12 +134,9 @@
   provider credentials could create infrastructure on any machine it ran on. What it holds
   instead is a bearer token for one server you already administer.
 
-  Settings changes patch the server's `.ini` **in place**: the one operation that matters is
-  changing a single key while leaving every other byte alone, which is what general INI
-  parsers are worst at — a parse/serialise round-trip reorders keys and drops comments, and
-  this is a file server owners edit by hand. Only `track`, `name` and `maxclient` are exposed,
-  values containing newlines are rejected so a caller can't inject unrelated keys, and the
-  game is restarted afterwards because it reads its `.ini` only at startup.
+  Settings changes patch the server's `.ini` in place, exposing only `track`, `name` and
+  `maxclient`, and the game is restarted afterwards because it reads its `.ini` only at
+  startup.
 
   Note the agent speaks plain HTTP, so its token crosses the network in clear. Terminate TLS
   in front of it, or keep it on a private network, before exposing it to the open internet.
@@ -161,19 +152,10 @@
   whitespace, a leading `-` — is rejected there, so a pasted address can't quietly turn into
   a different flag. The connect flag is only read at startup, so asking to join while MX
   Bikes is already running says so instead of appearing to work.
-- **Shop items now show the store's own description.** The catalog started carrying them
-  today — every one of its 1311 products, screenshots and all — and the detail page shows it
-  under **About**, the same way a Browse mod's description reads.
-- **Opening a paint in 3D now shows the model it was painted for, wearing it.** Click a
-  livery, a helmet paint or a goggle paint and the viewer loads the bike or helmet it belongs
-  to and selects that paint in the picker, instead of draping the textures over a stock body
-  that was never the shape they were drawn against. A paint whose model isn't installed still
-  previews the way it did before.
-
-- **A beta build now says it's a beta.** The About box reads `v0.8.0-beta.1` with a **Beta**
-  badge beside it. The badge existed but could never fire: the packaged version is a plain
-  `0.8.0` and nothing wrote the tag's `-beta.1` suffix into the build, so a beta install
-  called itself the release it precedes.
+- **An Experimental switch in Settings**, off by default, gating both of the above. They
+  talk to a live service and write files other players uploaded, so they're opt-in rather
+  than something you find by accident. `MXB_EXPERIMENTAL=1` turns them on for a single run
+  without touching your saved settings — and the switch says so rather than looking stuck.
 
 ### Changed
 
@@ -184,7 +166,6 @@
   in the picker and easy to land on. The setting now says so, and picking `mods` by mistake
   quietly resolves to the folder above it (Settings says which one it took) rather than
   leaving you with a library that scans nothing and a path that looks perfectly reasonable.
-
 - **Features that don't apply to GP Bikes are hidden rather than half-working.** FrostMod
   is a compiled MX Bikes plugin, so its sidebar panel and settings section are hidden for
   GP Bikes and instant profile refresh is shown disabled with the reason. The 3D preview
@@ -194,7 +175,6 @@
   opens as the MX Bikes config it always was, with the same folders; preset share codes are
   unchanged. Applying a preset no longer creates `profile.ini` sections that the game
   doesn't use.
-
 - The signed-in "All My Downloads" page moved to `MyDownloads.tsx` and the `shop` route now
   goes to the new catalog. That feature is intact and still hidden from the sidebar.
 - **Placement decides once, then acts.** Split `place_mod` into `plan_placement` (decide) and
@@ -217,22 +197,15 @@
 - **Switching to a game you haven't set up says what to do.** The folder row read a bare "Not
   set" next to a **Change…** button; it now reads *Select a folder for GP Bikes* next to
   **Set…**.
-- **"Join a server" is behind the Experimental toggle.** It launches the game with an
-  undocumented connect flag, so it belongs with the rest of the unfinished multiplayer surface
-  rather than being something you find by accident.
-- **The Library's 3D button says what it does.** The bare square on each row is now a
-  labelled **View in 3D**.
-- **Settings spells out which folder to pick.** The app wants your MX Bikes folder — the one
-  holding `mods` and `profiles` — not the `mods` folder inside it, which is one click deeper
-  in the picker and easy to land on. The setting now says so, and picking `mods` by mistake
-  quietly resolves to the folder above it (Settings says which one it took) rather than
-  leaving you with a library that scans nothing and a path that looks perfectly reasonable.
 - **FrostMod builds that aren't safe on the current game are no longer offered for it.**
   FrostMod v0.10.0 is the first that attaches to GP Bikes, but its mod reload runs MX
   Bikes' internals there and takes the game down the first time it's used. On GP Bikes the
   app now requires v0.11.0 or newer, updates to it automatically, and says so instead of
   starting a build that would crash. MX Bikes is unaffected — every FrostMod ever released
   was built for it.
+- **"Join a server" is behind the Experimental toggle.** It launches the game with an
+  undocumented connect flag, so it belongs with the rest of the unfinished multiplayer surface
+  rather than being something you find by accident.
 
 ### Fixed
 
@@ -281,7 +254,6 @@
 - **A protection that ships sealed files loads out of a `.pkz` too**, not only out of a folder.
 - **The expanded 3D preview gives the model the window.** The title bar was taking half of it,
   because the dialog laid its two rows out as an even grid.
-
 - **Paint folders shared between models with a junction or symlink are read again.** If you
   keep one set of liveries and point several rider models at it — `mklink /J` on Windows, a
   symlink on Linux and macOS — the app walked straight past the shared folder and showed
@@ -306,7 +278,6 @@
 
 Extracted archives are deliberately left alone: a link inside a download you didn't make is
 still refused, which is what stops an archive writing outside the folder it unpacks into.
-
 - **Helmets whose goggles came out wearing the helmet's paint.** The Bell Moto 10 packs are
   the clear case: shell, tear-off, lens and goggle frame each ended up in the wrong texture,
   the goggle worst of all. Three faults behind it, all in how a model's textures are counted
@@ -325,7 +296,6 @@ still refused, which is what stops an archive writing outside the folder it unpa
   across it.
 - **A "Stock" option that showed a helmet in the wrong texture.** It's offered only where the
   mesh really carries the sheet that side's paints replace.
-
 - **A config written by an older build lost track of which game was active.** Builds that
   predate multi-game support read the config fine but rewrite it without `activeGame` and
   `games` — so running one once (a downgrade, or the shipped app alongside a newer build)
@@ -380,24 +350,6 @@ still refused, which is what stops an archive writing outside the folder it unpa
   and the app window has no address bar or Back button to escape with. They now open in your
   own browser and leave the app where it was. Browse descriptions had the same fault and are
   fixed with it.
-- **Helmets whose goggles came out wearing the helmet's paint.** The Bell Moto 10 packs are
-  the clear case: shell, tear-off, lens and goggle frame each ended up in the wrong texture,
-  the goggle worst of all. Three faults behind it, all in how a model's textures are counted
-  and matched:
-  - A helmet needn't ship the sheet its paints replace, and the Moto 10 doesn't — it names
-    it and leaves the pixels to the `.pnt`. That slot was going uncounted, so every piece
-    was drawn from its neighbour's texture.
-  - A one-character texture name (the Oakley pack calls its goggle sheet `O`) was skipped
-    entirely, sliding everything after it by one.
-  - Which pieces are the goggles was decided from their names, and a helmet names its
-    goggle group after the goggle it ships — `Armega`, `Airbrake` — not "goggles". It is now
-    decided by which paint supplies the texture the piece is drawn from, which is the mod's
-    own answer.
-- **Pieces no paint covers keep their own look.** A tear-off film, a visor, anything an author
-  baked into the mesh and left out of the `.pnt` used to have the shell's paint stretched
-  across it.
-- **A "Stock" option that showed a helmet in the wrong texture.** It's offered only where the
-  mesh really carries the sheet that side's paints replace.
 - **The overlay's empty frame left sitting over the game.** Clicking back into MX Bikes with
   the overlay open stopped drawing the panel but kept its window there — a box over the game
   that still swallowed clicks. The overlay now closes itself when you click away, to the game
