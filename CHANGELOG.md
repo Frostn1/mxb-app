@@ -14,6 +14,20 @@
   missing in plain language, and installs it from Microsoft with one button.
 - **The warning goes where it'll be seen.** A bar at the top of the app, not just a line in
   Settings — nothing about the symptom suggests Settings is where to look.
+- **A beta now announces itself in the beta Discord channel.** Until now a suffixed tag
+  built and published quietly and testers only heard about it if someone told them, because
+  the announcement job skipped pre-releases outright. It runs for them now, and the tag
+  decides which channel it reaches: a beta posts to the beta webhook, a full release to the
+  release one, so testers hear immediately while everyone else still hears about a version
+  once — when the updater can actually hand it to them.
+  - The beta message says what it is before it says what's in it — a beta build of the
+    version it names, which the updater won't offer you, so install it from the links in the
+    message. Same fact the release page leads with. It's titled and coloured as a beta, and
+    reads the changelog section for the version it's a build of, so it carries that
+    release's headline once it's written and simply omits it before then.
+  - The beta webhook is its own `DISCORD_BETA_WEBHOOK_URL` secret and the script never falls
+    back from one webhook to the other: a beta landing in the channel every player watches
+    is worse than a beta nobody announced.
 
 ### Changed
 - **FrostMod still starts when a runtime is missing.** It's a warning, not a gate: we can't
