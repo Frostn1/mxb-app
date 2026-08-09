@@ -30,7 +30,6 @@ import {
   type ExperimentalState,
   type SyncEvent,
 } from "../../api/mods";
-import { shopCatalogAvailable } from "../../api/shop";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
