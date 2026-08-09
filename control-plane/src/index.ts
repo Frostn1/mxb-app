@@ -20,6 +20,7 @@ import { bootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
   isBikeId,
+  isBootstrapStage,
   isGuid,
   isPaintFileName,
   isPaintSize,
@@ -31,6 +32,7 @@ import {
   isServerName,
   isSha256,
   isSlot,
+  MAX_BOOTSTRAP_LOG,
   MAX_PAINT_BYTES,
 } from "./validate";
 
@@ -95,6 +97,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   // not by an account bearer — the machine holds no account and has no way to be given one.
   const hello = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/hello$/.exec(path);
   if (hello && method === "POST") return serverHello(request, hello[1], env);
+
+  const boot = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/bootstrap$/.exec(path);
+  if (boot && method === "POST") return serverBootstrap(request, boot[1], env);
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
@@ -732,16 +737,70 @@ async function provision(request: Request, account: Account, env: Env): Promise<
  * Idempotent: a bootstrap that retries, or an instance that reboots and announces itself
  * again, simply rewrites the same row.
  */
-async function serverHello(request: Request, id: string, env: Env): Promise<Response> {
-  const row = await env.DB.prepare(
-    "SELECT agent_token, instance_id FROM servers WHERE id = ?",
-  )
+/**
+ * Prove a request came from the box a row was provisioned for.
+ *
+ * The agent token is the only credential that machine has — it holds no account and there is
+ * no way to give it one. Shared by every route the box itself calls, so the answer to a wrong
+ * token cannot drift between them: an unknown id and a bad token return the same 403, which
+ * is what stops this being a way to discover which server ids exist.
+ */
+async function asProvisionedServer(
+  request: Request,
+  id: string,
+  env: Env,
+): Promise<{ instance_id: string | null } | null> {
+  const row = await env.DB.prepare("SELECT agent_token, instance_id FROM servers WHERE id = ?")
     .bind(id)
     .first<{ agent_token: string | null; instance_id: string | null }>();
-  // The same answer for an unknown id and a wrong token, so this can't be used to find out
-  // which server ids exist.
   const presented = bearer(request.headers.get("Authorization"));
   if (!row?.agent_token || !presented || !tokenMatches(row.agent_token, presented)) {
+    return null;
+  }
+  return { instance_id: row.instance_id };
+}
+
+/**
+ * A booting instance reporting what it is doing, and why it died if it did.
+ *
+ * Nothing else can tell you. The box has no console and no key pair, so `C:\mxb-bootstrap.log`
+ * is unreadable from outside — and the bootstrap's own failure trap shuts the machine down,
+ * which terminates it and takes the log with it. Before this, a bootstrap that failed at
+ * minute twelve and one still downloading looked exactly the same from here: nothing.
+ *
+ * Also what lets "Create a server" say `extracting the game` instead of spinning for a
+ * quarter of an hour with nothing to show.
+ */
+async function serverBootstrap(request: Request, id: string, env: Env): Promise<Response> {
+  if (!(await asProvisionedServer(request, id, env))) {
+    return json(403, { error: "not this server" });
+  }
+  const body = (await readJson(request)) as
+    | { stage?: unknown; ok?: unknown; log?: unknown }
+    | null;
+  if (!isBootstrapStage(body?.stage)) return json(400, { error: "that isn't a stage" });
+
+  // Kept only when something went wrong, and only the tail: this is a transcript written by a
+  // script, and there is no version of "store all of it" that ends well.
+  const log =
+    body?.ok === false && typeof body.log === "string"
+      ? body.log.slice(-MAX_BOOTSTRAP_LOG)
+      : null;
+
+  await env.DB.prepare(
+    "UPDATE servers SET bootstrap_stage = ?, bootstrap_at = ?, bootstrap_log = COALESCE(?, bootstrap_log)" +
+      " WHERE id = ?",
+  )
+    .bind((body!.stage as string).trim(), Date.now(), log, id)
+    .run();
+
+  console.log(JSON.stringify({ msg: "bootstrap", id, stage: body!.stage, failed: log !== null }));
+  return json(200, { ok: true });
+}
+
+async function serverHello(request: Request, id: string, env: Env): Promise<Response> {
+  const row = await asProvisionedServer(request, id, env);
+  if (!row) {
     return json(403, { error: "not this server" });
   }
 
@@ -785,7 +844,8 @@ function isPort(value: unknown): value is number {
 async function myServers(account: Account, env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
     "SELECT id, name, region, address, agent_url, agent_token, instance_id, published," +
-      " created_at, idle_since FROM servers WHERE owner_account_id = ? ORDER BY created_at",
+      " created_at, idle_since, bootstrap_stage, bootstrap_at, bootstrap_log" +
+      " FROM servers WHERE owner_account_id = ? ORDER BY created_at",
   )
     .bind(account.id)
     .all<{
@@ -799,6 +859,9 @@ async function myServers(account: Account, env: Env): Promise<Response> {
       published: number;
       created_at: number;
       idle_since: number | null;
+      bootstrap_stage: string | null;
+      bootstrap_at: number | null;
+      bootstrap_log: string | null;
     }>();
 
   // Only ask EC2 when at least one row is a machine we launched; a player who only runs
@@ -834,6 +897,11 @@ async function myServers(account: Account, env: Env): Promise<Response> {
         idleMinutes: Number(env.MXB_IDLE_MINUTES ?? "20"),
         state: r.instance_id ? (instance?.state ?? "gone") : "self-hosted",
         publicIp: instance?.publicIp ?? null,
+        // What the box last said it was doing, and why it gave up if it did. The only
+        // window into a machine with no console.
+        bootstrapStage: r.bootstrap_stage,
+        bootstrapAt: r.bootstrap_at,
+        bootstrapLog: r.bootstrap_log,
       };
     }),
   });

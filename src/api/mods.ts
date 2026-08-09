@@ -1991,6 +1991,16 @@ export interface CloudServer {
   /** `pending` | `running` | `stopping` | `stopped` | `gone` | `self-hosted`. */
   state: string;
   publicIp: string | null;
+  /**
+   * What the box last reported doing — `downloading the game`, `ready`, `failed`.
+   *
+   * The only window into a machine with no console and no key pair. A bootstrap that failed
+   * and one still downloading are otherwise indistinguishable from here.
+   */
+  bootstrapStage: string | null;
+  bootstrapAt: number | null;
+  /** The tail of the transcript, present only when the bootstrap gave up. */
+  bootstrapLog: string | null;
 }
 
 /** The servers the control plane runs for this account, and what it takes to drive them. */

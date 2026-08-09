@@ -773,6 +773,8 @@ export const fr: Translation = {
   "sync.keptYours_other": "{{count}} peintures ont été laissées intactes",
   "sync.keptYoursWhy": "Un autre pilote utilise le même nom de fichier pour une peinture différente. La vôtre a été conservée — l'app n'écrase jamais une livrée qu'elle n'a pas installée. Vous verrez ce pilote dans votre version.",
   "servers.booting": "Démarrage…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "Ce serveur n'a pas pu terminer son installation et s'est éteint. Voici ce qu'il a signalé :",
   "servers.bootingWhy": "Installation du jeu sur la nouvelle machine. Cela prend quelques minutes — l'installeur complet est téléchargé.",
   "servers.shutsDown": "S'éteint",
   "servers.inUse": "En cours d'utilisation",

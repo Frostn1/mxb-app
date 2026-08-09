@@ -768,6 +768,8 @@ export const ptBR: Translation = {
   "sync.keptYours_other": "{{count}} pinturas foram mantidas",
   "sync.keptYoursWhy": "Outro piloto usa o mesmo nome de arquivo para uma pintura diferente. A sua foi mantida — o app nunca sobrescreve uma pintura que não instalou. Você verá aquele piloto com a sua versão.",
   "servers.booting": "Iniciando…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "Este servidor não conseguiu concluir a configuração e se desligou. Foi isto que ele relatou:",
   "servers.bootingWhy": "Instalando o jogo na máquina nova. Leva alguns minutos — ele baixa o instalador completo.",
   "servers.shutsDown": "Desliga",
   "servers.inUse": "Em uso",

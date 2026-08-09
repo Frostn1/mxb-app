@@ -61,12 +61,34 @@ export function bootstrapScript(input: BootstrapInputs): string {
 $ErrorActionPreference = "Stop"
 Start-Transcript -Path "C:\\mxb-bootstrap.log" -Append
 
+# Say what we are doing, so a server that takes a quarter of an hour to arrive can show its
+# progress instead of an unexplained spinner. Best-effort by design: a report that fails must
+# never be the thing that fails a build which is otherwise working.
+function Send-Stage {
+  param([string] $Stage, [bool] $Ok = $true, [string] $Log = "")
+  try {
+    $payload = @{ stage = $Stage; ok = $Ok; log = $Log } | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method POST -Uri "${input.controlPlaneUrl}/v1/servers/${input.serverId}/bootstrap" -Headers @{ "Authorization" = "Bearer ${input.agentToken}"; "Content-Type" = "application/json" } -Body $payload -TimeoutSec 15 | Out-Null
+  } catch {
+    Write-Output "couldn't report stage '$Stage': $_"
+  }
+}
+
 # Any unhandled failure below takes the instance down with it. Launched with
 # InstanceInitiatedShutdownBehavior=terminate, so this is self-destruction, not a pause:
 # a half-built server that sits idle is the one outcome that quietly costs money.
+#
+# Which is why the transcript is sent *before* shutting down. There is no console on this box
+# and no key pair, so the log cannot be read from outside — and terminating destroys it.
+# Without this, a bootstrap that failed at minute twelve and one still downloading look
+# identical from the outside: a server that never turns up.
 trap {
-  Write-Output "bootstrap failed: $_"
-  Stop-Transcript
+  $reason = "$_"
+  Write-Output "bootstrap failed: $reason"
+  try { Stop-Transcript } catch {}
+  $tail = ""
+  try { $tail = Get-Content -Path "C:\\mxb-bootstrap.log" -Tail 150 -Raw } catch {}
+  Send-Stage -Stage "failed" -Ok $false -Log "$reason\`n$tail"
   Stop-Computer -Force
   exit 1
 }
@@ -78,11 +100,13 @@ Set-Location "${ROOT}"
 # known to negotiate down and fail against modern endpoints.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+Send-Stage -Stage "downloading the game"
 Write-Output "fetching the MX Bikes installer (about 2 GB)"
 # BITS rather than Invoke-WebRequest: IWR buffers the whole response in memory, and two
 # gigabytes of it on a small instance is how this step fails.
 Start-BitsTransfer -Source "${input.gameUrl}" -Destination "${ROOT}\\mxbikes-installer.exe"
 
+Send-Stage -Stage "extracting the game"
 Write-Output "extracting the server files"
 # There is no separate dedicated-server download; the installer carries it and \`-extract\`
 # unpacks it to mxbikes.zip without installing anything.
@@ -105,6 +129,7 @@ if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) {
   Move-Item -Path "$($inner.Directory.FullName)\\*" -Destination "${ROOT}\\game" -Force
 }
 
+Send-Stage -Stage "installing the agent"
 Write-Output "fetching the agent"
 Invoke-WebRequest -Uri "${input.agentUrl}" -OutFile "${ROOT}\\mxb-agent.exe" -UseBasicParsing
 
@@ -154,6 +179,7 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
 Register-ScheduledTask -TaskName "mxb-agent" -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName "mxb-agent"
+Send-Stage -Stage "waiting for the agent"
 
 # Wait for the agent to actually answer before saying the server is up. /health is the one
 # route it serves without a token, and it is served before anything else is ready — which is
@@ -192,6 +218,7 @@ foreach ($attempt in 1..5) {
 }
 if (-not $announced) { throw "couldn't tell the control plane this server is up" }
 
+Send-Stage -Stage "ready"
 Write-Output "bootstrap complete"
 Stop-Transcript
 </powershell>

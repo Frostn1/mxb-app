@@ -11,6 +11,23 @@
   enrolled in, which makes it the worst one to be quietly missing. Switching it back off
   stops the watcher rather than leaving it running.
 
+## Unreleased — a server that says what it's doing
+
+### Added
+- **A booting server now reports its progress, and its failure.** Creating a server launches a
+  machine that runs a long script with nobody watching: no console, no key pair, so
+  `C:\mxb-bootstrap.log` cannot be read from outside — and the script's own failure trap shuts
+  the instance down, which terminates it and destroys the log. A bootstrap that died at minute
+  twelve and one still downloading a 2 GB installer were indistinguishable: a server that never
+  turned up. The instance now posts each step to the control plane, and posts the tail of its
+  transcript *before* shutting down, so a failure leaves an explanation behind.
+- **"Create a server" says which step it is on** — `downloading the game`, `extracting the
+  game`, `installing the agent` — instead of spinning for a quarter of an hour with nothing to
+  show, and shows the reported error if the server gave up.
+- **`POST /v1/servers/:id/bootstrap`**, authenticated by the agent token the box already holds,
+  the same credential and the same refusal as `hello`. Stage names are validated and the stored
+  log is capped and kept only on failure.
+
 ## 2026-08-09 — v0.9.0 — Servers you can create, paints everyone can see, and a paint studio
 
 ### Added

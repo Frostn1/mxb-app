@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { bearer } from "../src/auth";
 import {
   isBikeId,
+  isBootstrapStage,
   isGuid,
   isPaintFileName,
   isPaintSize,
@@ -272,6 +273,30 @@ describe("bike ids", () => {
       {},
     ]) {
       expect(isBikeId(bad), JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
+describe("bootstrap stages", () => {
+  it("takes the labels the bootstrap actually sends", () => {
+    for (const ok of [
+      "starting up",
+      "downloading the game",
+      "extracting the game",
+      "installing the agent",
+      "waiting for the agent",
+      "ready",
+      "failed",
+    ]) {
+      expect(isBootstrapStage(ok), ok).toBe(true);
+    }
+  });
+
+  it("refuses anything that isn't a short plain label", () => {
+    // Written by a script on a machine we launched and read straight back into the app's UI,
+    // so it is checked rather than trusted for coming from our own instance.
+    for (const bad of ["", "   ", "a".repeat(65), "stage\nnext", "<b>x</b>", "drop;table", 7, null]) {
+      expect(isBootstrapStage(bad), JSON.stringify(bad)).toBe(false);
     }
   });
 });

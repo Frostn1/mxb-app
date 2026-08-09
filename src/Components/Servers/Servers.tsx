@@ -931,9 +931,30 @@ const CloudServerRow = ({
       {!ready ? (
         // The wait is minutes, not seconds — the bootstrap downloads a 2 GB installer. Saying
         // so is the difference between "still working" and "something has gone wrong".
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-white/[0.07] px-3 py-2 text-[12px] text-muted-foreground">
-          <Loader2 className="size-3.5 animate-spin" />
-          {t("servers.bootingWhy")}
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2 rounded-lg border border-white/[0.07] px-3 py-2 text-[12px] text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            {/* The box reports each step, so a ten-minute wait can say which part it is on
+                rather than spinning with nothing to show. */}
+            {server.bootstrapStage && server.bootstrapStage !== "failed"
+              ? t("servers.bootingStage", { stage: server.bootstrapStage })
+              : t("servers.bootingWhy")}
+          </div>
+          {/* A bootstrap that gave up used to take its own log down with it. This is that
+              log, which is the only thing that can say why. */}
+          {server.bootstrapStage === "failed" && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3">
+              <div className="flex items-center gap-2 text-[12px] font-semibold">
+                <TriangleAlert className="size-3.5 flex-none text-destructive" />
+                {t("servers.bootFailed")}
+              </div>
+              {server.bootstrapLog && (
+                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[11px] leading-relaxed text-muted-foreground">
+                  {server.bootstrapLog}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <>
