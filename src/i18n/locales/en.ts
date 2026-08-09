@@ -942,6 +942,19 @@ export const en = {
   "showcase.whileGameRunning": "while MX Bikes is running",
   "showcase.releaseNotes": "Read the release notes",
   "showcase.gotIt": "Got it",
+  "showcase.v090.hero.title": "Turn your artwork into a paint the game loads",
+  "showcase.v090.hero.body":
+    "A new Paints tab builds paints out of ordinary image sheets — TGA, PNG, JPG — and installs them where the game looks: a bike livery, a helmet or goggle paint, a rider's kit or gloves. Unpack a paint you already have to get a template that actually fits the model, edit it in any editor, and put it straight back. The studio checks your sheet names against the ones the mesh binds before you save, then previews the result on the real model.",
+  "showcase.v090.reshade":
+    "Browse, install and switch ReShade presets from the app — with an Off entry to compare against the stock look, and a warning when a preset needs effects you don't have.",
+  "showcase.v090.purchases":
+    "My purchases signs in to your mxbikes-shop.com account and installs what you've already paid for, through the same review sheet a drag-and-drop uses.",
+  "showcase.v090.ridingStyles":
+    "Presets can use a riding style you installed, not just the two the game ships — and a shared preset carries it along.",
+  "showcase.v090.frostmod":
+    "When FrostMod dies on a missing Windows runtime, the app names it in plain language and installs it for you. FrostMod can also be stopped from the app, whoever started it.",
+  "showcase.v090.updates":
+    "Updating over a running copy no longer stops at \"error opening file for writing\", and launching the app twice brings back the window you had instead of a second copy.",
   "showcase.v080.hero.title": "MXB App drives GP Bikes too",
   "showcase.v080.hero.body":
     "Pick your game at first launch, or switch any time in Settings — the whole app follows: Library, Manage, Presets, Play, and a Browse tab served by gpb-mods.com. GP's rider folders are read as GP's, not as MX Bikes', and FrostMod hot-reloads there as well. Each game keeps its own folders, so your MX Bikes setup is untouched.",

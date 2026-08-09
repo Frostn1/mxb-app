@@ -971,6 +971,19 @@ export const es: Translation = {
   "showcase.whileGameRunning": "mientras MX Bikes está abierto",
   "showcase.releaseNotes": "Leer las notas de la versión",
   "showcase.gotIt": "Entendido",
+  "showcase.v090.hero.title": "Convierte tus imágenes en un diseño que el juego carga",
+  "showcase.v090.hero.body":
+    "Una nueva pestaña Diseños crea diseños a partir de imágenes corrientes — TGA, PNG, JPG — y los instala donde el juego los busca: una decoración de moto, un diseño de casco o de gafas, el kit o los guantes de tu piloto. Descomprime un diseño que ya tengas para conseguir una plantilla que encaje de verdad con el modelo, edítala en cualquier editor y devuélvela tal cual. El estudio comprueba tus nombres de archivo frente a los que usa la malla antes de guardar, y luego muestra el resultado sobre el modelo real.",
+  "showcase.v090.reshade":
+    "Explora, instala y cambia presets de ReShade desde la app — con una entrada Desactivado para comparar con el aspecto original, y un aviso cuando a un preset le faltan efectos.",
+  "showcase.v090.purchases":
+    "Mis compras entra en tu cuenta de mxbikes-shop.com e instala lo que ya has pagado, con la misma hoja de revisión que usa el arrastrar y soltar.",
+  "showcase.v090.ridingStyles":
+    "Los presets pueden usar un estilo de pilotaje que hayas instalado, no solo los dos del juego — y un preset compartido se lo lleva consigo.",
+  "showcase.v090.frostmod":
+    "Cuando FrostMod muere por una biblioteca de Windows que falta, la app la nombra en lenguaje claro y la instala por ti. FrostMod también se puede parar desde la app, lo haya arrancado quien lo haya arrancado.",
+  "showcase.v090.updates":
+    "Instalar sobre una copia en ejecución ya no se detiene en «error al abrir el archivo para escritura», y abrir la app dos veces recupera la ventana que tenías en lugar de crear una segunda copia.",
   "showcase.v080.hero.title": "MXB App también maneja GP Bikes",
   "showcase.v080.hero.body":
     "Elige tu juego en el primer arranque, o cámbialo cuando quieras en Ajustes: toda la app lo sigue — Biblioteca, Gestionar, Presets, Jugar y una pestaña Explorar servida por gpb-mods.com. Las carpetas de piloto de GP se leen como las de GP, no como las de MX Bikes, y FrostMod también recarga en caliente allí. Cada juego guarda sus propias carpetas, así que tu configuración de MX Bikes queda intacta.",

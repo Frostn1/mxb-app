@@ -20,6 +20,11 @@ import {
   Wand2,
   Shield,
   Gauge,
+  Palette,
+  Sparkles,
+  PersonStanding,
+  Wrench,
+  RefreshCw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
@@ -46,6 +51,21 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.9.0",
+    hero: {
+      icon: Palette,
+      title: "showcase.v090.hero.title",
+      body: "showcase.v090.hero.body",
+    },
+    highlights: [
+      { icon: Sparkles, text: "showcase.v090.reshade" },
+      { icon: Store, text: "showcase.v090.purchases" },
+      { icon: PersonStanding, text: "showcase.v090.ridingStyles" },
+      { icon: Wrench, text: "showcase.v090.frostmod" },
+      { icon: RefreshCw, text: "showcase.v090.updates" },
+    ],
+  },
   {
     version: "0.8.0",
     hero: {

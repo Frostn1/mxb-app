@@ -1,8 +1,85 @@
 # Changelog
 
-## 2026-08-09 — The app spots the missing Windows component behind a dead FrostMod
+## 2026-08-09 — v0.9.0 — A paint studio, ReShade presets, and your Shop purchases
 
 ### Added
+- **A new Paints tab turns image files into paints the game loads.** MX Bikes reads a paint
+  as a packed container of compressed texture sheets, which no image editor writes — so
+  until now a livery drawn in GIMP or Photoshop had to go through somebody else's converter
+  before the game, or this app's 3D preview, would look at it. Pick the sheets (`.tga`,
+  `.png`, `.jpg`, `.bmp`, `.webp`), say what they're for, and the app builds the `.pnt` and
+  installs it where the game expects it: `mods/bikes/<Bike>/paints`,
+  `rider/helmets/<Helmet>/paints` or `goggles`, boots, protection, and a rider profile's
+  kit or gloves. Or save it to a folder of your own, to share.
+- **Unpack an existing paint into editable `.tga` sheets.** This is how you get a template
+  that actually fits the model: the sheets come out named the way the mesh binds them
+  (`livery`, `rider`, `shell`…), open in any editor, and go straight back in under the same
+  names. Extracted to `Documents\MXB App\Paint Templates\<paint>` and loaded into the studio
+  in one step, so the round trip is edit → **Reload from disk** → **Save paint**.
+- **Names are the part that decides whether a paint works, so the studio shows them.** A
+  `.pnt` supplies textures *by name* and the mesh binds whichever names it asked for — a
+  sheet called `livery` lands on the bodywork, the same sheet called `my_livery` lands
+  nowhere. The studio reads the names the paints already installed for that model use (from
+  their headers — no pixels decoded), lists them, and flags a sheet whose name isn't one of
+  them before you save.
+- **Preview what you just saved on the real model**, through the viewer the app already
+  has: a bike livery on its bike, a helmet or goggle paint on that helmet, a kit on the
+  rider.
+- **Sheets that aren't a power of two are resized to one, and say so.** MX Bikes is a
+  DirectX 9 title and its textures are powers of two throughout; a 1000×1000 export — which
+  GIMP will happily make — would otherwise be packed into a file the game refuses, and the
+  failure would land in-game rather than in the app.
+- **Pick a ReShade preset from Settings.** A new ReShade card lists every preset you have —
+  the ones the app installed and any already sitting loose in your game folder — and switching
+  between them is one click. There's an "Off" entry that runs no effects, so you can compare a
+  preset against the stock look without uninstalling anything.
+- **Browse and install ReShade presets like any other mod.** mxb-mods' ReShade Presets
+  category is now a tab in Browse. Installing one files the preset where the app can find it,
+  and puts any effects and lookup textures the download bundles where ReShade looks for them —
+  the usual reason a preset "does nothing" after a manual install.
+- **Drop a preset on the app.** A `.ini` or an archive of them is recognised as a ReShade
+  preset and goes straight to the right place.
+- **The app says when ReShade is installed for the wrong graphics API.** MX Bikes and GP Bikes
+  render with OpenGL, and ReShade's installer offers DirectX first — a DirectX install is
+  never loaded by the game and looks like ReShade simply not working. The card names that
+  specifically, and points at the fix.
+- **Presets warn when they need effects you don't have.** A preset that switches on a shader
+  that isn't installed renders without it and looks like it did nothing; the card lists what's
+  missing instead.
+
+  Getting ReShade itself is still a trip to reshade.me — it asks that its binaries not be
+  redistributed, so the app detects it and links out rather than bundling or downloading it.
+- **Install what you bought on the MX Bikes Shop, from inside the app.** The Shop tab now has
+  two halves — **Catalog**, the store's public listing as before, and **My purchases**, which
+  signs in to your own mxbikes-shop.com account and shows everything you've already paid for.
+  Cards carry the store's own artwork and author, a product that ships several files (PRO/AMS
+  and the like) is one card with a picker rather than several, and anything already in your
+  library is badged as installed.
+- **Purchases install through the same review sheet a drag-and-drop uses.** The file is
+  downloaded with a progress bar, then read to see what it actually contains, and the sheet
+  says where each piece will land and warns about collisions before anything is written.
+- **Presets can use a custom riding style.** The **Riding style** slot only ever offered the
+  two styles the game ships, so a style you had installed could not be picked — you could
+  type its name in by hand, but the preset then flagged it as a mod you were missing, never
+  packed it into a share code, and Manage was free to park it right before a race. The slot
+  now lists what is installed in `mods/rider/animations` alongside the stock `mx` and `sm`,
+  a shared preset carries the style with it like it already carries helmets and paints, and
+  Manage keeps it. **MX Bikes and GP Bikes both**, which is the point: the two games load
+  riding styles from the same folder and record the pick in the same `[riding_style]` line.
+- **MX Bikes lists riding styles in the Library**, in the Rider tab under their own heading,
+  and offers `mods/rider/animations` when you install one. GP Bikes already did both; MX
+  Bikes was treated as if it had no such folder, so a riding style installed there was
+  invisible to the app.
+- **FrostMod can be stopped from the app.** The sidebar pill and the FrostMod section in
+  Settings now offer a stop control while it's running, next to the reload and start ones —
+  until now the only way out was Task Manager or quitting the app from the tray. It stops
+  FrostMod whoever started it: a `frostmod.exe` left behind by an earlier session, or one
+  launched by hand, is no longer out of reach just because this app didn't spawn it. The app
+  waits for the process to actually go before saying it stopped, so a FrostMod that survives
+  the attempt (running elevated, or as another user) is reported rather than papered over with
+  a success message the status pill contradicts a second later. Stopping is a one-off — it
+  doesn't touch the "Run FrostMod automatically" setting, so the next app launch behaves as
+  configured.
 - **"msvcr90.dll was not found" is now something the app explains and fixes.** MX Bikes is
   a Visual C++ 2008 build, and it asks Windows for that runtime by manifest rather than by
   path — which resolves either machine-wide or out of a private copy sitting in the game
@@ -35,61 +112,6 @@
   FrostMod away from anyone the check is wrong about.
 
 ### Fixed
-- **Settings offers Stop for a FrostMod it didn't install.** The button was hidden unless
-  the app had put FrostMod there itself — so the one case that most needs a stop, a
-  `frostmod.exe` running that the app didn't start, had no button. The backend could
-  always kill it; only the button was missing. (The sidebar's stop control was unaffected.)
-
-## 2026-08-09
-
-### Fixed
-- **Browse keeps your place when you look at a mod and come back.** Opening a mod used to
-  throw away the search you typed, the category you picked, the sort order, every page you'd
-  loaded with "Load more" and how far you'd scrolled — Back dropped you at the top of a fresh,
-  unfiltered listing, which made working through a long category one mod at a time miserable.
-  The grid now sits exactly where you left it, down to the row of cards, and nothing is
-  re-fetched on the way back. It survives a trip to Library or Settings too, and the in-game
-  overlay behaves the same way.
-- **The Linux app opens to its interface instead of a white screen.** On SteamOS the window
-  appeared, the title bar drew, and the inside stayed blank with nothing in the terminal to
-  explain it. The AppImage carries its own copy of the web engine, and that engine tries to
-  hand frames to the graphics driver through a fast path the host's driver answers
-  differently than the one it was built against — so it drew nothing at all, silently. It now
-  takes the ordinary path by default, which paints on every machine and costs nothing anyone
-  will notice on a UI this static. A machine that handles the fast path can still ask for it
-  back with `WEBKIT_DISABLE_DMABUF_RENDERER=0`. The startup log now records which path a run
-  took, so the next report of a blank window can be read straight from the log.
-### Added
-- **Install what you bought on the MX Bikes Shop, from inside the app.** The Shop tab now has
-  two halves — **Catalog**, the store's public listing as before, and **My purchases**, which
-  signs in to your own mxbikes-shop.com account and shows everything you've already paid for.
-  Cards carry the store's own artwork and author, a product that ships several files (PRO/AMS
-  and the like) is one card with a picker rather than several, and anything already in your
-  library is badged as installed.
-- **Purchases install through the same review sheet a drag-and-drop uses.** The file is
-  downloaded with a progress bar, then read to see what it actually contains, and the sheet
-  says where each piece will land and warns about collisions before anything is written.
-- **Pick a ReShade preset from Settings.** A new ReShade card lists every preset you have —
-  the ones the app installed and any already sitting loose in your game folder — and switching
-  between them is one click. There's an "Off" entry that runs no effects, so you can compare a
-  preset against the stock look without uninstalling anything.
-- **Browse and install ReShade presets like any other mod.** mxb-mods' ReShade Presets
-  category is now a tab in Browse. Installing one files the preset where the app can find it,
-  and puts any effects and lookup textures the download bundles where ReShade looks for them —
-  the usual reason a preset "does nothing" after a manual install.
-- **Drop a preset on the app.** A `.ini` or an archive of them is recognised as a ReShade
-  preset and goes straight to the right place.
-- **The app says when ReShade is installed for the wrong graphics API.** MX Bikes and GP Bikes
-  render with OpenGL, and ReShade's installer offers DirectX first — a DirectX install is
-  never loaded by the game and looks like ReShade simply not working. The card names that
-  specifically, and points at the fix.
-- **Presets warn when they need effects you don't have.** A preset that switches on a shader
-  that isn't installed renders without it and looks like it did nothing; the card lists what's
-  missing instead.
-
-Getting ReShade itself is still a trip to reshade.me — it asks that its binaries not be
-redistributed, so the app detects it and links out rather than bundling or downloading it.
-### Fixed
 - **Helmets, boots and protection now install into a folder of their own.** A gear mod
   packaged as a `.pkz` — which is how locked mods are distributed — unpacks to a single
   folder, and the app was unwrapping it and dropping the contents straight into
@@ -101,30 +123,12 @@ redistributed, so the app detects it and links out rather than bundling or downl
   folder it will make (taken from the mod's own descriptor) and lists exactly what will
   move before you press Repair. Packaged `.pkz` models and models already filed correctly
   are left alone.
-- **A purchased bike or gear set no longer installs as if it were a track.** The old path
-  picked a destination by looking for keywords in the *product name* and otherwise assumed
-  tracks, so bikes, paints and gear were filed into a tracks-derived folder silently, with no
-  preview and no collision check. Destination now comes from the archive's contents.
-- **A mods folder you moved with `mxbikes.ini` now works.** Plenty of players keep their
-  content somewhere short like `C:\mods` — junctioning one rider paint into six model
-  folders needs paths that OneDrive and a deep `Documents` tree can't give you. The app
-  couldn't be pointed at such a folder: picking it silently rewrote your setting to the
-  drive root, and auto-detection went to `Documents\PiBoSo\MX Bikes` instead, found no
-  `mods` inside it, and came up missing gear, paints and bikes with nothing to explain why.
-  The folder you pick is now the folder used, whether it's the game folder or the mods
-  folder itself.
-- **The app reads `mxbikes.ini` to find a relocated mods folder on its own.** The game
-  already knows where your content is; setup now asks it instead of guessing. Profiles,
-  which don't move with the mods folder, are pinned to where they actually stayed.
-- **FrostMod was being handed the wrong folder.** It appends `\tracks` and `\bikes` to what
-  the app gives it, and the app was sending the folder one level above — so its track
-  manager and model swap were pointed at folders that don't exist. Affected everyone, not
-  just relocated setups; it just never announced itself.
-- **Settings says which folder mods are actually read from** when that isn't the obvious
-  `<picked>\mods`, and warns when the folder isn't there at all.
-## 2026-08-09 — Gear with no paint picked wears its own look
-
-### Fixed
+- **A packed gear item and a folder of the same name are now one item, not two.** A `.pkz`
+  helmet with paints installed loose beside it (which is where the game looks, and where the
+  studio writes) only ever showed one side of itself: whichever the loader resolved first.
+  A folder holding nothing but paints hid the archive entirely — the picker listed the new
+  paint alone and the preview lost the mesh it belonged to. Both are read now, the folder
+  winning a name clash because it's what was installed last.
 - **An empty paint slot shows the model's own look, not a paint you never chose.** The stock
   helmet came out bronze on the Rider tab while the Library showed that same helmet white
   under "Stock", and picking a helmet mod without naming a paint quietly dressed it in
@@ -137,24 +141,10 @@ redistributed, so the app detects it and links out rather than bundling or downl
   same question now, so the two views can't disagree about it again. A paint that *is* named
   but missing still falls back as it always did, and a mod that ships paints without baking a
   shell texture into its mesh keeps that fallback too, rather than turning up bare.
-## 2026-08-09 — custom riding styles
-
-### Added
-- **Presets can use a custom riding style.** The **Riding style** slot only ever offered the
-  two styles the game ships, so a style you had installed could not be picked — you could
-  type its name in by hand, but the preset then flagged it as a mod you were missing, never
-  packed it into a share code, and Manage was free to park it right before a race. The slot
-  now lists what is installed in `mods/rider/animations` alongside the stock `mx` and `sm`,
-  a shared preset carries the style with it like it already carries helmets and paints, and
-  Manage keeps it. **MX Bikes and GP Bikes both**, which is the point: the two games load
-  riding styles from the same folder and record the pick in the same `[riding_style]` line.
-- **MX Bikes lists riding styles in the Library**, in the Rider tab under their own heading,
-  and offers `mods/rider/animations` when you install one. GP Bikes already did both; MX
-  Bikes was treated as if it had no such folder, so a riding style installed there was
-  invisible to the app.
-## Unreleased
-
-### Fixed
+- **A purchased bike or gear set no longer installs as if it were a track.** The old path
+  picked a destination by looking for keywords in the *product name* and otherwise assumed
+  tracks, so bikes, paints and gear were filed into a tracks-derived folder silently, with no
+  preview and no collision check. Destination now comes from the archive's contents.
 - **Retrying a failed install no longer breaks the install.** Downloads are meant to run one
   at a time, but the Retry button on a failure went straight to the installer instead of the
   queue — so a second, impatient click started a *parallel* run of the same mod. Both runs
@@ -170,22 +160,6 @@ redistributed, so the app detects it and links out rather than bundling or downl
 - **One unreadable file no longer sinks a whole install.** A shortcut whose target has gone
   away, or a file an antivirus pulls out mid-install, used to fail everything that came with
   it. Those entries are skipped and noted in the log; the rest of the mod installs.
-## 2026-08-09 — stopping FrostMod from the app
-
-### Added
-- **FrostMod can be stopped from the app.** The sidebar pill and the FrostMod section in
-  Settings now offer a stop control while it's running, next to the reload and start ones —
-  until now the only way out was Task Manager or quitting the app from the tray. It stops
-  FrostMod whoever started it: a `frostmod.exe` left behind by an earlier session, or one
-  launched by hand, is no longer out of reach just because this app didn't spawn it. The app
-  waits for the process to actually go before saying it stopped, so a FrostMod that survives
-  the attempt (running elevated, or as another user) is reported rather than papered over with
-  a success message the status pill contradicts a second later. Stopping is a one-off — it
-  doesn't touch the "Run FrostMod automatically" setting, so the next app launch behaves as
-  configured.
-## 2026-08-09 — an installer that can always replace the app it's updating
-
-### Fixed
 - **Installing over a running copy no longer stops at "error opening file for writing".**
   The file it named, `frost.exe`, is the app's own program file, and Windows won't let
   anything overwrite a program image that is still held — which the app's often is, since it
@@ -203,48 +177,6 @@ redistributed, so the app detects it and links out rather than bundling or downl
   process tree with it, and the installer the app had just launched was part of that tree.
   It now closes the app alone; the browser processes that the tree kill was there for exit
   with it anyway.
-
-## Unreleased — paint studio: TGA in, `.pnt` out
-
-### Added
-- **A new Paints tab turns image files into paints the game loads.** MX Bikes reads a paint
-  as a packed container of compressed texture sheets, which no image editor writes — so
-  until now a livery drawn in GIMP or Photoshop had to go through somebody else's converter
-  before the game, or this app's 3D preview, would look at it. Pick the sheets (`.tga`,
-  `.png`, `.jpg`, `.bmp`, `.webp`), say what they're for, and the app builds the `.pnt` and
-  installs it where the game expects it: `mods/bikes/<Bike>/paints`,
-  `rider/helmets/<Helmet>/paints` or `goggles`, boots, protection, and a rider profile's
-  kit or gloves. Or save it to a folder of your own, to share.
-- **Unpack an existing paint into editable `.tga` sheets.** This is how you get a template
-  that actually fits the model: the sheets come out named the way the mesh binds them
-  (`livery`, `rider`, `shell`…), open in any editor, and go straight back in under the same
-  names. Extracted to `Documents\MXB App\Paint Templates\<paint>` and loaded into the studio
-  in one step, so the round trip is edit → **Reload from disk** → **Save paint**.
-- **Names are the part that decides whether a paint works, so the studio shows them.** A
-  `.pnt` supplies textures *by name* and the mesh binds whichever names it asked for — a
-  sheet called `livery` lands on the bodywork, the same sheet called `my_livery` lands
-  nowhere. The studio reads the names the paints already installed for that model use (from
-  their headers — no pixels decoded), lists them, and flags a sheet whose name isn't one of
-  them before you save.
-- **Preview what you just saved on the real model**, through the viewer the app already
-  has: a bike livery on its bike, a helmet or goggle paint on that helmet, a kit on the
-  rider.
-- **Sheets that aren't a power of two are resized to one, and say so.** MX Bikes is a
-  DirectX 9 title and its textures are powers of two throughout; a 1000×1000 export — which
-  GIMP will happily make — would otherwise be packed into a file the game refuses, and the
-  failure would land in-game rather than in the app.
-
-### Fixed
-- **A packed gear item and a folder of the same name are now one item, not two.** A `.pkz`
-  helmet with paints installed loose beside it (which is where the game looks, and where the
-  studio writes) only ever showed one side of itself: whichever the loader resolved first.
-  A folder holding nothing but paints hid the archive entirely — the picker listed the new
-  paint alone and the preview lost the mesh it belonged to. Both are read now, the folder
-  winning a name clash because it's what was installed last.
-
-## 2026-08-09
-
-### Fixed
 - **Opening MXB App while it's already running shows the window you had, instead of starting
   a second copy.** Closing the window parks the app in the tray rather than quitting it —
   that part is deliberate, it's what keeps FrostMod connected — but nothing stopped the next
@@ -254,6 +186,43 @@ redistributed, so the app detects it and links out rather than bundling or downl
   brings its window forward, the same as clicking the tray icon. Launch-at-login is covered
   too — the instance that started with Windows is the one your first launch of the day
   reveals, rather than the one it stacks on top of.
+- **A mods folder you moved with `mxbikes.ini` now works.** Plenty of players keep their
+  content somewhere short like `C:\mods` — junctioning one rider paint into six model
+  folders needs paths that OneDrive and a deep `Documents` tree can't give you. The app
+  couldn't be pointed at such a folder: picking it silently rewrote your setting to the
+  drive root, and auto-detection went to `Documents\PiBoSo\MX Bikes` instead, found no
+  `mods` inside it, and came up missing gear, paints and bikes with nothing to explain why.
+  The folder you pick is now the folder used, whether it's the game folder or the mods
+  folder itself.
+- **The app reads `mxbikes.ini` to find a relocated mods folder on its own.** The game
+  already knows where your content is; setup now asks it instead of guessing. Profiles,
+  which don't move with the mods folder, are pinned to where they actually stayed.
+- **FrostMod was being handed the wrong folder.** It appends `\tracks` and `\bikes` to what
+  the app gives it, and the app was sending the folder one level above — so its track
+  manager and model swap were pointed at folders that don't exist. Affected everyone, not
+  just relocated setups; it just never announced itself.
+- **Settings says which folder mods are actually read from** when that isn't the obvious
+  `<picked>\mods`, and warns when the folder isn't there at all.
+- **Settings offers Stop for a FrostMod it didn't install.** The button was hidden unless
+  the app had put FrostMod there itself — so the one case that most needs a stop, a
+  `frostmod.exe` running that the app didn't start, had no button. The backend could
+  always kill it; only the button was missing. (The sidebar's stop control was unaffected.)
+- **Browse keeps your place when you look at a mod and come back.** Opening a mod used to
+  throw away the search you typed, the category you picked, the sort order, every page you'd
+  loaded with "Load more" and how far you'd scrolled — Back dropped you at the top of a fresh,
+  unfiltered listing, which made working through a long category one mod at a time miserable.
+  The grid now sits exactly where you left it, down to the row of cards, and nothing is
+  re-fetched on the way back. It survives a trip to Library or Settings too, and the in-game
+  overlay behaves the same way.
+- **The Linux app opens to its interface instead of a white screen.** On SteamOS the window
+  appeared, the title bar drew, and the inside stayed blank with nothing in the terminal to
+  explain it. The AppImage carries its own copy of the web engine, and that engine tries to
+  hand frames to the graphics driver through a fast path the host's driver answers
+  differently than the one it was built against — so it drew nothing at all, silently. It now
+  takes the ordinary path by default, which paints on every machine and costs nothing anyone
+  will notice on a UI this static. A machine that handles the fast path can still ask for it
+  back with `WEBKIT_DISABLE_DMABUF_RENDERER=0`. The startup log now records which path a run
+  took, so the next report of a blank window can be read straight from the log.
 
 ## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 
