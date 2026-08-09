@@ -15,6 +15,7 @@ import {
   Shirt,
   User,
   RefreshCw,
+  Server as ServerIcon,
   Settings as SettingsIcon,
   Check,
   ArrowLeft,
@@ -25,6 +26,7 @@ import { Button } from "@/Components/ui/button";
 import { cn } from "@/lib/utils";
 import { useT, type TKey } from "../../i18n/context";
 import { useConfig } from "../../Context/Config";
+import { experimentalState } from "../../api/mods";
 import type { GameCaps } from "../../types";
 import type { DashboardView } from "../Shell/Sidebar";
 
@@ -50,6 +52,9 @@ interface Step {
   /** Capability the active game must have for this step to apply. A step that
    *  spotlights a nav item the game doesn't show would highlight nothing. */
   cap?: keyof GameCaps;
+  /** Only when the experimental features are on — same reason as `cap`: the nav entry this
+   *  points at isn't rendered otherwise, and the spotlight would land on empty space. */
+  experimental?: boolean;
 }
 
 const STEPS: Step[] = [
@@ -103,6 +108,15 @@ const STEPS: Step[] = [
     cap: "frostmod",
   },
   {
+    view: "servers",
+    selector: '[data-tour="servers"]',
+    icon: ServerIcon,
+    title: "tour.servers.title",
+    body: "tour.servers.body",
+    cap: "servers",
+    experimental: true,
+  },
+  {
     view: "settings",
     selector: '[data-tour="settings"]',
     icon: SettingsIcon,
@@ -153,10 +167,18 @@ interface TourProps {
 
 export default function Tour({ navigate, onDone }: TourProps) {
   const { game } = useConfig();
-  // Only the steps whose target this game actually shows.
+  const [experimental, setExperimental] = useState(false);
+  useEffect(() => {
+    experimentalState()
+      .then((s) => setExperimental(s.enabled))
+      .catch(() => {});
+  }, []);
+  // Only the steps whose target this game actually shows — and, for the experimental ones,
+  // only when that surface is switched on. A spotlight on a nav entry that isn't rendered
+  // dims the screen and points at nothing.
   const steps = useMemo(
-    () => STEPS.filter((s) => !s.cap || game.caps[s.cap]),
-    [game],
+    () => STEPS.filter((s) => (!s.cap || game.caps[s.cap]) && (!s.experimental || experimental)),
+    [game, experimental],
   );
   const t = useT();
   const [index, setIndex] = useState(0);

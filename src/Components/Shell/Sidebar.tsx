@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Home,
   Library as LibraryIcon,
@@ -23,7 +23,14 @@ import { useFrostmod } from "../../Context/FrostmodContext";
 import { useInstall } from "../../Context/Install";
 import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
-import { experimentalState, launchGame } from "../../api/mods";
+import {
+  experimentalState,
+  launchGame,
+  onSyncEvent,
+  type ExperimentalState,
+  type SyncEvent,
+} from "../../api/mods";
+import { shopCatalogAvailable } from "../../api/shop";
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
@@ -112,11 +119,31 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   // leaving that page is exactly when the nav needs to reflect a change.
   const [experimental, setExperimental] = useState(false);
 
-  useEffect(() => {
+  // Kept whole rather than just `.enabled`: the sync line below reads the same payload, and
+  // asking twice for one answer is two IPC round trips per navigation.
+  const [sync, setSync] = useState<ExperimentalState | null>(null);
+  const [syncBusy, setSyncBusy] = useState<SyncEvent["phase"] | null>(null);
+
+  const readExperimental = useCallback(() => {
     experimentalState()
-      .then((s) => setExperimental(s.enabled))
+      .then((s) => {
+        setExperimental(s.enabled);
+        setSync(s);
+      })
       .catch(() => {});
-  }, [view]);
+  }, []);
+  useEffect(readExperimental, [readExperimental, view]);
+
+  // Follow the background work as it happens, and re-read the record it leaves behind.
+  useEffect(() => {
+    const pending = onSyncEvent((e) => {
+      setSyncBusy(e.phase === "publishing" || e.phase === "pulling" ? e.phase : null);
+      if (e.phase !== "publishing" && e.phase !== "pulling") readExperimental();
+    });
+    return () => {
+      void pending.then((unlisten) => unlisten());
+    };
+  }, [readExperimental]);
 
   // Two independent gates: servers needs the experimental toggle, and every entry needs the
   // active game to support it. Built here rather than inline so the JSX stays one `.map`.
@@ -289,6 +316,42 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           onJoined={refreshGame}
         />
         </>
+        )}
+
+        {/* Paint sync, in one line. Both halves of it run in the background off actions the
+            player didn't ask for — an apply, a launch, the game rewriting profile.ini — so
+            without something like this the only place its state existed was the log file.
+            Shown only once there's an account, since before that the Servers page is where
+            the answer is. */}
+        {experimental && sync?.enrolled && (
+          <div className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2">
+            <span
+              className={cn(
+                "size-[7px] flex-none rounded-full",
+                syncBusy
+                  ? "animate-pulse bg-primary"
+                  : sync.sync.publishedAt
+                    ? "bg-success"
+                    : "bg-warning",
+              )}
+            />
+            <span className="flex-1 truncate text-[11.5px] text-muted-foreground">
+              {syncBusy === "publishing"
+                ? t("sync.publishing")
+                : syncBusy === "pulling"
+                  ? t("sync.pulling")
+                  : sync.sync.publishedAt
+                    ? t("sync.sidebarOk", { count: sync.sync.pulledRiders })
+                    : t("sync.sidebarUnpublished")}
+            </span>
+            <button
+              onClick={() => onNavigate("servers")}
+              title={t("sync.title")}
+              className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Shirt className="size-3.5" />
+            </button>
+          </div>
         )}
 
         {/* FrostMod is a compiled MX Bikes plugin — there is nothing to report, start or

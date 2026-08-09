@@ -31,6 +31,10 @@ export interface BootstrapInputs {
   gamePort: number;
   /** TCP port the agent listens on. */
   agentPort: number;
+  /** This server's row id, so the box can announce itself against it. */
+  serverId: string;
+  /** Base URL of the control plane, for that announcement. */
+  controlPlaneUrl: string;
 }
 
 /** Where everything lands on the instance. Referenced by the agent's config too. */
@@ -116,10 +120,22 @@ track = Victoria
 track_layout =
 "@ | Set-Content -Path "${ROOT}\\game\\dedicated.ini" -Encoding ASCII
 
+# The box's own public address, from the instance metadata service. IMDSv2 needs a token
+# first; v1 is disabled on hardened AMIs and the extra call costs nothing. Without this the
+# agent binds a wildcard, works out its address from the primary interface, and prints the
+# *private* IP — an address nobody outside the VPC can use.
+$imdsToken = Invoke-RestMethod -Method PUT -Uri "http://169.254.169.254/latest/api/token" \`
+  -Headers @{ "X-aws-ec2-metadata-token-ttl-seconds" = "300" } -TimeoutSec 10
+$publicIp = Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/public-ipv4" \`
+  -Headers @{ "X-aws-ec2-metadata-token" = $imdsToken } -TimeoutSec 10
+if (-not $publicIp) { throw "this instance has no public address" }
+Write-Output "public address is $publicIp"
+
 @"
 {
   "token": "${input.agentToken}",
   "listen": "0.0.0.0:${input.agentPort}",
+  "public_url": "http://$publicIp:${input.agentPort}",
   "game_dir": "${ROOT}\\\\game",
   "ini": "dedicated.ini",
   "game_port": ${input.gamePort}
@@ -138,6 +154,43 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
 Register-ScheduledTask -TaskName "mxb-agent" -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName "mxb-agent"
+
+# Wait for the agent to actually answer before saying the server is up. /health is the one
+# route it serves without a token, and it is served before anything else is ready — which is
+# all this needs to know: the process is alive and listening.
+$ready = $false
+foreach ($attempt in 1..30) {
+  try {
+    Invoke-RestMethod -Uri "http://127.0.0.1:${input.agentPort}/health" -TimeoutSec 5 | Out-Null
+    $ready = $true
+    break
+  } catch {
+    Start-Sleep -Seconds 2
+  }
+}
+if (-not $ready) { throw "the agent never came up" }
+
+# Tell the control plane where this server is. Until this call, the row it was created from
+# has an empty address and is published to nobody: the public IP is assigned while the box
+# boots, long after that row was written, and nothing else is in a position to report it.
+# Authenticated with the agent's own token, which only this instance and that row hold.
+#
+# Retried, because everything else has already succeeded by this point — a transient network
+# failure here would otherwise self-destruct a server that is up and running.
+$announced = $false
+foreach ($attempt in 1..5) {
+  try {
+    Invoke-RestMethod -Method POST -Uri "${input.controlPlaneUrl}/v1/servers/${input.serverId}/hello" \`
+      -Headers @{ "Authorization" = "Bearer ${input.agentToken}"; "Content-Type" = "application/json" } \`
+      -Body '{"agentPort":${input.agentPort},"gamePort":${input.gamePort}}' -TimeoutSec 15 | Out-Null
+    $announced = $true
+    break
+  } catch {
+    Write-Output "announce attempt $attempt failed: $_"
+    Start-Sleep -Seconds 5
+  }
+}
+if (-not $announced) { throw "couldn't tell the control plane this server is up" }
 
 Write-Output "bootstrap complete"
 Stop-Transcript

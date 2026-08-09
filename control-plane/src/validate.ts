@@ -224,3 +224,21 @@ export function isPublicAgentUrl(value: unknown): value is string {
   if (url.pathname !== "/" && url.pathname !== "") return false;
   return !isPrivateHost(url.hostname);
 }
+
+/**
+ * A bike id, as it appears as a key in the game's `profile.ini`.
+ *
+ * Part of a primary key now that loadouts are per bike, and the value the app matches on when
+ * deciding which paints belong to the bike a rider is on — so it has to be a plain name.
+ * Accepted unvalidated until this point, which meant a control character or a 4 KB string
+ * could go straight into the table and come back out in every roster.
+ */
+export function isBikeId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const id = value.trim();
+  if (id.length === 0 || id.length > 128) return false;
+  if (/[\u0000-\u001f\u007f]/.test(id)) return false;
+  // Not a path and not a separator: this is a key, and it is echoed into JSON that other
+  // players' apps read.
+  return !/[/\\]/.test(id);
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bearer } from "../src/auth";
 import {
+  isBikeId,
   isGuid,
   isPaintFileName,
   isPaintSize,
@@ -243,5 +244,34 @@ describe("bearer parsing", () => {
     expect(bearer("Bearer")).toBe(null);
     expect(bearer("Bearer   ")).toBe(null);
     expect(bearer(null)).toBe(null);
+  });
+});
+
+describe("bike ids", () => {
+  it("takes the names a profile.ini actually uses", () => {
+    // Real keys out of the `[paint]` section: vendor names, years, spaces, dots.
+    for (const ok of ["YZ450F", "2026 KTM 450 SX-F", "kx250_v1.2", "BSB23_Ducati_V4R"]) {
+      expect(isBikeId(ok), ok).toBe(true);
+    }
+  });
+
+  it("refuses anything that isn't a plain key", () => {
+    // This became half a primary key and is echoed into every roster; before per-bike
+    // loadouts it was stored with no validation at all.
+    for (const bad of [
+      "",
+      "   ",
+      "a/b",
+      "a\\b",
+      "bike\u0000",
+      "bike\n450",
+      "x".repeat(129),
+      42,
+      null,
+      undefined,
+      {},
+    ]) {
+      expect(isBikeId(bad), JSON.stringify(bad)).toBe(false);
+    }
   });
 });

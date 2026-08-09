@@ -1727,11 +1727,28 @@ export interface ExperimentalState {
   /** Whether this install has a control-plane account yet. */
   enrolled: boolean;
   riderName: string;
+  /** What paint sync last achieved — present so a cold start can say so straight away. */
+  sync: SyncState;
+  /**
+   * The MX Bikes profile paint sync speaks for, or `null` when there is none.
+   *
+   * Null means nothing can ever be published, which is worth saying rather than leaving as
+   * a publish that quietly does nothing.
+   */
+  profile: string | null;
 }
 
 export interface PublishOutcome {
+  /** Paints sent, across every bike. */
   published: number;
   uploaded: number;
+  /** Bikes that carried something worth publishing. */
+  bikes: number;
+  /** Bikes beyond the cap that were left out. */
+  skippedBikes: number;
+  digest: string;
+  /** The look already matched what was last sent, so nothing went up. */
+  unchanged: boolean;
 }
 
 export interface PullOutcome {
@@ -1740,6 +1757,41 @@ export interface PullOutcome {
   alreadyHad: number;
   /** Entries refused because their destination wasn't safe to write. */
   rejected: number;
+  /** Paints left alone because that file is the player's own, not one the sync installed. */
+  keptYours: number;
+  /** Destinations two riders disagreed about, where neither was installed. */
+  conflicted: number;
+}
+
+/** What the last publish and the last pull achieved, as the backend recorded them. */
+export interface SyncState {
+  publishedDigest: string;
+  /** Unix milliseconds; `0` means never. */
+  publishedAt: number;
+  publishedBikes: number;
+  publishedPaints: number;
+  pulledAt: number;
+  pulledRiders: number;
+  keptYours: number;
+  conflicted: number;
+}
+
+/**
+ * A background publish or pull, as it happens.
+ *
+ * Both run in spawned tasks off actions the player didn't ask for directly — an apply, a
+ * launch, a file changing under us. Before this event they were invisible: the only report
+ * was a log line, so "is this working?" had no answer anywhere on screen.
+ */
+export interface SyncEvent {
+  phase: "publishing" | "published" | "pulling" | "pulled" | "failed";
+  publish?: PublishOutcome;
+  pull?: PullOutcome;
+  error?: string;
+}
+
+export function onSyncEvent(cb: (event: SyncEvent) => void): Promise<UnlistenFn> {
+  return listen<SyncEvent>("paint-sync", (e) => cb(e.payload));
 }
 
 export function experimentalState(): Promise<ExperimentalState> {
@@ -1764,8 +1816,15 @@ export function setGuid(guid: string): Promise<void> {
 }
 
 /** Publish this rider's paints so everyone else on the server can see them. */
-export function publishPaints(profile: string, bike: string): Promise<PublishOutcome> {
-  return invoke<PublishOutcome>("publish_paints", { profile, bike });
+/**
+ * Publish everything this rider is wearing, across every bike.
+ *
+ * The app does this on its own whenever the look changes, so this is the button for wanting
+ * to see it happen. `force` sends an unchanged look anyway — without it, pressing Publish
+ * after a successful one is correctly a no-op, which reads as the button being broken.
+ */
+export function publishPaints(force = false, profile?: string): Promise<PublishOutcome> {
+  return invoke<PublishOutcome>("publish_paints", { profile: profile ?? null, force });
 }
 
 /**
@@ -1891,7 +1950,48 @@ export interface FleetInstance {
 
 export interface FleetState {
   region: string;
+  /** Instances running across the whole fleet — what the cap is measured against. */
+  running: number;
+  cap: number;
+  /** Only this account's own; an instance id and IP belong to whoever pays for the box. */
   instances: FleetInstance[];
+}
+
+/**
+ * A server the control plane runs for this account.
+ *
+ * Carries the agent token, which the public list never does. That is the point: a
+ * provisioned box has no console and prints its pairing code to nobody, so its owner has no
+ * other way to get the credential for a server they are paying for.
+ */
+export interface CloudServer {
+  id: string;
+  name: string;
+  region: string;
+  /** `host:port` players connect to. Empty until the box has announced itself. */
+  address: string;
+  agentUrl: string | null;
+  agentToken: string | null;
+  instanceId: string | null;
+  published: boolean;
+  createdAt: number;
+  /** When it was last seen empty, or `null` while someone is riding. */
+  idleSince: number | null;
+  /** Minutes of emptiness before it destroys itself. */
+  idleMinutes: number;
+  /** `pending` | `running` | `stopping` | `stopped` | `gone` | `self-hosted`. */
+  state: string;
+  publicIp: string | null;
+}
+
+/** The servers the control plane runs for this account, and what it takes to drive them. */
+export function cloudServers(): Promise<CloudServer[]> {
+  return invoke<CloudServer[]>("cloud_servers");
+}
+
+/** Destroy one, and stop paying for it. */
+export function destroyCloudServer(id: string): Promise<void> {
+  return invoke<void>("destroy_cloud_server", { id });
 }
 
 /**

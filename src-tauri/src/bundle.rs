@@ -89,6 +89,29 @@ pub fn plan(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
     Ok(p)
 }
 
+/// [`plan`] for several loadouts, paying for the library walk once.
+///
+/// Resolving a slot means matching it against every installed file, and gathering those files
+/// means a full recursive walk of `mods/bikes` — which on a real install is every livery the
+/// player owns. One walk per loadout is fine for the one-at-a-time callers; it is not fine for
+/// "publish this rider's whole profile", where the loadout count is the number of bikes they
+/// have ever sat on. Same resolution, same order, one scan.
+pub fn plan_many(cfg: &AppConfig, loadouts: &[Loadout]) -> Vec<BundlePlan> {
+    if loadouts.is_empty() {
+        return Vec::new();
+    }
+    let libs = Libraries::scan(cfg);
+    loadouts
+        .iter()
+        .map(|loadout| {
+            let mut p = resolve_with(cfg, &libs, loadout);
+            dedup_assets(&mut p.assets);
+            p.total_size = p.assets.iter().map(|a| a.size).sum();
+            p
+        })
+        .collect()
+}
+
 /// The same resolution as [`plan`], with every asset still addressed in its own right.
 ///
 /// [`plan`] collapses an asset into the folder that already contains it, because a zip that
@@ -99,10 +122,36 @@ pub fn plan_detailed(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<Bundl
     resolve(cfg, loadout)
 }
 
+/// The three scans a resolution reads from, gathered once.
+///
+/// Exists so [`plan_many`] can hand the same walk to every loadout. A scan is infallible from
+/// the caller's point of view — an unreadable folder resolves to nothing, exactly as it did
+/// when each `resolve` did its own `unwrap_or_default`.
+struct Libraries {
+    bikes: Vec<LibraryEntry>,
+    rider: Vec<LibraryEntry>,
+    tyres: Vec<LibraryEntry>,
+}
+
+impl Libraries {
+    fn scan(cfg: &AppConfig) -> Self {
+        Libraries {
+            bikes: library::scan_library(&cfg.mods_path, "mods/bikes", &[], cfg.game())
+                .unwrap_or_default(),
+            rider: library::scan_library(&cfg.mods_path, "mods/rider", &[], cfg.game())
+                .unwrap_or_default(),
+            tyres: library::scan_library(&cfg.mods_path, "mods/tyres", &[], cfg.game())
+                .unwrap_or_default(),
+        }
+    }
+}
+
 fn resolve(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
-    let bikes = library::scan_library(&cfg.mods_path, "mods/bikes", &[], cfg.game()).unwrap_or_default();
-    let rider = library::scan_library(&cfg.mods_path, "mods/rider", &[], cfg.game()).unwrap_or_default();
-    let tyres = library::scan_library(&cfg.mods_path, "mods/tyres", &[], cfg.game()).unwrap_or_default();
+    Ok(resolve_with(cfg, &Libraries::scan(cfg), loadout))
+}
+
+fn resolve_with(cfg: &AppConfig, libs: &Libraries, loadout: &Loadout) -> BundlePlan {
+    let Libraries { bikes, rider, tyres } = libs;
 
     let specs = vec![
         Spec { slot: "paint", value: loadout.paint.clone(), scan: Scan::Bikes, cats: &["bikePaint"], parent: None },
@@ -131,9 +180,9 @@ fn resolve(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
             continue;
         }
         let (entries, type_folder) = match spec.scan {
-            Scan::Bikes => (&bikes, "bikes"),
-            Scan::Rider => (&rider, "rider"),
-            Scan::Tyres => (&tyres, "tyres"),
+            Scan::Bikes => (bikes, "bikes"),
+            Scan::Rider => (rider, "rider"),
+            Scan::Tyres => (tyres, "tyres"),
         };
 
         let mut matches: Vec<&LibraryEntry> = entries
@@ -189,7 +238,7 @@ fn resolve(cfg: &AppConfig, loadout: &Loadout) -> anyhow::Result<BundlePlan> {
     }
 
     let total_size = assets.iter().map(|a| a.size).sum();
-    Ok(BundlePlan { assets, unresolved, total_size })
+    BundlePlan { assets, unresolved, total_size }
 }
 
 fn resolve_model_swap(
@@ -482,6 +531,44 @@ mod tests {
         assert!(dest("helmet_paint").is_none());
         assert!(plan.unresolved.iter().any(|u| u.slot == "suit_font"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // Publishing a rider's whole profile plans every bike they own. `plan_many` exists to
+    // make that one library walk instead of one per bike, so the thing worth pinning is that
+    // it still answers exactly what planning them separately would have.
+    #[test]
+    fn planning_many_at_once_answers_the_same_as_planning_each() {
+        let root = tmp("plan-many");
+        touch(&root.join("mods/bikes/KTM450/paints/RedBud.pnt"));
+        touch(&root.join("mods/bikes/YZ250/paints/Southwick.pnt"));
+        touch(&root.join("mods/rider/helmets/AGV/model.edf"));
+
+        let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        let mut ktm = Loadout::default();
+        ktm.paint = "RedBud".into();
+        ktm.helmet = "AGV".into();
+        let mut yam = Loadout::default();
+        yam.paint = "Southwick".into();
+
+        let loadouts = vec![ktm.clone(), yam.clone()];
+        let many = plan_many(&cfg, &loadouts);
+        assert_eq!(many.len(), 2);
+        for (batched, one) in many.iter().zip([plan(&cfg, &ktm).unwrap(), plan(&cfg, &yam).unwrap()])
+        {
+            let dests = |p: &BundlePlan| {
+                p.assets.iter().map(|a| a.rel_dest.clone()).collect::<Vec<_>>()
+            };
+            assert_eq!(dests(batched), dests(&one));
+            assert_eq!(batched.total_size, one.total_size);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn planning_nothing_walks_nothing() {
+        // Guards the early return: a profile with no bikes must not pay for a library scan.
+        let cfg = AppConfig { mods_path: "/nowhere".into(), ..Default::default() };
+        assert!(plan_many(&cfg, &[]).is_empty());
     }
 
     #[test]

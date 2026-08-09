@@ -29,6 +29,26 @@ export function bearer(header: string | null): string | null {
   return token ? token : null;
 }
 
+/**
+ * Compare two tokens without leaking where they differ.
+ *
+ * Account tokens never need this — they are looked up by digest, so the comparison happens
+ * inside an index. An agent token does: it is stored in plaintext (the box it belongs to has
+ * to present it verbatim, and we have to hand it back to the owner), so this is a real
+ * string compare and a naive one would answer faster the sooner it found a mismatch.
+ */
+export function tokenMatches(expected: string, presented: string): boolean {
+  const a = new TextEncoder().encode(expected);
+  const b = new TextEncoder().encode(presented);
+  // Fold the length difference in rather than returning early on it: the length is not the
+  // secret, but a short-circuit here would be one more thing to get wrong later.
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  }
+  return diff === 0;
+}
+
 function base64url(bytes: Uint8Array): string {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);

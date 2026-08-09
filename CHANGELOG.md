@@ -1,5 +1,62 @@
 # Changelog
 
+## Unreleased — paint sync actually closes the loop
+
+### Fixed
+- **Your look is published even if you never open the Locker.** Publishing only ever ran off
+  a preset apply, so the commonest path there is — enrol, press Play — sent nothing at all,
+  and the player appeared to everyone else in default gear with no indication anything was
+  wrong. It now publishes when you enrol, when the app starts, when you press Play or Join,
+  and whenever a preset is applied.
+- **Changing your kit in the game's own garage publishes it.** MX Bikes writes the same
+  `profile.ini` the app does; nothing was listening. A watcher on that file now catches it,
+  filtered to `profile.ini` alone so the replay and telemetry churn a session produces can't
+  set it off. Redundant fires cost nothing: the look is hashed and an unchanged one is never
+  sent.
+- **Every bike is published, not just the last one touched.** Storage held one loadout per
+  account — `loadout_paints` had no bike dimension at all — so publishing a second bike
+  deleted the first. A rider looked right on whichever bike the app last saw and default on
+  every other. Both tables are rebuilt keyed by bike, and the app sends them together.
+- **The sync no longer overwrites liveries you made yourself.** Any local paint whose name
+  matched an incoming one was replaced, including your own artwork. It now records what it
+  installs and will only ever replace that; anything else is yours and is kept, and reported.
+  Two riders using one file name for different paints installs neither, rather than letting
+  whichever roster answered first decide what everyone sees.
+- **A server created from the app can now be reached.** Provisioning launched a machine and
+  then lost it: the response carried no address and no token, nothing ever filled either in,
+  and the row stayed unpublished forever — so the server could not be joined, managed or even
+  deleted, only waited out by the idle reaper. The instance now announces itself once its
+  agent answers, which fills in its address and puts it in the join picker.
+
+### Added
+- **A paint-sync panel that says what's missing.** Publishing and syncing both happen in the
+  background off actions you didn't ask for, and their only report was a line in the log — so
+  "is this working?" had no answer anywhere on screen, and the most common failure looked
+  exactly like success. The Servers page now shows, in a sentence each: whether your look is
+  published and when it last went up, how many riders' paints you hold, and — when it isn't
+  working — what that means and which button fixes it. It updates live as the background work
+  runs.
+- **A sync line in the sidebar**, alongside the FrostMod one, so the state is visible without
+  going to look for it.
+- **Cloud servers have a lifecycle.** Booting, ready with an address, a Join button, start and
+  stop, a track picker, whether it's in the public list, and how many minutes until it shuts
+  itself down. Previously the panel showed a raw instance id and a state string.
+- **`GET /v1/servers/mine`**, which hands a server's agent token to the account that owns it —
+  the only way to drive a box that has no console and prints its pairing code to nobody.
+- **A guided-tour step for the Servers page**, and a help hint on it. Every other screen had
+  one.
+
+### Changed
+- **Publishing a whole profile costs one library scan, not one per bike.** Resolving a look
+  walks `mods/bikes` recursively — every livery installed — and the publish path did that once
+  per bike plus once per uploaded file. Loadouts are now planned in a batch against a single
+  walk, and the upload takes its bytes from the files already hashed.
+- **`GET /v1/fleet` no longer hands every enrolled account the address of every server.** The
+  running count stays public to everyone, because that is what the concurrency cap is measured
+  against; the instance list is scoped to its owner.
+- **The on-screen description of paint sync matches what it does.** It promised automatic
+  publishing on every look change before that was true.
+
 ## 2026-08-09 — v0.9.0 — A paint studio, ReShade presets, and your Shop purchases
 
 ### Added

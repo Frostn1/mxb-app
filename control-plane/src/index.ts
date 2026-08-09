@@ -17,8 +17,9 @@ import {
   terminateInstance,
 } from "./aws";
 import { bootstrapScript } from "./bootstrap";
-import { bearer, hashToken, newToken } from "./auth";
+import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
+  isBikeId,
   isGuid,
   isPaintFileName,
   isPaintSize,
@@ -90,15 +91,22 @@ async function route(request: Request, env: Env): Promise<Response> {
   // deliberately not selected, so the admin API's location stays private.
   if (method === "GET" && path === "/v1/servers") return listServers(env);
 
+  // A provisioned box announcing itself. Authenticated by the agent token in its own row,
+  // not by an account bearer — the machine holds no account and has no way to be given one.
+  const hello = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/hello$/.exec(path);
+  if (hello && method === "POST") return serverHello(request, hello[1], env);
+
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
+  if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
-  if (method === "GET" && path === "/v1/fleet") return fleetState(env);
+  if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
+  if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
   if (method === "POST" && path === "/v1/provision") return provision(request, account, env);
 
   const owned = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})$/.exec(path);
@@ -174,19 +182,48 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   return json(201, { accountId: id, token, riderName: (riderName as string).trim() });
 }
 
+/**
+ * The account, and what is actually stored for it.
+ *
+ * The per-bike summary is what lets the app say "published — 6 bikes, 14 paints" from the
+ * server's own record rather than from its optimism about a request it made. Those are not
+ * the same thing the moment a publish half-fails, which is exactly when a player looks.
+ */
 async function me(account: Account, env: Env): Promise<Response> {
   const paints = await env.DB.prepare(
-    "SELECT slot, file_name, sha256, size FROM loadout_paints WHERE account_id = ?",
+    "SELECT bike_id, slot, file_name, sha256, size FROM loadout_paints WHERE account_id = ?" +
+      " ORDER BY bike_id, slot",
   )
     .bind(account.id)
-    .all<{ slot: string; file_name: string; sha256: string; size: number }>();
+    .all<{ bike_id: string; slot: string; file_name: string; sha256: string; size: number }>();
+
+  const updated = await env.DB.prepare(
+    "SELECT bike_id, updated_at FROM loadouts WHERE account_id = ?",
+  )
+    .bind(account.id)
+    .all<{ bike_id: string; updated_at: number }>();
+  const updatedAt = new Map(updated.results.map((r) => [r.bike_id, r.updated_at]));
+
+  const bikes = new Map<string, { bikeId: string; paints: number; updatedAt: number | null }>();
+  for (const p of paints.results) {
+    const bike = bikes.get(p.bike_id) ?? {
+      bikeId: p.bike_id,
+      paints: 0,
+      updatedAt: updatedAt.get(p.bike_id) ?? null,
+    };
+    bike.paints += 1;
+    bikes.set(p.bike_id, bike);
+  }
 
   return json(200, {
     accountId: account.id,
     riderName: account.rider_name,
     steamId: account.steam_id,
     guid: account.guid,
+    bikes: [...bikes.values()],
+    totalPaints: paints.results.length,
     paints: paints.results.map((p) => ({
+      bikeId: p.bike_id,
       slot: p.slot,
       fileName: p.file_name,
       sha256: p.sha256,
@@ -222,25 +259,44 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
   return json(200, { ok: true, guid: (guid as string).trim() });
 }
 
-async function putLoadout(request: Request, account: Account, env: Env): Promise<Response> {
-  const body = await readJson(request);
-  if (!body) return json(400, { error: "expected a JSON body" });
+/** A publish carries at most this many bikes, matching the app's own cap. */
+const MAX_BIKES = 32;
 
-  const { bikeId, paints } = body as { bikeId?: unknown; paints?: unknown };
-  if (!Array.isArray(paints)) return json(400, { error: "paints must be an array" });
-  if (paints.length > 16) return json(400, { error: "too many paints" });
+/** And at most this many paints per bike — a loadout has one slot each. */
+const MAX_PAINTS_PER_BIKE = 16;
 
-  const rows: { slot: string; fileName: string; sha256: string; size: number; relDest: string }[] =
-    [];
+/** One bike's worth of validated rows, ready to insert. */
+interface BikeRows {
+  bikeId: string;
+  rows: { slot: string; fileName: string; sha256: string; size: number; relDest: string }[];
+}
+
+/**
+ * Validate `{ bikeId, paints }` into rows, or return the message explaining why not.
+ *
+ * `relDest` is the value that becomes a path on another player's disk, so it is checked here
+ * as well as by the app that receives it. Neither check is redundant: this one keeps bad rows
+ * out of the database, and the app's keeps a bad row already in it from reaching a filesystem.
+ */
+function bikeRows(value: unknown): BikeRows | string {
+  const { bikeId, paints } = (value ?? {}) as { bikeId?: unknown; paints?: unknown };
+  if (!isBikeId(bikeId)) return `not a usable bike id: ${String(bikeId)}`;
+  if (!Array.isArray(paints)) return `paints must be an array for ${String(bikeId)}`;
+  if (paints.length > MAX_PAINTS_PER_BIKE) return `too many paints for ${String(bikeId)}`;
+
+  const rows: BikeRows["rows"] = [];
+  const seen = new Set<string>();
   for (const entry of paints) {
     const p = entry as Record<string, unknown>;
-    if (!isSlot(p.slot)) return json(400, { error: `unknown slot: ${String(p.slot)}` });
-    if (!isPaintFileName(p.fileName)) {
-      return json(400, { error: `invalid paint filename for ${p.slot}` });
-    }
-    if (!isRelDest(p.relDest)) return json(400, { error: `invalid destination for ${p.slot}` });
-    if (!isSha256(p.sha256)) return json(400, { error: `invalid sha256 for ${p.slot}` });
-    if (!isPaintSize(p.size)) return json(400, { error: `invalid size for ${p.slot}` });
+    if (!isSlot(p.slot)) return `unknown slot: ${String(p.slot)}`;
+    // A slot twice in one bike would violate the primary key and fail the whole batch, so
+    // it is named here rather than surfacing as an opaque constraint error.
+    if (seen.has(p.slot)) return `${p.slot} given twice for ${bikeId}`;
+    seen.add(p.slot);
+    if (!isPaintFileName(p.fileName)) return `invalid paint filename for ${p.slot}`;
+    if (!isRelDest(p.relDest)) return `invalid destination for ${p.slot}`;
+    if (!isSha256(p.sha256)) return `invalid sha256 for ${p.slot}`;
+    if (!isPaintSize(p.size)) return `invalid size for ${p.slot}`;
     rows.push({
       slot: p.slot,
       fileName: (p.fileName as string).trim(),
@@ -249,34 +305,104 @@ async function putLoadout(request: Request, account: Account, env: Env): Promise
       relDest: (p.relDest as string).trim(),
     });
   }
+  return { bikeId: (bikeId as string).trim(), rows };
+}
 
+/** Write a set of bikes, replacing `scope` wholesale, and report the blobs still missing. */
+async function storeLoadouts(
+  account: Account,
+  bikes: BikeRows[],
+  scope: "all" | "these",
+  env: Env,
+): Promise<Response> {
   const now = Date.now();
+  // Replace rather than merge: a slot the player cleared has to disappear, and merging would
+  // leave them wearing something they took off. `scope: "all"` is a whole-profile publish, so
+  // a bike they no longer have any custom paint on goes too.
+  const clear =
+    scope === "all"
+      ? [
+          env.DB.prepare("DELETE FROM loadout_paints WHERE account_id = ?").bind(account.id),
+          env.DB.prepare("DELETE FROM loadouts WHERE account_id = ?").bind(account.id),
+        ]
+      : bikes.flatMap((b) => [
+          env.DB.prepare("DELETE FROM loadout_paints WHERE account_id = ? AND bike_id = ?").bind(
+            account.id,
+            b.bikeId,
+          ),
+        ]);
+
   const statements = [
-    env.DB.prepare(
-      "INSERT INTO loadouts (account_id, bike_id, updated_at) VALUES (?, ?, ?)" +
-        " ON CONFLICT(account_id) DO UPDATE SET bike_id = excluded.bike_id, updated_at = excluded.updated_at",
-    ).bind(account.id, typeof bikeId === "string" ? bikeId : null, now),
-    // Replace wholesale: a slot the player cleared has to disappear, and merging would
-    // leave them wearing something they took off.
-    env.DB.prepare("DELETE FROM loadout_paints WHERE account_id = ?").bind(account.id),
-    ...rows.map((r) =>
+    ...clear,
+    ...bikes.map((b) =>
       env.DB.prepare(
-        "INSERT INTO loadout_paints (account_id, slot, file_name, sha256, size, rel_dest)" +
-          " VALUES (?, ?, ?, ?, ?, ?)",
-      ).bind(account.id, r.slot, r.fileName, r.sha256, r.size, r.relDest),
+        "INSERT INTO loadouts (account_id, bike_id, updated_at) VALUES (?, ?, ?)" +
+          " ON CONFLICT(account_id, bike_id) DO UPDATE SET updated_at = excluded.updated_at",
+      ).bind(account.id, b.bikeId, now),
+    ),
+    ...bikes.flatMap((b) =>
+      b.rows.map((r) =>
+        env.DB.prepare(
+          "INSERT INTO loadout_paints (account_id, bike_id, slot, file_name, sha256, size, rel_dest)" +
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).bind(account.id, b.bikeId, r.slot, r.fileName, r.sha256, r.size, r.relDest),
+      ),
     ),
   ];
   await env.DB.batch(statements);
 
   // Tell the client which blobs we still need, so it uploads only what nobody has shared
   // yet. Content addressing makes this cheap: the same paint from twenty riders is one
-  // object and nineteen skipped uploads.
+  // object and nineteen skipped uploads. De-duplicated first — gear repeats across bikes,
+  // so a whole-profile publish asks about the same digest many times over.
+  const wanted = [...new Set(bikes.flatMap((b) => b.rows.map((r) => r.sha256)))];
   const missing: string[] = [];
-  for (const r of rows) {
-    if (!(await env.PAINTS.head(r.sha256))) missing.push(r.sha256);
+  for (const sha of wanted) {
+    if (!(await env.PAINTS.head(sha))) missing.push(sha);
   }
-
   return json(200, { ok: true, missing });
+}
+
+/**
+ * Replace one bike's loadout.
+ *
+ * Kept for clients older than per-bike storage, which send one bike at a time and would
+ * otherwise have every other bike deleted out from under them on each publish.
+ */
+async function putLoadout(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const bike = bikeRows(body);
+  if (typeof bike === "string") return json(400, { error: bike });
+  return storeLoadouts(account, [bike], "these", env);
+}
+
+/**
+ * Replace this rider's whole look, every bike at once.
+ *
+ * Which bike a rider takes out is decided in the game, and nothing tells us which one that
+ * will be — so the only answer that always renders correctly is to hold all of them. Sending
+ * them together also makes the replacement atomic: there is no moment where half a profile
+ * is published.
+ */
+async function putLoadouts(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { bikes } = body as { bikes?: unknown };
+  if (!Array.isArray(bikes)) return json(400, { error: "bikes must be an array" });
+  if (bikes.length > MAX_BIKES) return json(400, { error: `at most ${MAX_BIKES} bikes` });
+
+  const parsed: BikeRows[] = [];
+  const seen = new Set<string>();
+  for (const entry of bikes) {
+    const bike = bikeRows(entry);
+    if (typeof bike === "string") return json(400, { error: bike });
+    const key = bike.bikeId.toLowerCase();
+    if (seen.has(key)) return json(400, { error: `${bike.bikeId} given twice` });
+    seen.add(key);
+    parsed.push(bike);
+  }
+  return storeLoadouts(account, parsed, "all", env);
 }
 
 /**
@@ -364,6 +490,16 @@ const MAX_SERVERS_PER_ACCOUNT = 5;
 
 /** Long enough for a cold agent to answer, short enough that registering never hangs. */
 const REACHABILITY_TIMEOUT_MS = 5000;
+
+/**
+ * The ports a provisioned box uses.
+ *
+ * Fixed rather than configurable: the bootstrap writes them into `agent.json` and opens them
+ * in the firewall, so anything reading them back has to agree. They were repeated as literals
+ * in three places, one of which — the reaper — silently decides whether a server is reachable.
+ */
+const AGENT_PORT = 8787;
+const GAME_PORT = 54210;
 
 /**
  * Register a server the player runs, so other people can find it.
@@ -469,16 +605,29 @@ async function agentAnswers(agentUrl: string): Promise<boolean> {
  * believe we created, and this is what will actually appear on the bill. When a launch
  * half-fails those two disagree, and only one of them is expensive to be wrong about.
  *
- * Authenticated but not owner-scoped — every enrolled account sees the same fleet, because
- * the number of servers running is what the spending cap is measured against and hiding it
- * from the people it constrains would be perverse.
+ * The *count* is everyone's business — it is what the concurrency cap is measured against, and
+ * hiding it from the people it constrains would be perverse. The instance list is not: an
+ * instance id and public IP belong to whoever is paying for that box, so only its owner sees
+ * the row. Splitting the two is what lets the panel say "1 of 2 running" without handing every
+ * enrolled account the address of every server.
  */
-async function fleetState(env: Env): Promise<Response> {
+async function fleetState(account: Account, env: Env): Promise<Response> {
   const aws = awsEnv(env);
   if (!aws) return json(503, { error: "provisioning isn't configured on this deployment" });
   try {
     const instances = await fleet(aws);
-    return json(200, { region: REGION, instances });
+    const mine = await env.DB.prepare(
+      "SELECT instance_id FROM servers WHERE owner_account_id = ? AND instance_id IS NOT NULL",
+    )
+      .bind(account.id)
+      .all<{ instance_id: string }>();
+    const owned = new Set(mine.results.map((r) => r.instance_id));
+    return json(200, {
+      region: REGION,
+      running: instances.length,
+      cap: Number(env.MXB_MAX_INSTANCES ?? "2"),
+      instances: instances.filter((i) => owned.has(i.instanceId)),
+    });
   } catch (err) {
     console.error(JSON.stringify({ msg: "fleet", error: String(err) }));
     return json(502, { error: String(err) });
@@ -542,8 +691,12 @@ async function provision(request: Request, account: Account, env: Env): Promise<
           agentUrl: agentDownload,
           gameUrl: gameDownload,
           serverName: (name as string).trim(),
-          gamePort: 54210,
-          agentPort: 8787,
+          gamePort: GAME_PORT,
+          agentPort: AGENT_PORT,
+          serverId: id,
+          // Taken from the request rather than configured, so a preview deployment's boxes
+          // announce themselves to that preview rather than to production.
+          controlPlaneUrl: new URL(request.url).origin,
         }),
       },
       amiId,
@@ -561,6 +714,129 @@ async function provision(request: Request, account: Account, env: Env): Promise<
     console.error(JSON.stringify({ msg: "provision", error: String(err) }));
     return json(502, { error: String(err) });
   }
+}
+
+/**
+ * A provisioned box announcing that it is up, and where it is.
+ *
+ * This is the one thing that made cloud servers real. A launched instance had no way to be
+ * reached: its public IP exists only in EC2's view, its agent token only in this table and on
+ * the box, and nothing ever wrote `address` or flipped `published` — so a server the app
+ * created could never be joined, managed or even found. Now the box says so itself.
+ *
+ * **The address is observed, not supplied.** The IP comes from `cf-connecting-ip` rather than
+ * from the request body, so a box that is compromised — or an operator poking at this by hand
+ * — cannot register somebody else's address into everyone's join picker. Only the ports are
+ * taken from the body, and only after the token proves the caller is that server.
+ *
+ * Idempotent: a bootstrap that retries, or an instance that reboots and announces itself
+ * again, simply rewrites the same row.
+ */
+async function serverHello(request: Request, id: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(
+    "SELECT agent_token, instance_id FROM servers WHERE id = ?",
+  )
+    .bind(id)
+    .first<{ agent_token: string | null; instance_id: string | null }>();
+  // The same answer for an unknown id and a wrong token, so this can't be used to find out
+  // which server ids exist.
+  const presented = bearer(request.headers.get("Authorization"));
+  if (!row?.agent_token || !presented || !tokenMatches(row.agent_token, presented)) {
+    return json(403, { error: "not this server" });
+  }
+
+  const body = (await readJson(request)) as { agentPort?: unknown; gamePort?: unknown } | null;
+  const agentPort = isPort(body?.agentPort) ? body!.agentPort : AGENT_PORT;
+  const gamePort = isPort(body?.gamePort) ? body!.gamePort : GAME_PORT;
+
+  const ip = (request.headers.get("cf-connecting-ip") ?? "").trim();
+  // Behind `wrangler dev` there is no edge header and the caller is loopback; refusing that
+  // is right for production and is why the local exercise of this uses a public test address.
+  if (!isPublicGameAddress(`${ip}:${gamePort}`)) {
+    return json(400, { error: "that address isn't reachable from the internet" });
+  }
+
+  const now = Date.now();
+  await env.DB.prepare(
+    "UPDATE servers SET address = ?, agent_url = ?, checked_at = ?, published = 1 WHERE id = ?",
+  )
+    .bind(`${ip}:${gamePort}`, `http://${ip}:${agentPort}`, now, id)
+    .run();
+
+  console.log(JSON.stringify({ msg: "hello", id, instance: row.instance_id, address: ip }));
+  return json(200, { ok: true, address: `${ip}:${gamePort}` });
+}
+
+function isPort(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65535;
+}
+
+/**
+ * The servers this account runs, with what it takes to drive them.
+ *
+ * Includes `agent_token`, which the public list deliberately never carries. That is the
+ * point: a box the control plane launched has no console and prints its pairing code to
+ * nobody, so the owner has no other way to obtain the credential for a server they are
+ * paying for. Scoped strictly to `owner_account_id`, so it is only ever the caller's own.
+ *
+ * `state` and `publicIp` come from EC2 rather than from this table, which is what lets the app
+ * distinguish "still booting" from "up but not answering".
+ */
+async function myServers(account: Account, env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(
+    "SELECT id, name, region, address, agent_url, agent_token, instance_id, published," +
+      " created_at, idle_since FROM servers WHERE owner_account_id = ? ORDER BY created_at",
+  )
+    .bind(account.id)
+    .all<{
+      id: string;
+      name: string;
+      region: string;
+      address: string;
+      agent_url: string | null;
+      agent_token: string | null;
+      instance_id: string | null;
+      published: number;
+      created_at: number;
+      idle_since: number | null;
+    }>();
+
+  // Only ask EC2 when at least one row is a machine we launched; a player who only runs
+  // servers on their own hardware shouldn't make this endpoint depend on AWS at all.
+  const aws = rows.results.some((r) => r.instance_id) ? awsEnv(env) : null;
+  let live = new Map<string, { state: string; publicIp: string | null }>();
+  if (aws) {
+    try {
+      live = new Map((await fleet(aws)).map((i) => [i.instanceId, i]));
+    } catch (err) {
+      // The rows are still useful without it — the panel just can't say "booting".
+      console.error(JSON.stringify({ msg: "servers/mine fleet", error: String(err) }));
+    }
+  }
+
+  return json(200, {
+    servers: rows.results.map((r) => {
+      const instance = r.instance_id ? live.get(r.instance_id) : undefined;
+      return {
+        id: r.id,
+        name: r.name,
+        region: r.region,
+        address: r.address,
+        // Falls back to EC2's view for the window between the instance getting an IP and its
+        // bootstrap finishing — the agent is not up yet, but the app can already show where.
+        agentUrl:
+          r.agent_url ?? (instance?.publicIp ? `http://${instance.publicIp}:${AGENT_PORT}` : null),
+        agentToken: r.agent_token,
+        instanceId: r.instance_id,
+        published: r.published === 1,
+        createdAt: r.created_at,
+        idleSince: r.idle_since,
+        idleMinutes: Number(env.MXB_IDLE_MINUTES ?? "20"),
+        state: r.instance_id ? (instance?.state ?? "gone") : "self-hosted",
+        publicIp: instance?.publicIp ?? null,
+      };
+    }),
+  });
 }
 
 /**
@@ -669,7 +945,7 @@ async function reapIdleServers(env: Env): Promise<void> {
     // Built from EC2's view rather than a stored column: the public IP is assigned while the
     // instance boots, long after the row was written, so the row can never have it at
     // creation time and a server whose address we forgot to record would never be checked.
-    const agentUrl = instance.publicIp ? `http://${instance.publicIp}:8787` : null;
+    const agentUrl = instance.publicIp ? `http://${instance.publicIp}:${AGENT_PORT}` : null;
     const players = await connectedCount(agentUrl, row.agent_token);
 
     if (players === null) {
@@ -727,9 +1003,17 @@ async function roster(url: URL, env: Env): Promise<Response> {
   const serverId = url.searchParams.get("server");
   if (!serverId) return json(400, { error: "a server id is required" });
 
+  // DISTINCT on the destination: loadouts are per bike now, and gear repeats across every
+  // bike a rider owns, so the raw join returns the same helmet paint a dozen times over. The
+  // receiver installs by destination and de-duplicates anyway — doing it here keeps the
+  // response the size it was before bikes were separated.
+  //
+  // MIN(slot) only picks a stable representative for a destination two slots agree on; the
+  // client keys on rel_dest, not on slot.
   const rows = await env.DB.prepare(
-    "SELECT a.rider_name, a.guid, p.slot, p.file_name, p.sha256, p.size, p.rel_dest" +
-      " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id",
+    "SELECT a.rider_name, a.guid, MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest" +
+      " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id" +
+      " GROUP BY a.id, p.rel_dest, p.sha256",
   ).all<{
     rider_name: string;
     guid: string | null;

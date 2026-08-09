@@ -24,15 +24,43 @@ consequences fall out of that, and they're baked into the schema:
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/health` | — | Liveness |
+| GET | `/v1/agent.exe` | — | The agent binary. Unauthenticated by necessity: a booting instance fetches it before it holds any credential. |
 | POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
-| GET | `/v1/me` | bearer | Account and current loadout |
-| PUT | `/v1/loadout` | bearer | Replace the loadout; returns `missing` — the blobs still to upload |
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
-| GET | `/v1/roster?server=<id>` | bearer | Riders and their paints, for the sync |
+| POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
+| GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it |
+| PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come. |
+| PUT | `/v1/loadout` | bearer | Replace **one bike's** loadout. Kept for clients older than per-bike storage. |
+| PUT | `/v1/loadouts` | bearer | Replace the whole look, every bike at once. Returns `missing` — the blobs still to upload. |
+| GET | `/v1/roster?server=<id>` | bearer | Riders and their paints, for the sync. De-duplicated by destination. |
+| POST | `/v1/servers` | bearer | Publish a server you run. Five per account, one per address. |
+| DELETE | `/v1/servers/:id` | bearer + owner | Remove it, terminating the instance if we launched it |
+| GET | `/v1/servers/mine` | bearer | Your own servers, **with their agent tokens** — the only way to drive a box that has no console |
+| GET | `/v1/fleet` | bearer | What is running. The count is everyone's (it is what the cap measures); the instance list is only yours. |
+| POST | `/v1/provision` | bearer | Launch a server. Capped, and reaped when idle. |
+| PUT/GET | `/v1/paints/:sha256` | bearer | Content-addressed paint blobs |
 
 Enrollment by invite code stands in for Steam sign-in until there's an API key. `accounts`
 already carries a nullable `steam_id`, so adding Steam is a backfill rather than a rewrite
 of every account's identity.
+
+### Why loadouts are per bike
+
+A `profile.ini` holds a column per bike the rider has ever sat on, and which one they take
+out is decided in the game — nothing tells us in advance. Storing one loadout per account
+meant publishing a second bike deleted the first, so a rider appeared correctly on whichever
+bike the app last touched and in default livery on every other. `loadout_paints` is therefore
+keyed `(account_id, bike_id, slot)`, and the app publishes all of them together.
+
+### How a provisioned server becomes joinable
+
+Its public IP exists only in EC2's view, assigned while the instance boots — long after the
+`servers` row was written — and its agent token exists only in that row and on the box. So the
+box says so itself: the bootstrap reads its own address from IMDSv2, waits for the agent's
+`/health`, and calls `POST /v1/servers/:id/hello`. That one call fills in `address` and
+`agent_url` and flips `published`, which is what puts the server in everyone's join picker.
+Its owner then gets the agent token from `/v1/servers/mine`, which is what makes Start, Stop
+and Set track work on a machine nobody has a console for.
 
 ## Security notes
 
@@ -52,8 +80,26 @@ npm install
 npx wrangler types                                              # regenerate Env
 npx tsc --noEmit
 npx vitest run
-npx wrangler d1 execute mxb-control-plane --local --file migrations/0001_init.sql
+for m in migrations/*.sql; do npx wrangler d1 execute mxb-control-plane --local --file "$m"; done
 npx wrangler dev
+```
+
+### Pointing the app at it
+
+`MXB_CONTROL_PLANE` redirects the desktop app to another control plane. **Debug builds only** —
+a shipped binary always uses the baked-in URL, because responses from here become files written
+into the game's mods folder and a redirectable target is a way to put content on a player's disk.
+
+```sh
+MXB_EXPERIMENTAL=1 MXB_CONTROL_PLANE=http://127.0.0.1:8799 npm run start-dev
+```
+
+The paint-sync round trip has a live test that needs both:
+
+```sh
+cd src-tauri
+MXB_CONTROL_PLANE=http://127.0.0.1:8799 MXB_TEST_TOKEN=<token from /v1/enroll> \
+  cargo test --locked live_sync -- --ignored --nocapture
 ```
 
 Deploy with `npx wrangler deploy`. Resources already provisioned in the personal account:
