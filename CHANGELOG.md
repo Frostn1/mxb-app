@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-09 — Import from the Library
+
+### Added
+- **An Import button in the Library, for setups drag-and-drop never reaches.** Dropping a
+  download on the window stays the fast path, but the OS drop event doesn't arrive
+  everywhere — remote desktops and some shells eat it — and where it doesn't, there was no
+  other way to install a file you'd already downloaded. **Import → Choose files…** (or
+  **Choose a folder…**, for an unpacked track) stages exactly what a drop stages: same
+  classification, same review sheet showing where each piece lands, same collision
+  warnings, and nothing written until you confirm.
+
 ## 2026-08-09 — v0.9.0 — A paint studio, ReShade presets, and your Shop purchases
 
 ### Added

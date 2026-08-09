@@ -14,6 +14,10 @@ import {
   ListChecks,
   CheckCircle2,
   Circle,
+  PackagePlus,
+  FileArchive,
+  Folder,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -41,6 +45,7 @@ import LibraryDetail from "./LibraryDetail";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
 import { useConfig } from "../../Context/Config";
+import { useImport } from "../Dropzone/useImport";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
@@ -256,6 +261,7 @@ export default function Library({
   onChanged,
 }: LibraryProps) {
   const t = useT();
+  const { pickAndImport, staging } = useImport();
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -519,6 +525,30 @@ export default function Library({
           <ListChecks className="size-3.5" />{" "}
           {selectMode ? t("common.done") : t("common.select")}
         </Button>
+        {/* The same install flow as dropping, for anyone the OS drop event never reaches —
+            and a discoverable one for anyone who never thought to drag a file here. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" disabled={staging}>
+              {staging ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <PackagePlus className="size-3.5" />
+              )}{" "}
+              {staging ? t("import.staging") : t("import.action")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => void pickAndImport("files")}>
+              <FileArchive className="size-3.5" />
+              {t("import.pickFiles")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void pickAndImport("folder")}>
+              <Folder className="size-3.5" />
+              {t("import.pickFolder")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />{" "}
           {t("locker.rescan")}

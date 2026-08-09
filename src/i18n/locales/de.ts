@@ -1160,6 +1160,16 @@ export const de: Translation = {
   "drop.reason.reshadePreset": "Listet ReShade-Techniken auf",
   "drop.reason.unrecognised": "Nicht erkannt — du musst es zuordnen",
 
+  // ── Import (derselbe Ablauf wie Ablegen, nur per Auswahl) ──────────────────
+  "import.action": "Importieren",
+  "import.staging": "Wird gelesen …",
+  "import.pickFiles": "Dateien auswählen …",
+  "import.pickFolder": "Ordner auswählen …",
+  "import.modFiles": "Mods und Lackierungen",
+  "import.allFiles": "Alle Dateien",
+  "import.pickFailed": "Die Dateiauswahl konnte nicht geöffnet werden",
+  "import.readFailed": "Das Ausgewählte konnte nicht gelesen werden",
+
   // ── ReShade ────────────────────────────────────────────────────────────────
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Postprocessing-Presets — wie {{game}} auf dem Bildschirm aussieht.",

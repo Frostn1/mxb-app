@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Loader2, PackageOpen } from "lucide-react";
-import { toast } from "sonner";
-import { planDrop } from "../../api/mods";
 import { useDropReview } from "../../Context/DropReview";
 import { useT } from "../../i18n/context";
+import { useImport } from "./useImport";
 
 /**
  * Whole-window drop target.
@@ -14,31 +13,18 @@ import { useT } from "../../i18n/context";
  * even if it did, an HTML5 `File` carries no filesystem path, which is the only thing the
  * installer can work with.
  *
+ * That event is also the one part of this we don't control — where it never arrives, dropping
+ * silently does nothing. So the paths it yields go through `useImport`, shared with the
+ * Library's Import button, rather than a handler only a drop can reach.
+ *
  * Nothing is written when a drop lands. `planDrop` stages and classifies, and the review sheet
  * — owned by `DropReviewProvider`, since purchases stage plans too — takes it from there.
  */
 export default function DropZone() {
   const t = useT();
-  const { reviewPlan, reviewing } = useDropReview();
+  const { reviewing } = useDropReview();
+  const { stagePaths, staging } = useImport();
   const [hovering, setHovering] = useState(false);
-  const [scanning, setScanning] = useState(false);
-
-  const tRef = useRef(t);
-  tRef.current = t;
-  const reviewRef = useRef(reviewPlan);
-  reviewRef.current = reviewPlan;
-
-  const handlePaths = useCallback(async (paths: string[]) => {
-    if (paths.length === 0) return;
-    setScanning(true);
-    try {
-      reviewRef.current(await planDrop(paths));
-    } catch (e) {
-      toast.error(tRef.current("drop.scanFailed"), { description: String(e) });
-    } finally {
-      setScanning(false);
-    }
-  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -50,7 +36,7 @@ export default function DropZone() {
           setHovering(true);
         } else if (event.payload.type === "drop") {
           setHovering(false);
-          void handlePaths(event.payload.paths);
+          void stagePaths(event.payload.paths);
         } else {
           setHovering(false);
         }
@@ -64,23 +50,25 @@ export default function DropZone() {
       cancelled = true;
       unlisten?.();
     };
-  }, [handlePaths]);
+  }, [stagePaths]);
 
-  if (!(hovering || scanning) || reviewing) return null;
+  // `staging` is this hook instance's own — a pick from the Library drives a separate one, and
+  // reports itself on its own button — so the overlay still only ever follows a drop.
+  if (!(hovering || staging) || reviewing) return null;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm">
       <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-primary/50 bg-card/80 px-12 py-10">
-        {scanning ? (
+        {staging ? (
           <Loader2 className="size-8 animate-spin text-primary" />
         ) : (
           <PackageOpen className="size-8 text-primary" />
         )}
         <div className="text-center">
           <p className="text-[15px] font-bold">
-            {scanning ? t("drop.scanning") : t("drop.dropHere")}
+            {staging ? t("drop.scanning") : t("drop.dropHere")}
           </p>
-          {!scanning && (
+          {!staging && (
             <p className="mt-0.5 text-[12px] text-muted-foreground">
               {t("drop.dropHint")}
             </p>

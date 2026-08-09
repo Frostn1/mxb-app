@@ -1150,6 +1150,16 @@ export const fr: Translation = {
   "drop.reason.reshadePreset": "Liste des techniques ReShade",
   "drop.reason.unrecognised": "Non reconnu — à vous de le placer",
 
+  // ── Import (le même flux que le dépôt, en le sélectionnant) ────────────────
+  "import.action": "Importer",
+  "import.staging": "Lecture…",
+  "import.pickFiles": "Choisir des fichiers…",
+  "import.pickFolder": "Choisir un dossier…",
+  "import.modFiles": "Mods et peintures",
+  "import.allFiles": "Tous les fichiers",
+  "import.pickFailed": "Impossible d'ouvrir le sélecteur de fichiers",
+  "import.readFailed": "Impossible de lire ce que vous avez choisi",
+
   // ── ReShade ────────────────────────────────────────────────────────────────
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Préréglages de post-traitement — le rendu de {{game}} à l'écran.",
