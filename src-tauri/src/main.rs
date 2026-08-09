@@ -1061,9 +1061,7 @@ fn load_rider_model_blocking(
     loadout: presets::Loadout,
 ) -> Result<RiderModel, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    let base = std::path::Path::new(&cfg.mods_path)
-        .join("mods")
-        .join("rider");
+    let base = library::mods_subdir(&cfg.mods_path, "mods/rider");
     let mut parts = Vec::new();
 
     for spec in &GEAR {
@@ -1417,10 +1415,7 @@ fn read_pkz_basename(pkz: &std::path::Path, base: &str) -> Option<Vec<u8>> {
 }
 
 fn rider_body_source(cfg: &config::AppConfig, profile: &str) -> Option<BodySource> {
-    let riders = std::path::Path::new(&cfg.mods_path)
-        .join("mods")
-        .join("rider")
-        .join("riders");
+    let riders = library::mods_subdir(&cfg.mods_path, "mods/rider/riders");
     let loose = riders.join(profile).join("rider.edf");
     if loose.is_file() {
         return Some(BodySource::Loose(loose));
@@ -1688,7 +1683,7 @@ async fn list_installed_gear_paints(
 /// the first source it found showed one of those sets and never the other.
 fn gear_paints_for(cfg: &config::AppConfig, spec: &GearSpec, model: &str) -> GearPaints {
     let stem = model.trim_end_matches(".pkz");
-    let rider = std::path::Path::new(&cfg.mods_path).join("mods").join("rider");
+    let rider = library::mods_subdir(&cfg.mods_path, "mods/rider");
     let mut out = GearPaints::default();
     for src in gear_sources(&rider, spec, stem) {
         if !src.exists() {
@@ -2884,6 +2879,33 @@ fn count_profiles_in(path: String) -> usize {
     presets::list_profiles(std::path::Path::new(&path)).len()
 }
 
+/// The folder the app actually reads content out of, and whether it's there.
+///
+/// `modsPath` alone doesn't answer this any more: it may be the game's user folder, whose
+/// `mods` child is the real root, or a relocated tree that *is* the root. Which one it
+/// landed on is the first thing to check when the library comes up empty, so Settings
+/// shows it rather than leaving the player to infer it from a path that reads fine.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModsRootInfo {
+    path: String,
+    exists: bool,
+    /// The root is `modsPath` itself rather than its `mods` child — i.e. a relocated tree.
+    relocated: bool,
+}
+
+#[tauri::command]
+fn get_mods_root(app: tauri::AppHandle) -> ModsRootInfo {
+    let cfg = config::load(&app).unwrap_or_default();
+    let root = library::mods_root(&cfg.mods_path);
+    ModsRootInfo {
+        exists: root.is_dir(),
+        relocated: !cfg.mods_path.trim().is_empty()
+            && root == std::path::Path::new(cfg.mods_path.trim()),
+        path: root.to_string_lossy().into_owned(),
+    }
+}
+
 /// Whether this build can decode real bike geometry (the optional local module is
 /// compiled in). Public builds without it return `false`, so the UI hides the bike
 /// 3D preview instead of showing a broken/empty one.
@@ -3978,6 +4000,7 @@ fn main() {
             set_profiles_path,
             detect_game_path,
             count_profiles_in,
+            get_mods_root,
             set_run_in_background,
             set_launch_at_startup,
             set_auto_run_frostmod,

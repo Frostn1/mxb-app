@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-09
+
+### Fixed
+- **A mods folder you moved with `mxbikes.ini` now works.** Plenty of players keep their
+  content somewhere short like `C:\mods` — junctioning one rider paint into six model
+  folders needs paths that OneDrive and a deep `Documents` tree can't give you. The app
+  couldn't be pointed at such a folder: picking it silently rewrote your setting to the
+  drive root, and auto-detection went to `Documents\PiBoSo\MX Bikes` instead, found no
+  `mods` inside it, and came up missing gear, paints and bikes with nothing to explain why.
+  The folder you pick is now the folder used, whether it's the game folder or the mods
+  folder itself.
+- **The app reads `mxbikes.ini` to find a relocated mods folder on its own.** The game
+  already knows where your content is; setup now asks it instead of guessing. Profiles,
+  which don't move with the mods folder, are pinned to where they actually stayed.
+- **FrostMod was being handed the wrong folder.** It appends `\tracks` and `\bikes` to what
+  the app gives it, and the app was sending the folder one level above — so its track
+  manager and model swap were pointed at folders that don't exist. Affected everyone, not
+  just relocated setups; it just never announced itself.
+- **Settings says which folder mods are actually read from** when that isn't the obvious
+  `<picked>\mods`, and warns when the folder isn't there at all.
+
 ## 2026-08-09 — v0.8.1 — GP Bikes' mod pictures
 
 A patch on top of v0.8.0 — everything that release added is still the news, and its notes are

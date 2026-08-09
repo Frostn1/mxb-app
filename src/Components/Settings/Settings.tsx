@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import {
   countProfilesIn,
   detectGamePath,
+  getModsRoot,
   getOverlayState,
   overlayToggle,
   presetsListProfiles,
@@ -226,6 +227,20 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       .then((scan) => setResolvedProfilesPath(scan.dir))
       .catch(() => setResolvedProfilesPath(""));
   }, [config.modsPath, config.profilesPath]);
+
+  // Where content is really read from. `modsPath` no longer answers it on its own: it can
+  // be the game folder (the root is its `mods` child) or a relocated tree that *is* the
+  // root. Showing it turns "my paints are missing" into something a player can see.
+  const [modsRoot, setModsRoot] = useState<{
+    path: string;
+    exists: boolean;
+    relocated: boolean;
+  } | null>(null);
+  useEffect(() => {
+    getModsRoot()
+      .then(setModsRoot)
+      .catch(() => setModsRoot(null));
+  }, [config.modsPath]);
 
   const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
   const defaultProfilesPath =
@@ -565,6 +580,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             >
               Detect automatically
             </button>
+
+            {/* The resolved content root. Only worth a line when it isn't the obvious
+                `<picked>/mods` — a relocated tree, or a folder that isn't there yet, are
+                exactly the two cases where an empty library needs explaining. */}
+            {config.modsPath && modsRoot && (modsRoot.relocated || !modsRoot.exists) && (
+              <p
+                className={cn(
+                  "-mt-0.5 text-[11.5px] leading-relaxed",
+                  modsRoot.exists ? "text-muted-foreground" : "text-warning",
+                )}
+              >
+                {modsRoot.exists ? "Reading mods from " : "No mods folder at "}
+                <span className="font-mono">{modsRoot.path}</span>
+                {!modsRoot.exists && " — nothing will show up until it's there."}
+              </p>
+            )}
 
             {/* Profiles folder — a customization nested under the mods folder. It
                 normally lives at <mods>/profiles; override only for the split case. */}

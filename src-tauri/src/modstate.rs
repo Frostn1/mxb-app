@@ -123,12 +123,22 @@ fn key(rel: &str) -> String {
         .to_lowercase()
 }
 
-/// The path of `abs` relative to the MX Bikes root, forward-slashed. `None` when it sits
-/// outside the root, which is the guard against a move escaping the content folders.
+/// `abs` as a forward-slashed path relative to `base`. `None` when it sits outside, which
+/// is the guard against a move escaping the folder it was meant to stay in.
+fn rel_under(base: &Path, abs: &Path) -> Option<String> {
+    Some(abs.strip_prefix(base).ok()?.to_string_lossy().replace('\\', "/"))
+}
+
+/// The path of `abs` as the app names it everywhere: relative to the mods tree, always
+/// `mods/`-prefixed.
+///
+/// Taken against the *tree* and re-prefixed rather than against `mods_path`, because the
+/// two are the same folder for a player who relocated theirs — stripping `mods_path` off
+/// `C:\mods\tracks\X.pkz` would yield `tracks/X.pkz`, and every consumer here drops a
+/// leading `mods` segment it assumes is present. The `mods/` form is also what saved
+/// presets and share codes carry, so it can't be allowed to vary by install.
 fn rel_of(mods_path: &str, abs: &Path) -> Option<String> {
-    let root = Path::new(mods_path.trim());
-    let rel = abs.strip_prefix(root).ok()?;
-    Some(rel.to_string_lossy().replace('\\', "/"))
+    Some(format!("mods/{}", rel_under(&library::mods_root(mods_path), abs)?))
 }
 
 /// Rider gear a player picks a *model* of in-game: helmets, boots, protection. Installed
@@ -212,7 +222,7 @@ pub fn scan(cfg: &AppConfig, sound_bikes: &[String]) -> Vec<ModEntry> {
                 .filter(|e| is_candidate(e))
             {
                 // Report it under the path it will occupy once enabled, not where it's parked.
-                let Some(parked) = rel_of(&shadow_str, Path::new(&e.path)) else {
+                let Some(parked) = rel_under(&shadow, Path::new(&e.path)) else {
                     continue;
                 };
                 out.push(ModEntry {
@@ -492,6 +502,60 @@ mod delete_tests {
 
         let _ = fs::remove_dir_all(&root);
     }
+
+    /// Parking has to work the same when `mods_path` *is* the mods tree — the `C:\mods`
+    /// shape. The rel paths must keep their `mods/` prefix whichever it is: they're what
+    /// presets and share codes carry, so a rel written on one install is read on another.
+    #[test]
+    fn parking_works_when_the_path_is_the_mods_tree_itself() {
+        let root = std::env::temp_dir().join(format!("frost-modstate-tree-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        // No `mods` child — this folder is the tree, exactly like `C:\mods`.
+        let tree = root.join("mods");
+        let track = tree.join("tracks").join("Red Bud.pkz");
+        fs::create_dir_all(track.parent().unwrap()).unwrap();
+        fs::write(&track, b"x").unwrap();
+        let mods_path = tree.to_string_lossy().into_owned();
+
+        // A scan of the tree reports the same rel an ordinary layout would.
+        assert_eq!(
+            rel_of(&mods_path, &track).as_deref(),
+            Some("mods/tracks/Red Bud.pkz"),
+        );
+
+        // ...and that rel round-trips through park and restore.
+        let rel = "mods/tracks/Red Bud.pkz";
+        assert_eq!(enabled_path(&mods_path, rel), track);
+        assert!(set_one(&mods_path, rel, false).unwrap(), "parked");
+        assert!(!track.exists(), "gone from where the game reads it");
+        let parked = tree.join(SHADOW_DIR).join("tracks").join("Red Bud.pkz");
+        assert!(parked.is_file(), "and sitting in the shadow tree: {parked:?}");
+
+        assert!(set_one(&mods_path, rel, true).unwrap(), "restored");
+        assert!(track.is_file(), "back where it started");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The guard against a hand-edited preset moving files around the disk has to hold for
+    /// a relocated tree too — where the shadow folder lives *inside* the content root.
+    #[test]
+    fn the_escape_guard_holds_for_a_relocated_tree() {
+        let root = std::env::temp_dir().join(format!("frost-modstate-guard-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let tree = root.join("mods");
+        fs::create_dir_all(tree.join("tracks")).unwrap();
+        let mods_path = tree.to_string_lossy().into_owned();
+
+        assert!(guard_inside(&mods_path, &tree.join("tracks").join("A.pkz")).is_ok());
+        assert!(guard_inside(&mods_path, &tree.join(SHADOW_DIR).join("tracks")).is_ok());
+        assert!(
+            guard_inside(&mods_path, &root.join("somewhere-else").join("A.pkz")).is_err(),
+            "outside the tree is still refused",
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
 
 /// Everything back where it came from. Walks the shadow tree rather than a saved list, so
@@ -536,7 +600,9 @@ fn collect_parked(shadow: &Path, mods_path: &str, dir: &Path, out: &mut Vec<Stri
     let Ok(rd) = fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();
-        let Some(rel) = rel_of(&shadow.to_string_lossy(), &p) else {
+        // Relative to the shadow tree, which mirrors the content folder without the
+        // leading `mods` — so the callers below put it back.
+        let Some(rel) = rel_under(shadow, &p) else {
             continue;
         };
         if p.is_file() {
