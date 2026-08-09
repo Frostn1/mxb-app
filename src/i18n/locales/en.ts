@@ -249,6 +249,25 @@ export const en = {
   "update.updateAndRestart": "Update & restart",
   "update.dismiss": "Dismiss update notification",
   "update.onLatest": "You're on the latest version",
+
+  // ── Missing Visual C++ runtime ─────────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.bannerGame": "MX Bikes needs {{what}} before FrostMod can load into it.",
+  "runtime.bannerFrostmod": "FrostMod needs {{what}} to run.",
+  "runtime.pitch":
+    "Without it Windows shows a \"dll was not found\" error instead. Takes seconds to fix.",
+  "runtime.fixIt": "Install it",
+  "runtime.installing": "Installing…",
+  "runtime.dismiss": "Dismiss this warning",
+  "runtime.installed": "Component installed",
+  "runtime.installedDesc":
+    "FrostMod should reach the game now. Restart MX Bikes if it's already open.",
+  "runtime.cancelled": "Nothing was installed",
+  "runtime.cancelledDesc":
+    "Windows needs your permission to install it. Opening Microsoft's download instead.",
+  "runtime.installFailed": "Couldn't install the component",
+  "runtime.downloadManually": "Download it yourself",
   "update.checkFailed": "Couldn't check for updates",
   "update.failed": "Update failed",
 
@@ -529,6 +548,8 @@ export const en = {
   "settings.updateCheckFailed":
     "Couldn't check for updates — offline or GitHub unavailable.",
   "settings.latestVersion": "Latest: {{version}}",
+  "settings.frostmodRuntimeMissing":
+    "Windows is missing a Visual C++ component FrostMod needs — install it to stop the \"dll was not found\" error.",
   "settings.frostmodNeedsRepair":
     "The installed files don't match this version — reinstalling fixes it.",
   "settings.frostmodRepair": "Repair install",

@@ -261,6 +261,26 @@ export const de: Translation = {
   "update.updateAndRestart": "Aktualisieren und neu starten",
   "update.dismiss": "Update-Benachrichtigung ausblenden",
   "update.onLatest": "Du hast bereits die neueste Version",
+
+  // ── Fehlende Visual-C++-Laufzeit ───────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.bannerGame":
+    "MX Bikes braucht {{what}}, bevor FrostMod sich einklinken kann.",
+  "runtime.bannerFrostmod": "FrostMod braucht {{what}}, um zu laufen.",
+  "runtime.pitch":
+    "Sonst zeigt Windows stattdessen den Fehler „dll was not found“. In Sekunden behoben.",
+  "runtime.fixIt": "Installieren",
+  "runtime.installing": "Wird installiert…",
+  "runtime.dismiss": "Hinweis ausblenden",
+  "runtime.installed": "Komponente installiert",
+  "runtime.installedDesc":
+    "FrostMod sollte das Spiel jetzt erreichen. Starte MX Bikes neu, falls es schon läuft.",
+  "runtime.cancelled": "Es wurde nichts installiert",
+  "runtime.cancelledDesc":
+    "Windows braucht dafür deine Erlaubnis. Der Download von Microsoft wird stattdessen geöffnet.",
+  "runtime.installFailed": "Komponente konnte nicht installiert werden",
+  "runtime.downloadManually": "Selbst herunterladen",
   "update.checkFailed": "Updates konnten nicht geprüft werden",
   "update.failed": "Update fehlgeschlagen",
 
@@ -548,6 +568,8 @@ export const de: Translation = {
   "settings.updateCheckFailed":
     "Updates konnten nicht geprüft werden — offline oder GitHub nicht erreichbar.",
   "settings.latestVersion": "Neueste: {{version}}",
+  "settings.frostmodRuntimeMissing":
+    "Windows fehlt eine Visual-C++-Komponente, die FrostMod braucht — installiere sie, um den Fehler „dll was not found“ loszuwerden.",
   "settings.frostmodNeedsRepair":
     "Die installierten Dateien passen nicht zu dieser Version — eine Neuinstallation behebt das.",
   "settings.frostmodRepair": "Installation reparieren",

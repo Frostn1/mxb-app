@@ -6,7 +6,7 @@ use tauri::{AppHandle, Manager};
 
 /// FrostMod's GitHub repo — releases carry `frostmod.exe` + `frostmod.dll`.
 const REPO: &str = "Frostn1/frostmod";
-const UA: &str = "mxb-app";
+pub const UA: &str = "mxb-app";
 
 /// The binaries a FrostMod release has to ship. Both land or neither does — a new
 /// `frostmod.exe` beside an old `frostmod.dll` is a worse state than not updating.
@@ -39,6 +39,14 @@ pub struct FrostmodStatus {
     /// UI offers an update instead of a start; starting it anyway is what crashed GP
     /// Bikes, so `start` refuses too.
     pub supported_for_game: bool,
+    /// Visual C++ runtimes this machine is short of. Empty is the normal case (and always
+    /// the case off Windows). Non-empty means FrostMod will very likely fail to attach with
+    /// a bare "…dll was not found" box over the game — see `crate::vcruntime`.
+    ///
+    /// Unlike the flags above this does **not** gate `start`: we can't prove from out here
+    /// which machines inject fine, and refusing to launch would take FrostMod away from
+    /// anyone the detection is wrong about. It's a warning with a fix attached.
+    pub missing_runtimes: Vec<crate::vcruntime::Runtime>,
 }
 
 fn frostmod_dir(app: &AppHandle) -> PathBuf {
@@ -223,6 +231,7 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         needs_repair,
         running: crate::frostmod::is_running(),
         supported_for_game,
+        missing_runtimes: crate::vcruntime::missing(),
     }
 }
 

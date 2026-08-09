@@ -7,8 +7,10 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import {
   frostmodInstall,
+  frostmodInstallRuntime,
   frostmodStart,
   frostmodStatus,
   frostmodStop,
@@ -16,8 +18,9 @@ import {
   MODS_WATCH_SLUG,
   onFrostmodReload,
   reloadFrostmod,
+  RUNTIME_DOWNLOAD_URL,
 } from "../api/mods";
-import type { FrostmodStatus } from "../types";
+import type { FrostmodStatus, VcRuntime } from "../types";
 import { displayName } from "../lib/mods";
 import { useT, type TFunc } from "../i18n/context";
 import { FrostmodContext } from "./FrostmodContext";
@@ -49,6 +52,8 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const [installing, setInstalling] = useState(false);
   const [checking, setChecking] = useState(false);
   const [statusError, setStatusError] = useState(false);
+  const [installingRuntime, setInstallingRuntime] = useState(false);
+  const [runtimeDismissed, setRuntimeDismissed] = useState(false);
   const mounted = useRef(true);
 
   const probe = useCallback(async () => {
@@ -177,6 +182,49 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshStatus, t]);
 
+  const installRuntime = useCallback(
+    async (runtime: VcRuntime) => {
+      setInstallingRuntime(true);
+      try {
+        const outcome = await frostmodInstallRuntime(runtime);
+        await refreshStatus();
+        if (outcome === "installed") {
+          toast.success(t("runtime.installed"), {
+            description: t("runtime.installedDesc"),
+          });
+        } else {
+          // Declining the admin prompt isn't a failure — but nothing was fixed either,
+          // so hand over the download rather than leaving them at the same dead end.
+          toast.info(t("runtime.cancelled"), {
+            description: t("runtime.cancelledDesc"),
+          });
+          void openUrl(RUNTIME_DOWNLOAD_URL[runtime]);
+        }
+      } catch (e) {
+        toast.error(t("runtime.installFailed"), {
+          description: String(e),
+          action: {
+            label: t("runtime.downloadManually"),
+            onClick: () => void openUrl(RUNTIME_DOWNLOAD_URL[runtime]),
+          },
+        });
+      } finally {
+        setInstallingRuntime(false);
+      }
+    },
+    [refreshStatus, t],
+  );
+
+  // Only ever surface one at a time: two banners stacked over the app is noise, and the
+  // game's own runtime (vc90) is the one that produces the error people actually report,
+  // so `missingRuntimes` order (vc90 first) decides.
+  const missingRuntime = status?.missingRuntimes?.[0] ?? null;
+  // The banner respects a dismissal; the Settings panel deliberately doesn't. Dismissing
+  // a bar you didn't understand shouldn't also erase the one place that explains it.
+  const runtimeWarning = runtimeDismissed ? null : missingRuntime;
+
+  const dismissRuntimeWarning = useCallback(() => setRuntimeDismissed(true), []);
+
   // FrostMod is core to the app, so set it up automatically on first run instead
   // of prompting: once we learn it isn't installed, download + start it silently.
   //
@@ -189,6 +237,11 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   // all, and the player has no way to know why. Updating unasked is the fix — and if the
   // newest release is still too old, the attempt is capped at one per session and the
   // panel falls back to telling them.
+  //
+  // `missingRuntimes` is deliberately NOT in here. Reinstalling FrostMod cannot put a
+  // Visual C++ runtime on the machine, so auto-installing on that flag would download
+  // FrostMod again to no effect — and the flag would still be set afterwards. It needs
+  // the user's admin consent anyway, so it stays a banner they press.
   //
   // Runs at most once per session; a failed status check (`statusError`) is skipped so
   // we only act on a confirmed snapshot, never an offline guess.
@@ -219,8 +272,13 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       install,
       start,
       stop,
+      installingRuntime,
+      installRuntime,
+      dismissRuntimeWarning,
+      runtimeWarning,
+      missingRuntime,
     }),
-    [running, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop],
+    [running, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, dismissRuntimeWarning, runtimeWarning, missingRuntime],
   );
 
   return (

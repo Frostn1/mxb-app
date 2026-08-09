@@ -15,6 +15,8 @@ import type {
   FrostmodInstallReport,
   FrostmodReload,
   FrostmodStatus,
+  RuntimeInstallOutcome,
+  VcRuntime,
   InstalledMod,
   InstallProgress,
   LaunchOutcome,
@@ -1444,6 +1446,26 @@ export function frostmodStatus(): Promise<FrostmodStatus> {
 export function frostmodInstall(): Promise<FrostmodInstallReport> {
   return invoke<FrostmodInstallReport>("frostmod_install");
 }
+
+/** Install a Visual C++ runtime `frostmodStatus` reported missing.
+ *
+ *  Raises a Windows UAC prompt — Microsoft's redistributables need admin rights. A
+ *  declined prompt resolves to `"cancelled"` rather than throwing, so the caller can
+ *  offer the manual download instead of reporting a failure. */
+export function frostmodInstallRuntime(
+  runtime: VcRuntime,
+): Promise<RuntimeInstallOutcome> {
+  return invoke<RuntimeInstallOutcome>("frostmod_install_runtime", { runtime });
+}
+
+/** Where to send someone whose UAC prompt we can't raise (or who declined it).
+ *
+ *  Microsoft's own direct downloads, the same ones the backend fetches — a download page
+ *  would make them pick an architecture, and picking x86 here fixes nothing. */
+export const RUNTIME_DOWNLOAD_URL: Record<VcRuntime, string> = {
+  vc90: "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x64.exe",
+  vc140: "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+};
 
 /** Launch the managed FrostMod process if it isn't already running. */
 export function frostmodStart(): Promise<boolean> {

@@ -40,6 +40,7 @@ mod shop_session;
 mod soundmods;
 mod texstore;
 mod upload;
+mod vcruntime;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
@@ -3685,6 +3686,21 @@ async fn frostmod_install(
     Ok(report)
 }
 
+/// Install a Visual C++ runtime `frostmod_status` reported missing.
+///
+/// Raises a UAC prompt — Microsoft's redistributables require admin, and only the shell
+/// can ask. A declined prompt comes back as `cancelled`, not an error, so the UI can fall
+/// back to handing over the download link instead of reading as broken.
+#[tauri::command]
+async fn frostmod_install_runtime(
+    app: tauri::AppHandle,
+    runtime: vcruntime::Runtime,
+) -> Result<vcruntime::InstallOutcome, String> {
+    vcruntime::install(&app, runtime)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn frostmod_start(app: tauri::AppHandle, state: State<FrostmodProcess>) -> Result<bool, String> {
     frostmod_manage::start(&app, &state).map_err(|e| format!("{e:#}"))
@@ -4582,6 +4598,7 @@ fn main() {
             garage_swap_bike,
             frostmod_status,
             frostmod_install,
+            frostmod_install_runtime,
             frostmod_start,
             frostmod_stop,
             launch_game,

@@ -258,6 +258,26 @@ export const fr: Translation = {
   "update.updateAndRestart": "Mettre à jour et redémarrer",
   "update.dismiss": "Ignorer la notification de mise à jour",
   "update.onLatest": "Vous avez déjà la dernière version",
+
+  // ── Runtime Visual C++ manquant ────────────────────────────────────────────
+  "runtime.componentVc90": "Microsoft Visual C++ 2008 (x64)",
+  "runtime.componentVc140": "Microsoft Visual C++ 2015–2022 (x64)",
+  "runtime.bannerGame":
+    "MX Bikes a besoin de {{what}} pour que FrostMod puisse s'y greffer.",
+  "runtime.bannerFrostmod": "FrostMod a besoin de {{what}} pour fonctionner.",
+  "runtime.pitch":
+    "Sans ça, Windows affiche l'erreur « dll was not found ». Réglé en quelques secondes.",
+  "runtime.fixIt": "L'installer",
+  "runtime.installing": "Installation…",
+  "runtime.dismiss": "Masquer cet avertissement",
+  "runtime.installed": "Composant installé",
+  "runtime.installedDesc":
+    "FrostMod devrait maintenant atteindre le jeu. Relancez MX Bikes s'il est déjà ouvert.",
+  "runtime.cancelled": "Rien n'a été installé",
+  "runtime.cancelledDesc":
+    "Windows a besoin de votre autorisation. Ouverture du téléchargement Microsoft à la place.",
+  "runtime.installFailed": "Impossible d'installer le composant",
+  "runtime.downloadManually": "Le télécharger soi-même",
   "update.checkFailed": "Impossible de vérifier les mises à jour",
   "update.failed": "Échec de la mise à jour",
 
@@ -545,6 +565,8 @@ export const fr: Translation = {
   "settings.updateCheckFailed":
     "Impossible de vérifier les mises à jour — hors ligne ou GitHub indisponible.",
   "settings.latestVersion": "Dernière : {{version}}",
+  "settings.frostmodRuntimeMissing":
+    "Il manque à Windows un composant Visual C++ dont FrostMod a besoin — installez-le pour faire disparaître l'erreur « dll was not found ».",
   "settings.frostmodNeedsRepair":
     "Les fichiers installés ne correspondent pas à cette version — une réinstallation corrige ça.",
   "settings.frostmodRepair": "Réparer l'installation",
