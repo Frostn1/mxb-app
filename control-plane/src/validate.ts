@@ -115,3 +115,130 @@ export const MAX_PAINT_BYTES = 32 * 1024 * 1024;
 export function isPaintSize(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_PAINT_BYTES;
 }
+
+/**
+ * A server's display name in the public list.
+ *
+ * Shown to every player in the join picker, so control characters — which would break the
+ * line — and absurd lengths are rejected. Otherwise it is the operator's to choose.
+ */
+export function isServerName(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const name = value.trim();
+  if (name.length < 2 || name.length > 48) return false;
+  // eslint-disable-next-line no-control-regex
+  return !/[\x00-\x1f\x7f]/.test(name);
+}
+
+/** Regions are ours to define, so this is a closed set rather than free text. */
+export const REGIONS = [
+  "eu-central-1",
+  "eu-west-1",
+  "us-east-1",
+  "us-west-2",
+  "ap-southeast-2",
+] as const;
+
+export function isRegion(value: unknown): value is (typeof REGIONS)[number] {
+  return typeof value === "string" && (REGIONS as readonly string[]).includes(value);
+}
+
+/**
+ * Hosts that must never be reached from a URL a user supplied.
+ *
+ * The control plane fetches an operator-supplied agent URL to check the server is real, and
+ * that makes it a request-forgery surface. Without this, anyone with an account could aim
+ * our egress at `127.0.0.1`, at cloud metadata on `169.254.169.254`, or at private space
+ * inside whatever network the request originates from, and read back the result.
+ *
+ * Literal IPv4 is checked numerically. A *hostname* that resolves into private space cannot
+ * be caught here — DNS is not available to this check — which is one more reason the agent
+ * authenticates every call it serves rather than trusting who reached it.
+ */
+function isPrivateHost(host: string): boolean {
+  const h = host.toLowerCase().trim();
+  if (h.length === 0) return true;
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local")) return true;
+  // IPv6 in any form. Loopback, link-local and unique-local are all unroutable, and there
+  // is no v6 agent address in use yet, so the whole family is refused rather than parsed.
+  if (h.includes(":") || h.startsWith("[")) return true;
+
+  const parts = h.split(".");
+  if (parts.length !== 4 || !parts.every((p) => /^\d{1,3}$/.test(p))) {
+    // Not a literal IPv4, so it is a hostname — nothing further to check numerically.
+    return false;
+  }
+  const octets = parts.map(Number);
+  if (octets.some((n) => n > 255)) return true;
+  const [a, b] = octets;
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  // Carrier-grade NAT, link-local (which is where cloud metadata lives), multicast upward.
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a >= 224) return true;
+  return false;
+}
+
+/**
+ * A `host:port` a player's game can actually be pointed at.
+ *
+ * This goes into the public list and from there onto a command line, so it is held to the
+ * same shape the app's own parser enforces: IPv4 or a hostname, an explicit port, and
+ * nothing that could be read as a second argument.
+ */
+export function isPublicGameAddress(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const addr = value.trim();
+  if (addr.length === 0 || addr.length > 128) return false;
+  const at = addr.lastIndexOf(":");
+  if (at <= 0) return false;
+  const host = addr.slice(0, at);
+  const port = Number(addr.slice(at + 1));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return false;
+  if (!/^[A-Za-z0-9.-]+$/.test(host)) return false;
+  if (host.startsWith("-") || host.startsWith(".") || host.endsWith(".")) return false;
+  return !isPrivateHost(host);
+}
+
+/**
+ * An agent base URL the control plane is willing to call.
+ *
+ * Plain http/https, no embedded credentials, no query or fragment, no path — and never a
+ * private or loopback host, per [`isPrivateHost`].
+ */
+export function isPublicAgentUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const raw = value.trim();
+  if (raw.length === 0 || raw.length > 256) return false;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  if (url.username || url.password) return false;
+  if (url.search || url.hash) return false;
+  if (url.pathname !== "/" && url.pathname !== "") return false;
+  return !isPrivateHost(url.hostname);
+}
+
+/**
+ * A bike id, as it appears as a key in the game's `profile.ini`.
+ *
+ * Part of a primary key now that loadouts are per bike, and the value the app matches on when
+ * deciding which paints belong to the bike a rider is on — so it has to be a plain name.
+ * Accepted unvalidated until this point, which meant a control character or a 4 KB string
+ * could go straight into the table and come back out in every roster.
+ */
+export function isBikeId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const id = value.trim();
+  if (id.length === 0 || id.length > 128) return false;
+  if (/[\u0000-\u001f\u007f]/.test(id)) return false;
+  // Not a path and not a separator: this is a key, and it is echoed into JSON that other
+  // players' apps read.
+  return !/[/\\]/.test(id);
+}

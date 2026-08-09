@@ -19,6 +19,11 @@ pub struct Config {
     /// UDP port passed to `-dedicated`.
     #[serde(default = "default_game_port")]
     pub game_port: u16,
+    /// Base URL the app should use to reach this agent, when it isn't simply the address
+    /// the agent binds. Behind NAT or a reverse proxy the two differ and only the operator
+    /// knows the outside one, so this is the override the pairing blob uses.
+    #[serde(default)]
+    pub public_url: Option<String>,
 }
 
 fn default_listen() -> String {

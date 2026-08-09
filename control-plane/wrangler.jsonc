@@ -5,6 +5,39 @@
   "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Provisioning settings. Not secrets — none of these is worth hiding, and having them in
+  // config means a change is a reviewable diff rather than an invisible dashboard edit.
+  // The AWS key itself is a secret; see `src/env.d.ts`.
+  "vars": {
+    // The hard ceiling on concurrent servers. This, and the idle reaper below, are what
+    // keep an hourly-billed resource from turning into an open-ended bill.
+    "MXB_MAX_INSTANCES": "2",
+    // Minutes a server may sit with nobody on it before it is destroyed.
+    "MXB_IDLE_MINUTES": "20",
+    // The backstop. Nothing lives longer than this, whatever else has gone wrong — a hung
+    // bootstrap, an agent that never started, a failure nobody has thought of. Any instance
+    // we cannot talk to would otherwise bill until someone happened to look.
+    "MXB_MAX_LIFETIME_MINUTES": "240",
+    "MXB_INSTANCE_TYPE": "t3.small",
+    // Opens the game's UDP port and the agent's TCP port. Empty disables launching.
+    "MXB_SECURITY_GROUP_ID": "sg-0d17867610872ce20",
+    // Where a fresh instance fetches the agent and the dedicated server from. Both must be
+    // reachable without credentials, because the instance has none.
+    "MXB_AGENT_DOWNLOAD_URL": "https://mxb-control-plane.aui-svi.workers.dev/v1/agent.exe",
+    // PiBoSo's own installer. There is no separate dedicated-server package — the server
+    // is inside this, and the bootstrap runs it with `-extract` to unpack it. Pointing at
+    // the official URL means nothing of theirs is rehosted, at the cost of a 2 GB download
+    // on every launch. Baking an AMI is the obvious way to remove that later.
+    "MXB_GAME_DOWNLOAD_URL": "https://mx-bikes.com/downloads/mxbikes-beta21e.exe"
+  },
+
+  // The idle reaper. Every five minutes it asks each running server who is connected and
+  // destroys the ones that have been empty long enough — the difference between "no
+  // unattended servers" being a policy and being a fact.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+
   "observability": {
     "enabled": true,
     "logs": { "head_sampling_rate": 1 },

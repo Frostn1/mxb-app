@@ -11,6 +11,63 @@
   classification, same review sheet showing where each piece lands, same collision
   warnings, and nothing written until you confirm.
 
+## Unreleased — paint sync actually closes the loop
+
+### Fixed
+- **Your look is published even if you never open the Locker.** Publishing only ever ran off
+  a preset apply, so the commonest path there is — enrol, press Play — sent nothing at all,
+  and the player appeared to everyone else in default gear with no indication anything was
+  wrong. It now publishes when you enrol, when the app starts, when you press Play or Join,
+  and whenever a preset is applied.
+- **Changing your kit in the game's own garage publishes it.** MX Bikes writes the same
+  `profile.ini` the app does; nothing was listening. A watcher on that file now catches it,
+  filtered to `profile.ini` alone so the replay and telemetry churn a session produces can't
+  set it off. Redundant fires cost nothing: the look is hashed and an unchanged one is never
+  sent.
+- **Every bike is published, not just the last one touched.** Storage held one loadout per
+  account — `loadout_paints` had no bike dimension at all — so publishing a second bike
+  deleted the first. A rider looked right on whichever bike the app last saw and default on
+  every other. Both tables are rebuilt keyed by bike, and the app sends them together.
+- **The sync no longer overwrites liveries you made yourself.** Any local paint whose name
+  matched an incoming one was replaced, including your own artwork. It now records what it
+  installs and will only ever replace that; anything else is yours and is kept, and reported.
+  Two riders using one file name for different paints installs neither, rather than letting
+  whichever roster answered first decide what everyone sees.
+- **A server created from the app can now be reached.** Provisioning launched a machine and
+  then lost it: the response carried no address and no token, nothing ever filled either in,
+  and the row stayed unpublished forever — so the server could not be joined, managed or even
+  deleted, only waited out by the idle reaper. The instance now announces itself once its
+  agent answers, which fills in its address and puts it in the join picker.
+
+### Added
+- **A paint-sync panel that says what's missing.** Publishing and syncing both happen in the
+  background off actions you didn't ask for, and their only report was a line in the log — so
+  "is this working?" had no answer anywhere on screen, and the most common failure looked
+  exactly like success. The Servers page now shows, in a sentence each: whether your look is
+  published and when it last went up, how many riders' paints you hold, and — when it isn't
+  working — what that means and which button fixes it. It updates live as the background work
+  runs.
+- **A sync line in the sidebar**, alongside the FrostMod one, so the state is visible without
+  going to look for it.
+- **Cloud servers have a lifecycle.** Booting, ready with an address, a Join button, start and
+  stop, a track picker, whether it's in the public list, and how many minutes until it shuts
+  itself down. Previously the panel showed a raw instance id and a state string.
+- **`GET /v1/servers/mine`**, which hands a server's agent token to the account that owns it —
+  the only way to drive a box that has no console and prints its pairing code to nobody.
+- **A guided-tour step for the Servers page**, and a help hint on it. Every other screen had
+  one.
+
+### Changed
+- **Publishing a whole profile costs one library scan, not one per bike.** Resolving a look
+  walks `mods/bikes` recursively — every livery installed — and the publish path did that once
+  per bike plus once per uploaded file. Loadouts are now planned in a batch against a single
+  walk, and the upload takes its bytes from the files already hashed.
+- **`GET /v1/fleet` no longer hands every enrolled account the address of every server.** The
+  running count stays public to everyone, because that is what the concurrency cap is measured
+  against; the instance list is scoped to its owner.
+- **The on-screen description of paint sync matches what it does.** It promised automatic
+  publishing on every look change before that was true.
+
 ## 2026-08-09 — v0.9.0 — A paint studio, ReShade presets, and your Shop purchases
 
 ### Added
@@ -530,6 +587,142 @@ repeated below.
 
 Extracted archives are deliberately left alone: a link inside a download you didn't make is
 still refused, which is what stops an archive writing outside the folder it unpacks into.
+
+## 2026-08-08 — create a server without owning a machine
+
+### Added
+- **Create a server from the app.** The control plane launches an EC2 instance, installs
+  the dedicated server and the agent on it, and the server appears in the Servers page. The
+  app holds no cloud credentials — a desktop binary can be unpacked, and a key inside one
+  would let anyone create infrastructure in our account — so the AWS key lives only as a
+  Worker secret, scoped by IAM to instances tagged `mxb:managed` in a single region.
+- **The agent ships as a build artifact**, served from R2 through the control plane. A
+  booting instance holds no credentials and has no way to be given any, so that URL is
+  unauthenticated by necessity; the bucket itself stays private.
+
+### Changed
+- **Nothing runs unattended.** Four separate things have to fail before a server can bill
+  indefinitely: a cap of 2 concurrent instances counted *from EC2 rather than our own
+  records*; destruction after 20 minutes with nobody connected; termination of any instance
+  no database row points at; and a hard maximum lifetime that catches everything else — a
+  hung bootstrap, an agent that never started, a failure nobody has thought of.
+  Instances also launch with `InstanceInitiatedShutdownBehavior=terminate`, and the
+  bootstrap's failure trap shuts the machine down, so a half-built server destroys itself
+  rather than sitting idle on the bill.
+
+### Fixed
+- **The idle reaper could never have reaped anything.** It read the agent address from a
+  column that provisioning cannot fill in — EC2 assigns the public IP while the instance
+  boots, long after the row is written — so every provisioned server looked permanently
+  unreachable and was skipped forever. It now takes the address from EC2's own view.
+
+## 2026-08-08 — put your own server in the list
+
+### Added
+- **Publish a server you run to the public list, from the app.** Until now `servers` rows
+  were hand-written SQL, so running a server and *having anyone able to join it* were
+  separate problems — the second one solved by passing an address around privately. A
+  server you manage in the app now has an "Add to the server list" button, and it appears
+  in everyone's Join a server picker.
+- **Nothing is typed to publish it.** The address is the agent's own host joined to the port
+  it reports, and the name comes from the server's `.ini`. The only thing asked for is the
+  region, which is the one fact no machine on this end can work out.
+- **`POST /v1/servers` and `DELETE /v1/servers/:id`** on the control plane, with ownership:
+  a server is recorded against the account that registered it, only that account can remove
+  it, and the hand-seeded rows have no owner so the API can't touch them. Five servers per
+  account, and one registration per address.
+
+### Changed
+- **A server is only advertised once we can reach it.** The control plane calls the agent's
+  unauthenticated `/health` before publishing; an unreachable one is recorded and stays
+  manageable, but is kept out of everyone's picker. A list full of servers nobody can
+  connect to is worse than a short list. This can't prove the *game* port is open — that's
+  UDP, and a Worker can't send one — so "reachable" means the host answers.
+- **Addresses pointing into private space are refused outright**, before any request is
+  made. The control plane fetches an operator-supplied URL, which makes it a
+  request-forgery surface: `127.0.0.1`, RFC1918, carrier-grade NAT and the `169.254.169.254`
+  metadata address are all rejected, as is any URL carrying credentials, a path or a query.
+
+## 2026-08-08 — paint sync stops being a form
+
+### Added
+- **Your paints publish themselves.** Whenever you change your look, the app sends it up a
+  second or so later — one publish for a burst of preset-flipping, not one per click. This
+  closes the loop: publishing had a command but no button anywhere in the app, so nothing
+  was ever uploaded and every roster was empty by construction.
+- **Everyone else's paints arrive on their own**, pulled when you launch the game. Joining
+  by address syncs that server; pressing Play syncs every server in the registry, since the
+  game you're about to pick from the in-game browser never passes through us. Rosters are
+  merged and de-duplicated first, so two servers sharing riders is one pass over the disk.
+- **`GET /tracks` on the agent**, so setting a track is a list of what that host actually
+  has instead of a text box you spell a track name into from memory. Your own PC's library
+  can't answer this — the operator's machine and the server box are different installs.
+- **One-line pairing.** `mxb-agent` prints a code at startup carrying its own address and
+  token; paste it into Add a server and both fields fill in. `public_url` in `agent.json`
+  overrides the address for hosts behind NAT or a proxy.
+- **`mxb://enroll?code=…` links**, so an invite can be clicked instead of transcribed. The
+  link only prefills the field — enrolling is still a button you press, because a URL any
+  website can open must not be able to spend an invite on its own.
+
+### Changed
+- **Join a server offers the servers we know about**, instead of an empty box wanting an IP
+  address. The control plane has held a registry of them since the first migration and
+  nothing ever showed it, so the answer to "where do I get the address" was nowhere in the
+  app. Typing one is still there, for a server that isn't listed.
+- **The server registry is public.** It was bearer-only, which meant the players most in
+  need of a list — the ones who have never joined a server and have no address to type —
+  were the only ones who couldn't see it. It returns the same name, region and address a
+  server browser shows; `agent_url` is still withheld, so no admin API is advertised.
+- **The enroll panel says where an invite code comes from**, with a button through to the
+  Discord. Invites are issued by hand and the field previously explained none of that.
+- **Adding a server shows one field, not four.** The pairing code carries the address and
+  the token and the host supplies the name, so the manual fields sit behind a disclosure
+  rather than implying they all need filling in — and the form now says where the code is
+  printed.
+- **Your rider name is picked from your MX Bikes profiles**, not typed. It had to match the
+  game exactly and nothing checked that it did, which made a silent no-op the most likely
+  outcome of enrolling. Typing is still there when no profiles are found.
+- **Your GUID is claimed automatically** the first time one of your servers sees you
+  connect — the app reads it from the server's log, where the game writes it next to your
+  name. You can't read it off your own machine, so asking you to type it never made sense.
+  The manual field is still there, one click away, for anyone not running a server.
+- **Adding a server checks it before saving it**, and takes the server's name from the host
+  rather than asking you to invent one. A wrong address or token now fails at the form
+  instead of becoming a row that never loads.
+- **Join a server is behind the Experimental switch**, with the rest of the multiplayer
+  work. It rides on an undocumented connect flag, so it shouldn't sit under Play for
+  everyone while that's still unconfirmed.
+
+### Fixed
+- **The agent's track list no longer offers things that aren't tracks.** A folder tracks are
+  filed into (`EU`) and the interior of an extracted one (`data`) both came back as
+  selectable names, and picking either would have restarted the server into nothing. It now
+  uses the same marker files the app's own library scanner keys on, and stops descending
+  once it has found a track.
+- **Paint sync no longer syncs one hard-coded server.** The Servers page asked for
+  `eu-frankfurt-1` by name regardless of where you were riding; it now resolves the server
+  you actually joined, matching a registered one by address or falling back to the address
+  itself.
+
+## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
+
+### Added
+- **Opening a paint in 3D now shows the model it was painted for, wearing it.** Click a
+  livery, a helmet paint or a goggle paint and the viewer loads the bike or helmet it belongs
+  to and selects that paint in the picker, instead of draping the textures over a stock body
+  that was never the shape they were drawn against. A paint whose model isn't installed still
+  previews the way it did before.
+
+### Changed
+- **The Library's 3D button says what it does.** The bare square on each row is now a
+  labelled **View in 3D**.
+- **Settings spells out which folder to pick.** The app wants your MX Bikes folder — the one
+  holding `mods` and `profiles` — not the `mods` folder inside it, which is one click deeper
+  in the picker and easy to land on. The setting now says so, and picking `mods` by mistake
+  quietly resolves to the folder above it (Settings says which one it took) rather than
+  leaving you with a library that scans nothing and a path that looks perfectly reasonable.
+
+### Fixed
 - **Helmets whose goggles came out wearing the helmet's paint.** The Bell Moto 10 packs are
   the clear case: shell, tear-off, lens and goggle frame each ended up in the wrong texture,
   the goggle worst of all. Three faults behind it, all in how a model's textures are counted
@@ -1161,7 +1354,6 @@ still refused, which is what stops an archive writing outside the folder it unpa
   surviving, but Tauri doesn't receive tray clicks through libayatana-appindicator and a
   stock GNOME desktop has no tray at all — hiding there could strand the window with no
   way back.
-
 
 ## 2026-08-06 — v0.6.2 — mod-manager performance, Discord release announcements
 

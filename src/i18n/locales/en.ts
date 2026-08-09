@@ -235,6 +235,8 @@ export const en = {
   "tour.frostmod.title": "FrostMod, live",
   "tour.frostmod.body":
     "This shows FrostMod's status. It live-reloads MX Bikes after an install, so new content shows up without restarting the game.",
+  "tour.servers.title": "Look right online",
+  "tour.servers.body": "MX Bikes never sends paints between players, so everyone shows up in default gear unless you already hold their exact file. Enrol here and the app publishes your look and fetches everyone else's — and you can start a dedicated server from the same page.",
   "tour.settings.title": "Settings",
   "tour.settings.body":
     "Set your game folder, background behaviour and FrostMod options here. You can replay this tour from here too.",
@@ -623,6 +625,8 @@ export const en = {
   "join.alreadyRunning":
     "Close {{game}} first — a running game can't be sent to a server.",
   "join.failed": "Couldn't join that server",
+  "join.manual": "Join a server that isn't listed",
+  "join.noServers": "No servers listed yet — type an address you were given instead.",
 
   "servers.title": "Servers",
   "servers.subtitle":
@@ -646,6 +650,35 @@ export const en = {
   "servers.actionFailed": "That didn't work",
   "servers.trackChanged": "Track set to {{track}} — the server restarted.",
   "servers.saveFailed": "Couldn't save your server list",
+  "servers.trackLoading": "Reading tracks…",
+  "servers.trackEmpty": "No tracks on that host",
+  "servers.nameOptional": "Server name (optional — read from the host)",
+  "servers.probing": "Checking that agent…",
+  "servers.probeFailed": "Couldn't reach that agent",
+  "servers.probed": "Found {{name}}",
+  "servers.pairingPlaceholder": "Paste the pairing code",
+  "servers.pairingHint":
+    "The agent prints this line when it starts. Paste it here and the address and token fill themselves in — or enter them by hand below.",
+  "servers.pairingWhere":
+    "Run mxb-agent on the machine hosting your server. It prints this line every time it starts — copy the whole thing.",
+  "servers.manualEntry": "I don't have a pairing code — enter the details by hand",
+  "servers.publish": "Add to the server list",
+  "servers.unpublish": "Remove from the list",
+  "servers.listed": "In the public server list — anyone can find and join this.",
+  "servers.notListed": "Not in the public server list yet.",
+  "servers.published": "Added — other players can find it now",
+  "servers.publishedUnreachable":
+    "Saved, but we couldn't reach it from the internet, so it isn't listed yet. Check the agent is running and its port is open.",
+  "servers.publishFailed": "Couldn't change the server list",
+  "servers.unpublished": "Removed from the server list",
+  "servers.createTitle": "Create a server",
+  "servers.createDesc":
+    "Launch a dedicated server in the cloud without owning a machine. It shuts itself down once nobody has been riding on it for a while, so it doesn't run up a bill overnight.",
+  "servers.create": "Create",
+  "servers.creating": "Creating it — it takes a few minutes to come up",
+  "servers.createFailed": "Couldn't create that server",
+  "servers.runningCount_one": "{{count}} running",
+  "servers.runningCount_other": "{{count}} running",
 
   "settings.experimental": "Experimental",
   "settings.experimentalServers": "Servers and paint sync",
@@ -658,9 +691,9 @@ export const en = {
   "sync.title": "Paint sync",
   "sync.desc":
     "MX Bikes never sends paints, so other riders show up in default liveries unless you already have their exact file. Publish yours and pull back everyone else's.",
-  "sync.enroll": "Enrol",
+  "sync.enroll": "Enroll",
   "sync.enrolled": "Enrolled as {{name}}",
-  "sync.enrollFailed": "Couldn't enrol",
+  "sync.enrollFailed": "Couldn't enroll",
   "sync.codePlaceholder": "Invite code",
   "sync.riderNamePlaceholder": "In-game rider name",
   "sync.riderNameHint":
@@ -675,6 +708,62 @@ export const en = {
   "sync.pulled": "Installed {{installed}} from {{riders}} riders ({{had}} already had)",
   "sync.pullFailed": "Couldn't sync paints",
   "sync.rejected": "Skipped {{count}} with an unsafe destination",
+  "sync.pickProfile": "Ride as",
+  "sync.pickProfileHint":
+    "Your MX Bikes profiles, as the app found them. Picking one here is what tells other players' apps which paints are yours.",
+  "sync.noProfiles":
+    "No MX Bikes profiles found, so type your rider name exactly as it appears in the game.",
+  "sync.guidClaimed": "Identified by GUID {{guid}}",
+  "sync.guidPending":
+    "Your GUID is picked up on its own the first time one of your servers sees you connect. Until then your rider name identifies you.",
+  "sync.guidManual": "Enter it manually",
+  "sync.whereCode":
+    "Paint sync is invite-only for now. Codes are handed out in the Discord — ask there and paste the one you're given above.",
+  "sync.getCode": "Ask in the Discord",
+  "sync.sidebarOk": "Synced · {{count}} riders",
+  "sync.sidebarUnpublished": "Your look isn't published",
+  "sync.agoJustNow": "just now",
+  "sync.agoMinutes_one": "{{count}} minute ago",
+  "sync.agoMinutes_other": "{{count}} minutes ago",
+  "sync.agoHours_one": "{{count}} hour ago",
+  "sync.agoHours_other": "{{count}} hours ago",
+  "sync.agoDays_one": "{{count}} day ago",
+  "sync.agoDays_other": "{{count}} days ago",
+  "sync.publishing": "Sending your look up…",
+  "sync.pulling": "Fetching everyone else's paints…",
+  "sync.publishNow": "Publish now",
+  "sync.published": "Published {{paints}} paints across {{bikes}} bikes",
+  "sync.publishFailed": "Couldn't publish your paints",
+  "sync.publishedState": "Your look is published — {{bikes}} bikes, {{paints}} paints",
+  "sync.lastPublished": "Last sent {{ago}}. It goes up again by itself whenever you change something.",
+  "sync.neverPublished": "Your look hasn't been published yet",
+  "sync.neverPublishedWhy": "Until it is, everyone else on the server sees you on a default bike in default gear.",
+  "sync.pulledState": "You have the paints of {{count}} riders",
+  "sync.lastPulled": "Last checked {{ago}}. It runs again by itself when you press Play.",
+  "sync.neverPulled": "You haven't fetched anyone else's paints yet",
+  "sync.neverPulledWhy": "Until you do, other riders show up on default bikes even if they've published theirs.",
+  "sync.skippedBikes_one": "{{count}} bike wasn't published — you have more than we can hold.",
+  "sync.skippedBikes_other": "{{count}} bikes weren't published — you have more than we can hold.",
+  "sync.noMatchingProfile": "This name doesn't match any MX Bikes profile on this PC, so there's nothing to publish. Check the profiles folder in Settings.",
+  "sync.guidPendingTitle": "Identified by your rider name",
+  "sync.keptYours_one": "{{count}} paint was left alone",
+  "sync.keptYours_other": "{{count}} paints were left alone",
+  "sync.keptYoursWhy": "Another rider uses the same file name for a different paint. Yours was kept — the app never overwrites a livery it didn't install. You'll see that rider in your version of it.",
+  "servers.booting": "Starting up…",
+  "servers.bootingWhy": "Installing the game on the new machine. This takes a few minutes — it downloads the full installer.",
+  "servers.shutsDown": "Shuts down",
+  "servers.inUse": "In use",
+  "servers.inMinutes_one": "in {{count}} min",
+  "servers.inMinutes_other": "in {{count}} min",
+  "servers.inList": "Listed",
+  "servers.destroy": "Shut this server down",
+  "servers.destroyed": "Server shut down",
+  "servers.runningOfCap": "{{count}} of {{cap}} running",
+  "servers.atCap": "{{cap}} servers are already running, which is the limit. Shut one down to start another.",
+  "servers.help": "Share your liveries with everyone else on a server, and run a dedicated server of your own.",
+
+  "sync.autoNote":
+    "Your look publishes itself — every bike, whenever you change it in the app or in the game's own garage. Everyone else's arrives when you press Play.",
 
   // ── Strings the multi-line JSX sweep initially missed ──────────────────────
   "libraryDetail.noEmbedded": "No embedded details were found for this item.",

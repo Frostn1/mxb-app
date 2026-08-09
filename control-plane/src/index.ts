@@ -8,13 +8,27 @@
  * else), so the app reports it here and every other app on the server reads it back.
  */
 
-import { bearer, hashToken, newToken } from "./auth";
 import {
+  awsEnv,
+  fleet,
+  latestWindowsAmi,
+  REGION,
+  runInstance,
+  terminateInstance,
+} from "./aws";
+import { bootstrapScript } from "./bootstrap";
+import { bearer, hashToken, newToken, tokenMatches } from "./auth";
+import {
+  isBikeId,
   isGuid,
   isPaintFileName,
   isPaintSize,
+  isPublicAgentUrl,
+  isPublicGameAddress,
+  isRegion,
   isRelDest,
   isRiderName,
+  isServerName,
   isSha256,
   isSlot,
   MAX_PAINT_BYTES,
@@ -41,6 +55,17 @@ export default {
       return json(500, { error: "internal error" });
     }
   },
+
+  /**
+   * The idle sweep, on a cron trigger.
+   *
+   * Servers bill by the hour whether or not anyone is on them, and nobody is watching at
+   * 3am. This is the only thing standing between "we should turn those off" and a month of
+   * charges for an empty grid.
+   */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(reapIdleServers(env));
+  },
 } satisfies ExportedHandler<Env>;
 
 async function route(request: Request, env: Env): Promise<Response> {
@@ -50,9 +75,26 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   if (method === "GET" && path === "/health") return json(200, { ok: true });
 
-  // Enrolment is the one unauthenticated write: it trades an invite code for a token.
+  // Unauthenticated on purpose: a freshly launched instance fetches this during boot, when
+  // it holds no credentials and has no way to be given any. The binary is not a secret —
+  // it is the same agent anyone can build from the public repository.
+  if (method === "GET" && path === "/v1/agent.exe") return artifact(env, "artifacts/mxb-agent.exe");
+
+  // Enrollment is the one unauthenticated write: it trades an invite code for a token.
   // Steam sign-in will replace the invite code without changing anything downstream.
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
+
+  // The server list is public, and has to be: it is what the app's join picker offers, and
+  // requiring a token meant a player who hadn't enrolled was shown an empty box asking for
+  // an IP address — the exact question the registry exists to answer. Nothing here is
+  // secret; it is the same name/region/address a server browser shows, and `agent_url` is
+  // deliberately not selected, so the admin API's location stays private.
+  if (method === "GET" && path === "/v1/servers") return listServers(env);
+
+  // A provisioned box announcing itself. Authenticated by the agent token in its own row,
+  // not by an account bearer — the machine holds no account and has no way to be given one.
+  const hello = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/hello$/.exec(path);
+  if (hello && method === "POST") return serverHello(request, hello[1], env);
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
@@ -60,8 +102,15 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
-  if (method === "GET" && path === "/v1/servers") return listServers(env);
+  if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
+  if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
+  if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
+  if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
+  if (method === "POST" && path === "/v1/provision") return provision(request, account, env);
+
+  const owned = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})$/.exec(path);
+  if (owned && method === "DELETE") return deleteServer(owned[1], account, env);
 
   const paint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
   if (paint) {
@@ -133,19 +182,48 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   return json(201, { accountId: id, token, riderName: (riderName as string).trim() });
 }
 
+/**
+ * The account, and what is actually stored for it.
+ *
+ * The per-bike summary is what lets the app say "published — 6 bikes, 14 paints" from the
+ * server's own record rather than from its optimism about a request it made. Those are not
+ * the same thing the moment a publish half-fails, which is exactly when a player looks.
+ */
 async function me(account: Account, env: Env): Promise<Response> {
   const paints = await env.DB.prepare(
-    "SELECT slot, file_name, sha256, size FROM loadout_paints WHERE account_id = ?",
+    "SELECT bike_id, slot, file_name, sha256, size FROM loadout_paints WHERE account_id = ?" +
+      " ORDER BY bike_id, slot",
   )
     .bind(account.id)
-    .all<{ slot: string; file_name: string; sha256: string; size: number }>();
+    .all<{ bike_id: string; slot: string; file_name: string; sha256: string; size: number }>();
+
+  const updated = await env.DB.prepare(
+    "SELECT bike_id, updated_at FROM loadouts WHERE account_id = ?",
+  )
+    .bind(account.id)
+    .all<{ bike_id: string; updated_at: number }>();
+  const updatedAt = new Map(updated.results.map((r) => [r.bike_id, r.updated_at]));
+
+  const bikes = new Map<string, { bikeId: string; paints: number; updatedAt: number | null }>();
+  for (const p of paints.results) {
+    const bike = bikes.get(p.bike_id) ?? {
+      bikeId: p.bike_id,
+      paints: 0,
+      updatedAt: updatedAt.get(p.bike_id) ?? null,
+    };
+    bike.paints += 1;
+    bikes.set(p.bike_id, bike);
+  }
 
   return json(200, {
     accountId: account.id,
     riderName: account.rider_name,
     steamId: account.steam_id,
     guid: account.guid,
+    bikes: [...bikes.values()],
+    totalPaints: paints.results.length,
     paints: paints.results.map((p) => ({
+      bikeId: p.bike_id,
       slot: p.slot,
       fileName: p.file_name,
       sha256: p.sha256,
@@ -181,25 +259,44 @@ async function putGuid(request: Request, account: Account, env: Env): Promise<Re
   return json(200, { ok: true, guid: (guid as string).trim() });
 }
 
-async function putLoadout(request: Request, account: Account, env: Env): Promise<Response> {
-  const body = await readJson(request);
-  if (!body) return json(400, { error: "expected a JSON body" });
+/** A publish carries at most this many bikes, matching the app's own cap. */
+const MAX_BIKES = 32;
 
-  const { bikeId, paints } = body as { bikeId?: unknown; paints?: unknown };
-  if (!Array.isArray(paints)) return json(400, { error: "paints must be an array" });
-  if (paints.length > 16) return json(400, { error: "too many paints" });
+/** And at most this many paints per bike — a loadout has one slot each. */
+const MAX_PAINTS_PER_BIKE = 16;
 
-  const rows: { slot: string; fileName: string; sha256: string; size: number; relDest: string }[] =
-    [];
+/** One bike's worth of validated rows, ready to insert. */
+interface BikeRows {
+  bikeId: string;
+  rows: { slot: string; fileName: string; sha256: string; size: number; relDest: string }[];
+}
+
+/**
+ * Validate `{ bikeId, paints }` into rows, or return the message explaining why not.
+ *
+ * `relDest` is the value that becomes a path on another player's disk, so it is checked here
+ * as well as by the app that receives it. Neither check is redundant: this one keeps bad rows
+ * out of the database, and the app's keeps a bad row already in it from reaching a filesystem.
+ */
+function bikeRows(value: unknown): BikeRows | string {
+  const { bikeId, paints } = (value ?? {}) as { bikeId?: unknown; paints?: unknown };
+  if (!isBikeId(bikeId)) return `not a usable bike id: ${String(bikeId)}`;
+  if (!Array.isArray(paints)) return `paints must be an array for ${String(bikeId)}`;
+  if (paints.length > MAX_PAINTS_PER_BIKE) return `too many paints for ${String(bikeId)}`;
+
+  const rows: BikeRows["rows"] = [];
+  const seen = new Set<string>();
   for (const entry of paints) {
     const p = entry as Record<string, unknown>;
-    if (!isSlot(p.slot)) return json(400, { error: `unknown slot: ${String(p.slot)}` });
-    if (!isPaintFileName(p.fileName)) {
-      return json(400, { error: `invalid paint filename for ${p.slot}` });
-    }
-    if (!isRelDest(p.relDest)) return json(400, { error: `invalid destination for ${p.slot}` });
-    if (!isSha256(p.sha256)) return json(400, { error: `invalid sha256 for ${p.slot}` });
-    if (!isPaintSize(p.size)) return json(400, { error: `invalid size for ${p.slot}` });
+    if (!isSlot(p.slot)) return `unknown slot: ${String(p.slot)}`;
+    // A slot twice in one bike would violate the primary key and fail the whole batch, so
+    // it is named here rather than surfacing as an opaque constraint error.
+    if (seen.has(p.slot)) return `${p.slot} given twice for ${bikeId}`;
+    seen.add(p.slot);
+    if (!isPaintFileName(p.fileName)) return `invalid paint filename for ${p.slot}`;
+    if (!isRelDest(p.relDest)) return `invalid destination for ${p.slot}`;
+    if (!isSha256(p.sha256)) return `invalid sha256 for ${p.slot}`;
+    if (!isPaintSize(p.size)) return `invalid size for ${p.slot}`;
     rows.push({
       slot: p.slot,
       fileName: (p.fileName as string).trim(),
@@ -208,34 +305,104 @@ async function putLoadout(request: Request, account: Account, env: Env): Promise
       relDest: (p.relDest as string).trim(),
     });
   }
+  return { bikeId: (bikeId as string).trim(), rows };
+}
 
+/** Write a set of bikes, replacing `scope` wholesale, and report the blobs still missing. */
+async function storeLoadouts(
+  account: Account,
+  bikes: BikeRows[],
+  scope: "all" | "these",
+  env: Env,
+): Promise<Response> {
   const now = Date.now();
+  // Replace rather than merge: a slot the player cleared has to disappear, and merging would
+  // leave them wearing something they took off. `scope: "all"` is a whole-profile publish, so
+  // a bike they no longer have any custom paint on goes too.
+  const clear =
+    scope === "all"
+      ? [
+          env.DB.prepare("DELETE FROM loadout_paints WHERE account_id = ?").bind(account.id),
+          env.DB.prepare("DELETE FROM loadouts WHERE account_id = ?").bind(account.id),
+        ]
+      : bikes.flatMap((b) => [
+          env.DB.prepare("DELETE FROM loadout_paints WHERE account_id = ? AND bike_id = ?").bind(
+            account.id,
+            b.bikeId,
+          ),
+        ]);
+
   const statements = [
-    env.DB.prepare(
-      "INSERT INTO loadouts (account_id, bike_id, updated_at) VALUES (?, ?, ?)" +
-        " ON CONFLICT(account_id) DO UPDATE SET bike_id = excluded.bike_id, updated_at = excluded.updated_at",
-    ).bind(account.id, typeof bikeId === "string" ? bikeId : null, now),
-    // Replace wholesale: a slot the player cleared has to disappear, and merging would
-    // leave them wearing something they took off.
-    env.DB.prepare("DELETE FROM loadout_paints WHERE account_id = ?").bind(account.id),
-    ...rows.map((r) =>
+    ...clear,
+    ...bikes.map((b) =>
       env.DB.prepare(
-        "INSERT INTO loadout_paints (account_id, slot, file_name, sha256, size, rel_dest)" +
-          " VALUES (?, ?, ?, ?, ?, ?)",
-      ).bind(account.id, r.slot, r.fileName, r.sha256, r.size, r.relDest),
+        "INSERT INTO loadouts (account_id, bike_id, updated_at) VALUES (?, ?, ?)" +
+          " ON CONFLICT(account_id, bike_id) DO UPDATE SET updated_at = excluded.updated_at",
+      ).bind(account.id, b.bikeId, now),
+    ),
+    ...bikes.flatMap((b) =>
+      b.rows.map((r) =>
+        env.DB.prepare(
+          "INSERT INTO loadout_paints (account_id, bike_id, slot, file_name, sha256, size, rel_dest)" +
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).bind(account.id, b.bikeId, r.slot, r.fileName, r.sha256, r.size, r.relDest),
+      ),
     ),
   ];
   await env.DB.batch(statements);
 
   // Tell the client which blobs we still need, so it uploads only what nobody has shared
   // yet. Content addressing makes this cheap: the same paint from twenty riders is one
-  // object and nineteen skipped uploads.
+  // object and nineteen skipped uploads. De-duplicated first — gear repeats across bikes,
+  // so a whole-profile publish asks about the same digest many times over.
+  const wanted = [...new Set(bikes.flatMap((b) => b.rows.map((r) => r.sha256)))];
   const missing: string[] = [];
-  for (const r of rows) {
-    if (!(await env.PAINTS.head(r.sha256))) missing.push(r.sha256);
+  for (const sha of wanted) {
+    if (!(await env.PAINTS.head(sha))) missing.push(sha);
   }
-
   return json(200, { ok: true, missing });
+}
+
+/**
+ * Replace one bike's loadout.
+ *
+ * Kept for clients older than per-bike storage, which send one bike at a time and would
+ * otherwise have every other bike deleted out from under them on each publish.
+ */
+async function putLoadout(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const bike = bikeRows(body);
+  if (typeof bike === "string") return json(400, { error: bike });
+  return storeLoadouts(account, [bike], "these", env);
+}
+
+/**
+ * Replace this rider's whole look, every bike at once.
+ *
+ * Which bike a rider takes out is decided in the game, and nothing tells us which one that
+ * will be — so the only answer that always renders correctly is to hold all of them. Sending
+ * them together also makes the replacement atomic: there is no moment where half a profile
+ * is published.
+ */
+async function putLoadouts(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { bikes } = body as { bikes?: unknown };
+  if (!Array.isArray(bikes)) return json(400, { error: "bikes must be an array" });
+  if (bikes.length > MAX_BIKES) return json(400, { error: `at most ${MAX_BIKES} bikes` });
+
+  const parsed: BikeRows[] = [];
+  const seen = new Set<string>();
+  for (const entry of bikes) {
+    const bike = bikeRows(entry);
+    if (typeof bike === "string") return json(400, { error: bike });
+    const key = bike.bikeId.toLowerCase();
+    if (seen.has(key)) return json(400, { error: `${bike.bikeId} given twice` });
+    seen.add(key);
+    parsed.push(bike);
+  }
+  return storeLoadouts(account, parsed, "all", env);
 }
 
 /**
@@ -269,6 +436,26 @@ async function putPaint(request: Request, sha256: string, env: Env): Promise<Res
   return json(201, { ok: true, sha256, size: body.byteLength });
 }
 
+/**
+ * Serve a build artifact a booting instance needs.
+ *
+ * Streamed from R2 through the Worker rather than from a public bucket: the bucket stays
+ * private, so the only thing reachable from outside is the exact key named here, and the
+ * URL doesn't change if the storage behind it ever does.
+ */
+async function artifact(env: Env, key: string): Promise<Response> {
+  const object = await env.PAINTS.get(key);
+  if (!object) return json(404, { error: "no such artifact" });
+  return new Response(object.body, {
+    headers: {
+      "content-type": "application/octet-stream",
+      // Short rather than immutable: unlike a paint, this key is *not* content-addressed,
+      // so a rebuilt agent has to be able to replace it.
+      "cache-control": "public, max-age=300",
+    },
+  });
+}
+
 async function getPaint(sha256: string, env: Env): Promise<Response> {
   const object = await env.PAINTS.get(sha256);
   if (!object) return json(404, { error: "no such paint" });
@@ -283,11 +470,526 @@ async function getPaint(sha256: string, env: Env): Promise<Response> {
   });
 }
 
+/**
+ * The joinable servers. Unauthenticated — see the routing table.
+ *
+ * `agent_url` is not in the select list and must not be added to it: that column is the
+ * base URL of a server's admin API, and while it is still bearer-protected on the agent
+ * side, publishing where every one of them lives hands an attacker the target list for
+ * free. Everything else here is what a player needs in order to connect.
+ */
 async function listServers(env: Env): Promise<Response> {
   const servers = await env.DB.prepare(
-    "SELECT id, name, region, address FROM servers ORDER BY region, name",
+    "SELECT id, name, region, address FROM servers WHERE published = 1 ORDER BY region, name",
   ).all<{ id: string; name: string; region: string; address: string }>();
   return json(200, { servers: servers.results });
+}
+
+/** How many servers one account may register. Enough for a small league, not a botnet. */
+const MAX_SERVERS_PER_ACCOUNT = 5;
+
+/** Long enough for a cold agent to answer, short enough that registering never hangs. */
+const REACHABILITY_TIMEOUT_MS = 5000;
+
+/**
+ * The ports a provisioned box uses.
+ *
+ * Fixed rather than configurable: the bootstrap writes them into `agent.json` and opens them
+ * in the firewall, so anything reading them back has to agree. They were repeated as literals
+ * in three places, one of which — the reaper — silently decides whether a server is reachable.
+ */
+const AGENT_PORT = 8787;
+const GAME_PORT = 54210;
+
+/**
+ * Register a server the player runs, so other people can find it.
+ *
+ * The list was hand-seeded SQL until now, which meant running a server and *having anyone
+ * able to join it* were separate problems, the second one solved by passing an address
+ * around privately.
+ *
+ * Publication is conditional on the agent answering. A home server behind NAT resolves and
+ * accepts nothing from outside, and a join picker full of servers that cannot be joined is
+ * worse than a short one — so an unreachable server is still recorded, still manageable by
+ * its owner, and simply not advertised.
+ */
+async function registerServer(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { name, region, address, agentUrl } = body as Record<string, unknown>;
+
+  if (!isServerName(name)) return json(400, { error: "that server name won't fit the list" });
+  if (!isRegion(region)) return json(400, { error: "unknown region" });
+  if (!isPublicGameAddress(address)) {
+    return json(400, {
+      error:
+        "that address isn't one other players could connect to — it needs a public host and a port",
+    });
+  }
+  // Optional: a server can be listed for joining without handing us its admin API.
+  if (agentUrl !== undefined && agentUrl !== null && !isPublicAgentUrl(agentUrl)) {
+    return json(400, { error: "that agent URL isn't one we can call" });
+  }
+
+  const owned = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM servers WHERE owner_account_id = ?",
+  )
+    .bind(account.id)
+    .first<{ n: number }>();
+  if ((owned?.n ?? 0) >= MAX_SERVERS_PER_ACCOUNT) {
+    return json(409, { error: `you can register up to ${MAX_SERVERS_PER_ACCOUNT} servers` });
+  }
+
+  // Addresses are unique across the list: two rows for one server would show up twice in
+  // everyone's picker, and would let a second account shadow the first one's entry.
+  const clash = await env.DB.prepare(
+    "SELECT owner_account_id FROM servers WHERE lower(address) = lower(?)",
+  )
+    .bind((address as string).trim())
+    .first<{ owner_account_id: string | null }>();
+  if (clash) {
+    return json(409, { error: "a server at that address is already registered" });
+  }
+
+  const reachable = agentUrl ? await agentAnswers(agentUrl as string) : false;
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  await env.DB.prepare(
+    "INSERT INTO servers (id, name, region, address, agent_url, created_at, owner_account_id," +
+      " published, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+    .bind(
+      id,
+      (name as string).trim(),
+      region,
+      (address as string).trim(),
+      agentUrl ? (agentUrl as string).trim() : null,
+      now,
+      account.id,
+      reachable ? 1 : 0,
+      agentUrl ? now : null,
+    )
+    .run();
+
+  return json(201, { id, published: reachable });
+}
+
+/**
+ * Does the agent at this URL answer?
+ *
+ * `/health` is unauthenticated by design on the agent, which makes it exactly the right
+ * probe: it proves the host is up and reachable from outside without us holding a token.
+ *
+ * What this cannot prove is that the *game* port is open — that is UDP, and a Worker has no
+ * way to send one. So "published" means the box answers and the operator says a server is
+ * on it, not that anyone has demonstrably joined.
+ */
+async function agentAnswers(agentUrl: string): Promise<boolean> {
+  const base = agentUrl.trim().replace(/\/+$/, "");
+  try {
+    const resp = await fetch(`${base}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(REACHABILITY_TIMEOUT_MS),
+    });
+    return resp.ok;
+  } catch {
+    // Unreachable, refused, too slow, or DNS that goes nowhere — all the same answer here.
+    return false;
+  }
+}
+
+/**
+ * What AWS is currently charging us for.
+ *
+ * Deliberately reads from EC2 rather than from our own table: the database records what we
+ * believe we created, and this is what will actually appear on the bill. When a launch
+ * half-fails those two disagree, and only one of them is expensive to be wrong about.
+ *
+ * The *count* is everyone's business — it is what the concurrency cap is measured against, and
+ * hiding it from the people it constrains would be perverse. The instance list is not: an
+ * instance id and public IP belong to whoever is paying for that box, so only its owner sees
+ * the row. Splitting the two is what lets the panel say "1 of 2 running" without handing every
+ * enrolled account the address of every server.
+ */
+async function fleetState(account: Account, env: Env): Promise<Response> {
+  const aws = awsEnv(env);
+  if (!aws) return json(503, { error: "provisioning isn't configured on this deployment" });
+  try {
+    const instances = await fleet(aws);
+    const mine = await env.DB.prepare(
+      "SELECT instance_id FROM servers WHERE owner_account_id = ? AND instance_id IS NOT NULL",
+    )
+      .bind(account.id)
+      .all<{ instance_id: string }>();
+    const owned = new Set(mine.results.map((r) => r.instance_id));
+    return json(200, {
+      region: REGION,
+      running: instances.length,
+      cap: Number(env.MXB_MAX_INSTANCES ?? "2"),
+      instances: instances.filter((i) => owned.has(i.instanceId)),
+    });
+  } catch (err) {
+    console.error(JSON.stringify({ msg: "fleet", error: String(err) }));
+    return json(502, { error: String(err) });
+  }
+}
+
+/**
+ * Create a server: launch the machine, and record it.
+ *
+ * The order matters. The row is written *before* the launch, so an instance can never exist
+ * without something in our database pointing at it — the reverse leaves a billing resource
+ * nobody knows to turn off, which is the failure that costs money rather than time. If the
+ * launch then fails, the row is removed again.
+ */
+async function provision(request: Request, account: Account, env: Env): Promise<Response> {
+  const aws = awsEnv(env);
+  if (!aws) return json(503, { error: "provisioning isn't configured on this deployment" });
+  const securityGroupId = env.MXB_SECURITY_GROUP_ID?.trim();
+  const agentDownload = env.MXB_AGENT_DOWNLOAD_URL?.trim();
+  const gameDownload = env.MXB_GAME_DOWNLOAD_URL?.trim();
+  if (!securityGroupId || !agentDownload || !gameDownload) {
+    return json(503, { error: "provisioning isn't finished being set up yet" });
+  }
+
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { name } = body as Record<string, unknown>;
+  if (!isServerName(name)) return json(400, { error: "that server name won't fit the list" });
+
+  // Counted from EC2, not from our table. This is the number that turns into a bill, and
+  // the two disagree exactly when something has already gone wrong.
+  const running = await fleet(aws);
+  const cap = Number(env.MXB_MAX_INSTANCES ?? "2");
+  if (running.length >= cap) {
+    return json(409, {
+      error: `there are already ${running.length} servers running, and the limit is ${cap}`,
+    });
+  }
+
+  const id = crypto.randomUUID();
+  const agentToken = newToken();
+  const now = Date.now();
+
+  await env.DB.prepare(
+    "INSERT INTO servers (id, name, region, address, created_at, owner_account_id, published," +
+      " agent_token) VALUES (?, ?, ?, '', ?, ?, 0, ?)",
+  )
+    .bind(id, (name as string).trim(), REGION, now, account.id, agentToken)
+    .run();
+
+  try {
+    const amiId = await latestWindowsAmi(aws);
+    const instanceId = await runInstance(
+      aws,
+      {
+        name: `mxb ${(name as string).trim()}`,
+        instanceType: env.MXB_INSTANCE_TYPE?.trim() || "t3.small",
+        securityGroupId,
+        userData: bootstrapScript({
+          agentToken,
+          agentUrl: agentDownload,
+          gameUrl: gameDownload,
+          serverName: (name as string).trim(),
+          gamePort: GAME_PORT,
+          agentPort: AGENT_PORT,
+          serverId: id,
+          // Taken from the request rather than configured, so a preview deployment's boxes
+          // announce themselves to that preview rather than to production.
+          controlPlaneUrl: new URL(request.url).origin,
+        }),
+      },
+      amiId,
+    );
+    await env.DB.prepare("UPDATE servers SET instance_id = ? WHERE id = ?")
+      .bind(instanceId, id)
+      .run();
+    // No address yet: EC2 assigns the public IP as the instance comes up, and the app polls
+    // for it. Publishing waits until there is something to publish.
+    return json(201, { id, instanceId, state: "pending" });
+  } catch (err) {
+    // The row would otherwise claim a server that does not exist, and the cap counts rows
+    // nobody can ever use.
+    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(id).run();
+    console.error(JSON.stringify({ msg: "provision", error: String(err) }));
+    return json(502, { error: String(err) });
+  }
+}
+
+/**
+ * A provisioned box announcing that it is up, and where it is.
+ *
+ * This is the one thing that made cloud servers real. A launched instance had no way to be
+ * reached: its public IP exists only in EC2's view, its agent token only in this table and on
+ * the box, and nothing ever wrote `address` or flipped `published` — so a server the app
+ * created could never be joined, managed or even found. Now the box says so itself.
+ *
+ * **The address is observed, not supplied.** The IP comes from `cf-connecting-ip` rather than
+ * from the request body, so a box that is compromised — or an operator poking at this by hand
+ * — cannot register somebody else's address into everyone's join picker. Only the ports are
+ * taken from the body, and only after the token proves the caller is that server.
+ *
+ * Idempotent: a bootstrap that retries, or an instance that reboots and announces itself
+ * again, simply rewrites the same row.
+ */
+async function serverHello(request: Request, id: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(
+    "SELECT agent_token, instance_id FROM servers WHERE id = ?",
+  )
+    .bind(id)
+    .first<{ agent_token: string | null; instance_id: string | null }>();
+  // The same answer for an unknown id and a wrong token, so this can't be used to find out
+  // which server ids exist.
+  const presented = bearer(request.headers.get("Authorization"));
+  if (!row?.agent_token || !presented || !tokenMatches(row.agent_token, presented)) {
+    return json(403, { error: "not this server" });
+  }
+
+  const body = (await readJson(request)) as { agentPort?: unknown; gamePort?: unknown } | null;
+  const agentPort = isPort(body?.agentPort) ? body!.agentPort : AGENT_PORT;
+  const gamePort = isPort(body?.gamePort) ? body!.gamePort : GAME_PORT;
+
+  const ip = (request.headers.get("cf-connecting-ip") ?? "").trim();
+  // Behind `wrangler dev` there is no edge header and the caller is loopback; refusing that
+  // is right for production and is why the local exercise of this uses a public test address.
+  if (!isPublicGameAddress(`${ip}:${gamePort}`)) {
+    return json(400, { error: "that address isn't reachable from the internet" });
+  }
+
+  const now = Date.now();
+  await env.DB.prepare(
+    "UPDATE servers SET address = ?, agent_url = ?, checked_at = ?, published = 1 WHERE id = ?",
+  )
+    .bind(`${ip}:${gamePort}`, `http://${ip}:${agentPort}`, now, id)
+    .run();
+
+  console.log(JSON.stringify({ msg: "hello", id, instance: row.instance_id, address: ip }));
+  return json(200, { ok: true, address: `${ip}:${gamePort}` });
+}
+
+function isPort(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65535;
+}
+
+/**
+ * The servers this account runs, with what it takes to drive them.
+ *
+ * Includes `agent_token`, which the public list deliberately never carries. That is the
+ * point: a box the control plane launched has no console and prints its pairing code to
+ * nobody, so the owner has no other way to obtain the credential for a server they are
+ * paying for. Scoped strictly to `owner_account_id`, so it is only ever the caller's own.
+ *
+ * `state` and `publicIp` come from EC2 rather than from this table, which is what lets the app
+ * distinguish "still booting" from "up but not answering".
+ */
+async function myServers(account: Account, env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(
+    "SELECT id, name, region, address, agent_url, agent_token, instance_id, published," +
+      " created_at, idle_since FROM servers WHERE owner_account_id = ? ORDER BY created_at",
+  )
+    .bind(account.id)
+    .all<{
+      id: string;
+      name: string;
+      region: string;
+      address: string;
+      agent_url: string | null;
+      agent_token: string | null;
+      instance_id: string | null;
+      published: number;
+      created_at: number;
+      idle_since: number | null;
+    }>();
+
+  // Only ask EC2 when at least one row is a machine we launched; a player who only runs
+  // servers on their own hardware shouldn't make this endpoint depend on AWS at all.
+  const aws = rows.results.some((r) => r.instance_id) ? awsEnv(env) : null;
+  let live = new Map<string, { state: string; publicIp: string | null }>();
+  if (aws) {
+    try {
+      live = new Map((await fleet(aws)).map((i) => [i.instanceId, i]));
+    } catch (err) {
+      // The rows are still useful without it — the panel just can't say "booting".
+      console.error(JSON.stringify({ msg: "servers/mine fleet", error: String(err) }));
+    }
+  }
+
+  return json(200, {
+    servers: rows.results.map((r) => {
+      const instance = r.instance_id ? live.get(r.instance_id) : undefined;
+      return {
+        id: r.id,
+        name: r.name,
+        region: r.region,
+        address: r.address,
+        // Falls back to EC2's view for the window between the instance getting an IP and its
+        // bootstrap finishing — the agent is not up yet, but the app can already show where.
+        agentUrl:
+          r.agent_url ?? (instance?.publicIp ? `http://${instance.publicIp}:${AGENT_PORT}` : null),
+        agentToken: r.agent_token,
+        instanceId: r.instance_id,
+        published: r.published === 1,
+        createdAt: r.created_at,
+        idleSince: r.idle_since,
+        idleMinutes: Number(env.MXB_IDLE_MINUTES ?? "20"),
+        state: r.instance_id ? (instance?.state ?? "gone") : "self-hosted",
+        publicIp: instance?.publicIp ?? null,
+      };
+    }),
+  });
+}
+
+/**
+ * Remove a server from the list — and destroy the machine, if we made one.
+ *
+ * Only its owner may, and the hand-seeded rows have no owner so the API cannot touch them.
+ * Termination happens before the row is dropped: losing the row while the instance lives is
+ * how an orphan starts billing forever.
+ */
+async function deleteServer(id: string, account: Account, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(
+    "SELECT owner_account_id, instance_id FROM servers WHERE id = ?",
+  )
+    .bind(id)
+    .first<{ owner_account_id: string | null; instance_id: string | null }>();
+  if (!row) return json(404, { error: "no such server" });
+  // One message whether it is someone else's or unowned: which of the two it is isn't the
+  // caller's business.
+  if (row.owner_account_id !== account.id) {
+    return json(403, { error: "that isn't your server" });
+  }
+
+  if (row.instance_id) {
+    const aws = awsEnv(env);
+    if (!aws) return json(503, { error: "can't reach AWS to shut that server down" });
+    try {
+      await terminateInstance(aws, row.instance_id);
+    } catch (err) {
+      // Deliberately fatal. Dropping the row here would leave an instance running with
+      // nothing left pointing at it, and the reaper works from these rows.
+      console.error(JSON.stringify({ msg: "terminate", error: String(err) }));
+      return json(502, { error: `couldn't shut the server down: ${String(err)}` });
+    }
+  }
+
+  await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(id).run();
+  return json(200, { ok: true, terminated: Boolean(row.instance_id) });
+}
+
+/**
+ * Destroy servers that nobody is riding on.
+ *
+ * This is what makes "no unattended servers" true rather than merely intended. An idle
+ * server is indistinguishable from a busy one on the bill, and the only person who would
+ * notice is the one paying — long after the fact.
+ *
+ * A server is given a grace period rather than being killed on the first empty poll,
+ * because empty is normal: between races, and while the first rider is still loading in.
+ */
+async function reapIdleServers(env: Env): Promise<void> {
+  const aws = awsEnv(env);
+  if (!aws) return;
+  const idleMs = Number(env.MXB_IDLE_MINUTES ?? "20") * 60_000;
+  const maxLifeMs = Number(env.MXB_MAX_LIFETIME_MINUTES ?? "240") * 60_000;
+  const now = Date.now();
+
+  // Driven from EC2, not from our table. The instances AWS is billing for are the ones that
+  // need turning off, and a row that went missing is precisely the case where our records
+  // cannot be trusted to find them.
+  const instances = await fleet(aws);
+  const rows = await env.DB.prepare(
+    "SELECT id, instance_id, agent_token, idle_since FROM servers WHERE instance_id IS NOT NULL",
+  ).all<{
+    id: string;
+    instance_id: string;
+    agent_token: string | null;
+    idle_since: number | null;
+  }>();
+  const byInstance = new Map(rows.results.map((r) => [r.instance_id, r]));
+
+  for (const instance of instances) {
+    if (instance.state !== "running" && instance.state !== "pending") continue;
+    const row = byInstance.get(instance.instanceId);
+
+    const kill = async (why: string) => {
+      try {
+        await terminateInstance(aws, instance.instanceId);
+        if (row) await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(row.id).run();
+        console.log(JSON.stringify({ msg: "reaped", instance: instance.instanceId, why }));
+      } catch (err) {
+        // Left on the list rather than forgotten — an instance we failed to kill is exactly
+        // the one that must be tried again next sweep.
+        console.error(
+          JSON.stringify({ msg: "reap", instance: instance.instanceId, why, error: String(err) }),
+        );
+      }
+    };
+
+    // An instance with no row is one whose record we already deleted, or one whose launch
+    // half-failed. Either way nothing is tracking it any more, so nothing will ever turn it
+    // off — which makes destroying it the safe direction, not the risky one.
+    if (!row) {
+      await kill("orphan: no database row points at this instance");
+      continue;
+    }
+
+    // The backstop that catches everything else: a bootstrap that hung instead of trapping,
+    // an agent that never started, a failure mode nobody has thought of yet. Without this,
+    // any instance we cannot talk to bills until a human notices.
+    const age = instance.launchedAt ? now - Date.parse(instance.launchedAt) : 0;
+    if (age > maxLifeMs) {
+      await kill(`older than the ${maxLifeMs / 60_000} minute limit`);
+      continue;
+    }
+
+    // Built from EC2's view rather than a stored column: the public IP is assigned while the
+    // instance boots, long after the row was written, so the row can never have it at
+    // creation time and a server whose address we forgot to record would never be checked.
+    const agentUrl = instance.publicIp ? `http://${instance.publicIp}:${AGENT_PORT}` : null;
+    const players = await connectedCount(agentUrl, row.agent_token);
+
+    if (players === null) {
+      // Still booting, or briefly unreachable. Not fatal on its own — the age limit above
+      // is what stops "unreachable" from meaning "runs forever".
+      continue;
+    }
+    if (players > 0) {
+      if (row.idle_since !== null) {
+        await env.DB.prepare("UPDATE servers SET idle_since = NULL WHERE id = ?")
+          .bind(row.id)
+          .run();
+      }
+      continue;
+    }
+    if (row.idle_since === null) {
+      await env.DB.prepare("UPDATE servers SET idle_since = ? WHERE id = ?")
+        .bind(now, row.id)
+        .run();
+      continue;
+    }
+    if (now - row.idle_since >= idleMs) {
+      await kill(`empty for ${Math.round((now - row.idle_since) / 60_000)} minutes`);
+    }
+  }
+}
+
+/** How many riders are on a server, or null if the agent couldn't be asked. */
+async function connectedCount(
+  agentUrl: string | null,
+  agentToken: string | null,
+): Promise<number | null> {
+  if (!agentUrl || !agentToken) return null;
+  try {
+    const resp = await fetch(`${agentUrl.replace(/\/+$/, "")}/players`, {
+      headers: { authorization: `Bearer ${agentToken}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) return null;
+    const body = (await resp.json()) as { players?: unknown[] };
+    return Array.isArray(body.players) ? body.players.length : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -301,9 +1003,17 @@ async function roster(url: URL, env: Env): Promise<Response> {
   const serverId = url.searchParams.get("server");
   if (!serverId) return json(400, { error: "a server id is required" });
 
+  // DISTINCT on the destination: loadouts are per bike now, and gear repeats across every
+  // bike a rider owns, so the raw join returns the same helmet paint a dozen times over. The
+  // receiver installs by destination and de-duplicates anyway — doing it here keeps the
+  // response the size it was before bikes were separated.
+  //
+  // MIN(slot) only picks a stable representative for a destination two slots agree on; the
+  // client keys on rel_dest, not on slot.
   const rows = await env.DB.prepare(
-    "SELECT a.rider_name, a.guid, p.slot, p.file_name, p.sha256, p.size, p.rel_dest" +
-      " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id",
+    "SELECT a.rider_name, a.guid, MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest" +
+      " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id" +
+      " GROUP BY a.id, p.rel_dest, p.sha256",
   ).all<{
     rider_name: string;
     guid: string | null;

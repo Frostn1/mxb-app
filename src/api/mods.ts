@@ -1727,11 +1727,28 @@ export interface ExperimentalState {
   /** Whether this install has a control-plane account yet. */
   enrolled: boolean;
   riderName: string;
+  /** What paint sync last achieved — present so a cold start can say so straight away. */
+  sync: SyncState;
+  /**
+   * The MX Bikes profile paint sync speaks for, or `null` when there is none.
+   *
+   * Null means nothing can ever be published, which is worth saying rather than leaving as
+   * a publish that quietly does nothing.
+   */
+  profile: string | null;
 }
 
 export interface PublishOutcome {
+  /** Paints sent, across every bike. */
   published: number;
   uploaded: number;
+  /** Bikes that carried something worth publishing. */
+  bikes: number;
+  /** Bikes beyond the cap that were left out. */
+  skippedBikes: number;
+  digest: string;
+  /** The look already matched what was last sent, so nothing went up. */
+  unchanged: boolean;
 }
 
 export interface PullOutcome {
@@ -1740,6 +1757,41 @@ export interface PullOutcome {
   alreadyHad: number;
   /** Entries refused because their destination wasn't safe to write. */
   rejected: number;
+  /** Paints left alone because that file is the player's own, not one the sync installed. */
+  keptYours: number;
+  /** Destinations two riders disagreed about, where neither was installed. */
+  conflicted: number;
+}
+
+/** What the last publish and the last pull achieved, as the backend recorded them. */
+export interface SyncState {
+  publishedDigest: string;
+  /** Unix milliseconds; `0` means never. */
+  publishedAt: number;
+  publishedBikes: number;
+  publishedPaints: number;
+  pulledAt: number;
+  pulledRiders: number;
+  keptYours: number;
+  conflicted: number;
+}
+
+/**
+ * A background publish or pull, as it happens.
+ *
+ * Both run in spawned tasks off actions the player didn't ask for directly — an apply, a
+ * launch, a file changing under us. Before this event they were invisible: the only report
+ * was a log line, so "is this working?" had no answer anywhere on screen.
+ */
+export interface SyncEvent {
+  phase: "publishing" | "published" | "pulling" | "pulled" | "failed";
+  publish?: PublishOutcome;
+  pull?: PullOutcome;
+  error?: string;
+}
+
+export function onSyncEvent(cb: (event: SyncEvent) => void): Promise<UnlistenFn> {
+  return listen<SyncEvent>("paint-sync", (e) => cb(e.payload));
 }
 
 export function experimentalState(): Promise<ExperimentalState> {
@@ -1764,13 +1816,25 @@ export function setGuid(guid: string): Promise<void> {
 }
 
 /** Publish this rider's paints so everyone else on the server can see them. */
-export function publishPaints(profile: string, bike: string): Promise<PublishOutcome> {
-  return invoke<PublishOutcome>("publish_paints", { profile, bike });
+/**
+ * Publish everything this rider is wearing, across every bike.
+ *
+ * The app does this on its own whenever the look changes, so this is the button for wanting
+ * to see it happen. `force` sends an unchanged look anyway — without it, pressing Publish
+ * after a successful one is correctly a no-op, which reads as the button being broken.
+ */
+export function publishPaints(force = false, profile?: string): Promise<PublishOutcome> {
+  return invoke<PublishOutcome>("publish_paints", { profile: profile ?? null, force });
 }
 
-/** Install every other rider's paints. */
-export function syncPaints(serverId: string): Promise<PullOutcome> {
-  return invoke<PullOutcome>("sync_paints", { serverId });
+/**
+ * Install every other rider's paints.
+ *
+ * The app already does this on its own when the game launches — this is the manual retry
+ * for a sync that ran before someone had published, or that hit a flaky connection.
+ */
+export function syncPaints(): Promise<PullOutcome> {
+  return invoke<PullOutcome>("sync_paints");
 }
 
 // ── Dedicated servers ────────────────────────────────────────────────────────
@@ -1783,6 +1847,8 @@ export interface ServerRef {
   url: string;
   /** Bearer token from that host's `agent.json`. */
   token: string;
+  /** Control-plane id once this server is in the public list; empty when it isn't. */
+  registryId?: string;
 }
 
 /** What `mxb-agent` reports about a server. */
@@ -1800,6 +1866,23 @@ export interface ServerStatus {
     track: string | null;
     maxClients: string | null;
   };
+}
+
+/** A server the control plane knows about — the list the join picker offers. */
+export interface RegisteredServer {
+  id: string;
+  name: string;
+  region: string;
+  /** `host:port`, the form the game's connect flag takes. */
+  address: string;
+}
+
+/**
+ * The joinable servers. Empty when this install hasn't enrolled — the registry needs a
+ * token — so callers should fall back to asking for an address rather than showing an error.
+ */
+export function cpServers(): Promise<RegisteredServer[]> {
+  return invoke<RegisteredServer[]>("cp_servers");
 }
 
 export type ServerAction = "start" | "stop" | "restart";
@@ -1820,6 +1903,146 @@ export function serverStatus(id: string): Promise<ServerStatus> {
 
 export function serverAction(id: string, action: ServerAction): Promise<unknown> {
   return invoke<unknown>("server_action", { id, action });
+}
+
+/** The tracks that host has installed — the only values its `.ini` will accept. */
+export function serverTracks(id: string): Promise<string[]> {
+  return invoke<string[]>("server_tracks", { id });
+}
+
+/**
+ * Ask an agent to describe itself before it's saved, so the add form can fill in the name
+ * the host already knows — and so a bad address or token fails here rather than as a dead
+ * row in the list.
+ */
+export function serverProbe(url: string, token: string): Promise<ServerStatus> {
+  return invoke<ServerStatus>("server_probe", { url, token });
+}
+
+/**
+ * An `mxb://enroll?code=…` link was opened.
+ *
+ * Fires with the invite code alone — the backend has already checked the link is the enroll
+ * route and that the code is a plain token. It only ever *prefills* the field; enrolling is
+ * still a button the player presses, so a link can't spend an invite by itself.
+ */
+export function onEnrollLink(cb: (code: string) => void): Promise<UnlistenFn> {
+  return listen<string>("deep-link-enroll", (event) => cb(event.payload));
+}
+
+/** Where a server can be hosted, as the control plane will accept it. */
+export const SERVER_REGIONS = [
+  "eu-central-1",
+  "eu-west-1",
+  "us-east-1",
+  "us-west-2",
+  "ap-southeast-2",
+] as const;
+
+/** An EC2 instance the control plane launched, as AWS reports it. */
+export interface FleetInstance {
+  instanceId: string;
+  state: string;
+  publicIp: string | null;
+  instanceType: string;
+  launchedAt: string | null;
+}
+
+export interface FleetState {
+  region: string;
+  /** Instances running across the whole fleet — what the cap is measured against. */
+  running: number;
+  cap: number;
+  /** Only this account's own; an instance id and IP belong to whoever pays for the box. */
+  instances: FleetInstance[];
+}
+
+/**
+ * A server the control plane runs for this account.
+ *
+ * Carries the agent token, which the public list never does. That is the point: a
+ * provisioned box has no console and prints its pairing code to nobody, so its owner has no
+ * other way to get the credential for a server they are paying for.
+ */
+export interface CloudServer {
+  id: string;
+  name: string;
+  region: string;
+  /** `host:port` players connect to. Empty until the box has announced itself. */
+  address: string;
+  agentUrl: string | null;
+  agentToken: string | null;
+  instanceId: string | null;
+  published: boolean;
+  createdAt: number;
+  /** When it was last seen empty, or `null` while someone is riding. */
+  idleSince: number | null;
+  /** Minutes of emptiness before it destroys itself. */
+  idleMinutes: number;
+  /** `pending` | `running` | `stopping` | `stopped` | `gone` | `self-hosted`. */
+  state: string;
+  publicIp: string | null;
+}
+
+/** The servers the control plane runs for this account, and what it takes to drive them. */
+export function cloudServers(): Promise<CloudServer[]> {
+  return invoke<CloudServer[]>("cloud_servers");
+}
+
+/** Destroy one, and stop paying for it. */
+export function destroyCloudServer(id: string): Promise<void> {
+  return invoke<void>("destroy_cloud_server", { id });
+}
+
+/**
+ * Create a server — the control plane launches a machine for it.
+ *
+ * The app holds no cloud credentials: a desktop binary can be unpacked, so the key lives in
+ * the control plane and this asks it, authenticated as this player.
+ */
+export function provisionServer(name: string): Promise<{ id: string; instanceId: string }> {
+  return invoke<{ id: string; instanceId: string }>("provision_server", { name });
+}
+
+/** What's running, read from EC2 — the number that turns into a bill. */
+export function fleetState(): Promise<FleetState> {
+  return invoke<FleetState>("fleet_state");
+}
+
+export interface PublishResult {
+  /** The registry id, needed to take it back out of the list. */
+  id: string;
+  /** False when the control plane couldn't reach the agent — recorded, but not advertised. */
+  published: boolean;
+}
+
+/**
+ * Put a server into the public list.
+ *
+ * Takes nothing but the region: the address is the agent's host joined to the port it
+ * reports, and the name comes from the server's own `.ini`.
+ */
+export function publishServer(id: string, region: string): Promise<PublishResult> {
+  return invoke<PublishResult>("publish_server", { id, region });
+}
+
+/** Take it back out. Only the account that registered it may. */
+export function unpublishServer(registryId: string): Promise<void> {
+  return invoke<void>("unpublish_server", { registryId });
+}
+
+/** The address and token packed into the one-line code `mxb-agent` prints at startup. */
+export interface Pairing {
+  url: string;
+  token: string;
+}
+
+/**
+ * Unpack that code. The agent already knows its own address and token, so pairing is a
+ * paste rather than two fields transcribed off a terminal.
+ */
+export function parsePairing(blob: string): Promise<Pairing> {
+  return invoke<Pairing>("parse_pairing", { blob });
 }
 
 /** Change server settings. The agent restarts the game, which reads its `.ini` only at startup. */

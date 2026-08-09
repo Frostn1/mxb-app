@@ -23,6 +23,7 @@ mod modelswap;
 mod mods;
 mod modstate;
 mod modwatch;
+mod profilewatch;
 mod mxb_fetch;
 mod mxb_session;
 mod overlay;
@@ -48,6 +49,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
+use profilewatch::ProfileWatcher;
 use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
 use tauri::{
@@ -3327,7 +3329,15 @@ fn set_seen_version(app: tauri::AppHandle, version: String) -> Result<(), String
 fn set_profiles_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.profiles_path = path;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // The watcher is pinned to a folder that just moved; re-point it, and publish in case
+    // the new folder's look differs from what the old one last sent.
+    if cfg.experimental_enabled() {
+        let profiles = app.state::<ProfileWatcher>();
+        profilewatch::start(&app, &profiles, &cfg.profiles_dir());
+        publish_paints_soon(&app, &cfg, None);
+    }
+    Ok(())
 }
 
 /// Scan Steam for a game's install folder. `None` if not found.
@@ -3443,7 +3453,16 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     // `load_or_detect`, not `load`: a missing config file shouldn't turn Play into an
     // error when the install is sitting exactly where the detector looks.
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))
+    let outcome = gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))?;
+    if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        // Both directions, because Play is the last moment before either one matters: the
+        // grid needs everyone else's paints on disk, and everyone else needs ours.
+        publish_paints_soon(&app, &cfg, None);
+        // No address to aim at — they'll pick from the in-game browser — so this covers
+        // the whole registry.
+        sync_paints_soon(&app, None);
+    }
+    Ok(outcome)
 }
 
 /// The version to *show*, which is the release tag when this build came from one.
@@ -3491,6 +3510,12 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
         "enrolled": !cfg.cp_token.trim().is_empty(),
         "riderName": cfg.cp_rider_name,
         "guid": cfg.cp_guid,
+        // What paint sync last managed, so the panel can say so on a cold start rather than
+        // showing nothing until something happens to run.
+        "sync": cfg.sync,
+        // Whether there is a profile to publish at all. A rider name that matches no profile
+        // on disk publishes nothing, silently, and that is worth saying out loud.
+        "profile": sync_profile(&cfg),
     })
 }
 
@@ -3517,7 +3542,7 @@ async fn enroll_account(
     }
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/v1/enroll", paintsync::CONTROL_PLANE))
+        .post(format!("{}/v1/enroll", paintsync::control_plane()))
         .json(&serde_json::json!({ "code": code, "riderName": rider_name }))
         .send()
         .await
@@ -3535,7 +3560,15 @@ async fn enroll_account(
     let mut cfg = config::load_or_detect(&app).unwrap_or_default();
     cfg.cp_token = body.token;
     cfg.cp_rider_name = body.rider_name.clone();
+    // A new account has published nothing, whatever this machine last sent under an older
+    // one. Clearing the digest is what stops the first publish being skipped as unchanged.
+    cfg.sync = config::SyncState::default();
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+
+    // Enrolling and then pressing Play was the commonest way to end up in a roster wearing
+    // nothing: publishing only ever ran off a preset apply, so a player who never opened the
+    // Locker published nothing at all. This is that gap closed at its source.
+    publish_paints_soon(&app, &cfg, None);
     Ok(body.rider_name)
 }
 
@@ -3546,12 +3579,20 @@ async fn enroll_account(
 /// connection. Claiming is first-come on the server side.
 #[tauri::command]
 async fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
-    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    claim_guid(&app, &guid).await
+}
+
+/// Register `guid` against this account and remember it locally.
+///
+/// Shared by the manual field and the automatic claim off a server roster, so both go
+/// through the same validation and land in the same place.
+async fn claim_guid(app: &tauri::AppHandle, guid: &str) -> Result<(), String> {
+    let cfg = config::load_or_detect(app).unwrap_or_default();
     if cfg.cp_token.trim().is_empty() {
-        return Err("Enrol with an invite code first.".into());
+        return Err("Enroll with an invite code first.".into());
     }
     let resp = reqwest::Client::new()
-        .put(format!("{}/v1/me/guid", paintsync::CONTROL_PLANE))
+        .put(format!("{}/v1/me/guid", paintsync::control_plane()))
         .bearer_auth(&cfg.cp_token)
         .json(&serde_json::json!({ "guid": guid.trim() }))
         .send()
@@ -3565,40 +3606,371 @@ async fn set_guid(app: tauri::AppHandle, guid: String) -> Result<(), String> {
             .unwrap_or(detail));
     }
 
-    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    // Re-read rather than reusing the config above: the round trip is long enough for
+    // something else to have written it.
+    let mut cfg = config::load_or_detect(app).unwrap_or_default();
     cfg.cp_guid = guid.trim().to_string();
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
 /// Publish this rider's paints so everyone else on the server can see them.
+///
+/// The app does this on its own whenever the look changes; this is the button for when a
+/// player wants to know it happened, or to force it after a failure. `force` drops the
+/// digest so an identical look is sent anyway — otherwise pressing it after a successful
+/// publish would look like it did nothing.
 #[tauri::command]
 async fn publish_paints(
     app: tauri::AppHandle,
-    profile: String,
-    bike: String,
+    profile: Option<String>,
+    force: bool,
 ) -> Result<paintsync::PublishOutcome, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     if cfg.cp_token.trim().is_empty() {
-        return Err("Enrol with an invite code first.".into());
+        return Err("Enroll with an invite code first.".into());
     }
-    paintsync::publish(&cfg, &cfg.cp_token, &profile, &bike)
+    let profile = match profile.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
+        Some(p) => p,
+        None => sync_profile(&cfg).ok_or("No MX Bikes profile to publish.")?,
+    };
+    let known = (!force).then(|| cfg.sync.published_digest.clone());
+    let outcome = paintsync::publish_all(&cfg, &cfg.cp_token, &profile, known.as_deref())
         .await
-        .map_err(|e| format!("{e:#}"))
+        .map_err(|e| format!("{e:#}"))?;
+    remember_publish(&app, &outcome);
+    emit_sync(&app, SyncEvent::published(&outcome));
+    Ok(outcome)
+}
+
+/// Which profile paint sync speaks for.
+///
+/// The name enrolled with, when it matches a profile on disk — that is the identity other
+/// players' apps key on. Otherwise the only profile there is, which is the overwhelmingly
+/// common shape and saves asking a question with one possible answer.
+fn sync_profile(cfg: &AppConfig) -> Option<String> {
+    let profiles = presets::list_profiles(&cfg.profiles_dir());
+    let enrolled = cfg.cp_rider_name.trim();
+    if !enrolled.is_empty() {
+        if let Some(hit) = profiles.iter().find(|p| p.eq_ignore_ascii_case(enrolled)) {
+            return Some(hit.clone());
+        }
+    }
+    (profiles.len() == 1).then(|| profiles[0].clone()).or_else(|| profiles.first().cloned())
+}
+
+/// Record what a publish achieved, so a cold start can still answer "is my look out there?".
+fn remember_publish(app: &tauri::AppHandle, outcome: &paintsync::PublishOutcome) {
+    // Re-read immediately before writing: the publish took a round trip, and `config::save`
+    // rewrites the whole file.
+    let mut cfg = config::load_or_detect(app).unwrap_or_default();
+    cfg.sync.published_digest = outcome.digest.clone();
+    cfg.sync.published_at = now_ms();
+    cfg.sync.published_bikes = outcome.bikes;
+    cfg.sync.published_paints = outcome.published;
+    if let Err(e) = config::save(app, &cfg) {
+        log::warn!("[sync] couldn't record the publish: {e:#}");
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// The event the frontend listens on to open enrollment with the code already filled in.
+const DEEP_LINK_ENROLL_EVENT: &str = "deep-link-enroll";
+
+/// The invite code out of an `mxb://enroll?code=…` link.
+///
+/// Parsed by hand rather than with a URL crate because only one shape is accepted and the
+/// value goes straight into a form: anything that isn't the enroll route, or carries a code
+/// that isn't a plain token, is dropped rather than guessed at. A deep link is reachable by
+/// any page the player visits, so this is untrusted input and treated as such.
+fn enroll_code_from_link(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("mxb://")?;
+    // `mxb://enroll?code=X` — the host is the route. A trailing slash is what some launchers
+    // add, so it's tolerated rather than made to fail.
+    let (route, query) = rest.split_once('?')?;
+    let route = route.trim_end_matches('/');
+    // Both spellings, because the link is written by a human handing out an invite and the
+    // two are a genuine trap. Accepting one costs a comparison; rejecting it costs someone
+    // an invite that silently does nothing.
+    if !route.eq_ignore_ascii_case("enroll") && !route.eq_ignore_ascii_case("enroll") {
+        return None;
+    }
+    let code = query.split('&').find_map(|pair| pair.strip_prefix("code="))?.trim();
+    // Invite codes are opaque tokens. Anything with punctuation or spacing in it is either
+    // percent-encoding we don't want to guess at or an attempt to smuggle something else.
+    if code.is_empty()
+        || code.len() > 128
+        || !code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    Some(code.to_string())
+}
+
+/// Bring the window up and hand the frontend the code from an `mxb://enroll` link.
+///
+/// The link only ever *prefills* the field — enrolling still needs the player to press the
+/// button. A URL a website can open must not be able to spend an invite on its own.
+fn handle_deep_link(app: &tauri::AppHandle, urls: &[String]) {
+    let Some(code) = urls.iter().find_map(|u| enroll_code_from_link(u)) else {
+        log::warn!("[deep-link] ignored {urls:?} — not an enroll link");
+        return;
+    };
+    show_main(app);
+    if let Err(e) = app.emit(DEEP_LINK_ENROLL_EVENT, code) {
+        log::warn!("[deep-link] couldn't hand the code to the UI: {e}");
+    }
+}
+
+/// Coalesces a burst of look changes into a single publish.
+///
+/// Bumped on every request; a waiting task whose generation has moved on drops out rather
+/// than uploading a look that has already been replaced.
+static PUBLISH_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How long to wait for the player to stop changing their look before publishing it.
+/// Cycling through presets in the Locker is one publish, not one per click.
+const PUBLISH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// The event the frontend listens on to follow a background publish or pull.
+const SYNC_EVENT: &str = "paint-sync";
+
+/// What paint sync is doing, for the UI to show.
+///
+/// Publishing and pulling both happen in spawned tasks off actions the player didn't ask
+/// for directly — an apply, a launch, a file changing under us. Without this they are
+/// entirely invisible: the only report was a log line, so "is this working?" had no answer
+/// anywhere on screen.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncEvent {
+    /// `publishing` | `published` | `pulling` | `pulled` | `failed`
+    phase: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    publish: Option<paintsync::PublishOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pull: Option<paintsync::PullOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+impl SyncEvent {
+    fn phase(phase: &'static str) -> Self {
+        SyncEvent { phase, publish: None, pull: None, error: None }
+    }
+    fn published(outcome: &paintsync::PublishOutcome) -> Self {
+        SyncEvent { publish: Some(outcome.clone()), ..SyncEvent::phase("published") }
+    }
+    fn pulled(outcome: &paintsync::PullOutcome) -> Self {
+        SyncEvent { pull: Some(outcome.clone()), ..SyncEvent::phase("pulled") }
+    }
+    fn failed(error: impl std::fmt::Display) -> Self {
+        SyncEvent { error: Some(error.to_string()), ..SyncEvent::phase("failed") }
+    }
+}
+
+/// Publish because something outside the app changed the look on disk.
+///
+/// The watcher runs on the notify thread with no config in hand, so this reads it and hands
+/// off to the ordinary debounced path. Separate from `publish_paints_soon` only because that
+/// one takes the config its caller already has.
+pub fn publish_look_now(app: &tauri::AppHandle) {
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    publish_paints_soon(app, &cfg, None);
+}
+
+fn emit_sync(app: &tauri::AppHandle, event: SyncEvent) {
+    if let Err(e) = app.emit(SYNC_EVENT, event) {
+        log::warn!("[sync] couldn't tell the UI: {e}");
+    }
+}
+
+/// Publish the current look in the background, once the player has stopped changing it.
+///
+/// Called from every path that could have changed what this rider is wearing — an apply,
+/// enrolling, starting up, launching the game, and the profile watcher. It does not try to
+/// work out whether the look really changed: `publish_all` hashes it and sends nothing when
+/// the digest matches, so calling this too often costs one local hash and no request.
+///
+/// Publishes the whole profile rather than one bike. Which bike a rider takes out is decided
+/// in the game, so publishing only the one the app last touched is why a rider could look
+/// right on one bike and default on the next.
+///
+/// Best-effort on purpose: publishing is a side errand of an action that has already
+/// succeeded on disk, so a failure here logs and is dropped rather than surfacing as an
+/// error on the apply the player actually asked for.
+fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<&str>) {
+    if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+        return;
+    }
+    let generation = PUBLISH_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let app = app.clone();
+    let profile = profile.map(str::to_string);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(PUBLISH_DEBOUNCE).await;
+        // A later change superseded this one; that request owns the publish.
+        if PUBLISH_GEN.load(std::sync::atomic::Ordering::SeqCst) != generation {
+            return;
+        }
+        // Re-read rather than reusing the captured config: the debounce is long enough for
+        // the player to have enrolled, or re-enrolled, since the change that queued this.
+        let cfg = config::load_or_detect(&app).unwrap_or_default();
+        if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+            return;
+        }
+        let Some(profile) = profile.or_else(|| sync_profile(&cfg)) else {
+            return;
+        };
+        let known = cfg.sync.published_digest.clone();
+        emit_sync(&app, SyncEvent::phase("publishing"));
+        match paintsync::publish_all(&cfg, &cfg.cp_token, &profile, Some(known.as_str())).await {
+            Ok(o) => {
+                if o.unchanged {
+                    log::debug!("[sync] {profile} is already published as {}", o.digest);
+                } else {
+                    log::info!(
+                        "[sync] published {} paints across {} bikes for {profile}, {} uploaded",
+                        o.published,
+                        o.bikes,
+                        o.uploaded
+                    );
+                    remember_publish(&app, &o);
+                }
+                emit_sync(&app, SyncEvent::published(&o));
+            }
+            Err(e) => {
+                log::warn!("[sync] publishing {profile} failed: {e:#}");
+                emit_sync(&app, SyncEvent::failed(format!("{e:#}")));
+            }
+        }
+    });
+}
+
+/// Install everyone else's paints in the background, ahead of a session.
+///
+/// `address` is where the player is headed when we know it — joining by address — and
+/// `None` when they pressed Play and will pick a server from the in-game browser. In that
+/// second case there is nothing to resolve, so this syncs every server in the registry:
+/// a superset of wherever they end up, which is the point.
+///
+/// Fired at launch rather than on a button because the paints have to be on disk *before*
+/// the game reads them. The game loads a rider's look when they appear on track, so a sync
+/// that happens after the grid forms is a sync that changes nothing this session.
+fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let cfg = config::load_or_detect(&app).unwrap_or_default();
+        if !cfg.experimental_enabled() {
+            return;
+        }
+        emit_sync(&app, SyncEvent::phase("pulling"));
+        match pull_rosters(&app, address).await {
+            Ok(o) => {
+                log::info!(
+                    "[sync] {} riders, {} paints installed, {} already held, {} kept as yours, \
+                     {} clashed, {} refused",
+                    o.riders,
+                    o.installed,
+                    o.already_had,
+                    o.kept_yours,
+                    o.conflicted,
+                    o.rejected
+                );
+                emit_sync(&app, SyncEvent::pulled(&o));
+            }
+            Err(e) => {
+                log::warn!("[sync] automatic sync failed: {e}");
+                emit_sync(&app, SyncEvent::failed(&e));
+            }
+        }
+    });
+}
+
+/// Pull the rosters for wherever the player is, or could be, riding.
+///
+/// `address` narrows this to a single server when we know where they're headed. Without
+/// one it covers the whole registry, which is the best available answer when the server is
+/// chosen from the in-game browser and never passes through us.
+async fn pull_rosters(
+    app: &tauri::AppHandle,
+    address: Option<String>,
+) -> Result<paintsync::PullOutcome, String> {
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    // An unreachable registry doesn't have to sink a targeted sync — the address is a
+    // usable key on its own — but with no address there's nothing left to aim at.
+    let registry = match paintsync::registry(Some(&cfg.cp_token)).await {
+        Ok(list) => list,
+        Err(e) => {
+            log::warn!("[sync] couldn't read the server registry: {e:#}");
+            Vec::new()
+        }
+    };
+
+    let keys: Vec<String> = match &address {
+        Some(addr) => vec![paintsync::server_key_for(&registry, addr)],
+        None => registry.iter().map(|s| s.id.clone()).collect(),
+    };
+    if keys.is_empty() {
+        return Err("No servers to sync with yet.".into());
+    }
+
+    let outcome = paintsync::pull(&cfg, &cfg.cp_token, &keys)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    // Re-read immediately before writing: the pull took a round trip, and `config::save`
+    // rewrites the whole file.
+    let mut cfg = config::load_or_detect(app).unwrap_or_default();
+    cfg.sync.pulled_at = now_ms();
+    cfg.sync.pulled_riders = outcome.riders;
+    cfg.sync.kept_yours = outcome.kept_yours;
+    cfg.sync.conflicted = outcome.conflicted;
+    if let Err(e) = config::save(app, &cfg) {
+        log::warn!("[sync] couldn't record the pull: {e:#}");
+    }
+    // Anything newly on disk is invisible to a running game until the loader re-reads the
+    // mods folder.
+    let _ = frostmod::signal_reload();
+    Ok(outcome)
 }
 
 /// Install every other rider's paints, so the grid renders correctly.
+///
+/// The app does this on its own at launch; this is the manual retry for when that ran
+/// before a rider had published, or failed on a flaky connection.
 #[tauri::command]
-async fn sync_paints(
-    app: tauri::AppHandle,
-    server_id: String,
-) -> Result<paintsync::PullOutcome, String> {
-    let cfg = config::load_or_detect(&app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enrol with an invite code first.".into());
+async fn sync_paints(app: tauri::AppHandle) -> Result<paintsync::PullOutcome, String> {
+    emit_sync(&app, SyncEvent::phase("pulling"));
+    match pull_rosters(&app, None).await {
+        Ok(o) => {
+            emit_sync(&app, SyncEvent::pulled(&o));
+            Ok(o)
+        }
+        Err(e) => {
+            emit_sync(&app, SyncEvent::failed(&e));
+            Err(e)
+        }
     }
-    paintsync::pull(&cfg, &cfg.cp_token, &server_id)
-        .await
-        .map_err(|e| format!("{e:#}"))
+}
+
+/// The servers the control plane knows about — what the join picker offers instead of
+/// asking a player to find and type an IP address.
+///
+/// Works without an account. Gating it on enrollment meant the people most in need of the
+/// list — the ones who have never joined a server and have no address to type — were the
+/// only ones who couldn't see it.
+#[tauri::command]
+async fn cp_servers(app: tauri::AppHandle) -> Result<Vec<paintsync::RegisteredServer>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let token = Some(cfg.cp_token.as_str()).filter(|t| !t.trim().is_empty());
+    paintsync::registry(token).await.map_err(|e| format!("{e:#}"))
 }
 
 /// The dedicated servers this player administers.
@@ -3618,18 +3990,372 @@ fn save_servers(app: tauri::AppHandle, servers: Vec<servers::ServerRef>) -> Resu
 
 /// Look up one saved server by id, so the commands below take an id rather than having the
 /// frontend hand back a token it was given.
+/// Servers the control plane runs for this account, as last fetched.
+///
+/// Held in memory rather than saved to `config.json`, because the token in each one belongs
+/// to a machine the control plane can re-issue at any time — and a credential this app never
+/// writes to disk is one that cannot go stale there or be read out of it. Refreshed whenever
+/// the Servers page asks, which is also whenever anything is about to act on one.
+#[derive(Default)]
+struct CloudServers(std::sync::Mutex<Vec<servers::ServerRef>>);
+
 fn server_by_id(app: &tauri::AppHandle, id: &str) -> Result<servers::ServerRef, String> {
-    config::load_or_detect(app)
-        .unwrap_or_default()
-        .servers
-        .into_iter()
+    if let Some(saved) =
+        config::load_or_detect(app).unwrap_or_default().servers.into_iter().find(|s| s.id == id)
+    {
+        return Ok(saved);
+    }
+    // Not one they paired by hand, so it's one the control plane launched for them. These
+    // never reach the saved list — nothing on that box prints a pairing code anyone can read.
+    app.state::<CloudServers>()
+        .0
+        .lock()
+        .unwrap()
+        .iter()
         .find(|s| s.id == id)
+        .cloned()
         .ok_or_else(|| "That server isn't in your list any more.".to_string())
+}
+
+/// A server run for this account by the control plane.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudServer {
+    id: String,
+    name: String,
+    region: String,
+    /// `host:port` players connect to. Empty until the box has announced itself.
+    address: String,
+    #[serde(default)]
+    agent_url: Option<String>,
+    #[serde(default)]
+    agent_token: Option<String>,
+    #[serde(default)]
+    instance_id: Option<String>,
+    published: bool,
+    created_at: u64,
+    /// When the server was last seen with nobody on it, or `null` while someone is riding.
+    #[serde(default)]
+    idle_since: Option<u64>,
+    /// Minutes of emptiness before it destroys itself.
+    idle_minutes: u64,
+    /// `pending` | `running` | `stopping` | `stopped` | `gone` | `self-hosted`.
+    state: String,
+    #[serde(default)]
+    public_ip: Option<String>,
+}
+
+/// The servers the control plane is running for this account.
+///
+/// A provisioned box has no console and prints its pairing code to nobody, so this is the
+/// only way its owner can ever obtain the token that drives it. Fetching it also refreshes
+/// the in-memory list `server_by_id` falls back to, which is what makes Start, Stop and Set
+/// track work on a machine the player has never touched.
+#[tauri::command]
+async fn cloud_servers(app: tauri::AppHandle) -> Result<Vec<CloudServer>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        servers: Vec<CloudServer>,
+    }
+    let resp = reqwest::Client::new()
+        .get(format!("{}/v1/servers/mine", paintsync::control_plane()))
+        .bearer_auth(&cfg.cp_token)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(text));
+    }
+    let body: Resp = resp.json().await.map_err(|e| format!("{e}"))?;
+
+    // Only the ones we can actually talk to become drivable; a box still booting has no
+    // agent yet, and an entry with no token is one the control plane declined to hand over.
+    *app.state::<CloudServers>().0.lock().unwrap() = body
+        .servers
+        .iter()
+        .filter_map(|s| {
+            Some(servers::ServerRef {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                url: s.agent_url.clone()?,
+                token: s.agent_token.clone()?,
+                registry_id: s.published.then(|| s.id.clone()).unwrap_or_default(),
+            })
+        })
+        .collect();
+    Ok(body.servers)
+}
+
+/// Destroy a server the control plane runs, and stop paying for it.
+#[tauri::command]
+async fn destroy_cloud_server(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .delete(format!("{}/v1/servers/{id}", paintsync::control_plane()))
+        .bearer_auth(&cfg.cp_token)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    // Already gone is the state we wanted.
+    if !resp.status().is_success() && resp.status() != reqwest::StatusCode::NOT_FOUND {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(text));
+    }
+    app.state::<CloudServers>().0.lock().unwrap().retain(|s| s.id != id);
+    Ok(())
 }
 
 #[tauri::command]
 async fn server_status(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, String> {
-    servers::status(&server_by_id(&app, &id)?).await
+    let server = server_by_id(&app, &id)?;
+    let status = servers::status(&server).await?;
+    claim_guid_from_roster(&app, &server).await;
+    Ok(status)
+}
+
+/// Claim this player's own GUID the first time one of their servers sees them connect.
+///
+/// The GUID is the identity the roster keys on, and it used to be a 32-character field the
+/// player had to find and type. They can't read it off their own machine — the game's
+/// plugin API exposes it only for the local player, to a plugin, in-process — but the
+/// dedicated server writes it next to their name on every connection, and the agent already
+/// parses exactly that. So the app waits until it sees the name it enrolled under connected
+/// to a server this player administers, and takes the GUID from there.
+///
+/// Runs off the status poll the Servers page already makes, and short-circuits the moment a
+/// GUID is held, so it costs one extra request per poll only while still unclaimed.
+async fn claim_guid_from_roster(app: &tauri::AppHandle, server: &servers::ServerRef) {
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    if !cfg.cp_guid.trim().is_empty() || cfg.cp_token.trim().is_empty() {
+        return;
+    }
+    let rider = cfg.cp_rider_name.trim();
+    if rider.is_empty() {
+        return;
+    }
+    let Ok(players) = servers::players(server).await else { return };
+    // Matched case-insensitively for the same reason the control plane's unique index is:
+    // the player typed this name into the game and into the app on two separate occasions.
+    let Some(me) = players
+        .iter()
+        .find(|p| p.name.trim().eq_ignore_ascii_case(rider) && !p.guid.trim().is_empty())
+    else {
+        return;
+    };
+
+    match claim_guid(app, &me.guid).await {
+        Ok(()) => log::info!("[sync] claimed GUID {} for {rider}", me.guid),
+        // First-come on the server side, so a rejection here is a real answer — someone
+        // else holds it — not a transient failure worth retrying into a loop.
+        Err(e) => log::warn!("[sync] couldn't claim GUID {} for {rider}: {e}", me.guid),
+    }
+}
+
+#[tauri::command]
+async fn server_tracks(app: tauri::AppHandle, id: String) -> Result<Vec<String>, String> {
+    servers::tracks(&server_by_id(&app, &id)?).await
+}
+
+/// Create a server: the control plane launches a machine for it.
+///
+/// The app never talks to AWS. A desktop binary can be unpacked, so a cloud credential
+/// inside one would let anyone create infrastructure in our account — the control plane
+/// holds the key and this asks it nicely, authenticated as this player.
+#[tauri::command]
+async fn provision_server(app: tauri::AppHandle, name: String) -> Result<serde_json::Value, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/provision", paintsync::control_plane()))
+        .bearer_auth(&cfg.cp_token)
+        .json(&serde_json::json!({ "name": name.trim() }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+
+    let ok = resp.status().is_success();
+    let text = resp.text().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if !ok {
+        return Err(body
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(str::to_string)
+            .unwrap_or(text));
+    }
+    Ok(body)
+}
+
+/// What's running, and therefore what's being paid for.
+///
+/// Read from EC2 rather than from anyone's records, because that is the number that turns
+/// into a bill.
+#[tauri::command]
+async fn fleet_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .get(format!("{}/v1/fleet", paintsync::control_plane()))
+        .bearer_auth(&cfg.cp_token)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    let ok = resp.status().is_success();
+    let text = resp.text().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if !ok {
+        return Err(body
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(str::to_string)
+            .unwrap_or(text));
+    }
+    Ok(body)
+}
+
+/// Put a server the player runs into the public list, so other people can find it.
+///
+/// Everything the control plane needs is already known to the agent, so nothing here is
+/// asked of the operator: the game address is the agent's own host joined to the port it
+/// reports, and the name comes from the server's `.ini`. What the player supplies is the
+/// decision to publish, and a region — which is the one fact no machine can infer.
+///
+/// The agent URL is sent so the control plane can check the box actually answers before
+/// advertising it. That check is why an unreachable home server doesn't end up as a row in
+/// everyone's join picker that nobody can connect to.
+#[tauri::command]
+async fn publish_server(
+    app: tauri::AppHandle,
+    id: String,
+    region: String,
+) -> Result<serde_json::Value, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let server = server_by_id(&app, &id)?;
+    let status = servers::status(&server).await?;
+
+    let port = status
+        .get("port")
+        .and_then(|p| p.as_u64())
+        .ok_or("The agent didn't say which port the server runs on.")?;
+    let host = servers::host_of(&server.url)?;
+    let name = status
+        .get("server")
+        .and_then(|s| s.get("name"))
+        .and_then(|n| n.as_str())
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .unwrap_or(&server.name)
+        .to_string();
+
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/servers", paintsync::control_plane()))
+        .bearer_auth(&cfg.cp_token)
+        .json(&serde_json::json!({
+            "name": name,
+            "region": region,
+            "address": format!("{host}:{port}"),
+            "agentUrl": server.url,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+
+    let status_code = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if !status_code.is_success() {
+        return Err(body
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(str::to_string)
+            .unwrap_or(text));
+    }
+
+    // Remember the registry id: it is the only handle that can withdraw this row later, and
+    // the control plane will never hand it out a second time.
+    if let Some(registry_id) = body.get("id").and_then(|v| v.as_str()) {
+        let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+        if let Some(saved) = cfg.servers.iter_mut().find(|s| s.id == id) {
+            saved.registry_id = registry_id.to_string();
+            config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+        }
+    }
+    Ok(body)
+}
+
+/// Take a server back out of the public list.
+#[tauri::command]
+async fn unpublish_server(app: tauri::AppHandle, registry_id: String) -> Result<(), String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let resp = reqwest::Client::new()
+        .delete(format!("{}/v1/servers/{registry_id}", paintsync::control_plane()))
+        .bearer_auth(&cfg.cp_token)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach the control plane: {e}"))?;
+    // A row already gone from the control plane is the state we wanted; clearing our end
+    // regardless keeps a 404 from stranding the local entry as permanently "published".
+    let gone = resp.status() == reqwest::StatusCode::NOT_FOUND;
+    if !resp.status().is_success() && !gone {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(text));
+    }
+
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    if let Some(saved) = cfg.servers.iter_mut().find(|s| s.registry_id == registry_id) {
+        saved.registry_id.clear();
+        config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    }
+    Ok(())
+}
+
+/// Unpack the one-line code `mxb-agent` prints, so adding a server is a paste rather than
+/// an address, a token and a name typed in by hand.
+#[tauri::command]
+fn parse_pairing(blob: String) -> Result<servers::Pairing, String> {
+    servers::parse_pairing(&blob)
+}
+
+/// Ask an agent to name itself, before it's saved to the list.
+///
+/// Lets the add form fill the server's name in from its `.ini` rather than having the
+/// operator retype something the host already knows, and doubles as the check that the
+/// address and token are right — a typo shows up here instead of as a dead row.
+#[tauri::command]
+async fn server_probe(url: String, token: String) -> Result<serde_json::Value, String> {
+    let probe = servers::ServerRef {
+        url: url.trim().to_string(),
+        token: token.trim().to_string(),
+        ..Default::default()
+    };
+    servers::status(&probe).await
 }
 
 #[tauri::command]
@@ -3657,7 +4383,13 @@ async fn server_set_config(
 #[tauri::command]
 fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::LaunchOutcome, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))
+    let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
+    if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        publish_paints_soon(&app, &cfg, None);
+        // We know exactly where they're going, so this syncs that server alone.
+        sync_paints_soon(&app, Some(address));
+    }
+    Ok(outcome)
 }
 
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
@@ -4067,6 +4799,9 @@ fn apply_loadout_now(
         model_refresh = model_refresh_cmd(app, cfg.instant_refresh, bikeid);
     }
     let content_reload = frostmod::signal_reload();
+    // The look on disk just changed, so what the control plane holds for this rider is now
+    // stale. Queued rather than awaited — this function is the synchronous apply path.
+    publish_paints_soon(app, cfg, Some(profile));
     Ok(PresetApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
@@ -4393,6 +5128,9 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())
+        // `mxb://` links, so an invite can be handed out as something to click rather than
+        // a code to transcribe. See `handle_deep_link`.
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -4404,6 +5142,8 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(FrostmodProcess::default())
         .manage(ModWatcher::default())
+        .manage(ProfileWatcher::default())
+        .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
@@ -4423,6 +5163,24 @@ fn main() {
             }
             if let Ok(dir) = app.path().app_log_dir() {
                 log::info!("log dir: {}", dir.display());
+            }
+
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // Windows and Linux bind the scheme at runtime rather than at install, so a
+                // build run from a folder — or a dev build — still answers `mxb://`. macOS
+                // takes it from the bundle's Info.plist and has no runtime equivalent.
+                #[cfg(any(windows, target_os = "linux"))]
+                if let Err(e) = app.deep_link().register_all() {
+                    // Not fatal: everything except the link still works, and on a locked-down
+                    // machine this is the one part that can legitimately be refused.
+                    log::warn!("[deep-link] couldn't register the mxb:// scheme: {e}");
+                }
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
+                    handle_deep_link(&handle, &urls);
+                });
             }
 
             let show = MenuItem::with_id(app, "show", "Show MXB App", true, None::<&str>)?;
@@ -4487,6 +5245,16 @@ fn main() {
                 if cfg.watch_mods_reload {
                     let watcher = handle.state::<ModWatcher>();
                     modwatch::start(handle, &watcher, &cfg.mods_path);
+                }
+                // Paint sync, both directions, from the moment the app opens:
+                //  * publish, because the look may have changed in the game's garage while
+                //    the app was shut, and nothing would ever have noticed;
+                //  * watch, so the same change during this session is noticed as it happens.
+                // Both no-op unless the experimental features are on and an account exists.
+                if cfg.experimental_enabled() {
+                    publish_paints_soon(handle, &cfg, None);
+                    let profiles = handle.state::<ProfileWatcher>();
+                    profilewatch::start(handle, &profiles, &cfg.profiles_dir());
                 }
                 // A combo another app already owns shouldn't stop the app from starting
                 // — Settings reports the state and lets the player pick another.
@@ -4637,7 +5405,17 @@ fn main() {
             sync_paints,
             list_servers,
             save_servers,
+            cp_servers,
             server_status,
+            server_tracks,
+            server_probe,
+            publish_server,
+            unpublish_server,
+            provision_server,
+            fleet_state,
+            cloud_servers,
+            destroy_cloud_server,
+            parse_pairing,
             server_action,
             server_set_config,
             game_running,
@@ -5129,6 +5907,64 @@ mod stock_side_tests {
         let embedded = v(&["goggles"]);
         assert!(mesh_supplies_side(&embedded, &v(&[]), true), "the goggle side has one");
         assert!(!mesh_supplies_side(&embedded, &v(&[]), false), "the shell does not");
+    }
+}
+
+#[cfg(test)]
+mod deep_link_tests {
+    use super::enroll_code_from_link;
+
+    #[test]
+    fn reads_the_code_out_of_an_enroll_link() {
+        assert_eq!(enroll_code_from_link("mxb://enroll?code=ABC-123").as_deref(), Some("ABC-123"));
+        // A launcher that adds a trailing slash to the host must still work.
+        assert_eq!(enroll_code_from_link("mxb://enroll/?code=xyz_9").as_deref(), Some("xyz_9"));
+    }
+
+    #[test]
+    fn accepts_the_british_spelling_too() {
+        // Whoever writes the invite link is a person, and the two spellings are a trap.
+        assert_eq!(enroll_code_from_link("mxb://enroll?code=A1").as_deref(), Some("A1"));
+    }
+
+    #[test]
+    fn finds_the_code_among_other_parameters() {
+        assert_eq!(enroll_code_from_link("mxb://enroll?ref=discord&code=A1").as_deref(), Some("A1"));
+    }
+
+    #[test]
+    fn ignores_links_that_are_not_the_enroll_route() {
+        // Any page the player visits can open one of these, so anything unrecognised has
+        // to be dropped rather than interpreted.
+        for bad in [
+            "mxb://install?code=A1",
+            "mxb://enroll",
+            "https://example.com/enroll?code=A1",
+            "mxb://",
+            "",
+        ] {
+            assert!(enroll_code_from_link(bad).is_none(), "{bad:?} must be ignored");
+        }
+    }
+
+    #[test]
+    fn refuses_a_code_that_is_not_a_plain_token() {
+        // These would each go straight into the enroll field; none is a real invite code.
+        for bad in [
+            "mxb://enroll?code=",
+            "mxb://enroll?code=a b",
+            "mxb://enroll?code=../../etc",
+            "mxb://enroll?code=%2E%2E",
+            "mxb://enroll?code=<script>",
+        ] {
+            assert!(enroll_code_from_link(bad).is_none(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn refuses_an_absurdly_long_code() {
+        let long = format!("mxb://enroll?code={}", "a".repeat(200));
+        assert!(enroll_code_from_link(&long).is_none());
     }
 }
 

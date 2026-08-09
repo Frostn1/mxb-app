@@ -84,3 +84,58 @@ jobs:
         working-directory: ./src-tauri
         # Tests needing a real MX Bikes asset are `#[ignore]`d and stay skipped here.
         run: cargo test --locked
+
+  # The two things paint sync depends on that nothing was checking. Both ship separately
+  # from the app — the Worker is deployed by hand and the agent runs on someone else's
+  # machine — so a break in either surfaced only when a player hit it.
+  control-plane:
+    name: Control plane (typecheck, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./control-plane
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Wrangler 4 refuses to run on anything older, and `wrangler types` is what
+          # generates the `Env` the typecheck needs.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: control-plane/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `Env` comes from a generated `worker-configuration.d.ts` that is gitignored, so it
+      # has to be regenerated before anything can typecheck.
+      - name: Generate Worker types
+        run: npx wrangler types
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npx vitest run
+
+  server-agent:
+    name: Server agent (test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./server-agent -> target
+
+      - name: Run tests
+        working-directory: ./server-agent
+        run: cargo test --locked

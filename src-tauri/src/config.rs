@@ -88,7 +88,7 @@ pub struct AppConfig {
     /// the saved config (see [`AppConfig::experimental_enabled`]).
     pub experimental: bool,
     /// Bearer token for this player's control-plane account, from enrolling with an invite
-    /// code. Empty until they enrol.
+    /// code. Empty until they enroll.
     pub cp_token: String,
     /// The in-game rider name this account enrolled with. Kept so the UI can show which
     /// identity the paints are published under.
@@ -96,6 +96,33 @@ pub struct AppConfig {
     /// This player's MX Bikes GUID, once claimed. The stable identity the roster keys on —
     /// rider names are free text and change between sessions.
     pub cp_guid: String,
+    /// What paint sync last did, so the UI can say so instead of the player having to guess
+    /// from an empty grid. Written by the background tasks; never edited by hand.
+    pub sync: SyncState,
+}
+
+/// The record of the last publish and the last pull.
+///
+/// Persisted rather than held in memory because the question it answers — "is my look
+/// actually out there?" — is asked on a cold start, before anything has run.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SyncState {
+    /// Digest of the look last sent up. An identical look is never re-sent, which is what
+    /// lets every path that might have changed one publish without checking first.
+    pub published_digest: String,
+    /// Unix milliseconds. `0` means never.
+    pub published_at: u64,
+    pub published_bikes: usize,
+    pub published_paints: usize,
+    /// Unix milliseconds of the last successful pull. `0` means never.
+    pub pulled_at: u64,
+    pub pulled_riders: usize,
+    /// Paints another rider published that would have landed on a file this machine already
+    /// had. Kept back rather than overwritten — see `paintsync::pull`.
+    pub kept_yours: usize,
+    /// Destinations two riders disagreed about, so neither was installed.
+    pub conflicted: usize,
 }
 
 /// Set to `1` to force the experimental features on for one run.
@@ -154,6 +181,7 @@ impl Default for AppConfig {
             cp_token: String::new(),
             cp_rider_name: String::new(),
             cp_guid: String::new(),
+            sync: SyncState::default(),
         }
     }
 }

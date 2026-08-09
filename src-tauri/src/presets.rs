@@ -33,7 +33,7 @@ pub const SLOT_SECTIONS: [&str; 15] = [
     "tyres",
 ];
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Loadout {
     pub paint: String,
@@ -349,7 +349,11 @@ pub fn list_profiles(profiles_dir: &Path) -> Vec<String> {
 pub fn list_bikes(profiles_dir: &Path, profile: &str) -> anyhow::Result<Vec<String>> {
     let path = profile_ini_path(profiles_dir, profile);
     let text = read_profile_ini(&path)?;
-    let doc = IniDoc::parse(&text);
+    Ok(bikes_in(&IniDoc::parse(&text)))
+}
+
+/// The bikes a profile carries, from whichever section is keyed by bike id.
+fn bikes_in(doc: &IniDoc) -> Vec<String> {
     // `[rider]` is the cleanest bikeid-keyed section; fall back to `[paint]`.
     let mut bikes = doc.section_keys("rider");
     if bikes.is_empty() {
@@ -357,14 +361,52 @@ pub fn list_bikes(profiles_dir: &Path, profile: &str) -> anyhow::Result<Vec<Stri
     }
     bikes.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
     bikes.dedup();
-    Ok(bikes)
+    bikes
 }
 
 pub fn read_loadout(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow::Result<Loadout> {
     let path = profile_ini_path(profiles_dir, profile);
     let text = read_profile_ini(&path)?;
-    let doc = IniDoc::parse(&text);
+    Ok(loadout_in(&IniDoc::parse(&text), bikeid))
+}
 
+/// Every bike's loadout, from a single read and parse.
+///
+/// [`read_loadout`] re-reads and re-parses the whole `profile.ini` per call, which is the
+/// right shape when the UI is asking about one bike. Publishing a rider's look asks about
+/// all of them — a profile holds a column per bike they have ever sat on — and doing that
+/// one bike at a time is the same file parsed a dozen times over.
+///
+/// Returned in `list_bikes` order so the caller's own ordering decisions are stable.
+pub fn read_all_loadouts(
+    profiles_dir: &Path,
+    profile: &str,
+) -> anyhow::Result<Vec<(String, Loadout)>> {
+    let path = profile_ini_path(profiles_dir, profile);
+    let text = read_profile_ini(&path)?;
+    let doc = IniDoc::parse(&text);
+    Ok(bikes_in(&doc)
+        .into_iter()
+        .map(|bike| {
+            let lo = loadout_in(&doc, &bike);
+            (bike, lo)
+        })
+        .collect())
+}
+
+/// The bike the game will start on — `[info] bikeid`.
+///
+/// Profile-global rather than per-bike, and the only thing in the file that says which of
+/// those columns is the one the rider is actually using.
+pub fn active_bike(profiles_dir: &Path, profile: &str) -> Option<String> {
+    let text = read_profile_ini(&profile_ini_path(profiles_dir, profile)).ok()?;
+    IniDoc::parse(&text)
+        .get("info", "bikeid")
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty())
+}
+
+fn loadout_in(doc: &IniDoc, bikeid: &str) -> Loadout {
     let mut lo = Loadout::default();
     for section in SLOT_SECTIONS {
         lo.set_slot(section, doc.get(section, bikeid).unwrap_or_default());
@@ -378,7 +420,7 @@ pub fn read_loadout(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow:
         }
     }
     lo.race_number = doc.get("info", "race_number").unwrap_or_default();
-    Ok(lo)
+    lo
 }
 
 /// Whether a `profile.ini` section is a cosmetic slot rather than bookkeeping.
@@ -748,6 +790,43 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         assert_eq!(lo.helmet_paint, "CLUTCH");
         assert_eq!(lo.tyres, "");
         assert_eq!(lo.race_number, "92");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // Paint sync publishes every bike a profile holds, and reading them one at a time
+    // re-parses the same file per bike. What matters is that the batch answers identically.
+    #[test]
+    fn reading_every_bike_at_once_matches_reading_them_one_by_one() {
+        let root = tmp("read-all");
+        write_sample(&root, "main");
+        let profiles = root.join("profiles");
+
+        let all = read_all_loadouts(&profiles, "main").unwrap();
+        assert_eq!(
+            all.iter().map(|(b, _)| b.clone()).collect::<Vec<_>>(),
+            list_bikes(&profiles, "main").unwrap(),
+            "same bikes, same order"
+        );
+        for (bike, lo) in &all {
+            assert_eq!(*lo, read_loadout(&profiles, "main", bike).unwrap(), "{bike}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // `[info] bikeid` is the only thing in the file saying which of those columns the rider
+    // is actually using — it decides which bike survives the publish cap.
+    #[test]
+    fn the_active_bike_is_the_one_the_game_will_start_on() {
+        let root = tmp("active");
+        write_sample(&root, "main");
+        assert_eq!(active_bike(&root.join("profiles"), "main").as_deref(), Some("YZ450F"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn no_profile_means_no_active_bike_rather_than_a_panic() {
+        let root = tmp("active-missing");
+        assert_eq!(active_bike(&root.join("profiles"), "nobody"), None);
         let _ = fs::remove_dir_all(&root);
     }
 
