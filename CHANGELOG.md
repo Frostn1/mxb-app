@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-08-09
+
+### Fixed
+- **Protection is drawn the right way up.** Every piece in the slot rendered on its side: the
+  viewer assumed protection was authored the way the rider's body is, and it isn't — it takes
+  the same up-axis as a helmet, turned a quarter turn about it. Read off the meshes rather
+  than assumed, and checked against the game's own chest protector and neck brace, a tactical
+  vest, a Leatt, long hair and two chains. The library's quick-view had the same fault and now
+  faces a piece forward too.
+- **Installed protections show up at all.** The game keeps them in `mods/rider/protections`;
+  the app looked in — and installed to — `protection`, so nothing you dropped in the game's
+  folder was offered in the picker, and nothing the app installed was visible to the game.
+  New installs go to the game's folder; the old one is still read, so anything already there
+  keeps working.
+- **A protection set wears all of its pieces.** The game's own "Full" is a chest protector
+  *and* the neck brace worn with it, and only one of the two was drawn — a different one from
+  one run to the next. Every piece a mod declares is now drawn, each bound to its own mesh's
+  textures.
+- **Stock protection isn't a grey shape any more.** "Full" and "Neck" ship no paint of their
+  own, and the loader had nothing to dress them in; they now wear the texture baked into their
+  mesh, the same way a paintless mod already did.
+- **Chains hang where they belong.** A mesh whose geometry is a single group was placed twice,
+  which put a chain 35 cm below the rider and off to one side — most of the protection
+  category is chains. Gear now lands exactly on the bounds its own file states.
+- **A protection that ships sealed files loads out of a `.pkz` too**, not only out of a folder.
+- **The expanded 3D preview gives the model the window.** The title bar was taking half of it,
+  because the dialog laid its two rows out as an even grid.
+
 ## 2026-08-08 — content behind a folder link is found
 
 ### Fixed

@@ -77,6 +77,15 @@ impl Game {
     pub const ALL: [Game; 2] = [Game::Mxb, Game::Gpb];
 }
 
+/// The folders MX Bikes' protection models live in under `mods/rider`, in the order they're
+/// looked in.
+///
+/// `protections` is the game's own name for the slot: it is what `rider.pkz` calls the folder,
+/// what the game's loader asks the mods tree for, and what mods on mxb-mods package themselves
+/// as. Earlier versions of this app installed to the singular `protection`, so that is still
+/// read — nothing is ever written to it.
+pub const PROTECTION_AREAS: &[&str] = &["protections", "protection"];
+
 /// One gear area under `mods/rider` — a folder of models, each of which may carry paints.
 pub struct RiderArea {
     /// Folder name under `mods/rider`.
@@ -190,7 +199,15 @@ pub static MXB: GameProfile = GameProfile {
                 goggles: false,
             },
             RiderArea {
-                folder: "protection",
+                folder: PROTECTION_AREAS[0],
+                model_cat: "protection",
+                paint_cat: Some("protectionPaint"),
+                goggles: false,
+            },
+            // The same slot under the name earlier versions installed to, so what they put
+            // there still shows up in the library and the pickers.
+            RiderArea {
+                folder: PROTECTION_AREAS[1],
                 model_cat: "protection",
                 paint_cat: Some("protectionPaint"),
                 goggles: false,

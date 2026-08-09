@@ -770,6 +770,16 @@ export const STOCK_RIDER_PROFILES = ["default_mx", "default_sm"];
 const RIDER_KIT_CATEGORY_IDS = [35, 129, 52];
 const RIDER_GLOVES_CATEGORY_ID = 32;
 
+/**
+ * The folder under `mods/rider` a protection install goes to.
+ *
+ * The game's own name for the slot, plural: it is what `rider.pkz` calls the folder and what
+ * mods package themselves as. Earlier versions installed to the singular `protection`, which
+ * the backend still *reads* so nothing already there disappears — but nothing is written
+ * there any more, because the game never looks in it.
+ */
+const PROTECTION_DIR = "protections";
+
 export type GearPaintKind = "helmets" | "boots" | "protection";
 
 const RIDER_PAINT_CATEGORY_KIND: Record<number, GearPaintKind> = {
@@ -820,7 +830,7 @@ export function buildRiderDestinations(
 
   add("helmets", "dest.helmetsNewModel");
   add("boots", "dest.bootsNewModel");
-  add("protection", "dest.protectionNewModel");
+  add(PROTECTION_DIR, "dest.protectionNewModel");
 
   const scoredPaints: { value: string; score: number; kind: GearPaintKind }[] = [];
   for (const h of targets.helmets) {
@@ -833,8 +843,12 @@ export function buildRiderDestinations(
     scoredPaints.push({ value: `boots/${b}/paints`, score: score(b), kind: "boots" });
   }
   for (const p of targets.protection) {
-    add(`protection/${p}/paints`, "dest.protectionPaintsFor", { name: p });
-    scoredPaints.push({ value: `protection/${p}/paints`, score: score(p), kind: "protection" });
+    add(`${PROTECTION_DIR}/${p}/paints`, "dest.protectionPaintsFor", { name: p });
+    scoredPaints.push({
+      value: `${PROTECTION_DIR}/${p}/paints`,
+      score: score(p),
+      kind: "protection",
+    });
   }
 
   const profiles = [...new Set([...targets.profiles, ...STOCK_RIDER_PROFILES])].sort(

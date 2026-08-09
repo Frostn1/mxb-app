@@ -215,6 +215,13 @@ fn sort_dedup(v: &mut Vec<String>) {
     v.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 }
 
+/// Everything installed across a slot's folders, as one list.
+fn models_in_areas(base: &Path, areas: &[&str]) -> Vec<String> {
+    let mut out: Vec<String> = areas.iter().flat_map(|a| models_in(&base.join(a))).collect();
+    sort_dedup(&mut out);
+    out
+}
+
 pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
     let base = mods_subdir(mods_path, "mods/rider");
     RiderTargets {
@@ -222,7 +229,7 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
         // Absent for GP Bikes, which bakes boots and protection into the rider model —
         // the folders simply aren't there, and `models_in` returns empty for those.
         boots: models_in(&base.join("boots")),
-        protection: models_in(&base.join("protection")),
+        protection: models_in_areas(&base, crate::game::PROTECTION_AREAS),
         // GP Bikes' riding-style animations. Nothing writes here for MX Bikes.
         animations: models_in(&base.join("animations")),
         // A rider model can be packed as `riders/<name>.pkz` just as gear can, and a

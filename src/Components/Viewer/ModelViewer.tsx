@@ -235,8 +235,16 @@ const GEAR_ROT: [number, number, number] = [0, 0, -Math.PI / 2];
 // both feet as separate nodes (`boot_l`/`boot_r`) coincident at the ankle, split by bootSides.
 const BOOT_ROT: [number, number, number] = [0, 0, Math.PI / 2];
 
-// Protection is authored Y-up (the rider body's own frame), so no roll.
-const PROT_ROT: [number, number, number] = [0, 0, 0];
+// Protection shares the helmet's up-axis (GEAR_ROT) but is rolled a quarter turn about it:
+// its left-right axis is Z where a helmet's is Y. So the piece stands up on the roll alone
+// and then needs a −90° yaw to face the way the body does.
+//
+// Measured off the meshes rather than assumed: in the frame the loader hands over, every
+// piece — the game's own chest protector and neck brace, a tactical vest, a Leatt, two
+// chains — is mirror-symmetric about Z and stacks along X, and the Long Hair mod sits wholly
+// at −Y, which is the rider's back. Front is +Y, and after the roll that lands on +Z, the
+// way the body faces.
+const PROT_YAW = -Math.PI / 2;
 
 // Downward nod so the helmet gazes ahead / slightly down rather than skyward.
 const HELMET_PITCH = 0.25;
@@ -590,8 +598,11 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
   const tex = useTextureMap(part.textures);
   const geoms = useNodeGeometries(part.nodes);
   const mats = useGearMaterials(part, tex);
-  const rot =
-    part.part === "boots" ? BOOT_ROT : part.part === "protection" ? PROT_ROT : GEAR_ROT;
+  const rot = part.part === "boots" ? BOOT_ROT : GEAR_ROT;
+  // The quarter turn that faces a protection piece forward, the same one the on-body render
+  // gives it — a preview that showed a chest protector edge-on was the piece being right and
+  // only this view disagreeing.
+  const baseYaw = part.part === "protection" ? PROT_YAW : 0;
   // Measure in the rotated frame; for a coincident two-node boots pair, push each foot
   // to its own side, straighten each toe, then scale and recentre on the origin ourselves.
   const layout = useMemo(() => {
@@ -614,7 +625,7 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
       offsets[1] = sides[1] * w * 0.55;
     }
     // Straighten each foot so its toe points forward instead of splaying in.
-    const yaws = geoms.map((g) => (pair ? straightenYaw(g, rotM) : 0));
+    const yaws = geoms.map((g) => (pair ? straightenYaw(g, rotM) : baseYaw));
     // Arranged bounds: each foot as T(offset)·RotY(yaw)·rot.
     const total = new THREE.Box3();
     geoms.forEach((g, i) => {
@@ -631,7 +642,7 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
     const center = new THREE.Vector3();
     total.getCenter(center);
     return { scale: 1.1 / (Math.max(size.x, size.y, size.z) || 1), offsets, yaws, center };
-  }, [geoms, rot, part]);
+  }, [geoms, rot, baseYaw, part]);
   if (!layout) return null;
   return (
     <group scale={layout.scale}>
@@ -683,7 +694,11 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   // slot shares one mount: a chest protector, a neck brace, a chain and a bib are all
   // authored around the same point in the rider's own frame, so this anchor places every
   // one of them and their own geometry does the rest.
-  const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.62 * h, cz] : [0, 1.16, 0.03];
+  //
+  // Mid-chest, which the game's own two pieces locate between them: the chest protector
+  // reaches 21 cm above the mount and 12 cm below, and the neck brace sits 11–25 cm above it,
+  // i.e. around the base of the neck.
+  const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.74 * h, cz] : [0, 1.16, 0.03];
   const bootTarget = hasBody ? 0.44 * h : 0.32;
 
   if (solo) return <RiderGearSolo part={solo} />;
@@ -712,7 +727,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
         <RiderGearMesh
           part={protection!}
           anchor={protAnchor}
-          rot={PROT_ROT}
+          yaw={PROT_YAW}
           fit="native"
         />
       )}

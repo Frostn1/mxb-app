@@ -1335,9 +1335,11 @@ fn cached_mesh(key: &str) -> Option<Vec<edf::EdfNode>> {
 fn mesh_from_bytes(
     key: String,
     data: &[u8],
+    // Gear is read with [`edf::parse_gear`] — see there for why the two readings differ.
+    gear: bool,
     prepare: impl FnOnce(&mut Vec<edf::EdfNode>, &[u8]),
 ) -> Option<Vec<edf::EdfNode>> {
-    let mut nodes = edf::parse(data);
+    let mut nodes = if gear { edf::parse_gear(data) } else { edf::parse(data) };
     edf::to_right_handed(&mut nodes);
     keep_lod0(&mut nodes);
     if nodes.is_empty() {
@@ -1350,12 +1352,14 @@ fn mesh_from_bytes(
     Some(nodes)
 }
 
+/// A gear mesh out of a game archive, memoised. Gear-only: the two readings would otherwise
+/// share a cache entry, and whichever asked first would settle how the other saw the file.
 fn load_pkz_mesh(pkz: &std::path::Path, entry: &str) -> Option<Vec<edf::EdfNode>> {
-    let key = format!("{}:{}", bike_cache_key(&pkz.to_string_lossy()), entry);
+    let key = format!("{}:{}#gear", bike_cache_key(&pkz.to_string_lossy()), entry);
     if let Some(n) = cached_mesh(&key) {
         return Some(n);
     }
-    mesh_from_bytes(key, &read_pkz_entry(pkz, entry)?, |_, _| {})
+    mesh_from_bytes(key, &read_pkz_entry(pkz, entry)?, true, |_, _| {})
 }
 
 /// The stock rider profiles the game itself ships. They're the fallback for a custom model
@@ -1436,7 +1440,7 @@ fn rider_body_nodes(src: &BodySource, profile: &str) -> Option<Vec<edf::EdfNode>
     if let Some(n) = cached_mesh(&key) {
         return Some(n);
     }
-    mesh_from_bytes(key, &src.read(profile)?, |nodes, data| {
+    mesh_from_bytes(key, &src.read(profile)?, false, |nodes, data| {
         bind_body_submeshes(nodes, data);
         stand_body_upright(nodes);
     })
@@ -1603,17 +1607,21 @@ fn gear_paints_at(path: &std::path::Path) -> Result<GearPaints, String> {
     };
     // Names only — decoding the pixels is the load path's job, and this runs per picker.
     // Resolved the same way the loader resolves it, so the picker can't offer a stock look
-    // that comes off a different mesh than the one drawn.
-    let scene = gear_mount(&files).scene;
-    let embedded: Vec<String> = files
-        .iter()
-        .find(|(n, _)| {
-            let base = n.rsplit('/').next().unwrap_or(n);
-            scene.as_deref().is_some_and(|s| base.eq_ignore_ascii_case(s))
-        })
-        .or_else(|| files.iter().find(|(n, _)| is_visible_gear_mesh(n)))
-        .map(|(_, d)| edf::embedded_textures(d).iter().map(|t| t.name.clone()).collect())
-        .unwrap_or_default();
+    // that comes off a different mesh than the one drawn — every mesh it draws, since a
+    // two-piece set carries a texture per piece.
+    let scenes = gear_scenes(&files);
+    let mut meshes: Vec<&Vec<u8>> = scenes.iter().filter_map(|s| gear_file(&files, s)).collect();
+    if meshes.is_empty() {
+        meshes.extend(files.iter().find(|(n, _)| is_visible_gear_mesh(n)).map(|(_, d)| d));
+    }
+    let mut embedded: Vec<String> = Vec::new();
+    for d in &meshes {
+        for t in edf::embedded_textures(d) {
+            if !embedded.iter().any(|h| h.eq_ignore_ascii_case(&t.name)) {
+                embedded.push(t.name);
+            }
+        }
+    }
     // Whether a side has a stock look to offer: the mesh carries its own copy of the sheet
     // that side's paints replace. Asking the paints, not the texture names, is what keeps a
     // "Stock" entry off the Bell Moto 10 — it embeds a tear-off film and a goggle, but not
@@ -1680,12 +1688,9 @@ async fn list_installed_gear_paints(
 /// the first source it found showed one of those sets and never the other.
 fn gear_paints_for(cfg: &config::AppConfig, spec: &GearSpec, model: &str) -> GearPaints {
     let stem = model.trim_end_matches(".pkz");
-    let kind_dir = std::path::Path::new(&cfg.mods_path)
-        .join("mods")
-        .join("rider")
-        .join(spec.mods_kind);
+    let rider = std::path::Path::new(&cfg.mods_path).join("mods").join("rider");
     let mut out = GearPaints::default();
-    for src in [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))] {
+    for src in gear_sources(&rider, spec, stem) {
         if !src.exists() {
             continue;
         }
@@ -1799,43 +1804,39 @@ fn load_gear_model_blocking(
     files.extend(extra);
     let want = paint.filter(|s| !s.is_empty());
     let want_goggles = goggles.filter(|s| !s.is_empty());
-    // Which `.edf` is the visible one, in the mod's own words where it says so.
-    let mount = gear_mount(&files);
-    let scene = mount.scene.as_deref();
-    // Kept so a stock side can read the mesh's own textures back out of it.
-    let mut named_mesh: Option<&Vec<u8>> = None;
-    let mut first_mesh: Option<&Vec<u8>> = None;
     // Collect paint/goggle entries up front so we can prefer the requested one but always
     // fall back to the first available: a stale or unknown paint name must still show the
     // gear textured, never bare grey.
     let mut paints: Vec<(String, &Vec<u8>)> = Vec::new();
     let mut goggle_paints: Vec<(String, &Vec<u8>)> = Vec::new();
     for (name, data) in &files {
-        let base = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
-        if base.ends_with(".edf") {
-            if scene.is_some_and(|s| base.eq_ignore_ascii_case(s)) {
-                named_mesh = Some(data);
-            } else if first_mesh.is_none() && is_visible_gear_mesh(name) {
-                first_mesh = Some(data);
-            }
-        } else if let Some(pname) = gear_folder_paint_name(name, "paints") {
+        if let Some(pname) = gear_folder_paint_name(name, "paints") {
             paints.push((pname, data));
         } else if let Some(gname) = gear_folder_paint_name(name, "goggles") {
             goggle_paints.push((gname, data));
         }
     }
-    // A mod that names a scene it doesn't ship still has a mesh in the folder; take it.
-    let mesh = named_mesh.or(first_mesh);
-    let mut nodes = mesh.map(|d| edf::parse(d)).unwrap_or_default();
-    edf::to_right_handed(&mut nodes);
-    keep_lod0(&mut nodes);
-    if nodes.is_empty() {
-        return Err(format!("no gear mesh found in {path}"));
+    // Every `.edf` the item draws, in the mod's own words where it says so — kept as bytes
+    // too, so a stock side can read each mesh's own textures back out of it.
+    let mut meshes: Vec<&Vec<u8>> =
+        gear_scenes(&files).iter().filter_map(|s| gear_file(&files, s)).collect();
+    if meshes.is_empty() {
+        // A mod that names a scene it doesn't ship still has a mesh in the folder; take it.
+        meshes.extend(files.iter().find(|(n, _)| is_visible_gear_mesh(n)).map(|(_, d)| d));
     }
-    // The `.hrc` may seat the piece off its mount — the Leatt neck brace drops 11 cm — and
-    // the viewer draws gear where the mesh puts it, so bake it in rather than pass it on.
-    if let Some(pos) = mount.pos {
-        offset_nodes(&mut nodes, pos);
+    // Parsed per mesh and kept that way until binding: a submesh's material id counts its own
+    // mesh's texture list, so one mesh's materials must never be read against another's.
+    let mut drawn: Vec<(&Vec<u8>, Vec<edf::EdfNode>)> = Vec::new();
+    for d in &meshes {
+        let mut nodes = edf::parse_gear(d);
+        edf::to_right_handed(&mut nodes);
+        keep_lod0(&mut nodes);
+        if !nodes.is_empty() {
+            drawn.push((d, nodes));
+        }
+    }
+    if drawn.is_empty() {
+        return Err(format!("no gear mesh found in {path}"));
     }
     // With no `.pnt` to offer, the shell wears what the mesh already carries. Helmets and
     // boots nearly always ship a paint, so this reads as an edge case there — on the
@@ -1861,9 +1862,16 @@ fn load_gear_model_blocking(
     let mut goggle_side = GearSide::new(names_of(&goggle_pnt));
     let mut out: Vec<paint::PaintTexture> =
         main_pnt.iter().chain(goggle_pnt.iter()).map(paint::to_texture).collect();
-    // The look the model ships with, before any paint: the textures embedded in the mesh.
+    // The look the model ships with, before any paint: the textures embedded in the meshes.
     if stock || stock_goggles {
-        let embedded = mesh.map(|d| paint::extract_edf_textures(d)).unwrap_or_default();
+        let mut embedded: Vec<paint::PaintTexture> = Vec::new();
+        for (d, _) in &drawn {
+            for t in paint::extract_edf_textures(d) {
+                if !embedded.iter().any(|h| h.name.eq_ignore_ascii_case(&t.name)) {
+                    embedded.push(t);
+                }
+            }
+        }
         let (emb_goggle, emb_main): (Vec<String>, Vec<String>) =
             embedded.iter().map(|t| t.name.clone()).partition(|n| is_goggle_name(n));
         if stock {
@@ -1900,13 +1908,10 @@ fn load_gear_model_blocking(
     // Read even when nothing is painted: a stock preview counts the same slots.
     let declared =
         paint_texture_names(paints.iter().chain(goggle_paints.iter()).map(|(_, d)| d.as_slice()));
-    bind_gear_submeshes(
-        &mut nodes,
-        mesh.map(|d| d.as_slice()),
-        &main_side,
-        &goggle_side,
-        &declared,
-    );
+    for (d, nodes) in &mut drawn {
+        bind_gear_submeshes(nodes, Some(d.as_slice()), &main_side, &goggle_side, &declared);
+    }
+    let nodes: Vec<edf::EdfNode> = drawn.into_iter().flat_map(|(_, n)| n).collect();
     // Pieces the paints don't cover keep the mesh's own texture — a tear-off film, a visor,
     // anything the author baked in and left out of the `.pnt`. The game draws those from the
     // mesh, so they have to travel with it; without them the Bell Moto 10's tear-off had
@@ -1920,10 +1925,12 @@ fn load_gear_model_blocking(
         .map(|t| t.to_ascii_lowercase())
         .filter(|t| !shipped.contains(t))
         .collect();
-    if let (false, Some(d)) = (worn.is_empty(), mesh) {
-        out.extend(paint::extract_edf_textures_where(d, |n| {
-            worn.contains(&n.to_ascii_lowercase())
-        }));
+    for d in meshes.iter().filter(|_| !worn.is_empty()) {
+        for t in paint::extract_edf_textures_where(d, |n| worn.contains(&n.to_ascii_lowercase())) {
+            if !out.iter().any(|h| h.name.eq_ignore_ascii_case(&t.name)) {
+                out.push(t);
+            }
+        }
     }
     log::info!(
         "[viewer] {part}: paint={want:?} goggles={want_goggles:?} stock={stock}/{stock_goggles} \
@@ -1935,54 +1942,67 @@ fn load_gear_model_blocking(
     Ok(RiderPart { part, nodes, textures: out })
 }
 
-/// What a gear item says about its own mesh.
-#[derive(Default)]
-struct GearMount {
-    /// The `.edf` named by `level0 { scene }`.
-    scene: Option<String>,
-    /// The `pos { x y z }` the `.hrc` seats that mesh at, in the game's own frame.
-    pos: Option<[f32; 3]>,
+/// One file out of a gear folder or archive, by base name.
+fn gear_file<'a>(files: &'a [(String, Vec<u8>)], want: &str) -> Option<&'a Vec<u8>> {
+    files
+        .iter()
+        .find(|(n, _)| n.rsplit('/').next().unwrap_or(n).eq_ignore_ascii_case(want))
+        .map(|(_, d)| d)
 }
 
-/// Follow `gfx.cfg` → `<piece>.hrc` → `level0 { scene }`, the same chain the game walks and
-/// the bike loader already uses.
+/// Every `.edf` a gear item draws, in the order it declares them.
 ///
-/// Worth following on gear because a gear mesh is named for the piece rather than the slot —
-/// `neckbrace.edf`, `pickaxe.edf`, `protection.edf` all turn up in the protection folder —
-/// so which `.edf` is *the* one is the mod's answer to give, not ours to guess from filenames.
-fn gear_mount(files: &[(String, Vec<u8>)]) -> GearMount {
-    let find = |want: &str| -> Option<&Vec<u8>> {
-        files
-            .iter()
-            .find(|(n, _)| n.rsplit('/').next().unwrap_or(n).eq_ignore_ascii_case(want))
-            .map(|(_, d)| d)
+/// Follow `gfx.cfg` → `<piece>.hrc` → `level0 { scene }`, the same chain the game walks and
+/// the bike loader already uses. Worth following on gear because a gear mesh is named for the
+/// piece rather than the slot — `neckbrace.edf`, `pickaxe.edf`, `protection.edf` all turn up
+/// in the protection folder — so which `.edf` is *the* one is the mod's answer to give, not
+/// ours to guess from filenames.
+///
+/// A gear item is not always one mesh: the stock `full` protection declares an `armour` and a
+/// `neckbrace`, each its own `.edf`, and drawing whichever block came first left the rider
+/// wearing half the item — a different half from one run to the next, since the blocks are
+/// keyed by name rather than kept in file order.
+fn gear_scenes(files: &[(String, Vec<u8>)]) -> Vec<String> {
+    let Some(gfx) = gear_file(files, "gfx.cfg").map(|d| cfg::parse(d)) else {
+        return Vec::new();
     };
-    // The `.hrc` sits under a block named for the piece — `armour`, `neckbrace`, whatever
-    // the author called it — so take the first block that names one at all.
-    let hrc_name = find("gfx.cfg")
-        .map(|d| cfg::parse(d))
-        .and_then(|c| c.blocks.values().find_map(|b| b.get("model").map(str::to_string)));
-    let Some(hrc) = hrc_name.as_deref().and_then(find).map(|d| cfg::parse(d)) else {
-        return GearMount::default();
-    };
-    let pos = hrc.block("pos").and_then(|p| {
-        let axis = |k: &str| p.get(k).and_then(|v| v.trim().parse::<f32>().ok());
-        Some([axis("x")?, axis("y")?, axis("z")?])
-    });
-    GearMount { scene: cfg::hrc_level0_scene(&hrc), pos }
-}
-
-/// Shift a mesh onto the mount its `.hrc` names. `pos` is written in the game's own frame,
-/// so it takes the same X flip [`edf::to_right_handed`] gave the vertices.
-fn offset_nodes(nodes: &mut [edf::EdfNode], pos: [f32; 3]) {
-    let d = [-pos[0], pos[1], pos[2]];
-    for n in nodes.iter_mut() {
-        for p in n.positions.chunks_exact_mut(3) {
-            for (v, delta) in p.iter_mut().zip(d) {
-                *v += delta;
+    // Three spellings are in use and all three are the item: `model = x.hrc` at the top level
+    // (helmets), `<piece> { model = x.hrc }` (protection), `<piece> { model { file = x.hrc } }`
+    // (boots). `cockpit` is the first-person mesh and `shadow` the blob cast under the rider —
+    // neither is ever drawn on the model.
+    let mut hrcs: Vec<String> = Vec::new();
+    let mut push = |name: Option<&str>| {
+        if let Some(n) = name.filter(|n| !n.is_empty()) {
+            if !hrcs.iter().any(|h| h.eq_ignore_ascii_case(n)) {
+                hrcs.push(n.to_string());
             }
         }
+    };
+    push(gfx.get("model"));
+    let mut blocks: Vec<&String> = gfx.blocks.keys().collect();
+    blocks.sort();
+    for name in blocks {
+        if matches!(name.as_str(), "cockpit" | "shadow") {
+            continue;
+        }
+        let b = &gfx.blocks[name];
+        push(b.get("model").or_else(|| b.block("model").and_then(|m| m.get("file"))));
     }
+    let mut scenes: Vec<String> = Vec::new();
+    for hrc in &hrcs {
+        let Some(scene) = gear_file(files, hrc)
+            .map(|d| cfg::parse(d))
+            .and_then(|c| cfg::hrc_level0_scene(&c))
+        else {
+            continue;
+        };
+        // Two `.hrc`s can name one mesh — the boots' left and right both point at `boots.edf`,
+        // which already holds both feet — so a repeat is one piece, not two.
+        if !scenes.iter().any(|s| s.eq_ignore_ascii_case(&scene)) {
+            scenes.push(scene);
+        }
+    }
+    scenes
 }
 
 /// The gear file carrying the visible mesh — not the `_s` shadow or the `c_` cockpit variant.
@@ -2155,22 +2175,47 @@ fn read_gear_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>
         }
         return Ok(out);
     }
-    pkz::read_all(p)
+    // A sealed file stays sealed when it's zipped up: pack the Tactical Vest's folder into a
+    // `.pkz` — which is what anyone tidying a mods folder does — and every entry comes back
+    // as a blob rather than the mesh and paints it holds. Unwrap them the same way the loose
+    // files above are unwrapped; anything already plain passes straight through.
+    Ok(pkz::read_all(p)?
+        .into_iter()
+        .map(|(n, d)| {
+            let d = pkz::read_sidecar_blob(&d).unwrap_or(d);
+            (n, d)
+        })
+        .collect())
 }
 
 struct GearSpec {
     part: &'static str,
-    mods_kind: &'static str,
+    /// Folders under `mods/rider` this slot's models live in. The first is the game's own —
+    /// where a new install goes — and any after it are read for what earlier versions of this
+    /// app wrote somewhere else. See [`game::PROTECTION_AREAS`].
+    mods_kind: &'static [&'static str],
     pkz_kind: &'static str,
     mesh: &'static str,
     default_name: &'static str,
 }
 
 const GEAR: [GearSpec; 3] = [
-    GearSpec { part: "helmet", mods_kind: "helmets", pkz_kind: "helmets", mesh: "helmet.edf", default_name: "default" },
-    GearSpec { part: "boots", mods_kind: "boots", pkz_kind: "boots", mesh: "boots.edf", default_name: "default" },
-    GearSpec { part: "protection", mods_kind: "protection", pkz_kind: "protections", mesh: "armour.edf", default_name: "full" },
+    GearSpec { part: "helmet", mods_kind: &["helmets"], pkz_kind: "helmets", mesh: "helmet.edf", default_name: "default" },
+    GearSpec { part: "boots", mods_kind: &["boots"], pkz_kind: "boots", mesh: "boots.edf", default_name: "default" },
+    GearSpec { part: "protection", mods_kind: game::PROTECTION_AREAS, pkz_kind: "protections", mesh: "armour.edf", default_name: "full" },
 ];
+
+/// Everywhere a gear model of this slot could be installed, in the order they're preferred:
+/// each of the slot's folders as an unpacked `<model>/` and as a packed `<model>.pkz`.
+fn gear_sources(rider: &std::path::Path, spec: &GearSpec, stem: &str) -> Vec<std::path::PathBuf> {
+    spec.mods_kind
+        .iter()
+        .flat_map(|kind| {
+            let dir = rider.join(kind);
+            [dir.join(stem), dir.join(format!("{stem}.pkz"))]
+        })
+        .collect()
+}
 
 fn load_gear(
     cfg: &config::AppConfig,
@@ -2181,8 +2226,8 @@ fn load_gear(
     goggles: &str,
     profile: &str,
 ) -> Option<RiderPart> {
-    let kind_dir = base.join(spec.mods_kind);
     let stem = model.trim_end_matches(".pkz");
+    let sources = gear_sources(base, spec, stem);
     // A goggle paint routinely ships apart from the helmet it's worn with — under the
     // rider profile, or loose beside a `.pkz` the loader can't write into. Gather those so
     // a name the picker offered always resolves to a paint instead of falling back to
@@ -2190,7 +2235,9 @@ fn load_gear(
     let mut extra: Vec<(String, Vec<u8>)> = Vec::new();
     if !goggles.is_empty() {
         if !model.is_empty() {
-            extra = loose_paints(&kind_dir.join(stem).join("goggles"), "goggles");
+            for src in &sources {
+                extra.extend(loose_paints(&src.join("goggles"), "goggles"));
+            }
         }
         if !profile.is_empty() {
             extra.extend(loose_paints(&base.join("riders").join(profile).join("goggles"), "goggles"));
@@ -2198,20 +2245,20 @@ fn load_gear(
     }
 
     if !model.is_empty() {
-        let sources = [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))];
         for (i, src) in sources.iter().enumerate() {
             if !src.exists() {
                 continue;
             }
-            // The same model can be installed both ways at once — a paint pack for a
-            // packaged mod has nowhere to go but a folder beside it — and only one of the
-            // two is opened here. Carry the named paint over from the other, so a name the
-            // picker offered can't quietly render as whichever paint happened to be first.
+            // The same model can be installed more than one way at once — a paint pack for a
+            // packaged mod has nowhere to go but a folder beside it — and only one of them is
+            // opened here. Carry the named paint over from the others, so a name the picker
+            // offered can't quietly render as whichever paint happened to be first.
             let mut extra = extra.clone();
-            let other = &sources[1 - i];
-            if other.exists() {
-                extra.extend(gear_paint_from(other, "paints", paint));
-                extra.extend(gear_paint_from(other, "goggles", goggles));
+            for other in sources.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, p)| p) {
+                if other.exists() {
+                    extra.extend(gear_paint_from(other, "paints", paint));
+                    extra.extend(gear_paint_from(other, "goggles", goggles));
+                }
             }
             match load_gear_model_blocking(
                 src.to_string_lossy().into_owned(),
@@ -2238,17 +2285,31 @@ fn load_gear(
     let name = if model.is_empty() { spec.default_name } else { model };
     let pkz = resolve_game_pkz(cfg, "rider.pkz")?;
     let folder = format!("rider/{}/{}", spec.pkz_kind, name);
-    let named = format!("{folder}/{}", spec.mesh);
-    let (entry, mut nodes) = match load_pkz_mesh(&pkz, &named) {
-        Some(n) => (named, n),
-        None => {
-            let alt = stock_gear_entry(&pkz, &folder)?;
-            let n = load_pkz_mesh(&pkz, &alt)?;
-            (alt, n)
-        }
-    };
-    let mut textures = load_pkz_paint(&pkz, &folder, "paints", paint);
-    let main_side = GearSide::new(textures.iter().map(|t| t.name.clone()).collect());
+    // What the folder says it draws, asked the same way an installed mod is asked. `full`
+    // declares two pieces — the chest protector and the neck brace worn with it — so taking
+    // only the slot's usual mesh name dressed the rider in half the item.
+    let mut drawn: Vec<(String, Vec<edf::EdfNode>)> = gear_scenes(&pkz_gear_cfgs(&pkz, &folder))
+        .iter()
+        .map(|s| format!("{folder}/{s}"))
+        .filter_map(|e| load_pkz_mesh(&pkz, &e).map(|n| (e, n)))
+        .collect();
+    if drawn.is_empty() {
+        let named = format!("{folder}/{}", spec.mesh);
+        drawn.push(match load_pkz_mesh(&pkz, &named) {
+            Some(n) => (named, n),
+            None => {
+                let alt = stock_gear_entry(&pkz, &folder)?;
+                let n = load_pkz_mesh(&pkz, &alt)?;
+                (alt, n)
+            }
+        });
+    }
+    let shell_texs = load_pkz_paint(&pkz, &folder, "paints", paint);
+    // A stock folder can ship no paint at all — `rider/protections/{full,neck}` carry none —
+    // and then the mesh's own textures are the look, exactly as they are for an installed mod
+    // that bakes it in. Without this the whole piece came out bare grey.
+    let stock_shell = shell_texs.is_empty();
+    let mut main_side = GearSide::new(shell_texs.iter().map(|t| t.name.clone()).collect());
     // Stock gear paints its goggles apart from the shell just as an installed helmet does:
     // from the rider profile's own folder where it has one, else from `rider.pkz`.
     let goggle_texs: Vec<paint::PaintTexture> = if goggles.is_empty() {
@@ -2261,15 +2322,47 @@ fn load_gear(
     if !goggles.is_empty() && goggle_side.primary.is_none() {
         log::warn!("[rider] goggle paint '{goggles}' not found for stock {}", spec.part);
     }
-    textures.extend(goggle_texs);
-    // Only a goggled piece needs the mesh's own materials read back, so only that pays for
-    // the extra archive read — the nodes themselves stay cached.
-    let mesh = (!goggles.is_empty()).then(|| read_pkz_entry(&pkz, &entry)).flatten();
+    let mut textures: Vec<paint::PaintTexture> =
+        shell_texs.into_iter().chain(goggle_texs).collect();
+    // The mesh's own materials are what the binder reads to tell one piece from the next, so
+    // every source that needs them pays for the archive read — the nodes themselves stay
+    // cached. Skipped only when a paint covers the shell and nothing is goggled.
+    let need_mesh = stock_shell || !goggles.is_empty();
+    let bytes: Vec<Option<Vec<u8>>> = drawn
+        .iter()
+        .map(|(e, _)| need_mesh.then(|| read_pkz_entry(&pkz, e)).flatten())
+        .collect();
+    if stock_shell {
+        let mut embedded: Vec<paint::PaintTexture> = Vec::new();
+        for d in bytes.iter().flatten() {
+            for t in paint::extract_edf_textures(d) {
+                if !embedded.iter().any(|h| h.name.eq_ignore_ascii_case(&t.name)) {
+                    embedded.push(t);
+                }
+            }
+        }
+        main_side = GearSide::new(
+            embedded.iter().map(|t| t.name.clone()).filter(|n| !is_goggle_name(n)).collect(),
+        );
+        if main_side.primary.is_none() {
+            log::warn!("[rider] stock {} '{name}' has no texture of its own", spec.part);
+        }
+        // The goggle side keeps its own `.pnt`; a paint reuses the mesh's names, so only what
+        // it doesn't supply comes off the mesh.
+        let taken: std::collections::HashSet<String> =
+            textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
+        textures
+            .extend(embedded.into_iter().filter(|t| !taken.contains(&t.name.to_ascii_lowercase())));
+    }
     // The stock model's own paints are what it declares — both sides' names are already in
     // hand here, decoded from `rider.pkz` above.
     let declared: Vec<String> =
         main_side.names.iter().chain(goggle_side.names.iter()).cloned().collect();
-    bind_gear_submeshes(&mut nodes, mesh.as_deref(), &main_side, &goggle_side, &declared);
+    let mut nodes = Vec::new();
+    for ((_, mut n), d) in drawn.into_iter().zip(&bytes) {
+        bind_gear_submeshes(&mut n, d.as_deref(), &main_side, &goggle_side, &declared);
+        nodes.extend(n);
+    }
     log::info!(
         "[rider] {} stock '{name}' loaded: {} nodes, tex={:?} goggles={:?}",
         spec.part,
@@ -2282,6 +2375,18 @@ fn load_gear(
         nodes,
         textures,
     })
+}
+
+/// The small text files a stock gear folder ships — `gfx.cfg` and the `.hrc`s it names —
+/// read out of the game archive in the shape [`gear_scenes`] reads an installed mod's folder.
+/// A few hundred bytes each, against a 100 MB archive, so ask before guessing at mesh names.
+fn pkz_gear_cfgs(pkz: &std::path::Path, folder: &str) -> Vec<(String, Vec<u8>)> {
+    let prefix = format!("{}/", folder.replace('\\', "/").to_ascii_lowercase());
+    pkz::read_selected(pkz, |n| {
+        let n = n.replace('\\', "/").to_ascii_lowercase();
+        n.starts_with(&prefix) && (n.ends_with(".cfg") || n.ends_with(".hrc"))
+    })
+    .unwrap_or_default()
 }
 
 /// The `.edf` a stock gear folder in `rider.pkz` actually carries, for the folders that
@@ -4172,8 +4277,8 @@ mod gear_bind_tests {
 }
 
 #[cfg(test)]
-mod gear_mount_tests {
-    use super::{gear_mount, offset_nodes, edf};
+mod gear_scene_tests {
+    use super::gear_scenes;
 
     fn files(entries: &[(&str, &str)]) -> Vec<(String, Vec<u8>)> {
         entries.iter().map(|(n, d)| (n.to_string(), d.as_bytes().to_vec())).collect()
@@ -4187,9 +4292,7 @@ mod gear_mount_tests {
             ("gfx.cfg", "neckbrace\n{\n\tmodel = neckbrace.hrc\n}\n"),
             ("neckbrace.hrc", "level0\n{\n\tscene = neckbrace.edf\n\tswitch = 0\n}\n"),
         ]);
-        let m = gear_mount(&f);
-        assert_eq!(m.scene.as_deref(), Some("neckbrace.edf"));
-        assert_eq!(m.pos, None);
+        assert_eq!(gear_scenes(&f), ["neckbrace.edf"]);
     }
 
     // The block in `gfx.cfg` is named for the piece, and authors don't agree on the word —
@@ -4200,45 +4303,58 @@ mod gear_mount_tests {
             ("gfx.cfg", "armour\n{\n\tmodel = protection.hrc\n}\n"),
             ("protection.hrc", "level0\n{\n\tscene = protection.edf\n}\n"),
         ]);
-        assert_eq!(gear_mount(&f).scene.as_deref(), Some("protection.edf"));
+        assert_eq!(gear_scenes(&f), ["protection.edf"]);
     }
 
+    // The stock `full` protection: two pieces worn together, each its own mesh. Taking one
+    // block's mesh dressed the rider in half the item.
     #[test]
-    fn an_hrc_can_seat_the_mesh_off_its_mount() {
+    fn a_two_piece_set_draws_both_pieces() {
         let f = files(&[
-            ("gfx.cfg", "neckbrace\n{\n\tmodel = neckbrace.hrc\n}\n"),
             (
-                "neckbrace.hrc",
-                "level0\n{\n\tscene = neckbrace.edf\n}\npos\n{\n\tx = 0\n\ty = -0.11\n\tz = 0\n}\n",
+                "gfx.cfg",
+                "neckbrace\n{\n\tmodel = neckbrace.hrc\n}\n\narmour\n{\n\tmodel = armour.hrc\n}\n",
             ),
+            ("armour.hrc", "level0\n{\n\tscene = armour.edf\n}\n"),
+            ("neckbrace.hrc", "level0\n{\n\tscene = neckbrace.edf\n}\n"),
         ]);
-        assert_eq!(gear_mount(&f).pos, Some([0.0, -0.11, 0.0]));
+        // Sorted by block name, so the same folder always draws in the same order.
+        assert_eq!(gear_scenes(&f), ["armour.edf", "neckbrace.edf"]);
     }
 
-    // Most gear ships neither, and that's not an error — the loader falls back to scanning.
+    // Boots declare a left and a right, both pointing at the one mesh that holds both feet.
+    // A repeat is one piece, not two — and the nested `model { file = … }` is the boots'
+    // own spelling, which nothing else uses.
+    #[test]
+    fn two_blocks_naming_one_mesh_are_one_piece() {
+        let f = files(&[
+            (
+                "gfx.cfg",
+                "left\n{\n\tmodel\n\t{\n\t\tfile = left_boot.hrc\n\t}\n}\nright\n{\n\tmodel\n\t{\n\t\tfile = right_boot.hrc\n\t}\n}\n",
+            ),
+            ("left_boot.hrc", "level0\n{\n\tscene = boots.edf\n}\n"),
+            ("right_boot.hrc", "level0\n{\n\tscene = boots.edf\n\tname = righta\n}\n"),
+        ]);
+        assert_eq!(gear_scenes(&f), ["boots.edf"]);
+    }
+
+    // A helmet names its mesh at the top level and its first-person mesh in `cockpit`. The
+    // cockpit one is never drawn on the model, and picking it up put a headless shell on the
+    // rider.
+    #[test]
+    fn the_cockpit_mesh_is_not_the_item() {
+        let f = files(&[
+            ("gfx.cfg", "model = helmet.hrc\nshadow = helmet_s.edf\n\ncockpit\n{\n\tmodel = c_helmet.edf\n}\n"),
+            ("helmet.hrc", "level0\n{\n\tscene = helmet.edf\n}\n"),
+        ]);
+        assert_eq!(gear_scenes(&f), ["helmet.edf"]);
+    }
+
+    // Most gear ships nothing to read, and that's not an error — the loader falls back to
+    // scanning the folder for a mesh.
     #[test]
     fn a_mod_that_says_nothing_answers_nothing() {
-        let m = gear_mount(&files(&[("protection.edf", "EDF\0")]));
-        assert_eq!(m.scene, None);
-        assert_eq!(m.pos, None);
-    }
-
-    // `pos` is written in the game's frame, so it takes the same X flip the vertices got.
-    #[test]
-    fn the_mount_offset_flips_x_with_the_vertices() {
-        let mut nodes = vec![edf::EdfNode {
-            name: "protection".into(),
-            positions: vec![1.0, 2.0, 3.0],
-            uvs: Vec::new(),
-            normals: Vec::new(),
-            indices: Vec::new(),
-            submeshes: Vec::new(),
-            texture: None,
-            placed: false,
-            materials: Vec::new(),
-        }];
-        offset_nodes(&mut nodes, [0.5, -0.11, 0.25]);
-        assert_eq!(nodes[0].positions, vec![0.5, 1.89, 3.25]);
+        assert!(gear_scenes(&files(&[("protection.edf", "EDF\0")])).is_empty());
     }
 }
 
@@ -4305,7 +4421,20 @@ mod viewer_tests {
         };
         let m = super::load_bike_model_blocking(path).expect("load bike");
         for n in &m.nodes {
-            eprintln!("node '{}' placed={}", n.name, n.placed);
+            // Where the part ended up. Printed because placement is the half of this that a
+            // texture listing can't show: a part bound to the right sheet and hung in the
+            // wrong place reads as correct here otherwise.
+            let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+            for v in n.positions.chunks_exact(3) {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(v[k]);
+                    hi[k] = hi[k].max(v[k]);
+                }
+            }
+            eprintln!(
+                "node '{}' placed={} x[{:.3},{:.3}] y[{:.3},{:.3}] z[{:.3},{:.3}]",
+                n.name, n.placed, lo[0], hi[0], lo[1], hi[1], lo[2], hi[2],
+            );
             for s in &n.submeshes {
                 eprintln!(
                     "   {:<16} -> {:<12} tile={:?}",
@@ -4398,24 +4527,53 @@ mod viewer_tests {
                 }
             }
         }
-        // Where the mesh sits in its own frame. Protection is authored in the rider's own
-        // space, so these bounds say whether a piece is a chest-wide vest or a thin chain
-        // — the difference a one-size fit erases.
-        if let Some((_, d)) = files.iter().find(|(n, _)| super::is_visible_gear_mesh(n)) {
-            let mut nodes = super::edf::parse(d);
+        // Where each mesh sits in its own frame, against the bounds the file states for
+        // itself. Protection is authored in the rider's own space, so these say whether a
+        // piece is a chest-wide vest or a thin chain — the difference a one-size fit erases —
+        // and disagreeing with the header is how a placement that ran twice shows up.
+        let mut scenes: Vec<&Vec<u8>> =
+            super::gear_scenes(&files).iter().filter_map(|s| super::gear_file(&files, s)).collect();
+        if scenes.is_empty() {
+            scenes.extend(files.iter().find(|(n, _)| super::is_visible_gear_mesh(n)).map(|(_, d)| d));
+        }
+        for d in scenes {
+            let mut nodes = super::edf::parse_gear(d);
             super::edf::to_right_handed(&mut nodes);
+            let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
             for n in &nodes {
-                let mut lo = [f32::INFINITY; 3];
-                let mut hi = [f32::NEG_INFINITY; 3];
+                let (mut nlo, mut nhi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
                 for v in n.positions.chunks_exact(3) {
                     for k in 0..3 {
-                        lo[k] = lo[k].min(v[k]);
-                        hi[k] = hi[k].max(v[k]);
+                        nlo[k] = nlo[k].min(v[k]);
+                        nhi[k] = nhi[k].max(v[k]);
                     }
                 }
                 eprintln!(
                     "bounds  {:<16} x[{:.3},{:.3}] y[{:.3},{:.3}] z[{:.3},{:.3}]",
-                    n.name, lo[0], hi[0], lo[1], hi[1], lo[2], hi[2],
+                    n.name, nlo[0], nhi[0], nlo[1], nhi[1], nlo[2], nhi[2],
+                );
+                for k in 0..3 {
+                    lo[k] = lo[k].min(nlo[k]);
+                    hi[k] = hi[k].max(nhi[k]);
+                }
+            }
+            let Some((hlo, hhi)) = super::edf::header_aabb(d) else { continue };
+            // The header is written in authored space, so it takes the same X flip the
+            // vertices got — and the flip swaps which end is the minimum.
+            let (hlo, hhi) = ([-hhi[0], hlo[1], hlo[2]], [-hlo[0], hhi[1], hhi[2]]);
+            eprintln!(
+                "header                   x[{:.3},{:.3}] y[{:.3},{:.3}] z[{:.3},{:.3}]",
+                hlo[0], hhi[0], hlo[1], hhi[1], hlo[2], hhi[2],
+            );
+            // Only the highest LOD is kept and a dropped one can reach a millimetre further,
+            // so this is a "same place, same size" check, not an equality.
+            for k in 0..3 {
+                let slack = 0.02 + 0.1 * (hhi[k] - hlo[k]);
+                assert!(
+                    (lo[k] - hlo[k]).abs() <= slack && (hi[k] - hhi[k]).abs() <= slack,
+                    "axis {k}: mesh [{:.3},{:.3}] is not where the file says it is \
+                     ([{:.3},{:.3}]) — placement",
+                    lo[k], hi[k], hlo[k], hhi[k],
                 );
             }
         }
@@ -4435,6 +4593,20 @@ mod viewer_tests {
         let slot = std::env::var("MXB_REAL_GEAR_PART").unwrap_or_else(|_| "helmet".into());
         let part = super::load_gear_model_blocking(path.clone(), slot.clone(), None, None, false, false, Vec::new())
             .expect("load gear");
+        // MXB_DUMP_OBJ=<file> writes the loaded geometry in viewer-input space, so a
+        // silhouette can be drawn outside the test — the only way to settle which way a
+        // gear frame points without the game in front of you.
+        if let Ok(out) = std::env::var("MXB_DUMP_OBJ") {
+            let mut s = String::new();
+            for n in &part.nodes {
+                s.push_str(&format!("o {}\n", n.name));
+                for v in n.positions.chunks_exact(3) {
+                    s.push_str(&format!("v {} {} {}\n", v[0], v[1], v[2]));
+                }
+            }
+            std::fs::write(&out, s).expect("write obj");
+            eprintln!("wrote {out}");
+        }
         let have: std::collections::HashSet<String> =
             part.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
         // An item with no paint and nothing baked into its mesh has no look to wear — the
@@ -4583,11 +4755,10 @@ mod viewer_tests {
 
         // Every source, asked on its own. Each one's paints have to survive the merge —
         // taking the first source is exactly what dropped the others.
-        let kind_dir =
-            std::path::Path::new(&mods).join("mods").join("rider").join(spec.mods_kind);
+        let rider = std::path::Path::new(&mods).join("mods").join("rider");
         let stem = model.trim_end_matches(".pkz");
         let mut sources = 0;
-        for src in [kind_dir.join(stem), kind_dir.join(format!("{stem}.pkz"))] {
+        for src in super::gear_sources(&rider, spec, stem) {
             if !src.exists() {
                 continue;
             }

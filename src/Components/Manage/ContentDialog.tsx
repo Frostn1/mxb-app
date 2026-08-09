@@ -43,7 +43,9 @@ function paneOfRel(rel: string): Pane | null {
   if (segs[1] === "rider" && segs.length === 4) {
     if (segs[2] === "helmets") return "helmets";
     if (segs[2] === "boots") return "boots";
-    if (segs[2] === "protection") return "protection";
+    // Both spellings of the slot: the game's own `protections`, and the singular this app
+    // used to install to.
+    if (segs[2] === "protections" || segs[2] === "protection") return "protection";
   }
   return "keep";
 }

@@ -604,7 +604,8 @@ fn is_gear_model_dir(shadow: &Path, dir: &Path) -> bool {
         .collect();
     segs.len() == 3
         && segs[0] == "rider"
-        && matches!(segs[1].as_str(), "helmets" | "boots" | "protection")
+        && (matches!(segs[1].as_str(), "helmets" | "boots" | "animations")
+            || crate::game::PROTECTION_AREAS.contains(&segs[1].as_str()))
 }
 
 #[cfg(test)]
