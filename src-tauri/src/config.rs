@@ -47,6 +47,10 @@ pub struct AppConfig {
     /// resolved from `mods_path` — see [`AppConfig::profiles_dir`]. Set it when the
     /// resolver can't find the folder, e.g. profiles on a drive we don't probe.
     pub profiles_path: String,
+    /// macOS: the Wine binary that starts the game. Empty (the normal case) means it's
+    /// auto-detected — see [`crate::winehost::resolve`]. Machine-wide rather than
+    /// per-game: one Mac has one set of wrappers installed. Ignored on Windows and Linux.
+    pub wine_runner: String,
     /// Hide to the tray on window close and keep running.
     pub run_in_background: bool,
     /// Start MXB App automatically on login.
@@ -166,6 +170,7 @@ impl Default for AppConfig {
             mods_path: String::new(),
             game_path: String::new(),
             profiles_path: String::new(),
+            wine_runner: String::new(),
             run_in_background: true,
             launch_at_startup: true,
             auto_run_frostmod: true,
@@ -323,10 +328,11 @@ fn resolve_profiles_dir(primary: PathBuf, fallback: impl FnOnce() -> Option<Path
     }
 }
 
-/// The game's user folder where it puts it when nothing has been moved: the Proton
-/// prefix on Linux, `Documents\PiBoSo\<game>` elsewhere.
+/// The game's user folder where it puts it when nothing has been moved: inside the Wine
+/// prefix wherever the game runs as a Windows process (Proton on Linux, a bottle on
+/// macOS), `Documents\PiBoSo\<game>` on Windows.
 fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
-    if let Some(p) = detect_proton_mods_path(game) {
+    if let Some(p) = detect_prefix_mods_path(game) {
         return Some(PathBuf::from(p));
     }
     Some(dirs_next::document_dir()?.join("PiBoSo").join(game.user_dir))
@@ -669,32 +675,56 @@ fn parse_ini_mods_folder(bytes: &[u8]) -> Option<String> {
     fallback
 }
 
-/// The game's user folder inside a Proton prefix.
+/// The game's user folder inside a Wine prefix.
 ///
-/// Under Proton the game is a Windows process, so `Documents` is the prefix's fake
-/// `C:` drive — `compatdata/<appid>/pfx/drive_c/users/steamuser/Documents/PiBoSo/<game>`
-/// — and nothing is ever written to the user's real `~/Documents`. Without this a Linux
-/// player lands on the setup screen with no working default to accept.
+/// Wherever the game runs as a Windows process — Proton on Linux, CrossOver/Whisky on
+/// macOS — `Documents` is the prefix's fake `C:` drive, and nothing is ever written to the
+/// user's real `~/Documents`. Without this a player lands on the setup screen with no
+/// working default to accept.
 ///
 /// Returns the first prefix that actually looks like a mods dir, so a stale prefix from an
 /// uninstalled copy can't win over a real one.
-fn detect_proton_mods_path(game: &GameProfile) -> Option<String> {
-    if cfg!(not(target_os = "linux")) {
-        return None;
-    }
-    for lib in steam_libraries() {
-        let candidate = lib
-            .join("steamapps")
-            .join("compatdata")
-            .join(game.steam_appid)
-            .join("pfx/drive_c/users/steamuser/Documents/PiBoSo")
-            .join(game.user_dir);
-        let as_str = candidate.to_string_lossy().into_owned();
-        if looks_like_mods_dir(&as_str) {
-            return Some(as_str);
+fn detect_prefix_mods_path(game: &GameProfile) -> Option<String> {
+    wine_prefixes(game)
+        .iter()
+        .find_map(|prefix| mods_dir_in_prefix(prefix, game))
+}
+
+/// Wine prefixes that could hold the game's user folder: Proton's per-game `compatdata`
+/// on Linux, every CrossOver/Whisky/Wine bottle on macOS. Empty on Windows, where the
+/// game is native and writes to the real `Documents`.
+fn wine_prefixes(game: &GameProfile) -> Vec<PathBuf> {
+    let mut prefixes: Vec<PathBuf> = Vec::new();
+    if cfg!(target_os = "linux") {
+        for lib in steam_libraries() {
+            prefixes.push(
+                lib.join("steamapps")
+                    .join("compatdata")
+                    .join(game.steam_appid)
+                    .join("pfx"),
+            );
         }
     }
-    None
+    prefixes.extend(crate::winehost::bottles());
+    prefixes
+}
+
+/// `<prefix>/drive_c/users/<user>/Documents/PiBoSo/<game>`, if it's really there.
+///
+/// The Windows user varies by wrapper — `steamuser` under Proton, `crossover` under
+/// CrossOver, the login name under plain Wine — so every user in the prefix is tried
+/// rather than guessing which one built it.
+fn mods_dir_in_prefix(prefix: &Path, game: &GameProfile) -> Option<String> {
+    let users = std::fs::read_dir(prefix.join("drive_c").join("users")).ok()?;
+    users.flatten().find_map(|user| {
+        let candidate = user
+            .path()
+            .join("Documents")
+            .join("PiBoSo")
+            .join(game.user_dir);
+        let as_str = candidate.to_string_lossy().into_owned();
+        looks_like_mods_dir(&as_str).then_some(as_str)
+    })
 }
 
 /// Locate the game's install folder (the one holding its `install_marker`) by scanning
@@ -750,6 +780,13 @@ fn steam_libraries() -> Vec<PathBuf> {
                 home.join(".var/app/com.valvesoftware.Steam/data/Steam"),
             );
             push(&mut roots, home.join("snap/steam/common/.local/share/Steam"));
+        }
+        // macOS: the game is a Windows title, so a Steam that owns it is a *Windows* Steam
+        // installed inside a Wine bottle. The native paths above can never hold it.
+        for bottle in crate::winehost::bottles() {
+            let c = bottle.join("drive_c");
+            push(&mut roots, c.join("Program Files (x86)/Steam"));
+            push(&mut roots, c.join("Program Files/Steam"));
         }
     }
 
@@ -1322,7 +1359,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod linux_paths_tests {
+mod prefix_paths_tests {
     use super::*;
 
     /// A Proton prefix laid out the way Steam actually makes one, checked through the
@@ -1354,11 +1391,36 @@ mod linux_paths_tests {
     }
 
     #[test]
-    fn proton_detection_is_linux_only() {
-        // On Windows/macOS the game is native and writes to the real Documents folder,
-        // so the prefix probe must never hijack detection there.
-        if cfg!(not(target_os = "linux")) {
-            assert!(detect_proton_mods_path(&crate::game::MXB).is_none());
+    fn prefix_detection_never_runs_on_windows() {
+        // On Windows the game is native and writes to the real Documents folder, so the
+        // prefix probe must never hijack detection there.
+        if cfg!(windows) {
+            assert!(detect_prefix_mods_path(&crate::game::MXB).is_none());
         }
+    }
+
+    /// A CrossOver bottle's user folder, found without being told which Windows user
+    /// built it — `crossover` here, `steamuser` under Proton, a login name under Wine.
+    #[test]
+    fn finds_the_user_folder_in_a_bottle_whatever_the_windows_user_is_called() {
+        let root = std::env::temp_dir().join(format!("frost-bottle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let users = root.join("drive_c/users");
+        // A user with nothing in it must not be mistaken for the one that has the game.
+        std::fs::create_dir_all(users.join("Public")).unwrap();
+        let mods = users.join("crossover/Documents/PiBoSo/MX Bikes");
+        std::fs::create_dir_all(mods.join("mods").join("bikes")).unwrap();
+        std::fs::create_dir_all(mods.join("profiles")).unwrap();
+
+        assert_eq!(
+            mods_dir_in_prefix(&root, &crate::game::MXB).map(PathBuf::from),
+            Some(mods)
+        );
+        // Wrong title: GP Bikes isn't in this bottle.
+        assert!(mods_dir_in_prefix(&root, &crate::game::GPB).is_none());
+        // Not a prefix at all.
+        assert!(mods_dir_in_prefix(&root.join("nope"), &crate::game::MXB).is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

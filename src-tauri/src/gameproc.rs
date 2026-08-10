@@ -379,7 +379,21 @@ pub fn refresh_look() -> LiveRefresh {
     }
 }
 
-#[cfg(not(windows))]
+/// Under Wine the game is an ordinary macOS process whose argv still names the exe, so
+/// `ps` finds it. Without this Play would cheerfully start a second copy.
+#[cfg(target_os = "macos")]
+pub fn is_game_running() -> bool {
+    let Ok(out) = std::process::Command::new("ps").args(["-Ao", "pid=,args="]).output() else {
+        return false;
+    };
+    crate::winehost::running_exe(
+        &String::from_utf8_lossy(&out.stdout),
+        crate::game::active().exe,
+        std::process::id(),
+    )
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn is_game_running() -> bool {
     false
 }
@@ -415,7 +429,7 @@ pub fn game_window_rect() -> Option<(i32, i32, i32, i32)> {
 }
 
 /// What happened when the user pressed Play.
-// macOS dev builds only ever construct `AlreadyRunning` (the launch bails first).
+// Platforms with no launch arm of their own only ever construct `AlreadyRunning`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -460,7 +474,8 @@ fn resolve_exe(cfg: &AppConfig) -> anyhow::Result<(std::path::PathBuf, std::path
 /// Windows runs the exe directly rather than going through `steam://`: that works for
 /// standalone (non-Steam) copies too, and doesn't need Steam to be up. Under Proton the
 /// exe isn't ours to spawn — Steam has to set up the prefix — so Linux hands the Steam
-/// URL to the desktop instead.
+/// URL to the desktop instead. macOS runs the exe too, but through the Wine wrapper that
+/// owns the prefix it lives in (see [`crate::winehost`]).
 pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
     launch_with(cfg, None)
 }
@@ -573,10 +588,48 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
         Ok(LaunchOutcome::Launched)
     }
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        // The game is a Windows binary here, so it runs inside a Wine prefix. The prefix
+        // is whatever sits above `drive_c` in the exe's own path — see `winehost`.
+        let (prefix, _) = crate::winehost::split_prefix(&exe).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{game} is a Windows game — on macOS the install folder has to be the copy \
+                 inside your CrossOver, Whisky or Wine bottle (a path with drive_c in it). \
+                 Set it in Settings, under {game} install folder."
+            )
+        })?;
+        let runner = crate::winehost::resolve(&cfg.wine_runner, Some(&prefix)).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No Wine runner found — install CrossOver, Whisky or Wine to run {game} on \
+                 macOS, or point Settings at one you already have."
+            )
+        })?;
+
+        let extra: Vec<String> = address.map(|a| connect_args(a).to_vec()).unwrap_or_default();
+        let plan = crate::winehost::plan(&runner, &prefix, &exe, &extra);
+        log::info!(
+            "via {}: {} {:?}",
+            runner.via(),
+            plan.program.display(),
+            plan.args
+        );
+
+        let mut cmd = std::process::Command::new(&plan.program);
+        cmd.current_dir(&dir).args(&plan.args);
+        for (key, value) in &plan.env {
+            cmd.env(key, value);
+        }
+        cmd.spawn().map_err(|e| {
+            anyhow::anyhow!("Couldn't start {} through {}: {e}", exe.display(), runner.via())
+        })?;
+        Ok(LaunchOutcome::Launched)
+    }
+
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = (dir, address);
-        anyhow::bail!("Launching MX Bikes is supported on Windows and Linux only")
+        anyhow::bail!("Launching MX Bikes is supported on Windows, macOS and Linux only")
     }
 }
 
@@ -681,6 +734,118 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(msg.contains(crate::game::MXB.exe), "names what's missing: {msg}");
         assert!(msg.contains("Settings"), "points at the fix: {msg}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The whole macOS launch, end to end, against a stub standing in for Wine.
+    ///
+    /// Everything up to the wrapper is ours and is exercised here: the prefix comes out of
+    /// the exe's path, the runner override is honoured, the game folder becomes the working
+    /// directory, and the connect flag reaches argv as two entries. Only whether Wine then
+    /// runs a Windows binary is out of our hands.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn launches_through_the_runner_with_the_prefix_and_the_connect_args() {
+        let root = temp_dir("mac-launch");
+        let game_dir = root.join("Bottles/MXB/drive_c/Program Files/MX Bikes");
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::write(game_dir.join(crate::game::MXB.exe), b"stub").unwrap();
+
+        // A stub "Wine" that records how it was called, so the assertion is on the real
+        // spawn rather than on the plan we handed to it.
+        let record = root.join("argv.txt");
+        let runner = root.join("fake-wine");
+        std::fs::write(
+            &runner,
+            format!(
+                "#!/bin/sh\n{{ echo \"$WINEPREFIX\"; pwd; for a in \"$@\"; do echo \"$a\"; done; }} > {}\n",
+                record.display()
+            ),
+        )
+        .unwrap();
+        std::process::Command::new("chmod").arg("+x").arg(&runner).status().unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.game_path = game_dir.to_string_lossy().into_owned();
+        cfg.wine_runner = runner.to_string_lossy().into_owned();
+
+        let outcome = join(&cfg, "203.0.113.10").expect("a stub runner is enough to launch");
+        assert!(matches!(outcome, LaunchOutcome::Launched));
+
+        // The child is spawned, not waited on — give it a moment to write.
+        let mut written = String::new();
+        for _ in 0..100 {
+            if let Ok(text) = std::fs::read_to_string(&record) {
+                if !text.is_empty() {
+                    written = text;
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(
+            lines.first().copied(),
+            Some(root.join("Bottles/MXB").to_string_lossy().as_ref()),
+            "WINEPREFIX is the folder above drive_c, not the game folder: {written:?}"
+        );
+        // `pwd` resolves symlinks, and macOS puts the temp dir behind `/private`.
+        assert!(
+            lines.get(1).is_some_and(|cwd| cwd.ends_with("drive_c/Program Files/MX Bikes")),
+            "the game folder is the working directory: {written:?}"
+        );
+        assert_eq!(
+            &lines[2..],
+            [
+                game_dir.join(crate::game::MXB.exe).to_string_lossy().as_ref(),
+                "-directconnect",
+                "203.0.113.10:54210",
+            ],
+            "the exe and the connect flag arrive as separate argv entries: {written:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With no wrapper installed and none configured, Play has to say what to install —
+    /// "supported on Windows and Linux only" was the old answer and is no longer true.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn without_a_runner_the_error_names_the_wrappers_to_install() {
+        let root = temp_dir("mac-no-runner");
+        let game_dir = root.join("Bottles/MXB/drive_c/MX Bikes");
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::write(game_dir.join(crate::game::MXB.exe), b"stub").unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.game_path = game_dir.to_string_lossy().into_owned();
+        // Point at a runner that isn't there: auto-detection then decides, and this test
+        // only holds on a machine with no wrapper installed — which is the case it covers.
+        cfg.wine_runner = root.join("not-here").to_string_lossy().into_owned();
+
+        if crate::winehost::resolve("", Some(&root.join("Bottles/MXB"))).is_none() {
+            let msg = format!("{:#}", launch(&cfg).expect_err("no runner means no launch"));
+            assert!(msg.contains("CrossOver"), "names a wrapper to install: {msg}");
+            assert!(msg.contains("Wine"), "names a wrapper to install: {msg}");
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A native folder pick on a Mac isn't inside any prefix — say so, rather than
+    /// failing later inside a wrapper that was never going to be involved.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_install_outside_a_bottle_is_named_as_the_problem() {
+        let dir = temp_dir("mac-no-prefix");
+        std::fs::write(dir.join(crate::game::MXB.exe), b"stub").unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.game_path = dir.to_string_lossy().into_owned();
+        let msg = format!("{:#}", launch(&cfg).expect_err("no prefix means no launch"));
+        assert!(msg.contains("drive_c"), "names what's missing from the path: {msg}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

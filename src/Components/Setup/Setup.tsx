@@ -29,15 +29,17 @@ interface SetupProps {
 }
 
 /**
- * Where the game keeps its user folder, per OS. On Linux it runs under Proton and writes
- * inside the Wine prefix, so pointing someone at `~/Documents` would send them looking in
- * a folder the game has never touched.
+ * Where the game keeps its user folder, per OS. Anywhere it runs as a Windows process —
+ * Proton on Linux, a CrossOver/Whisky bottle on macOS — it writes inside the Wine prefix,
+ * so pointing someone at `~/Documents` would send them looking in a folder the game has
+ * never touched.
  */
 function hintFor(platform: string | null, game: GameInfo): string {
   const appid = game.id === "gpb" ? "848050" : "655500";
   if (platform === "linux")
     return `steamapps/compatdata/${appid}/.../Documents/PiBoSo/${game.display}`;
-  if (platform === "macos") return `Documents/PiBoSo/${game.display}`;
+  if (platform === "macos")
+    return `Bottles/.../drive_c/users/crossover/Documents/PiBoSo/${game.display}`;
   return `Documents\\PiBoSo\\${game.display}`;
 }
 

@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-08-10 — v0.9.1 — Play works on a Mac
+
+A patch on top of v0.9.0 — everything that release added is still the news, and its notes
+are repeated below.
+
+Worth knowing for this beta: the Mac launch has been tested against a stand-in for Wine, not
+against a real bottle, so if Play does something odd on your machine the app log names the
+exact command it ran — please send it.
+
+### Added
+- **Play and Join Server work on macOS.** MX Bikes is a Windows game, so on a Mac it runs
+  inside a CrossOver, Whisky or Wine bottle — and the app, which had a launcher for Windows
+  and one for Linux, simply refused: *"Launching MX Bikes is supported on Windows and Linux
+  only."* It launches now, through whichever wrapper owns the bottle the game sits in. That
+  bottle is worked out from the install folder itself: every wrapper keeps its fake `C:` drive
+  at `drive_c`, so whatever is above it is the prefix, and no wrapper's private layout has to
+  be guessed at. CrossOver bottles are started by name, the way CodeWeavers documents, so the
+  bottle's own graphics settings apply instead of being skipped; everything else is pointed
+  straight at the prefix. Joining a server goes the same way, connect flag and all.
+- **The app finds a bottled install by itself.** Setup and Settings only ever looked where a
+  *native* Mac game would be — Steam under `~/Library`, mods under `~/Documents` — neither of
+  which a Windows game inside a bottle ever touches. A Mac player had to type a path like
+  `…/Bottles/MXB/drive_c/…` by hand before anything worked at all. Both detectors now search
+  the CrossOver and Whisky bottles on the machine, including a Windows Steam installed inside
+  one, and the setup screen's folder hint points at the bottle rather than at `Documents`.
+- **The sidebar knows when the game is up on a Mac.** Under Wine the game is an ordinary
+  process, so Play now shows "MX Bikes running" instead of quietly starting a second copy.
+- **A Wine runner picker in Settings**, for when the automatic choice is wrong or the wrapper
+  lives somewhere unusual. It also shows which runner was found and how many bottles the app
+  can see — so a bottle it *can't* see shows up as missing before you press Play, not after.
+
 ## 2026-08-09 — v0.9.0 — Servers you can create, paints everyone can see, and a paint studio
 
 ### Added

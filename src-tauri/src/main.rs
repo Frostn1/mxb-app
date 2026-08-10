@@ -45,6 +45,7 @@ mod soundmods;
 mod texstore;
 mod upload;
 mod vcruntime;
+mod winehost;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
@@ -3318,6 +3319,25 @@ fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// macOS: pick the Wine binary that starts the game. Blank hands it back to auto-detection.
+#[tauri::command]
+fn set_wine_runner(app: tauri::AppHandle, path: String) -> Result<winehost::HostInfo, String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.wine_runner = path;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    Ok(winehost::describe(&cfg.wine_runner))
+}
+
+/// macOS: what the app found to launch the game with, and which bottles it can see.
+///
+/// Reported rather than assumed — a player whose bottle we can't see needs to know that
+/// before they press Play, not after.
+#[tauri::command]
+fn wine_host_info(app: tauri::AppHandle) -> winehost::HostInfo {
+    let cfg = config::load(&app).unwrap_or_default();
+    winehost::describe(&cfg.wine_runner)
+}
+
 /// The titles this build can drive, with their per-game capabilities. Static data —
 /// the switcher and the feature gating both read it.
 #[tauri::command]
@@ -5567,6 +5587,8 @@ fn main() {
             uninstall_mod,
             reveal_in_explorer,
             set_game_path,
+            set_wine_runner,
+            wine_host_info,
             set_mods_path,
             set_intro_seen,
             set_seen_version,
