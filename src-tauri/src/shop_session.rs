@@ -71,6 +71,29 @@ pub fn load_session(app: &AppHandle) {
     log::info!("restored MX Bikes Shop session ({} cookies)", cookies.len());
 }
 
+/// Forget the sign-in, without touching the browser's cookies.
+///
+/// For the case where the store itself has told us we are signed out — the purchases page came
+/// back as the login form, or as Cloudflare's interstitial. Two things have to happen, and
+/// neither used to:
+///
+///  - The stored marker goes. Otherwise `shop_status` keeps answering `true` from a file that
+///    has outlived the browser's cookies, so every visit to the Purchases tab renders as signed
+///    in, fails its first read, and drops to signed out — the "logged in for a second" flicker,
+///    with no sign-in involved at all.
+///  - The hidden window goes, so the next read starts from a fresh navigation instead of the
+///    signed-out DOM that produced this.
+///
+/// What stays is the cookie jar. Those cookies are dead as a session, but the `cf_clearance`
+/// among them is not, and dropping it makes the next sign-in pay for a fresh managed challenge
+/// — the slowest and least reliable part of the whole flow. [`clear_session`] is the one that
+/// clears cookies, because "Log out" has to mean the account is really let go of.
+pub fn forget(app: &AppHandle) {
+    cookie_session::remove(app, &SITE);
+    app.state::<ShopSession>().set(false);
+    crate::shop_fetch::close(app);
+}
+
 pub fn clear_session(app: &AppHandle) {
     cookie_session::remove(app, &SITE);
     app.state::<ShopSession>().set(false);

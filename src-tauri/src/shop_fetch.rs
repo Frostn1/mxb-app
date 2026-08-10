@@ -73,6 +73,11 @@ struct Reply {
     id: u64,
     #[serde(default)]
     html: String,
+    /// `performance.timeOrigin` — the document's own identity, and the only cheap way to tell
+    /// a page that a navigation has actually *replaced* from the one that is still on screen
+    /// while the new one loads. See [`wait_until_ready`].
+    #[serde(default)]
+    origin: f64,
 }
 
 type Waiting = Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<Reply>>>;
@@ -106,15 +111,28 @@ fn listen_for_results(app: &AppHandle) {
 /// The purchases page's HTML, read from the window that is already displaying it.
 ///
 /// `reload` re-navigates first, which is what "Refresh" has to mean — the DOM otherwise stays
-/// on whatever was fetched when the window opened.
+/// on whatever was fetched when the window opened. It is also what a *fresh sign-in* means: the
+/// window that is already up was loaded by whoever was signed in before, and reading it again
+/// would answer for the old session — or, when there was none, hand back the login form that
+/// EDD serves a signed-out visitor. That is the reload's real job, not just the button's.
 pub async fn downloads_html(reload: bool) -> anyhow::Result<String> {
     let app = app()?;
-    let window = ensure_window(app).await?;
+    // A window that was *just built* has already loaded the purchases page, freshly, as itself:
+    // there is no stale DOM for a reload to replace, and re-navigating would only make the user
+    // wait through a second load and a second challenge. This is the common case after a
+    // sign-in now, since signing in drops the old window.
+    let (window, freshly_built) = ensure_window(app).await?;
 
-    if reload {
+    if reload && !freshly_built {
+        // Which document is being replaced. `navigate` returns immediately and the *old* page
+        // stays live — and `readyState === 'complete'` — for as long as the new one takes to
+        // arrive, so a readiness check that couldn't tell them apart would pass at once and
+        // read the page we just navigated away from. `Err` here (still on a challenge, script
+        // not reachable) simply leaves the wait below unconstrained.
+        let previous = probe(&window).await.ok();
         let url = format!("{SHOP_BASE}{DOWNLOADS_PATH}");
         window.navigate(url.parse()?)?;
-        wait_until_ready(&window).await?;
+        wait_until_ready_replacing(&window, previous).await?;
     }
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -212,7 +230,7 @@ fn download_lock() -> &'static tokio::sync::Mutex<()> {
 /// `commit_drop` — moves at all.
 pub async fn download(app: &AppHandle, slug: &str, url: &str, dir: &Path) -> anyhow::Result<PathBuf> {
     let _guard = download_lock().lock().await;
-    let window = ensure_window(app).await?;
+    let (window, _) = ensure_window(app).await?;
 
     *lock(download_dir()) = Some(dir.to_path_buf());
     *lock(download_state()) = Download::default();
@@ -339,20 +357,29 @@ fn sanitize(name: &str) -> String {
 
 // ──────────────────────────────────── the window ────────────────────────────────────
 
+/// Whether the window that is up has been seen past Cloudflare's challenge.
+///
+/// Module-level rather than a local static inside [`ensure_window`], because [`close`] has to
+/// be able to clear it: it belongs to a particular window, and a stale `true` would let the
+/// *next* window be handed out before its own challenge had cleared.
+static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Build the hidden window on first use and leave it up for the session.
-async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> {
+///
+/// The flag says whether this call is what built it — which is the same question as "is the
+/// page it is showing freshly loaded, or left over from before", and so decides whether a
+/// caller asking to reload has anything to reload away from.
+async fn ensure_window(app: &AppHandle) -> anyhow::Result<(tauri::WebviewWindow, bool)> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = LOCK.lock().await;
 
-    static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
     if let Some(existing) = app.get_webview_window(WINDOW) {
         if READY.load(Ordering::Relaxed) {
-            return Ok(existing);
+            return Ok((existing, false));
         }
         wait_until_ready(&existing).await?;
         READY.store(true, Ordering::Relaxed);
-        return Ok(existing);
+        return Ok((existing, false));
     }
 
     let url: tauri::Url = format!("{SHOP_BASE}{DOWNLOADS_PATH}").parse()?;
@@ -373,7 +400,7 @@ async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> 
 
     wait_until_ready(&window).await?;
     READY.store(true, Ordering::Relaxed);
-    Ok(window)
+    Ok((window, true))
 }
 
 /// Wait for the page to be able to run our script.
@@ -383,11 +410,25 @@ async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> 
 /// is — has to have cleared. Polling a one-line `eval` covers both, since the challenge page is
 /// replaced by the real one when it passes.
 async fn wait_until_ready(window: &tauri::WebviewWindow) -> anyhow::Result<()> {
+    wait_until_ready_replacing(window, None).await
+}
+
+/// [`wait_until_ready`], for a page a navigation has just been asked for.
+///
+/// `replacing` is the document that has to be *gone* before the window counts as ready —
+/// identified by its `performance.timeOrigin`, which is minted per document. Without it the
+/// check answers about whatever is still on screen, which after a `navigate` is the previous
+/// page: complete, past the challenge, and wrong.
+async fn wait_until_ready_replacing(
+    window: &tauri::WebviewWindow,
+    replacing: Option<f64>,
+) -> anyhow::Result<()> {
     let deadline = std::time::Instant::now() + READY_TIMEOUT;
     let mut last: Option<String> = None;
     while std::time::Instant::now() < deadline {
         match probe(window).await {
-            Ok(()) => return Ok(()),
+            Ok(origin) if Some(origin) != replacing => return Ok(()),
+            Ok(_) => last = Some("the page it was told to leave is still loaded".to_string()),
             Err(e) => last = Some(e.to_string()),
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -407,24 +448,19 @@ async fn wait_until_ready(window: &tauri::WebviewWindow) -> anyhow::Result<()> {
 /// wrong, and quietly so: Cloudflare injects its `challenge-platform/scripts/jsd` script into
 /// *ordinary* pages as well when JS detections are on, so that string is no evidence of a
 /// challenge and the window would never be declared ready.
-async fn probe(window: &tauri::WebviewWindow) -> anyhow::Result<()> {
+///
+/// Answers with the document's `performance.timeOrigin`, so a caller that has just navigated
+/// can tell the page it asked for from the one it asked to leave.
+async fn probe(window: &tauri::WebviewWindow) -> anyhow::Result<f64> {
     const PROBE_ID: u64 = 0;
     let (tx, rx) = tokio::sync::oneshot::channel();
     lock(waiting()).insert(PROBE_ID, tx);
-    let js = format!(
-        "if (window.__TAURI_INTERNALS__ && document.readyState === 'complete' \
-         && typeof window._cf_chl_opt === 'undefined' \
-         && !/^just a moment/i.test(document.title || '')) {{ \
-         window.__TAURI_INTERNALS__.invoke\
-         ('plugin:event|emit', {{ event: {event}, payload: {{id:0}} }}); }}",
-        event = js_string(RESULT_EVENT)
-    );
-    if let Err(e) = window.eval(&js) {
+    if let Err(e) = window.eval(probe_script()) {
         lock(waiting()).remove(&PROBE_ID);
         return Err(anyhow::anyhow!("{e}"));
     }
     match tokio::time::timeout(Duration::from_millis(400), rx).await {
-        Ok(Ok(_)) => Ok(()),
+        Ok(Ok(reply)) => Ok(reply.origin),
         _ => {
             lock(waiting()).remove(&PROBE_ID);
             Err(anyhow::anyhow!("still on the challenge, or not ready yet"))
@@ -432,9 +468,31 @@ async fn probe(window: &tauri::WebviewWindow) -> anyhow::Result<()> {
     }
 }
 
-/// Drop the window, so the next use rebuilds it. Signing out has to do this, or a window that
-/// is still signed in keeps answering.
+/// The probe, as its own function so a test can hold it to what it has to say.
+fn probe_script() -> String {
+    format!(
+        "if (window.__TAURI_INTERNALS__ && document.readyState === 'complete' \
+         && typeof window._cf_chl_opt === 'undefined' \
+         && !/^just a moment/i.test(document.title || '')) {{ \
+         window.__TAURI_INTERNALS__.invoke\
+         ('plugin:event|emit', {{ event: {event}, \
+         payload: {{id:0, origin: performance.timeOrigin}} }}); }}",
+        event = js_string(RESULT_EVENT)
+    )
+}
+
+/// Drop the window, so the next use rebuilds it from a fresh navigation.
+///
+/// Signing *out* has to do this, or a window that is still signed in keeps answering. Signing
+/// *in* has to do it just as much, and that is the less obvious half: the window is a browser
+/// parked on a page, and the page it is parked on was loaded by whoever was signed in before —
+/// or, if the last read failed, is the login form EDD serves a signed-out visitor. Left up, it
+/// answers the very next read with that same stale DOM, so a sign-in that genuinely succeeded
+/// is reported back as "your session expired" and the app drops straight to signed-out again.
 pub fn close(app: &AppHandle) {
+    // Cleared before the close, not after: `READY` describes the window that is going away, and
+    // a `true` left behind would let the next one be handed out before its challenge cleared.
+    READY.store(false, Ordering::Relaxed);
     if let Some(win) = app.get_webview_window(WINDOW) {
         let _ = win.close();
     }
@@ -514,11 +572,37 @@ mod tests {
         let (tx, mut rx) = tokio::sync::oneshot::channel();
         lock(waiting()).insert(4242, tx);
 
-        deliver(Reply { id: 4243, html: "injected".into() });
+        deliver(Reply { id: 4243, html: "injected".into(), origin: 0.0 });
         assert!(rx.try_recv().is_err(), "a reply for another id must not resolve this request");
 
-        deliver(Reply { id: 4242, html: "ours".into() });
+        deliver(Reply { id: 4242, html: "ours".into(), origin: 0.0 });
         assert_eq!(rx.try_recv().unwrap().html, "ours");
+    }
+
+    /// The probe has to carry the document's identity back, or a reload cannot be told from the
+    /// page it is replacing — which is how a fresh sign-in ends up reading the previous
+    /// session's DOM and reporting itself as expired.
+    #[test]
+    fn the_probe_reports_which_document_answered() {
+        let js = probe_script();
+        assert!(js.contains("performance.timeOrigin"), "{js}");
+        // The two conditions that make this a readiness check rather than a liveness one.
+        assert!(js.contains("_cf_chl_opt"), "{js}");
+        assert!(js.contains("readyState"), "{js}");
+        assert!(js.contains(RESULT_EVENT), "{js}");
+    }
+
+    /// A reply is parsed from a remote page, so every field it may omit has to have a default —
+    /// the probe sends no `html`, and the page read sends no `origin`.
+    #[test]
+    fn a_reply_may_omit_everything_but_its_id() {
+        let probe: Reply = serde_json::from_str(r#"{"id":0,"origin":1234.5}"#).unwrap();
+        assert_eq!(probe.origin, 1234.5);
+        assert_eq!(probe.html, "");
+
+        let read: Reply = serde_json::from_str(r#"{"id":3,"html":"<html></html>"}"#).unwrap();
+        assert_eq!(read.origin, 0.0);
+        assert_eq!(read.html, "<html></html>");
     }
 
     #[test]

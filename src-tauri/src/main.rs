@@ -4614,6 +4614,12 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
         "opening the shop login window at {target} (clearing first; jar held: {})",
         shop_session::cookie_names(&stale)
     );
+    // The hidden purchases window goes first, for the same reason sign-*out* drops it: it is a
+    // browser parked on a page belonging to the session about to be thrown away. Clearing the
+    // cookies out from under a window that stays up leaves it displaying the old DOM, and that
+    // DOM is what the read straight after this sign-in would return — the login form, read back
+    // as "your session expired", which signs the user out a moment after signing them in.
+    shop_fetch::close(&app);
     if let Some(main) = app.get_webview_window(MAIN_WINDOW) {
         if let Err(e) = main.clear_all_browsing_data() {
             log::warn!("could not clear stale cookies before sign-in: {e}");
