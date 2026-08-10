@@ -43,6 +43,22 @@ export const SHOP_SORTS: { value: ShopSort; label: TKey }[] = [
   { value: "nameAsc", label: "shopSort.nameAsc" },
 ];
 
+/**
+ * How the Purchases grid can be ordered.
+ *
+ * Its own list rather than a reuse of `SHOP_SORTS`: price and on-sale are meaningless once you
+ * own the thing, and the two orderings that matter most here — when you bought it, and what you
+ * haven't installed yet — have nowhere to live in the catalog's list. Sorting happens in the
+ * browser; every purchase is already in memory.
+ */
+export type PurchaseSort = "recentlyPurchased" | "nameAsc" | "notInstalled";
+
+export const PURCHASE_SORTS: { value: PurchaseSort; label: TKey }[] = [
+  { value: "recentlyPurchased", label: "purchaseSort.recentlyPurchased" },
+  { value: "nameAsc", label: "purchaseSort.nameAsc" },
+  { value: "notInstalled", label: "purchaseSort.notInstalled" },
+];
+
 /** Whether this build can reach the shop at all. False hides the tab. */
 export function shopCatalogAvailable(): Promise<boolean> {
   return invoke<boolean>("shop_catalog_available");

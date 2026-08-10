@@ -1,19 +1,42 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ExternalLink, Store, User } from "lucide-react";
+import { ArrowLeft, Check, Download, ExternalLink, Loader2, Store, User } from "lucide-react";
 import type { ShopModDetail } from "../../types";
+import type { ShopItem } from "../../api/mods";
 import { openShopUrl, shopCatalogDetail } from "../../api/shop";
 import PriceTag, { SaleEnds } from "./PriceTag";
 import Gallery from "../ModDetail/Gallery";
 import RichDescription from "../ModDetail/RichDescription";
 import { Button } from "@/Components/ui/button";
 import { Skeleton } from "@/Components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/Components/ui/select";
 import { useT } from "../../i18n/context";
 import { formatDate } from "../../lib/mods";
+
+/** What the right rail offers when the viewer already owns this. */
+export interface OwnedActions {
+  /** Every file sold under this product; length > 1 means variants (PRO/AMS/…). */
+  files: ShopItem[];
+  installed: boolean;
+  /** True while this product is downloading. */
+  busy: boolean;
+  /** Download completion, 0–1, or null when no length was reported. */
+  progress: number | null;
+  disabled: boolean;
+  onInstall: (file: ShopItem) => void;
+}
 
 interface ShopDetailProps {
   id: number;
   currency: string;
   onBack: () => void;
+  /** Turns this into the detail page for something already bought. */
+  owned?: OwnedActions;
 }
 
 /**
@@ -28,10 +51,13 @@ interface ShopDetailProps {
  * Served entirely from the catalog already in memory, so this opens instantly and works with
  * the network down.
  */
-export default function ShopDetail({ id, currency, onBack }: ShopDetailProps) {
+export default function ShopDetail({ id, currency, onBack, owned }: ShopDetailProps) {
   const t = useT();
   const [detail, setDetail] = useState<ShopModDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Which file to install, for a product that ships more than one. Held here rather than in
+  // `owned` so the picker survives a re-render of the parent grid.
+  const [pickedId, setPickedId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,29 +134,38 @@ export default function ShopDetail({ id, currency, onBack }: ShopDetailProps) {
 
         {/* right rail */}
         <div className="flex w-[340px] flex-none flex-col gap-3 overflow-y-auto">
-          <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-card p-4">
-            <PriceTag price={detail.price} currency={currency} size="lg" />
-            <SaleEnds price={detail.price} />
+          {owned ? (
+            <OwnedPanel
+              owned={owned}
+              pickedId={pickedId}
+              setPickedId={setPickedId}
+              storeUrl={detail.url}
+            />
+          ) : (
+            <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-card p-4">
+              <PriceTag price={detail.price} currency={currency} size="lg" />
+              <SaleEnds price={detail.price} />
 
-            {/* Buying happens on the store. We deliberately don't handle payment or
-                downloads — this app can browse the catalog and nothing more. */}
-            {detail.url ? (
-              <Button
-                className="mt-2 w-full"
-                onClick={() => void openShopUrl(detail.url)}
-              >
-                <ExternalLink className="size-4" />
-                {t("shopCatalog.buyOnStore")}
-              </Button>
-            ) : (
-              <p className="mt-2 text-[12px] text-muted-foreground">
-                {t("shopCatalog.noProductLink")}
+              {/* Buying happens on the store. We deliberately don't handle payment or
+                  downloads — this app can browse the catalog and nothing more. */}
+              {detail.url ? (
+                <Button
+                  className="mt-2 w-full"
+                  onClick={() => void openShopUrl(detail.url)}
+                >
+                  <ExternalLink className="size-4" />
+                  {t("shopCatalog.buyOnStore")}
+                </Button>
+              ) : (
+                <p className="mt-2 text-[12px] text-muted-foreground">
+                  {t("shopCatalog.noProductLink")}
+                </p>
+              )}
+              <p className="text-center text-[11px] text-faint">
+                {t("shopCatalog.buyNote")}
               </p>
-            )}
-            <p className="text-center text-[11px] text-faint">
-              {t("shopCatalog.buyNote")}
-            </p>
-          </div>
+            </div>
+          )}
 
           <div className="flex flex-col gap-2.5 rounded-xl border border-white/[0.07] bg-card p-4 text-[12.5px]">
             {detail.author && (
@@ -149,7 +184,11 @@ export default function ShopDetail({ id, currency, onBack }: ShopDetailProps) {
             )}
             {detail.categoryNames.length > 0 && (
               <Row icon={<Store className="size-3.5" />} label={t("shopCatalog.category")}>
-                <span className="truncate">{detail.categoryNames.join(", ")}</span>
+                {/* Wraps rather than truncates: `truncate` on an inline span in a flex row
+                    doesn't clip a dozen categories, it pushes them out of the card. */}
+                <span className="block whitespace-normal break-words">
+                  {detail.categoryNames.join(", ")}
+                </span>
               </Row>
             )}
             {detail.updated !== null && (
@@ -160,6 +199,101 @@ export default function ShopDetail({ id, currency, onBack }: ShopDetailProps) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The right rail for something already bought: pick a file, put it in the library. */
+function OwnedPanel({
+  owned,
+  pickedId,
+  setPickedId,
+  storeUrl,
+}: {
+  owned: OwnedActions;
+  pickedId: string | null;
+  setPickedId: (id: string) => void;
+  storeUrl: string | null;
+}) {
+  const t = useT();
+  const { files, installed, busy, progress, disabled, onInstall } = owned;
+
+  const picked = files.find((f) => String(f.id) === pickedId) ?? files[0];
+  const multi = files.length > 1;
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-xl border border-white/[0.07] bg-card p-4">
+      {installed && (
+        <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-emerald-400">
+          <Check className="size-3.5" strokeWidth={3} />
+          {t("purchases.installed")}
+        </span>
+      )}
+
+      {/* Only a product with variants has anything to ask. */}
+      {multi && (
+        <Select
+          value={String(picked.id)}
+          onValueChange={setPickedId}
+          disabled={disabled}
+        >
+          <SelectTrigger className="h-8 w-full bg-background text-[12.5px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {files.map((f) => (
+              <SelectItem key={f.id} value={String(f.id)}>
+                {f.fileLabel || f.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      <Button
+        className="w-full"
+        variant={installed ? "outline" : "default"}
+        onClick={() => onInstall(picked)}
+        disabled={disabled}
+      >
+        {busy ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Download className="size-4" />
+        )}
+        {busy
+          ? t("purchases.downloading")
+          : installed
+            ? t("purchases.reinstall")
+            : t("modDetail.addToLibrary")}
+      </Button>
+
+      {/* No bar when nothing reported a length — an invented one would be a lie. */}
+      {busy && progress !== null && (
+        <div className="flex flex-col gap-1">
+          <div className="h-1 w-full overflow-hidden rounded-full bg-foreground/15">
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-200"
+              style={{ width: `${Math.round(progress * 100)}%` }}
+            />
+          </div>
+          <span className="text-center text-[11px] font-medium tabular-nums text-muted-foreground">
+            {Math.round(progress * 100)}%
+          </span>
+        </div>
+      )}
+
+      {storeUrl && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full"
+          onClick={() => void openShopUrl(storeUrl)}
+        >
+          <ExternalLink className="size-3.5" />
+          {t("shopCatalog.openOnStore")}
+        </Button>
+      )}
     </div>
   );
 }
@@ -183,8 +317,9 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="flex flex-none items-center gap-1.5 text-muted-foreground">
+    // `items-start` keeps the label at the top when the value wraps.
+    <div className="flex items-start gap-2">
+      <span className="flex flex-none items-center gap-1.5 pt-px text-muted-foreground">
         {icon}
         {label}
       </span>

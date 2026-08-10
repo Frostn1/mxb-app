@@ -391,6 +391,14 @@ export const en = {
   "purchases.installed": "Installed",
   "purchases.downloading": "Downloading…",
   "purchases.downloadFailed": "Couldn't download {{title}}",
+  "purchases.searchPlaceholder": "Search your purchases…",
+  "purchases.otherCategory": "Other",
+  "purchases.notInstalledOnly": "Not installed",
+  "purchases.noMatches": "None of your purchases match that.",
+  "purchases.viewDetails": "View details",
+  "purchaseSort.recentlyPurchased": "Recently purchased",
+  "purchaseSort.nameAsc": "Name (A–Z)",
+  "purchaseSort.notInstalled": "Not installed first",
 
   // ── MX Bikes Shop catalog (browse-only; buying happens on the store) ───────
   "shopCatalog.searchPlaceholder": "Search the shop…",
