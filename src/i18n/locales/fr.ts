@@ -1357,7 +1357,7 @@ export const fr: Translation = {
 
   // ── Designer (l'éditeur par calques) ──────────────────────────────────────────
   "designer.help":
-    "Dessine une déco sur les planches que le jeu lit vraiment, et regarde-la sur le modèle au fur et à mesure. Pars d'une déco installée pour avoir les bons noms de planches, empile images et textes par-dessus, puis enregistre : ce qui sort est un .pnt que le jeu charge, pas un export à convertir.",
+    "Dessine une déco sur les planches que le jeu lit vraiment, et regarde-la sur le modèle au fur et à mesure. Pars d'une déco installée pour avoir les bons noms de planches, peins dessus au pinceau, au dégradé ou avec des formes, empile images et textes par-dessus, puis enregistre : ce qui sort est un .pnt que le jeu charge, pas un export à convertir.",
   "designer.empty":
     "Rien sur quoi dessiner pour l'instant. Pars d'une déco installée pour ce modèle — tu récupères ses planches et leurs noms — ou ajoute une planche vierge.",
   "designer.startFromPaint": "Partir d'une déco…",
@@ -1376,7 +1376,8 @@ export const fr: Translation = {
   "designer.layers": "Calques",
   "designer.showRail": "Afficher planches et calques",
   "designer.hideRail": "Masquer planches et calques",
-  "designer.noLayers": "Aucun calque — ajoute une image ou du texte.",
+  "designer.noLayers":
+    "Aucun calque — ajoute une image, du texte ou un calque de peinture pour dessiner dessus.",
   "designer.layerCount": "{{count}} calque(s)",
   "designer.layerTitle": "Calque sélectionné",
   "designer.hide": "Masquer",
@@ -1406,4 +1407,40 @@ export const fr: Translation = {
   "designer.gearNote":
     "Affiché sur le pilote d'origine — ta propre tenue n'est pas chargée ici.",
   "designer.resetView": "Réinitialiser la vue",
+
+  // ── Designer › les outils de peinture ─────────────────────────────────────────
+  "designer.paint": "Peinture",
+  "designer.addPaint": "Calque de peinture",
+  "designer.paintLayerName": "Peinture",
+  "designer.undoStroke": "Annuler le tracé",
+  "designer.redoStroke": "Rétablir le tracé",
+  "designer.tool.move": "Déplacer",
+  "designer.tool.brush": "Pinceau",
+  "designer.tool.eraser": "Gomme",
+  "designer.tool.gradient": "Dégradé",
+  "designer.tool.fill": "Remplissage",
+  "designer.tool.rect": "Rectangle",
+  "designer.tool.ellipse": "Ellipse",
+  "designer.tool.line": "Ligne",
+  "designer.moveHint":
+    "Fais glisser les calques sur la planche pour les placer. Choisis un outil ci-dessus pour peindre dessus.",
+  "designer.colourFrom": "Peindre avec cette couleur",
+  "designer.colourTo": "Fondre vers cette couleur",
+  "designer.swapColours": "Inverser les deux couleurs",
+  "designer.brushSize": "Pinceau",
+  "designer.hardness": "Bord",
+  "designer.strength": "Intensité",
+  "designer.gradient": "Dégradé",
+  "designer.gradient.linear": "Linéaire",
+  "designer.gradient.radial": "Radial",
+  "designer.fadeOut": "Fondu",
+  "designer.shape": "Style",
+  "designer.shape.fill": "Plein",
+  "designer.shape.outline": "Contour",
+  "designer.lineWidth": "Épaisseur",
+  "designer.paintHint":
+    "Fais glisser sur la planche. Maintiens Maj pour rester droit, clic droit glissé pour déplacer la vue.",
+  "designer.fillHint": "Clique sur la planche pour remplir tout le calque.",
+  "designer.gradientHint":
+    "Fais glisser sur la planche pour définir où se fait la transition. Cela remplit tout le calque : ajoute un autre calque de peinture pour garder ce qu'il y a dessous.",
 };

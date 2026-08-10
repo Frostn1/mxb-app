@@ -56,7 +56,27 @@ export interface TextLayer extends LayerCommon {
   outlineWidth: number;
 }
 
-export type Layer = ImageLayer | TextLayer;
+/**
+ * A layer you paint into, holding its own raster the size of the sheet.
+ *
+ * Locked to the sheet — centred, unscaled, unrotated — because a stroke is put down in sheet
+ * pixels and moving the canvas afterwards would put it somewhere the hand didn't. The template
+ * underneath is never written to, so hiding this gets the untouched template back.
+ */
+export interface PaintLayer extends LayerCommon {
+  kind: "paint";
+  canvas: HTMLCanvasElement;
+  /**
+   * Bumped whenever the pixels change.
+   *
+   * The editor recomposites a sheet when the sheet *object* changes, and painting changes
+   * pixels inside a canvas without touching any object. This is what gives the change
+   * something to be — replace the layer with a higher `rev` and the sheet moves with it.
+   */
+  rev: number;
+}
+
+export type Layer = ImageLayer | TextLayer | PaintLayer;
 
 /** One texture of the paint: a name the mesh binds, and what's drawn under that name. */
 export interface Sheet {
@@ -117,6 +137,9 @@ export function layerExtent(layer: Layer): { w: number; h: number } {
   if (layer.kind === "image") {
     return { w: layer.image.width, h: layer.image.height };
   }
+  if (layer.kind === "paint") {
+    return { w: layer.canvas.width, h: layer.canvas.height };
+  }
   const ctx = measurer();
   if (!ctx) return { w: layer.text.length * layer.size * 0.6, h: layer.size };
   ctx.font = fontSpec(layer);
@@ -136,11 +159,15 @@ export function layerHalfSize(layer: Layer): { hw: number; hh: number } {
  * The topmost visible layer under a point in sheet coordinates, or null.
  *
  * Walks back to front because that's the one a click means: the layer you can see.
+ *
+ * Paint layers are invisible to this. One covers the whole sheet, so it would answer every
+ * click and there would be no way left to reach the logo underneath it — they're picked from
+ * the layer list instead.
  */
 export function hitTest(layers: Layer[], px: number, py: number): Layer | null {
   for (let i = layers.length - 1; i >= 0; i -= 1) {
     const layer = layers[i];
-    if (!layer.visible) continue;
+    if (!layer.visible || layer.kind === "paint") continue;
     // Into the layer's own frame: translate to its centre, then undo its rotation.
     const dx = px - layer.x;
     const dy = py - layer.y;
@@ -192,6 +219,28 @@ export function textLayer(text: string, sheet: Sheet): TextLayer {
     color: "#ffffff",
     outline: "#000000",
     outlineWidth: 0,
+  };
+}
+
+export function paintLayer(name: string, sheet: Sheet): PaintLayer {
+  const canvas = document.createElement("canvas");
+  canvas.width = sheet.width;
+  canvas.height = sheet.height;
+  return {
+    kind: "paint",
+    id: newId("layer"),
+    name,
+    visible: true,
+    opacity: 1,
+    blend: "normal",
+    // Sheet-sized and sheet-aligned: the identity transform, spelled out in the same fields
+    // every other layer uses so `drawLayer` needs no special case for it.
+    x: sheet.width / 2,
+    y: sheet.height / 2,
+    scale: 1,
+    rotation: 0,
+    canvas,
+    rev: 0,
   };
 }
 

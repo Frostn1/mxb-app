@@ -26,8 +26,11 @@ function drawLayer(ctx: CanvasRenderingContext2D, layer: Layer) {
   ctx.rotate(layer.rotation);
   ctx.scale(layer.scale, layer.scale);
 
-  if (layer.kind === "image") {
-    ctx.drawImage(layer.image, -layer.image.width / 2, -layer.image.height / 2);
+  if (layer.kind === "image" || layer.kind === "paint") {
+    // A paint layer's raster is sheet-sized and its transform is the identity, so this puts it
+    // back exactly where it was painted — the same call, from the same centre, as an image.
+    const src = layer.kind === "image" ? layer.image : layer.canvas;
+    ctx.drawImage(src, -src.width / 2, -src.height / 2);
   } else {
     ctx.font = fontSpec(layer);
     ctx.textAlign = "center";

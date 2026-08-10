@@ -1345,7 +1345,7 @@ export const ptBR: Translation = {
 
   // ── Designer (o editor de camadas) ────────────────────────────────────────────
   "designer.help":
-    "Desenhe uma pintura nas folhas que o jogo realmente lê e veja no modelo enquanto trabalha. Comece de uma pintura instalada para acertar os nomes das folhas, empilhe imagens e texto por cima e salve: o que sai é um .pnt que o jogo carrega, não uma exportação para converter.",
+    "Desenhe uma pintura nas folhas que o jogo realmente lê e veja no modelo enquanto trabalha. Comece de uma pintura instalada para acertar os nomes das folhas, pinte nela com pincel, gradiente ou formas, empilhe imagens e texto por cima e salve: o que sai é um .pnt que o jogo carrega, não uma exportação para converter.",
   "designer.empty":
     "Ainda não há nada para desenhar. Comece de uma pintura instalada para este modelo — assim você pega as folhas e os nomes delas — ou adicione uma em branco.",
   "designer.startFromPaint": "Começar de uma pintura…",
@@ -1363,7 +1363,8 @@ export const ptBR: Translation = {
   "designer.layers": "Camadas",
   "designer.showRail": "Mostrar folhas e camadas",
   "designer.hideRail": "Ocultar folhas e camadas",
-  "designer.noLayers": "Nenhuma camada ainda — adicione uma imagem ou um texto.",
+  "designer.noLayers":
+    "Nenhuma camada ainda — adicione uma imagem, um texto ou uma camada de pintura para desenhar.",
   "designer.layerCount": "{{count}} camada(s)",
   "designer.layerTitle": "Camada selecionada",
   "designer.hide": "Ocultar",
@@ -1391,4 +1392,40 @@ export const ptBR: Translation = {
     "A prévia 3D é só do MX Bikes por enquanto — os modelos do {{game}} precisam dos próprios vínculos de peças. Todo o resto funciona igual e a pintura salva normalmente.",
   "designer.gearNote": "Mostrado no piloto padrão — o seu equipamento não está carregado aqui.",
   "designer.resetView": "Redefinir visualização",
+
+  // ── Designer › as ferramentas de pintura ──────────────────────────────────────
+  "designer.paint": "Pintura",
+  "designer.addPaint": "Camada de pintura",
+  "designer.paintLayerName": "Pintura",
+  "designer.undoStroke": "Desfazer traço",
+  "designer.redoStroke": "Refazer traço",
+  "designer.tool.move": "Mover",
+  "designer.tool.brush": "Pincel",
+  "designer.tool.eraser": "Borracha",
+  "designer.tool.gradient": "Gradiente",
+  "designer.tool.fill": "Preenchimento",
+  "designer.tool.rect": "Retângulo",
+  "designer.tool.ellipse": "Elipse",
+  "designer.tool.line": "Linha",
+  "designer.moveHint":
+    "Arraste as camadas na folha para posicioná-las. Escolha uma ferramenta acima para pintar nela.",
+  "designer.colourFrom": "Pintar com esta",
+  "designer.colourTo": "Transitar para esta",
+  "designer.swapColours": "Trocar as duas cores",
+  "designer.brushSize": "Pincel",
+  "designer.hardness": "Borda",
+  "designer.strength": "Intensidade",
+  "designer.gradient": "Gradiente",
+  "designer.gradient.linear": "Linear",
+  "designer.gradient.radial": "Radial",
+  "designer.fadeOut": "Desaparecer",
+  "designer.shape": "Estilo",
+  "designer.shape.fill": "Preenchida",
+  "designer.shape.outline": "Contorno",
+  "designer.lineWidth": "Espessura",
+  "designer.paintHint":
+    "Arraste na folha. Segure Shift para manter reto, arraste com o botão direito para mover a vista.",
+  "designer.fillHint": "Clique na folha para preencher a camada inteira.",
+  "designer.gradientHint":
+    "Arraste na folha para definir onde acontece a transição. Ele preenche esta camada inteira — adicione outra camada de pintura para manter o que está embaixo.",
 };

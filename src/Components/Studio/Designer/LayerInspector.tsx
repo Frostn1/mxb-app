@@ -1,49 +1,7 @@
 import { Input } from "../../ui/input";
 import { useT } from "../../../i18n/context";
+import { Row, Slider } from "./controls";
 import { BLEND_MODES, FONTS, type BlendMode, type Layer } from "./layers";
-
-/** A labelled row. The panel is nothing but these, so they earn their own component. */
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex items-center gap-2">
-      <span className="w-[68px] flex-none text-[11px] text-muted-foreground">{label}</span>
-      <span className="flex min-w-0 flex-1 items-center gap-1.5">{children}</span>
-    </label>
-  );
-}
-
-function Slider({
-  value,
-  min,
-  max,
-  step,
-  onChange,
-  format,
-}: {
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  onChange: (v: number) => void;
-  format: (v: number) => string;
-}) {
-  return (
-    <>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 min-w-0 flex-1 accent-primary"
-      />
-      <span className="w-[44px] flex-none text-right text-[11px] tabular-nums text-muted-foreground">
-        {format(value)}
-      </span>
-    </>
-  );
-}
 
 /**
  * Everything about the selected layer that isn't its position on the sheet.
@@ -60,32 +18,39 @@ export function LayerInspector({
 }) {
   const t = useT();
   const patch = (fn: (l: Layer) => Layer) => onChange(fn);
+  // A paint layer is the sheet: strokes were put down in sheet pixels, and scaling or rotating
+  // the canvas afterwards would move every one of them off the panel it was painted on.
+  const movable = layer.kind !== "paint";
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-card/40 p-3.5">
       <h2 className="text-[13px] font-semibold">{t("designer.layerTitle")}</h2>
 
-      <Row label={t("designer.scale")}>
-        <Slider
-          value={layer.scale}
-          min={0.05}
-          max={4}
-          step={0.01}
-          onChange={(v) => patch((l) => ({ ...l, scale: v }))}
-          format={(v) => `${Math.round(v * 100)}%`}
-        />
-      </Row>
+      {movable && (
+        <>
+          <Row label={t("designer.scale")}>
+            <Slider
+              value={layer.scale}
+              min={0.05}
+              max={4}
+              step={0.01}
+              onChange={(v) => patch((l) => ({ ...l, scale: v }))}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+          </Row>
 
-      <Row label={t("designer.rotation")}>
-        <Slider
-          value={Math.round((layer.rotation * 180) / Math.PI)}
-          min={-180}
-          max={180}
-          step={1}
-          onChange={(v) => patch((l) => ({ ...l, rotation: (v * Math.PI) / 180 }))}
-          format={(v) => `${v}°`}
-        />
-      </Row>
+          <Row label={t("designer.rotation")}>
+            <Slider
+              value={Math.round((layer.rotation * 180) / Math.PI)}
+              min={-180}
+              max={180}
+              step={1}
+              onChange={(v) => patch((l) => ({ ...l, rotation: (v * Math.PI) / 180 }))}
+              format={(v) => `${v}°`}
+            />
+          </Row>
+        </>
+      )}
 
       <Row label={t("designer.opacity")}>
         <Slider

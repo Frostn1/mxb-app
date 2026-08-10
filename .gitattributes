@@ -1,3 +1,10 @@
 # The Windows release leg runs `scripts/release-notes.sh` through Git Bash, which chokes
 # on CRLF (`$'\r': command not found`). Keep shell scripts LF wherever they're checked out.
 *.sh text eol=lf
+
+# One stray NUL byte in a source file makes git call the whole thing binary, and a binary
+# file has no reviewable diff — `Designer.tsx` had exactly that (`join("\0")`) and its diffs
+# were unreadable. Diff source as text regardless of what a typo puts in it.
+*.ts diff
+*.tsx diff
+*.rs diff
