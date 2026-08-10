@@ -1258,6 +1258,27 @@ export const en = {
   // ReShade is a product name and stays untranslated everywhere, capital S included.
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Post-processing presets — how {{game}} looks on screen.",
+
+  // ── Supporters (Patreon) ───────────────────────────────────────────────────
+  "settings.supporters": "Supporters",
+  "settings.supportersDesc": "The people funding MXB App on Patreon.",
+  "supporters.intro":
+    "MXB App is free, and stays that way. Patreon is what pays for the time behind it — the people below are why there's a new build to install.",
+  "supporters.count_one": "{{count}} supporter",
+  "supporters.count_other": "{{count}} supporters",
+  "supporters.untiered": "Supporters",
+  "supporters.since": "since {{date}}",
+  "supporters.loading": "Fetching the list…",
+  "supporters.refresh": "Refresh",
+  "supporters.become": "Support on Patreon",
+  "supporters.empty": "Nobody's listed here yet",
+  "supporters.emptyDesc":
+    "The list updates on its own — back the app and your name shows up here, no new version needed.",
+  "supporters.offline":
+    "Couldn't reach the list just now — this is the last one we saw.",
+  "supporters.optOut":
+    "Names are shown with permission. Ask on Discord or Patreon and yours comes straight off.",
+
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ReShade presets",
   "reshade.needsGameFolder":

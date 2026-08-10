@@ -1280,6 +1280,27 @@ export const it: Translation = {
   // ── ReShade ────────────────────────────────────────────────────────────────
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Preset di post-processing — l'aspetto di {{game}} a schermo.",
+
+  // ── Sostenitori (Patreon) ──────────────────────────────────────────────────
+  "settings.supporters": "Sostenitori",
+  "settings.supportersDesc": "Chi finanzia MXB App su Patreon.",
+  "supporters.intro":
+    "MXB App è gratuita, e resta così. Patreon è ciò che paga il tempo che ci sta dietro: le persone qui sotto sono il motivo per cui c'è una nuova build da installare.",
+  "supporters.count_one": "{{count}} sostenitore",
+  "supporters.count_other": "{{count}} sostenitori",
+  "supporters.untiered": "Sostenitori",
+  "supporters.since": "da {{date}}",
+  "supporters.loading": "Carico l'elenco…",
+  "supporters.refresh": "Aggiorna",
+  "supporters.become": "Sostieni su Patreon",
+  "supporters.empty": "Ancora nessuno in elenco",
+  "supporters.emptyDesc":
+    "L'elenco si aggiorna da solo: sostieni l'app e il tuo nome compare qui, senza aspettare una nuova versione.",
+  "supporters.offline":
+    "Non sono riuscito a raggiungere l'elenco — questo è l'ultimo che abbiamo visto.",
+  "supporters.optOut":
+    "I nomi sono mostrati con il consenso di chi li porta. Scrivi su Discord o Patreon e il tuo viene tolto subito.",
+
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "preset ReShade",
   "reshade.needsGameFolder":

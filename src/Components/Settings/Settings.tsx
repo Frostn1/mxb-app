@@ -45,6 +45,7 @@ import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
 import ReshadeCard from "./ReshadeCard";
+import SupportersCard from "./SupportersCard";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
@@ -78,6 +79,7 @@ export type SectionId =
   | "appearance"
   | "frostmod"
   | "reshade"
+  | "supporters"
   | "about";
 const SECTIONS: { id: SectionId; label: TKey }[] = [
   { id: "game", label: "game.label" },
@@ -87,6 +89,7 @@ const SECTIONS: { id: SectionId; label: TKey }[] = [
   { id: "appearance", label: "settings.appearance" },
   { id: "frostmod", label: "settings.frostmod" },
   { id: "reshade", label: "settings.reshade" },
+  { id: "supporters", label: "settings.supporters" },
   { id: "about", label: "settings.about" },
 ];
 
@@ -217,6 +220,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     appearance: null,
     frostmod: null,
     reshade: null,
+    supporters: null,
     about: null,
   });
 
@@ -1155,6 +1159,17 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   .catch((e) => toast.error(String(e)));
               }}
             />
+          </Section>
+
+          {/* supporters — who's paying for the app on Patreon. Above About rather than
+              inside it: a thank-you buried under the version number and the update
+              button is one nobody reads. */}
+          <Section
+            title={t("settings.supporters")}
+            desc={t("settings.supportersDesc")}
+            innerRef={(el) => (refs.current.supporters = el)}
+          >
+            <SupportersCard />
           </Section>
 
           {/* about */}
