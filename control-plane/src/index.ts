@@ -21,6 +21,7 @@ import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
   isBikeId,
   isBootstrapStage,
+  isContentName,
   isGuid,
   isPaintFileName,
   isPaintSize,
@@ -81,6 +82,22 @@ async function route(request: Request, env: Env): Promise<Response> {
   // it holds no credentials and has no way to be given any. The binary is not a secret —
   // it is the same agent anyone can build from the public repository.
   if (method === "GET" && path === "/v1/agent.exe") return artifact(env, "artifacts/mxb-agent.exe");
+
+  // The bikes a provisioned server needs in order to accept the ones players ride.
+  //
+  // Unauthenticated for the same reason as the agent binary: a booting instance holds no
+  // credential and has no way to be given one. Nothing here is secret — it is the same
+  // content every client already has installed — and the listing is what lets the bootstrap
+  // stay ignorant of which bikes exist.
+  if (method === "GET" && path === "/v1/content/bikes") return listContent(env);
+  const content = /^\/v1\/content\/bikes\/(.+)$/.exec(path);
+  if (content && method === "GET") {
+    const name = decodeURIComponent(content[1]);
+    // Validated rather than trusted: this segment becomes an R2 key and then a filename on
+    // someone's disk.
+    if (!isContentName(name)) return json(400, { error: "not a content file" });
+    return artifact(env, `content/bikes/${name}`);
+  }
 
   // Enrollment is the one unauthenticated write: it trades an invite code for a token.
   // Steam sign-in will replace the invite code without changing anything downstream.
@@ -439,6 +456,21 @@ async function putPaint(request: Request, sha256: string, env: Env): Promise<Res
     await env.PAINTS.put(sha256, body);
   }
   return json(201, { ok: true, sha256, size: body.byteLength });
+}
+
+/**
+ * What bikes are mirrored, so a server can install them without being told the list.
+ *
+ * A dedicated server rejects any bike it does not itself have installed — which is why a
+ * freshly provisioned one refuses every rider on a mod bike. Mirroring the pack means a new
+ * server can be rideable the moment it boots rather than only for whoever owns stock content.
+ */
+async function listContent(env: Env): Promise<Response> {
+  const listed = await env.PAINTS.list({ prefix: "content/bikes/" });
+  const bikes = listed.objects
+    .map((o) => ({ name: o.key.slice("content/bikes/".length), size: o.size }))
+    .filter((b) => b.name.length > 0);
+  return json(200, { bikes, totalBytes: bikes.reduce((n, b) => n + b.size, 0) });
 }
 
 /**
