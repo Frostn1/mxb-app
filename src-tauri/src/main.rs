@@ -706,6 +706,18 @@ async fn read_track_info(app: tauri::AppHandle, path: String) -> Result<track::T
     .map_err(|e| format!("read_track_info task failed: {e}"))?
 }
 
+/// A plain-text account of what a track's terrain looks like to the reader.
+///
+/// Shown in the viewer when a track's terrain won't load. The height format is undocumented,
+/// so a track that fails is evidence we don't otherwise have — and the player holding it is
+/// rarely the person who can rebuild the app to investigate.
+#[tauri::command]
+async fn diagnose_track(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || track::diagnose(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("diagnose_track task failed: {e}"))
+}
+
 /// A track's terrain grid, at no more than `max_dim` samples on its longest edge.
 ///
 /// Returned as raw bytes rather than JSON: a grid is a few hundred thousand floats, and
@@ -5639,6 +5651,7 @@ fn main() {
             get_pkz_preview,
             read_track_info,
             load_track_terrain,
+            diagnose_track,
             unpack_paint,
             texture_bytes,
             unpack_pkz,

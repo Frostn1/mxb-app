@@ -1456,4 +1456,7 @@ export const it: Translation = {
     "Il file di altezze di questo tracciato non ha un formato documentato, quindi la sua forma è stata dedotta dai dati. Consideralo una lettura fedele, non esatta.",
   "trackViewer.assumedScaleNote":
     "Questo tracciato non dichiara la distanza fra i suoi punti di altezza: il rilievo è reale, ma la sua pendenza è approssimativa.",
+  "trackViewer.whyDetails": "Perché?",
+  "trackViewer.copyDetails": "Copia i dettagli",
+  "trackViewer.copied": "Copiato",
 };

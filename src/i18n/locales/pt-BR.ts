@@ -1455,4 +1455,7 @@ export const ptBR: Translation = {
     "O arquivo de alturas desta pista não tem formato documentado, então sua forma foi deduzida dos dados. Trate o terreno como uma leitura próxima, não exata.",
   "trackViewer.assumedScaleNote":
     "Esta pista não informa a distância entre seus pontos de altura: o relevo é real, mas sua inclinação é aproximada.",
+  "trackViewer.whyDetails": "Por quê?",
+  "trackViewer.copyDetails": "Copiar detalhes",
+  "trackViewer.copied": "Copiado",
 };

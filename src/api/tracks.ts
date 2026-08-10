@@ -60,3 +60,14 @@ export async function loadTrackTerrain(
     heights: new Float32Array(buf, HEADER, width * height),
   };
 }
+
+/**
+ * A plain-text account of what a track's terrain looks like to the reader: its contents,
+ * what its `.ini` claimed, every layout the probe considered, and what it settled on.
+ *
+ * Only worth fetching when the terrain didn't load — it re-reads the archive rather than
+ * using the cached grid, precisely because the interesting case is the one with no grid.
+ */
+export function diagnoseTrack(path: string): Promise<string> {
+  return invoke<string>("diagnose_track", { path });
+}

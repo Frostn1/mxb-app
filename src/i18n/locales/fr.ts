@@ -1470,4 +1470,7 @@ export const fr: Translation = {
     "Le fichier d'altitudes de ce circuit n'a pas de format documenté ; sa forme a donc été déduite des données. À lire comme une approximation fidèle, pas comme une mesure exacte.",
   "trackViewer.assumedScaleNote":
     "Ce circuit n'indique pas l'écart entre ses points d'altitude : le relief est réel, mais sa pente est approximative.",
+  "trackViewer.whyDetails": "Pourquoi ?",
+  "trackViewer.copyDetails": "Copier les détails",
+  "trackViewer.copied": "Copié",
 };

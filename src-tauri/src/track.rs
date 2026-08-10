@@ -392,6 +392,75 @@ fn resample(master: &Master, max_dim: u32) -> (u32, u32, Vec<f32>) {
     (out_w as u32, out_h as u32, out)
 }
 
+/// An account of what this track's terrain looks like to the reader, in plain text.
+///
+/// The height format is undocumented, so "no terrain to show" is not something a player —
+/// or whoever has to fix the reader — can act on. This is the answer that is actually
+/// useful: what the track contains, what its `.ini` claimed, every layout the probe
+/// considered for each candidate file, and what it settled on. Surfaced in the viewer when
+/// a track won't load, so diagnosing a format we've never seen needs nothing but the app.
+pub fn diagnose(path: &Path) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+
+    let names = match entry_names(path) {
+        Ok(n) => n,
+        Err(e) => return format!("couldn't list {path:?}: {e:#}"),
+    };
+    let _ = writeln!(out, "{}\n{} entries", path.display(), names.len());
+    for n in &names {
+        let role = role_of(n);
+        if !matches!(role, "other" | "image") {
+            let _ = writeln!(out, "  [{role:<11}] {n}");
+        }
+    }
+
+    let ini = ini_text(path, &names);
+    let (hint, scale) = ini.as_deref().map(ini_hints).unwrap_or((None, None));
+    let _ = writeln!(out, "ini dimensions {hint:?}, spacing {scale:?}");
+
+    let heightfields = heightfield_entries(&names);
+    if heightfields.is_empty() {
+        out.push_str("no heightfield-looking entries — nothing for the probe to read\n");
+    }
+    for entry in heightfields {
+        let _ = writeln!(out, "\n--- {entry} ---");
+        match read_entry(path, &entry) {
+            // The first bytes are worth having verbatim: if the probe found nothing, a magic
+            // string or a dimension pair in here is what tells us how to widen it.
+            Ok(bytes) => {
+                let _ = writeln!(out, "first bytes: {}", hex_preview(&bytes, 64));
+                let _ = writeln!(out, "{}", heightfield::report(&bytes, hint));
+            }
+            Err(e) => {
+                let _ = writeln!(out, "couldn't read it: {e:#}");
+            }
+        }
+    }
+
+    match decode_master(path) {
+        Ok(m) => {
+            let _ = writeln!(out, "\nterrain: {:#?}", m.info);
+        }
+        Err(e) => {
+            let _ = writeln!(out, "\nno terrain: {e:#}");
+        }
+    }
+    out
+}
+
+/// The leading bytes as hex and printable ASCII — the one view of an unknown format that is
+/// always worth having, since a magic string or a stated dimension shows up here or nowhere.
+fn hex_preview(bytes: &[u8], count: usize) -> String {
+    let take = bytes.len().min(count);
+    let hex: Vec<String> = bytes[..take].iter().map(|b| format!("{b:02x}")).collect();
+    let ascii: String = bytes[..take]
+        .iter()
+        .map(|b| if b.is_ascii_graphic() { *b as char } else { '.' })
+        .collect();
+    format!("{}  |{ascii}|", hex.join(" "))
+}
+
 // ---------------------------------------------------------------------------
 // Caches
 // ---------------------------------------------------------------------------
@@ -537,37 +606,14 @@ mod tests {
     #[ignore = "needs a real track — set FROST_TRACK"]
     fn read_a_real_track() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
-        let p = Path::new(&path);
+        println!("{}", diagnose(Path::new(&path)));
+    }
 
-        let names = entry_names(p).expect("list the track's entries");
-        println!("{path}\n{} entries", names.len());
-        for n in &names {
-            let role = role_of(n);
-            if !matches!(role, "other" | "image") {
-                println!("  [{role:<11}] {n}");
-            }
-        }
-
-        let ini = ini_text(p, &names);
-        let (hint, scale) = ini.as_deref().map(ini_hints).unwrap_or((None, None));
-        println!("ini dimensions {hint:?}, spacing {scale:?}");
-
-        let heightfields = heightfield_entries(&names);
-        if heightfields.is_empty() {
-            println!("no heightfield-looking entries — nothing for the probe to read");
-        }
-        for entry in heightfields {
-            println!("\n--- {entry} ---");
-            match read_entry(p, &entry) {
-                Ok(bytes) => println!("{}", heightfield::report(&bytes, hint)),
-                Err(e) => println!("couldn't read it: {e:#}"),
-            }
-        }
-
-        match decode_master(p) {
-            Ok(m) => println!("\nterrain: {:#?}", m.info),
-            Err(e) => println!("\nno terrain: {e:#}"),
-        }
+    #[test]
+    fn a_hex_preview_shows_bytes_and_their_ascii() {
+        let line = hex_preview(b"TRH\0\x01\x02", 64);
+        assert!(line.starts_with("54 52 48 00 01 02"), "{line}");
+        assert!(line.ends_with("|TRH...|"), "{line}");
     }
 
     #[test]

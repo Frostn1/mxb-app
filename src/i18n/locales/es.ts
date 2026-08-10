@@ -1466,4 +1466,7 @@ export const es: Translation = {
     "El archivo de alturas de este circuito no tiene un formato documentado, así que su forma se dedujo de los datos. Tómalo como una lectura aproximada, no exacta.",
   "trackViewer.assumedScaleNote":
     "Este circuito no indica la separación entre sus puntos de altura: el relieve es real, pero su pendiente es aproximada.",
+  "trackViewer.whyDetails": "¿Por qué?",
+  "trackViewer.copyDetails": "Copiar detalles",
+  "trackViewer.copied": "Copiado",
 };

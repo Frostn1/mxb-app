@@ -1431,4 +1431,7 @@ export const en = {
     "This track's height file has no documented layout, so its shape was worked out from the data. Treat the terrain as a close reading rather than an exact one.",
   "trackViewer.assumedScaleNote":
     "This track doesn't state how far apart its height samples are, so the relief is real but how steep it looks is an approximation.",
+  "trackViewer.whyDetails": "Why?",
+  "trackViewer.copyDetails": "Copy details",
+  "trackViewer.copied": "Copied",
 } as const;

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Loader2, Mountain, X } from "lucide-react";
+import { Check, Copy, Loader2, Mountain, X } from "lucide-react";
 import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
 import { Segmented } from "../ui/segmented";
+import { Button } from "@/Components/ui/button";
 import { TrackViewer } from "./TrackViewer";
-import { loadTrackTerrain, readTrackInfo } from "../../api/tracks";
+import { diagnoseTrack, loadTrackTerrain, readTrackInfo } from "../../api/tracks";
 import type { TrackInfo, TrackTerrain } from "../../types";
 import { formatLength } from "../../lib/mods";
 import { useT } from "../../i18n/context";
@@ -44,6 +45,9 @@ export function TrackViewerDialog({
   const [refining, setRefining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exaggeration, setExaggeration] = useState<Exaggeration>("1");
+  // Only fetched when a track fails, and only when asked for — it re-reads the archive.
+  const [diagnosis, setDiagnosis] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +56,8 @@ export function TrackViewerDialog({
     setInfo(null);
     setTerrain(null);
     setError(null);
+    setDiagnosis(null);
+    setCopied(false);
     setLoading(true);
 
     // The inventory doesn't inflate anything, so it lands while the terrain is still being
@@ -167,6 +173,49 @@ export function TrackViewerDialog({
                 <span className="max-w-md text-xs text-muted-foreground">
                   {t("trackViewer.noTerrainHint")}
                 </span>
+                {/* The format is undocumented, so a track that won't load is evidence. This
+                    puts that evidence in reach of whoever is holding the track, who is
+                    rarely the person who can rebuild the app to go and look. */}
+                <div className="pointer-events-auto mt-3 flex flex-col items-center gap-2">
+                  {!diagnosis ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        void diagnoseTrack(path)
+                          .then(setDiagnosis)
+                          .catch((e) =>
+                            setDiagnosis(e instanceof Error ? e.message : String(e)),
+                          );
+                      }}
+                    >
+                      {t("trackViewer.whyDetails")}
+                    </Button>
+                  ) : (
+                    <>
+                      <pre className="max-h-56 w-[min(46rem,80vw)] overflow-auto rounded-md border border-border bg-background/80 p-3 text-left text-[11px] leading-relaxed">
+                        {diagnosis}
+                      </pre>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(diagnosis).then(() => {
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 2000);
+                          });
+                        }}
+                      >
+                        {copied ? (
+                          <Check className="size-3.5" />
+                        ) : (
+                          <Copy className="size-3.5" />
+                        )}
+                        {copied ? t("trackViewer.copied") : t("trackViewer.copyDetails")}
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>

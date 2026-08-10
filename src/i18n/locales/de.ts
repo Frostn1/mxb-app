@@ -1478,4 +1478,7 @@ export const de: Translation = {
     "Die Höhendatei dieser Strecke hat kein dokumentiertes Format, ihre Form wurde also aus den Daten erschlossen. Als nahe, nicht als exakte Lesung zu verstehen.",
   "trackViewer.assumedScaleNote":
     "Diese Strecke gibt den Abstand ihrer Höhenpunkte nicht an: Das Relief ist echt, seine Steilheit aber nur eine Näherung.",
+  "trackViewer.whyDetails": "Warum?",
+  "trackViewer.copyDetails": "Details kopieren",
+  "trackViewer.copied": "Kopiert",
 };
