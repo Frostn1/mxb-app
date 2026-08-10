@@ -177,9 +177,10 @@ fn isqrt(n: usize) -> usize {
 }
 
 /// Grids outside this are not terrain we can use: too small to show, or big enough that
-/// decoding it would cost more than the view is worth.
+/// decoding it would cost more than the view is worth. The ceiling is a power of two plus
+/// one because heightmaps are — the track guide's own examples run 2049² and 4097×257.
 const MIN_DIM: u32 = 32;
-const MAX_DIM: u32 = 8192;
+const MAX_DIM: u32 = 8193;
 
 /// The largest header we'll believe sits in front of the samples. Generous — the cost of a
 /// wrong guess is one rejected candidate, and a header this big is still cheap to skip.

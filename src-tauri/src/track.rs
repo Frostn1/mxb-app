@@ -34,17 +34,18 @@ const CACHE_DIR: &str = "track-terrain-v2";
 /// only grows with tracks actually opened.
 const CACHE_KEEP: usize = 64;
 
-/// Files that carry a terrain grid, best first. The probe validates whatever it is handed,
-/// so trying several costs only the read of the ones that don't pan out.
-const HEIGHTFIELD_EXTS: [&str; 3] = ["trh", "map", "hf"];
+/// Files that carry a terrain grid. Just the one: PiBoSo's track guide has `.trh` as the
+/// collision terrain and `.map` as the track *graphics*, so probing a `.map` would mean
+/// inflating the largest file in the archive to discover it was never a heightfield.
+const HEIGHTFIELD_EXTS: [&str; 1] = ["trh"];
 
 /// What a track file is for, as far as the UI is concerned. A key, not prose — the app
 /// translates it.
 fn role_of(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
-        "trh" | "hf" => "heightfield",
-        "map" => "terrain",
+        "trh" => "heightfield",
+        "map" => "graphics",
         "tsc" => "scenery",
         "rdf" => "road",
         "ssc" => "surfaces",
@@ -180,10 +181,8 @@ fn heightfield_entries(names: &[String]) -> Vec<String> {
 /// itself that the shape reads as terrain. Keys vary between track tools, so this stays
 /// deliberately loose about where it finds them.
 fn ini_hints(text: &str) -> (Option<(u32, u32)>, Option<f32>) {
-    let mut w: Option<u32> = None;
-    let mut h: Option<u32> = None;
-    let mut square: Option<u32> = None;
-    let mut scale: Option<f32> = None;
+    let mut samples: (Option<u32>, Option<u32>) = (None, None);
+    let mut metres: (Option<f32>, Option<f32>) = (None, None);
 
     for line in text.lines() {
         let line = line.trim();
@@ -196,22 +195,31 @@ fn ini_hints(text: &str) -> (Option<(u32, u32)>, Option<f32>) {
         let key = key.trim().to_ascii_lowercase();
         let value = value.trim();
         match key.as_str() {
-            "width" | "nx" | "cx" | "xsize" | "size_x" => w = value.parse().ok(),
-            "height" | "ny" | "cy" | "ysize" | "size_y" => h = value.parse().ok(),
-            // A single figure means a square grid.
-            "size" | "resolution" | "grid" => square = value.parse().ok(),
-            "scale" | "step" | "spacing" | "cell" | "cellsize" => {
-                scale = value.parse().ok().filter(|v: &f32| *v > 0.0 && *v < 1000.0)
-            }
+            // The grid, in samples.
+            "samples_x" | "nx" | "width" => samples.0 = value.parse().ok(),
+            "samples_y" | "ny" | "height" => samples.1 = value.parse().ok(),
+            // The ground it covers, in metres. Deliberately not treated as a sample count:
+            // `size_x` is the track's width in metres, and reading it as a grid width is
+            // how a 480 m track becomes a 480-sample one.
+            "size_x" => metres.0 = value.parse().ok(),
+            "size_z" | "size_y" => metres.1 = value.parse().ok(),
+            // `scale` is the total height of the terrain in metres, not a spacing. Nothing
+            // here uses it — the height file carries its own — but naming it keeps the next
+            // reader from adopting it as one.
             _ => {}
         }
     }
 
-    let dims = match (w, h) {
-        (Some(w), Some(h)) => Some((w, h)),
-        _ => square.map(|s| (s, s)),
+    let dims = match samples {
+        (Some(w), Some(h)) if w >= 2 && h >= 2 => Some((w, h)),
+        _ => None,
     };
-    (dims, scale)
+    // Spacing is the two together: metres across, divided by the steps between samples.
+    let spacing = match (dims, metres.0) {
+        (Some((w, _)), Some(x)) if x > 0.0 => Some(x / (w - 1) as f32),
+        _ => None,
+    };
+    (dims, spacing)
 }
 
 /// The track's top-level `.ini` text, if it has one worth reading.
@@ -631,6 +639,8 @@ mod tests {
     #[test]
     fn roles_come_from_the_extension() {
         assert_eq!(role_of("Hangtown/Hangtown.trh"), "heightfield");
+        // Track *graphics*, not height data — so never a heightfield candidate.
+        assert_eq!(role_of("Hangtown/Hangtown.map"), "graphics");
         assert_eq!(role_of("Hangtown/Hangtown.tsc"), "scenery");
         assert_eq!(role_of("Hangtown/Hangtown.ini"), "config");
         assert_eq!(role_of("Hangtown/preview.jpg"), "image");
@@ -640,13 +650,17 @@ mod tests {
     }
 
     #[test]
-    fn heightfields_are_offered_best_first() {
+    fn only_the_trh_is_offered_as_a_heightfield() {
         let names = vec![
             "T/T.map".to_string(),
             "T/T.ini".to_string(),
             "T/T.trh".to_string(),
         ];
-        assert_eq!(heightfield_entries(&names), vec!["T/T.trh", "T/T.map"]);
+        assert_eq!(
+            heightfield_entries(&names),
+            vec!["T/T.trh"],
+            "a .map is graphics — inflating it to probe would cost the most for nothing",
+        );
     }
 
     #[test]
@@ -671,29 +685,40 @@ mod tests {
     }
 
     #[test]
-    fn ini_hints_read_paired_dimensions() {
-        let (dims, scale) = ini_hints("[terrain]\nnx = 512\nny = 256\nscale = 0.5\n");
-        assert_eq!(dims, Some((512, 256)));
-        assert_eq!(scale, Some(0.5));
+    fn ini_hints_read_a_terrain_ini() {
+        // The shape the track creation guide documents.
+        let (dims, spacing) = ini_hints(
+            "samples_x = 2049\nsamples_y = 2049\ndata = heightmap.raw\n\
+             size_x = 480\nsize_z = 480\nscale = 3.2\n",
+        );
+        assert_eq!(dims, Some((2049, 2049)));
+        // 480 m across 2048 steps.
+        let spacing = spacing.expect("size and samples together give a spacing");
+        assert!((spacing - 480.0 / 2048.0).abs() < 1e-6, "got {spacing}");
     }
 
     #[test]
-    fn ini_hints_read_a_single_square_size() {
-        let (dims, _) = ini_hints("[terrain]\nsize=1024\n");
-        assert_eq!(dims, Some((1024, 1024)));
+    fn ini_hints_dont_read_metres_as_a_sample_count() {
+        // `size_x` is the track's width in metres. Taken for a grid width it would turn a
+        // 480 m track into a 480-sample one, which is the kind of wrong that still renders.
+        let (dims, spacing) = ini_hints("size_x = 480\nsize_z = 480\n");
+        assert_eq!(dims, None, "metres are not samples");
+        assert_eq!(spacing, None, "spacing needs a sample count to divide by");
+    }
+
+    #[test]
+    fn ini_hints_dont_take_scale_for_a_spacing() {
+        // `scale` is the terrain's total height in metres. It is not metres-per-sample, and
+        // a viewer that used it as one would draw the ground at a fraction of its size.
+        let (_, spacing) = ini_hints("samples_x = 2049\nsamples_y = 2049\nscale = 3.2\n");
+        assert_eq!(spacing, None);
     }
 
     #[test]
     fn ini_hints_ignore_a_track_that_says_nothing() {
-        let (dims, scale) = ini_hints("[info]\nname = Hangtown\n");
+        let (dims, spacing) = ini_hints("[info]\nname = Hangtown\n");
         assert_eq!(dims, None);
-        assert_eq!(scale, None);
-    }
-
-    #[test]
-    fn ini_hints_reject_an_absurd_scale() {
-        let (_, scale) = ini_hints("[terrain]\nscale = 99999\n");
-        assert_eq!(scale, None, "a kilometre-wide sample is a misread, not a hint");
+        assert_eq!(spacing, None);
     }
 
     /// A master built from a known grid, for the blob and resample tests.
