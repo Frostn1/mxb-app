@@ -59,6 +59,7 @@ export interface SupportersManifest {
 export const BUNDLED_SUPPORTERS: SupportersManifest = {
   tiers: [],
   supporters: [
+    { name: "OHTEA - MXB HUB" },
     { name: "HottPie" },
     { name: "Mouk" },
     { name: "SoggySwisher" },
