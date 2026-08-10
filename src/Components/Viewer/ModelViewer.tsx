@@ -91,6 +91,25 @@ function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
   return map;
 }
 
+/**
+ * [`useTextureMap`], with caller-owned textures layered over it by name.
+ *
+ * The override is how pixels that only exist in this webview — the Designer's live composite
+ * canvas — reach a mesh, which otherwise only ever sees textures fetched by token. Layered
+ * last so a sheet being edited replaces the installed one it is named after, and never merged
+ * into the disposal set below: these belong to whoever passed them in.
+ */
+function useTextureMapWith(
+  textures: PaintTexture[],
+  overrides?: Map<string, THREE.Texture>,
+): Map<string, THREE.Texture> {
+  const loaded = useTextureMap(textures);
+  return useMemo(
+    () => (overrides?.size ? new Map([...loaded, ...overrides]) : loaded),
+    [loaded, overrides],
+  );
+}
+
 function submeshTexture(
   texture: string | null | undefined,
   tex: Map<string, THREE.Texture>,
@@ -300,6 +319,7 @@ function RiderGearMesh({
   alignY = "center",
   pitch = 0,
   fit: fitMode = "box",
+  overrides,
 }: {
   part: RiderPart;
   anchor: [number, number, number];
@@ -316,8 +336,9 @@ function RiderGearMesh({
    * it was authored at, and ignores `target`.
    */
   fit?: "box" | "native";
+  overrides?: Map<string, THREE.Texture>;
 }) {
-  const texMap = useTextureMap(part.textures);
+  const texMap = useTextureMapWith(part.textures, overrides);
   const geoms = useNodeGeometries(part.nodes);
   const mats = useGearMaterials(part, texMap);
 
@@ -565,8 +586,14 @@ function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THRE
   });
 }
 
-function RiderBodyMesh({ part }: { part: RiderPart }) {
-  const tex = useTextureMap(part.textures);
+function RiderBodyMesh({
+  part,
+  overrides,
+}: {
+  part: RiderPart;
+  overrides?: Map<string, THREE.Texture>;
+}) {
+  const tex = useTextureMapWith(part.textures, overrides);
   const geoms = useNodeGeometries(part.nodes);
   // One material per submesh; a node with no submesh table takes a single suit material.
   const mats = useMemo(
@@ -594,8 +621,14 @@ function RiderBodyMesh({ part }: { part: RiderPart }) {
   );
 }
 
-function RiderGearSolo({ part }: { part: RiderPart }) {
-  const tex = useTextureMap(part.textures);
+function RiderGearSolo({
+  part,
+  overrides,
+}: {
+  part: RiderPart;
+  overrides?: Map<string, THREE.Texture>;
+}) {
+  const tex = useTextureMapWith(part.textures, overrides);
   const geoms = useNodeGeometries(part.nodes);
   const mats = useGearMaterials(part, tex);
   const rot = part.part === "boots" ? BOOT_ROT : GEAR_ROT;
@@ -659,7 +692,13 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
   );
 }
 
-function RiderComposite({ parts }: { parts: RiderPart[] }) {
+function RiderComposite({
+  parts,
+  overrides,
+}: {
+  parts: RiderPart[];
+  overrides?: Map<string, THREE.Texture>;
+}) {
   const byPart = (p: RiderPart["part"]) => parts.find((x) => x.part === p);
   const body = byPart("body");
   const helmet = byPart("helmet");
@@ -701,17 +740,18 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.74 * h, cz] : [0, 1.16, 0.03];
   const bootTarget = hasBody ? 0.44 * h : 0.32;
 
-  if (solo) return <RiderGearSolo part={solo} />;
+  if (solo) return <RiderGearSolo part={solo} overrides={overrides} />;
 
   return (
     <group>
       {hasBody ? (
-        <RiderBodyMesh part={body!} />
+        <RiderBodyMesh part={body!} overrides={overrides} />
       ) : (
         <RiderBody suit={suit} gloves={gloves} showHead={!hasHelmet} />
       )}
       {hasHelmet && (
         <RiderGearMesh
+          overrides={overrides}
           part={helmet!}
           anchor={helmetAnchor}
           target={hasBody ? 0.38 * h : 0.52}
@@ -725,6 +765,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
           threw away the offset a piece like a chain or a hood hangs at deliberately. */}
       {!!protection?.nodes.length && (
         <RiderGearMesh
+          overrides={overrides}
           part={protection!}
           anchor={protAnchor}
           yaw={PROT_YAW}
@@ -736,6 +777,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
         (boots!.nodes.length === 2 ? (
           bootSides(boots!).map(({ node, side }, i) => (
             <RiderGearMesh
+          overrides={overrides}
               key={i}
               part={{ ...boots!, nodes: [node] }}
               anchor={[cx + side * legX, footY, bootZ]}
@@ -748,6 +790,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
           ))
         ) : (
           <RiderGearMesh
+          overrides={overrides}
             part={boots!}
             anchor={[cx, footY, bootZ]}
             target={bootTarget}
@@ -869,10 +912,39 @@ function ControlsHint() {
   );
 }
 
+/** Asks for one frame whenever `token` changes. Nothing else in the scene re-renders. */
+function FrameOnChange({ token }: { token?: number }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    invalidate();
+  }, [token, invalidate]);
+  return null;
+}
+
 export interface ModelViewerProps {
   mode: ViewerMode;
   texture?: PaintTexture | null;
   textures?: PaintTexture[];
+  /**
+   * Textures that win over `textures`, keyed by lowercase texture name.
+   *
+   * For a caller holding pixels the backend has never seen — the Designer's live composite,
+   * which is a canvas in this webview. Everything else arrives by token and goes through
+   * `textures`; this is the door for the one case that can't.
+   *
+   * The caller owns these and must dispose them: unlike `useTextureMap`'s, their lifetime is
+   * the editor's, not this component's.
+   */
+  overrides?: Map<string, THREE.Texture>;
+  /**
+   * Draw a frame when this changes.
+   *
+   * `frameloop="demand"` only redraws on a React commit, and a caller mutating a texture in
+   * place — the Designer, repainting its canvas — deliberately doesn't cause one: handing the
+   * material map a new identity per frame is what made dragging crawl. This is the way to say
+   * "the pixels moved" without saying "rebuild everything".
+   */
+  frameToken?: number;
   nodes?: EdfNode[] | null;
   riderParts?: RiderPart[] | null;
   loading?: boolean;
@@ -884,6 +956,8 @@ export function ModelViewer({
   mode,
   texture,
   textures = [],
+  overrides,
+  frameToken,
   nodes,
   riderParts,
   loading = false,
@@ -891,7 +965,7 @@ export function ModelViewer({
   className,
 }: ModelViewerProps) {
   const map = useDataTexture(texture);
-  const texMap = useTextureMap(textures);
+  const texMap = useTextureMapWith(textures, overrides);
   const hasReal = mode === "bike" && !!nodes?.length;
   const hasRider = mode === "rider" && !!riderParts?.length;
   // A single gear item (no body) is a small centred object — frame it level.
@@ -927,6 +1001,7 @@ export function ModelViewer({
           }}
         >
           <color attach="background" args={["#0e0f13"]} />
+          <FrameOnChange token={frameToken} />
           <CameraRig solo={gearSolo} />
           <ambientLight intensity={0.75} />
           {/* Even sky/ground fill so matte paint reads its true colour. */}
@@ -944,7 +1019,7 @@ export function ModelViewer({
             {hasReal ? (
               <EdfMesh nodes={nodes!} textures={texMap} />
             ) : hasRider ? (
-              <RiderComposite parts={riderParts!} />
+              <RiderComposite parts={riderParts!} overrides={overrides} />
             ) : loading || noStandIn ? null : mode === "bike" ? (
               <BikeStandIn map={map} />
             ) : (

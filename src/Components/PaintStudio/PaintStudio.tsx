@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Box,
+  Brush,
   FileImage,
   FolderOpen,
   ImagePlus,
@@ -17,8 +18,6 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import HelpHint from "../ui/help-hint";
-import { Combobox } from "../ui/combobox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,20 +32,20 @@ import { ViewerDialog } from "../Viewer/ViewerDialog";
 import type { EntryViewerProps } from "../Viewer/entryViewer";
 import { SheetThumb } from "./SheetThumb";
 import {
-  bikePreviewAvailable,
-  EMPTY_RIDER_TARGETS,
+  gearPartOf,
+  IMAGE_EXTS,
+  isBikeKind,
+  PaintDestBar,
+  usePaintDest,
+} from "../Studio/paintDest";
+import {
   paintStudioExtract,
-  paintStudioHints,
   paintStudioLoad,
   paintStudioSave,
   paintStudioTarget,
-  scanBikeTargets,
-  scanRiderTargets,
-  STOCK_RIDER_PROFILES,
-  type RiderTargets,
 } from "../../api/mods";
-import type { PaintDest, SavedPaint, StudioImage } from "../../types";
-import { useT, type TKey } from "../../i18n/context";
+import type { SavedPaint, StudioImage } from "../../types";
+import { useT } from "../../i18n/context";
 
 /**
  * Paint Studio — build a `.pnt` out of ordinary image files.
@@ -66,58 +65,8 @@ import { useT, type TKey } from "../../i18n/context";
  * existing paint's sheets out as `.tga` already named the way the model wants them.
  */
 
-type PaintKind =
-  | "bike"
-  | "helmet"
-  | "goggles"
-  | "boots"
-  | "protection"
-  | "kit"
-  | "gloves";
-
-const KINDS: { id: PaintKind; label: TKey }[] = [
-  { id: "bike", label: "paints.kind.bike" },
-  { id: "helmet", label: "paints.kind.helmet" },
-  { id: "goggles", label: "paints.kind.goggles" },
-  { id: "boots", label: "paints.kind.boots" },
-  { id: "protection", label: "paints.kind.protection" },
-  { id: "kit", label: "paints.kind.kit" },
-  { id: "gloves", label: "paints.kind.gloves" },
-];
-
-/** Extensions the backend will read. TGA first: it's what paint templates are traded in. */
-const IMAGE_EXTS = ["tga", "png", "jpg", "jpeg", "bmp", "webp"];
-
 /** How a saved paint is shown in 3D — the viewer's own props, minus the mode it derives. */
 type PreviewProps = Omit<EntryViewerProps, "mode">;
-
-/** The gear slot a kind previews in, absent for the ones worn on the body itself. */
-const GEAR_PART: Partial<Record<PaintKind, "helmet" | "boots" | "protection">> = {
-  helmet: "helmet",
-  goggles: "helmet",
-  boots: "boots",
-  protection: "protection",
-};
-
-/** Where a kind's paints live under `mods/`, given the model or profile they're for. */
-function relFor(kind: PaintKind, model: string): string {
-  switch (kind) {
-    case "bike":
-      return `bikes/${model}/paints`;
-    case "helmet":
-      return `rider/helmets/${model}/paints`;
-    case "goggles":
-      return `rider/helmets/${model}/goggles`;
-    case "boots":
-      return `rider/boots/${model}/paints`;
-    case "protection":
-      return `rider/protection/${model}/paints`;
-    case "kit":
-      return `rider/riders/${model}/paints`;
-    case "gloves":
-      return `rider/riders/${model}/gloves`;
-  }
-}
 
 function fileStem(path: string): string {
   return (path.replace(/\\/g, "/").split("/").pop() ?? path).replace(/\.[^.]+$/, "");
@@ -127,94 +76,31 @@ function parentDir(path: string): string {
   return path.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
 }
 
-export default function PaintStudio() {
+interface PaintStudioProps {
+  /**
+   * Hand the sheets on screen to the Designer, to draw on rather than replace.
+   *
+   * Unpacking a paint here already produces exactly what the Designer wants to start from —
+   * the real sheets, named the way the mesh binds them — and making someone unpack twice, once
+   * per tab, is asking them to do the app's filing for it.
+   */
+  onSendToDesigner?: (sheets: StudioImage[]) => void;
+}
+
+export default function PaintStudio({ onSendToDesigner }: PaintStudioProps) {
   const t = useT();
-  const [kind, setKind] = useState<PaintKind>("bike");
-  const [model, setModel] = useState("");
-  const [bikes, setBikes] = useState<string[]>([]);
-  const [targets, setTargets] = useState<RiderTargets>(EMPTY_RIDER_TARGETS);
-  const [bikePreview, setBikePreview] = useState(true);
   const [sheets, setSheets] = useState<StudioImage[]>([]);
   const [name, setName] = useState("");
-  const [hints, setHints] = useState<string[]>([]);
-  const [folder, setFolder] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<SavedPaint | null>(null);
   const [clash, setClash] = useState<string | null>(null);
   const [view3d, setView3d] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    void Promise.all([
-      scanBikeTargets().catch(() => [] as string[]),
-      scanRiderTargets().catch(() => EMPTY_RIDER_TARGETS),
-      bikePreviewAvailable().catch(() => true),
-    ]).then(([b, r, preview]) => {
-      if (!alive) return;
-      setBikes(b);
-      setTargets(r);
-      setBikePreview(preview);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  /** The models (or rider profiles) the chosen kind can be painted for. */
-  const models = useMemo(() => {
-    switch (kind) {
-      case "bike":
-        return bikes;
-      case "helmet":
-      case "goggles":
-        return targets.helmets;
-      case "boots":
-        return targets.boots;
-      case "protection":
-        return targets.protection;
-      default:
-        return [...new Set([...targets.profiles, ...STOCK_RIDER_PROFILES])].sort((a, b) =>
-          a.toLowerCase().localeCompare(b.toLowerCase()),
-        );
-    }
-  }, [kind, bikes, targets]);
-
-  // Keep the picked model on the list the kind offers — switching from a helmet to a bike
-  // must not leave a helmet's name sitting in a bike destination.
-  useEffect(() => {
-    setModel((m) => (models.includes(m) ? m : models[0] ?? ""));
-  }, [models]);
-
-  const dest = useMemo<PaintDest | null>(
-    () =>
-      folder
-        ? { kind: "folder", path: folder }
-        : model
-          ? { kind: "mods", rel: relFor(kind, model) }
-          : null,
-    [folder, kind, model],
-  );
-
-  // What the paints already installed for this model call their sheets. Only meaningful
-  // for a destination inside the game — a plain folder has nothing to learn from.
-  useEffect(() => {
-    if (folder || !model) {
-      setHints([]);
-      return;
-    }
-    let alive = true;
-    const rel = relFor(kind, model);
-    paintStudioHints(rel)
-      .then((h) => alive && setHints(h))
-      .catch(() => alive && setHints([]));
-    return () => {
-      alive = false;
-    };
-  }, [kind, model, folder]);
-
   // A saved paint describes the file that was written; any edit after it makes that
   // description stale, so the preview/reveal buttons go with it.
   const invalidate = useCallback(() => setSaved(null), []);
+  const destState = usePaintDest(invalidate);
+  const { kind, folder, dest, hints, bikePreview } = destState;
 
   const addImages = useCallback(async () => {
     const picked = await openDialog({
@@ -288,15 +174,6 @@ export default function PaintStudio() {
       setBusy(false);
     }
   }, [invalidate, t]);
-
-  const pickFolder = useCallback(async () => {
-    const picked = await openDialog({ directory: true });
-    const dir = Array.isArray(picked) ? picked[0] : picked;
-    if (dir) {
-      setFolder(dir);
-      invalidate();
-    }
-  }, [invalidate]);
 
   const rename = useCallback(
     (path: string, value: string) => {
@@ -384,12 +261,12 @@ export default function PaintStudio() {
     const path = saved.path.replace(/\\/g, "/");
     const stem = fileStem(path);
     const modelDir = parentDir(parentDir(path));
-    const part = GEAR_PART[kind];
+    const part = gearPartOf(kind);
     if (folder) {
       if (part) return { paintPaths: [path], stockGearPart: part };
-      return kind === "bike" ? null : { paintPaths: [path] };
+      return isBikeKind(kind) ? null : { paintPaths: [path] };
     }
-    if (kind === "bike") {
+    if (isBikeKind(kind)) {
       return bikePreview ? { paintPaths: [], modelSource: modelDir, initialPaint: stem } : null;
     }
     if (part) {
@@ -397,149 +274,85 @@ export default function PaintStudio() {
         paintPaths: [],
         gearSource: modelDir,
         gearPart: part,
-        ...(kind === "goggles" ? { initialGoggles: stem } : { initialPaint: stem }),
+        ...(kind.sub === "goggles" ? { initialGoggles: stem } : { initialPaint: stem }),
       };
     }
     return { paintPaths: [path] };
   }, [saved, kind, folder, bikePreview]);
 
-  const modelLabel = kind === "kit" || kind === "gloves" ? "paints.profile" : "paints.model";
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">{t("nav.paints")}</h1>
-          <HelpHint title={t("nav.paints")} description={t("paints.help")} />
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void unpack()} disabled={busy}>
-            <PackageOpen className="size-3.5" /> {t("paints.unpack")}
+    <div className="flex min-h-0 flex-1 flex-col gap-3 px-7 pb-6">
+      {/* Same one-row treatment as the Designer: where it goes and what it's called are
+          answered once, and the sheets are what the screen is actually for. */}
+      <div className="flex flex-none flex-wrap items-center gap-2">
+        <PaintDestBar state={destState} className="w-[290px]" />
+        <Input
+          value={name}
+          placeholder={t("paints.namePlaceholder")}
+          className="h-8 w-[168px]"
+          onChange={(e) => {
+            setName(e.target.value);
+            invalidate();
+          }}
+          onKeyDown={(e) => e.key === "Enter" && void save()}
+        />
+        <Button
+          size="sm"
+          disabled={busy || !!blocked}
+          title={blocked ?? undefined}
+          onClick={() => void save()}
+        >
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+          {t("paints.save")}
+        </Button>
+        <span className="h-5 w-px flex-none bg-border" />
+        <Button variant="outline" size="sm" onClick={() => void unpack()} disabled={busy}>
+          <PackageOpen className="size-3.5" /> {t("paints.unpack")}
+        </Button>
+        {blocked && (
+          <span className="ml-auto max-w-[40%] truncate text-[11px] text-faint" title={blocked}>
+            {blocked}
+          </span>
+        )}
+      </div>
+
+      {saved && (
+        <div className="flex flex-none flex-wrap items-center gap-2 rounded-md border border-border bg-card/40 px-2.5 py-1.5">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={saved.path}>
+            {saved.path}
+          </span>
+          {viewerProps && (
+            <Button variant="outline" size="sm" onClick={() => setView3d(true)}>
+              <Box className="size-3.5" /> {t("paints.preview3d")}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void openPath(parentDir(saved.path)).catch(() => {})}
+          >
+            <FolderOpen className="size-3.5" /> {t("paints.openFolder")}
           </Button>
         </div>
-      </header>
+      )}
 
-      <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto px-7 pb-7 lg:grid-cols-[320px_1fr]">
-        {/* ── Where it goes ─────────────────────────────────────────────────── */}
-        <section className="flex flex-col gap-4">
-          <div className="rounded-lg border border-border bg-card/40 p-3.5">
-            <h2 className="mb-2.5 text-[13px] font-semibold">{t("paints.whereTitle")}</h2>
-
-            <div className="flex flex-wrap gap-1.5">
-              {KINDS.map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    setKind(id);
-                    invalidate();
-                  }}
-                  className={cn(
-                    "rounded-md border px-2 py-1 text-[11.5px] font-medium transition-colors",
-                    kind === id
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {t(label)}
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-3 flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-muted-foreground">
-                {t(modelLabel as TKey)}
-              </span>
-              <Combobox
-                value={model}
-                options={models}
-                onChange={(v) => {
-                  setModel(v);
-                  setFolder(null);
-                  invalidate();
-                }}
-              />
-              {!models.length && (
-                <span className="text-[11px] leading-snug text-faint">{t("paints.noModels")}</span>
-              )}
-            </div>
-
-            <div className="mt-3 flex flex-col gap-1.5">
-              {folder ? (
-                <div className="flex items-start gap-2 rounded-md border border-border bg-background/60 px-2 py-1.5">
-                  <FolderOpen className="mt-0.5 size-3.5 flex-none text-muted-foreground" />
-                  <span className="min-w-0 flex-1 break-all text-[11px] leading-snug">{folder}</span>
-                  <button
-                    type="button"
-                    className="text-[11px] text-muted-foreground hover:text-foreground"
-                    onClick={() => {
-                      setFolder(null);
-                      invalidate();
-                    }}
-                  >
-                    {t("common.clear")}
-                  </button>
-                </div>
-              ) : (
-                <p className="text-[11px] leading-snug text-faint">
-                  {t("paints.destPath", { rel: model ? relFor(kind, model) : "…" })}
-                </p>
-              )}
-              <button
-                type="button"
-                className="self-start text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                onClick={() => void pickFolder()}
-              >
-                {t("paints.saveElsewhere")}
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-card/40 p-3.5">
-            <h2 className="mb-2.5 text-[13px] font-semibold">{t("paints.saveTitle")}</h2>
-            <Input
-              value={name}
-              placeholder={t("paints.namePlaceholder")}
-              onChange={(e) => {
-                setName(e.target.value);
-                invalidate();
-              }}
-            />
-            <Button className="mt-2.5 w-full" disabled={busy || !!blocked} onClick={() => void save()}>
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-              {t("paints.save")}
-            </Button>
-            {blocked && <p className="mt-1.5 text-[11px] leading-snug text-faint">{blocked}</p>}
-
-            {saved && (
-              <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
-                <p className="break-all text-[11px] leading-snug text-muted-foreground">
-                  {saved.path}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {viewerProps && (
-                    <Button variant="outline" size="sm" onClick={() => setView3d(true)}>
-                      <Box className="size-3.5" /> {t("paints.preview3d")}
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void openPath(parentDir(saved.path)).catch(() => {})}
-                  >
-                    <FolderOpen className="size-3.5" /> {t("paints.openFolder")}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {/* ── The sheets ────────────────────────────────────────────────────── */}
         <section className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-[13px] font-semibold">{t("paints.sheetsTitle")}</h2>
             <div className="ml-auto flex gap-2">
+              {!!sheets.length && onSendToDesigner && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => onSendToDesigner(sheets)}
+                >
+                  <Brush className="size-3.5" /> {t("paints.toDesigner")}
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => void reload()} disabled={busy || !sheets.length}>
                 <RefreshCw className={cn("size-3.5", busy && "animate-spin")} /> {t("paints.reload")}
               </Button>

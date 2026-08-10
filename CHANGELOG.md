@@ -3,6 +3,27 @@
 ## 2026-08-09 — v0.9.0 — Servers you can create, paints everyone can see, and a paint studio
 
 ### Added
+- **A paint designer, and one Studio instead of three tabs.** Designing a livery meant leaving
+  for a web editor, exporting a `.tga`, packing it, launching, looking, and starting over —
+  the loop was long enough that most of it happened blind. The **Designer** closes it: start
+  from a paint already installed for the model (which is how the sheets arrive named the way
+  the mesh binds them), stack images and text on top, drag them around, and **the bike or
+  rider beside you wears the drawing as you draw it**. Save writes the packed `.pnt` the game
+  reads, through the same destination picker, overwrite prompt and folder rules Paints already
+  used. No brushes and no filters — pixels still come from wherever you like drawing them;
+  this places them and knows where they go.
+- **Designer, Paints and Rider now live under one Studio tab**, switched by a segmented
+  control. They were three sidebar entries answering three halves of one question, and the
+  sidebar had started listing features rather than places; it's back to seven entries.
+- **The Studio works under GP Bikes too.** Building a `.pnt` is the same job for either title —
+  same container, same encoder, same folders — and only the 3D preview needs part bindings GP
+  Bikes doesn't have yet. So Designer and Paints are both there, the preview says plainly why
+  it isn't, and the Rider tab (which *is* the rig) stays MX Bikes-only. Paint destinations are
+  read from the game's own rider layout rather than listed in the app, so GP Bikes is offered
+  its three — bike livery, helmet, rider kit — instead of MX Bikes' boots and protection
+  folders it has no use for.
+- **The sidebar collapses to icons**, and the Designer's sheets/layers rail folds away, for
+  when the canvas and the model are what you want the width for.
 - **Create a server from the app.** The control plane launches an EC2 instance, installs
   the dedicated server and the agent on it, and the server appears in the Servers page. The
   app holds no cloud credentials — a desktop binary can be unpacked, and a key inside one
@@ -198,6 +219,12 @@
   old fuzzy match as a fallback.
 
 ### Changed
+- The 3D viewer can be handed textures the backend has never seen, which is what lets the
+  Designer's canvas appear on real geometry. Everything else still arrives by token, unchanged.
+- Switching between the Studio's tabs no longer throws away what you were doing in the one you
+  left.
+- Sheets unpacked in Paints can be sent straight to the Designer to draw on, rather than
+  unpacked a second time.
 - **Nothing runs unattended.** Four separate things have to fail before a server can bill
   indefinitely: a cap of 2 concurrent instances counted *from EC2 rather than our own
   records*; destruction after 20 minutes with nobody connected; termination of any instance
@@ -269,6 +296,14 @@
   one. Release builds are untouched.
 
 ### Fixed
+- **Protection paints were being saved to a folder the game doesn't read.** Paint Studio wrote
+  them to `rider/protection/<model>/paints` — the singular folder an old version of this app
+  used, marked un-installable ever since — while the model itself lives in `rider/protections/`
+  and every other path in the app installs there. The paint saved, the app said so, and the
+  gear turned up unpainted in game. Destinations are now derived from the folders the game
+  actually loads, so the two can't drift apart again.
+- The Designer's "Start from a paint…" gave no sign it was working while it unpacked, and said
+  nothing at all if the paint yielded no sheets.
 - **Signing in to the Shop no longer signs you straight back out.** A sign-in would land, show
   the Purchases tab for a second, and drop to the signed-out screen again — every time, for
   anyone whose stored session had gone stale. Your purchases are read out of a hidden browser

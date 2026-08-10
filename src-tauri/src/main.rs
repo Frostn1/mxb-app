@@ -796,6 +796,50 @@ async fn paint_studio_load(paths: Vec<String>) -> Result<Vec<paintstudio::Studio
     .map_err(|e| format!("paint_studio_load task failed: {e}"))?
 }
 
+/// Read one image at its full size, for the Designer to composite with.
+///
+/// Separate from `paint_studio_load` because that one answers "describe this file" with a
+/// thumbnail, and the editor needs the pixels themselves — see `paintstudio::pixels`.
+#[tauri::command]
+async fn paint_studio_pixels(path: String) -> Result<paint::PaintTexture, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paintstudio::pixels(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("paint_studio_pixels task failed: {e}"))?
+}
+
+/// Stage a composited sheet, returning the file `paint_studio_save` should pack.
+///
+/// Takes the PNG as a raw request body rather than an argument: a 4096² sheet is megabytes,
+/// and JSON would send it as a list of numbers. The sheet's texture name rides in a header
+/// for the same reason — the body has to be the bytes and nothing else.
+///
+/// One staging directory per call. The caller saves immediately after staging every sheet, so
+/// these are short-lived; they sit in the OS temp dir either way, which is where an editor
+/// that's closed mid-flight should leave its scratch files.
+#[tauri::command]
+async fn paint_studio_stage(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err("paint_studio_stage expects the sheet's PNG bytes as the request body".into());
+    };
+    let name = request
+        .headers()
+        .get("x-sheet-name")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let png = png.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = install::staging_dir("paint");
+        paintstudio::stage_sheet(&dir, &name, &png)
+            .map(|p| p.to_string_lossy().into_owned())
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("paint_studio_stage task failed: {e}"))?
+}
+
 /// The file a save would write, resolved but not written — so the UI can ask before
 /// replacing a paint that's already there.
 #[tauri::command]
@@ -5490,6 +5534,8 @@ fn main() {
             list_gear_paints,
             list_installed_gear_paints,
             paint_studio_load,
+            paint_studio_pixels,
+            paint_studio_stage,
             paint_studio_target,
             paint_studio_save,
             paint_studio_extract,

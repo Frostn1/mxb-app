@@ -102,29 +102,8 @@ fn fits(w: u32, h: u32) -> bool {
 /// surface in-game rather than here. The caller is told it happened (`resized`) so the UI
 /// can say so before anything is saved.
 pub fn load(path: &Path) -> Result<(PntTexture, u32, u32, bool)> {
-    let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    // `image::load_from_memory` sniffs by content and TGA has no magic to sniff, so a
-    // `.tga` has to be handed to its decoder by name — the same order `paint::decode_image`
-    // uses for the textures loose beside a bike model.
-    let img = if ext == "tga" {
-        image::codecs::tga::TgaDecoder::new(Cursor::new(&bytes))
-            .ok()
-            .and_then(|d| DynamicImage::from_decoder(d).ok())
-            .or_else(|| image::load_from_memory(&bytes).ok())
-    } else {
-        image::load_from_memory(&bytes).ok()
-    };
-    let img = img.with_context(|| format!("{} isn't an image this can read", path.display()))?;
-
+    let img = decode(path)?;
     let (sw, sh) = (img.width(), img.height());
-    if sw == 0 || sh == 0 {
-        bail!("{} has no pixels", path.display());
-    }
     let resized = !fits(sw, sh);
     let img = if resized {
         img.resize_exact(
@@ -144,6 +123,32 @@ pub fn load(path: &Path) -> Result<(PntTexture, u32, u32, bool)> {
         sh,
         resized,
     ))
+}
+
+/// Read an image file, whatever it is, at whatever size it is.
+fn decode(path: &Path) -> Result<DynamicImage> {
+    let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    // `image::load_from_memory` sniffs by content and TGA has no magic to sniff, so a
+    // `.tga` has to be handed to its decoder by name — the same order `paint::decode_image`
+    // uses for the textures loose beside a bike model.
+    let img = if ext == "tga" {
+        image::codecs::tga::TgaDecoder::new(Cursor::new(&bytes))
+            .ok()
+            .and_then(|d| DynamicImage::from_decoder(d).ok())
+            .or_else(|| image::load_from_memory(&bytes).ok())
+    } else {
+        image::load_from_memory(&bytes).ok()
+    };
+    let img = img.with_context(|| format!("{} isn't an image this can read", path.display()))?;
+    if img.width() == 0 || img.height() == 0 {
+        bail!("{} has no pixels", path.display());
+    }
+    Ok(img)
 }
 
 /// The texture name a source file suggests: its stem, unchanged.
@@ -173,6 +178,56 @@ pub fn inspect(path: &Path) -> Result<StudioImage> {
         preview_height: preview.height(),
         token: crate::texstore::put(preview.to_rgba8().into_raw()),
     })
+}
+
+/// Read `path` at its own size and its own shape, for the layer editor to draw with.
+///
+/// Deliberately not [`inspect`], not [`paint::to_texture`], and not even [`load`]: the first
+/// shrinks to [`PREVIEW_EDGE`] for a thumbnail, the second caps at the viewer's 1024, and the
+/// third rounds both edges to powers of two. Each is right where it's used and wrong here.
+///
+/// The power-of-two rounding is the one that would bite hardest: it's what the *game* needs of
+/// a finished sheet, and applying it to a 300×200 sponsor logo on its way onto a layer would
+/// stretch it to 256×256 — a squashed decal, from a step the painter never asked for. The
+/// rounding still happens, once, to the composited sheet on its way into the `.pnt`.
+///
+/// The cost is honest: these are big, and they share [`crate::texstore`]'s budget with the
+/// viewer's models. That store is an LRU, so the price of holding one is evicting something
+/// nobody is looking at.
+pub fn pixels(path: &Path) -> Result<paint::PaintTexture> {
+    let rgba = decode(path)?.to_rgba8();
+    Ok(paint::PaintTexture {
+        name: texture_name_for(path),
+        width: rgba.width(),
+        height: rgba.height(),
+        token: crate::texstore::put(rgba.into_raw()),
+    })
+}
+
+/// Write composited pixels out as a PNG the build path can read, returning its path.
+///
+/// The editor's sheets only exist as a canvas in the webview, and [`build`] reads files. This
+/// is the join between them, and it stages rather than writing to the destination: nothing
+/// lands in the game folder until `paint_studio_save` runs, so an editor that never saves
+/// leaves the mods tree untouched.
+///
+/// PNG rather than TGA because it's what a canvas encodes to natively, and both are lossless
+/// — the sheet is re-decoded by [`load`] on the way into the paint either way.
+pub fn stage_sheet(dir: &Path, name: &str, png: &[u8]) -> Result<PathBuf> {
+    if png.is_empty() {
+        bail!("no pixels to stage for '{name}'");
+    }
+    // The name becomes the texture name the mesh binds, so it has to survive the round trip
+    // through a file name intact — but it still can't be allowed to name a path.
+    let stem = crate::install::sanitize(name.trim());
+    let stem = stem.trim();
+    if stem.is_empty() {
+        bail!("a sheet needs a name before it can be saved");
+    }
+    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    let path = dir.join(format!("{stem}.png"));
+    std::fs::write(&path, png).with_context(|| format!("write {}", path.display()))?;
+    Ok(path)
 }
 
 /// One texture of a paint being built: a file on disk, packed under `name`.
@@ -368,6 +423,114 @@ mod tests {
         let err = extract(b"NOTPNT\x00\x00 followed by a paint", &out).expect_err("must refuse");
         assert!(format!("{err:#}").contains("can't be unpacked"));
         assert!(!out.exists(), "refused before anything reached disk");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The Designer's whole save path, minus the canvas: stage the sheet a browser would have
+    /// encoded, then pack it. What this guards is the join — a staged file the packer can't
+    /// read, or a name mangled on the way through one, only shows up as a paint that loads
+    /// blank in game.
+    #[test]
+    fn a_staged_sheet_packs_into_a_paint() {
+        let dir = tmpdir("stage");
+        let png = {
+            let mut buf = Vec::new();
+            image::RgbaImage::from_fn(64, 64, |x, y| image::Rgba([x as u8, y as u8, 9, 0xff]))
+                .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
+                .unwrap();
+            buf
+        };
+        let staged = stage_sheet(&dir, "livery", &png).expect("stage");
+        assert!(staged.is_file());
+
+        let bytes = build(
+            "Designed",
+            &[BuildTexture {
+                path: staged.to_string_lossy().into_owned(),
+                name: "livery".into(),
+            }],
+        )
+        .expect("pack the staged sheet");
+        let back = paint::decode(&bytes).expect("decode what we just packed");
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].name, "livery", "the name the mesh binds survives the staging file");
+        assert_eq!((back[0].width, back[0].height), (64, 64));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A sheet name is a texture name, not a path. It reaches the backend as a header on the
+    /// upload, so it is the one part of a save that arrives as free text from the webview.
+    #[test]
+    fn staging_refuses_a_name_that_would_escape_its_directory() {
+        let dir = tmpdir("stagename");
+        let png = std::fs::read(Path::new("/dev/null")).unwrap_or_default();
+        assert!(stage_sheet(&dir, "livery", &png).is_err(), "no pixels, no file");
+
+        let real = {
+            let mut buf = Vec::new();
+            image::RgbaImage::new(2, 2)
+                .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
+                .unwrap();
+            buf
+        };
+        let out = stage_sheet(&dir, "../escaped", &real).expect("stage");
+        assert_eq!(out.parent(), Some(dir.as_path()), "stays where it was put");
+        assert!(stage_sheet(&dir, "   ", &real).is_err(), "a blank name is not a texture name");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `pixels` feeds the layer editor, and a layer must not be reshaped on the way in — that
+    /// rounding belongs to the finished sheet, not to a sponsor logo being placed on one.
+    #[test]
+    fn pixels_keeps_a_source_at_its_own_shape() {
+        let dir = tmpdir("pixels");
+        let file = dir.join("logo.png");
+        write_png(&file, 300, 200);
+        let tex = pixels(&file).expect("read");
+        assert_eq!((tex.width, tex.height), (300, 200), "not rounded to a power of two");
+        assert_eq!(tex.name, "logo");
+        // `load`, which feeds the packer, still rounds — the two answers differ on purpose.
+        let (packed, _, _, resized) = load(&file).expect("load");
+        assert!(resized);
+        assert_eq!((packed.width, packed.height), (256, 256));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A sheet must come back the same way up it went out.
+    ///
+    /// The Designer draws the extracted sheet on a canvas and hands that same canvas to the 3D
+    /// preview, so a vertical flip anywhere in extract → read would put the drawing upside down
+    /// relative to the paint it started from. TGA is the format with an origin bit and two
+    /// conventions, which makes this the one hop where that can happen quietly.
+    #[test]
+    fn a_sheet_survives_extract_and_reread_the_same_way_up() {
+        let dir = tmpdir("flip");
+        // Deliberately asymmetric top-to-bottom: the first row is the only opaque red one.
+        let (w, h) = (4u32, 4u32);
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for x in 0..w as usize {
+            let at = x * 4;
+            rgba[at..at + 4].copy_from_slice(&[0xff, 0x00, 0x00, 0xff]);
+        }
+        let original = PntTexture { name: "livery".into(), width: w, height: h, rgba };
+
+        let pnt = paint::encode("Flip", std::slice::from_ref(&original)).expect("encode");
+        let files = extract(&pnt, &dir).expect("extract");
+        let back = pixels(&files[0]).expect("read the sheet back");
+
+        assert_eq!((back.width, back.height), (w, h));
+        let bytes = crate::texstore::get(&back.token).expect("pixels are still held");
+        assert_eq!(
+            &bytes[0..4],
+            &[0xff, 0x00, 0x00, 0xff],
+            "the top-left pixel is still the top-left pixel — a flip would put it on the last row",
+        );
+        let last_row = ((h - 1) * w * 4) as usize;
+        assert_eq!(
+            &bytes[last_row..last_row + 4],
+            &[0, 0, 0, 0],
+            "and the bottom row is still the empty one",
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

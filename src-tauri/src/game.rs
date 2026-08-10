@@ -526,6 +526,44 @@ mod tests {
         );
     }
 
+    /// The Studio's paint destinations are built from `rider_areas`, and the drop-installer
+    /// routes loose paints with `PROTECTION_AREAS[0]`. They have to agree: a paint saved to
+    /// `rider/protection/…` while the model sits in `rider/protections/…` is a paint the game
+    /// never opens, and nothing in the app would say so — it writes, reports success, and the
+    /// bike shows up unpainted. That is exactly the bug this pins.
+    #[test]
+    fn every_offered_gear_folder_is_one_new_content_may_be_written_to() {
+        for game in Game::ALL {
+            let profile = game.profile();
+            let offered: Vec<&str> = profile.info().rider_areas.iter().map(|a| a.folder).collect();
+            for folder in &offered {
+                let area = profile
+                    .rider
+                    .areas
+                    .iter()
+                    .find(|a| a.folder == *folder)
+                    .expect("an offered folder is one of the title's own areas");
+                assert!(
+                    area.installable,
+                    "{}: `{folder}` is offered as a destination but marked read-only",
+                    profile.id,
+                );
+            }
+            // The legacy singular folder is readable, never writable, and so never offered.
+            assert!(
+                !offered.contains(&PROTECTION_AREAS[1]),
+                "{}: the legacy `{}` folder must not be a destination",
+                profile.id,
+                PROTECTION_AREAS[1],
+            );
+        }
+        // And the one the drop-installer routes chest gear to is the one that *is* offered.
+        assert!(
+            MXB.info().rider_areas.iter().any(|a| a.folder == PROTECTION_AREAS[0]),
+            "the folder loose protection paints are installed into must also be offered here",
+        );
+    }
+
     /// The install pickers are built from this list, so an MX-only folder appearing here
     /// would be offered on GP Bikes — where the loader never opens it, leaving the mod
     /// installed as far as the app is concerned and absent as far as the game is.
