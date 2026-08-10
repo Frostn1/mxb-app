@@ -1,6 +1,7 @@
 // Prevents an additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod antidebug;
 mod bikefiles;
 mod bikeswap;
 mod bundle;
@@ -5338,6 +5339,13 @@ fn prepare_webview_env() {
 }
 
 fn main() {
+    // Before anything else: in a release build, refuse to run under a debugger. A live
+    // debugger attached to the process defeats the static hardening the release profile
+    // pays for (stripped symbols, fat LTO, no debug info), so this is the runtime half of
+    // it. No-op in debug builds, so `tauri dev` and the tests stay debuggable. See
+    // `antidebug`.
+    antidebug::guard();
+
     prepare_webview_env();
 
     let builder = tauri::Builder::default();
