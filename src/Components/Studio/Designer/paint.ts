@@ -11,7 +11,16 @@
  * drag and the result after it are the same pixels by construction, and a soft brush can't
  * bruise into dark blobs where its own stamps overlap — the overlap happens inside the scratch,
  * and the scratch is composited once.
+ *
+ * Render is confined to the region the tool actually marked since the last one, which is what
+ * keeps that "once" affordable at sheet size. Restoring and re-laying is per pixel — the pixels
+ * outside the marked region have the same two inputs they had a sample ago, so recomputing them
+ * cannot change them. What the region is *for* is the rest of the chain: it is handed out
+ * through `dirty` so the composite and the texture readback behind it can be told the same
+ * thing, and a brush stroke stops costing a whole sheet per pointer sample at every stage.
  */
+
+import { clampRegion, unionRegion, type Region } from "./layers";
 
 /**
  * What the pointer does on the sheet.
@@ -266,6 +275,23 @@ function drawShape(
 }
 
 /**
+ * Where a shape drawn between two points lands, with room for the pen that draws it.
+ *
+ * Padded by half the stroke width because a line is centred on its path, and by a couple of
+ * pixels beyond that for the round cap and for the antialiasing at its edge — a region that
+ * stopped at the geometry would leave the outer fringe of a thick outline unrestored.
+ */
+function shapeRegion(from: Point, to: Point, s: PaintSettings): Region {
+  const pad = Math.max(1, s.strokeWidth) / 2 + 2;
+  return {
+    x: Math.min(from.x, to.x) - pad,
+    y: Math.min(from.y, to.y) - pad,
+    w: Math.abs(to.x - from.x) + pad * 2,
+    h: Math.abs(to.y - from.y) + pad * 2,
+  };
+}
+
+/**
  * Hold Shift: squares, circles, and axes that snap to 45°.
  *
  * Exported because the stage draws the guide you aim with and this draws what lands, and the
@@ -304,6 +330,12 @@ export class Stroke {
   private last: Point;
   /** Whether anything has actually been put down, so a stray click isn't an undo step. */
   private painted = false;
+  /** What the scratch has gained since the last render, and so what render has to lay down. */
+  private pending: Region | null = null;
+  /** Where the last drag-tool shape landed, since the next one has to wipe it off again. */
+  private shape: Region | null = null;
+  /** What the last render actually rewrote. Read through `dirty`. */
+  private touched: Region | null = null;
 
   constructor(
     private readonly target: HTMLCanvasElement,
@@ -324,6 +356,7 @@ export class Stroke {
         ctx.fillStyle = withAlpha(this.settings.colorA, 1);
         ctx.fillRect(0, 0, this.scratch.width, this.scratch.height);
       }
+      this.mark(this.whole());
       this.painted = true;
     } else if (!DRAG_TOOLS.has(this.settings.tool)) {
       this.dab(at, at);
@@ -332,13 +365,41 @@ export class Stroke {
     this.render();
   }
 
+  /**
+   * The region the last render rewrote, or null if it had nothing to do.
+   *
+   * The only thing anyone outside needs from the bookkeeping above: it says which part of the
+   * layer the sheet's composite — and the texture read back off it — has to catch up with.
+   */
+  get dirty(): Region | null {
+    return this.touched;
+  }
+
+  private whole(): Region {
+    return { x: 0, y: 0, w: this.target.width, h: this.target.height };
+  }
+
+  private mark(r: Region) {
+    this.pending = unionRegion(this.pending, r);
+  }
+
   private dab(from: Point, to: Point) {
     const ctx = this.scratch.getContext("2d");
     if (!ctx) return;
     const { size, hardness, colorA, tool } = this.settings;
     // The eraser's colour never reaches the sheet — the scratch is punched out of the layer,
     // so only its alpha matters. Black keeps a soft edge from tinting what it half-erases.
-    stampSegment(ctx, brushTip(size, hardness, tool === "eraser" ? "#000000" : colorA), from, to);
+    const tip = brushTip(size, hardness, tool === "eraser" ? "#000000" : colorA);
+    stampSegment(ctx, tip, from, to);
+    // The segment's own box, grown by the tip that was walked along it — the stamps at each
+    // end hang half a diameter past the points themselves.
+    const r = tip.width / 2 + 1;
+    this.mark({
+      x: Math.min(from.x, to.x) - r,
+      y: Math.min(from.y, to.y) - r,
+      w: Math.abs(to.x - from.x) + r * 2,
+      h: Math.abs(to.y - from.y) + r * 2,
+    });
   }
 
   /**
@@ -346,6 +407,9 @@ export class Stroke {
    * path, and only the latest for the ones that just need a current corner.
    */
   move(points: Point[], constrain: boolean) {
+    // Cleared up front so a sample that draws nothing reports nothing, rather than leaving the
+    // previous sample's region standing for a second helping of the work it already caused.
+    this.touched = null;
     if (!points.length) return;
     const { tool } = this.settings;
     if (tool === "fill") return;
@@ -364,6 +428,13 @@ export class Stroke {
       } else {
         drawShape(ctx, tool, this.start, to, this.settings);
       }
+      // Both boxes, because the scratch was wiped: the new shape has to be laid down and the
+      // old one has to be taken back off. A gradient covers the sheet, so for that one they
+      // are the same box and it is the whole thing.
+      const next = tool === "gradient" ? this.whole() : shapeRegion(this.start, to, this.settings);
+      this.mark(next);
+      if (this.shape) this.mark(this.shape);
+      this.shape = next;
       this.painted = true;
     } else {
       for (const p of points) {
@@ -375,21 +446,33 @@ export class Stroke {
     this.render();
   }
 
-  /** Put the layer back to the snapshot and lay the whole stroke over it, once. */
+  /**
+   * Put the layer back to the snapshot and lay the whole stroke over it, once — across the part
+   * of it that has moved since the last time.
+   *
+   * Both steps are per pixel and both read the same two canvases, so a pixel outside the region
+   * would be recomputed from unchanged inputs to the value it already holds. What the region
+   * changes is the bill, not the picture.
+   */
   private render() {
+    const rect = this.pending && clampRegion(this.pending, this.target.width, this.target.height);
+    this.pending = null;
+    this.touched = rect ?? null;
+    if (!rect) return;
     const ctx = this.target.getContext("2d");
     if (!ctx) return;
+    const { x, y, w, h } = rect;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.save();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
-    ctx.clearRect(0, 0, this.target.width, this.target.height);
-    ctx.drawImage(this.before, 0, 0);
+    ctx.clearRect(x, y, w, h);
+    ctx.drawImage(this.before, x, y, w, h, x, y, w, h);
     ctx.globalAlpha = this.settings.opacity;
     ctx.globalCompositeOperation =
       this.settings.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.drawImage(this.scratch, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(this.scratch, x, y, w, h, x, y, w, h);
+    ctx.restore();
   }
 
   /** True when the stroke left something behind, and so is worth an undo entry. */

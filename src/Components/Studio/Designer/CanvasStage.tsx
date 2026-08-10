@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "../../../i18n/context";
 import { layerCorners } from "./composite";
@@ -10,6 +10,34 @@ import { constrained, hasTip, isDragTool, type PaintTool, type Point } from "./p
 /** Half-edge of a drawn corner handle, and how far off one a press still counts, in view px. */
 const HANDLE = 3.5;
 const GRAB = 9;
+
+/** Side of one checkerboard square, in view pixels. Fixed, so zoom doesn't resize the board. */
+const CELL = 8;
+
+/**
+ * The transparency checkerboard, as a two-square tile the canvas repeats for us.
+ *
+ * Drawn a square at a time this is a few thousand `fillRect` calls to cover the sheet, repeated
+ * on every repaint — which during a stroke is every frame, to redraw a pattern that never
+ * changes. One tile handed to `createPattern` is the same picture in a single fill.
+ */
+let tile: HTMLCanvasElement | null = null;
+function checkerTile(): HTMLCanvasElement {
+  if (!tile) {
+    tile = document.createElement("canvas");
+    tile.width = CELL * 2;
+    tile.height = CELL * 2;
+    const ctx = tile.getContext("2d");
+    if (ctx) {
+      ctx.fillStyle = "#2a2c33";
+      ctx.fillRect(0, 0, CELL * 2, CELL * 2);
+      ctx.fillStyle = "#33363e";
+      ctx.fillRect(0, 0, CELL, CELL);
+      ctx.fillRect(CELL, CELL, CELL, CELL);
+    }
+  }
+  return tile;
+}
 
 /** The range a corner drag can take a layer to. The same as the inspector's slider, so the
  *  two controls can't disagree about how big a logo is allowed to get. */
@@ -81,6 +109,9 @@ export function CanvasStage({
   // The brush cursor, moved by writing to its style rather than through state — a ring that
   // re-rendered the stage on every mouse move would redraw the whole sheet to move a circle.
   const cursorRef = useRef<HTMLDivElement>(null);
+  // The checkerboard pattern, built once. Patterns belong to the context they were made from,
+  // and this canvas keeps the same one for its whole life — resizing it doesn't replace it.
+  const checker = useRef<CanvasPattern | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -104,6 +135,18 @@ export function CanvasStage({
   const [guide, setGuide] = useState<{ from: Point; to: Point } | null>(null);
 
   const paints = tool !== "move" && canPaint;
+
+  /**
+   * The hovered part's outline, built when the hover moves rather than when the view repaints.
+   *
+   * A part is a few thousand triangles and the repaint below runs on every frame of a stroke,
+   * with the pointer parked on whatever it was over when the press happened — so rebuilding the
+   * path there was paying for the same unchanged shape once per sample of the drawing.
+   */
+  const overPath = useMemo(
+    () => (overPart ? partPath(overPart, sheet.width, sheet.height) : null),
+    [overPart, sheet.width, sheet.height],
+  );
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -211,19 +254,19 @@ export function CanvasStage({
 
     // Checkerboard first, so transparent parts of the sheet read as transparent rather than
     // as black — which on a livery is a real colour and would be badly misleading.
-    const cell = 8;
     ctx.save();
     ctx.beginPath();
     ctx.rect(left, top, w, h);
     ctx.clip();
-    ctx.fillStyle = "#2a2c33";
-    ctx.fillRect(left, top, w, h);
-    ctx.fillStyle = "#33363e";
-    for (let y = 0; y < h; y += cell) {
-      for (let x = ((y / cell) % 2) * cell; x < w; x += cell * 2) {
-        ctx.fillRect(left + x, top + y, cell, cell);
-      }
-    }
+    // Translated rather than offset per square, so the tile still starts at the sheet's own
+    // corner: the pattern is laid out in the space the current transform describes.
+    ctx.translate(left, top);
+    const board = checker.current ?? ctx.createPattern(checkerTile(), "repeat");
+    checker.current = board;
+    // Flat where a pattern couldn't be built. It still says "nothing is drawn here", which is
+    // the whole job — a board is only the clearer way of saying it.
+    ctx.fillStyle = board ?? "#2a2c33";
+    ctx.fillRect(0, 0, w, h);
     ctx.restore();
 
     ctx.imageSmoothingEnabled = true;
@@ -284,13 +327,12 @@ export function CanvasStage({
 
     // The piece under the pointer, picked out of the map. Only while the map is on: a highlight
     // that appeared over a livery with no islands showing would be an outline from nowhere.
-    if (overPart && ghost?.showWire && ghost.wire) {
+    if (overPart && overPath && ghost?.showWire && ghost.wire) {
       ctx.save();
       ctx.translate(left, top);
       ctx.scale(w / sheet.width, h / sheet.height);
-      const path = partPath(overPart, sheet.width, sheet.height);
       ctx.fillStyle = `hsla(${overPart.hue}, 85%, 65%, 0.18)`;
-      ctx.fill(path, "nonzero");
+      ctx.fill(overPath, "nonzero");
       ctx.restore();
     }
 
@@ -330,6 +372,7 @@ export function CanvasStage({
     source,
     ghost,
     overPart,
+    overPath,
     version,
     guide,
     tool,

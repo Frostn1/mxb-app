@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import {
   BLEND_OPS,
+  clampRegion,
   fontSpec,
   layerExtent,
   type Layer,
+  type Region,
   type Sheet,
 } from "./layers";
 
@@ -53,24 +55,53 @@ function drawLayer(ctx: CanvasRenderingContext2D, layer: Layer) {
 }
 
 /**
- * Redraw `sheet` into `canvas`, sizing it if needed.
+ * Redraw `sheet` into `canvas`, sizing it if needed, and say which part of it was rewritten.
  *
  * Cleared to transparent, not to white: a paint's alpha is the part of it the game reads for
  * decals and cutouts, and a sheet flattened onto white would lose that on the way to the file.
+ *
+ * `region` narrows the redraw to the part of the sheet the caller knows has moved — a brush
+ * stamp rather than the 2048² square around it. Every layer is still drawn, under a clip: the
+ * saving is in pixels touched, not in work skipped, and a stack that composited differently
+ * inside the region than outside it would leave a seam along the region's edge. Anything that
+ * cannot be narrowed honestly — a sheet that just changed size, or a change nobody described —
+ * passes null and gets the whole thing.
+ *
+ * The region that comes back is the one actually used, clipped to the canvas: it is what the
+ * texture readback downstream has to be told, and letting the caller assume its own region was
+ * honoured is how a resized sheet would upload one stamp's worth of a new canvas.
  */
-export function composite(canvas: HTMLCanvasElement, sheet: Sheet): void {
-  if (canvas.width !== sheet.width || canvas.height !== sheet.height) {
+export function composite(
+  canvas: HTMLCanvasElement,
+  sheet: Sheet,
+  region?: Region | null,
+): Region | null {
+  const resized = canvas.width !== sheet.width || canvas.height !== sheet.height;
+  if (resized) {
     canvas.width = sheet.width;
     canvas.height = sheet.height;
   }
   const ctx = canvas.getContext("2d");
-  if (!ctx) return;
+  if (!ctx) return null;
+  // A fresh canvas has nothing on it to keep, so a region would be describing pixels that were
+  // never drawn in the first place.
+  const area =
+    resized || !region
+      ? { x: 0, y: 0, w: sheet.width, h: sheet.height }
+      : clampRegion(region, sheet.width, sheet.height);
+  if (!area || !area.w || !area.h) return null;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.save();
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
-  ctx.clearRect(0, 0, sheet.width, sheet.height);
+  ctx.beginPath();
+  ctx.rect(area.x, area.y, area.w, area.h);
+  ctx.clip();
+  ctx.clearRect(area.x, area.y, area.w, area.h);
   if (sheet.base) ctx.drawImage(sheet.base, 0, 0, sheet.width, sheet.height);
   for (const layer of sheet.layers) drawLayer(ctx, layer);
+  ctx.restore();
+  return area;
 }
 
 /** The selection box for a layer, as the four corners of its rotated bounds in sheet space. */
@@ -121,26 +152,45 @@ export function toPng(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
  * `.pnt` it came from. Matching the type is the only way to be sure they agree; reasoning
  * about which `flipY` cancels which got it wrong twice.
  *
- * The cost is a full-size readback per change, which is the same order as the composite that
- * just ran.
+ * `region` is the part of the canvas that changed — the same region the composite just drew.
+ * Reading back only those rows is what keeps this off the critical path of a stroke: a full
+ * 2048² readback is sixteen megabytes pulled off the GPU and copied again, per pointer sample,
+ * to carry a brush stamp that covers a few thousand pixels. The upload is still the whole
+ * texture, but that is the GPU's own copy of a buffer it already has; the readback is the
+ * expensive half and it is the half a region can remove.
  */
 export function sheetTexture(
   canvas: HTMLCanvasElement,
   existing: THREE.DataTexture | null,
+  region?: Region | null,
 ): THREE.DataTexture | null {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx || !canvas.width || !canvas.height) return existing;
-  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
   // Same size as last time: write into the buffer that's already there rather than handing
   // three.js a new one, so a drag doesn't allocate a sheet-sized array per frame.
   const held = existing?.image.data as Uint8Array | undefined;
-  if (existing && held && held.length === data.length) {
-    held.set(data);
+  if (existing && held && held.length === canvas.width * canvas.height * 4) {
+    const area = region ? clampRegion(region, canvas.width, canvas.height) : null;
+    if (region && !area) return existing;
+    const { x, y, w, h } = area ?? { x: 0, y: 0, w: canvas.width, h: canvas.height };
+    const { data } = ctx.getImageData(x, y, w, h);
+    if (w === canvas.width) {
+      // Full-width rows are contiguous in both buffers, so they go across in one move.
+      held.set(data, y * canvas.width * 4);
+    } else {
+      const stride = canvas.width * 4;
+      const run = w * 4;
+      for (let row = 0; row < h; row += 1) {
+        held.set(data.subarray(row * run, row * run + run), (y + row) * stride + x * 4);
+      }
+    }
     existing.needsUpdate = true;
     return existing;
   }
 
+  // No buffer to patch — a first texture, or a sheet that changed size. Read the lot.
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
   existing?.dispose();
   const pixels = new Uint8Array(data.buffer.slice(0));
   const tex = new THREE.DataTexture(pixels, canvas.width, canvas.height, THREE.RGBAFormat);
