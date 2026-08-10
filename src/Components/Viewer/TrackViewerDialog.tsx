@@ -111,10 +111,14 @@ export function TrackViewerDialog({
   if (meta?.altitude != null) rows.push([t("libraryDetail.altitude"), `${meta.altitude} m`]);
   if (terrain) {
     rows.push([t("trackViewer.grid"), `${terrain.width} × ${terrain.height}`]);
-    rows.push([
-      t("trackViewer.relief"),
-      `${Math.round(terrain.maxHeight - terrain.minHeight)} m`,
-    ]);
+    // Only when the height file said what its samples mean. Otherwise the grid is in raw
+    // quantised units and "65535 m of elevation" would be worse than saying nothing.
+    if (terrain.heightsInMetres) {
+      rows.push([
+        t("trackViewer.relief"),
+        `${Math.round(terrain.maxHeight - terrain.minHeight)} m`,
+      ]);
+    }
   }
 
   // Nothing to load rather than something that failed — worth saying plainly, since the

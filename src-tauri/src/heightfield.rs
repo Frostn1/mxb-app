@@ -1,9 +1,12 @@
 //! Recovering a terrain grid from a track's height file.
 //!
-//! MX Bikes' `.trh` is undocumented, and no two builds of the track tools have to agree on
-//! what precedes the samples. Rather than hard-code a header this build can only guess at,
-//! the reader *probes*: it enumerates the layouts a heightfield could plausibly have, then
-//! asks each one to prove itself against the bytes.
+//! MX Bikes' `.trh` carries a magic and states its own shape, and [`parse_trh`] reads it
+//! directly — layout confirmed against a published track. That is the path real tracks take.
+//!
+//! Everything below it exists for the files that path doesn't fit: a `.map`, a heightfield
+//! from a tool that wrote something else, a future revision. For those the reader *probes*:
+//! it enumerates the layouts a heightfield could plausibly have, then asks each one to prove
+//! itself against the bytes.
 //!
 //! The proof is a property terrain has and noise does not — neighbouring samples are close
 //! together. Two independent measurements fall out of that, and between them they pin down
@@ -66,9 +69,95 @@ pub struct Layout {
     /// 0–1. How cleanly this layout beat the roughness thresholds — surfaced so a probed
     /// terrain can be labelled as inferred rather than read.
     pub confidence: f32,
-    /// Whether the dimensions came from numbers in the file's own header (`header`), from a
-    /// hint in the track's `.ini` (`ini`), or from assuming a square grid (`square`).
+    /// `trh` when the file described itself, otherwise how the shape was inferred:
+    /// `header` (numbers in the file), `ini` (a hint from the track) or `square`.
     pub source: &'static str,
+    /// Multiply a raw sample by this for metres. `None` when the file doesn't say, in which
+    /// case the grid is in raw sample units and its relief means nothing in the world.
+    pub height_scale: Option<f32>,
+    /// Metres of ground per sample step, when the file states it. `None` means the relief
+    /// is real but the footprint it sits on is unknown.
+    pub metres_per_sample: Option<f32>,
+}
+
+/// The magic that opens a real `.trh`.
+const TRH_MAGIC: &[u8; 4] = b"TRH\0";
+
+/// Read MX Bikes' own heightfield layout, confirmed against a published track:
+///
+/// ```text
+///  0   "TRH\0"
+///  4   u32   width
+///  8   u32   height
+/// 12   u16 × width × height    raw samples spanning the height range
+///  …   trailing block, opening with three floats: size x, relief, size z — all metres
+/// ```
+///
+/// Worth having as its own reader rather than leaving to [`probe`], which cannot see it at
+/// all: the grid doesn't run to the end of the file, and the blind search derives the sample
+/// offset from the file's length precisely so that it never has to guess. It also can't
+/// know that the samples are a quantised range rather than metres, so it would report a
+/// track's relief as tens of thousands of units.
+fn parse_trh(bytes: &[u8]) -> Option<Layout> {
+    if bytes.len() < 12 || &bytes[..4] != TRH_MAGIC {
+        return None;
+    }
+    let width = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
+    let height = u32::from_le_bytes(bytes[8..12].try_into().ok()?);
+    if !(MIN_DIM..=MAX_DIM).contains(&width) || !(MIN_DIM..=MAX_DIM).contains(&height) {
+        return None;
+    }
+    let need = (width as usize).checked_mul(height as usize)?.checked_mul(2)?;
+    let end = need.checked_add(12)?;
+    if end > bytes.len() {
+        return None;
+    }
+
+    let c = Candidate {
+        offset: 12,
+        width,
+        height,
+        sample: Sample::U16,
+        source: "trh",
+    };
+    // A self-describing file is still measured. A header that says one thing while the body
+    // says another is a misread, and falling back to the blind search beats drawing it.
+    let Assessment::Ok { confidence, .. } = assess(bytes, &c) else {
+        return None;
+    };
+
+    let scale = trh_scale(bytes, end, width);
+    Some(Layout {
+        offset: 12,
+        width,
+        height,
+        sample: Sample::U16,
+        confidence,
+        source: "trh",
+        height_scale: scale.map(|(_, h)| h),
+        metres_per_sample: scale.map(|(s, _)| s),
+    })
+}
+
+/// `(metres per sample, metres per raw unit)` from the block that follows the grid.
+///
+/// Taken from one published track rather than from a specification, so every figure has to
+/// be plausible before any of it is believed — and it's all or nothing, because a footprint
+/// without a height scale would draw relief in raw units across real ground.
+fn trh_scale(bytes: &[u8], at: usize, width: u32) -> Option<(f32, f32)> {
+    let f32_at = |i: usize| -> Option<f32> {
+        let o = at + i * 4;
+        Some(f32::from_le_bytes(bytes.get(o..o + 4)?.try_into().ok()?))
+    };
+    let size_x = f32_at(0)?;
+    let relief = f32_at(1)?;
+    let size_z = f32_at(2)?;
+
+    let sane = |v: f32, max: f32| v.is_finite() && v > 0.0 && v < max;
+    if !(sane(size_x, 100_000.0) && sane(size_z, 100_000.0) && sane(relief, 10_000.0)) {
+        return None;
+    }
+    Some((size_x / (width.max(2) - 1) as f32, relief / u16::MAX as f32))
 }
 
 /// Integer square root, for testing whether a sample count is a square grid.
@@ -350,6 +439,16 @@ pub fn report(bytes: &[u8], hint: Option<(u32, u32)>) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{} bytes, hint {hint:?}", bytes.len());
 
+    if let Some(l) = parse_trh(bytes) {
+        let _ = writeln!(
+            out,
+            "reads as a self-describing .trh: {}x{} u16 at 12, confidence {:.2}\n\
+             spacing {:?} m/sample, height scale {:?} m/unit",
+            l.width, l.height, l.confidence, l.metres_per_sample, l.height_scale
+        );
+        return out;
+    }
+
     let all = candidates(bytes, hint);
     if all.is_empty() {
         out.push_str(
@@ -406,6 +505,11 @@ pub fn report(bytes: &[u8], hint: Option<(u32, u32)>) -> String {
 /// `hint` is a (width, height) from the track's `.ini` when it names one — believed ahead of
 /// anything inferred, but still made to pass the same roughness test as every other layout.
 pub fn probe(bytes: &[u8], hint: Option<(u32, u32)>) -> Option<Layout> {
+    // A file that says what it is doesn't need guessing at.
+    if let Some(known) = parse_trh(bytes) {
+        return Some(known);
+    }
+
     let mut best: Option<Layout> = None;
 
     for c in candidates(bytes, hint) {
@@ -419,6 +523,10 @@ pub fn probe(bytes: &[u8], hint: Option<(u32, u32)>) -> Option<Layout> {
             sample: c.sample,
             confidence,
             source: c.source,
+            // Nothing inferred carries a scale: a grid recovered by its shape says nothing
+            // about the ground it covers or what its numbers mean.
+            height_scale: None,
+            metres_per_sample: None,
         };
         // Ties on confidence go to the layout with the better provenance, then to the larger
         // grid: a stated shape beats a guessed one, and a half-width misread of a real grid
@@ -447,7 +555,9 @@ fn rank(source: &str) -> u8 {
     }
 }
 
-/// Read a probed grid out as metres, downsampled so the longest edge is at most `max_dim`.
+/// Read a probed grid out, downsampled so the longest edge is at most `max_dim`.
+///
+/// In metres where the file gave a height scale; in raw sample units where it didn't.
 ///
 /// Downsampling happens here rather than in the app because the whole point is to not ship a
 /// 4096² grid over the IPC channel: at four bytes a sample that is 64 MB for a view that
@@ -472,7 +582,8 @@ pub fn read_grid(bytes: &[u8], layout: &Layout, max_dim: u32) -> (u32, u32, Vec<
             let mut count = 0usize;
             for y in oy * step..((oy + 1) * step).min(h) {
                 for x in ox * step..((ox + 1) * step).min(w) {
-                    let v = layout.sample.read(bytes, layout.offset + (y * w + x) * size);
+                    let v = layout.sample.read(bytes, layout.offset + (y * w + x) * size)
+                        * layout.height_scale.unwrap_or(1.0);
                     if v.is_finite() {
                         total += v as f64;
                         count += 1;
@@ -518,6 +629,92 @@ mod tests {
         bytes
     }
 
+    /// Build a file to the layout a published track actually uses.
+    fn real_trh(w: u32, h: u32, footer: &[u8]) -> Vec<u8> {
+        let heights = terrain(w, h);
+        let lo = heights.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"TRH\0");
+        bytes.extend_from_slice(&w.to_le_bytes());
+        bytes.extend_from_slice(&h.to_le_bytes());
+        for v in &heights {
+            // Quantised across the whole 16-bit range, which is what makes the trailing
+            // block's relief figure the only thing that turns these back into metres.
+            let q = ((v - lo) / (hi - lo) * u16::MAX as f32) as u16;
+            bytes.extend_from_slice(&q.to_le_bytes());
+        }
+        bytes.extend_from_slice(footer);
+        bytes
+    }
+
+    /// `size_x`, relief, `size_z`, then the rest of the block we don't read.
+    fn real_footer() -> Vec<u8> {
+        let mut f = Vec::new();
+        f.extend_from_slice(&250.0f32.to_le_bytes());
+        f.extend_from_slice(&18.36f32.to_le_bytes());
+        f.extend_from_slice(&250.0f32.to_le_bytes());
+        f.extend_from_slice(&[0u8; 512]);
+        f
+    }
+
+    #[test]
+    fn reads_the_real_trh_layout() {
+        let bytes = real_trh(257, 257, &real_footer());
+        let l = probe(&bytes, None).expect("a real-layout .trh should be read directly");
+
+        assert_eq!(l.source, "trh", "it describes itself — nothing should be inferred");
+        assert_eq!((l.width, l.height), (257, 257));
+        assert_eq!(l.sample, Sample::U16);
+        assert_eq!(l.offset, 12);
+        // 250 m spread across 256 steps.
+        assert!((l.metres_per_sample.unwrap() - 250.0 / 256.0).abs() < 1e-4);
+
+        // And the heights come out in metres rather than raw quantised units — the whole
+        // point of reading the trailing block.
+        let (_, _, grid) = read_grid(&bytes, &l, 512);
+        let max = grid.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        assert!((max - 18.36).abs() < 0.05, "relief should be metres, got {max}");
+    }
+
+    #[test]
+    fn a_trh_whose_grid_doesnt_run_to_the_end_is_still_read() {
+        // The blind search derives the sample offset from the file's length, so a grid with
+        // anything after it is invisible to it. This is exactly that shape.
+        let bytes = real_trh(257, 257, &real_footer());
+        assert!(
+            bytes.len() > 12 + 257 * 257 * 2,
+            "the fixture has to actually carry a trailing block",
+        );
+        assert_eq!(probe(&bytes, None).unwrap().width, 257);
+    }
+
+    #[test]
+    fn a_trh_with_an_unusable_footer_reads_its_grid_but_claims_no_scale() {
+        // Zeros aren't a footprint. The shape is still trustworthy — it's stated in the
+        // header — but nothing should be asserted about the ground or the units.
+        let bytes = real_trh(257, 257, &[0u8; 64]);
+        let l = probe(&bytes, None).expect("the grid is still readable");
+        assert_eq!(l.source, "trh");
+        assert_eq!(l.metres_per_sample, None, "no footprint should be claimed");
+        assert_eq!(l.height_scale, None, "samples stay raw when nothing scales them");
+    }
+
+    #[test]
+    fn a_trh_header_that_disagrees_with_its_body_is_not_believed() {
+        // Magic and dimensions alone aren't enough: if the body doesn't read as terrain at
+        // the stated shape, this is a misread and the blind search should get its turn.
+        let mut bytes = real_trh(257, 257, &real_footer());
+        bytes[4..8].copy_from_slice(&64u32.to_le_bytes());
+        bytes[8..12].copy_from_slice(&64u32.to_le_bytes());
+        let found = probe(&bytes, None);
+        assert!(
+            found.is_none_or(|l| (l.width, l.height) != (64, 64)),
+            "a stated shape the body contradicts must not be taken at its word",
+        );
+    }
+
     #[test]
     fn recovers_a_square_grid_with_no_header() {
         let heights = terrain(256, 256);
@@ -533,7 +730,7 @@ mod tests {
         // Non-square, so nothing but the header could have supplied the shape.
         let heights = terrain(320, 192);
         let mut header = Vec::new();
-        header.extend_from_slice(b"TRH\0");
+        header.extend_from_slice(b"HGT\0");
         header.extend_from_slice(&320u32.to_le_bytes());
         header.extend_from_slice(&192u32.to_le_bytes());
         header.extend_from_slice(&[0u8; 20]);

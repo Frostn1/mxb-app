@@ -52,8 +52,10 @@ export async function loadTrackTerrain(
     minHeight: view.getFloat32(16, true),
     maxHeight: view.getFloat32(20, true),
     metresPerSample: view.getFloat32(24, true),
-    // Bit 0 of the flags: the track stated its sample spacing rather than us assuming it.
+    // Bit 0: the track stated its sample spacing rather than us assuming it.
+    // Bit 1: the heights are metres rather than the height file's own raw units.
     scaleKnown: (view.getUint16(6, true) & 1) === 1,
+    heightsInMetres: (view.getUint16(6, true) & 2) === 2,
     confidence: view.getFloat32(28, true),
     // The header is a multiple of four bytes precisely so this can be a view rather than
     // a copy — a 512² grid is a megabyte that never needs to be duplicated.

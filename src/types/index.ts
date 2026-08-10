@@ -482,6 +482,11 @@ export interface TrackTerrain {
   scaleKnown: boolean;
   /** 0–1. How sure the backend's probe was that it read the height file correctly. */
   confidence: number;
+  /**
+   * Whether the heights are metres. A height file that doesn't say what its samples mean
+   * leaves them as raw units, and the elevation range is then a number about nothing.
+   */
+  heightsInMetres: boolean;
   /** `width * height` heights in metres, row-major. */
   heights: Float32Array;
 }

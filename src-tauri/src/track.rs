@@ -26,7 +26,9 @@ const MASTER_DIM: u32 = 512;
 
 /// Cache generation. Bump when the blob layout or the probe changes shape, so entries
 /// written by an older build are ignored rather than misread.
-const CACHE_DIR: &str = "track-terrain-v1";
+// v2: grids are metres where the file states a height scale, so v1's raw-unit masters
+// would now be read as though they were already converted.
+const CACHE_DIR: &str = "track-terrain-v2";
 
 /// How many cached masters to keep. At roughly a megabyte each this is a bounded cost that
 /// only grows with tracks actually opened.
@@ -79,6 +81,9 @@ pub struct TerrainInfo {
     /// `scale_known`) — the relief is still true, only its footprint is a guess.
     pub metres_per_sample: f32,
     pub scale_known: bool,
+    /// Whether `min_height`/`max_height` are metres. When the height file didn't say what
+    /// its samples mean they're raw units, and the relief is a number about nothing.
+    pub heights_in_metres: bool,
     /// 0–1, from the probe. Anything recovered rather than stated is shown as inferred.
     pub confidence: f32,
     /// `header`, `ini` or `square` — how the grid's shape was decided.
@@ -309,7 +314,10 @@ fn build_master(bytes: &[u8], layout: &Layout, entry: &str, ini_scale: Option<f3
     // The master covers the same ground as the source at fewer samples, so the spacing grows
     // by exactly the reduction factor.
     let reduction = layout.width as f32 / w.max(1) as f32;
-    let metres_per_sample = ini_scale.unwrap_or(1.0) * reduction;
+    // What the file itself said, first: a `.trh` states its own footprint, and that beats
+    // both a hint from the track's `.ini` and the fallback of one metre per sample.
+    let stated = layout.metres_per_sample.or(ini_scale);
+    let metres_per_sample = stated.unwrap_or(1.0) * reduction;
 
     Master {
         info: TerrainInfo {
@@ -320,7 +328,8 @@ fn build_master(bytes: &[u8], layout: &Layout, entry: &str, ini_scale: Option<f3
             min_height: if min.is_finite() { min } else { 0.0 },
             max_height: if max.is_finite() { max } else { 0.0 },
             metres_per_sample,
-            scale_known: ini_scale.is_some(),
+            scale_known: stated.is_some(),
+            heights_in_metres: layout.height_scale.is_some(),
             confidence: layout.confidence,
             source: layout.source.to_string(),
             entry: entry.to_string(),
@@ -340,7 +349,9 @@ pub fn terrain_blob(master: &Master, max_dim: u32) -> Vec<u8> {
     // Bit 0: the sample spacing was stated by the track rather than assumed. The app needs
     // this to caption the view honestly — with the spacing assumed, the relief is drawn
     // against a footprint we guessed, so its steepness is not something to trust.
-    out.extend_from_slice(&(u16::from(master.info.scale_known)).to_le_bytes());
+    // Bit 1: the heights are metres rather than the file's own raw units.
+    let flags = u16::from(master.info.scale_known) | (u16::from(master.info.heights_in_metres) << 1);
+    out.extend_from_slice(&flags.to_le_bytes());
     out.extend_from_slice(&w.to_le_bytes());
     out.extend_from_slice(&h.to_le_bytes());
     out.extend_from_slice(&master.info.min_height.to_le_bytes());
@@ -700,6 +711,7 @@ mod tests {
                 max_height: 10.0,
                 metres_per_sample: 2.0,
                 scale_known: true,
+                heights_in_metres: true,
                 confidence: 0.9,
                 source: "header".into(),
                 entry: "T/T.trh".into(),
