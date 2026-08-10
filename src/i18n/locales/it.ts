@@ -1435,6 +1435,8 @@ export const it: Translation = {
   "designer.noGeometry": "Carica un modello nell'anteprima per vederne il layout UV.",
   "designer.uvNoMatch":
     "Nessuna parte del modello usa una texture chiamata “{{name}}”, quindi non c'è un layout UV da mostrare.",
+  "designer.ghostBuried":
+    "Il riferimento sta sotto la planche, e il modello di questa planche è opaco: attiva Modello per toglierlo e vedere attraverso.",
   "designer.ghostNote": "Solo una guida: il riferimento non viene mai salvato nella vernice.",
   "designer.resetView": "Reimposta vista",
 

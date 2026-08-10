@@ -1099,6 +1099,9 @@ function GhostPanel({
   // sitting there dead with no explanation.
   const canTrace = hasBase || tracing;
   const showing = ghostShows(ghost);
+  // Something to show, and an opaque template still in the sheet sitting on top of it. The
+  // reference draws underneath, so this is showing nothing until the template is lifted out.
+  const buried = showing && hasBase;
 
   return (
     <div className="rounded-lg border border-border bg-card/40 p-3.5">
@@ -1164,6 +1167,15 @@ function GhostPanel({
           format={(v) => `${Math.round(v * 100)}%`}
         />
       </Row>
+
+      {/* The reference is underneath, so an opaque sheet hides it completely. Saying so is
+          the difference between a feature that looks broken and one that tells you the next
+          move — which is the button directly above this line. */}
+      {buried && (
+        <p className="mt-1.5 text-[11px] leading-snug text-amber-500/90">
+          {t("designer.ghostBuried")}
+        </p>
+      )}
 
       {/* The name binds the sheet to the mesh, so a name nothing asks for is worth saying
           plainly — it is the same mistake that makes a paint load and show nothing. */}

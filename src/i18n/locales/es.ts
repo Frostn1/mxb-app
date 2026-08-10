@@ -1445,6 +1445,8 @@ export const es: Translation = {
   "designer.noGeometry": "Carga un modelo en la vista previa para ver su distribución UV.",
   "designer.uvNoMatch":
     "Nada del modelo usa una textura llamada “{{name}}”, así que no hay distribución UV que mostrar.",
+  "designer.ghostBuried":
+    "La referencia va debajo de la hoja, y la plantilla de esta hoja es opaca: activa Plantilla para sacarla y poder ver a través.",
   "designer.ghostNote": "Solo una guía: la referencia nunca se guarda en la pintura.",
   "designer.resetView": "Restablecer vista",
 

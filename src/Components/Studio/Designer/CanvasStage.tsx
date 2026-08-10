@@ -221,27 +221,30 @@ export function CanvasStage({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
-    // The template ghost goes *under* the drawing, because that is what tracing is: the paint
-    // you are copying sits behind the one you are making. It only shows through where the
-    // sheet is still transparent, which is exactly where there is nothing drawn yet.
-    if (ghost?.showTemplate && ghost.template && ghost.opacity > 0) {
+    // The whole reference goes *under* the drawing — that is what makes it a ghost rather than
+    // an overlay. Both halves show through wherever the sheet is still transparent, which is
+    // exactly where there is nothing drawn yet and exactly where you need to know which piece
+    // of bodywork you are about to paint on.
+    //
+    // The consequence is worth being clear about: a sheet that still has its template baked in
+    // is opaque, and an underlay beneath it is invisible. That is what the trace toggle is for
+    // — it lifts the template out and leaves the sheet transparent, and the two features are
+    // meant to be used together.
+    if (ghost && ghost.opacity > 0) {
       ctx.save();
       ctx.globalAlpha = ghost.opacity;
-      ctx.drawImage(ghost.template, left, top, w, h);
+      // Template first, islands over it: the outlines have to stay readable against the paint
+      // being traced, and they are the thinner of the two marks.
+      if (ghost.showTemplate && ghost.template) {
+        ctx.drawImage(ghost.template, left, top, w, h);
+      }
+      if (ghost.showWire && ghost.wire) {
+        ctx.drawImage(ghost.wire, left, top, w, h);
+      }
       ctx.restore();
     }
 
     ctx.drawImage(source, left, top, w, h);
-
-    // The UV map goes *over* it, and that isn't an inconsistency — it answers a different
-    // question. A template is something to copy and belongs behind your work; the islands are
-    // a ruler, and a ruler underneath an opaque livery tells you nothing.
-    if (ghost?.showWire && ghost.wire && ghost.opacity > 0) {
-      ctx.save();
-      ctx.globalAlpha = ghost.opacity;
-      ctx.drawImage(ghost.wire, left, top, w, h);
-      ctx.restore();
-    }
 
     // Sheet edge, so you can see where the texture stops.
     ctx.strokeStyle = "rgba(255,255,255,0.18)";

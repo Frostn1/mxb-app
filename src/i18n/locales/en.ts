@@ -1410,6 +1410,8 @@ export const en = {
   "designer.noGeometry": "Load a model in the preview to see its UV layout.",
   "designer.uvNoMatch":
     "Nothing on the model uses a texture called “{{name}}”, so there is no UV layout to show.",
+  "designer.ghostBuried":
+    "The reference sits under the sheet, and this sheet’s template is opaque — turn on Template to lift it out and see through.",
   "designer.ghostNote": "A guide only â the reference is never saved into the paint.",
   "designer.resetView": "Reset view",
 

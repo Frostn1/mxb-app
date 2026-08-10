@@ -1458,6 +1458,8 @@ export const de: Translation = {
   "designer.noGeometry": "Lade in der Vorschau ein Modell, um sein UV-Layout zu sehen.",
   "designer.uvNoMatch":
     "Nichts am Modell verwendet eine Textur namens „{{name}}“, also gibt es kein UV-Layout zu zeigen.",
+  "designer.ghostBuried":
+    "Die Referenz liegt unter dem Blatt, und die Vorlage dieses Blattes ist undurchsichtig — schalte Vorlage ein, um sie herauszuheben und hindurchzusehen.",
   "designer.ghostNote": "Nur eine Hilfe — die Referenz wird nie in die Lackierung gespeichert.",
   "designer.resetView": "Ansicht zurücksetzen",
 

@@ -1434,6 +1434,8 @@ export const ptBR: Translation = {
   "designer.noGeometry": "Carregue um modelo na prévia para ver o layout UV dele.",
   "designer.uvNoMatch":
     "Nada no modelo usa uma textura chamada “{{name}}”, então não há layout UV para mostrar.",
+  "designer.ghostBuried":
+    "A referência fica sob a folha, e o modelo desta folha é opaco — ative Modelo para tirá-lo e enxergar através.",
   "designer.ghostNote": "Apenas um guia — a referência nunca é salva na pintura.",
   "designer.resetView": "Redefinir visualização",
 

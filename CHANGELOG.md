@@ -13,8 +13,11 @@
   and draws its bodywork where it actually lands on the sheet, each piece in its own colour —
   the thing an image editor cannot tell you. Neither is ever composited, staged or saved: they
   live outside the sheet entirely, so a guide cannot end up shipped inside somebody's livery.
-  The template sits under your work because that is what tracing is; the UV map sits over it,
-  because a ruler beneath an opaque paint tells you nothing.
+  Both sit **underneath** what you're drawing — a ghost, not an overlay — so they show through
+  wherever the sheet is still transparent, which is exactly where you need to know which piece
+  of bodywork you're about to paint on. The two are meant to be used together: lifting the
+  template out is what leaves the sheet transparent enough to see the islands through it, and
+  the panel says so when a still-opaque template is burying the reference.
 - **Layers resize by their corners.** The selected layer's box has grabbable handles, dragged
   from the centre the same way the inspector's slider scales from it, so the two controls agree
   about where a logo grows from. The slider stays for typing an exact number; the corners are

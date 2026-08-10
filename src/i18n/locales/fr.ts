@@ -1449,6 +1449,8 @@ export const fr: Translation = {
   "designer.noGeometry": "Charge un modèle dans l'aperçu pour voir sa disposition UV.",
   "designer.uvNoMatch":
     "Rien sur le modèle n'utilise une texture nommée « {{name}} », il n'y a donc aucune disposition UV à montrer.",
+  "designer.ghostBuried":
+    "La référence est sous la planche, et le modèle de cette planche est opaque : active Modèle pour l'en sortir et voir au travers.",
   "designer.ghostNote": "Un simple repère : la référence n'est jamais enregistrée dans la peinture.",
   "designer.resetView": "Réinitialiser la vue",
 
