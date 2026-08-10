@@ -5338,6 +5338,48 @@ fn prepare_webview_env() {
     }
 }
 
+/// Whether this process is running under Wine — CrossOver, Whisky, Kegworks or plain Wine.
+///
+/// `ntdll` exports `wine_get_version` under Wine and never on real Windows, which is the
+/// check Wine documents for programs that need to tell. It matters here because Wine's
+/// `ole32` faults inside `RegisterDragDrop`: the app came up as a transparent window and
+/// died in `ole32` from its own window procedure, with WebView2 already running.
+#[cfg(windows)]
+fn under_wine() -> bool {
+    use std::os::raw::{c_char, c_void};
+
+    extern "system" {
+        fn GetModuleHandleA(name: *const c_char) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *mut c_void;
+    }
+
+    // SAFETY: both take a NUL-terminated name and return null rather than failing. `ntdll`
+    // is always already loaded, so this never brings a library in.
+    unsafe {
+        let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr() as *const c_char);
+        !ntdll.is_null()
+            && !GetProcAddress(ntdll, b"wine_get_version\0".as_ptr() as *const c_char).is_null()
+    }
+}
+
+#[cfg(not(windows))]
+fn under_wine() -> bool {
+    false
+}
+
+/// Whether to register the OS drag-drop handler on the main window.
+///
+/// Under Wine it is what crashes the app, so it comes off there and stays on everywhere
+/// else — a Windows player keeps the dropzone. `MXB_DRAG_DROP` forces the answer either way
+/// (`0` off, `1` on) so one build can be tried both ways.
+fn drag_drop_enabled() -> bool {
+    match std::env::var("MXB_DRAG_DROP").ok().as_deref() {
+        Some("0") => false,
+        Some("1") => true,
+        _ => !under_wine(),
+    }
+}
+
 fn main() {
     // Before anything else: in a release build, refuse to run under a debugger. A live
     // debugger attached to the process defeats the static hardening the release profile
@@ -5421,6 +5463,28 @@ fn main() {
         .manage(shop_session::ShopSession::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+
+            // The main window is `"create": false` in tauri.conf.json so it is built here
+            // rather than by Tauri's own startup loop, which is the only way to decide the
+            // drag-drop handler per run: it can only be turned off while the window is
+            // being built. Everything else about the window still comes from the config,
+            // the macOS overrides in `tauri.macos.conf.json` included.
+            let drag_drop = drag_drop_enabled();
+            log::info!("wine={} drag-drop-handler={}", under_wine(), drag_drop);
+            for window_config in app
+                .config()
+                .app
+                .windows
+                .iter()
+                .filter(|w| w.label == MAIN_WINDOW)
+            {
+                let mut builder =
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?;
+                if !drag_drop {
+                    builder = builder.disable_drag_drop_handler();
+                }
+                builder.build()?;
+            }
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
             log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
