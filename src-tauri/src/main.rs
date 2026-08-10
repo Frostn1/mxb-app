@@ -51,6 +51,9 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
+// Decoding a paint's textures is per-texture CPU work over no shared state, and every path
+// that does it wants the same treatment — so this sits here rather than in one function.
+use rayon::prelude::*;
 use profilewatch::ProfileWatcher;
 use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
@@ -696,8 +699,44 @@ async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> 
         .map_err(|e| format!("unpack_paint task failed: {e}"))?
 }
 
+/// Paints decoded for the viewer, so re-opening one doesn't inflate it a second time.
+///
+/// The picker re-runs this on every selection change and on every re-open, and a gear paint is
+/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are small,
+/// because each is downscaled to 1024² before it is stored.
+const PAINT_CACHE_CAP: usize = 4;
+
+fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(PAINT_CACHE_CAP)))
+}
+
 fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
-    paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+    let t0 = std::time::Instant::now();
+    // Path *and* mtime, as the bike cache does, so a paint re-saved under the same name misses.
+    let key = bike_cache_key(&path);
+    if let Some(t) = paint_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+        log::info!("unpack_paint {path}: cache hit ({:?})", t0.elapsed());
+        return Ok(t);
+    }
+
+    let textures = paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+    log::info!(
+        "unpack_paint {path}: {} texture(s) in {:?} | {:.1} MB resident in the texture store",
+        textures.len(),
+        t0.elapsed(),
+        texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
+    );
+    if let Ok(mut c) = paint_cache().lock() {
+        // Cloning an entry copies names, sizes and tokens — never pixels, which stay in the
+        // texture store. The evicted paint's go with it; nothing else holds those tokens.
+        if let Some(dropped) = c.insert(key, textures.clone()) {
+            let tokens: Vec<String> = dropped.iter().map(|t| t.token.clone()).collect();
+            texstore::release(&tokens);
+        }
+    }
+    Ok(textures)
 }
 
 // ── Paint studio ────────────────────────────────────────────────────────────────────
@@ -1043,7 +1082,6 @@ async fn load_bike_model(source: String) -> Result<BikeModel, String> {
 }
 
 fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
-    use rayon::prelude::*;
     let t0 = std::time::Instant::now();
     let key = bike_cache_key(&source);
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
@@ -1168,7 +1206,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
                 (
                     BikePaint {
                         name: name.clone(),
-                        textures: pnt.par_iter().map(paint::to_texture).collect(),
+                        textures: pnt.into_par_iter().map(paint::into_texture).collect(),
                         changes_preview: false, // resolved below, once bindings are known
                     },
                     *shipped,
@@ -1915,7 +1953,7 @@ async fn load_stock_gear_model(
             Some(p) => std::fs::read(&p)
                 .ok()
                 .and_then(|d| paint::decode_any(&d).ok())
-                .map(|pnt| pnt.iter().map(paint::to_texture).collect())
+                .map(|pnt| pnt.into_par_iter().map(paint::into_texture).collect())
                 .unwrap_or_default(),
             // Nothing to preview → the stock look, which is what the mesh carries. Not the
             // first `.pnt` in the folder: that's a paint like any other, and picking it here
@@ -2278,7 +2316,7 @@ fn load_gear_model_blocking(
     let mut main_side = GearSide::new(names_of(&main_pnt));
     let mut goggle_side = GearSide::new(names_of(&goggle_pnt));
     let mut out: Vec<paint::PaintTexture> =
-        main_pnt.iter().chain(goggle_pnt.iter()).map(paint::to_texture).collect();
+        main_pnt.into_par_iter().chain(goggle_pnt).map(paint::into_texture).collect();
     // The look the model ships with, before any paint: the textures embedded in the meshes.
     if stock || stock_goggles {
         let mut embedded: Vec<paint::PaintTexture> = Vec::new();
@@ -2929,7 +2967,7 @@ fn loose_paint_named(
     let hit = files.iter().find(|(n, _)| {
         gear_folder_paint_name(n, folder).is_some_and(|p| p.eq_ignore_ascii_case(want))
     })?;
-    Some(paint::decode_any(&hit.1).ok()?.iter().map(paint::to_texture).collect())
+    Some(paint::decode_any(&hit.1).ok()?.into_par_iter().map(paint::into_texture).collect())
 }
 
 /// A paint the game itself ships, from `<folder>/<sub>/<paint>.pnt` — `sub` being `paints`
@@ -2953,7 +2991,7 @@ fn load_pkz_paint(
     read_pkz_entry(pkz, &format!("{folder}/{sub}/{paint}.pnt"))
         .or_else(|| read_pkz_first(pkz, &format!("{folder}/{sub}/"), ".pnt"))
         .and_then(|d| paint::decode_any(&d).ok())
-        .map(|p| p.iter().map(paint::to_texture).collect())
+        .map(|p| p.into_par_iter().map(paint::into_texture).collect())
         .unwrap_or_default()
 }
 
@@ -2993,7 +3031,8 @@ fn load_rider_paint(
     // resolves instead of silently dropping off the preview.
     let profile = rider_profile_or_stock(profile);
     let data = read_rider_paint_file(cfg, base, profile, sub, paint)?;
-    let textures: Vec<_> = paint::decode_any(&data).ok()?.iter().map(paint::to_texture).collect();
+    let textures: Vec<_> =
+        paint::decode_any(&data).ok()?.into_par_iter().map(paint::into_texture).collect();
     if textures.is_empty() {
         return None;
     }
