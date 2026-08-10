@@ -102,9 +102,22 @@ Set-Location "${ROOT}"
 
 Send-Stage -Stage "downloading the game"
 Write-Output "fetching the MX Bikes installer (about 2 GB)"
-# BITS rather than Invoke-WebRequest: IWR buffers the whole response in memory, and two
-# gigabytes of it on a small instance is how this step fails.
-Start-BitsTransfer -Source "${input.gameUrl}" -Destination "${ROOT}\\mxbikes-installer.exe"
+# curl.exe, which ships in System32 on Server 2019 and later.
+#
+# Not Invoke-WebRequest: it buffers the whole response in memory, and two gigabytes of that on
+# a small instance is how this step fails. And not Start-BitsTransfer, which was the first
+# choice for exactly that reason and cannot work here at all -- user data runs as SYSTEM at
+# boot with no interactive session, and BITS refuses with 0x800704DD, "the user has not logged
+# on to the network". curl streams straight to disk, needs no session, and retries by itself.
+$curl = "$env:SystemRoot\\System32\\curl.exe"
+if (-not (Test-Path $curl)) { throw "curl.exe is missing from System32" }
+& $curl -L --fail --silent --show-error --retry 5 --retry-delay 15 --retry-connrefused \`
+  -o "${ROOT}\\mxbikes-installer.exe" "${input.gameUrl}"
+if ($LASTEXITCODE -ne 0) { throw "downloading the installer failed (curl exit $LASTEXITCODE)" }
+$size = (Get-Item "${ROOT}\\mxbikes-installer.exe").Length
+Write-Output "installer downloaded: $size bytes"
+# A truncated download extracts into nonsense; anything this small is not the installer.
+if ($size -lt 1GB) { throw "the installer is only $size bytes, so the download did not finish" }
 
 Send-Stage -Stage "extracting the game"
 Write-Output "extracting the server files"

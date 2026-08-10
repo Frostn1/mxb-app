@@ -14,6 +14,15 @@
 ## Unreleased — a server that says what it's doing
 
 ### Fixed
+- **A provisioned server can actually download the game.** The bootstrap fetched the installer
+  with `Start-BitsTransfer`, which cannot work where it runs: EC2 user data executes as SYSTEM
+  at boot with no interactive session, and BITS refuses with `0x800704DD` -- "the user has not
+  logged on to the network". Every launch died at that step. It now uses `curl.exe` from
+  System32, which streams to disk without a session and retries on its own, and the size is
+  checked afterwards so a truncated download fails loudly rather than extracting into nonsense.
+  Found by launching a real one, and diagnosed in a single attempt because the instance now
+  reports its transcript before shutting down.
+
 - **A server whose name isn't plain Latin-1 can be created.** EC2 user data was encoded with
   `btoa`, which takes a "binary string" of one character per byte and throws on anything above
   U+00FF. Any server named with an emoji or a non-Latin script failed to launch with
