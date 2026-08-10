@@ -5246,22 +5246,74 @@ fn log_level() -> log::LevelFilter {
     }
 }
 
-/// WebKitGTK renders through DMA-BUF by default, which asks the WebKit our AppImage carries
-/// from Ubuntu 22.04 to negotiate buffers with whatever Mesa/EGL the host happens to ship.
-/// On SteamOS that negotiation fails silently: the window appears, the web process never
-/// paints, and the user is left looking at a white rectangle with nothing on stdout to say
-/// why. The shared-memory fallback costs a copy per frame — imperceptible on a UI that is
-/// mostly static lists — and paints everywhere.
+/// What the session looks like, read once so the choice below is a pure function of it —
+/// the only way to test any of this from a machine that isn't the one it's for.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+struct GraphicsEnv {
+    /// Exported by the AppImage runtime. A `.deb`/`.rpm` install links the host's own
+    /// libraries, so the mismatch below can't reach it.
+    appimage: bool,
+    /// The compositor's socket — set on any Wayland session, gamescope included.
+    wayland: bool,
+    /// An X server is reachable, real or XWayland.
+    x_server: bool,
+    /// `MXB_SAFE_GRAPHICS=1`, for a white screen the defaults didn't cure.
+    safe_mode: bool,
+}
+
+impl GraphicsEnv {
+    fn read() -> Self {
+        let set = |key: &str| std::env::var_os(key).is_some_and(|v| !v.is_empty());
+        Self {
+            appimage: set("APPIMAGE"),
+            wayland: set("WAYLAND_DISPLAY"),
+            x_server: set("DISPLAY"),
+            safe_mode: std::env::var("MXB_SAFE_GRAPHICS").unwrap_or_default() == "1",
+        }
+    }
+}
+
+/// The environment WebKitGTK should start under. Two separate faults both end as a white
+/// window, and each has its own knob here.
+fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
+    // DMA-BUF asks the WebKit our AppImage carries from Ubuntu 22.04 to negotiate buffers
+    // with whatever Mesa the host ships; where that fails it fails silently, painting
+    // nothing. The shared-memory fallback costs a copy per frame — imperceptible on a UI
+    // of mostly static lists — and paints everywhere.
+    let mut vars = vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1")];
+
+    // WebKitGTK 2.46+ aborts outright when it can't create an EGL display, and our AppImage
+    // bundles Ubuntu 22.04's libwayland next to the host's Mesa — the pairing the AppImage
+    // excludelist warns about. XWayland never goes down that path. Guarded on there being
+    // an X server to land on: forcing the backend without one trades a white screen for no
+    // window at all.
+    if env.wayland && env.x_server && (env.appimage || env.safe_mode) {
+        vars.push(("GDK_BACKEND", "x11"));
+    }
+
+    // Asked for by hand, once the above wasn't enough: take the GPU out of it entirely.
+    if env.safe_mode {
+        vars.push(("WEBKIT_DISABLE_COMPOSITING_MODE", "1"));
+        vars.push(("LIBGL_ALWAYS_SOFTWARE", "1"));
+    }
+
+    vars
+}
+
+/// Defaults, not overrides — anything already set explicitly wins, so a machine whose driver
+/// stack handles the fast paths can ask for them back with `GDK_BACKEND=wayland`.
 ///
-/// A default, not an override: an explicit `WEBKIT_DISABLE_DMABUF_RENDERER=0` still wins, so
-/// a machine whose driver stack handles the fast path can ask for it back.
-///
-/// Has to run before the first window is built, since WebKit reads this when it spawns the
+/// Has to run before the first window is built, since WebKit reads these when it spawns the
 /// web process, and before any other thread exists — being `main`'s first statement gives
 /// both.
 fn prepare_webview_env() {
-    if cfg!(target_os = "linux") && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    for (key, value) in webview_env_defaults(GraphicsEnv::read()) {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+        }
     }
 }
 
@@ -5344,12 +5396,20 @@ fn main() {
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
             log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
-            // A blank webview leaves nothing else behind to diagnose from, so record which
-            // renderer path this run took. See `prepare_webview_env`.
+            // A blank webview leaves nothing else behind to diagnose from, so record the
+            // session this run started under and every knob `prepare_webview_env` settled on.
             if cfg!(target_os = "linux") {
+                let on = |key: &str| std::env::var(key).unwrap_or_default() == "1";
                 log::info!(
-                    "webview dmabuf renderer disabled: {}",
-                    std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap_or_default() == "1"
+                    "webview env: appimage={} wayland={} x_server={} gdk_backend={} \
+                     dmabuf_disabled={} compositing_disabled={} software_gl={}",
+                    std::env::var_os("APPIMAGE").is_some(),
+                    std::env::var_os("WAYLAND_DISPLAY").is_some(),
+                    std::env::var_os("DISPLAY").is_some(),
+                    std::env::var("GDK_BACKEND").unwrap_or_else(|_| "default".into()),
+                    on("WEBKIT_DISABLE_DMABUF_RENDERER"),
+                    on("WEBKIT_DISABLE_COMPOSITING_MODE"),
+                    on("LIBGL_ALWAYS_SOFTWARE"),
                 );
             }
             if let Ok(dir) = app.path().app_local_data_dir() {
@@ -5669,6 +5729,101 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod webview_env_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn defaults(env: GraphicsEnv) -> HashMap<&'static str, &'static str> {
+        webview_env_defaults(env).into_iter().collect()
+    }
+
+    /// SteamOS, both modes: Desktop is Plasma Wayland and gamescope is a compositor of its
+    /// own, and each runs an XWayland the app can land on instead.
+    const STEAMOS: GraphicsEnv = GraphicsEnv {
+        appimage: true,
+        wayland: true,
+        x_server: true,
+        safe_mode: false,
+    };
+
+    /// The cheap fix for the silent no-paint fault, and it costs a machine nothing that
+    /// works already — so it goes on everywhere rather than being guessed at.
+    #[test]
+    fn the_shared_memory_renderer_is_always_the_default() {
+        for env in [
+            GraphicsEnv::default(),
+            STEAMOS,
+            GraphicsEnv { appimage: false, ..STEAMOS },
+            GraphicsEnv { safe_mode: true, ..STEAMOS },
+        ] {
+            assert_eq!(
+                defaults(env).get("WEBKIT_DISABLE_DMABUF_RENDERER"),
+                Some(&"1"),
+                "{env:?} should have fallen back to shared memory",
+            );
+        }
+    }
+
+    /// The bug this exists for: WebKitGTK aborts on EGL_BAD_PARAMETER and the window never
+    /// paints. XWayland sidesteps the EGL path the bundled libwayland breaks.
+    #[test]
+    fn an_appimage_on_wayland_goes_through_xwayland() {
+        assert_eq!(defaults(STEAMOS).get("GDK_BACKEND"), Some(&"x11"));
+    }
+
+    /// A `.deb`/`.rpm` links the host's libwayland, so it never hits the mismatch — and
+    /// XWayland would cost it sharpness under fractional scaling for nothing.
+    #[test]
+    fn an_installed_build_keeps_native_wayland() {
+        let installed = GraphicsEnv { appimage: false, ..STEAMOS };
+        assert_eq!(defaults(installed).get("GDK_BACKEND"), None);
+    }
+
+    /// Without an X server to fall back to, forcing the backend trades a white screen for
+    /// no window at all.
+    #[test]
+    fn wayland_with_no_x_server_is_left_alone() {
+        let no_xwayland = GraphicsEnv { x_server: false, ..STEAMOS };
+        assert_eq!(defaults(no_xwayland).get("GDK_BACKEND"), None);
+
+        let safe = GraphicsEnv { safe_mode: true, ..no_xwayland };
+        assert_eq!(defaults(safe).get("GDK_BACKEND"), None);
+    }
+
+    /// GTK already picks X11 there; saying so again would only be noise in the log.
+    #[test]
+    fn a_plain_x11_session_needs_no_override() {
+        let x11_only = GraphicsEnv { wayland: false, ..STEAMOS };
+        assert_eq!(defaults(x11_only).get("GDK_BACKEND"), None);
+    }
+
+    /// The escape hatch to hand someone whose screen is still white: every knob at once.
+    #[test]
+    fn safe_mode_takes_the_gpu_out_of_it() {
+        let vars = defaults(GraphicsEnv { safe_mode: true, ..STEAMOS });
+        assert_eq!(vars.get("GDK_BACKEND"), Some(&"x11"));
+        assert_eq!(vars.get("WEBKIT_DISABLE_COMPOSITING_MODE"), Some(&"1"));
+        assert_eq!(vars.get("LIBGL_ALWAYS_SOFTWARE"), Some(&"1"));
+    }
+
+    /// Asking for it by hand reaches an installed build too — the fault it cures needn't be
+    /// the bundled-library one.
+    #[test]
+    fn safe_mode_reaches_an_installed_build() {
+        let installed = GraphicsEnv { appimage: false, safe_mode: true, ..STEAMOS };
+        assert_eq!(defaults(installed).get("GDK_BACKEND"), Some(&"x11"));
+    }
+
+    /// Nothing is imposed on a desktop that was never broken.
+    #[test]
+    fn an_ordinary_session_gets_only_the_renderer_default() {
+        let vars = defaults(GraphicsEnv::default());
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains_key("WEBKIT_DISABLE_DMABUF_RENDERER"));
+    }
 }
 
 #[cfg(test)]

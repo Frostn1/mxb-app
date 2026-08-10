@@ -194,6 +194,22 @@ them up.
   uses the same marker files the app's own library scanner keys on, and stops descending
   once it has found a track.
 
+## 2026-08-10
+
+### Fixed
+- **The Linux app opens to its interface on SteamOS instead of a white screen.** Our AppImage
+  carries Ubuntu 22.04's libwayland next to whatever Mesa the host ships — the pairing the
+  AppImage excludelist warns about — and WebKitGTK 2.46 and later abort outright when that
+  leaves them unable to create an EGL display (`EGL_BAD_PARAMETER`). The window came up and
+  nothing ever painted. AppImage runs on a Wayland session now start through XWayland, which
+  never goes down that path; both SteamOS modes qualify, Desktop and Game. Installed
+  `.deb`/`.rpm` builds link the host's own libraries, so they're left on native Wayland, and
+  an explicit `GDK_BACKEND=wayland` still wins anywhere.
+- **`MXB_SAFE_GRAPHICS=1`, for a white screen that survives all that** — one variable that also
+  turns off GPU compositing and renders in software. The startup log now records the session
+  the app began under and every graphics knob it settled on, so the next report of a blank
+  window arrives with something to read.
+
 ## 2026-08-10 — v0.9.0 — A studio for paints, the Shop installing what you bought, and presets that carry their own mods
 
 ### Added
