@@ -186,8 +186,15 @@ skips the announcement. It's for testing that a build compiles, not for shipping
 
 Features coming next:
 
-- Reading your in-game track list through FrostMod (which already handles the
-  live reload) to one-click-install the tracks you're missing.
-- A 3D preview for GP Bikes. Building a `.pnt` is title-agnostic and already
+- **Servers, with paint sync.** Creating and running a dedicated server from the
+  app, and everyone on it seeing everyone else's paint. Both are built and both
+  need an account on the control plane, which is invite-only for now — opening
+  that up is the remaining work.
+- **A map viewer.** Look at a track before you ride it. The 3D viewer already
+  renders bikes and riders straight from the game's own meshes; a track is the
+  one thing it doesn't read yet.
+- **A 3D preview for GP Bikes.** Building a `.pnt` is title-agnostic and already
   works there; only the preview needs part bindings GP Bikes hasn't got yet, so
   the Studio says so plainly rather than showing an empty stage.
+- **Your in-game track list, through FrostMod** (which already handles the live
+  reload) — to one-click-install the tracks you're missing.
