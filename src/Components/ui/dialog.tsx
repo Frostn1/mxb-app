@@ -36,7 +36,10 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-input bg-[var(--panel,var(--card))] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.5)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        // `grid-cols-[minmax(0,1fr)]`: a grid track sizes to its widest item's min-content,
+        // so anything that can't wrap — a row of nowrap buttons, an unbreakable mod name —
+        // stretched the track past `max-w-md` and took every `w-full` child out with it.
+        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md grid-cols-[minmax(0,1fr)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-input bg-[var(--panel,var(--card))] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.5)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className,
       )}
       style={{ background: "var(--card)" }}
@@ -62,7 +65,9 @@ function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
 function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex justify-end gap-2 pt-1", className)}
+      // Wraps because buttons are nowrap: three of them (Cancel / Config only / Full
+      // import) don't fit `max-w-md` once one is mid-progress.
+      className={cn("flex flex-wrap justify-end gap-2 pt-1", className)}
       {...props}
     />
   );
