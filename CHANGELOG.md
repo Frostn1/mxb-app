@@ -13,6 +13,12 @@
 
 ## Unreleased — a server that says what it's doing
 
+### Fixed
+- **A server whose name isn't plain Latin-1 can be created.** EC2 user data was encoded with
+  `btoa`, which takes a "binary string" of one character per byte and throws on anything above
+  U+00FF. Any server named with an emoji or a non-Latin script failed to launch with
+  `InvalidCharacterError` and nothing else to go on. Found by trying to launch a real one.
+
 ### Added
 - **A booting server now reports its progress, and its failure.** Creating a server launches a
   machine that runs a long script with nobody watching: no console, no key pair, so

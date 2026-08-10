@@ -125,6 +125,23 @@ export async function latestWindowsAmi(env: AwsEnv): Promise<string> {
   return ids[best];
 }
 
+/**
+ * Base64 for EC2 user data.
+ *
+ * Not `btoa`, which throws on any character above U+00FF — it takes a "binary string", one
+ * char per byte, so anything outside Latin-1 is not representable. The script carries prose
+ * comments and, more to the point, the operator's own server name: a name with an emoji or a
+ * CJK character would fail the launch with `InvalidCharacterError` and nothing else to go on.
+ *
+ * Encoding to UTF-8 first and base64-ing the bytes is what `btoa` was always standing in for.
+ */
+function base64Utf8(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
 export interface LaunchSpec {
   /** Display name, used for the Name tag so the console is readable. */
   name: string;
@@ -158,7 +175,7 @@ export async function runInstance(
     "SecurityGroupId.1": spec.securityGroupId,
     InstanceInitiatedShutdownBehavior: "terminate",
     // Base64 is what EC2 expects here; the instance decodes it before running it.
-    UserData: btoa(spec.userData),
+    UserData: base64Utf8(spec.userData),
     "TagSpecification.1.ResourceType": "instance",
     "TagSpecification.1.Tag.1.Key": MANAGED_TAG.key,
     "TagSpecification.1.Tag.1.Value": MANAGED_TAG.value,

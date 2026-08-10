@@ -79,7 +79,7 @@ function Send-Stage {
 # a half-built server that sits idle is the one outcome that quietly costs money.
 #
 # Which is why the transcript is sent *before* shutting down. There is no console on this box
-# and no key pair, so the log cannot be read from outside — and terminating destroys it.
+# and no key pair, so the log cannot be read from outside -- and terminating destroys it.
 # Without this, a bootstrap that failed at minute twelve and one still downloading look
 # identical from the outside: a server that never turns up.
 trap {
@@ -111,14 +111,14 @@ Write-Output "extracting the server files"
 # There is no separate dedicated-server download; the installer carries it and \`-extract\`
 # unpacks it to mxbikes.zip without installing anything.
 #
-# It exits 1 on SUCCESS. Treating that as failure — which every normal convention says to
-# do — leaves the bootstrap dead at the one step that actually worked, so the exit code is
+# It exits 1 on SUCCESS. Treating that as failure -- which every normal convention says to
+# do -- leaves the bootstrap dead at the one step that actually worked, so the exit code is
 # deliberately ignored and the *artifact* is what gets checked instead.
 $proc = Start-Process -FilePath "${ROOT}\\mxbikes-installer.exe" -ArgumentList "-extract" -WorkingDirectory "${ROOT}" -Wait -PassThru -NoNewWindow
 Write-Output "installer exited $($proc.ExitCode) (1 is normal here)"
 
 $zip = Get-ChildItem -Path "${ROOT}" -Filter "mxbikes*.zip" | Select-Object -First 1
-if (-not $zip) { throw "the installer produced no zip — extraction did not work" }
+if (-not $zip) { throw "the installer produced no zip -- extraction did not work" }
 Expand-Archive -Path $zip.FullName -DestinationPath "${ROOT}\\game" -Force
 
 if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) {
@@ -148,7 +148,7 @@ track_layout =
 # The box's own public address, from the instance metadata service. IMDSv2 needs a token
 # first; v1 is disabled on hardened AMIs and the extra call costs nothing. Without this the
 # agent binds a wildcard, works out its address from the primary interface, and prints the
-# *private* IP — an address nobody outside the VPC can use.
+# *private* IP -- an address nobody outside the VPC can use.
 $imdsToken = Invoke-RestMethod -Method PUT -Uri "http://169.254.169.254/latest/api/token" \`
   -Headers @{ "X-aws-ec2-metadata-token-ttl-seconds" = "300" } -TimeoutSec 10
 $publicIp = Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/public-ipv4" \`
@@ -182,7 +182,7 @@ Start-ScheduledTask -TaskName "mxb-agent"
 Send-Stage -Stage "waiting for the agent"
 
 # Wait for the agent to actually answer before saying the server is up. /health is the one
-# route it serves without a token, and it is served before anything else is ready — which is
+# route it serves without a token, and it is served before anything else is ready -- which is
 # all this needs to know: the process is alive and listening.
 $ready = $false
 foreach ($attempt in 1..30) {
@@ -201,7 +201,7 @@ if (-not $ready) { throw "the agent never came up" }
 # boots, long after that row was written, and nothing else is in a position to report it.
 # Authenticated with the agent's own token, which only this instance and that row hold.
 #
-# Retried, because everything else has already succeeded by this point — a transient network
+# Retried, because everything else has already succeeded by this point -- a transient network
 # failure here would otherwise self-destruct a server that is up and running.
 $announced = $false
 foreach ($attempt in 1..5) {
