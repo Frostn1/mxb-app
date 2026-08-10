@@ -3538,7 +3538,24 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
 fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load_or_detect(&app).unwrap_or_default();
     cfg.experimental = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+
+    // Bring paint sync up — or take it down — with the switch that owns it.
+    //
+    // Both of these are otherwise only decided in `.setup`, so turning the feature on left
+    // the profile watcher stopped until the next restart: the app would keep publishing on
+    // an apply or a launch, but a look changed in the game's garage went unnoticed for the
+    // whole session. That is the session a player has just enrolled in, which makes it the
+    // worst one to be quietly missing.
+    let watcher = app.state::<ProfileWatcher>();
+    if cfg.experimental_enabled() {
+        profilewatch::start(&app, &watcher, &cfg.profiles_dir());
+        // And publish once now, since nothing has been watching until this moment.
+        publish_paints_soon(&app, &cfg, None);
+    } else {
+        profilewatch::stop(&watcher);
+    }
+    Ok(())
 }
 
 /// Trade an invite code for a control-plane account, and remember the token.

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { bearer } from "../src/auth";
+import { bootstrapScript } from "../src/bootstrap";
 import {
   isBikeId,
+  isBootstrapStage,
   isGuid,
   isPaintFileName,
   isPaintSize,
@@ -273,5 +275,55 @@ describe("bike ids", () => {
     ]) {
       expect(isBikeId(bad), JSON.stringify(bad)).toBe(false);
     }
+  });
+});
+
+describe("bootstrap stages", () => {
+  it("takes the labels the bootstrap actually sends", () => {
+    for (const ok of [
+      "starting up",
+      "downloading the game",
+      "extracting the game",
+      "installing the agent",
+      "waiting for the agent",
+      "ready",
+      "failed",
+    ]) {
+      expect(isBootstrapStage(ok), ok).toBe(true);
+    }
+  });
+
+  it("refuses anything that isn't a short plain label", () => {
+    // Written by a script on a machine we launched and read straight back into the app's UI,
+    // so it is checked rather than trusted for coming from our own instance.
+    for (const bad of ["", "   ", "a".repeat(65), "stage\nnext", "<b>x</b>", "drop;table", 7, null]) {
+      expect(isBootstrapStage(bad), JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
+describe("bootstrap user data", () => {
+  it("is plain ASCII, so a Windows host cannot misread it", () => {
+    // EC2 hands the decoded script to PowerShell 5.1, which reads a file with no BOM using
+    // the system codepage rather than UTF-8. Comments are harmless; a mangled command is not.
+    const script = bootstrapScript({
+      agentToken: "t", agentUrl: "https://cp/v1/agent.exe", gameUrl: "https://g/i.exe",
+      serverName: "Test", gamePort: 54210, agentPort: 8787,
+      serverId: "abc", controlPlaneUrl: "https://cp",
+    });
+    const offenders = [...new Set([...script].filter((c) => c.charCodeAt(0) > 127))];
+    expect(offenders, `non-ASCII in the script: ${JSON.stringify(offenders)}`).toEqual([]);
+  });
+
+  it("survives a server name outside Latin-1", () => {
+    // The name is the operator's, and it is interpolated into the script. `btoa` threw on
+    // anything above U+00FF, which failed the launch with nothing to go on.
+    expect(() =>
+      bootstrapScript({
+        agentToken: "t", agentUrl: "https://cp/v1/agent.exe", gameUrl: "https://g/i.exe",
+        serverName: "Sean 🏁 サーバー", gamePort: 54210, agentPort: 8787,
+        serverId: "abc", controlPlaneUrl: "https://cp",
+      }),
+    ).not.toThrow();
   });
 });

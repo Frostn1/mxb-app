@@ -1960,6 +1960,15 @@ export const SERVER_REGIONS = [
   "ap-southeast-2",
 ] as const;
 
+/**
+ * What the region picker starts on.
+ *
+ * Where somebody else's hardware physically sits is unknowable from here, so this is a
+ * guess either way — but the control plane provisions in `us-west-2` and nothing else, so
+ * that is the better guess than whichever region happened to be first in the list.
+ */
+export const DEFAULT_SERVER_REGION = "us-west-2";
+
 /** An EC2 instance the control plane launched, as AWS reports it. */
 export interface FleetInstance {
   instanceId: string;
@@ -2003,6 +2012,16 @@ export interface CloudServer {
   /** `pending` | `running` | `stopping` | `stopped` | `gone` | `self-hosted`. */
   state: string;
   publicIp: string | null;
+  /**
+   * What the box last reported doing — `downloading the game`, `ready`, `failed`.
+   *
+   * The only window into a machine with no console and no key pair. A bootstrap that failed
+   * and one still downloading are otherwise indistinguishable from here.
+   */
+  bootstrapStage: string | null;
+  bootstrapAt: number | null;
+  /** The tail of the transcript, present only when the bootstrap gave up. */
+  bootstrapLog: string | null;
 }
 
 /** The servers the control plane runs for this account, and what it takes to drive them. */

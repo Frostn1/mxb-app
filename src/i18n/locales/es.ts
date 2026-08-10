@@ -777,6 +777,8 @@ export const es: Translation = {
   "sync.keptYours_other": "{{count}} pinturas se dejaron intactas",
   "sync.keptYoursWhy": "Otro piloto usa el mismo nombre de archivo para una pintura distinta. La tuya se conservó — la app nunca sobrescribe una librea que no instaló. Verás a ese piloto con tu versión.",
   "servers.booting": "Arrancando…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "Este servidor no pudo terminar de configurarse y se apagó. Esto es lo que informó:",
   "servers.bootingWhy": "Instalando el juego en la máquina nueva. Tarda unos minutos — descarga el instalador completo.",
   "servers.shutsDown": "Se apaga",
   "servers.inUse": "En uso",

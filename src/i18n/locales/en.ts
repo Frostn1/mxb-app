@@ -236,7 +236,7 @@ export const en = {
   "tour.frostmod.body":
     "This shows FrostMod's status. It live-reloads MX Bikes after an install, so new content shows up without restarting the game.",
   "tour.servers.title": "Look right online",
-  "tour.servers.body": "MX Bikes never sends paints between players, so everyone shows up in default gear unless you already hold their exact file. Enrol here and the app publishes your look and fetches everyone else's — and you can start a dedicated server from the same page.",
+  "tour.servers.body": "MX Bikes never sends paints between players, so everyone shows up in default gear unless you already hold their exact file. Enroll here and the app publishes your look and fetches everyone else's — and you can start a dedicated server from the same page.",
   "tour.settings.title": "Settings",
   "tour.settings.body":
     "Set your game folder, background behaviour and FrostMod options here. You can replay this tour from here too.",
@@ -758,6 +758,8 @@ export const en = {
   "sync.keptYours_other": "{{count}} paints were left alone",
   "sync.keptYoursWhy": "Another rider uses the same file name for a different paint. Yours was kept — the app never overwrites a livery it didn't install. You'll see that rider in your version of it.",
   "servers.booting": "Starting up…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "This server couldn't finish setting itself up, so it shut down. Here's what it reported:",
   "servers.bootingWhy": "Installing the game on the new machine. This takes a few minutes — it downloads the full installer.",
   "servers.shutsDown": "Shuts down",
   "servers.inUse": "In use",

@@ -242,3 +242,20 @@ export function isBikeId(value: unknown): value is string {
   // players' apps read.
   return !/[/\\]/.test(id);
 }
+
+/** How much of a failed bootstrap's transcript is worth keeping. */
+export const MAX_BOOTSTRAP_LOG = 16 * 1024;
+
+/**
+ * A bootstrap stage name.
+ *
+ * Written by a script on a machine we launched, and read back into the app's UI, so it is
+ * held to being a short plain label rather than trusted because of where it came from.
+ */
+export function isBootstrapStage(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const stage = value.trim();
+  if (stage.length === 0 || stage.length > 64) return false;
+  return /^[a-z0-9 :\-]+$/i.test(stage);
+}
+

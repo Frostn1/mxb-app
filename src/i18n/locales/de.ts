@@ -784,6 +784,8 @@ export const de: Translation = {
   "sync.keptYours_other": "{{count}} Lackierungen wurden nicht angerührt",
   "sync.keptYoursWhy": "Ein anderer Fahrer nutzt denselben Dateinamen für eine andere Lackierung. Deine bleibt — die App überschreibt nie ein Design, das sie nicht selbst installiert hat. Du siehst diesen Fahrer in deiner Version.",
   "servers.booting": "Startet…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "Dieser Server konnte seine Einrichtung nicht abschließen und hat sich abgeschaltet. Das hat er gemeldet:",
   "servers.bootingWhy": "Das Spiel wird auf der neuen Maschine installiert. Das dauert ein paar Minuten — der komplette Installer wird geladen.",
   "servers.shutsDown": "Schaltet ab",
   "servers.inUse": "In Benutzung",
