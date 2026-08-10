@@ -1259,25 +1259,25 @@ export const en = {
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Post-processing presets — how {{game}} looks on screen.",
 
-  // ── Supporters (Patreon) ───────────────────────────────────────────────────
+  // ── Supporters (Buy Me a Coffee) ───────────────────────────────────────────
   "settings.supporters": "Supporters",
-  "settings.supportersDesc": "The people funding MXB App on Patreon.",
+  "settings.supportersDesc": "The people keeping MXB App going on Buy Me a Coffee.",
   "supporters.intro":
-    "MXB App is free, and stays that way. Patreon is what pays for the time behind it — the people below are why there's a new build to install.",
+    "MXB App is free, and stays that way. The coffees below are what pay for the time behind it — the people who bought them are why there's a new build to install.",
   "supporters.count_one": "{{count}} supporter",
   "supporters.count_other": "{{count}} supporters",
   "supporters.untiered": "Supporters",
   "supporters.since": "since {{date}}",
   "supporters.loading": "Fetching the list…",
   "supporters.refresh": "Refresh",
-  "supporters.become": "Support on Patreon",
+  "supporters.become": "Buy me a coffee",
   "supporters.empty": "Nobody's listed here yet",
   "supporters.emptyDesc":
-    "The list updates on its own — back the app and your name shows up here, no new version needed.",
+    "The list updates on its own — buy a coffee and your name shows up here, no new version needed.",
   "supporters.offline":
     "Couldn't reach the list just now — this is the last one we saw.",
   "supporters.optOut":
-    "Names are shown with permission. Ask on Discord or Patreon and yours comes straight off.",
+    "Names are shown with permission. Ask on Discord or Buy Me a Coffee and yours comes straight off.",
 
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ReShade presets",

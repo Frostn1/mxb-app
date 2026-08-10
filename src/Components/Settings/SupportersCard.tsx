@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, Heart, RefreshCw } from "lucide-react";
+import { Coffee, ExternalLink, RefreshCw } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { useI18n } from "../../i18n/context";
 import { getLocale } from "../../i18n/core";
@@ -7,7 +7,7 @@ import { Button } from "@/Components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   BUNDLED_SUPPORTERS,
-  PATREON_URL,
+  SUPPORT_URL,
   fetchSupporters,
   groupByTier,
   readCachedManifest,
@@ -80,8 +80,8 @@ export default function SupportersCard() {
   const groups = groupByTier(manifest);
   const count = manifest.supporters.length;
   // A URL the manifest carries wins, so a bad default can be corrected without a
-  // release — see the TODO on `PATREON_URL`.
-  const patreonUrl = manifest.patreonUrl || PATREON_URL;
+  // release — see the TODO on `SUPPORT_URL`.
+  const supportUrl = manifest.supportUrl || SUPPORT_URL;
 
   return (
     <div className="flex flex-col gap-3">
@@ -124,7 +124,7 @@ export default function SupportersCard() {
                     key={`${group.tier ?? ""}:${person.name}`}
                     className="flex items-center gap-1.5 rounded-full border border-input bg-foreground/[0.03] px-2.5 py-1 text-[12px] text-foreground/85"
                   >
-                    <Heart className="size-3 flex-none text-primary" />
+                    <Coffee className="size-3 flex-none text-primary" />
                     {person.name}
                     {person.since && sinceLabel(person.since) && (
                       <span className="text-[10.5px] text-faint">
@@ -159,8 +159,8 @@ export default function SupportersCard() {
       )}
 
       <div className="flex gap-2 pt-0.5">
-        <Button size="sm" onClick={() => void openUrl(patreonUrl)}>
-          <Heart className="size-3.5" /> {t("supporters.become")}
+        <Button size="sm" onClick={() => void openUrl(supportUrl)}>
+          <Coffee className="size-3.5" /> {t("supporters.become")}
           <ExternalLink className="size-3" />
         </Button>
       </div>

@@ -1161,9 +1161,9 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             />
           </Section>
 
-          {/* supporters — who's paying for the app on Patreon. Above About rather than
-              inside it: a thank-you buried under the version number and the update
-              button is one nobody reads. */}
+          {/* supporters — who's buying the coffees that pay for the app. Above About
+              rather than inside it: a thank-you buried under the version number and the
+              update button is one nobody reads. */}
           <Section
             title={t("settings.supporters")}
             desc={t("settings.supportersDesc")}

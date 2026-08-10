@@ -1,5 +1,5 @@
 /**
- * Who's funding MXB App on Patreon, and where that list comes from.
+ * Who's funding MXB App on Buy Me a Coffee, and where that list comes from.
  *
  * The list changes between releases, and a credits page that only refreshes when
  * someone ships a build would thank a new supporter weeks late — so the names live in
@@ -15,33 +15,34 @@
  */
 
 /**
- * The Patreon page every button here opens.
+ * The Buy Me a Coffee page every button here opens.
  *
  * TODO(maintainer): confirm the handle before release — a wrong URL is a dead button in
- * a shipped build. `patreonUrl` in the manifest overrides it without a release, so a
+ * a shipped build. `supportUrl` in the manifest overrides it without a release, so a
  * mistake here is fixable, but only for someone who can reach the network.
  */
-export const PATREON_URL = "https://www.patreon.com/mxbapp";
+export const SUPPORT_URL = "https://buymeacoffee.com/mxbapp";
 
 /** Read from `main`, not from a tag: the list has to move faster than releases do. */
 export const SUPPORTERS_URL =
   "https://raw.githubusercontent.com/Frostn1/mxb-app/main/supporters.json";
 
 export interface Supporter {
-  /** Display name, as they want it shown — not their Patreon account name. */
+  /** Display name, as they want it shown — not their Buy Me a Coffee account name. */
   name: string;
-  /** Patreon tier, verbatim. Tier names are the creator's own words, so they're
-   *  never translated; a tier nobody is in simply doesn't render. */
+  /** Membership level, verbatim. Level names are the creator's own words, so they're
+   *  never translated; a level nobody is in simply doesn't render. Someone who bought a
+   *  one-off coffee has none, and lands in the ungrouped list at the bottom. */
   tier?: string;
   /** ISO date they started supporting, shown as "since Jul 2026" when present. */
   since?: string;
 }
 
 export interface SupportersManifest {
-  /** Overrides {@link PATREON_URL} when set — see the TODO above. */
-  patreonUrl?: string;
-  /** Tier names, best first. Anything not listed here still renders; it just sorts
-   *  after the named ones. */
+  /** Overrides {@link SUPPORT_URL} when set — see the TODO above. */
+  supportUrl?: string;
+  /** Membership levels, best first. Anything not listed here still renders; it just
+   *  sorts after the named ones. */
   tiers: string[];
   supporters: Supporter[];
 }
@@ -103,7 +104,7 @@ export function parseManifest(raw: unknown): SupportersManifest | null {
     : [];
 
   return {
-    patreonUrl: trimmed(obj.patreonUrl, 200),
+    supportUrl: trimmed(obj.supportUrl, 200),
     tiers,
     supporters,
   };
@@ -153,11 +154,12 @@ export interface TierGroup {
 }
 
 /**
- * Bucket supporters by tier, in the manifest's order.
+ * Bucket supporters by membership level, in the manifest's order.
  *
- * A tier the manifest doesn't name still shows up — sorted after the named ones, so
- * renaming a tier on Patreon degrades to "listed last" rather than "silently dropped".
- * Untiered names always come last, under a generic heading.
+ * A level the manifest doesn't name still shows up — sorted after the named ones, so
+ * renaming one on Buy Me a Coffee degrades to "listed last" rather than "silently
+ * dropped". People with no level — a one-off coffee — always come last, under a
+ * generic heading.
  */
 export function groupByTier(manifest: SupportersManifest): TierGroup[] {
   const buckets = new Map<string, Supporter[]>();
