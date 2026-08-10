@@ -1084,6 +1084,10 @@ export const ptBR: Translation = {
     "Um gradiente que leva uma cor até outra. Arraste para dizer onde acontece a transição: antes fica a primeira cor, depois a segunda. Linear ou radial, e pode desaparecer no nada em vez de terminar numa cor.",
   "showcase.v091.paintLayer":
     "O que você pinta vai numa camada própria, então tem opacidade, mesclagem e ordem como todo o resto — e o template embaixo nunca é tocado. Esconda a camada e o template limpo volta. ⌘Z desfaz traços.",
+  "showcase.v091.ghost":
+    "Desenhe sobre um fantasma da moto. Uma folha pode mostrar apagada por baixo a pintura da qual você partiu, para decalcar — tirada da folha, então não é salva na sua — e um mapa UV das carenagens do modelo, cada peça com sua cor, para ver em qual painel você está pintando.",
+  "showcase.v091.resize":
+    "As camadas são redimensionadas arrastando os cantos, não só pelo controle deslizante.",
   "showcase.v091.macos":
     "Jogar e Entrar no servidor funcionam no macOS, pela garrafa CrossOver, Whisky ou Wine que contém o jogo — e o app acha sozinho uma instalação engarrafada em vez de pedir o caminho.",
   "showcase.v091.steamos":

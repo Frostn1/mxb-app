@@ -1,34 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Added
-
-- **The Designer can show you what you're drawing on.** A livery is drawn flat and worn curved,
-  and the flat version gives away almost nothing about which rectangle of it ends up on a
-  shroud — so a sheet has a **reference underlay** now, and it answers that two ways. **Template**
-  lifts the paint you started from *out* of the sheet and shows it faintly underneath to trace
-  over; it stops being part of what you save, which is the difference between drawing *from* a
-  paint and drawing *over* one. **UV map** reads the model already standing beside the canvas
-  and draws its bodywork where it actually lands on the sheet, each piece in its own colour —
-  the thing an image editor cannot tell you. Neither is ever composited, staged or saved: they
-  live outside the sheet entirely, so a guide cannot end up shipped inside somebody's livery.
-  Both sit **underneath** what you're drawing — a ghost, not an overlay — so they show through
-  wherever the sheet is still transparent, which is exactly where you need to know which piece
-  of bodywork you're about to paint on. The two are meant to be used together: lifting the
-  template out is what leaves the sheet transparent enough to see the islands through it, and
-  the panel says so when a still-opaque template is burying the reference.
-- **Layers resize by their corners.** The selected layer's box has grabbable handles, dragged
-  from the centre the same way the inspector's slider scales from it, so the two controls agree
-  about where a logo grows from. The slider stays for typing an exact number; the corners are
-  for the other 90% of the time. Handles are still drawn on a layer too small to grab one —
-  the box is how you see what's selected — but the grab itself steps aside there rather than
-  leaving a tiny layer resizable and no longer draggable.
-- **A sheet name the model never asks for now says so.** Turning on the UV map for a sheet
-  nothing on the mesh binds reports it in the panel instead of drawing an empty overlay, which
-  had been indistinguishable from one still loading. It's the same mistake that makes a paint
-  load and show nothing, caught before the save rather than after it.
-
 ## Unannounced — a debugger can't ride along
 
 Left out of the release notes on purpose: a hardening measure advertised is a hardening
@@ -252,6 +223,10 @@ Worth knowing for this beta: the Mac launch has been tested against a stand-in f
 against a real bottle, so if Play does something odd on your machine the app log names the
 exact command it ran — please send it.
 
+Also worth knowing: the Designer's new UV map has been checked against synthetic meshes, not
+against a real bike's geometry. If the islands land somewhere that doesn't match the bodywork
+on the model beside them, that's the thing to report.
+
 ### Added
 - **You can paint on a template.** The Designer could stack images and text on the sheets of an
   unpacked paint, but it could not put down a single pixel — a fade across a shroud or a stripe
@@ -272,6 +247,30 @@ exact command it ran — please send it.
   edits are not part of it.
 - **Tools have keys.** V, B, E, G, F, R, O and L. Hold Shift for straight lines, squares and
   circles; right-drag still pans, which matters more with a brush than with a logo.
+- **The Designer can show you what you're drawing on.** A livery is drawn flat and worn curved,
+  and the flat version gives away almost nothing about which rectangle of it ends up on a
+  shroud — so a sheet has a **reference underlay** now, and it answers that two ways. **Template**
+  lifts the paint you started from *out* of the sheet and shows it faintly underneath to trace
+  over; it stops being part of what you save, which is the difference between drawing *from* a
+  paint and drawing *over* one. **UV map** reads the model already standing beside the canvas
+  and draws its bodywork where it actually lands on the sheet, each piece in its own colour —
+  the thing an image editor cannot tell you. Neither is ever composited, staged or saved: they
+  live outside the sheet entirely, so a guide cannot end up shipped inside somebody's livery.
+  Both sit **underneath** what you're drawing — a ghost, not an overlay — so they show through
+  wherever the sheet is still transparent, which is exactly where you need to know which piece
+  of bodywork you're about to paint on. The two are meant to be used together: lifting the
+  template out is what leaves the sheet transparent enough to see the islands through it, and
+  the panel says so when a still-opaque template is burying the reference.
+- **Layers resize by their corners.** The selected layer's box has grabbable handles, dragged
+  from the centre the same way the inspector's slider scales from it, so the two controls agree
+  about where a logo grows from. The slider stays for typing an exact number; the corners are
+  for the other 90% of the time. Handles are still drawn on a layer too small to grab one —
+  the box is how you see what's selected — but the grab itself steps aside there rather than
+  leaving a tiny layer resizable and no longer draggable.
+- **A sheet name the model never asks for now says so.** Turning on the UV map for a sheet
+  nothing on the mesh binds reports it in the panel instead of drawing an empty overlay, which
+  had been indistinguishable from one still loading. It's the same mistake that makes a paint
+  load and show nothing, caught before the save rather than after it.
 - **Play and Join Server work on macOS.** MX Bikes is a Windows game, so on a Mac it runs
   inside a CrossOver, Whisky or Wine bottle — and the app, which had a launcher for Windows
   and one for Linux, simply refused: *"Launching MX Bikes is supported on Windows and Linux
