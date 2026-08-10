@@ -1088,6 +1088,17 @@ export const fr: Translation = {
   "showcase.whileGameRunning": "pendant que MX Bikes tourne",
   "showcase.releaseNotes": "Lire les notes de version",
   "showcase.gotIt": "Compris",
+  "showcase.v091.hero.title": "Peins directement sur le gabarit",
+  "showcase.v091.hero.body":
+    "Le Designer savait placer images et textes sur les planches d'une déco, mais il ne laissait poser aucun pixel à la main — un dégradé sur un ouïe voulait dire partir dans un éditeur d'images et revenir. Il a maintenant sa boîte à outils : pinceau doux avec taille, bord et intensité, gomme, dégradé, remplissage, rectangle, ellipse et ligne. Tout arrive sur la planche et sur le modèle 3D en même temps, pendant que tu fais glisser.",
+  "showcase.v091.gradient":
+    "Un dégradé qui emmène une couleur vers une autre. Fais glisser pour dire où se fait la transition : avant c'est la première couleur, après la seconde. Linéaire ou radial, et il peut se fondre vers rien plutôt que vers une couleur.",
+  "showcase.v091.paintLayer":
+    "La peinture va sur son propre calque, donc elle a opacité, fusion et empilement comme le reste — et le gabarit en dessous n'est jamais touché. Masque le calque et tu retrouves le gabarit intact. ⌘Z annule les tracés.",
+  "showcase.v091.macos":
+    "Jouer et Rejoindre un serveur fonctionnent sur macOS, via la bouteille CrossOver, Whisky ou Wine qui contient le jeu — et l'app trouve seule une installation en bouteille au lieu de te demander le chemin.",
+  "showcase.v091.steamos":
+    "Sur SteamOS, l'app Linux s'ouvre sur son interface au lieu d'un écran blanc.",
   "showcase.v090.hero.title": "Transforme tes images en une déco que le jeu charge",
   "showcase.v090.hero.body":
     "Un nouvel onglet Décos fabrique des décos à partir de simples fichiers image — TGA, PNG, JPG — et les installe là où le jeu les cherche : une livrée de moto, une déco de casque ou de masque, la tenue ou les gants de ton pilote. Décompresse une déco existante pour obtenir un gabarit vraiment adapté au modèle, retouche-la dans n'importe quel éditeur et remets-la telle quelle. Le studio vérifie tes noms de fichiers face à ceux que le maillage utilise avant l'enregistrement, puis affiche le résultat sur le vrai modèle.",

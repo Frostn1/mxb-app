@@ -194,7 +194,14 @@ them up.
   uses the same marker files the app's own library scanner keys on, and stops descending
   once it has found a track.
 
-## 2026-08-10 — the Designer paints
+## 2026-08-10 — v0.9.1 — The Designer paints, Play works on a Mac, and SteamOS stops opening to a white screen
+
+On top of v0.9.0 — everything that release added is still the news, and its notes are
+repeated below.
+
+Worth knowing for this beta: the Mac launch has been tested against a stand-in for Wine, not
+against a real bottle, so if Play does something odd on your machine the app log names the
+exact command it ran — please send it.
 
 ### Added
 - **You can paint on a template.** The Designer could stack images and text on the sheets of an
@@ -216,17 +223,6 @@ them up.
   edits are not part of it.
 - **Tools have keys.** V, B, E, G, F, R, O and L. Hold Shift for straight lines, squares and
   circles; right-drag still pans, which matters more with a brush than with a logo.
-
-## 2026-08-10 — v0.9.1 — Play works on a Mac, and SteamOS stops opening to a white screen
-
-A patch on top of v0.9.0 — everything that release added is still the news, and its notes
-are repeated below.
-
-Worth knowing for this beta: the Mac launch has been tested against a stand-in for Wine, not
-against a real bottle, so if Play does something odd on your machine the app log names the
-exact command it ran — please send it.
-
-### Added
 - **Play and Join Server work on macOS.** MX Bikes is a Windows game, so on a Mac it runs
   inside a CrossOver, Whisky or Wine bottle — and the app, which had a launcher for Windows
   and one for Linux, simply refused: *"Launching MX Bikes is supported on Windows and Linux

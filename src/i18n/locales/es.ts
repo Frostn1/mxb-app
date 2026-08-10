@@ -1085,6 +1085,17 @@ export const es: Translation = {
   "showcase.whileGameRunning": "mientras MX Bikes está abierto",
   "showcase.releaseNotes": "Leer las notas de la versión",
   "showcase.gotIt": "Entendido",
+  "showcase.v091.hero.title": "Pinta directamente sobre la plantilla",
+  "showcase.v091.hero.body":
+    "El Designer sabía colocar imágenes y texto sobre las hojas de una pintura, pero no dejaba poner ni un píxel a mano — un degradado en un lateral obligaba a salir a un editor de imágenes y volver. Ahora tiene su caja de herramientas: pincel suave con tamaño, borde e intensidad, borrador, degradado, relleno, y rectángulo, elipse y línea. Todo aparece en la hoja y en el modelo 3D a la vez, mientras arrastras.",
+  "showcase.v091.gradient":
+    "Un degradado que lleva un color hasta otro. Arrastra para decir dónde ocurre la transición: antes está el primer color, después el segundo. Lineal o radial, y puede desvanecerse hasta nada en lugar de hasta un color.",
+  "showcase.v091.paintLayer":
+    "Lo que pintas va en su propia capa, así que tiene opacidad, fusión y orden como todo lo demás — y la plantilla de debajo no se toca nunca. Oculta la capa y tienes la plantilla limpia otra vez. ⌘Z deshace trazos.",
+  "showcase.v091.macos":
+    "Jugar y Unirse a un servidor funcionan en macOS, a través de la botella CrossOver, Whisky o Wine que contenga el juego — y la app encuentra sola una instalación embotellada en vez de pedirte la ruta.",
+  "showcase.v091.steamos":
+    "En SteamOS la app de Linux abre en su interfaz en lugar de una pantalla en blanco.",
   "showcase.v090.hero.title": "Convierte tus imágenes en un diseño que el juego carga",
   "showcase.v090.hero.body":
     "Una nueva pestaña Diseños crea diseños a partir de imágenes corrientes — TGA, PNG, JPG — y los instala donde el juego los busca: una decoración de moto, un diseño de casco o de gafas, el kit o los guantes de tu piloto. Descomprime un diseño que ya tengas para conseguir una plantilla que encaje de verdad con el modelo, edítala en cualquier editor y devuélvela tal cual. El estudio comprueba tus nombres de archivo frente a los que usa la malla antes de guardar, y luego muestra el resultado sobre el modelo real.",

@@ -1097,6 +1097,17 @@ export const de: Translation = {
   "showcase.whileGameRunning": "während MX Bikes läuft",
   "showcase.releaseNotes": "Release Notes lesen",
   "showcase.gotIt": "Alles klar",
+  "showcase.v091.hero.title": "Male direkt auf die Vorlage",
+  "showcase.v091.hero.body":
+    "Der Designer konnte Bilder und Text auf den Bahnen eines Designs platzieren, aber keinen einzigen Pixel von Hand setzen — ein Verlauf über eine Spoiler-Flanke hieß: raus in einen Bildeditor und wieder zurück. Jetzt gibt es einen Werkzeugkasten: weicher Pinsel mit Größe, Kante und Stärke, Radierer, Verlauf, Füllung sowie Rechteck, Ellipse und Linie. Alles landet gleichzeitig auf der Bahn und am 3D-Modell, während du ziehst.",
+  "showcase.v091.gradient":
+    "Ein Verlauf, der eine Farbe in eine andere trägt. Zieh, um zu sagen, wo der Übergang liegt: davor die erste Farbe, dahinter die zweite. Linear oder radial, und er kann ins Nichts ausblenden statt in eine Farbe.",
+  "showcase.v091.paintLayer":
+    "Gemaltes liegt auf einer eigenen Ebene und hat damit Deckkraft, Mischmodus und Reihenfolge wie alles andere — die Vorlage darunter wird nie angefasst. Blende die Ebene aus und du hast die saubere Vorlage zurück. ⌘Z nimmt Striche zurück.",
+  "showcase.v091.macos":
+    "Spielen und Server beitreten funktionieren unter macOS, über die CrossOver-, Whisky- oder Wine-Bottle, in der das Spiel liegt — und die App findet eine Bottle-Installation von selbst, statt nach dem Pfad zu fragen.",
+  "showcase.v091.steamos":
+    "Unter SteamOS öffnet die Linux-App ihre Oberfläche statt eines weißen Bildschirms.",
   "showcase.v090.hero.title": "Mach aus deinen Grafiken ein Design, das das Spiel lädt",
   "showcase.v090.hero.body":
     "Ein neuer Designs-Tab baut Designs aus ganz normalen Bilddateien — TGA, PNG, JPG — und installiert sie dort, wo das Spiel sucht: eine Bike-Lackierung, ein Helm- oder Brillen-Design, Kit oder Handschuhe deines Fahrers. Entpack ein vorhandenes Design, um eine Vorlage zu bekommen, die wirklich zum Modell passt, bearbeite sie in jedem Editor und leg sie direkt wieder ab. Das Studio prüft deine Dateinamen gegen die, die das Mesh bindet, bevor du speicherst, und zeigt das Ergebnis danach am echten Modell.",
