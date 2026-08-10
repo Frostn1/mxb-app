@@ -1059,6 +1059,8 @@ export const en = {
     "A new Paints tab builds paints out of ordinary image sheets — TGA, PNG, JPG — and installs them where the game looks: a bike livery, a helmet or goggle paint, a rider's kit or gloves. Unpack a paint you already have to get a template that actually fits the model, edit it in any editor, and put it straight back. The studio checks your sheet names against the ones the mesh binds before you save, then previews the result on the real model.",
   "showcase.v090.reshade":
     "Browse, install and switch ReShade presets from the app — with an Off entry to compare against the stock look, and a warning when a preset needs effects you don't have.",
+  "showcase.v090.bundles":
+    "Share a preset as a full bundle and the code carries the mods themselves — livery, helmet and goggles, kit, gloves, boots, tyres. Full import puts every file where the game reads it, so someone with an empty mods folder still ends up wearing exactly what you built.",
   "showcase.v090.purchases":
     "My purchases signs in to your mxbikes-shop.com account and installs what you've already paid for, through the same review sheet a drag-and-drop uses.",
   "showcase.v090.ridingStyles":

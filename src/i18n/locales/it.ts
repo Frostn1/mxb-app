@@ -1082,6 +1082,8 @@ export const it: Translation = {
     "Una nuova scheda Livree costruisce le livree da normali file immagine — TGA, PNG, JPG — e le installa dove il gioco le cerca: la livrea di una moto, la grafica di un casco o di una maschera, il completo o i guanti del tuo pilota. Estrai una livrea che hai già per ottenere un template che calza davvero sul modello, modificalo in qualsiasi editor e rimettilo dentro così com'è. Lo studio controlla i nomi dei tuoi file contro quelli che la mesh usa prima del salvataggio, poi mostra il risultato sul modello vero.",
   "showcase.v090.reshade":
     "Sfoglia, installa e cambia i preset ReShade dall'app — con una voce Nessuno per confrontare con l'aspetto originale, e un avviso quando a un preset mancano degli effetti.",
+  "showcase.v090.bundles":
+    "Condividi un preset come pacchetto completo: il codice porta con sé le mod stesse — livrea, casco e maschera, completo, guanti, stivali, gomme. Importazione completa mette ogni file dove il gioco lo legge, così anche chi ha la cartella mod vuota finisce per indossare esattamente quello che hai creato.",
   "showcase.v090.purchases":
     "I miei acquisti accede al tuo account mxbikes-shop.com e installa ciò che hai già pagato, con lo stesso riepilogo usato dal trascinamento.",
   "showcase.v090.ridingStyles":

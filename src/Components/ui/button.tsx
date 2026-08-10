@@ -3,6 +3,11 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
+/// A ghost that keeps its background at rest, for an action that would otherwise read as
+/// decoration among neighbouring icons. Exported for buttons built outside `Button`.
+export const CHIP =
+  "bg-foreground/[0.10] text-foreground hover:bg-foreground/[0.18]";
+
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-default select-none",
   {
@@ -13,6 +18,7 @@ const buttonVariants = cva(
         outline:
           "border border-input text-foreground hover:bg-foreground/[0.06]",
         ghost: "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+        chip: CHIP,
         destructive:
           "bg-destructive text-destructive-foreground hover:brightness-105",
         link: "text-primary underline-offset-4 hover:underline",

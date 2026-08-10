@@ -51,6 +51,8 @@ reqwest = { version = "0.12", default-features = false, features = [
     "cookies",
     "gzip",
     "brotli",
+    # Preset bundles upload as a multipart form.
+    "multipart",
 ] }
 # `sync` for the mutex that stops two simultaneous 403s opening two clearance windows.
 tokio = { version = "1", features = ["time", "sync", "rt"] }
