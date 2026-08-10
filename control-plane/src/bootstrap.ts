@@ -174,16 +174,25 @@ $publicIp = Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/publ
 if (-not $publicIp) { throw "this instance has no public address" }
 Write-Output "public address is $publicIp"
 
-@"
-{
-  "token": "${input.agentToken}",
-  "listen": "0.0.0.0:${input.agentPort}",
-  "public_url": "http://$publicIp:${input.agentPort}",
-  "game_dir": "${ROOT}\\\\game",
-  "ini": "dedicated.ini",
-  "game_port": ${input.gamePort}
-}
-"@ | Set-Content -Path "${ROOT}\\agent.json" -Encoding ASCII
+# Built with ConvertTo-Json rather than written out by hand.
+#
+# It was hand-written, and it was never valid: the path interpolated as a single-backslash
+# "C:\\mxb", so the file said "game_dir": "C:\\mxb\\\\game" and \\m is not a JSON escape. The
+# agent refused to parse its own config on every server ever provisioned. Letting PowerShell
+# do the escaping removes the entire class of mistake, and it is the same thing Send-Stage
+# already relies on.
+@{
+  token = "${input.agentToken}"
+  listen = "0.0.0.0:${input.agentPort}"
+  public_url = "http://$publicIp:${input.agentPort}"
+  game_dir = "${ROOT}\\game"
+  ini = "dedicated.ini"
+  game_port = ${input.gamePort}
+} | ConvertTo-Json | Set-Content -Path "${ROOT}\\agent.json" -Encoding ASCII
+
+# Prove it parses here, rather than discovering it does not when the agent exits.
+try { Get-Content -Path "${ROOT}\\agent.json" -Raw | ConvertFrom-Json | Out-Null }
+catch { throw "the agent config we just wrote is not valid JSON: $_" }
 
 # The security group already gates what reaches the box; these rules are what let traffic
 # past Windows' own firewall once it is there.

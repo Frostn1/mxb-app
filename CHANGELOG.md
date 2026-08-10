@@ -14,6 +14,13 @@
 ## Unreleased — a server that says what it's doing
 
 ### Fixed
+- **A provisioned server's agent can read its own config.** `agent.json` was written by hand as
+  JSON inside a PowerShell here-string, and the install path interpolated with single
+  backslashes -- so the file said `"game_dir": "C:\mxb\\game"`, and `\m` is not a valid JSON
+  escape. The agent refused to parse it and exited immediately on every server ever
+  provisioned. It is now built with `ConvertTo-Json`, which escapes properly, and the file is
+  parsed once on the box before the agent is asked to.
+
 - **A provisioned server can actually download the game.** The bootstrap fetched the installer
   with `Start-BitsTransfer`, which cannot work where it runs: EC2 user data executes as SYSTEM
   at boot with no interactive session, and BITS refuses with `0x800704DD` -- "the user has not
