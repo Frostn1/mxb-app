@@ -711,7 +711,7 @@ export interface Loadout {
 export interface BundleRef {
   /** Direct-download URL of the uploaded `.zip`. */
   url: string;
-  /** Host label (e.g. `pixeldrain`), shown in the import dialog. */
+  /** Host label (e.g. `catbox`), shown in the import dialog. */
   host: string;
   /** Bundle size in bytes. */
   size: number;

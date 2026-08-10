@@ -1,6 +1,25 @@
 # Changelog
 
-## 2026-08-09 — v0.9.0 — Servers you can create, paints everyone can see, and a paint studio
+## 2026-08-10
+
+### Fixed
+- **Sharing a preset as a full bundle works again.** Pixeldrain closed anonymous uploads, so
+  every "Create full bundle" packed its zip and then died on the upload with no code to show
+  for it. Bundles now go to catbox, which still takes them without an account and hands back
+  the download link directly — nothing to unwrap, and the import side needed no changes at
+  all. A bundle past catbox's 200 MB ceiling is now refused up front, with its size named,
+  instead of after the whole upload.
+- **The import dialog keeps its contents inside the window.** A dialog lays itself out as a
+  grid, and a grid column grows to fit whatever can't wrap — so once a full-bundle code was
+  pasted and a third button appeared in the footer, the column outgrew the dialog and took
+  the text box with it. Only reachable now that sharing produces bundle codes again. Fixed
+  for every dialog, not just this one; a footer with too many buttons wraps, and long mod
+  names break instead of shoving.
+
+### Changed
+- **Share and Expand look like the buttons they are.** Sharing a preset was one of four
+  identical grey glyphs on the card, and the 3D preview's expand control was a tooltip away
+  from invisible. Both now keep a background at rest.
 
 ### Added
 - **A paint designer, and one Studio instead of three tabs.** Designing a livery meant leaving
