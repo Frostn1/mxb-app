@@ -1086,6 +1086,8 @@ export const ptBR: Translation = {
     "O que você pinta vai numa camada própria, então tem opacidade, mesclagem e ordem como todo o resto — e o template embaixo nunca é tocado. Esconda a camada e o template limpo volta. ⌘Z desfaz traços.",
   "showcase.v091.ghost":
     "Desenhe sobre um fantasma da moto. Uma folha pode mostrar apagada por baixo a pintura da qual você partiu, para decalcar — tirada da folha, então não é salva na sua — e um mapa UV das carenagens do modelo, cada peça com sua cor, para ver em qual painel você está pintando.",
+  "showcase.v091.parts":
+    "Coloque uma foto em um só painel. Escolha uma peça da carenagem e a camada se ajusta a ela e é recortada no seu contorno, então uma imagem da internet cobre a aleta e para na emenda. Passar o cursor pela folha mostra o nome da peça.",
   "showcase.v091.resize":
     "As camadas são redimensionadas arrastando os cantos, não só pelo controle deslizante.",
   "showcase.v091.macos":
@@ -1409,6 +1411,14 @@ export const ptBR: Translation = {
   "designer.lower": "Enviar para trás",
   "designer.scale": "Tamanho",
   "designer.rotation": "Rotação",
+  "designer.part": "Peça",
+  "designer.wholeSheet": "Folha inteira",
+  "designer.fitToPart": "Ajustar à peça",
+  "designer.fitToPartHint":
+    "Posiciona e redimensiona esta camada para cobrir a peça escolhida. Ela cobre em vez de caber dentro, então não sobram falhas — recorte-a para tirar o excesso.",
+  "designer.fitNotForPaint": "Uma camada de pintura é a folha, então não há o que mover ou redimensionar.",
+  "designer.clipped": "Recortada",
+  "designer.clippedHint": "Esta camada está recortada na peça: nada passa da emenda.",
   "designer.opacity": "Opacidade",
   "designer.blend": "Mesclagem",
   "designer.blend.normal": "Normal",

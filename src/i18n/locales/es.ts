@@ -1094,6 +1094,8 @@ export const es: Translation = {
     "Lo que pintas va en su propia capa, así que tiene opacidad, fusión y orden como todo lo demás — y la plantilla de debajo no se toca nunca. Oculta la capa y tienes la plantilla limpia otra vez. ⌘Z deshace trazos.",
   "showcase.v091.ghost":
     "Dibuja sobre un fantasma de la moto. Una hoja puede mostrar tenue por debajo la pintura de la que partiste para calcarla — sacada de la hoja, así que no se guarda en la tuya — y un mapa UV del carenado del modelo, cada pieza con su color, para ver sobre qué panel estás pintando.",
+  "showcase.v091.parts":
+    "Pon una foto en un solo panel. Elige una pieza del carenado y la capa se ajusta a ella y se recorta a su contorno, así una imagen de internet cubre el spoiler y se detiene en la junta. Al pasar por la hoja se muestra el nombre de la pieza.",
   "showcase.v091.resize":
     "Las capas se redimensionan arrastrando sus esquinas, no solo con el deslizador.",
   "showcase.v091.macos":
@@ -1418,6 +1420,14 @@ export const es: Translation = {
   "designer.lower": "Enviar atrás",
   "designer.scale": "Tamaño",
   "designer.rotation": "Rotación",
+  "designer.part": "Pieza",
+  "designer.wholeSheet": "Toda la hoja",
+  "designer.fitToPart": "Ajustar a la pieza",
+  "designer.fitToPartHint":
+    "Coloca y escala esta capa para cubrir la pieza elegida. La cubre en vez de caber dentro, así no quedan huecos: recórtala para quitar lo que sobresale.",
+  "designer.fitNotForPaint": "Una capa de pintura es la hoja, así que no hay nada que mover ni escalar.",
+  "designer.clipped": "Recortada",
+  "designer.clippedHint": "Esta capa está recortada a la pieza: nada se sale por la junta.",
   "designer.opacity": "Opacidad",
   "designer.blend": "Fusión",
   "designer.blend.normal": "Normal",

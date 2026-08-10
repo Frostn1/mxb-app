@@ -1097,6 +1097,8 @@ export const fr: Translation = {
     "La peinture va sur son propre calque, donc elle a opacité, fusion et empilement comme le reste — et le gabarit en dessous n'est jamais touché. Masque le calque et tu retrouves le gabarit intact. ⌘Z annule les tracés.",
   "showcase.v091.ghost":
     "Dessine par-dessus un fantôme de la moto. Une planche peut afficher en transparence dessous la peinture dont tu es parti, pour la décalquer — sortie de la planche, donc pas enregistrée dans la tienne — et une carte UV des carrosseries du modèle, chaque pièce dans sa couleur, pour voir sur quel panneau tu peins.",
+  "showcase.v091.parts":
+    "Pose une photo sur un seul panneau. Choisis une pièce de carrosserie : le calque s'y ajuste et se découpe sur son contour, donc une image prise sur internet couvre l'ouïe et s'arrête à la jointure. Survoler la planche affiche le nom de la pièce.",
   "showcase.v091.resize":
     "Les calques se redimensionnent en tirant leurs coins, pas seulement au curseur.",
   "showcase.v091.macos":
@@ -1422,6 +1424,14 @@ export const fr: Translation = {
   "designer.lower": "Vers l'arrière",
   "designer.scale": "Taille",
   "designer.rotation": "Rotation",
+  "designer.part": "Pièce",
+  "designer.wholeSheet": "Toute la planche",
+  "designer.fitToPart": "Ajuster à la pièce",
+  "designer.fitToPartHint":
+    "Place et redimensionne ce calque pour couvrir la pièce choisie. Il la couvre au lieu d'y tenir, donc pas de vide — découpe-le pour retirer le débordement.",
+  "designer.fitNotForPaint": "Un calque de peinture est la planche : il n'y a rien à déplacer ni à redimensionner.",
+  "designer.clipped": "Découpé",
+  "designer.clippedHint": "Ce calque est rogné sur la pièce : rien ne dépasse la jointure.",
   "designer.opacity": "Opacité",
   "designer.blend": "Fusion",
   "designer.blend.normal": "Normal",

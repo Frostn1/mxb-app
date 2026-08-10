@@ -22,6 +22,10 @@ function drawLayer(ctx: CanvasRenderingContext2D, layer: Layer) {
   ctx.save();
   ctx.globalAlpha = layer.opacity;
   ctx.globalCompositeOperation = BLEND_OPS[layer.blend];
+  // Before the layer's own transform, because the path is in sheet pixels: a shroud stays where
+  // the mesh put it however the photo inside it is dragged, scaled or spun. Clipping after the
+  // translate would carry the part around with the layer, which is the opposite of pinning it.
+  if (layer.clip) ctx.clip(layer.clip.path, "nonzero");
   ctx.translate(layer.x, layer.y);
   ctx.rotate(layer.rotation);
   ctx.scale(layer.scale, layer.scale);

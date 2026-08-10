@@ -36,6 +36,22 @@ interface LayerCommon {
   scale: number;
   /** Radians, clockwise. */
   rotation: number;
+  /** Confine this layer to one piece of bodywork, or null to let it cover the sheet. */
+  clip: LayerClip | null;
+}
+
+/**
+ * A layer pinned to one piece of the model's bodywork.
+ *
+ * The path is built once, in sheet pixels, and carried here rather than rebuilt inside the
+ * composite — that runs on every pointer sample of a stroke, and a shroud is a few thousand
+ * triangles. It is rebuilt when the part is chosen again, which is also what makes a sheet
+ * resized or a model swapped out a matter of re-picking rather than of stale pixels.
+ */
+export interface LayerClip {
+  /** Mesh-group name, kept so the inspector can show what a layer is pinned to. */
+  label: string;
+  path: Path2D;
 }
 
 export interface ImageLayer extends LayerCommon {
@@ -196,6 +212,7 @@ export function imageLayer(name: string, image: ImageBitmap, sheet: Sheet): Imag
     y: sheet.height / 2,
     scale: fit,
     rotation: 0,
+    clip: null,
     image,
   };
 }
@@ -212,6 +229,7 @@ export function textLayer(text: string, sheet: Sheet): TextLayer {
     y: sheet.height / 2,
     scale: 1,
     rotation: 0,
+    clip: null,
     text,
     font: FONTS[0],
     // A twelfth of the sheet reads as a name across a jersey back at 2048².
@@ -239,6 +257,7 @@ export function paintLayer(name: string, sheet: Sheet): PaintLayer {
     y: sheet.height / 2,
     scale: 1,
     rotation: 0,
+    clip: null,
     canvas,
     rev: 0,
   };

@@ -1063,6 +1063,8 @@ export const en = {
     "Painting goes on its own layer, so it gets opacity, blending and stacking like everything else — and the template underneath is never touched. Hide the layer and you have the clean template back. ⌘Z undoes strokes.",
   "showcase.v091.ghost":
     "Draw against a ghost of the bike. A sheet can show the paint you started from faintly underneath to trace over — lifted out of the sheet, so it isn't saved into yours — and a UV map of the model's bodywork, each piece in its own colour, so you can see which panel you're painting on.",
+  "showcase.v091.parts":
+    "Drop a photo onto one panel. Pick a piece of the bike's bodywork and a layer fits to it and is clipped to its outline, so an image off the internet covers the shroud and stops at the seam. Hovering the sheet names the part you're over.",
   "showcase.v091.resize":
     "Layers resize by dragging their corners, not just by the slider.",
   "showcase.v091.macos":
@@ -1384,6 +1386,14 @@ export const en = {
   "designer.lower": "Send back",
   "designer.scale": "Size",
   "designer.rotation": "Rotation",
+  "designer.part": "Part",
+  "designer.wholeSheet": "Whole sheet",
+  "designer.fitToPart": "Fit to part",
+  "designer.fitToPartHint":
+    "Place and scale this layer to cover the chosen part. It covers rather than fits inside, so the part has no gaps — clip it to trim the overspill.",
+  "designer.fitNotForPaint": "A paint layer is the sheet, so there is nothing to move or scale.",
+  "designer.clipped": "Clipped",
+  "designer.clippedHint": "This layer is trimmed to the part — nothing it holds spills past the seam.",
   "designer.opacity": "Opacity",
   "designer.blend": "Blend",
   "designer.blend.normal": "Normal",
