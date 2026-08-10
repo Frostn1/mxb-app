@@ -15,6 +15,7 @@
 use crate::install::{self, RouteRule};
 use crate::library;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -102,7 +103,7 @@ pub enum DetectReason {
     Unrecognised,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DestChoice {
     /// Written straight into `destFolder`, e.g. `MX1OEM_2023_KTM_450/paints`.
@@ -305,8 +306,30 @@ fn from_route_rule(rule: RouteRule) -> Option<Verdict> {
     }
 }
 
-/// What classifying and placing a drop are relative to: the mods folder to look in, and the
-/// title whose folder layout applies.
+/// The mods folder as it stood when the drop landed.
+///
+/// Scanned once per plan and shared by every row. Nothing here changes while the user is
+/// reviewing, and building it per row meant reopening every installed bike's `.pkz` once per
+/// row — a pack of twenty paints paid for twenty identical scans before it drew anything.
+struct Scans {
+    bikes: Vec<crate::bikeswap::BikeIdentity>,
+    rider: library::RiderTargets,
+    /// `scan_mods` per category, filled the first time a row of that kind asks for it.
+    folders: RefCell<HashMap<String, Vec<DestChoice>>>,
+}
+
+impl Scans {
+    fn new(mods_path: &str) -> Self {
+        Scans {
+            bikes: crate::bikeswap::scan_installed_bikes(mods_path),
+            rider: library::scan_rider_targets(mods_path),
+            folders: RefCell::new(HashMap::new()),
+        }
+    }
+}
+
+/// What classifying and placing a drop are relative to: the mods folder to look in, the
+/// title whose folder layout applies, and what that folder currently holds.
 ///
 /// The title is carried rather than read from [`crate::game::active`] at each use so that the
 /// whole module is a function of its inputs — one drop is classified against one title, and a
@@ -315,13 +338,15 @@ fn from_route_rule(rule: RouteRule) -> Option<Verdict> {
 struct Ctx<'a> {
     mods_path: &'a str,
     game: &'static crate::game::GameProfile,
+    scans: &'a Scans,
 }
 
 impl<'a> Ctx<'a> {
-    fn new(mods_path: &'a str) -> Self {
+    fn new(mods_path: &'a str, scans: &'a Scans) -> Self {
         Ctx {
             mods_path,
             game: crate::game::active(),
+            scans,
         }
     }
 
@@ -499,6 +524,10 @@ const GEAR_TEXTURE_HINTS: [(&str, &str); 6] = [
 /// bike paint carries bike parts (`framecompletemap`, `wheels`). `_n`/`_r` are the normal and
 /// roughness maps of the same texture, so only the base names matter.
 ///
+/// Names only, never pixels. Reading them through `decode_any` inflated every sheet in the
+/// file — 200 MB and a fifth of a second for one 38 MB outfit, paid again for every paint in
+/// a dropped folder, which is what left the review sheet spinning forever on a gear pack.
+///
 /// An outfit gets a real default rather than an empty picker: MX Bikes always ships
 /// `default_mx`, so `riders/default_mx/paints` is somewhere it will actually load from, and
 /// it is the same guess the install dialog has always made. Gear defaults to the only model
@@ -507,17 +536,14 @@ const GEAR_TEXTURE_HINTS: [(&str, &str); 6] = [
 /// Falls back to a bike paint, the commonest case by far.
 fn classify_paint(pnt: &Path, ctx: Ctx) -> Verdict {
     let bike = || Verdict::new(ContentKind::BikePaint, DetectReason::LoosePaint).ask();
-    let Ok(bytes) = std::fs::read(pnt) else {
-        return bike();
-    };
-    let Ok(textures) = crate::paint::decode_any(&bytes) else {
+    let Ok(declared) = crate::paint::texture_names_at(pnt) else {
         return bike();
     };
 
-    let names: Vec<String> = textures
+    let names: Vec<String> = declared
         .iter()
-        .map(|t| {
-            let n = t.name.to_ascii_lowercase();
+        .map(|name| {
+            let n = name.to_ascii_lowercase();
             n.strip_suffix("_n")
                 .or_else(|| n.strip_suffix("_r"))
                 .unwrap_or(&n)
@@ -532,7 +558,7 @@ fn classify_paint(pnt: &Path, ctx: Ctx) -> Verdict {
         // model exists to wear them.
         return match (
             ctx.game.rider.stock_profiles.first(),
-            library::scan_rider_targets(ctx.mods_path).profiles.as_slice(),
+            ctx.scans.rider.profiles.as_slice(),
         ) {
             (Some(stock), _) => v.dest(profile_dest(stock, "paints")),
             (None, [only]) => v.dest(profile_dest(only, "paints")),
@@ -558,7 +584,7 @@ fn classify_paint(pnt: &Path, ctx: Ctx) -> Verdict {
                 None => v.ask(),
             };
         }
-        let t = library::scan_rider_targets(ctx.mods_path);
+        let t = &ctx.scans.rider;
         let models = match area {
             "helmets" | "goggles" => &t.helmets,
             "boots" => &t.boots,
@@ -638,9 +664,10 @@ fn units_in(
 // Destinations
 // ---------------------------------------------------------------------------------------
 
-fn bike_choices(mods_path: &str, paints: bool) -> Vec<DestChoice> {
-    crate::bikeswap::scan_installed_bikes(mods_path)
-        .into_iter()
+fn bike_choices(ctx: Ctx, paints: bool) -> Vec<DestChoice> {
+    ctx.scans
+        .bikes
+        .iter()
         .map(|b| {
             let folder = Path::new(&b.path)
                 .file_stem()
@@ -650,9 +677,9 @@ fn bike_choices(mods_path: &str, paints: bool) -> Vec<DestChoice> {
                 value: if paints {
                     format!("{folder}/paints")
                 } else {
-                    folder.clone()
+                    folder
                 },
-                label: b.name,
+                label: b.name.clone(),
                 subpath: "mods/bikes".into(),
             }
         })
@@ -670,7 +697,7 @@ fn bike_choices(mods_path: &str, paints: bool) -> Vec<DestChoice> {
 /// row could not be corrected at all — a dead end for the one case that most needs a choice.
 fn gear_choices(ctx: Ctx) -> Vec<DestChoice> {
     let game = ctx.game;
-    let t = library::scan_rider_targets(ctx.mods_path);
+    let t = &ctx.scans.rider;
     let mut out = Vec::new();
     let mut choice = |value: String, label: String| {
         out.push(DestChoice {
@@ -729,7 +756,19 @@ fn gear_choices(ctx: Ctx) -> Vec<DestChoice> {
 /// Identifying content correctly is not the same as knowing where the user wants it filed,
 /// so every row gets this list — the classifier's destination is a default to override, not
 /// a decision. Mirrors the install dialog: the distinct folders installed mods sit in.
-fn folder_choices(mods_path: &str, subpath: &str) -> Vec<DestChoice> {
+fn folder_choices(ctx: Ctx, subpath: &str) -> Vec<DestChoice> {
+    if let Some(cached) = ctx.scans.folders.borrow().get(subpath) {
+        return cached.clone();
+    }
+    let built = scan_folder_choices(ctx.mods_path, subpath);
+    ctx.scans
+        .folders
+        .borrow_mut()
+        .insert(subpath.to_string(), built.clone());
+    built
+}
+
+fn scan_folder_choices(mods_path: &str, subpath: &str) -> Vec<DestChoice> {
     let leaf = subpath.rsplit('/').next().unwrap_or(subpath).to_string();
     let mut out = vec![DestChoice {
         value: String::new(),
@@ -755,7 +794,7 @@ fn folder_choices(mods_path: &str, subpath: &str) -> Vec<DestChoice> {
 
 /// Everywhere a dropped item could plausibly go, for the rows we can't place ourselves.
 fn all_choices(ctx: Ctx, paints: bool) -> Vec<DestChoice> {
-    let mut c = bike_choices(ctx.mods_path, paints);
+    let mut c = bike_choices(ctx, paints);
     c.extend(gear_choices(ctx));
     // Unidentified content still has to be placeable — offer the bare category roots so a
     // dropped file the classifier couldn't name can at least be filed by hand.
@@ -813,7 +852,7 @@ fn to_item(
     ) {
         // Textures already said it's worn, not ridden — lead with gear and profiles.
         let mut c = gear_choices(ctx);
-        c.extend(bike_choices(ctx.mods_path, true));
+        c.extend(bike_choices(ctx, true));
         c
     } else if needs_choice {
         all_choices(ctx, matches!(verdict.kind, ContentKind::BikePaint))
@@ -821,11 +860,11 @@ fn to_item(
         verdict.kind,
         ContentKind::BikePaint | ContentKind::SoundSet | ContentKind::RiderGear
     ) {
-        let mut c = bike_choices(ctx.mods_path, matches!(verdict.kind, ContentKind::BikePaint));
+        let mut c = bike_choices(ctx, matches!(verdict.kind, ContentKind::BikePaint));
         c.extend(gear_choices(ctx));
         c
     } else {
-        folder_choices(ctx.mods_path, verdict.kind.subpath().unwrap_or("mods/misc"))
+        folder_choices(ctx, verdict.kind.subpath().unwrap_or("mods/misc"))
     };
 
     let subpath = if needs_choice {
@@ -923,7 +962,8 @@ pub fn plan(mods_path: &str, paths: &[String]) -> anyhow::Result<DropPlan> {
         anyhow::bail!("no MX Bikes folder configured");
     }
     let mods_dir = library::mods_subdir(mods_path, "mods");
-    let ctx = Ctx::new(mods_path);
+    let scans = Scans::new(mods_path);
+    let ctx = Ctx::new(mods_path, &scans);
 
     let plan_id = next_id("drop");
     let work = install::staging_dir("drop");
@@ -1162,6 +1202,9 @@ mod tests {
         Ctx {
             mods_path,
             game: game.profile(),
+            // Leaked so the helper can hand back a `Ctx` the caller doesn't have to hold the
+            // scans for. A few empty vectors, in a process that exits after the test.
+            scans: Box::leak(Box::new(Scans::new(mods_path))),
         }
     }
 
@@ -1648,6 +1691,71 @@ mod tests {
             choices.iter().map(|c| &c.value).collect::<Vec<_>>()
         );
         assert!(choices.iter().any(|c| c.value == "helmets"), "new-model slots offered");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The shape that hung: a downloaded pack, one sub-folder per paint. Every one of them
+    /// is classified, and the pack is one row per paint rather than a single unknown blob.
+    ///
+    /// This used to inflate every sheet in every file — hundreds of megabytes per paint, all
+    /// of it thrown away for a name the header already carried — and the review sheet never
+    /// arrived. Nothing here asserts a duration; what it pins is that the walk reaches every
+    /// paint and that a mods folder scanned once serves all of them.
+    #[test]
+    fn a_pack_of_paints_is_classified_paint_by_paint() {
+        let root = tmp("paintpack");
+        let mods = root.join("mods");
+        let pack = root.join("Pack");
+        for i in 0..8 {
+            write_pnt(&pack.join(format!("Outfit {i}/Outfit {i}.pnt")), &["rider", "rider_n"]);
+        }
+        write_pnt(&pack.join("Livery/Livery.pnt"), &["framecompletemap", "wheels"]);
+
+        let units = units_in(&pack, &mods, mx(""), "Pack", 0);
+        assert_eq!(units.len(), 9, "one row per paint, none skipped");
+        assert_eq!(
+            units.iter().filter(|u| u.verdict.reason == DetectReason::RiderTexture).count(),
+            8,
+            "every outfit recognised by its texture names"
+        );
+        assert!(
+            units.iter().any(|u| u.verdict.kind == ContentKind::BikePaint),
+            "and the bike livery told apart from them"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The destination lists are the mods folder as it was when the drop landed, so every
+    /// row sees the same one — and a row still gets it after the folder moves underneath.
+    #[test]
+    fn destination_lists_are_scanned_once_for_the_whole_drop() {
+        let root = tmp("scanonce");
+        let game = root.join("MX Bikes");
+        let mods_path = game.to_string_lossy().into_owned();
+        write(
+            &game.join("mods/bikes/RM250/RM250.ini"),
+            "[info]\nname = RM 250\n[data]\ncat = MX2\n",
+        );
+        write(&game.join("mods/bikes/RM250/RM250.cfg"), "ID = RM250\n");
+
+        let scans = Scans::new(&mods_path);
+        let ctx = Ctx { mods_path: &mods_path, game: Game::Mxb.profile(), scans: &scans };
+        let first = bike_choices(ctx, true);
+        assert!(first.iter().any(|c| c.label == "RM 250"), "{first:?}");
+
+        // A bike installed after the scan doesn't appear — the plan was priced against the
+        // folder the user is looking at, and every row agrees on it.
+        write(&game.join("mods/bikes/CR125/CR125.cfg"), "ID = CR125\n");
+        assert_eq!(
+            bike_choices(ctx, true).len(),
+            first.len(),
+            "the second row reuses the first row's scan"
+        );
+
+        // Same for the per-category folder lists, which are filled on first ask.
+        let folders = folder_choices(ctx, "mods/tracks");
+        assert_eq!(folder_choices(ctx, "mods/tracks"), folders);
+        assert!(scans.folders.borrow().contains_key("mods/tracks"));
         let _ = fs::remove_dir_all(&root);
     }
 

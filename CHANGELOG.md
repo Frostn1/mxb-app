@@ -256,6 +256,26 @@
   FrostMod away from anyone the check is wrong about.
 
 ### Fixed
+- **Dropping paints no longer leaves the review sheet spinning.** Working out what a dropped
+  `.pnt` is comes down to one question — which model does it paint? — and the file answers it
+  in its texture names: an outfit carries `rider`, a bike livery carries `framecompletemap`.
+  Reading those names decompressed every sheet in the file first, which for one 38 MB outfit is
+  a fifth of a second and 200 MB of pixels, all of it thrown away unlooked-at. A pack with one
+  folder per paint paid that bill for every paint in it, one after another, and never got to
+  the end. The names sit in the file's headers, each of which states how far the next one is,
+  so they are now read by seeking past the pixels rather than through them: 0.6 ms instead of
+  204 ms for that same outfit, and nothing decompressed at all. A sealed paint still has to be
+  decrypted whole before it has headers to read, and comes out about five times faster.
+- **A drop no longer rescans your mods folder once per row.** The list of bikes a paint could
+  go on, and of folders a track could be filed in, was rebuilt for every row in the sheet —
+  reopening every installed bike's `.pkz` each time — for lists that cannot change while you
+  are looking at them. The folder is now read once per drop and every row shares it.
+- **A corrupt `.pnt` is refused instead of being believed.** How many textures a paint holds
+  and how big each one is are numbers read out of the file before anything has checked them,
+  and both were handed straight to an allocation. A damaged or truncated paint could ask for
+  more memory than the machine has, or expand without limit while decompressing. Both are now
+  bounded well above anything a real paint carries, so a bad file is an error on that file
+  rather than something that takes the app down with it.
 - **Signing in to the Shop no longer signs you straight back out.** A sign-in would land, show
   the Purchases tab for a second, and drop to the signed-out screen again — every time, for
   anyone whose stored session had gone stale. Your purchases are read out of a hidden browser
