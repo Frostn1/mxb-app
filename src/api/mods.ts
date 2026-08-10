@@ -510,6 +510,29 @@ export function paintStudioLoad(paths: string[]): Promise<StudioImage[]> {
   return invoke<StudioImage[]>("paint_studio_load", { paths });
 }
 
+/**
+ * One image at its own resolution, for the Designer to composite with.
+ *
+ * Not {@link paintStudioLoad}: that answers with a thumbnail token, and a sheet composited
+ * from thumbnails would be saved as one. Read the pixels with {@link textureBytes}.
+ */
+export function paintStudioPixels(path: string): Promise<PaintTexture> {
+  return invoke<PaintTexture>("paint_studio_pixels", { path });
+}
+
+/**
+ * Stage a composited sheet as a file, returning the path to pack.
+ *
+ * The PNG goes up as the raw request body — a 4096² sheet is megabytes, and an argument
+ * would be JSON-encoded as a list of numbers. Tauri sends an `ArrayBuffer` passed in the
+ * argument position as `InvokeBody::Raw`, so the sheet's name has to travel as a header.
+ */
+export function paintStudioStage(name: string, png: ArrayBuffer): Promise<string> {
+  return invoke<string>("paint_studio_stage", png, {
+    headers: { "x-sheet-name": name },
+  });
+}
+
 /** The file a save would write, resolved but not written — so we can ask before replacing. */
 export function paintStudioTarget(
   fileName: string,

@@ -4,7 +4,6 @@ import {
   Library as LibraryIcon,
   Bike,
   Shirt,
-  User,
   Settings,
   RefreshCw,
   Play,
@@ -14,6 +13,8 @@ import {
   SlidersHorizontal,
   Store,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   Server as ServerIcon,
   Plug,
 } from "lucide-react";
@@ -41,8 +42,7 @@ export type DashboardView =
   | "library"
   | "locker"
   | "presets"
-  | "rider"
-  | "paints"
+  | "studio"
   | "servers"
   | "manage"
   | "settings";
@@ -71,10 +71,10 @@ const NAV: NavEntry[] = [
   // part bindings before they can be shown.
   { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
   { id: "presets", label: "nav.presets", icon: Shirt },
-  { id: "rider", label: "nav.rider", icon: User, cap: "viewer" },
-  // Building a `.pnt` needs nothing game-specific, but its whole point is seeing the
-  // result on the model — so it rides with the rest of the 3D preview.
-  { id: "paints", label: "nav.paints", icon: Palette, cap: "viewer" },
+  // Designer, Paints and Rider in one tab. Deliberately *not* viewer-gated: building a `.pnt`
+  // is the same job for either title — same container, same encoder, same folders — and only
+  // the 3D preview needs part bindings. Studio hides the sub-views that do.
+  { id: "studio", label: "nav.studio", icon: Palette },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
@@ -100,6 +100,9 @@ const EXPERIMENTAL_NAV: NavEntry = {
   cap: "servers",
 };
 
+/** Remembered across launches: a collapsed sidebar is a preference, not a mode. */
+const COLLAPSED_KEY = "mxb:sidebarCollapsed:v1";
+
 const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
 
 /** MX Bikes takes a while to show up in the process list; stop saying "Starting…" after this. */
@@ -113,6 +116,17 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const { game } = useConfig();
   const caps = game.caps;
   const [starting, setStarting] = useState(false);
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem(COLLAPSED_KEY) === "1",
+  );
+  const toggleCollapsed = useCallback(
+    () =>
+      setCollapsed((c) => {
+        localStorage.setItem(COLLAPSED_KEY, c ? "0" : "1");
+        return !c;
+      }),
+    [],
+  );
   const [joinOpen, setJoinOpen] = useState(false);
   // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
   // leaving that page is exactly when the nav needs to reflect a change.
@@ -195,14 +209,40 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   };
 
   return (
-    <aside className="flex w-[216px] flex-none flex-col border-r border-white/[0.06] bg-window px-2.5 pb-3 pt-3.5">
-      <div className="flex flex-col px-3 pb-3">
-        <span className="text-[13px] font-bold tracking-[0.2px]">MXB App</span>
-        {/* The switcher lives in Settings now, but which game you're driving still has
-            to be visible — every list below it is scoped to that choice. */}
-        <span className="text-[11px] font-medium text-muted-foreground">
-          {game.display}
-        </span>
+    <aside
+      className={cn(
+        "flex flex-none flex-col border-r border-white/[0.06] bg-window pb-3 pt-3.5 transition-[width]",
+        collapsed ? "w-[60px] px-2" : "w-[216px] px-2.5",
+      )}
+    >
+      <div
+        className={cn(
+          "flex pb-3",
+          collapsed ? "justify-center" : "items-start justify-between gap-2 px-3",
+        )}
+      >
+        {!collapsed && (
+          <div className="flex min-w-0 flex-col">
+            <span className="text-[13px] font-bold tracking-[0.2px]">MXB App</span>
+            {/* The switcher lives in Settings now, but which game you're driving still has
+                to be visible — every list below it is scoped to that choice. */}
+            <span className="truncate text-[11px] font-medium text-muted-foreground">
+              {game.display}
+            </span>
+          </div>
+        )}
+        <button
+          onClick={toggleCollapsed}
+          title={t(collapsed ? "sidebar.expand" : "sidebar.collapse")}
+          aria-label={t(collapsed ? "sidebar.expand" : "sidebar.collapse")}
+          className="flex cursor-default items-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="size-4" />
+          ) : (
+            <PanelLeftClose className="size-4" />
+          )}
+        </button>
       </div>
 
       <nav className="flex flex-col gap-0.5">
@@ -213,22 +253,25 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
               key={id}
               data-tour={id}
               onClick={() => onNavigate(id)}
+              title={collapsed ? t(label) : undefined}
+              aria-label={collapsed ? t(label) : undefined}
               className={cn(
-                "flex cursor-default items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13.5px] transition-colors",
+                "flex cursor-default items-center gap-2.5 rounded-lg py-2.5 text-[13.5px] transition-colors",
+                collapsed ? "justify-center px-0" : "px-3",
                 activeNav
                   ? "bg-accent font-semibold text-accent-foreground"
                   : "font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
               )}
             >
-              <Icon className="size-4" />
-              <span>{t(label)}</span>
+              <Icon className="size-4 flex-none" />
+              {!collapsed && <span>{t(label)}</span>}
             </button>
           );
         })}
       </nav>
 
       <div className="mt-auto flex flex-col gap-2">
-        {installing && (
+        {!collapsed && installing && (
           <div className="flex flex-col gap-[7px] rounded-[10px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="truncate text-[11.5px] font-semibold text-foreground/85">
@@ -263,6 +306,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           onClick={onPlay}
           disabled={gameRunning || starting}
           title={gameRunning ? t("game.running") : t("game.launch")}
+          aria-label={collapsed ? t("game.play") : undefined}
           className={cn(
             "flex cursor-default items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[13.5px] font-semibold transition-colors",
             gameRunning || starting
@@ -277,13 +321,15 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           ) : (
             <Play className="size-4" />
           )}
-          <span>
-            {gameRunning
-              ? t("game.running")
-              : starting
-                ? t("game.starting")
-                : t("game.play")}
-          </span>
+          {!collapsed && (
+            <span>
+              {gameRunning
+                ? t("game.running")
+                : starting
+                  ? t("game.starting")
+                  : t("game.play")}
+            </span>
+          )}
         </button>
 
         {/* Join-by-address launches the game with `-directconnect`. Behind the experimental
@@ -292,7 +338,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
             accident. Capability-gated on top — both the argv parser offset it was found at
             and the default port it assumes are MX Bikes', so it waits until GP's are
             confirmed. */}
-        {experimental && caps.joinByAddress && (
+        {!collapsed && experimental && caps.joinByAddress && (
         <>
         <button
           onClick={() => setJoinOpen(true)}
@@ -322,7 +368,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
             without something like this the only place its state existed was the log file.
             Shown only once there's an account, since before that the Servers page is where
             the answer is. */}
-        {experimental && sync?.enrolled && (
+        {!collapsed && experimental && sync?.enrolled && (
           <div className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2">
             <span
               className={cn(
@@ -358,7 +404,19 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         {caps.frostmod && (
         <div
           data-tour="frostmod"
-          className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2"
+          title={
+            collapsed
+              ? running === null
+                ? t("frostmod.checking")
+                : running
+                  ? t("frostmod.running")
+                  : t("frostmod.notRunning")
+              : undefined
+          }
+          className={cn(
+            "flex items-center rounded-[10px] border border-white/[0.07] py-2",
+            collapsed ? "justify-center gap-1.5 px-1" : "gap-2 px-3",
+          )}
         >
           <span
             className={cn(
@@ -366,13 +424,15 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
               running ? "bg-success" : "bg-muted-foreground/50",
             )}
           />
-          <span className="flex-1 text-[11.5px] text-muted-foreground">
-            {running === null
-              ? t("frostmod.checking")
-              : running
-                ? t("frostmod.running")
-                : t("frostmod.notRunning")}
-          </span>
+          {!collapsed && (
+            <span className="flex-1 text-[11.5px] text-muted-foreground">
+              {running === null
+                ? t("frostmod.checking")
+                : running
+                  ? t("frostmod.running")
+                  : t("frostmod.notRunning")}
+            </span>
+          )}
           {running ? (
             <>
               <button
@@ -382,13 +442,15 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
               >
                 <RefreshCw className="size-3.5" />
               </button>
-              <button
-                onClick={stop}
-                title={t("frostmod.stop")}
-                className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <Square className="size-3.5" />
-              </button>
+              {!collapsed && (
+                <button
+                  onClick={stop}
+                  title={t("frostmod.stop")}
+                  className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Square className="size-3.5" />
+                </button>
+              )}
             </>
           ) : (
             status?.installed && (
@@ -407,15 +469,18 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         <button
           data-tour="settings"
           onClick={() => onNavigate("settings")}
+          title={collapsed ? t("nav.settings") : undefined}
+          aria-label={collapsed ? t("nav.settings") : undefined}
           className={cn(
-            "flex cursor-default items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13.5px] transition-colors",
+            "flex cursor-default items-center gap-2.5 rounded-lg py-2.5 text-[13.5px] transition-colors",
+            collapsed ? "justify-center px-0" : "px-3",
             view === "settings"
               ? "bg-accent font-semibold text-accent-foreground"
               : "font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
           )}
         >
-          <Settings className="size-4" />
-          <span>{t("nav.settings")}</span>
+          <Settings className="size-4 flex-none" />
+          {!collapsed && <span>{t("nav.settings")}</span>}
         </button>
       </div>
     </aside>
