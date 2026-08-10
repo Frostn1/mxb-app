@@ -1084,6 +1084,10 @@ export const it: Translation = {
     "Una sfumatura che porta un colore dentro un altro. Trascina per dire dove avviene la transizione: prima c'è il primo colore, dopo il secondo. Lineare o radiale, e può dissolversi nel nulla invece che in un colore.",
   "showcase.v091.paintLayer":
     "La pittura va su un livello suo, quindi ha opacità, fusione e ordine come tutto il resto — e il template sotto non viene mai toccato. Nascondi il livello e hai di nuovo il template pulito. ⌘Z annulla i tratti.",
+  "showcase.v091.ghost":
+    "Disegna sopra un fantasma della moto. Una planche può mostrare in trasparenza sotto la vernice di partenza da ricalcare — tolta dalla planche, quindi non finisce salvata nella tua — e una mappa UV delle carene del modello, ogni pezzo con il suo colore, per vedere su quale pannello stai dipingendo.",
+  "showcase.v091.resize":
+    "I livelli si ridimensionano trascinando gli angoli, non solo con il cursore.",
   "showcase.v091.macos":
     "Gioca e Entra nel server funzionano su macOS, attraverso la bottiglia CrossOver, Whisky o Wine che contiene il gioco — e l'app trova da sola un'installazione in bottiglia invece di chiederti il percorso.",
   "showcase.v091.steamos":

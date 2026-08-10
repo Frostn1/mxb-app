@@ -1092,6 +1092,10 @@ export const es: Translation = {
     "Un degradado que lleva un color hasta otro. Arrastra para decir dónde ocurre la transición: antes está el primer color, después el segundo. Lineal o radial, y puede desvanecerse hasta nada en lugar de hasta un color.",
   "showcase.v091.paintLayer":
     "Lo que pintas va en su propia capa, así que tiene opacidad, fusión y orden como todo lo demás — y la plantilla de debajo no se toca nunca. Oculta la capa y tienes la plantilla limpia otra vez. ⌘Z deshace trazos.",
+  "showcase.v091.ghost":
+    "Dibuja sobre un fantasma de la moto. Una hoja puede mostrar tenue por debajo la pintura de la que partiste para calcarla — sacada de la hoja, así que no se guarda en la tuya — y un mapa UV del carenado del modelo, cada pieza con su color, para ver sobre qué panel estás pintando.",
+  "showcase.v091.resize":
+    "Las capas se redimensionan arrastrando sus esquinas, no solo con el deslizador.",
   "showcase.v091.macos":
     "Jugar y Unirse a un servidor funcionan en macOS, a través de la botella CrossOver, Whisky o Wine que contenga el juego — y la app encuentra sola una instalación embotellada en vez de pedirte la ruta.",
   "showcase.v091.steamos":

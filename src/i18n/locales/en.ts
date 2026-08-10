@@ -1061,6 +1061,10 @@ export const en = {
     "A gradient that carries one colour into another. Drag to say where the transition happens — everything before it is the first colour, everything past it the second. Linear or radial, and it can fade out to nothing instead of to a colour.",
   "showcase.v091.paintLayer":
     "Painting goes on its own layer, so it gets opacity, blending and stacking like everything else — and the template underneath is never touched. Hide the layer and you have the clean template back. ⌘Z undoes strokes.",
+  "showcase.v091.ghost":
+    "Draw against a ghost of the bike. A sheet can show the paint you started from faintly underneath to trace over — lifted out of the sheet, so it isn't saved into yours — and a UV map of the model's bodywork, each piece in its own colour, so you can see which panel you're painting on.",
+  "showcase.v091.resize":
+    "Layers resize by dragging their corners, not just by the slider.",
   "showcase.v091.macos":
     "Play and Join Server work on macOS, through whichever CrossOver, Whisky or Wine bottle holds the game — and the app finds a bottled install by itself instead of asking you to type the path.",
   "showcase.v091.steamos":

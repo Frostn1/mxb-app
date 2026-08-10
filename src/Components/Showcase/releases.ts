@@ -12,7 +12,9 @@ import {
   Apple,
   Blend,
   Brush,
+  Grid3x3,
   Layers,
+  Maximize2,
   Monitor,
   Languages,
   ListOrdered,
@@ -66,6 +68,8 @@ export const RELEASES: Release[] = [
     highlights: [
       { icon: Blend, text: "showcase.v091.gradient" },
       { icon: Layers, text: "showcase.v091.paintLayer" },
+      { icon: Grid3x3, text: "showcase.v091.ghost" },
+      { icon: Maximize2, text: "showcase.v091.resize" },
       { icon: Apple, text: "showcase.v091.macos" },
       { icon: Monitor, text: "showcase.v091.steamos" },
     ],
