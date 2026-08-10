@@ -76,6 +76,11 @@ export interface Config {
    * `<modsPath>/profiles`; set only when profiles sit outside the game folder.
    */
   profilesPath?: string;
+  /**
+   * macOS: the Wine binary that starts the game. Empty (normal) means auto-detected.
+   * Ignored on Windows and Linux.
+   */
+  wineRunner?: string;
   /** Hide to the tray on close and keep running (default true). */
   runInBackground?: boolean;
   /** Launch on login (default true). */

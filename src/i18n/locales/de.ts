@@ -627,6 +627,17 @@ export const de: Translation = {
   "settings.installFound": "Deine {{game}}-Installation wurde gefunden",
   "settings.detectInstallFailed":
     "Installationsordner konnte nicht erkannt werden",
+  "settings.wineRunnerDesc":
+    "{{game}} ist ein Windows-Spiel — auf einem Mac läuft es in einer CrossOver-, Whisky- oder Wine-Bottle. Darüber startet Spielen es.",
+  "settings.wineRunnerNone": "Kein Wine-Runner gefunden",
+  "settings.pickWineRunner": "Wähle eine Wine-Binärdatei (z. B. das wine von CrossOver)",
+  "settings.wineRunnerFailed": "Wine-Runner konnte nicht gesetzt werden",
+  "settings.wineBottlesFound_one":
+    "{{count}} Bottle gefunden, in der nach deiner Installation gesucht wird.",
+  "settings.wineBottlesFound_other":
+    "{{count}} Bottles gefunden, in denen nach deiner Installation gesucht wird.",
+  "settings.wineBottlesNone":
+    "Keine Bottles gefunden — installiere {{game}} zuerst in CrossOver, Whisky oder Wine.",
   "settings.pickProfilesFolder": "Wähle deinen {{game}}-Profilordner",
   "settings.profilesSet": "Profilordner festgelegt",
   "settings.profilesFound_one": "{{count}} Profil gefunden.",

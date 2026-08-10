@@ -654,6 +654,30 @@ export function setGamePath(path: string): Promise<void> {
   return invoke<void>("set_game_path", { path });
 }
 
+/**
+ * macOS only: what the app found to run the game with.
+ *
+ * MX Bikes is a Windows binary, so on a Mac it runs inside a CrossOver, Whisky or Wine
+ * bottle. `runner` is the binary we'd launch through — empty means none was found and
+ * Play can't work until one is installed or picked.
+ */
+export interface WineHostInfo {
+  runner: string;
+  /** Which wrapper the runner belongs to ("CrossOver", "Whisky", "Wine"). */
+  via: string;
+  /** Wine prefixes we can see, so a bottle we're missing shows up as missing. */
+  bottles: string[];
+}
+
+export function wineHostInfo(): Promise<WineHostInfo> {
+  return invoke<WineHostInfo>("wine_host_info");
+}
+
+/** Pick the Wine binary that starts the game. Pass an empty string to auto-detect again. */
+export function setWineRunner(path: string): Promise<WineHostInfo> {
+  return invoke<WineHostInfo>("set_wine_runner", { path });
+}
+
 /** Auto-detect the Steam MX Bikes install (holds `rider.pkz`); null if not found. */
 /** Scan Steam for a game's install folder. Omit `game` for the active one; setup passes
  *  it explicitly, since on a first run the pick isn't saved yet. */

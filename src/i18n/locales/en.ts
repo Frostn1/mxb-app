@@ -605,6 +605,15 @@ export const en = {
     "No Steam install detected — set the folder manually.",
   "settings.installFound": "Found your {{game}} install",
   "settings.detectInstallFailed": "Couldn't detect install folder",
+  "settings.wineRunnerDesc":
+    "{{game}} is a Windows game, so on a Mac it runs inside a CrossOver, Whisky or Wine bottle. This is what Play launches it through.",
+  "settings.wineRunnerNone": "No Wine runner found",
+  "settings.pickWineRunner": "Select a Wine binary (e.g. CrossOver's wine)",
+  "settings.wineRunnerFailed": "Couldn't set the Wine runner",
+  "settings.wineBottlesFound_one": "Found {{count}} bottle to search for your install.",
+  "settings.wineBottlesFound_other": "Found {{count}} bottles to search for your install.",
+  "settings.wineBottlesNone":
+    "No bottles found — install {{game}} in CrossOver, Whisky or Wine first.",
   "settings.pickProfilesFolder": "Select your {{game}} profiles folder",
   "settings.profilesSet": "Profiles folder set",
   "settings.profilesFound_one": "Found {{count}} profile.",

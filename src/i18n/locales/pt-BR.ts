@@ -619,6 +619,17 @@ export const ptBR: Translation = {
   "settings.installFound": "Instalação do {{game}} encontrada",
   "settings.detectInstallFailed":
     "Não foi possível detectar a pasta de instalação",
+  "settings.wineRunnerDesc":
+    "{{game}} é um jogo de Windows, então em um Mac ele roda dentro de uma bottle do CrossOver, Whisky ou Wine. É por aí que o Jogar o inicia.",
+  "settings.wineRunnerNone": "Nenhum runner do Wine encontrado",
+  "settings.pickWineRunner": "Selecione um binário do Wine (ex.: o wine do CrossOver)",
+  "settings.wineRunnerFailed": "Não foi possível definir o runner do Wine",
+  "settings.wineBottlesFound_one":
+    "{{count}} bottle encontrada para procurar sua instalação.",
+  "settings.wineBottlesFound_other":
+    "{{count}} bottles encontradas para procurar sua instalação.",
+  "settings.wineBottlesNone":
+    "Nenhuma bottle encontrada — instale o {{game}} no CrossOver, Whisky ou Wine primeiro.",
   "settings.pickProfilesFolder":
     "Selecione sua pasta de perfis do {{game}}",
   "settings.profilesSet": "Pasta de perfis definida",

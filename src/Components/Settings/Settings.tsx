@@ -32,6 +32,9 @@ import {
   setProfilesPath,
   setRunInBackground,
   setWatchModsReload,
+  setWineRunner,
+  wineHostInfo,
+  type WineHostInfo,
   type OverlayState,
   experimentalState as experimentalStateApi,
   setExperimental,
@@ -460,6 +463,46 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  // macOS: MX Bikes is a Windows binary, so Play has to go through a Wine wrapper. What
+  // we found is shown rather than assumed — "no runner" is the difference between Play
+  // working and Play failing, and the player should see it before they press it.
+  const [wineHost, setWineHost] = useState<WineHostInfo | null>(null);
+  useEffect(() => {
+    if (!isMac) return;
+    wineHostInfo()
+      .then(setWineHost)
+      .catch(() => setWineHost(null));
+  }, [isMac]);
+
+  const changeWineRunner = async () => {
+    const picked = await pickFolder({
+      multiple: false,
+      title: t("settings.pickWineRunner"),
+    });
+    if (typeof picked !== "string") return;
+    setBusy(true);
+    try {
+      setWineHost(await setWineRunner(picked));
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.wineRunnerFailed"), { description: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetWineRunner = async () => {
+    setBusy(true);
+    try {
+      setWineHost(await setWineRunner(""));
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.wineRunnerFailed"), { description: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const changeProfilesFolder = async () => {
     const picked = await pickFolder({
       directory: true,
@@ -694,6 +737,45 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             >
               Detect automatically
             </button>
+
+            {/* macOS only: the Wine wrapper Play launches through. */}
+            {isMac && (
+              <>
+                <div className="mt-1 h-px bg-border" />
+                <p className="text-[12px] text-muted-foreground">
+                  {t("settings.wineRunnerDesc", { game: game.display })}
+                </p>
+                <div className="flex gap-2">
+                  <div className="flex flex-1 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
+                    <span className="flex-1 truncate" title={wineHost?.runner}>
+                      {wineHost?.runner || t("settings.wineRunnerNone")}
+                    </span>
+                    {wineHost?.runner && (
+                      <span className="flex flex-none items-center gap-1 font-sans text-[11px] font-semibold text-success">
+                        <Check className="size-3" strokeWidth={3} /> {wineHost.via}
+                      </span>
+                    )}
+                  </div>
+                  <Button variant="outline" size="sm" onClick={changeWineRunner} disabled={busy}>
+                    {config.wineRunner ? t("settings.change") : t("settings.set")}
+                  </Button>
+                </div>
+                <p className="text-[11.5px] text-muted-foreground">
+                  {wineHost?.bottles.length
+                    ? t("settings.wineBottlesFound", { count: wineHost.bottles.length })
+                    : t("settings.wineBottlesNone", { game: game.display })}
+                </p>
+                {config.wineRunner && (
+                  <button
+                    onClick={resetWineRunner}
+                    disabled={busy}
+                    className="cursor-default self-start text-[11.5px] font-semibold text-primary hover:brightness-110 disabled:opacity-50"
+                  >
+                    {t("settings.resetToDefault")}
+                  </button>
+                )}
+              </>
+            )}
           </Section>
 
           {/* general / background */}
