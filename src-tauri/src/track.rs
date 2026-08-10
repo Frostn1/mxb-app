@@ -46,6 +46,7 @@ fn role_of(name: &str) -> &'static str {
         "tsc" => "scenery",
         "rdf" => "road",
         "ssc" => "surfaces",
+        "amb" => "ambience",
         "ini" | "cfg" => "config",
         "edf" => "model",
         "jpg" | "jpeg" | "png" | "dds" | "tga" | "bmp" => "image",
@@ -622,6 +623,8 @@ mod tests {
         assert_eq!(role_of("Hangtown/Hangtown.tsc"), "scenery");
         assert_eq!(role_of("Hangtown/Hangtown.ini"), "config");
         assert_eq!(role_of("Hangtown/preview.jpg"), "image");
+        assert_eq!(role_of("localcross.amb"), "ambience");
+        assert_eq!(role_of("gfx.cfg"), "config");
         assert_eq!(role_of("Hangtown/notes.txt"), "other");
     }
 
@@ -639,6 +642,21 @@ mod tests {
     fn a_track_with_no_heightfield_offers_nothing() {
         let names = vec!["T/T.ini".to_string(), "T/preview.jpg".to_string()];
         assert!(heightfield_entries(&names).is_empty());
+    }
+
+    /// A real MX Bikes track's descriptor, straight out of a published `.pkz`.
+    const REAL_INI: &str = include_str!("fixtures/localcross.ini");
+
+    #[test]
+    fn a_real_track_ini_offers_the_probe_nothing() {
+        // This matters more than it looks. A published track's `.ini` describes the race —
+        // name, weather, photo pose — and says nothing whatever about the terrain grid. So
+        // the `ini` hint path is close to dead in practice, and the probe has to recover the
+        // shape from the height file itself. Anything that reads dimensions out of here is
+        // inventing them.
+        let (dims, scale) = ini_hints(REAL_INI);
+        assert_eq!(dims, None, "a real track states no grid dimensions");
+        assert_eq!(scale, None, "a real track states no sample spacing");
     }
 
     #[test]

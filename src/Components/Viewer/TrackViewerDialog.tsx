@@ -20,6 +20,9 @@ import { useT } from "../../i18n/context";
 const COARSE_DIM = 96;
 const FINE_DIM = 320;
 
+/** Metres. Below this, `[info] length` is a placeholder rather than a lap. */
+const MIN_PLAUSIBLE_LENGTH = 50;
+
 type Exaggeration = "1" | "2" | "4";
 
 interface TrackViewerDialogProps {
@@ -99,7 +102,12 @@ export function TrackViewerDialog({
   const rows: [string, string][] = [];
   if (meta?.author) rows.push([t("libraryDetail.author"), meta.author]);
   if (meta?.location) rows.push([t("libraryDetail.location"), meta.location]);
-  if (meta?.length) rows.push([t("libraryDetail.length"), formatLength(meta.length)]);
+  // Track builders leave `length` at a placeholder more often than they fill it in — a
+  // published track in hand states `length = 1` while its own `.rdf` puts the finish line at
+  // 97 m. A lap shorter than this isn't a motocross track, so say nothing rather than "1 m".
+  if (meta?.length && meta.length >= MIN_PLAUSIBLE_LENGTH) {
+    rows.push([t("libraryDetail.length"), formatLength(meta.length)]);
+  }
   if (meta?.altitude != null) rows.push([t("libraryDetail.altitude"), `${meta.altitude} m`]);
   if (terrain) {
     rows.push([t("trackViewer.grid"), `${terrain.width} × ${terrain.height}`]);
