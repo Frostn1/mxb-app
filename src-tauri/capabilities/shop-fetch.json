@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "shop-fetch",
+  "description": "The hidden mxbikes-shop.com window that reads the signed-in purchases page and downloads bought files, for a flow Cloudflare's managed challenge puts out of reach of the HTTP client. This runs a REMOTE origin, so like the mxb-fetch window it gets the narrowest capability in the app: permission to emit an event, and nothing else — no shell, dialog, filesystem, updater, process or window control. A central guard in main.rs (`ipc_allowed`) additionally rejects every IPC call from this window except the single event emit, because app commands registered with generate_handler! are not covered by this ACL.",
+  "webviews": ["shop-fetch"],
+  "remote": {
+    "urls": ["https://mxbikes-shop.com", "https://mxbikes-shop.com/*"]
+  },
+  "permissions": ["core:event:allow-emit"]
+}

@@ -8,7 +8,7 @@
 use reqwest::cookie::Jar;
 use reqwest::{Client, ClientBuilder, Url};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
@@ -30,26 +30,6 @@ pub type Cookies = Vec<(String, String)>;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct Stored {
     cookies: Cookies,
-}
-
-/// A client, once a site has one. Both sites hold theirs in Tauri managed state.
-#[derive(Default)]
-pub struct Store {
-    client: Mutex<Option<Client>>,
-}
-
-impl Store {
-    pub fn client(&self) -> Option<Client> {
-        self.client.lock().unwrap().clone()
-    }
-
-    pub fn is_set(&self) -> bool {
-        self.client.lock().unwrap().is_some()
-    }
-
-    pub fn set(&self, client: Option<Client>) {
-        *self.client.lock().unwrap() = client;
-    }
 }
 
 /// Add `cookies` to `jar` as if the site had set them.

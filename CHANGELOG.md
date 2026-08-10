@@ -10,6 +10,50 @@
   **Choose a folder…**, for an unpacked track) stages exactly what a drop stages: same
   classification, same review sheet showing where each piece lands, same collision
   warnings, and nothing written until you confirm.
+- **Purchases works like the rest of the app now.** The tab you install your bought mods from
+  was a bare grid: no way to see what something actually was before installing it, no way to
+  find one among sixty, and an "Installed" badge that mostly didn't light up. It now has the
+  catalog's search, category pills, sorting (recently purchased, name, or not-installed-first)
+  and a full detail page — screenshots, description, author — reached by clicking a purchase's
+  artwork, the same as the catalog.
+- **Installing a purchase now works exactly like installing from Browse.** Add to Library asks
+  where it should go — the same destination picker, with the folders you already use and the
+  one you picked last time — confirms first if you already have it, then queues the install and
+  reports it on the same card, with the same FrostMod reload. Starting a second install while
+  one is running queues it instead of freezing the grid, which is what the purchases tab used
+  to do.
+- **The "Installed" badge is now a fact rather than a guess.** It used to compare the store's
+  product name against your folder names, and those routinely disagree — *2022 ARL MX Round 1*
+  ships as `2022.ARL.MX.RD01.pkz` and lands in a folder named after the file, so the badge
+  missed. Each install now records what it put where. Anything installed before this keeps the
+  old fuzzy match as a fallback.
+
+### Fixed
+- **The MX Bikes Shop sign-in no longer loops on "Verify you are human", and your purchases
+  install again.** The store now puts a Cloudflare *managed* challenge in front of every page
+  the signed-in half touches — the login form, the purchases list, and the file downloads
+  themselves. Only a real browser can clear one of those, by running its JavaScript, and the
+  pass it earns can't be handed to an HTTP client, so the app was asking for pages it could
+  never be given. Two things came of that: signing in sent you to the purchases page the
+  moment your password was accepted, straight into a second challenge, which is the loop; and
+  even a sign-in that got through had nothing behind it, because listing and downloading were
+  refused the same way.
+
+  The whole signed-in flow now happens inside a real browser window instead. Signing in lands
+  on a page Cloudflare doesn't gate, your purchases are read from a hidden window that has
+  actually cleared the check, and a bought file is downloaded by the browser itself straight
+  into the staging folder — so nothing large is squeezed through JavaScript. Browsing the
+  public catalog was never affected and is unchanged.
+
+  Two side effects worth knowing: an install now shows megabytes downloaded rather than a
+  percentage, because the browser reports a start and a finish and nothing in between; and
+  **Log out** now clears the browser's cookies too, which it has to, so the next sign-in is a
+  real one.
+- **A sign-in that fails now says so.** After five minutes of getting nowhere the app gave up
+  in complete silence — no message, no log line — which is what made a stuck challenge look
+  like an app that had simply hung. It now reports the failure and closes the dead window, and
+  writes which cookies the window ended up with (names only, never values) so a log says
+  whether the challenge ever cleared.
 
 ## Unreleased — paint sync actually closes the loop
 

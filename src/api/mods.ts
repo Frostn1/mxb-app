@@ -1406,19 +1406,40 @@ export function shopLogout(): Promise<void> {
 }
 
 /** The signed-in user's purchased downloads ("All My Downloads"). */
-export function shopMyDownloads(): Promise<ShopItem[]> {
-  return invoke<ShopItem[]>("shop_my_downloads");
+/**
+ * The purchases page is read out of a hidden WebView parked on it — an HTTP client can't get
+ * past the store's Cloudflare challenge. That window keeps whatever it last loaded, so
+ * `reload` is what makes Refresh actually re-fetch rather than re-read the same DOM.
+ */
+export function shopMyDownloads(reload = false): Promise<ShopItem[]> {
+  return invoke<ShopItem[]>("shop_my_downloads", { reload });
 }
 
 /**
- * Download a purchased file and stage it for review. Nothing is written under `mods/`.
+ * Download a purchased file and install it where the caller chose.
  *
- * Returns an ordinary `DropPlan`, so a purchase finishes through the same review sheet and the
- * same `commitDrop` a drag-and-drop does — and lands where its *contents* say it belongs
- * rather than where its title was guessed to. Progress arrives via `onInstallProgress`.
+ * The shop's `addToLibrary`: same destination arguments, same progress events, same placement —
+ * only the bytes differ, arriving through a WebView because the store's file URLs sit behind
+ * Cloudflare's managed challenge.
  */
-export function shopStage(item: ShopItem): Promise<DropPlan> {
-  return invoke<DropPlan>("shop_stage", { item });
+export function shopInstall(
+  item: ShopItem,
+  subpath: string,
+  destFolder: string,
+): Promise<void> {
+  return invoke<void>("shop_install", { item, subpath, destFolder });
+}
+
+/**
+ * Which purchased products have a recorded install, and the folders they claim.
+ *
+ * Recorded at install time so the "Installed" badge is a fact. It used to be inferred by
+ * comparing the product name to library folder names, which routinely disagree — `2022 ARL MX
+ * Round 1` ships as `2022.ARL.MX.RD01.pkz` and lands in a folder named after the file. The
+ * fuzzy comparison stays as the fallback for anything installed before this existed.
+ */
+export function shopInstalledMap(): Promise<Record<string, string[]>> {
+  return invoke<Record<string, string[]>>("shop_installed_map");
 }
 
 /** Fires after a WebView sign-in completes; payload is whether it succeeded. */

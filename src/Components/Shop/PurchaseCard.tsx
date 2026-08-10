@@ -41,6 +41,8 @@ interface PurchaseCardProps {
   /** Any card being staged disables the rest: one plan may be staged at a time. */
   disabled: boolean;
   onInstall: (file: ShopItem) => void;
+  /** Open the detail page. Absent when the catalog has no entry to show. */
+  onOpen?: () => void;
 }
 
 /**
@@ -63,6 +65,7 @@ export default function PurchaseCard({
   progress,
   disabled,
   onInstall,
+  onOpen,
 }: PurchaseCardProps) {
   const t = useT();
   const [broken, setBroken] = useState(false);
@@ -79,8 +82,9 @@ export default function PurchaseCard({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className="group relative flex flex-col overflow-hidden rounded-xl border border-white/[0.07] bg-card text-left transition-colors hover:border-white/15">
+          {/* Artwork opens the detail page, like `ShopCard`; the button installs. */}
           <button
-            onClick={install}
+            onClick={onOpen ?? install}
             disabled={disabled}
             className="relative aspect-square cursor-default overflow-hidden bg-gradient-to-br from-[#3a3f45] to-[#20242a] disabled:cursor-not-allowed"
           >
@@ -146,48 +150,60 @@ export default function PurchaseCard({
               </span>
             )}
 
-            {/* Only a product with variants gets a picker; a single file has nothing to ask. */}
-            {multi && (
-              <Select value={pickedId} onValueChange={setPickedId} disabled={disabled}>
-                <SelectTrigger className="h-7 w-full bg-background text-[11.5px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {files.map((f) => (
-                    <SelectItem key={f.id} value={String(f.id)}>
-                      {f.fileLabel || f.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            {/* Installing lives on the detail page, like the catalog's cards. The exception is
+                a purchase the catalog doesn't list: it has no detail page, so the card keeps
+                the button and the variant picker or there is no way to install it at all. */}
+            {!onOpen && (
+              <>
+                {multi && (
+                  <Select value={pickedId} onValueChange={setPickedId} disabled={disabled}>
+                    <SelectTrigger className="h-7 w-full bg-background text-[11.5px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {files.map((f) => (
+                        <SelectItem key={f.id} value={String(f.id)}>
+                          {f.fileLabel || f.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
 
-            <Button
-              size="sm"
-              variant={installed ? "outline" : "default"}
-              className="mt-0.5 h-7 w-full text-[12px]"
-              onClick={install}
-              disabled={disabled}
-            >
-              {busy ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Download className="size-3.5" />
-              )}
-              {busy
-                ? t("purchases.downloading")
-                : installed
-                  ? t("purchases.reinstall")
-                  : t("purchases.install")}
-            </Button>
+                <Button
+                  size="sm"
+                  variant={installed ? "outline" : "default"}
+                  className="mt-0.5 h-7 w-full text-[12px]"
+                  onClick={install}
+                  disabled={disabled}
+                >
+                  {busy ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
+                  {busy
+                    ? t("purchases.downloading")
+                    : installed
+                      ? t("purchases.reinstall")
+                      : t("purchases.install")}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={install} disabled={disabled}>
-          <Download className="size-4" />
-          {installed ? t("purchases.reinstall") : t("purchases.install")}
-        </ContextMenuItem>
+        {onOpen ? (
+          <ContextMenuItem onSelect={onOpen}>
+            <Store className="size-4" /> {t("purchases.viewDetails")}
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuItem onSelect={install} disabled={disabled}>
+            <Download className="size-4" />
+            {installed ? t("purchases.reinstall") : t("purchases.install")}
+          </ContextMenuItem>
+        )}
         {listing?.url && (
           <ContextMenuItem onSelect={() => void openShopUrl(listing.url)}>
             <ExternalLink className="size-4" /> {t("shopCatalog.openOnStore")}
