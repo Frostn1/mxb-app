@@ -764,6 +764,8 @@ export const it: Translation = {
   "sync.keptYours_other": "{{count}} grafiche sono state lasciate intatte",
   "sync.keptYoursWhy": "Un altro pilota usa lo stesso nome file per una grafica diversa. La tua è stata mantenuta — l'app non sovrascrive mai una livrea che non ha installato. Vedrai quel pilota con la tua versione.",
   "servers.booting": "Avvio in corso…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "Questo server non è riuscito a completare la configurazione e si è spento. Ecco cosa ha riportato:",
   "servers.bootingWhy": "Installazione del gioco sulla nuova macchina. Richiede qualche minuto — scarica l'installer completo.",
   "servers.shutsDown": "Si spegne",
   "servers.inUse": "In uso",

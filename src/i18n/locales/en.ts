@@ -750,6 +750,8 @@ export const en = {
   "sync.keptYours_other": "{{count}} paints were left alone",
   "sync.keptYoursWhy": "Another rider uses the same file name for a different paint. Yours was kept — the app never overwrites a livery it didn't install. You'll see that rider in your version of it.",
   "servers.booting": "Starting up…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "This server couldn't finish setting itself up, so it shut down. Here's what it reported:",
   "servers.bootingWhy": "Installing the game on the new machine. This takes a few minutes — it downloads the full installer.",
   "servers.shutsDown": "Shuts down",
   "servers.inUse": "In use",

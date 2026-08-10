@@ -11,6 +11,45 @@
   enrolled in, which makes it the worst one to be quietly missing. Switching it back off
   stops the watcher rather than leaving it running.
 
+## Unreleased — a server that says what it's doing
+
+### Fixed
+- **A provisioned server's agent can read its own config.** `agent.json` was written by hand as
+  JSON inside a PowerShell here-string, and the install path interpolated with single
+  backslashes -- so the file said `"game_dir": "C:\mxb\\game"`, and `\m` is not a valid JSON
+  escape. The agent refused to parse it and exited immediately on every server ever
+  provisioned. It is now built with `ConvertTo-Json`, which escapes properly, and the file is
+  parsed once on the box before the agent is asked to.
+
+- **A provisioned server can actually download the game.** The bootstrap fetched the installer
+  with `Start-BitsTransfer`, which cannot work where it runs: EC2 user data executes as SYSTEM
+  at boot with no interactive session, and BITS refuses with `0x800704DD` -- "the user has not
+  logged on to the network". Every launch died at that step. It now uses `curl.exe` from
+  System32, which streams to disk without a session and retries on its own, and the size is
+  checked afterwards so a truncated download fails loudly rather than extracting into nonsense.
+  Found by launching a real one, and diagnosed in a single attempt because the instance now
+  reports its transcript before shutting down.
+
+- **A server whose name isn't plain Latin-1 can be created.** EC2 user data was encoded with
+  `btoa`, which takes a "binary string" of one character per byte and throws on anything above
+  U+00FF. Any server named with an emoji or a non-Latin script failed to launch with
+  `InvalidCharacterError` and nothing else to go on. Found by trying to launch a real one.
+
+### Added
+- **A booting server now reports its progress, and its failure.** Creating a server launches a
+  machine that runs a long script with nobody watching: no console, no key pair, so
+  `C:\mxb-bootstrap.log` cannot be read from outside — and the script's own failure trap shuts
+  the instance down, which terminates it and destroys the log. A bootstrap that died at minute
+  twelve and one still downloading a 2 GB installer were indistinguishable: a server that never
+  turned up. The instance now posts each step to the control plane, and posts the tail of its
+  transcript *before* shutting down, so a failure leaves an explanation behind.
+- **"Create a server" says which step it is on** — `downloading the game`, `extracting the
+  game`, `installing the agent` — instead of spinning for a quarter of an hour with nothing to
+  show, and shows the reported error if the server gave up.
+- **`POST /v1/servers/:id/bootstrap`**, authenticated by the agent token the box already holds,
+  the same credential and the same refusal as `hello`. Stage names are validated and the stored
+  log is capped and kept only on failure.
+
 ## 2026-08-09 — v0.9.0 — Servers you can create, paints everyone can see, and a paint studio
 
 ### Added
