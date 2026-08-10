@@ -25,6 +25,7 @@ import {
   PersonStanding,
   Wrench,
   RefreshCw,
+  Package,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
@@ -59,8 +60,9 @@ export const RELEASES: Release[] = [
       body: "showcase.v090.hero.body",
     },
     highlights: [
-      { icon: Sparkles, text: "showcase.v090.reshade" },
+      { icon: Package, text: "showcase.v090.bundles" },
       { icon: Store, text: "showcase.v090.purchases" },
+      { icon: Sparkles, text: "showcase.v090.reshade" },
       { icon: PersonStanding, text: "showcase.v090.ridingStyles" },
       { icon: Wrench, text: "showcase.v090.frostmod" },
       { icon: RefreshCw, text: "showcase.v090.updates" },
