@@ -1079,6 +1079,8 @@ export const es: Translation = {
     "Una nueva pestaña Diseños crea diseños a partir de imágenes corrientes — TGA, PNG, JPG — y los instala donde el juego los busca: una decoración de moto, un diseño de casco o de gafas, el kit o los guantes de tu piloto. Descomprime un diseño que ya tengas para conseguir una plantilla que encaje de verdad con el modelo, edítala en cualquier editor y devuélvela tal cual. El estudio comprueba tus nombres de archivo frente a los que usa la malla antes de guardar, y luego muestra el resultado sobre el modelo real.",
   "showcase.v090.reshade":
     "Explora, instala y cambia presets de ReShade desde la app — con una entrada Desactivado para comparar con el aspecto original, y un aviso cuando a un preset le faltan efectos.",
+  "showcase.v090.bundles":
+    "Comparte un preset como paquete completo y el código lleva los propios mods: decoración, casco y gafas, equipación, guantes, botas y neumáticos. Importación completa deja cada archivo donde el juego lo lee, así que alguien con la carpeta de mods vacía acaba llevando exactamente lo que creaste.",
   "showcase.v090.purchases":
     "Mis compras entra en tu cuenta de mxbikes-shop.com e instala lo que ya has pagado, con la misma hoja de revisión que usa el arrastrar y soltar.",
   "showcase.v090.ridingStyles":
