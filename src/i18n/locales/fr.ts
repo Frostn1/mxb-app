@@ -1438,6 +1438,20 @@ export const fr: Translation = {
     "L'aperçu 3D est réservé à MX Bikes pour l'instant : les modèles de {{game}} ont besoin de leurs propres liaisons de pièces. Tout le reste fonctionne pareil et la déco s'enregistre normalement.",
   "designer.gearNote":
     "Affiché sur le pilote d'origine — ta propre tenue n'est pas chargée ici.",
+  "designer.reference": "Référence",
+  "designer.traceTemplate": "Modèle",
+  "designer.traceHint":
+    "Sors de la planche la peinture dont tu es parti et affiche-la en transparence dessous, pour la décalquer. Elle cesse de faire partie de ce que tu enregistres.",
+  "designer.noTemplate": "Cette planche n'a aucun modèle à décalquer : elle est partie vierge.",
+  "designer.uvMap": "Carte UV",
+  "designer.uvHint":
+    "Montre où tombent sur cette planche les carrosseries du modèle, chacune dans sa couleur.",
+  "designer.noGeometry": "Charge un modèle dans l'aperçu pour voir sa disposition UV.",
+  "designer.uvNoMatch":
+    "Rien sur le modèle n'utilise une texture nommée « {{name}} », il n'y a donc aucune disposition UV à montrer.",
+  "designer.ghostBuried":
+    "La référence est sous la planche, et le modèle de cette planche est opaque : active Modèle pour l'en sortir et voir au travers.",
+  "designer.ghostNote": "Un simple repère : la référence n'est jamais enregistrée dans la peinture.",
   "designer.resetView": "Réinitialiser la vue",
 
   // ── Designer › les outils de peinture ─────────────────────────────────────────

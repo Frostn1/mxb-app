@@ -1424,6 +1424,20 @@ export const it: Translation = {
   "designer.noPreviewForGame":
     "L'anteprima 3D per ora è solo per MX Bikes: i modelli di {{game}} hanno bisogno delle proprie associazioni delle parti. Tutto il resto funziona uguale e la livrea si salva normalmente.",
   "designer.gearNote": "Mostrato sul pilota di serie — la tua tenuta non è caricata qui.",
+  "designer.reference": "Riferimento",
+  "designer.traceTemplate": "Modello",
+  "designer.traceHint":
+    "Togli dalla planche la vernice di partenza e mostrala in trasparenza sotto, per ricalcarla. Smette di far parte di ciò che salvi.",
+  "designer.noTemplate": "Questa planche non ha un modello da ricalcare: è nata vuota.",
+  "designer.uvMap": "Mappa UV",
+  "designer.uvHint":
+    "Mostra dove finiscono su questa planche le carene del modello, ognuna con il suo colore.",
+  "designer.noGeometry": "Carica un modello nell'anteprima per vederne il layout UV.",
+  "designer.uvNoMatch":
+    "Nessuna parte del modello usa una texture chiamata “{{name}}”, quindi non c'è un layout UV da mostrare.",
+  "designer.ghostBuried":
+    "Il riferimento sta sotto la planche, e il modello di questa planche è opaco: attiva Modello per toglierlo e vedere attraverso.",
+  "designer.ghostNote": "Solo una guida: il riferimento non viene mai salvato nella vernice.",
   "designer.resetView": "Reimposta vista",
 
   // ── Designer › gli strumenti di pittura ───────────────────────────────────────

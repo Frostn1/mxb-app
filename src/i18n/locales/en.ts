@@ -1399,6 +1399,20 @@ export const en = {
   "designer.noPreviewForGame":
     "The 3D preview is MX Bikes only for now — the {{game}} models need their own part bindings. Everything else here works the same, and the paint saves normally.",
   "designer.gearNote": "Shown on the stock rider — your own kit isn't loaded here.",
+  "designer.reference": "Reference",
+  "designer.traceTemplate": "Template",
+  "designer.traceHint":
+    "Lift the paint you started from out of the sheet and show it faintly underneath, to trace over. It stops being part of what you save.",
+  "designer.noTemplate": "This sheet has no template to trace â it started blank.",
+  "designer.uvMap": "UV map",
+  "designer.uvHint":
+    "Show where the model's bodywork lands on this sheet, each piece in its own colour.",
+  "designer.noGeometry": "Load a model in the preview to see its UV layout.",
+  "designer.uvNoMatch":
+    "Nothing on the model uses a texture called “{{name}}”, so there is no UV layout to show.",
+  "designer.ghostBuried":
+    "The reference sits under the sheet, and this sheet’s template is opaque — turn on Template to lift it out and see through.",
+  "designer.ghostNote": "A guide only â the reference is never saved into the paint.",
   "designer.resetView": "Reset view",
 
   // ── Designer › the paint tools ────────────────────────────────────────────────

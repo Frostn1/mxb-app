@@ -1447,6 +1447,20 @@ export const de: Translation = {
     "Die 3D-Vorschau gibt es vorerst nur für MX Bikes — die Modelle von {{game}} brauchen eigene Teil-Zuordnungen. Alles andere funktioniert gleich, und das Design wird ganz normal gespeichert.",
   "designer.gearNote":
     "Auf dem Standardfahrer gezeigt — deine eigene Ausrüstung ist hier nicht geladen.",
+  "designer.reference": "Referenz",
+  "designer.traceTemplate": "Vorlage",
+  "designer.traceHint":
+    "Hebt die Lackierung, mit der du angefangen hast, aus dem Blatt heraus und zeigt sie schwach darunter zum Abpausen. Sie ist dann nicht mehr Teil dessen, was du speicherst.",
+  "designer.noTemplate": "Dieses Blatt hat keine Vorlage zum Abpausen — es war von Anfang an leer.",
+  "designer.uvMap": "UV-Karte",
+  "designer.uvHint":
+    "Zeigt, wo die Verkleidungsteile des Modells auf diesem Blatt landen, jedes in eigener Farbe.",
+  "designer.noGeometry": "Lade in der Vorschau ein Modell, um sein UV-Layout zu sehen.",
+  "designer.uvNoMatch":
+    "Nichts am Modell verwendet eine Textur namens „{{name}}“, also gibt es kein UV-Layout zu zeigen.",
+  "designer.ghostBuried":
+    "Die Referenz liegt unter dem Blatt, und die Vorlage dieses Blattes ist undurchsichtig — schalte Vorlage ein, um sie herauszuheben und hindurchzusehen.",
+  "designer.ghostNote": "Nur eine Hilfe — die Referenz wird nie in die Lackierung gespeichert.",
   "designer.resetView": "Ansicht zurücksetzen",
 
   // ── Designer › die Malwerkzeuge ───────────────────────────────────────────────
