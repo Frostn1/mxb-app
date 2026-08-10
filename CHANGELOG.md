@@ -1,55 +1,5 @@
 # Changelog
 
-## Unreleased — turning paint sync on turns all of it on
-
-### Fixed
-- **Switching Experimental on now starts watching for look changes straight away.** The
-  watcher that notices you changing kit in the game's own garage was only ever started when
-  the app launched, so turning the feature on left it stopped until the next restart — the
-  app kept publishing when you applied a preset or pressed Play, but a change made in the
-  garage went unnoticed for the rest of the session. That is the session you have just
-  enrolled in, which makes it the worst one to be quietly missing. Switching it back off
-  stops the watcher rather than leaving it running.
-
-## Unreleased — a server that says what it's doing
-
-### Fixed
-- **A provisioned server's agent can read its own config.** `agent.json` was written by hand as
-  JSON inside a PowerShell here-string, and the install path interpolated with single
-  backslashes -- so the file said `"game_dir": "C:\mxb\\game"`, and `\m` is not a valid JSON
-  escape. The agent refused to parse it and exited immediately on every server ever
-  provisioned. It is now built with `ConvertTo-Json`, which escapes properly, and the file is
-  parsed once on the box before the agent is asked to.
-
-- **A provisioned server can actually download the game.** The bootstrap fetched the installer
-  with `Start-BitsTransfer`, which cannot work where it runs: EC2 user data executes as SYSTEM
-  at boot with no interactive session, and BITS refuses with `0x800704DD` -- "the user has not
-  logged on to the network". Every launch died at that step. It now uses `curl.exe` from
-  System32, which streams to disk without a session and retries on its own, and the size is
-  checked afterwards so a truncated download fails loudly rather than extracting into nonsense.
-  Found by launching a real one, and diagnosed in a single attempt because the instance now
-  reports its transcript before shutting down.
-
-- **A server whose name isn't plain Latin-1 can be created.** EC2 user data was encoded with
-  `btoa`, which takes a "binary string" of one character per byte and throws on anything above
-  U+00FF. Any server named with an emoji or a non-Latin script failed to launch with
-  `InvalidCharacterError` and nothing else to go on. Found by trying to launch a real one.
-
-### Added
-- **A booting server now reports its progress, and its failure.** Creating a server launches a
-  machine that runs a long script with nobody watching: no console, no key pair, so
-  `C:\mxb-bootstrap.log` cannot be read from outside — and the script's own failure trap shuts
-  the instance down, which terminates it and destroys the log. A bootstrap that died at minute
-  twelve and one still downloading a 2 GB installer were indistinguishable: a server that never
-  turned up. The instance now posts each step to the control plane, and posts the tail of its
-  transcript *before* shutting down, so a failure leaves an explanation behind.
-- **"Create a server" says which step it is on** — `downloading the game`, `extracting the
-  game`, `installing the agent` — instead of spinning for a quarter of an hour with nothing to
-  show, and shows the reported error if the server gave up.
-- **`POST /v1/servers/:id/bootstrap`**, authenticated by the agent token the box already holds,
-  the same credential and the same refusal as `hello`. Stage names are validated and the stored
-  log is capped and kept only on failure.
-
 ## 2026-08-09 — v0.9.0 — Servers you can create, paints everyone can see, and a paint studio
 
 ### Added
@@ -61,6 +11,16 @@
 - **Cloud servers have a lifecycle.** Booting, ready with an address, a Join button, start and
   stop, a track picker, whether it's in the public list, and how many minutes until it shuts
   itself down. Previously the panel showed a raw instance id and a state string.
+- **A booting server now reports its progress, and its failure.** Creating a server launches a
+  machine that runs a long script with nobody watching: no console, no key pair, so
+  `C:\mxb-bootstrap.log` cannot be read from outside — and the script's own failure trap shuts
+  the instance down, which terminates it and destroys the log. A bootstrap that died at minute
+  twelve and one still downloading a 2 GB installer were indistinguishable: a server that never
+  turned up. The instance now posts each step to the control plane, and posts the tail of its
+  transcript *before* shutting down, so a failure leaves an explanation behind.
+- **"Create a server" says which step it is on** — `downloading the game`, `extracting the
+  game`, `installing the agent` — instead of spinning for a quarter of an hour with nothing to
+  show, and shows the reported error if the server gave up.
 - **Publish a server you run to the public list, from the app.** Until now `servers` rows
   were hand-written SQL, so running a server and *having anyone able to join it* were
   separate problems — the second one solved by passing an address around privately. A
@@ -101,6 +61,9 @@
   account, and one registration per address.
 - **`GET /v1/servers/mine`**, which hands a server's agent token to the account that owns it —
   the only way to drive a box that has no console and prints its pairing code to nobody.
+- **`POST /v1/servers/:id/bootstrap`**, authenticated by the agent token the box already holds,
+  the same credential and the same refusal as `hello`. Stage names are validated and the stored
+  log is capped and kept only on failure.
 - **The agent ships as a build artifact**, served from R2 through the control plane. A
   booting instance holds no credentials and has no way to be given any, so that URL is
   unauthenticated by necessity; the bucket itself stays private.
@@ -285,6 +248,13 @@
   filtered to `profile.ini` alone so the replay and telemetry churn a session produces can't
   set it off. Redundant fires cost nothing: the look is hashed and an unchanged one is never
   sent.
+- **Switching Experimental on now starts watching for look changes straight away.** The
+  watcher that notices you changing kit in the game's own garage was only ever started when
+  the app launched, so turning the feature on left it stopped until the next restart — the
+  app kept publishing when you applied a preset or pressed Play, but a change made in the
+  garage went unnoticed for the rest of the session. That is the session you have just
+  enrolled in, which makes it the worst one to be quietly missing. Switching it back off
+  stops the watcher rather than leaving it running.
 - **Every bike is published, not just the last one touched.** Storage held one loadout per
   account — `loadout_paints` had no bike dimension at all — so publishing a second bike
   deleted the first. A rider looked right on whichever bike the app last saw and default on
@@ -299,6 +269,24 @@
   and the row stayed unpublished forever — so the server could not be joined, managed or even
   deleted, only waited out by the idle reaper. The instance now announces itself once its
   agent answers, which fills in its address and puts it in the join picker.
+- **A server whose name isn't plain Latin-1 can be created.** EC2 user data was encoded with
+  `btoa`, which takes a "binary string" of one character per byte and throws on anything above
+  U+00FF. Any server named with an emoji or a non-Latin script failed to launch with
+  `InvalidCharacterError` and nothing else to go on. Found by trying to launch a real one.
+- **A provisioned server can actually download the game.** The bootstrap fetched the installer
+  with `Start-BitsTransfer`, which cannot work where it runs: EC2 user data executes as SYSTEM
+  at boot with no interactive session, and BITS refuses with `0x800704DD` — "the user has not
+  logged on to the network". Every launch died at that step. It now uses `curl.exe` from
+  System32, which streams to disk without a session and retries on its own, and the size is
+  checked afterwards so a truncated download fails loudly rather than extracting into nonsense.
+  Found by launching a real one, and diagnosed in a single attempt because the instance now
+  reports its transcript before shutting down.
+- **A provisioned server's agent can read its own config.** `agent.json` was written by hand as
+  JSON inside a PowerShell here-string, and the install path interpolated with single
+  backslashes — so the file said `"game_dir": "C:\mxb\\game"`, and `\m` is not a valid JSON
+  escape. The agent refused to parse it and exited immediately on every server ever
+  provisioned. It is now built with `ConvertTo-Json`, which escapes properly, and the file is
+  parsed once on the box before the agent is asked to.
 - **The idle reaper could never have reaped anything.** It read the agent address from a
   column that provisioning cannot fill in — EC2 assigns the public IP while the instance
   boots, long after the row is written — so every provisioned server looked permanently
