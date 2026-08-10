@@ -17,7 +17,9 @@ single flow:
 MXB App downloads the mod, extracts it, and drops the files into the matching MX
 Bikes `mods` folder automatically.
 
-Tracks, bikes and rider gear are supported today; more mod types are planned.
+Tracks, bikes, rider gear, paints, sounds, model swaps and riding-style
+animations are all recognised — and anything can be installed by dropping it on
+the window, sorted by what the archive holds rather than by what its title says.
 
 ## Download
 
@@ -184,7 +186,8 @@ skips the announcement. It's for testing that a build compiles, not for shipping
 
 Features coming next:
 
-- More mod types (assets, wheels, …) — the `ModSource` trait and category ids
-  already generalize beyond tracks, bikes and rider gear.
 - Reading your in-game track list through FrostMod (which already handles the
   live reload) to one-click-install the tracks you're missing.
+- A 3D preview for GP Bikes. Building a `.pnt` is title-agnostic and already
+  works there; only the preview needs part bindings GP Bikes hasn't got yet, so
+  the Studio says so plainly rather than showing an empty stage.
