@@ -79,6 +79,11 @@ export default function SupportersCard() {
   const { manifest, loading, stale, refresh } = useSupporters();
   const groups = groupByTier(manifest);
   const count = manifest.supporters.length;
+  // One nameless group means no distinction is being drawn, and a "Supporters" heading
+  // sitting directly under the "Supporters" section title — counting names the reader
+  // can already see — labels that non-distinction. Headings come back the moment there
+  // is more than one group, or the only group has a level of its own.
+  const showHeadings = groups.length > 1 || groups[0]?.tier != null;
   // A URL the manifest carries wins, so a bad default can be corrected without a
   // release — see the TODO on `SUPPORT_URL`.
   const supportUrl = manifest.supportUrl || SUPPORT_URL;
@@ -112,12 +117,14 @@ export default function SupportersCard() {
         <div className="flex flex-col gap-3">
           {groups.map((group) => (
             <div key={group.tier ?? "__untiered"} className="flex flex-col gap-1.5">
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-[11.5px] font-semibold text-foreground/80">
-                  {group.tier ?? t("supporters.untiered")}
-                </span>
-                <span className="text-[11px] text-faint">{group.people.length}</span>
-              </div>
+              {showHeadings && (
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[11.5px] font-semibold text-foreground/80">
+                    {group.tier ?? t("supporters.untiered")}
+                  </span>
+                  <span className="text-[11px] text-faint">{group.people.length}</span>
+                </div>
+              )}
               <div className="flex flex-wrap gap-1.5">
                 {group.people.map((person) => (
                   <span

@@ -40,7 +40,8 @@ export interface Supporter {
 }
 
 export interface SupportersManifest {
-  /** Overrides {@link SUPPORT_URL} when set — see the TODO above. */
+  /** Overrides {@link SUPPORT_URL} when set — how a moved page gets fixed without a
+   *  release. */
   supportUrl?: string;
   /** Membership levels, best first. Anything not listed here still renders; it just
    *  sorts after the named ones. */
@@ -49,13 +50,21 @@ export interface SupportersManifest {
 }
 
 /**
- * What a build ships with.
+ * What a build ships with — the list as it stood when the build was cut.
  *
- * Deliberately empty: inventing names to fill the page would credit people who never
- * gave anything. Until the manifest lands, the section shows its "nobody yet" state,
- * which is the honest version of the same screen.
+ * Only ever seen by an install that has never once reached the network; the manifest
+ * replaces it wholesale on the first successful fetch. It exists so a fresh offline
+ * launch thanks the people who are already there rather than claiming nobody is.
  */
-export const BUNDLED_SUPPORTERS: SupportersManifest = { tiers: [], supporters: [] };
+export const BUNDLED_SUPPORTERS: SupportersManifest = {
+  tiers: [],
+  supporters: [
+    { name: "HottPie" },
+    { name: "Mouk" },
+    { name: "SoggySwisher" },
+    { name: "LupaHo" },
+  ],
+};
 
 const CACHE_KEY = "mxb:supporters:v1";
 /** Long enough for a cold CDN, short enough that Settings isn't held open waiting. */
