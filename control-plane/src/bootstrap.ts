@@ -87,8 +87,13 @@ trap {
   Write-Output "bootstrap failed: $reason"
   try { Stop-Transcript } catch {}
   $tail = ""
-  try { $tail = Get-Content -Path "C:\\mxb-bootstrap.log" -Tail 150 -Raw } catch {}
-  Send-Stage -Stage "failed" -Ok $false -Log "$reason\`n$tail"
+  # -Tail and -Raw cannot be combined; asking for both throws, which the catch would swallow
+  # and leave this report with nothing in it but the throw message.
+  try { $tail = (Get-Content -Path "C:\\mxb-bootstrap.log" -Tail 200 | Out-String) } catch {}
+  # Whatever the agent itself said on the way out. Usually the actual answer.
+  $agentOut = ""
+  try { $agentOut = (Get-Content -Path "${ROOT}\\agent-out.txt","${ROOT}\\agent-err.txt" -ErrorAction SilentlyContinue | Out-String) } catch {}
+  Send-Stage -Stage "failed" -Ok $false -Log "$reason\`n--- agent output ---\`n$agentOut\`n--- transcript ---\`n$tail"
   Stop-Computer -Force
   exit 1
 }
@@ -191,6 +196,24 @@ $action = New-ScheduledTaskAction -Execute "${ROOT}\\mxb-agent.exe" -Argument "$
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
 Register-ScheduledTask -TaskName "mxb-agent" -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+# Run it once in the foreground first, with its output captured.
+#
+# The scheduled task is what keeps the agent alive across reboots, but it swallows everything
+# the process says: when the agent failed to come up, all we learned was that it hadn't. This
+# runs it directly for a few seconds purely so that a refusal to start has somewhere to say
+# why -- a bad agent.json, a missing folder, a binary Defender took exception to.
+$probe = Start-Process -FilePath "${ROOT}\\mxb-agent.exe" -ArgumentList "${ROOT}\\agent.json" \`
+  -WorkingDirectory "${ROOT}" -PassThru -NoNewWindow \`
+  -RedirectStandardOutput "${ROOT}\\agent-out.txt" -RedirectStandardError "${ROOT}\\agent-err.txt"
+Start-Sleep -Seconds 8
+if ($probe.HasExited) {
+  $out = (Get-Content -Path "${ROOT}\\agent-out.txt","${ROOT}\\agent-err.txt" -ErrorAction SilentlyContinue | Out-String)
+  throw "the agent exited immediately (code $($probe.ExitCode)): $out"
+}
+# It runs. Stop this copy so the scheduled task owns the port rather than racing it.
+Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+
 Start-ScheduledTask -TaskName "mxb-agent"
 Send-Stage -Stage "waiting for the agent"
 
@@ -198,7 +221,7 @@ Send-Stage -Stage "waiting for the agent"
 # route it serves without a token, and it is served before anything else is ready -- which is
 # all this needs to know: the process is alive and listening.
 $ready = $false
-foreach ($attempt in 1..30) {
+foreach ($attempt in 1..45) {
   try {
     Invoke-RestMethod -Uri "http://127.0.0.1:${input.agentPort}/health" -TimeoutSec 5 | Out-Null
     $ready = $true
@@ -207,7 +230,13 @@ foreach ($attempt in 1..30) {
     Start-Sleep -Seconds 2
   }
 }
-if (-not $ready) { throw "the agent never came up" }
+if (-not $ready) {
+  $info = ""
+  try { $info = (Get-ScheduledTaskInfo -TaskName "mxb-agent" | Format-List | Out-String) } catch {}
+  $running = ""
+  try { $running = (Get-Process -Name "mxb-agent" -ErrorAction SilentlyContinue | Out-String) } catch {}
+  throw "the agent never answered on ${input.agentPort}. task info: $info process: $running"
+}
 
 # Tell the control plane where this server is. Until this call, the row it was created from
 # has an empty address and is published to nobody: the public IP is assigned while the box
