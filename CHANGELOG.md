@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — turning paint sync on turns all of it on
+
+### Fixed
+- **Switching Experimental on now starts watching for look changes straight away.** The
+  watcher that notices you changing kit in the game's own garage was only ever started when
+  the app launched, so turning the feature on left it stopped until the next restart — the
+  app kept publishing when you applied a preset or pressed Play, but a change made in the
+  garage went unnoticed for the rest of the session. That is the session you have just
+  enrolled in, which makes it the worst one to be quietly missing. Switching it back off
+  stops the watcher rather than leaving it running.
+
 ## 2026-08-09 — v0.9.0 — Servers you can create, paints everyone can see, and a paint studio
 
 ### Added
