@@ -1291,6 +1291,27 @@ export const fr: Translation = {
   // ── ReShade ────────────────────────────────────────────────────────────────
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Préréglages de post-traitement — le rendu de {{game}} à l'écran.",
+
+  // ── Soutiens (Buy Me a Coffee) ─────────────────────────────────────────────
+  "settings.supporters": "Soutiens",
+  "settings.supportersDesc": "Les personnes qui font vivre MXB App sur Buy Me a Coffee.",
+  "supporters.intro":
+    "MXB App est gratuite, et le restera. Les cafés ci-dessous paient le temps passé dessus : celles et ceux qui les ont offerts sont la raison pour laquelle il y a une nouvelle version à installer.",
+  "supporters.count_one": "{{count}} soutien",
+  "supporters.count_other": "{{count}} soutiens",
+  "supporters.untiered": "Soutiens",
+  "supporters.since": "depuis {{date}}",
+  "supporters.loading": "Chargement de la liste…",
+  "supporters.refresh": "Actualiser",
+  "supporters.become": "Offrez-moi un café",
+  "supporters.empty": "Personne n'est encore listé ici",
+  "supporters.emptyDesc":
+    "La liste se met à jour toute seule : offrez un café et votre nom apparaîtra ici, sans attendre une nouvelle version.",
+  "supporters.offline":
+    "Impossible de joindre la liste pour l'instant — voici la dernière connue.",
+  "supporters.optOut":
+    "Les noms sont affichés avec accord. Un message sur Discord ou Buy Me a Coffee et le vôtre est retiré aussitôt.",
+
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "préréglages ReShade",
   "reshade.needsGameFolder":

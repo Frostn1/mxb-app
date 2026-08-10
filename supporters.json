@@ -1,0 +1,11 @@
+{
+  "_note": "Read live by the app's Settings → Supporters page, straight off main — adding somebody here shows up in every installed copy without a release. 'tiers' orders the groups (best first) and holds Buy Me a Coffee membership level names; a level used below but missing from it still renders, just last. Each supporter is either a plain string or { name, tier?, since? }, where 'since' is an ISO date shown as 'since Jul 2026'. Someone who bought a one-off coffee has no tier and lands in the ungrouped list at the bottom. Only list names with the person's permission.",
+  "supportUrl": "https://buymeacoffee.com/22ypnh5yfme",
+  "tiers": [],
+  "supporters": [
+    "HottPie",
+    "Mouk",
+    "SoggySwisher",
+    "LupaHo"
+  ]
+}

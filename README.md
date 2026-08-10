@@ -51,6 +51,11 @@ hours), then downloads and installs them on restart.
   on the model without leaving the app.
 - **Self-update**: `tauri-plugin-updater` against the `latest.json` published with
   each release; signature-verified, installs on restart.
+- **Supporters**: Settings → Supporters credits the people who bought a coffee on
+  [Buy Me a Coffee](https://buymeacoffee.com/). The names come from
+  [`supporters.json`](supporters.json) on `main`, fetched at runtime and cached —
+  adding somebody there reaches installed copies without a release, and an offline
+  launch still shows the last list it saw.
 
 ## Tech stack
 
