@@ -1054,6 +1054,17 @@ export const en = {
   "showcase.whileGameRunning": "while MX Bikes is running",
   "showcase.releaseNotes": "Read the release notes",
   "showcase.gotIt": "Got it",
+  "showcase.v091.hero.title": "Paint straight onto the template",
+  "showcase.v091.hero.body":
+    "The Designer could place images and text on a paint's sheets, but you couldn't put down a single pixel by hand — a fade across a shroud meant leaving for an image editor and coming back. It has a tool kit now: a soft brush with size, edge and strength, an eraser, a gradient, a fill, and rectangle, ellipse and line. Everything lands on the sheet and on the 3D model at the same time, while you drag.",
+  "showcase.v091.gradient":
+    "A gradient that carries one colour into another. Drag to say where the transition happens — everything before it is the first colour, everything past it the second. Linear or radial, and it can fade out to nothing instead of to a colour.",
+  "showcase.v091.paintLayer":
+    "Painting goes on its own layer, so it gets opacity, blending and stacking like everything else — and the template underneath is never touched. Hide the layer and you have the clean template back. ⌘Z undoes strokes.",
+  "showcase.v091.macos":
+    "Play and Join Server work on macOS, through whichever CrossOver, Whisky or Wine bottle holds the game — and the app finds a bottled install by itself instead of asking you to type the path.",
+  "showcase.v091.steamos":
+    "The Linux app opens to its interface on SteamOS instead of a white screen.",
   "showcase.v090.hero.title": "Turn your artwork into a paint the game loads",
   "showcase.v090.hero.body":
     "A new Paints tab builds paints out of ordinary image sheets — TGA, PNG, JPG — and installs them where the game looks: a bike livery, a helmet or goggle paint, a rider's kit or gloves. Unpack a paint you already have to get a template that actually fits the model, edit it in any editor, and put it straight back. The studio checks your sheet names against the ones the mesh binds before you save, then previews the result on the real model.",

@@ -1077,6 +1077,17 @@ export const ptBR: Translation = {
   "showcase.whileGameRunning": "enquanto o MX Bikes está aberto",
   "showcase.releaseNotes": "Ler as notas da versão",
   "showcase.gotIt": "Entendi",
+  "showcase.v091.hero.title": "Pinte direto no template",
+  "showcase.v091.hero.body":
+    "O Designer sabia posicionar imagens e texto nas folhas de uma pintura, mas não deixava colocar um único pixel à mão — um degradê numa carenagem significava sair para um editor de imagens e voltar. Agora ele tem um kit de ferramentas: pincel suave com tamanho, borda e intensidade, borracha, gradiente, preenchimento, retângulo, elipse e linha. Tudo aparece na folha e no modelo 3D ao mesmo tempo, enquanto você arrasta.",
+  "showcase.v091.gradient":
+    "Um gradiente que leva uma cor até outra. Arraste para dizer onde acontece a transição: antes fica a primeira cor, depois a segunda. Linear ou radial, e pode desaparecer no nada em vez de terminar numa cor.",
+  "showcase.v091.paintLayer":
+    "O que você pinta vai numa camada própria, então tem opacidade, mesclagem e ordem como todo o resto — e o template embaixo nunca é tocado. Esconda a camada e o template limpo volta. ⌘Z desfaz traços.",
+  "showcase.v091.macos":
+    "Jogar e Entrar no servidor funcionam no macOS, pela garrafa CrossOver, Whisky ou Wine que contém o jogo — e o app acha sozinho uma instalação engarrafada em vez de pedir o caminho.",
+  "showcase.v091.steamos":
+    "No SteamOS o app Linux abre na interface em vez de uma tela branca.",
   "showcase.v090.hero.title": "Transforme suas imagens numa pintura que o jogo carrega",
   "showcase.v090.hero.body":
     "Uma nova aba Pinturas monta pinturas a partir de arquivos de imagem comuns — TGA, PNG, JPG — e instala onde o jogo procura: a pintura de uma moto, de um capacete ou de um óculos, o kit ou as luvas do seu piloto. Descompacte uma pintura que você já tem para conseguir um molde que serve de verdade no modelo, edite em qualquer editor e devolva do mesmo jeito. O estúdio confere os nomes dos seus arquivos contra os que a malha usa antes de salvar, e depois mostra o resultado no modelo de verdade.",

@@ -1077,6 +1077,17 @@ export const it: Translation = {
   "showcase.whileGameRunning": "mentre MX Bikes è in esecuzione",
   "showcase.releaseNotes": "Leggi le note di rilascio",
   "showcase.gotIt": "Ho capito",
+  "showcase.v091.hero.title": "Dipingi direttamente sul template",
+  "showcase.v091.hero.body":
+    "Il Designer sapeva posizionare immagini e testo sui fogli di una livrea, ma non ti lasciava mettere giù un solo pixel a mano — una sfumatura su una fiancata voleva dire uscire, aprire un editor di immagini e tornare indietro. Ora ha una cassetta degli attrezzi: pennello morbido con dimensione, bordo e intensità, gomma, sfumatura, riempimento, rettangolo, ellisse e linea. Tutto arriva sul foglio e sul modello 3D nello stesso momento, mentre trascini.",
+  "showcase.v091.gradient":
+    "Una sfumatura che porta un colore dentro un altro. Trascina per dire dove avviene la transizione: prima c'è il primo colore, dopo il secondo. Lineare o radiale, e può dissolversi nel nulla invece che in un colore.",
+  "showcase.v091.paintLayer":
+    "La pittura va su un livello suo, quindi ha opacità, fusione e ordine come tutto il resto — e il template sotto non viene mai toccato. Nascondi il livello e hai di nuovo il template pulito. ⌘Z annulla i tratti.",
+  "showcase.v091.macos":
+    "Gioca e Entra nel server funzionano su macOS, attraverso la bottiglia CrossOver, Whisky o Wine che contiene il gioco — e l'app trova da sola un'installazione in bottiglia invece di chiederti il percorso.",
+  "showcase.v091.steamos":
+    "Su SteamOS l'app Linux si apre sulla sua interfaccia invece che su una schermata bianca.",
   "showcase.v090.hero.title": "Trasforma le tue immagini in una livrea che il gioco carica",
   "showcase.v090.hero.body":
     "Una nuova scheda Livree costruisce le livree da normali file immagine — TGA, PNG, JPG — e le installa dove il gioco le cerca: la livrea di una moto, la grafica di un casco o di una maschera, il completo o i guanti del tuo pilota. Estrai una livrea che hai già per ottenere un template che calza davvero sul modello, modificalo in qualsiasi editor e rimettilo dentro così com'è. Lo studio controlla i nomi dei tuoi file contro quelli che la mesh usa prima del salvataggio, poi mostra il risultato sul modello vero.",
