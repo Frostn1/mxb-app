@@ -1,5 +1,4 @@
 use crate::shop_session::SHOP_BASE;
-use reqwest::Client;
 use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -26,31 +25,44 @@ pub struct ShopItem {
     pub download_url: String,
 }
 
-/// Fetch and parse the signed-in user's "All My Downloads" page.
-pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Result<Vec<ShopItem>> {
-    let url = format!("{SHOP_BASE}/all-my-downloads/");
-    let resp = client.get(&url).send().await?;
-    let final_url = resp.url().as_str().to_string();
-    let status = resp.status();
-    let html = resp.text().await?;
+/// Whether this HTML is Cloudflare's interstitial rather than the page we asked for.
+///
+/// Matched on markers the interstitial alone carries. `challenge-platform` was one of them and
+/// had to go: Cloudflare injects a script from that path into *ordinary* pages too when its JS
+/// detections are on, so now that the HTML comes from a real browser rather than from `reqwest`
+/// it would condemn the very pages this exists to let through — every purchases list read as
+/// "blocked", permanently.
+fn looks_like_challenge(html: &str) -> bool {
+    // Set by the interstitial's inline bootstrap, and by nothing else.
+    html.contains("_cf_chl_opt")
+        || html.contains("cf-browser-verification")
+        || html.contains("<title>Just a moment...</title>")
+}
 
-    // Cloudflare "Just a moment…" interstitial; error text must contain "sign in".
-    let looks_like_challenge = html.contains("Just a moment")
-        || html.contains("challenge-platform")
-        || html.contains("cf-browser-verification");
-    if looks_like_challenge {
+/// Fetch and parse the signed-in user's "All My Downloads" page.
+///
+/// The HTML arrives from [`crate::shop_fetch`] — read out of a real browser sitting on the
+/// page — rather than from `reqwest`. It has to: the page is behind a Cloudflare *managed*
+/// challenge, which is cleared by running JavaScript, and a clearance earned in a WebView
+/// cannot be replayed by an HTTP client. The parsing below is unchanged and unaware of this.
+pub async fn fetch_my_downloads(app: &AppHandle, reload: bool) -> anyhow::Result<Vec<ShopItem>> {
+    let html = crate::shop_fetch::downloads_html(reload).await?;
+
+    // Both of the answers below mean the window we are reading is no longer any use — it is
+    // sitting on an interstitial, or on a login form — and both tell the user to sign in again.
+    // So both drop the session and the window with it (see [`crate::shop_session::forget`]).
+    // Leaving either in place is what turned one failed read into a permanent one: the marker
+    // kept claiming a session, and the window kept answering with the same page that disproved
+    // it, right through the next sign-in.
+    if looks_like_challenge(&html) {
+        crate::shop_session::forget(app);
         anyhow::bail!("MX Bikes Shop is blocking the app (Cloudflare). Please sign in again.");
     }
 
     // EDD bounces an unauthenticated user to the WordPress login form.
-    let looks_like_login = final_url.contains("wp-login")
-        || final_url.contains("/login")
-        || (html.contains("name=\"log\"") && html.contains("name=\"pwd\""));
-    if looks_like_login {
+    if html.contains("name=\"log\"") && html.contains("name=\"pwd\"") {
+        crate::shop_session::forget(app);
         anyhow::bail!("Your MX Bikes Shop session expired — please sign in again.");
-    }
-    if !status.is_success() {
-        anyhow::bail!("MX Bikes Shop returned HTTP {}.", status.as_u16());
     }
 
     let items = parse_my_downloads(&html);
@@ -259,6 +271,33 @@ fn is_generic_label(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The real interstitial has to be caught, or an empty grid gets reported as "you own
+    /// nothing" when the truth is "Cloudflare refused us".
+    #[test]
+    fn the_cloudflare_interstitial_is_recognised() {
+        // Trimmed from a live capture of the challenge on /all-my-downloads/.
+        let interstitial = r#"<html><head><title>Just a moment...</title></head><body>
+            <script>window._cf_chl_opt = {cType: 'managed', cRay: 'a28a310c1d2c760a'};</script>
+            </body></html>"#;
+        assert!(looks_like_challenge(interstitial));
+    }
+
+    /// ...and the *ordinary* page must not be, which is the sharper half. Cloudflare injects a
+    /// `challenge-platform/scripts/jsd` script into pages that were served normally, so keying
+    /// on that path — as this once did — condemns every good page the moment the HTML starts
+    /// coming from a real browser instead of from `reqwest`.
+    #[test]
+    fn a_normal_page_carrying_cloudflares_injected_script_is_not_a_challenge() {
+        let good = r#"<html><head><title>All My Downloads - MX Bikes Shop</title></head><body>
+            <script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>
+            <div class="wp-block-edd-user-downloads">…</div>
+            </body></html>"#;
+        assert!(
+            !looks_like_challenge(good),
+            "a served page must not be mistaken for the interstitial"
+        );
+    }
 
     #[test]
     fn parses_edd_blocks_user_downloads() {

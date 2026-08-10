@@ -38,6 +38,8 @@ mod reshade;
 mod servers;
 mod shop_catalog_session;
 mod shop_credentials;
+mod shop_fetch;
+mod shop_installed;
 mod shop_session;
 mod soundmods;
 mod texstore;
@@ -49,6 +51,9 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
+// Decoding a paint's textures is per-texture CPU work over no shared state, and every path
+// that does it wants the same treatment — so this sits here rather than in one function.
+use rayon::prelude::*;
 use profilewatch::ProfileWatcher;
 use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
@@ -81,16 +86,18 @@ fn parks_in_tray(label: &str) -> bool {
 
 /// Whether a window may make this IPC call.
 ///
-/// Exists for one window. [`mxb_fetch`] parks a hidden webview on the *remote* mxb-mods.com
-/// origin, and giving it a capability is what lets its page hand fetch results back. But a
-/// capability grants IPC in general, and the commands registered with `generate_handler!`
-/// are not covered by the permission ACL — so without this, script on mxb-mods.com could
-/// call `create_config`, `install_mod` or anything else the app exposes.
+/// Exists for the two windows that run a *remote* origin. [`mxb_fetch`] parks a hidden webview
+/// on mxb-mods.com and hands catalog fetches back; [`shop_fetch`] parks one on
+/// mxbikes-shop.com and hands the signed-in purchases page back. Giving each a capability is
+/// what lets its page speak to us at all. But a capability grants IPC in general, and the
+/// commands registered with `generate_handler!` are not covered by the permission ACL — so
+/// without this, script on either site could call `create_config`, `install_mod` or anything
+/// else the app exposes.
 ///
-/// So that window gets an allowlist of exactly one call: emitting the result event. Every
-/// other window is unaffected and keeps whatever its own capability file grants.
+/// So both get an allowlist of exactly one call: emitting their result event. Every other
+/// window is unaffected and keeps whatever its own capability file grants.
 fn ipc_allowed(label: &str, command: &str) -> bool {
-    if label != mxb_fetch::WINDOW {
+    if label != mxb_fetch::WINDOW && label != shop_fetch::WINDOW {
         return true;
     }
     command == "plugin:event|emit"
@@ -692,8 +699,44 @@ async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> 
         .map_err(|e| format!("unpack_paint task failed: {e}"))?
 }
 
+/// Paints decoded for the viewer, so re-opening one doesn't inflate it a second time.
+///
+/// The picker re-runs this on every selection change and on every re-open, and a gear paint is
+/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are small,
+/// because each is downscaled to 1024² before it is stored.
+const PAINT_CACHE_CAP: usize = 4;
+
+fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(PAINT_CACHE_CAP)))
+}
+
 fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
-    paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+    let t0 = std::time::Instant::now();
+    // Path *and* mtime, as the bike cache does, so a paint re-saved under the same name misses.
+    let key = bike_cache_key(&path);
+    if let Some(t) = paint_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+        log::info!("unpack_paint {path}: cache hit ({:?})", t0.elapsed());
+        return Ok(t);
+    }
+
+    let textures = paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+    log::info!(
+        "unpack_paint {path}: {} texture(s) in {:?} | {:.1} MB resident in the texture store",
+        textures.len(),
+        t0.elapsed(),
+        texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
+    );
+    if let Ok(mut c) = paint_cache().lock() {
+        // Cloning an entry copies names, sizes and tokens — never pixels, which stay in the
+        // texture store. The evicted paint's go with it; nothing else holds those tokens.
+        if let Some(dropped) = c.insert(key, textures.clone()) {
+            let tokens: Vec<String> = dropped.iter().map(|t| t.token.clone()).collect();
+            texstore::release(&tokens);
+        }
+    }
+    Ok(textures)
 }
 
 // ── Paint studio ────────────────────────────────────────────────────────────────────
@@ -1083,7 +1126,6 @@ async fn load_bike_model(source: String) -> Result<BikeModel, String> {
 }
 
 fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
-    use rayon::prelude::*;
     let t0 = std::time::Instant::now();
     let key = bike_cache_key(&source);
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
@@ -1208,7 +1250,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
                 (
                     BikePaint {
                         name: name.clone(),
-                        textures: pnt.par_iter().map(paint::to_texture).collect(),
+                        textures: pnt.into_par_iter().map(paint::into_texture).collect(),
                         changes_preview: false, // resolved below, once bindings are known
                     },
                     *shipped,
@@ -1955,7 +1997,7 @@ async fn load_stock_gear_model(
             Some(p) => std::fs::read(&p)
                 .ok()
                 .and_then(|d| paint::decode_any(&d).ok())
-                .map(|pnt| pnt.iter().map(paint::to_texture).collect())
+                .map(|pnt| pnt.into_par_iter().map(paint::into_texture).collect())
                 .unwrap_or_default(),
             // Nothing to preview → the stock look, which is what the mesh carries. Not the
             // first `.pnt` in the folder: that's a paint like any other, and picking it here
@@ -2318,7 +2360,7 @@ fn load_gear_model_blocking(
     let mut main_side = GearSide::new(names_of(&main_pnt));
     let mut goggle_side = GearSide::new(names_of(&goggle_pnt));
     let mut out: Vec<paint::PaintTexture> =
-        main_pnt.iter().chain(goggle_pnt.iter()).map(paint::to_texture).collect();
+        main_pnt.into_par_iter().chain(goggle_pnt).map(paint::into_texture).collect();
     // The look the model ships with, before any paint: the textures embedded in the meshes.
     if stock || stock_goggles {
         let mut embedded: Vec<paint::PaintTexture> = Vec::new();
@@ -2969,7 +3011,7 @@ fn loose_paint_named(
     let hit = files.iter().find(|(n, _)| {
         gear_folder_paint_name(n, folder).is_some_and(|p| p.eq_ignore_ascii_case(want))
     })?;
-    Some(paint::decode_any(&hit.1).ok()?.iter().map(paint::to_texture).collect())
+    Some(paint::decode_any(&hit.1).ok()?.into_par_iter().map(paint::into_texture).collect())
 }
 
 /// A paint the game itself ships, from `<folder>/<sub>/<paint>.pnt` — `sub` being `paints`
@@ -2993,7 +3035,7 @@ fn load_pkz_paint(
     read_pkz_entry(pkz, &format!("{folder}/{sub}/{paint}.pnt"))
         .or_else(|| read_pkz_first(pkz, &format!("{folder}/{sub}/"), ".pnt"))
         .and_then(|d| paint::decode_any(&d).ok())
-        .map(|p| p.iter().map(paint::to_texture).collect())
+        .map(|p| p.into_par_iter().map(paint::into_texture).collect())
         .unwrap_or_default()
 }
 
@@ -3033,7 +3075,8 @@ fn load_rider_paint(
     // resolves instead of silently dropping off the preview.
     let profile = rider_profile_or_stock(profile);
     let data = read_rider_paint_file(cfg, base, profile, sub, paint)?;
-    let textures: Vec<_> = paint::decode_any(&data).ok()?.iter().map(paint::to_texture).collect();
+    let textures: Vec<_> =
+        paint::decode_any(&data).ok()?.into_par_iter().map(paint::into_texture).collect();
     if textures.is_empty() {
         return None;
     }
@@ -3191,32 +3234,42 @@ async fn commit_drop(
     plan_id: String,
     items: Vec<dropzone::CommitItem>,
 ) -> Result<dropzone::CommitOutcome, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        let outcome =
-            dropzone::commit(&cfg.mods_path, &plan_id, &items).map_err(|e| format!("{e:#}"))?;
+    tauri::async_runtime::spawn_blocking(move || commit_plan(&app, &plan_id, &items))
+        .await
+        .map_err(|e| format!("commit_drop task failed: {e}"))?
+}
 
-        // Record which bikes gained a sound set, so the Library can tell them from stock.
-        let ok: Vec<String> = outcome.installed.iter().map(|i| i.id.clone()).collect();
-        let bikes = dropzone::sound_bikes(&plan_id, &ok);
-        if !bikes.is_empty() {
-            if let Ok(dir) = app.path().app_local_data_dir() {
-                let _ = soundmods::record(&dir, &bikes, "drop");
-            }
+/// Place a staged plan and do everything that has to follow it.
+///
+/// Shared by the review sheet's `commit_drop` and the shop's one-click install, so the
+/// bookkeeping after a commit can't drift between them — a plan committed but never released
+/// leaks its staging directory for the life of the process.
+fn commit_plan(
+    app: &tauri::AppHandle,
+    plan_id: &str,
+    items: &[dropzone::CommitItem],
+) -> Result<dropzone::CommitOutcome, String> {
+    let cfg = config::load(app).map_err(|e| format!("{e:#}"))?;
+    let outcome = dropzone::commit(&cfg.mods_path, plan_id, items).map_err(|e| format!("{e:#}"))?;
+
+    // Record which bikes gained a sound set, so the Library can tell them from stock.
+    let ok: Vec<String> = outcome.installed.iter().map(|i| i.id.clone()).collect();
+    let bikes = dropzone::sound_bikes(plan_id, &ok);
+    if !bikes.is_empty() {
+        if let Ok(dir) = app.path().app_local_data_dir() {
+            let _ = soundmods::record(&dir, &bikes, "drop");
         }
+    }
 
-        dropzone::cancel(&plan_id);
+    dropzone::cancel(plan_id);
 
-        // One signal for the whole drop: `notify_frostmod` also emits `frostmod-reload`,
-        // which every library scanner listens to — firing it per item would re-run them all
-        // N times for a single user action.
-        if !outcome.installed.is_empty() {
-            install::notify_frostmod(&app, "drop");
-        }
-        Ok(outcome)
-    })
-    .await
-    .map_err(|e| format!("commit_drop task failed: {e}"))?
+    // One signal for the whole drop: `notify_frostmod` also emits `frostmod-reload`,
+    // which every library scanner listens to — firing it per item would re-run them all
+    // N times for a single user action.
+    if !outcome.installed.is_empty() {
+        install::notify_frostmod(app, "drop");
+    }
+    Ok(outcome)
 }
 
 /// Discard a plan the user dismissed, deleting anything staged for it.
@@ -3568,7 +3621,24 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
 fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load_or_detect(&app).unwrap_or_default();
     cfg.experimental = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+
+    // Bring paint sync up — or take it down — with the switch that owns it.
+    //
+    // Both of these are otherwise only decided in `.setup`, so turning the feature on left
+    // the profile watcher stopped until the next restart: the app would keep publishing on
+    // an apply or a launch, but a look changed in the game's garage went unnoticed for the
+    // whole session. That is the session a player has just enrolled in, which makes it the
+    // worst one to be quietly missing.
+    let watcher = app.state::<ProfileWatcher>();
+    if cfg.experimental_enabled() {
+        profilewatch::start(&app, &watcher, &cfg.profiles_dir());
+        // And publish once now, since nothing has been watching until this moment.
+        publish_paints_soon(&app, &cfg, None);
+    } else {
+        profilewatch::stop(&watcher);
+    }
+    Ok(())
 }
 
 /// Trade an invite code for a control-plane account, and remember the token.
@@ -4611,17 +4681,38 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let url = tauri::WebviewUrl::External(
-        format!(
-            "{base}/wp-login.php?redirect_to={base}%2Fall-my-downloads%2F",
-            base = shop_session::SHOP_BASE
-        )
-        .parse()
-        .map_err(|e| format!("{e}"))?,
+    // Lands on `/robots.txt`, not `/all-my-downloads/`: every HTML path here is behind a
+    // managed challenge, so the old redirect walked straight into a second one the moment
+    // credentials were accepted. Static files aren't gated (measured: 200, no `cf-mitigated`).
+    let target = format!(
+        "{base}/wp-login.php?redirect_to={base}%2Frobots.txt",
+        base = shop_session::SHOP_BASE
     );
+    // A sign-in starts from a clean browser. An expired or mismatched `cf_clearance` is worse
+    // than none — it's presented, rejected, and the challenge re-served, which is the loop.
+    // Coarse on purpose: Tauri has no per-origin cookie delete, so mxb-mods.com re-clears its
+    // own check on next use.
+    let stale = shop_session::cookies_from_window_any(&app);
+    log::info!(
+        "opening the shop login window at {target} (clearing first; jar held: {})",
+        shop_session::cookie_names(&stale)
+    );
+    // The hidden purchases window goes first, for the same reason sign-*out* drops it: it is a
+    // browser parked on a page belonging to the session about to be thrown away. Clearing the
+    // cookies out from under a window that stays up leaves it displaying the old DOM, and that
+    // DOM is what the read straight after this sign-in would return — the login form, read back
+    // as "your session expired", which signs the user out a moment after signing them in.
+    shop_fetch::close(&app);
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW) {
+        if let Err(e) = main.clear_all_browsing_data() {
+            log::warn!("could not clear stale cookies before sign-in: {e}");
+        }
+    }
+    let url = tauri::WebviewUrl::External(target.parse().map_err(|e| format!("{e}"))?);
+    // No `.user_agent()` override: it claimed `Chrome/126.0` on Windows while actually being
+    // WKWebView on macOS. Left alone, the WebView introduces itself honestly.
     let window = tauri::WebviewWindowBuilder::new(&app, SHOP_LOGIN_WINDOW, url)
         .title("Sign in to MX Bikes Shop")
-        .user_agent(shop_session::UA)
         .inner_size(520.0, 760.0)
         .build()
         .map_err(|e| format!("{e:#}"))?;
@@ -4630,27 +4721,57 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         // ~5 minutes at 500ms intervals, then give up (user can retry).
+        let mut last_seen = Vec::new();
         for _ in 0..600u32 {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let Some(win) = app.get_webview_window(SHOP_LOGIN_WINDOW) else {
-                break; // user closed the window before finishing
+                // Closed by hand. That is a cancel rather than a failure, so it gets a log
+                // line and no error toast — but it does get a log line, because "the user gave
+                // up" and "the app stopped watching" are otherwise indistinguishable later.
+                log::info!(
+                    "the shop login window was closed before sign-in finished (cookies: {})",
+                    shop_session::cookie_names(&last_seen)
+                );
+                return;
             };
             let cookies = shop_session::cookies_from_window(&win);
-            if shop_session::is_authenticated(&cookies) {
-                let ok = match shop_session::set_session(&app, cookies) {
-                    Ok(()) => {
-                        log::info!("captured MX Bikes Shop session");
-                        true
-                    }
-                    Err(e) => {
-                        log::error!("failed to save shop session: {e:#}");
-                        false
-                    }
-                };
-                let _ = app.emit("shop-auth", ok);
-                let _ = win.close();
-                break;
+            if !shop_session::is_authenticated(&cookies) {
+                last_seen = cookies;
+                continue;
             }
+            let ok = match shop_session::set_session(&app, cookies) {
+                Ok(()) => {
+                    log::info!("captured MX Bikes Shop session");
+                    true
+                }
+                Err(e) => {
+                    log::error!("failed to save shop session: {e:#}");
+                    false
+                }
+            };
+            let _ = app.emit("shop-auth", ok);
+            let _ = win.close();
+            return;
+        }
+
+        // Five minutes on the page and never signed in.
+        //
+        // This used to end here in silence — no event, no log line — which is what makes a
+        // sign-in that cannot get past Cloudflare's challenge look like an app that has simply
+        // hung. The store fronts every path with a *managed* challenge, and an embedded WebView
+        // is exactly the visitor it is least willing to clear, so this is a real outcome and
+        // not a corner case. The cookie names say which it was: a `cf_clearance` means the
+        // challenge cleared and the sign-in itself never completed; no clearance means the
+        // window never got off the interstitial.
+        log::warn!(
+            "shop sign-in did not complete within 5 minutes (cookies: {})",
+            shop_session::cookie_names(&last_seen)
+        );
+        let _ = app.emit("shop-auth", false);
+        // Closed rather than left up: nothing is watching it any more, so a sign-in finished
+        // afterwards would go unnoticed. Retry reopens it.
+        if let Some(win) = app.get_webview_window(SHOP_LOGIN_WINDOW) {
+            let _ = win.close();
         }
     });
     Ok(())
@@ -4670,11 +4791,16 @@ fn shop_logout(app: tauri::AppHandle) {
 async fn shop_my_downloads(
     app: tauri::AppHandle,
     state: State<'_, shop_session::ShopSession>,
+    reload: Option<bool>,
 ) -> Result<Vec<mods::mxbshop::ShopItem>, String> {
-    let client = state
-        .client()
-        .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
-    mods::mxbshop::fetch_my_downloads(&app, &client)
+    // The captured cookies are what "signed in" means now; the `reqwest` client they also build
+    // is no longer what reads this page, because Cloudflare will not let it.
+    if !state.logged_in() {
+        return Err("Not signed in to MX Bikes Shop.".to_string());
+    }
+    // The hidden window keeps the page it loaded, so Refresh has to say so or it re-reads the
+    // same DOM. Absent (first load) means the window is being built and navigates anyway.
+    mods::mxbshop::fetch_my_downloads(&app, reload.unwrap_or(false))
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -4691,40 +4817,34 @@ async fn shop_match_catalog(
         .map_err(|e| format!("{e:#}"))
 }
 
-/// Download a purchased file and stage it for review. **Nothing is written under `mods/`.**
+/// Download a purchased file and install it, to a destination the caller already chose.
 ///
-/// The returned plan is an ordinary [`dropzone::DropPlan`], so the purchases grid hands it to
-/// the same review sheet a drag-and-drop produces and finishes through the existing
-/// `repreview_drop` / `commit_drop` / `cancel_drop` commands.
+/// The shop half of [`install::download_and_place`]: the bytes come through
+/// [`shop_fetch::download`] because the store's file URLs sit behind Cloudflare's managed
+/// challenge, and everything after that is the same extract-and-place every other install uses.
 ///
-/// That reuse is the point. The previous `shop_install` chose a `mods/` subfolder by matching
-/// keywords against the *product title* and always resolved the destination as if the purchase
-/// were a track — so a bought bike or gear set landed in a tracks-derived folder, silently and
-/// with no collision check. Routing by what the archive actually contains is the dropzone's job
-/// and it already does it well; this command's only work is getting the bytes to it.
+/// `subpath`/`dest_folder` arrive from the same dialog Browse uses, so nothing here guesses.
 #[tauri::command]
-async fn shop_stage(
+async fn shop_install(
     app: tauri::AppHandle,
     state: State<'_, shop_session::ShopSession>,
     item: mods::mxbshop::ShopItem,
-) -> Result<dropzone::DropPlan, String> {
-    let client = state
-        .client()
-        .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
+    subpath: String,
+    dest_folder: String,
+) -> Result<(), String> {
+    if !state.logged_in() {
+        return Err("Not signed in to MX Bikes Shop.".to_string());
+    }
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    // Asked before the download, not after: `dropzone::plan` refuses an unconfigured folder
-    // too, but by then a track archive is several hundred megabytes already spent.
+    // Asked before the download: a track archive is several hundred megabytes to waste.
     if cfg.mods_path.trim().is_empty() {
         return Err("No MX Bikes folder is configured yet.".to_string());
     }
 
-    // Its own staging directory, separate from the one `dropzone::plan` will make: this holds
-    // the downloaded archive, and the plan gets its own extracted copy.
     let work = install::staging_dir("shop");
     std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
 
-    let archive = match install::download(&app, &client, &item.slug, &item.download_url, &work).await
-    {
+    let archive = match shop_fetch::download(&app, &item.slug, &item.download_url, &work).await {
         Ok(path) => path,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
@@ -4732,20 +4852,50 @@ async fn shop_stage(
         }
     };
 
-    let planned = tauri::async_runtime::spawn_blocking({
-        let mods_path = cfg.mods_path.clone();
-        let paths = vec![archive.to_string_lossy().into_owned()];
-        move || dropzone::plan(&mods_path, &paths)
+    // What identifies this purchase on disk afterwards. Both forms, because a `.pkz` is placed
+    // under its own file name while an archive that extracts lands in a folder named for its
+    // stem. Deliberately *not* the chosen destination folder: that is shared by everything
+    // filed there, so matching on it would badge every other mod in the same folder.
+    let names: Vec<String> = [archive.file_name(), archive.file_stem()]
+        .into_iter()
+        .flatten()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+
+    let placed = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        let cfg = cfg.clone();
+        let slug = item.slug.clone();
+        let work = work.clone();
+        move || install::extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder)
+            .map(|()| dest_folder)
     })
     .await
-    .map_err(|e| format!("shop_stage task failed: {e}"))?;
+    .map_err(|e| format!("shop_install task failed: {e}"))?;
 
-    // `plan` staged its own copy of everything it found, so the download has done its job
-    // either way — and leaving it behind would strand a whole archive in the temp directory
-    // for every purchase installed.
     let _ = std::fs::remove_dir_all(&work);
+    let dest_folder = placed.map_err(|e| format!("{e:#}"))?;
 
-    planned.map_err(|e| format!("{e:#}"))
+    // One place records what a purchase installed, so the badge is written on every path.
+    let _ = dest_folder;
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        if let Err(e) = shop_installed::record(&dir, &item.product, &names) {
+            log::warn!("could not record what {} installed: {e:#}", item.product);
+        }
+    }
+    Ok(())
+}
+
+/// Which purchased products have a recorded install, and the folders they claim.
+///
+/// The claim is not checked against disk here — the purchases grid already scans the library
+/// for its badges, so it does the intersecting and this stays a cheap read.
+#[tauri::command]
+fn shop_installed_map(
+    app: tauri::AppHandle,
+) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    Ok(shop_installed::recorded(&dir))
 }
 
 fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -5315,6 +5465,9 @@ fn main() {
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
+            // Same again for the shop's signed-in half. Nothing opens until the purchases tab
+            // is actually used, so a user who never signs in never pays for the window.
+            shop_fetch::init(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -5470,7 +5623,8 @@ fn main() {
             shop_logout,
             shop_my_downloads,
             shop_match_catalog,
-            shop_stage,
+            shop_install,
+            shop_installed_map,
             shop_catalog_available,
             shop_catalog_status,
             shop_catalog_categories,
@@ -5574,6 +5728,7 @@ mod window_tests {
 
         for transient in [
             mxb_fetch::WINDOW,
+            shop_fetch::WINDOW,
             SHOP_LOGIN_WINDOW,
             overlay::LABEL, // handled earlier by its own branch, but never by this one
         ] {
@@ -5585,28 +5740,37 @@ mod window_tests {
         }
     }
 
-    /// The security boundary. The fetch window runs a *remote* origin — mxb-mods.com's own
-    /// page — and its capability grants IPC, which `generate_handler!` commands are not
-    /// gated by. So it gets exactly one call and nothing else; if this test ever goes green
-    /// on a second command, script on mxb-mods.com can drive that command.
+    /// The security boundary. Both fetch windows run a *remote* origin — mxb-mods.com's own
+    /// page in one, mxbikes-shop.com's signed-in page in the other — and their capabilities
+    /// grant IPC, which `generate_handler!` commands are not gated by. So each gets exactly one
+    /// call and nothing else; if this test ever goes green on a second command, script on those
+    /// sites can drive that command.
+    ///
+    /// The shop window is the sharper case of the two: it is signed in as the user, and
+    /// `shop_install` writes files.
     #[test]
-    fn the_remote_fetch_window_may_only_emit_its_result() {
-        assert!(ipc_allowed(mxb_fetch::WINDOW, "plugin:event|emit"));
+    fn the_remote_fetch_windows_may_only_emit_their_result() {
+        for remote in [mxb_fetch::WINDOW, shop_fetch::WINDOW] {
+            assert!(ipc_allowed(remote, "plugin:event|emit"), "{remote}");
 
-        for forbidden in [
-            "create_config",
-            "install_mod",
-            "mods_state_delete",
-            "get_config",
-            "plugin:shell|open",
-            "plugin:dialog|open",
-            "plugin:event|listen",
-            "plugin:process|restart",
-        ] {
-            assert!(
-                !ipc_allowed(mxb_fetch::WINDOW, forbidden),
-                "mxb-mods.com script must not be able to call {forbidden}"
-            );
+            for forbidden in [
+                "create_config",
+                "install_mod",
+                "mods_state_delete",
+                "get_config",
+                "shop_install",
+                "shop_logout",
+                "commit_drop",
+                "plugin:shell|open",
+                "plugin:dialog|open",
+                "plugin:event|listen",
+                "plugin:process|restart",
+            ] {
+                assert!(
+                    !ipc_allowed(remote, forbidden),
+                    "script on {remote}'s remote origin must not be able to call {forbidden}"
+                );
+            }
         }
     }
 

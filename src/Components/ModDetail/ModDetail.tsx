@@ -217,6 +217,9 @@ export default function ModDetail({
   const handleConfirm = ({ destFolder, mirror }: InstallChoice) => {
     localStorage.setItem(destKey, destFolder);
     setDialogOpen(false);
+    // A mod always has mirrors, so the dialog always returns one here; the field is optional
+    // only because a shop purchase, which has a single file, uses the same dialog.
+    if (!mirror) return;
     if (isBlockedDownload(mirror)) {
       setBlocked({ mirror, step1: false });
       // pre-remember the chosen folder for the import step

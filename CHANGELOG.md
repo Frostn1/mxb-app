@@ -1,15 +1,8 @@
 # Changelog
 
-## 2026-08-09 — Import from the Library
+## 2026-08-09 — v0.9.0 — Servers you can create, paints everyone can see, and a paint studio
 
 ### Added
-- **An Import button in the Library, for setups drag-and-drop never reaches.** Dropping a
-  download on the window stays the fast path, but the OS drop event doesn't arrive
-  everywhere — remote desktops and some shells eat it — and where it doesn't, there was no
-  other way to install a file you'd already downloaded. **Import → Choose files…** (or
-  **Choose a folder…**, for an unpacked track) stages exactly what a drop stages: same
-  classification, same review sheet showing where each piece lands, same collision
-  warnings, and nothing written until you confirm.
 - **A paint designer, and one Studio instead of three tabs.** Designing a livery meant leaving
   for a web editor, exporting a `.tga`, packing it, launching, looking, and starting over —
   the loop was long enough that most of it happened blind. The **Designer** closes it: start
@@ -25,60 +18,46 @@
 - **The Studio works under GP Bikes too.** Building a `.pnt` is the same job for either title —
   same container, same encoder, same folders — and only the 3D preview needs part bindings GP
   Bikes doesn't have yet. So Designer and Paints are both there, the preview says plainly why
-  it isn't, and the Rider tab (which *is* the rig) stays MX Bikes-only. The destinations are
-  read from the game rather than listed in the app, so GP Bikes is offered its three — bike
-  livery, helmet, rider kit — instead of MX Bikes' boots and protection folders it has no use
-  for.
+  it isn't, and the Rider tab (which *is* the rig) stays MX Bikes-only. Paint destinations are
+  read from the game's own rider layout rather than listed in the app, so GP Bikes is offered
+  its three — bike livery, helmet, rider kit — instead of MX Bikes' boots and protection
+  folders it has no use for.
 - **The sidebar collapses to icons**, and the Designer's sheets/layers rail folds away, for
   when the canvas and the model are what you want the width for.
-
-### Changed
-- The 3D viewer can be handed textures the backend has never seen, which is what lets the
-  Designer's canvas appear on real geometry. Everything else still arrives by token, unchanged.
-- Switching between the Studio's tabs no longer throws away what you were doing in the one you
-  left.
-- Sheets unpacked in Paints can be sent straight to the Designer to draw on, rather than
-  unpacked a second time.
-
-### Fixed
-- **Protection paints were being saved to a folder the game doesn't read.** Paint Studio wrote
-  them to `rider/protection/<model>/paints` — the singular folder an old version of this app
-  used — while the model itself lives in `rider/protections/` and every other path in the app
-  installs there. The paint saved, the app said so, and the gear turned up unpainted in game.
-  Destinations are now derived from the folders the game actually loads, so the two can't drift
-  apart again.
-- The Designer's "Start from a paint…" gave no sign it was working while it unpacked, and said
-  nothing at all if the paint yielded no sheets.
-
-## Unreleased — paint sync actually closes the loop
-
-### Fixed
-- **Your look is published even if you never open the Locker.** Publishing only ever ran off
-  a preset apply, so the commonest path there is — enrol, press Play — sent nothing at all,
-  and the player appeared to everyone else in default gear with no indication anything was
-  wrong. It now publishes when you enrol, when the app starts, when you press Play or Join,
-  and whenever a preset is applied.
-- **Changing your kit in the game's own garage publishes it.** MX Bikes writes the same
-  `profile.ini` the app does; nothing was listening. A watcher on that file now catches it,
-  filtered to `profile.ini` alone so the replay and telemetry churn a session produces can't
-  set it off. Redundant fires cost nothing: the look is hashed and an unchanged one is never
-  sent.
-- **Every bike is published, not just the last one touched.** Storage held one loadout per
-  account — `loadout_paints` had no bike dimension at all — so publishing a second bike
-  deleted the first. A rider looked right on whichever bike the app last saw and default on
-  every other. Both tables are rebuilt keyed by bike, and the app sends them together.
-- **The sync no longer overwrites liveries you made yourself.** Any local paint whose name
-  matched an incoming one was replaced, including your own artwork. It now records what it
-  installs and will only ever replace that; anything else is yours and is kept, and reported.
-  Two riders using one file name for different paints installs neither, rather than letting
-  whichever roster answered first decide what everyone sees.
-- **A server created from the app can now be reached.** Provisioning launched a machine and
-  then lost it: the response carried no address and no token, nothing ever filled either in,
-  and the row stayed unpublished forever — so the server could not be joined, managed or even
-  deleted, only waited out by the idle reaper. The instance now announces itself once its
-  agent answers, which fills in its address and puts it in the join picker.
-
-### Added
+- **Create a server from the app.** The control plane launches an EC2 instance, installs
+  the dedicated server and the agent on it, and the server appears in the Servers page. The
+  app holds no cloud credentials — a desktop binary can be unpacked, and a key inside one
+  would let anyone create infrastructure in our account — so the AWS key lives only as a
+  Worker secret, scoped by IAM to instances tagged `mxb:managed` in a single region.
+- **Cloud servers have a lifecycle.** Booting, ready with an address, a Join button, start and
+  stop, a track picker, whether it's in the public list, and how many minutes until it shuts
+  itself down. Previously the panel showed a raw instance id and a state string.
+- **A booting server now reports its progress, and its failure.** Creating a server launches a
+  machine that runs a long script with nobody watching: no console, no key pair, so
+  `C:\mxb-bootstrap.log` cannot be read from outside — and the script's own failure trap shuts
+  the instance down, which terminates it and destroys the log. A bootstrap that died at minute
+  twelve and one still downloading a 2 GB installer were indistinguishable: a server that never
+  turned up. The instance now posts each step to the control plane, and posts the tail of its
+  transcript *before* shutting down, so a failure leaves an explanation behind.
+- **"Create a server" says which step it is on** — `downloading the game`, `extracting the
+  game`, `installing the agent` — instead of spinning for a quarter of an hour with nothing to
+  show, and shows the reported error if the server gave up.
+- **Publish a server you run to the public list, from the app.** Until now `servers` rows
+  were hand-written SQL, so running a server and *having anyone able to join it* were
+  separate problems — the second one solved by passing an address around privately. A
+  server you manage in the app now has an "Add to the server list" button, and it appears
+  in everyone's Join a server picker.
+- **Nothing is typed to publish it.** The address is the agent's own host joined to the port
+  it reports, and the name comes from the server's `.ini`. The only thing asked for is the
+  region, which is the one fact no machine on this end can work out.
+- **Your paints publish themselves.** Whenever you change your look, the app sends it up a
+  second or so later — one publish for a burst of preset-flipping, not one per click. This
+  closes the loop: publishing had a command but no button anywhere in the app, so nothing
+  was ever uploaded and every roster was empty by construction.
+- **Everyone else's paints arrive on their own**, pulled when you launch the game. Joining
+  by address syncs that server; pressing Play syncs every server in the registry, since the
+  game you're about to pick from the in-game browser never passes through us. Rosters are
+  merged and de-duplicated first, so two servers sharing riders is one pass over the disk.
 - **A paint-sync panel that says what's missing.** Publishing and syncing both happen in the
   background off actions you didn't ask for, and their only report was a line in the log — so
   "is this working?" had no answer anywhere on screen, and the most common failure looked
@@ -88,28 +67,29 @@
   runs.
 - **A sync line in the sidebar**, alongside the FrostMod one, so the state is visible without
   going to look for it.
-- **Cloud servers have a lifecycle.** Booting, ready with an address, a Join button, start and
-  stop, a track picker, whether it's in the public list, and how many minutes until it shuts
-  itself down. Previously the panel showed a raw instance id and a state string.
+- **One-line pairing.** `mxb-agent` prints a code at startup carrying its own address and
+  token; paste it into Add a server and both fields fill in. `public_url` in `agent.json`
+  overrides the address for hosts behind NAT or a proxy.
+- **`mxb://enroll?code=…` links**, so an invite can be clicked instead of transcribed. The
+  link only prefills the field — enrolling is still a button you press, because a URL any
+  website can open must not be able to spend an invite on its own.
+- **`GET /tracks` on the agent**, so setting a track is a list of what that host actually
+  has instead of a text box you spell a track name into from memory. Your own PC's library
+  can't answer this — the operator's machine and the server box are different installs.
+- **`POST /v1/servers` and `DELETE /v1/servers/:id`** on the control plane, with ownership:
+  a server is recorded against the account that registered it, only that account can remove
+  it, and the hand-seeded rows have no owner so the API can't touch them. Five servers per
+  account, and one registration per address.
 - **`GET /v1/servers/mine`**, which hands a server's agent token to the account that owns it —
   the only way to drive a box that has no console and prints its pairing code to nobody.
+- **`POST /v1/servers/:id/bootstrap`**, authenticated by the agent token the box already holds,
+  the same credential and the same refusal as `hello`. Stage names are validated and the stored
+  log is capped and kept only on failure.
+- **The agent ships as a build artifact**, served from R2 through the control plane. A
+  booting instance holds no credentials and has no way to be given any, so that URL is
+  unauthenticated by necessity; the bucket itself stays private.
 - **A guided-tour step for the Servers page**, and a help hint on it. Every other screen had
   one.
-
-### Changed
-- **Publishing a whole profile costs one library scan, not one per bike.** Resolving a look
-  walks `mods/bikes` recursively — every livery installed — and the publish path did that once
-  per bike plus once per uploaded file. Loadouts are now planned in a batch against a single
-  walk, and the upload takes its bytes from the files already hashed.
-- **`GET /v1/fleet` no longer hands every enrolled account the address of every server.** The
-  running count stays public to everyone, because that is what the concurrency cap is measured
-  against; the instance list is scoped to its owner.
-- **The on-screen description of paint sync matches what it does.** It promised automatic
-  publishing on every look change before that was true.
-
-## 2026-08-09 — v0.9.0 — A paint studio, ReShade presets, and your Shop purchases
-
-### Added
 - **A new Paints tab turns image files into paints the game loads.** MX Bikes reads a paint
   as a packed container of compressed texture sheets, which no image editor writes — so
   until now a livery drawn in GIMP or Photoshop had to go through somebody else's converter
@@ -165,6 +145,13 @@
 - **Purchases install through the same review sheet a drag-and-drop uses.** The file is
   downloaded with a progress bar, then read to see what it actually contains, and the sheet
   says where each piece will land and warns about collisions before anything is written.
+- **An Import button in the Library, for setups drag-and-drop never reaches.** Dropping a
+  download on the window stays the fast path, but the OS drop event doesn't arrive
+  everywhere — remote desktops and some shells eat it — and where it doesn't, there was no
+  other way to install a file you'd already downloaded. **Import → Choose files…** (or
+  **Choose a folder…**, for an unpacked track) stages exactly what a drop stages: same
+  classification, same review sheet showing where each piece lands, same collision
+  warnings, and nothing written until you confirm.
 - **Presets can use a custom riding style.** The **Riding style** slot only ever offered the
   two styles the game ships, so a style you had installed could not be picked — you could
   type its name in by hand, but the preset then flagged it as a mod you were missing, never
@@ -213,12 +200,213 @@
     back from one webhook to the other: a beta landing in the channel every player watches
     is worse than a beta nobody announced.
 
+- **Purchases works like the rest of the app now.** The tab you install your bought mods from
+  was a bare grid: no way to see what something actually was before installing it, no way to
+  find one among sixty, and an "Installed" badge that mostly didn't light up. It now has the
+  catalog's search, category pills, sorting (recently purchased, name, or not-installed-first)
+  and a full detail page — screenshots, description, author — reached by clicking a purchase's
+  artwork, the same as the catalog.
+- **Installing a purchase now works exactly like installing from Browse.** Add to Library asks
+  where it should go — the same destination picker, with the folders you already use and the
+  one you picked last time — confirms first if you already have it, then queues the install and
+  reports it on the same card, with the same FrostMod reload. Starting a second install while
+  one is running queues it instead of freezing the grid, which is what the purchases tab used
+  to do.
+- **The "Installed" badge is now a fact rather than a guess.** It used to compare the store's
+  product name against your folder names, and those routinely disagree — *2022 ARL MX Round 1*
+  ships as `2022.ARL.MX.RD01.pkz` and lands in a folder named after the file, so the badge
+  missed. Each install now records what it put where. Anything installed before this keeps the
+  old fuzzy match as a fallback.
+
 ### Changed
+- The 3D viewer can be handed textures the backend has never seen, which is what lets the
+  Designer's canvas appear on real geometry. Everything else still arrives by token, unchanged.
+- Switching between the Studio's tabs no longer throws away what you were doing in the one you
+  left.
+- Sheets unpacked in Paints can be sent straight to the Designer to draw on, rather than
+  unpacked a second time.
+- **Nothing runs unattended.** Four separate things have to fail before a server can bill
+  indefinitely: a cap of 2 concurrent instances counted *from EC2 rather than our own
+  records*; destruction after 20 minutes with nobody connected; termination of any instance
+  no database row points at; and a hard maximum lifetime that catches everything else — a
+  hung bootstrap, an agent that never started, a failure nobody has thought of.
+  Instances also launch with `InstanceInitiatedShutdownBehavior=terminate`, and the
+  bootstrap's failure trap shuts the machine down, so a half-built server destroys itself
+  rather than sitting idle on the bill.
+- **A server is only advertised once we can reach it.** The control plane calls the agent's
+  unauthenticated `/health` before publishing; an unreachable one is recorded and stays
+  manageable, but is kept out of everyone's picker. A list full of servers nobody can
+  connect to is worse than a short list. This can't prove the *game* port is open — that's
+  UDP, and a Worker can't send one — so "reachable" means the host answers.
+- **Addresses pointing into private space are refused outright**, before any request is
+  made. The control plane fetches an operator-supplied URL, which makes it a
+  request-forgery surface: `127.0.0.1`, RFC1918, carrier-grade NAT and the `169.254.169.254`
+  metadata address are all rejected, as is any URL carrying credentials, a path or a query.
+- **Join a server offers the servers we know about**, instead of an empty box wanting an IP
+  address. The control plane has held a registry of them since the first migration and
+  nothing ever showed it, so the answer to "where do I get the address" was nowhere in the
+  app. Typing one is still there, for a server that isn't listed.
+- **The server registry is public.** It was bearer-only, which meant the players most in
+  need of a list — the ones who have never joined a server and have no address to type —
+  were the only ones who couldn't see it. It returns the same name, region and address a
+  server browser shows; `agent_url` is still withheld, so no admin API is advertised.
+- **Adding a server shows one field, not four.** The pairing code carries the address and
+  the token and the host supplies the name, so the manual fields sit behind a disclosure
+  rather than implying they all need filling in — and the form now says where the code is
+  printed.
+- **Adding a server checks it before saving it**, and takes the server's name from the host
+  rather than asking you to invent one. A wrong address or token now fails at the form
+  instead of becoming a row that never loads.
+- **The enroll panel says where an invite code comes from**, with a button through to the
+  Discord. Invites are issued by hand and the field previously explained none of that.
+- **Your rider name is picked from your MX Bikes profiles**, not typed. It had to match the
+  game exactly and nothing checked that it did, which made a silent no-op the most likely
+  outcome of enrolling. Typing is still there when no profiles are found.
+- **Your GUID is claimed automatically** the first time one of your servers sees you
+  connect — the app reads it from the server's log, where the game writes it next to your
+  name. You can't read it off your own machine, so asking you to type it never made sense.
+  The manual field is still there, one click away, for anyone not running a server.
+- **Join a server is behind the Experimental switch**, with the rest of the multiplayer
+  work. It rides on an undocumented connect flag, so it shouldn't sit under Play for
+  everyone while that's still unconfirmed.
+- **Publishing a whole profile costs one library scan, not one per bike.** Resolving a look
+  walks `mods/bikes` recursively — every livery installed — and the publish path did that once
+  per bike plus once per uploaded file. Loadouts are now planned in a batch against a single
+  walk, and the upload takes its bytes from the files already hashed.
+- **`GET /v1/fleet` no longer hands every enrolled account the address of every server.** The
+  running count stays public to everyone, because that is what the concurrency cap is measured
+  against; the instance list is scoped to its owner.
+- **The on-screen description of paint sync matches what it does.** It promised automatic
+  publishing on every look change before that was true.
 - **FrostMod still starts when a runtime is missing.** It's a warning, not a gate: we can't
   tell from outside which PCs manage to inject anyway, and refusing to launch would take
   FrostMod away from anyone the check is wrong about.
+- **Opening a paint in the viewer is fast.** A gear paint is tens of megabytes of compressed
+  pixels — three 4096² sheets — and every one of them was inflated one after another, then
+  copied whole before being downscaled. They now inflate in parallel off a header walk that
+  reads the image table without touching a pixel, and the copy is gone. The roughness sheet
+  isn't decoded at all: the viewer samples a diffuse and a normal map, so that plane was 67 MB
+  allocated, resized, sent to the webview and turned into a mipmapped texture nothing binds.
+  Paints are also kept once decoded, so re-opening one or flicking back to it in the picker
+  costs nothing.
+- **Developer builds no longer run the paint decoder unoptimized.** `cargo`'s default leaves
+  every crate at `opt-level = 0` in a debug build, and essentially all of this work happens
+  inside `flate2` and `image`. Dependencies now build optimized and our own crate lightly so,
+  which is what made a locally-run app take seconds where the shipped one took a fraction of
+  one. Release builds are untouched.
 
 ### Fixed
+- **Protection paints were being saved to a folder the game doesn't read.** Paint Studio wrote
+  them to `rider/protection/<model>/paints` — the singular folder an old version of this app
+  used, marked un-installable ever since — while the model itself lives in `rider/protections/`
+  and every other path in the app installs there. The paint saved, the app said so, and the
+  gear turned up unpainted in game. Destinations are now derived from the folders the game
+  actually loads, so the two can't drift apart again.
+- The Designer's "Start from a paint…" gave no sign it was working while it unpacked, and said
+  nothing at all if the paint yielded no sheets.
+- **Signing in to the Shop no longer signs you straight back out.** A sign-in would land, show
+  the Purchases tab for a second, and drop to the signed-out screen again — every time, for
+  anyone whose stored session had gone stale. Your purchases are read out of a hidden browser
+  window that stays parked on the store, and nothing was closing that window when the session
+  underneath it changed: it kept the page it already had, which — after a failed read, or a
+  sign-out — was the store's own login form. So the very first thing a successful sign-in did
+  was re-read that form and conclude the session had expired. Signing in now drops the window
+  along with the old cookies, and re-loads the purchases page rather than trusting whatever was
+  on screen. The same window is also dropped whenever the store answers that you are signed
+  out, so one failed read can no longer make every attempt after it fail the same way.
+- **The Purchases tab no longer claims you are signed in when you aren't.** The app remembered
+  a sign-in in a file that could outlive the browser's cookies, so opening the tab rendered as
+  signed in, failed its first read, and flipped to signed out — the same flicker, with no
+  sign-in involved. The store telling us you are signed out now clears that record. Your
+  Cloudflare pass is deliberately kept, so signing back in doesn't have to sit through a fresh
+  challenge; **Log out** still clears everything, as it always did.
+- **The MX Bikes Shop sign-in no longer loops on "Verify you are human", and your purchases
+  install again.** The store now puts a Cloudflare *managed* challenge in front of every page
+  the signed-in half touches — the login form, the purchases list, and the file downloads
+  themselves. Only a real browser can clear one of those, by running its JavaScript, and the
+  pass it earns can't be handed to an HTTP client, so the app was asking for pages it could
+  never be given. Two things came of that: signing in sent you to the purchases page the
+  moment your password was accepted, straight into a second challenge, which is the loop; and
+  even a sign-in that got through had nothing behind it, because listing and downloading were
+  refused the same way.
+
+  The whole signed-in flow now happens inside a real browser window instead. Signing in lands
+  on a page Cloudflare doesn't gate, your purchases are read from a hidden window that has
+  actually cleared the check, and a bought file is downloaded by the browser itself straight
+  into the staging folder — so nothing large is squeezed through JavaScript. Browsing the
+  public catalog was never affected and is unchanged.
+
+  Two side effects worth knowing: an install now shows megabytes downloaded rather than a
+  percentage, because the browser reports a start and a finish and nothing in between; and
+  **Log out** now clears the browser's cookies too, which it has to, so the next sign-in is a
+  real one.
+- **A sign-in that fails now says so.** After five minutes of getting nowhere the app gave up
+  in complete silence — no message, no log line — which is what made a stuck challenge look
+  like an app that had simply hung. It now reports the failure and closes the dead window, and
+  writes which cookies the window ended up with (names only, never values) so a log says
+  whether the challenge ever cleared.
+- **Your look is published even if you never open the Locker.** Publishing only ever ran off
+  a preset apply, so the commonest path there is — enroll, press Play — sent nothing at all,
+  and the player appeared to everyone else in default gear with no indication anything was
+  wrong. It now publishes when you enroll, when the app starts, when you press Play or Join,
+  and whenever a preset is applied.
+- **Changing your kit in the game's own garage publishes it.** MX Bikes writes the same
+  `profile.ini` the app does; nothing was listening. A watcher on that file now catches it,
+  filtered to `profile.ini` alone so the replay and telemetry churn a session produces can't
+  set it off. Redundant fires cost nothing: the look is hashed and an unchanged one is never
+  sent.
+- **Switching Experimental on now starts watching for look changes straight away.** The
+  watcher that notices you changing kit in the game's own garage was only ever started when
+  the app launched, so turning the feature on left it stopped until the next restart — the
+  app kept publishing when you applied a preset or pressed Play, but a change made in the
+  garage went unnoticed for the rest of the session. That is the session you have just
+  enrolled in, which makes it the worst one to be quietly missing. Switching it back off
+  stops the watcher rather than leaving it running.
+- **Every bike is published, not just the last one touched.** Storage held one loadout per
+  account — `loadout_paints` had no bike dimension at all — so publishing a second bike
+  deleted the first. A rider looked right on whichever bike the app last saw and default on
+  every other. Both tables are rebuilt keyed by bike, and the app sends them together.
+- **The sync no longer overwrites liveries you made yourself.** Any local paint whose name
+  matched an incoming one was replaced, including your own artwork. It now records what it
+  installs and will only ever replace that; anything else is yours and is kept, and reported.
+  Two riders using one file name for different paints installs neither, rather than letting
+  whichever roster answered first decide what everyone sees.
+- **A server created from the app can now be reached.** Provisioning launched a machine and
+  then lost it: the response carried no address and no token, nothing ever filled either in,
+  and the row stayed unpublished forever — so the server could not be joined, managed or even
+  deleted, only waited out by the idle reaper. The instance now announces itself once its
+  agent answers, which fills in its address and puts it in the join picker.
+- **A server whose name isn't plain Latin-1 can be created.** EC2 user data was encoded with
+  `btoa`, which takes a "binary string" of one character per byte and throws on anything above
+  U+00FF. Any server named with an emoji or a non-Latin script failed to launch with
+  `InvalidCharacterError` and nothing else to go on. Found by trying to launch a real one.
+- **A provisioned server can actually download the game.** The bootstrap fetched the installer
+  with `Start-BitsTransfer`, which cannot work where it runs: EC2 user data executes as SYSTEM
+  at boot with no interactive session, and BITS refuses with `0x800704DD` — "the user has not
+  logged on to the network". Every launch died at that step. It now uses `curl.exe` from
+  System32, which streams to disk without a session and retries on its own, and the size is
+  checked afterwards so a truncated download fails loudly rather than extracting into nonsense.
+  Found by launching a real one, and diagnosed in a single attempt because the instance now
+  reports its transcript before shutting down.
+- **A provisioned server's agent can read its own config.** `agent.json` was written by hand as
+  JSON inside a PowerShell here-string, and the install path interpolated with single
+  backslashes — so the file said `"game_dir": "C:\mxb\\game"`, and `\m` is not a valid JSON
+  escape. The agent refused to parse it and exited immediately on every server ever
+  provisioned. It is now built with `ConvertTo-Json`, which escapes properly, and the file is
+  parsed once on the box before the agent is asked to.
+- **The idle reaper could never have reaped anything.** It read the agent address from a
+  column that provisioning cannot fill in — EC2 assigns the public IP while the instance
+  boots, long after the row is written — so every provisioned server looked permanently
+  unreachable and was skipped forever. It now takes the address from EC2's own view.
+- **Paint sync no longer syncs one hard-coded server.** The Servers page asked for
+  `eu-frankfurt-1` by name regardless of where you were riding; it now resolves the server
+  you actually joined, matching a registered one by address or falling back to the address
+  itself.
+- **The agent's track list no longer offers things that aren't tracks.** A folder tracks are
+  filed into (`EU`) and the interior of an extracted one (`data`) both came back as
+  selectable names, and picking either would have restarted the server into nothing. It now
+  uses the same marker files the app's own library scanner keys on, and stops descending
+  once it has found a track.
 - **Helmets, boots and protection now install into a folder of their own.** A gear mod
   packaged as a `.pkz` — which is how locked mods are distributed — unpacks to a single
   folder, and the app was unwrapping it and dropping the contents straight into
@@ -230,6 +418,23 @@
   folder it will make (taken from the mod's own descriptor) and lists exactly what will
   move before you press Repair. Packaged `.pkz` models and models already filed correctly
   are left alone.
+- **"A helmets mod was installed loose" no longer fires on a paint pack.** The repair asked
+  to gather anything it found sitting in `mods/rider/helmets` — including a bare
+  `paints/`/`goggles/` pair, which is not a scattered helmet at all but liveries for one that
+  is already installed. Paints for a packaged helmet have nowhere else to live, since nothing
+  can be written inside a `.pkz`. Repairing them built a helmet out of the liveries: a folder
+  with no mesh, offered by every picker as a model, with the real helmet's paints filed under
+  a name the loader never looks for. The repair now only offers itself when a model is
+  genuinely there — a mesh in the gear areas, a descriptor for riding-style animations, which
+  ship no mesh and no paints either.
+- **Two mods scattered into one folder are left alone instead of fused.** Nothing on disk
+  says which mesh, config or livery came from which mod, so gathering them under one name
+  produced a model that never existed. Two descriptors in an area root is now a refusal, with
+  the reason in the log.
+- **A repair that fails part-way puts everything back.** It stopped at the first file that
+  wouldn't move — a file the running game holds open, on Windows — leaving the mesh gathered
+  and `paints/`/`goggles/` still in the area root, which shows the model *and* both strays in
+  the picker and reads as the repair having split the helmet up. It is now all-or-nothing.
 - **A packed gear item and a folder of the same name are now one item, not two.** A `.pkz`
   helmet with paints installed loose beside it (which is where the game looks, and where the
   studio writes) only ever showed one side of itself: whichever the loader resolved first.
@@ -626,122 +831,6 @@ repeated below.
 
 Extracted archives are deliberately left alone: a link inside a download you didn't make is
 still refused, which is what stops an archive writing outside the folder it unpacks into.
-
-## 2026-08-08 — create a server without owning a machine
-
-### Added
-- **Create a server from the app.** The control plane launches an EC2 instance, installs
-  the dedicated server and the agent on it, and the server appears in the Servers page. The
-  app holds no cloud credentials — a desktop binary can be unpacked, and a key inside one
-  would let anyone create infrastructure in our account — so the AWS key lives only as a
-  Worker secret, scoped by IAM to instances tagged `mxb:managed` in a single region.
-- **The agent ships as a build artifact**, served from R2 through the control plane. A
-  booting instance holds no credentials and has no way to be given any, so that URL is
-  unauthenticated by necessity; the bucket itself stays private.
-
-### Changed
-- **Nothing runs unattended.** Four separate things have to fail before a server can bill
-  indefinitely: a cap of 2 concurrent instances counted *from EC2 rather than our own
-  records*; destruction after 20 minutes with nobody connected; termination of any instance
-  no database row points at; and a hard maximum lifetime that catches everything else — a
-  hung bootstrap, an agent that never started, a failure nobody has thought of.
-  Instances also launch with `InstanceInitiatedShutdownBehavior=terminate`, and the
-  bootstrap's failure trap shuts the machine down, so a half-built server destroys itself
-  rather than sitting idle on the bill.
-
-### Fixed
-- **The idle reaper could never have reaped anything.** It read the agent address from a
-  column that provisioning cannot fill in — EC2 assigns the public IP while the instance
-  boots, long after the row is written — so every provisioned server looked permanently
-  unreachable and was skipped forever. It now takes the address from EC2's own view.
-
-## 2026-08-08 — put your own server in the list
-
-### Added
-- **Publish a server you run to the public list, from the app.** Until now `servers` rows
-  were hand-written SQL, so running a server and *having anyone able to join it* were
-  separate problems — the second one solved by passing an address around privately. A
-  server you manage in the app now has an "Add to the server list" button, and it appears
-  in everyone's Join a server picker.
-- **Nothing is typed to publish it.** The address is the agent's own host joined to the port
-  it reports, and the name comes from the server's `.ini`. The only thing asked for is the
-  region, which is the one fact no machine on this end can work out.
-- **`POST /v1/servers` and `DELETE /v1/servers/:id`** on the control plane, with ownership:
-  a server is recorded against the account that registered it, only that account can remove
-  it, and the hand-seeded rows have no owner so the API can't touch them. Five servers per
-  account, and one registration per address.
-
-### Changed
-- **A server is only advertised once we can reach it.** The control plane calls the agent's
-  unauthenticated `/health` before publishing; an unreachable one is recorded and stays
-  manageable, but is kept out of everyone's picker. A list full of servers nobody can
-  connect to is worse than a short list. This can't prove the *game* port is open — that's
-  UDP, and a Worker can't send one — so "reachable" means the host answers.
-- **Addresses pointing into private space are refused outright**, before any request is
-  made. The control plane fetches an operator-supplied URL, which makes it a
-  request-forgery surface: `127.0.0.1`, RFC1918, carrier-grade NAT and the `169.254.169.254`
-  metadata address are all rejected, as is any URL carrying credentials, a path or a query.
-
-## 2026-08-08 — paint sync stops being a form
-
-### Added
-- **Your paints publish themselves.** Whenever you change your look, the app sends it up a
-  second or so later — one publish for a burst of preset-flipping, not one per click. This
-  closes the loop: publishing had a command but no button anywhere in the app, so nothing
-  was ever uploaded and every roster was empty by construction.
-- **Everyone else's paints arrive on their own**, pulled when you launch the game. Joining
-  by address syncs that server; pressing Play syncs every server in the registry, since the
-  game you're about to pick from the in-game browser never passes through us. Rosters are
-  merged and de-duplicated first, so two servers sharing riders is one pass over the disk.
-- **`GET /tracks` on the agent**, so setting a track is a list of what that host actually
-  has instead of a text box you spell a track name into from memory. Your own PC's library
-  can't answer this — the operator's machine and the server box are different installs.
-- **One-line pairing.** `mxb-agent` prints a code at startup carrying its own address and
-  token; paste it into Add a server and both fields fill in. `public_url` in `agent.json`
-  overrides the address for hosts behind NAT or a proxy.
-- **`mxb://enroll?code=…` links**, so an invite can be clicked instead of transcribed. The
-  link only prefills the field — enrolling is still a button you press, because a URL any
-  website can open must not be able to spend an invite on its own.
-
-### Changed
-- **Join a server offers the servers we know about**, instead of an empty box wanting an IP
-  address. The control plane has held a registry of them since the first migration and
-  nothing ever showed it, so the answer to "where do I get the address" was nowhere in the
-  app. Typing one is still there, for a server that isn't listed.
-- **The server registry is public.** It was bearer-only, which meant the players most in
-  need of a list — the ones who have never joined a server and have no address to type —
-  were the only ones who couldn't see it. It returns the same name, region and address a
-  server browser shows; `agent_url` is still withheld, so no admin API is advertised.
-- **The enroll panel says where an invite code comes from**, with a button through to the
-  Discord. Invites are issued by hand and the field previously explained none of that.
-- **Adding a server shows one field, not four.** The pairing code carries the address and
-  the token and the host supplies the name, so the manual fields sit behind a disclosure
-  rather than implying they all need filling in — and the form now says where the code is
-  printed.
-- **Your rider name is picked from your MX Bikes profiles**, not typed. It had to match the
-  game exactly and nothing checked that it did, which made a silent no-op the most likely
-  outcome of enrolling. Typing is still there when no profiles are found.
-- **Your GUID is claimed automatically** the first time one of your servers sees you
-  connect — the app reads it from the server's log, where the game writes it next to your
-  name. You can't read it off your own machine, so asking you to type it never made sense.
-  The manual field is still there, one click away, for anyone not running a server.
-- **Adding a server checks it before saving it**, and takes the server's name from the host
-  rather than asking you to invent one. A wrong address or token now fails at the form
-  instead of becoming a row that never loads.
-- **Join a server is behind the Experimental switch**, with the rest of the multiplayer
-  work. It rides on an undocumented connect flag, so it shouldn't sit under Play for
-  everyone while that's still unconfirmed.
-
-### Fixed
-- **The agent's track list no longer offers things that aren't tracks.** A folder tracks are
-  filed into (`EU`) and the interior of an extracted one (`data`) both came back as
-  selectable names, and picking either would have restarted the server into nothing. It now
-  uses the same marker files the app's own library scanner keys on, and stops descending
-  once it has found a track.
-- **Paint sync no longer syncs one hard-coded server.** The Servers page asked for
-  `eu-frankfurt-1` by name regardless of where you were riding; it now resolves the server
-  you actually joined, matching a registered one by address or falling back to the address
-  itself.
 
 ## 2026-08-08 — paints preview on their own model, and helmets bind their goggles right
 

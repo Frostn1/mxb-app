@@ -29,6 +29,21 @@ struct Progress {
     message: Option<String>,
 }
 
+/// [`emit`], for the one caller outside this module.
+///
+/// [`crate::shop_fetch`] downloads through the browser rather than through `reqwest`, but it is
+/// the same install to the user and has to drive the same progress bar — so it reports on this
+/// event rather than inventing a second one.
+pub(crate) fn emit_progress(
+    app: &AppHandle,
+    slug: &str,
+    stage: &'static str,
+    received: Option<u64>,
+    total: Option<u64>,
+) {
+    emit(app, slug, stage, received, total);
+}
+
 fn emit(app: &AppHandle, slug: &str, stage: &'static str, received: Option<u64>, total: Option<u64>) {
     let _ = app.emit(
         "install-progress",
@@ -133,7 +148,9 @@ pub async fn download_and_place(
     extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
 }
 
-fn extract_and_place(
+/// Extract a downloaded archive and place it. `pub(crate)` for the shop, whose bytes come
+/// through a WebView rather than `reqwest` but which finishes exactly the same way.
+pub(crate) fn extract_and_place(
     app: &AppHandle,
     cfg: &AppConfig,
     slug: &str,

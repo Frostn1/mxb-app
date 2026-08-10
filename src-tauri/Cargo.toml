@@ -116,6 +116,19 @@ tauri = { version = "2", features = ["test"] }
 # shipped binary keeps the minimal `time`-only tokio it already had.
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
 
+# `tauri dev` builds this profile, and cargo's default leaves everything at opt-level 0 —
+# which is fine for our own glue but not for the crates doing the heavy lifting. Unpacking one
+# 36 MB gear paint (three 4096² textures) spends nearly all its time inside `flate2`'s inflate
+# and `image`'s resize: 4.3 s unoptimized against 0.33 s optimized.
+[profile.dev]
+# The local crate too, but only lightly: a creator-sealed `.pnt` is decrypted a byte at a time
+# over the whole file before it is even parsed, and that loop is ours. Keeps debug info.
+opt-level = 1
+
+[profile.dev.package."*"]
+# Dependencies are never stepped through, and they're built once and then cached.
+opt-level = 3
+
 # Ship a hardened, hard-to-reverse binary. cargo defaults leave the symbol table in and
 # emit no debug info; this strips symbols and leans on the optimizer to erase structure.
 # opt-level stays at 3 so the viewer's hot paths aren't sacrificed for it.

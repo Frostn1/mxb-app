@@ -61,12 +61,39 @@ export function bootstrapScript(input: BootstrapInputs): string {
 $ErrorActionPreference = "Stop"
 Start-Transcript -Path "C:\\mxb-bootstrap.log" -Append
 
+# Say what we are doing, so a server that takes a quarter of an hour to arrive can show its
+# progress instead of an unexplained spinner. Best-effort by design: a report that fails must
+# never be the thing that fails a build which is otherwise working.
+function Send-Stage {
+  param([string] $Stage, [bool] $Ok = $true, [string] $Log = "")
+  try {
+    $payload = @{ stage = $Stage; ok = $Ok; log = $Log } | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method POST -Uri "${input.controlPlaneUrl}/v1/servers/${input.serverId}/bootstrap" -Headers @{ "Authorization" = "Bearer ${input.agentToken}"; "Content-Type" = "application/json" } -Body $payload -TimeoutSec 15 | Out-Null
+  } catch {
+    Write-Output "couldn't report stage '$Stage': $_"
+  }
+}
+
 # Any unhandled failure below takes the instance down with it. Launched with
 # InstanceInitiatedShutdownBehavior=terminate, so this is self-destruction, not a pause:
 # a half-built server that sits idle is the one outcome that quietly costs money.
+#
+# Which is why the transcript is sent *before* shutting down. There is no console on this box
+# and no key pair, so the log cannot be read from outside -- and terminating destroys it.
+# Without this, a bootstrap that failed at minute twelve and one still downloading look
+# identical from the outside: a server that never turns up.
 trap {
-  Write-Output "bootstrap failed: $_"
-  Stop-Transcript
+  $reason = "$_"
+  Write-Output "bootstrap failed: $reason"
+  try { Stop-Transcript } catch {}
+  $tail = ""
+  # -Tail and -Raw cannot be combined; asking for both throws, which the catch would swallow
+  # and leave this report with nothing in it but the throw message.
+  try { $tail = (Get-Content -Path "C:\\mxb-bootstrap.log" -Tail 200 | Out-String) } catch {}
+  # Whatever the agent itself said on the way out. Usually the actual answer.
+  $agentOut = ""
+  try { $agentOut = (Get-Content -Path "${ROOT}\\agent-out.txt","${ROOT}\\agent-err.txt" -ErrorAction SilentlyContinue | Out-String) } catch {}
+  Send-Stage -Stage "failed" -Ok $false -Log "$reason\`n--- agent output ---\`n$agentOut\`n--- transcript ---\`n$tail"
   Stop-Computer -Force
   exit 1
 }
@@ -78,23 +105,38 @@ Set-Location "${ROOT}"
 # known to negotiate down and fail against modern endpoints.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+Send-Stage -Stage "downloading the game"
 Write-Output "fetching the MX Bikes installer (about 2 GB)"
-# BITS rather than Invoke-WebRequest: IWR buffers the whole response in memory, and two
-# gigabytes of it on a small instance is how this step fails.
-Start-BitsTransfer -Source "${input.gameUrl}" -Destination "${ROOT}\\mxbikes-installer.exe"
+# curl.exe, which ships in System32 on Server 2019 and later.
+#
+# Not Invoke-WebRequest: it buffers the whole response in memory, and two gigabytes of that on
+# a small instance is how this step fails. And not Start-BitsTransfer, which was the first
+# choice for exactly that reason and cannot work here at all -- user data runs as SYSTEM at
+# boot with no interactive session, and BITS refuses with 0x800704DD, "the user has not logged
+# on to the network". curl streams straight to disk, needs no session, and retries by itself.
+$curl = "$env:SystemRoot\\System32\\curl.exe"
+if (-not (Test-Path $curl)) { throw "curl.exe is missing from System32" }
+& $curl -L --fail --silent --show-error --retry 5 --retry-delay 15 --retry-connrefused \`
+  -o "${ROOT}\\mxbikes-installer.exe" "${input.gameUrl}"
+if ($LASTEXITCODE -ne 0) { throw "downloading the installer failed (curl exit $LASTEXITCODE)" }
+$size = (Get-Item "${ROOT}\\mxbikes-installer.exe").Length
+Write-Output "installer downloaded: $size bytes"
+# A truncated download extracts into nonsense; anything this small is not the installer.
+if ($size -lt 1GB) { throw "the installer is only $size bytes, so the download did not finish" }
 
+Send-Stage -Stage "extracting the game"
 Write-Output "extracting the server files"
 # There is no separate dedicated-server download; the installer carries it and \`-extract\`
 # unpacks it to mxbikes.zip without installing anything.
 #
-# It exits 1 on SUCCESS. Treating that as failure — which every normal convention says to
-# do — leaves the bootstrap dead at the one step that actually worked, so the exit code is
+# It exits 1 on SUCCESS. Treating that as failure -- which every normal convention says to
+# do -- leaves the bootstrap dead at the one step that actually worked, so the exit code is
 # deliberately ignored and the *artifact* is what gets checked instead.
 $proc = Start-Process -FilePath "${ROOT}\\mxbikes-installer.exe" -ArgumentList "-extract" -WorkingDirectory "${ROOT}" -Wait -PassThru -NoNewWindow
 Write-Output "installer exited $($proc.ExitCode) (1 is normal here)"
 
 $zip = Get-ChildItem -Path "${ROOT}" -Filter "mxbikes*.zip" | Select-Object -First 1
-if (-not $zip) { throw "the installer produced no zip — extraction did not work" }
+if (-not $zip) { throw "the installer produced no zip -- extraction did not work" }
 Expand-Archive -Path $zip.FullName -DestinationPath "${ROOT}\\game" -Force
 
 if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) {
@@ -105,6 +147,7 @@ if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) {
   Move-Item -Path "$($inner.Directory.FullName)\\*" -Destination "${ROOT}\\game" -Force
 }
 
+Send-Stage -Stage "installing the agent"
 Write-Output "fetching the agent"
 Invoke-WebRequest -Uri "${input.agentUrl}" -OutFile "${ROOT}\\mxb-agent.exe" -UseBasicParsing
 
@@ -123,7 +166,7 @@ track_layout =
 # The box's own public address, from the instance metadata service. IMDSv2 needs a token
 # first; v1 is disabled on hardened AMIs and the extra call costs nothing. Without this the
 # agent binds a wildcard, works out its address from the primary interface, and prints the
-# *private* IP — an address nobody outside the VPC can use.
+# *private* IP -- an address nobody outside the VPC can use.
 $imdsToken = Invoke-RestMethod -Method PUT -Uri "http://169.254.169.254/latest/api/token" \`
   -Headers @{ "X-aws-ec2-metadata-token-ttl-seconds" = "300" } -TimeoutSec 10
 $publicIp = Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/public-ipv4" \`
@@ -131,16 +174,25 @@ $publicIp = Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/publ
 if (-not $publicIp) { throw "this instance has no public address" }
 Write-Output "public address is $publicIp"
 
-@"
-{
-  "token": "${input.agentToken}",
-  "listen": "0.0.0.0:${input.agentPort}",
-  "public_url": "http://$publicIp:${input.agentPort}",
-  "game_dir": "${ROOT}\\\\game",
-  "ini": "dedicated.ini",
-  "game_port": ${input.gamePort}
-}
-"@ | Set-Content -Path "${ROOT}\\agent.json" -Encoding ASCII
+# Built with ConvertTo-Json rather than written out by hand.
+#
+# It was hand-written, and it was never valid: the path interpolated as a single-backslash
+# "C:\\mxb", so the file said "game_dir": "C:\\mxb\\\\game" and \\m is not a JSON escape. The
+# agent refused to parse its own config on every server ever provisioned. Letting PowerShell
+# do the escaping removes the entire class of mistake, and it is the same thing Send-Stage
+# already relies on.
+@{
+  token = "${input.agentToken}"
+  listen = "0.0.0.0:${input.agentPort}"
+  public_url = "http://$publicIp:${input.agentPort}"
+  game_dir = "${ROOT}\\game"
+  ini = "dedicated.ini"
+  game_port = ${input.gamePort}
+} | ConvertTo-Json | Set-Content -Path "${ROOT}\\agent.json" -Encoding ASCII
+
+# Prove it parses here, rather than discovering it does not when the agent exits.
+try { Get-Content -Path "${ROOT}\\agent.json" -Raw | ConvertFrom-Json | Out-Null }
+catch { throw "the agent config we just wrote is not valid JSON: $_" }
 
 # The security group already gates what reaches the box; these rules are what let traffic
 # past Windows' own firewall once it is there.
@@ -153,13 +205,32 @@ $action = New-ScheduledTaskAction -Execute "${ROOT}\\mxb-agent.exe" -Argument "$
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
 Register-ScheduledTask -TaskName "mxb-agent" -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+# Run it once in the foreground first, with its output captured.
+#
+# The scheduled task is what keeps the agent alive across reboots, but it swallows everything
+# the process says: when the agent failed to come up, all we learned was that it hadn't. This
+# runs it directly for a few seconds purely so that a refusal to start has somewhere to say
+# why -- a bad agent.json, a missing folder, a binary Defender took exception to.
+$probe = Start-Process -FilePath "${ROOT}\\mxb-agent.exe" -ArgumentList "${ROOT}\\agent.json" \`
+  -WorkingDirectory "${ROOT}" -PassThru -NoNewWindow \`
+  -RedirectStandardOutput "${ROOT}\\agent-out.txt" -RedirectStandardError "${ROOT}\\agent-err.txt"
+Start-Sleep -Seconds 8
+if ($probe.HasExited) {
+  $out = (Get-Content -Path "${ROOT}\\agent-out.txt","${ROOT}\\agent-err.txt" -ErrorAction SilentlyContinue | Out-String)
+  throw "the agent exited immediately (code $($probe.ExitCode)): $out"
+}
+# It runs. Stop this copy so the scheduled task owns the port rather than racing it.
+Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+
 Start-ScheduledTask -TaskName "mxb-agent"
+Send-Stage -Stage "waiting for the agent"
 
 # Wait for the agent to actually answer before saying the server is up. /health is the one
-# route it serves without a token, and it is served before anything else is ready — which is
+# route it serves without a token, and it is served before anything else is ready -- which is
 # all this needs to know: the process is alive and listening.
 $ready = $false
-foreach ($attempt in 1..30) {
+foreach ($attempt in 1..45) {
   try {
     Invoke-RestMethod -Uri "http://127.0.0.1:${input.agentPort}/health" -TimeoutSec 5 | Out-Null
     $ready = $true
@@ -168,14 +239,20 @@ foreach ($attempt in 1..30) {
     Start-Sleep -Seconds 2
   }
 }
-if (-not $ready) { throw "the agent never came up" }
+if (-not $ready) {
+  $info = ""
+  try { $info = (Get-ScheduledTaskInfo -TaskName "mxb-agent" | Format-List | Out-String) } catch {}
+  $running = ""
+  try { $running = (Get-Process -Name "mxb-agent" -ErrorAction SilentlyContinue | Out-String) } catch {}
+  throw "the agent never answered on ${input.agentPort}. task info: $info process: $running"
+}
 
 # Tell the control plane where this server is. Until this call, the row it was created from
 # has an empty address and is published to nobody: the public IP is assigned while the box
 # boots, long after that row was written, and nothing else is in a position to report it.
 # Authenticated with the agent's own token, which only this instance and that row hold.
 #
-# Retried, because everything else has already succeeded by this point — a transient network
+# Retried, because everything else has already succeeded by this point -- a transient network
 # failure here would otherwise self-destruct a server that is up and running.
 $announced = $false
 foreach ($attempt in 1..5) {
@@ -192,6 +269,7 @@ foreach ($attempt in 1..5) {
 }
 if (-not $announced) { throw "couldn't tell the control plane this server is up" }
 
+Send-Stage -Stage "ready"
 Write-Output "bootstrap complete"
 Stop-Transcript
 </powershell>
