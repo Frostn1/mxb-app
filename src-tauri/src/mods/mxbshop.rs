@@ -48,12 +48,20 @@ fn looks_like_challenge(html: &str) -> bool {
 pub async fn fetch_my_downloads(app: &AppHandle, reload: bool) -> anyhow::Result<Vec<ShopItem>> {
     let html = crate::shop_fetch::downloads_html(reload).await?;
 
+    // Both of the answers below mean the window we are reading is no longer any use — it is
+    // sitting on an interstitial, or on a login form — and both tell the user to sign in again.
+    // So both drop the session and the window with it (see [`crate::shop_session::forget`]).
+    // Leaving either in place is what turned one failed read into a permanent one: the marker
+    // kept claiming a session, and the window kept answering with the same page that disproved
+    // it, right through the next sign-in.
     if looks_like_challenge(&html) {
+        crate::shop_session::forget(app);
         anyhow::bail!("MX Bikes Shop is blocking the app (Cloudflare). Please sign in again.");
     }
 
     // EDD bounces an unauthenticated user to the WordPress login form.
     if html.contains("name=\"log\"") && html.contains("name=\"pwd\"") {
+        crate::shop_session::forget(app);
         anyhow::bail!("Your MX Bikes Shop session expired — please sign in again.");
     }
 

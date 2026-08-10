@@ -256,6 +256,22 @@
   FrostMod away from anyone the check is wrong about.
 
 ### Fixed
+- **Signing in to the Shop no longer signs you straight back out.** A sign-in would land, show
+  the Purchases tab for a second, and drop to the signed-out screen again — every time, for
+  anyone whose stored session had gone stale. Your purchases are read out of a hidden browser
+  window that stays parked on the store, and nothing was closing that window when the session
+  underneath it changed: it kept the page it already had, which — after a failed read, or a
+  sign-out — was the store's own login form. So the very first thing a successful sign-in did
+  was re-read that form and conclude the session had expired. Signing in now drops the window
+  along with the old cookies, and re-loads the purchases page rather than trusting whatever was
+  on screen. The same window is also dropped whenever the store answers that you are signed
+  out, so one failed read can no longer make every attempt after it fail the same way.
+- **The Purchases tab no longer claims you are signed in when you aren't.** The app remembered
+  a sign-in in a file that could outlive the browser's cookies, so opening the tab rendered as
+  signed in, failed its first read, and flipped to signed out — the same flicker, with no
+  sign-in involved. The store telling us you are signed out now clears that record. Your
+  Cloudflare pass is deliberately kept, so signing back in doesn't have to sit through a fresh
+  challenge; **Log out** still clears everything, as it always did.
 - **The MX Bikes Shop sign-in no longer loops on "Verify you are human", and your purchases
   install again.** The store now puts a Cloudflare *managed* challenge in front of every page
   the signed-in half touches — the login form, the purchases list, and the file downloads

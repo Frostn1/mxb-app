@@ -158,7 +158,10 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
       if (ok) {
         setLoggedIn(true);
         toast.success(tRef.current("shop.signedIn"));
-        void loadDownloads();
+        // `reload`, like the Refresh buttons: the page is read out of a hidden window, and a
+        // sign-in is precisely the moment its contents stop being about the right person. A
+        // read that didn't say so would answer from the page the previous session left behind.
+        void loadDownloads(true);
       } else {
         toast.error(tRef.current("shop.sessionFailed"));
       }
