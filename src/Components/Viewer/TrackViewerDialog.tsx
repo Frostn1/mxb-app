@@ -1,0 +1,207 @@
+import { useEffect, useState } from "react";
+import { Loader2, Mountain, X } from "lucide-react";
+import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
+import { Segmented } from "../ui/segmented";
+import { TrackViewer } from "./TrackViewer";
+import { loadTrackTerrain, readTrackInfo } from "../../api/tracks";
+import type { TrackInfo, TrackTerrain } from "../../types";
+import { formatLength } from "../../lib/mods";
+import { useT } from "../../i18n/context";
+
+/**
+ * The two passes the terrain is loaded in.
+ *
+ * A coarse grid is a few tens of kilobytes and builds its mesh in a frame or two, so the
+ * track is on screen almost immediately; the detailed one replaces it once it arrives. Both
+ * come from the same cached master in the backend, so the second pass costs a resample and
+ * a transfer rather than another read of the archive.
+ */
+const COARSE_DIM = 96;
+const FINE_DIM = 320;
+
+type Exaggeration = "1" | "2" | "4";
+
+interface TrackViewerDialogProps {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  /** The track's `.pkz` or unpacked folder. */
+  path: string;
+  title?: string;
+}
+
+export function TrackViewerDialog({
+  open,
+  onOpenChange,
+  path,
+  title,
+}: TrackViewerDialogProps) {
+  const t = useT();
+  const [info, setInfo] = useState<TrackInfo | null>(null);
+  const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
+  // True only until the *coarse* pass lands — the refine that follows happens under a
+  // terrain that is already up, and covering it with a spinner would be a step backwards.
+  const [loading, setLoading] = useState(false);
+  const [refining, setRefining] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [exaggeration, setExaggeration] = useState<Exaggeration>("1");
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+
+    setInfo(null);
+    setTerrain(null);
+    setError(null);
+    setLoading(true);
+
+    // The inventory doesn't inflate anything, so it lands while the terrain is still being
+    // read and the panel can fill in around the empty canvas.
+    readTrackInfo(path)
+      .then((i) => alive && setInfo(i))
+      .catch(() => {});
+
+    void (async () => {
+      try {
+        const coarse = await loadTrackTerrain(path, COARSE_DIM);
+        if (!alive) return;
+        setTerrain(coarse);
+        setLoading(false);
+
+        setRefining(true);
+        const fine = await loadTrackTerrain(path, FINE_DIM);
+        if (!alive) return;
+        // Only an upgrade: a backend that capped the master below the fine size would
+        // otherwise have us swap a grid for an identical one and rebuild the mesh for free.
+        if (fine.width > coarse.width) setTerrain(fine);
+      } catch (e) {
+        if (!alive) return;
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (alive) {
+          setLoading(false);
+          setRefining(false);
+        }
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [open, path]);
+
+  const meta = info?.meta;
+  const rows: [string, string][] = [];
+  if (meta?.author) rows.push([t("libraryDetail.author"), meta.author]);
+  if (meta?.location) rows.push([t("libraryDetail.location"), meta.location]);
+  if (meta?.length) rows.push([t("libraryDetail.length"), formatLength(meta.length)]);
+  if (meta?.altitude != null) rows.push([t("libraryDetail.altitude"), `${meta.altitude} m`]);
+  if (terrain) {
+    rows.push([t("trackViewer.grid"), `${terrain.width} × ${terrain.height}`]);
+    rows.push([
+      t("trackViewer.relief"),
+      `${Math.round(terrain.maxHeight - terrain.minHeight)} m`,
+    ]);
+  }
+
+  // Nothing to load rather than something that failed — worth saying plainly, since the
+  // inventory can tell us before the terrain read even finishes.
+  const noTerrain = info != null && !info.hasTerrain;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showClose={false}
+        className="flex h-[85vh] w-[92vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+      >
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+            <Mountain className="h-4 w-4 flex-none text-muted-foreground" />
+            <span className="truncate">{title ?? meta?.name ?? t("trackViewer.title")}</span>
+            {refining && (
+              <span className="flex-none text-[11px] font-normal text-muted-foreground">
+                {t("trackViewer.refining")}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-none items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {t("trackViewer.exaggeration")}
+              <Segmented
+                size="sm"
+                value={exaggeration}
+                onChange={setExaggeration}
+                options={[
+                  { value: "1", label: "1×" },
+                  { value: "2", label: "2×" },
+                  { value: "4", label: "4×" },
+                ]}
+              />
+            </label>
+            <DialogClose className="rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
+              <X className="size-4" />
+              <span className="sr-only">{t("common.close")}</span>
+            </DialogClose>
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-1">
+          <div className="relative min-w-0 flex-1">
+            <TrackViewer
+              terrain={terrain}
+              exaggeration={Number(exaggeration)}
+              className="absolute inset-0"
+            />
+            {loading && !terrain && (
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40">
+                <Loader2 className="h-6 w-6 animate-spin text-white/80" />
+                <span className="text-sm text-white/80">{t("trackViewer.loading")}</span>
+              </div>
+            )}
+            {/* Only when there's nothing on screen. A refine pass that failed leaves the
+                coarse terrain up and working, and covering it with an error would be a lie. */}
+            {!loading && !terrain && (error || noTerrain) && (
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center">
+                <span className="text-sm font-medium text-foreground">
+                  {t("trackViewer.noTerrain")}
+                </span>
+                <span className="max-w-md text-xs text-muted-foreground">
+                  {t("trackViewer.noTerrainHint")}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <aside className="w-64 flex-none overflow-y-auto border-l border-border p-4">
+            {meta?.thumbnail && (
+              <img
+                src={meta.thumbnail}
+                alt=""
+                className="mb-3 w-full rounded-md border border-border object-cover"
+              />
+            )}
+            <dl className="space-y-2">
+              {rows.map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-[10px] font-semibold uppercase tracking-[0.9px] text-faint">
+                    {label}
+                  </dt>
+                  <dd className="text-[13px] text-foreground">{value}</dd>
+                </div>
+              ))}
+            </dl>
+
+            {/* The height file has no documented layout, so what's on screen was worked out
+                from the data. Say so, rather than letting a guess pass for a reading. */}
+            {terrain && (terrain.confidence < 0.75 || !terrain.scaleKnown) && (
+              <p className="mt-4 border-t border-border pt-3 text-[11px] leading-relaxed text-muted-foreground">
+                {!terrain.scaleKnown
+                  ? t("trackViewer.assumedScaleNote")
+                  : t("trackViewer.inferredNote")}
+              </p>
+            )}
+          </aside>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

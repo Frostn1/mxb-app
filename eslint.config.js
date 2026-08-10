@@ -47,7 +47,10 @@ export default tseslint.config(
     // react-three-fiber renders three.js objects as JSX (`<mesh castShadow>`,
     // `<ambientLight intensity>`), which eslint-plugin-react judges against the DOM and
     // flags wholesale. @react-three/fiber ships types for them, so tsc is the real check.
-    files: ["src/Components/Viewer/ModelViewer.tsx"],
+    files: [
+      "src/Components/Viewer/ModelViewer.tsx",
+      "src/Components/Viewer/TrackViewer.tsx",
+    ],
     rules: { "react/no-unknown-property": "off" },
   },
 );

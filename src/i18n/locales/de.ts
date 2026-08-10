@@ -1462,4 +1462,20 @@ export const de: Translation = {
   "designer.fillHint": "Auf die Bahn klicken, um die ganze Ebene zu füllen.",
   "designer.gradientHint":
     "Auf der Bahn ziehen, um festzulegen, wo der Übergang liegt. Er füllt diese ganze Ebene — füge eine weitere Malebene hinzu, um zu behalten, was darunter liegt.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "Gelände ansehen",
+  "trackViewer.title": "Streckenvorschau",
+  "trackViewer.loading": "Gelände wird gelesen…",
+  "trackViewer.refining": "Wird verfeinert…",
+  "trackViewer.exaggeration": "Relief",
+  "trackViewer.grid": "Raster",
+  "trackViewer.relief": "Höhenunterschied",
+  "trackViewer.noTerrain": "Kein Gelände zum Anzeigen",
+  "trackViewer.noTerrainHint":
+    "Die Höhendaten dieser Strecke liegen in keinem Format vor, das der Betrachter bereits lesen kann.",
+  "trackViewer.inferredNote":
+    "Die Höhendatei dieser Strecke hat kein dokumentiertes Format, ihre Form wurde also aus den Daten erschlossen. Als nahe, nicht als exakte Lesung zu verstehen.",
+  "trackViewer.assumedScaleNote":
+    "Diese Strecke gibt den Abstand ihrer Höhenpunkte nicht an: Das Relief ist echt, seine Steilheit aber nur eine Näherung.",
 };

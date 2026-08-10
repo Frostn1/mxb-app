@@ -1440,4 +1440,20 @@ export const it: Translation = {
   "designer.fillHint": "Clicca sul foglio per riempire tutto il livello.",
   "designer.gradientHint":
     "Trascina sul foglio per decidere dove avviene la transizione. Riempie tutto questo livello: aggiungi un altro livello pittura per conservare quello che c'è sotto.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "Vedi il terreno",
+  "trackViewer.title": "Anteprima tracciato",
+  "trackViewer.loading": "Lettura del terreno…",
+  "trackViewer.refining": "Definizione…",
+  "trackViewer.exaggeration": "Rilievo",
+  "trackViewer.grid": "Griglia",
+  "trackViewer.relief": "Dislivello",
+  "trackViewer.noTerrain": "Nessun terreno da mostrare",
+  "trackViewer.noTerrainHint":
+    "I dati di altezza di questo tracciato non sono in un formato che il visualizzatore sa ancora leggere.",
+  "trackViewer.inferredNote":
+    "Il file di altezze di questo tracciato non ha un formato documentato, quindi la sua forma è stata dedotta dai dati. Consideralo una lettura fedele, non esatta.",
+  "trackViewer.assumedScaleNote":
+    "Questo tracciato non dichiara la distanza fra i suoi punti di altezza: il rilievo è reale, ma la sua pendenza è approssimativa.",
 };

@@ -1454,4 +1454,20 @@ export const fr: Translation = {
   "designer.fillHint": "Clique sur la planche pour remplir tout le calque.",
   "designer.gradientHint":
     "Fais glisser sur la planche pour définir où se fait la transition. Cela remplit tout le calque : ajoute un autre calque de peinture pour garder ce qu'il y a dessous.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "Voir le terrain",
+  "trackViewer.title": "Aperçu du circuit",
+  "trackViewer.loading": "Lecture du terrain…",
+  "trackViewer.refining": "Affinage…",
+  "trackViewer.exaggeration": "Relief",
+  "trackViewer.grid": "Grille",
+  "trackViewer.relief": "Dénivelé",
+  "trackViewer.noTerrain": "Aucun terrain à afficher",
+  "trackViewer.noTerrainHint":
+    "Les données d'altitude de ce circuit ne sont pas dans un format que la visionneuse sait encore lire.",
+  "trackViewer.inferredNote":
+    "Le fichier d'altitudes de ce circuit n'a pas de format documenté ; sa forme a donc été déduite des données. À lire comme une approximation fidèle, pas comme une mesure exacte.",
+  "trackViewer.assumedScaleNote":
+    "Ce circuit n'indique pas l'écart entre ses points d'altitude : le relief est réel, mais sa pente est approximative.",
 };

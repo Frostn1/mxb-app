@@ -7,11 +7,13 @@ import {
   Lock,
   Maximize2,
   Box,
+  Mountain,
   type LucideIcon,
 } from "lucide-react";
 import { getPkzMeta, getPkzPreview, type ModType } from "../../api/mods";
 import type { LibraryEntry, PkzMeta } from "../../types";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
+import { TrackViewerDialog } from "../Viewer/TrackViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
 import { useConfig } from "../../Context/Config";
 import {
@@ -55,6 +57,9 @@ export default function LibraryDetail({
   const [preview, setPreview] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState(false);
   const [view3d, setView3d] = useState(false);
+  const [viewTrack, setViewTrack] = useState(false);
+  // A track has its own viewer: it isn't a model with paints, it's a terrain grid.
+  const isTrack = entry.category === "track";
 
   useEffect(() => {
     let alive = true;
@@ -167,6 +172,11 @@ export default function LibraryDetail({
               {view && (
                 <Button variant="outline" size="sm" onClick={() => setView3d(true)}>
                   <Box className="size-3.5" /> View in 3D
+                </Button>
+              )}
+              {isTrack && (
+                <Button variant="outline" size="sm" onClick={() => setViewTrack(true)}>
+                  <Mountain className="size-3.5" /> {t("trackViewer.open")}
                 </Button>
               )}
               {canMove && (
@@ -326,6 +336,17 @@ export default function LibraryDetail({
         initialPaint={view?.initialPaint}
         initialGoggles={view?.initialGoggles}
       />
+
+      {/* Mounted only once opened: the viewer reads the terrain as it mounts, and a track
+          detail page shouldn't pay for that until someone asks to see it. */}
+      {isTrack && viewTrack && (
+        <TrackViewerDialog
+          open={viewTrack}
+          onOpenChange={setViewTrack}
+          path={entry.path}
+          title={title}
+        />
+      )}
     </div>
   );
 }

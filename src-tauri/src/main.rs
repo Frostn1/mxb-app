@@ -14,6 +14,7 @@ mod frostmod_manage;
 mod game;
 mod gameproc;
 mod gearrepair;
+mod heightfield;
 mod imgcache;
 mod install;
 mod library;
@@ -43,6 +44,7 @@ mod shop_installed;
 mod shop_session;
 mod soundmods;
 mod texstore;
+mod track;
 mod upload;
 mod vcruntime;
 mod winehost;
@@ -691,6 +693,38 @@ async fn get_pkz_preview(path: String) -> Result<Option<String>, String> {
 
 fn get_pkz_preview_blocking(path: String) -> Result<Option<String>, String> {
     pkz::read_preview(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+}
+
+/// A track's metadata and contents. Cheap by construction — nothing is inflated — so the
+/// track view can paint everything except the terrain immediately.
+#[tauri::command]
+async fn read_track_info(app: tauri::AppHandle, path: String) -> Result<track::TrackInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        track::read_info(&app, &path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_info task failed: {e}"))?
+}
+
+/// A track's terrain grid, at no more than `max_dim` samples on its longest edge.
+///
+/// Returned as raw bytes rather than JSON: a grid is a few hundred thousand floats, and
+/// serialising that as a JSON array costs more than reading it out of the archive did. The
+/// app reads the header described in [`track::BLOB_HEADER`] and takes the rest in place.
+#[tauri::command]
+async fn load_track_terrain(
+    app: tauri::AppHandle,
+    path: String,
+    max_dim: u32,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let master = track::load_master(&app, &path).map_err(|e| format!("{e:#}"))?;
+        Ok(tauri::ipc::Response::new(track::terrain_blob(
+            &master, max_dim,
+        )))
+    })
+    .await
+    .map_err(|e| format!("load_track_terrain task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -5603,6 +5637,8 @@ fn main() {
             get_pkz_meta_cached,
             get_pkz_meta,
             get_pkz_preview,
+            read_track_info,
+            load_track_terrain,
             unpack_paint,
             texture_bytes,
             unpack_pkz,
