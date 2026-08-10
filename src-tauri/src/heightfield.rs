@@ -101,7 +101,8 @@ const MAX_HEADER: usize = 4096;
 const MAX_ROUGHNESS: f32 = 0.12;
 
 /// Heights beyond this many metres from sea level are not a motocross track — they're a
-/// misread. Bounds the float layouts, which can otherwise "succeed" on exponent noise.
+/// misread. Applies to float layouts only, which can otherwise "succeed" on exponent noise;
+/// integer samples are raw steps rather than metres, so this would not be a bound on them.
 const MAX_ABS_HEIGHT: f32 = 20_000.0;
 
 /// A candidate layout, before it has been scored.
@@ -214,7 +215,7 @@ fn candidates(bytes: &[u8], hint: Option<(u32, u32)>) -> Vec<Candidate> {
 /// Bounded because this runs for every candidate: a full pass over a 4096² float grid, times
 /// the dozens of layouts probed, is seconds of work to answer a question a few thousand
 /// samples settle just as well.
-fn roughness(bytes: &[u8], c: &Candidate, stride: u32) -> Option<(f32, f32)> {
+fn roughness(bytes: &[u8], c: &Candidate, stride: u32) -> Result<(f32, f32), &'static str> {
     let size = c.sample.size();
     let w = c.width as usize;
     let h = c.height as usize;
@@ -255,10 +256,13 @@ fn roughness(bytes: &[u8], c: &Candidate, stride: u32) -> Option<(f32, f32)> {
             // A float layout that isn't one reads as NaN and infinity long before it reads
             // as rough, so reject on sight rather than letting it poison the average.
             if !a.is_finite() || !b.is_finite() {
-                return None;
+                return Err("samples aren't finite numbers");
             }
-            if a.abs() > MAX_ABS_HEIGHT || b.abs() > MAX_ABS_HEIGHT {
-                return None;
+            // Metres only. An integer sample is a raw step whose scale the file sets
+            // elsewhere, so judging it against a height in metres would throw out any
+            // 16-bit heightfield that happens to use most of its range.
+            if c.sample == Sample::F32 && (a.abs() > MAX_ABS_HEIGHT || b.abs() > MAX_ABS_HEIGHT) {
+                return Err("heights are implausibly far from sea level");
             }
             diff_total += (a - b).abs() as f64;
             diff_count += 1;
@@ -270,38 +274,131 @@ fn roughness(bytes: &[u8], c: &Candidate, stride: u32) -> Option<(f32, f32)> {
     }
 
     if diff_count == 0 {
-        return None;
+        return Err("no sample pairs to compare");
     }
-    Some(((diff_total / diff_count as f64) as f32, max - min))
+    Ok(((diff_total / diff_count as f64) as f32, max - min))
 }
 
-/// Score a candidate 0–1, or reject it.
-fn score(bytes: &[u8], c: &Candidate) -> Option<f32> {
+/// What the roughness test made of a candidate.
+enum Assessment {
+    /// Confidence 0–1, with the two measurements that produced it.
+    Ok { confidence: f32, rough_x: f32, rough_y: f32 },
+    /// Why it was thrown out. A short phrase, for the diagnostic report.
+    Rejected(&'static str),
+}
+
+/// Measure a candidate against the bytes.
+fn assess(bytes: &[u8], c: &Candidate) -> Assessment {
     let need = c.offset + c.width as usize * c.height as usize * c.sample.size();
     if need > bytes.len() {
-        return None;
+        return Assessment::Rejected("runs past the end of the file");
     }
 
-    let (dx, spread) = roughness(bytes, c, 1)?;
+    let (dx, spread) = match roughness(bytes, c, 1) {
+        Ok(v) => v,
+        Err(why) => return Assessment::Rejected(why),
+    };
     // A grid with no relief is either genuinely empty or a run of padding. Either way there
     // is nothing to show and nothing to validate against.
     if !(spread.is_finite() && spread > 0.0) {
-        return None;
+        return Assessment::Rejected("no relief at all");
     }
-    let (dy, _) = roughness(bytes, c, c.width)?;
+    let (dy, _) = match roughness(bytes, c, c.width) {
+        Ok(v) => v,
+        Err(why) => return Assessment::Rejected(why),
+    };
 
     // Both measured against the terrain's own relief, so the thresholds don't care whether
     // heights are metres or raw 16-bit steps.
     let rough_x = dx / spread;
     let rough_y = dy / spread;
-    if rough_x > MAX_ROUGHNESS || rough_y > MAX_ROUGHNESS {
-        return None;
+    if rough_x > MAX_ROUGHNESS {
+        return Assessment::Rejected("adjacent samples aren't neighbours (wrong type/offset)");
+    }
+    if rough_y > MAX_ROUGHNESS {
+        return Assessment::Rejected("rows aren't neighbours (wrong width)");
     }
 
     // How far inside the threshold it landed, worst axis first — a layout that only just
     // scraped in should not present itself as a confident read.
     let worst = rough_x.max(rough_y);
-    Some((1.0 - worst / MAX_ROUGHNESS).clamp(0.0, 1.0))
+    Assessment::Ok {
+        confidence: (1.0 - worst / MAX_ROUGHNESS).clamp(0.0, 1.0),
+        rough_x,
+        rough_y,
+    }
+}
+
+/// Score a candidate 0–1, or reject it.
+fn score(bytes: &[u8], c: &Candidate) -> Option<f32> {
+    match assess(bytes, c) {
+        Assessment::Ok { confidence, .. } => Some(confidence),
+        Assessment::Rejected(_) => None,
+    }
+}
+
+/// A human-readable account of what the probe made of `bytes`: every layout it considered,
+/// what each measured, and why the losers lost.
+///
+/// This exists because the format is undocumented. When a real height file doesn't read as
+/// terrain, "no terrain found" is not enough to act on — the useful question is which
+/// layouts were tried and how close each came, and that answer has to be obtainable from a
+/// machine that has the track on it rather than from the one holding this code.
+pub fn report(bytes: &[u8], hint: Option<(u32, u32)>) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::new();
+    let _ = writeln!(out, "{} bytes, hint {hint:?}", bytes.len());
+
+    let all = candidates(bytes, hint);
+    if all.is_empty() {
+        out.push_str(
+            "no candidate layouts at all — the file size doesn't fit any grid this reads.\n",
+        );
+        return out;
+    }
+
+    // Accepted first and best-scoring at the top, since that's what the probe would pick;
+    // the near-misses that follow are what tell you how to widen the search.
+    let mut rows: Vec<(f32, String)> = Vec::new();
+    for c in &all {
+        let dims = format!(
+            "{:>5}x{:<5} {:?} @{:<6} [{}]",
+            c.width, c.height, c.sample, c.offset, c.source
+        );
+        match assess(bytes, c) {
+            Assessment::Ok {
+                confidence,
+                rough_x,
+                rough_y,
+            } => rows.push((
+                confidence,
+                format!("  OK   {dims} confidence {confidence:.2} (x {rough_x:.4}, y {rough_y:.4})"),
+            )),
+            Assessment::Rejected(why) => rows.push((-1.0, format!("  --   {dims} {why}"))),
+        }
+    }
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+
+    let _ = writeln!(out, "{} candidate layouts (threshold {MAX_ROUGHNESS}):", all.len());
+    for (_, line) in rows.iter().take(40) {
+        let _ = writeln!(out, "{line}");
+    }
+    if rows.len() > 40 {
+        let _ = writeln!(out, "  … {} more", rows.len() - 40);
+    }
+
+    match probe(bytes, hint) {
+        Some(l) => {
+            let _ = writeln!(
+                out,
+                "chose {}x{} {:?} at {} via {} (confidence {:.2})",
+                l.width, l.height, l.sample, l.offset, l.source, l.confidence
+            );
+        }
+        None => out.push_str("chose nothing — no layout read as terrain.\n"),
+    }
+    out
 }
 
 /// Recover the terrain grid in `bytes`, or `None` if nothing in it reads as terrain.
@@ -462,6 +559,25 @@ mod tests {
     }
 
     #[test]
+    fn recovers_a_16_bit_grid_that_uses_most_of_its_range() {
+        // Raw steps spanning nearly the whole 16-bit range — a packed heightfield with a
+        // fine vertical resolution. These are not metres, and judging them as if they were
+        // is what used to throw this out.
+        let heights = terrain(256, 256);
+        let lo = heights.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut bytes = Vec::new();
+        for v in &heights {
+            let step = ((v - lo) / (hi - lo) * 64_000.0) as u16;
+            bytes.extend_from_slice(&step.to_le_bytes());
+        }
+
+        let layout = probe(&bytes, None).expect("a full-range 16-bit grid should be recovered");
+        assert_eq!(layout.sample, Sample::U16);
+        assert_eq!((layout.width, layout.height), (256, 256));
+    }
+
+    #[test]
     fn takes_the_dimensions_hinted_by_the_ini() {
         let heights = terrain(384, 128);
         let bytes = with_header(&heights, &[0u8; 16]);
@@ -535,6 +651,30 @@ mod tests {
         let layout = probe(&bytes, None).unwrap();
         let (w, h, _) = read_grid(&bytes, &layout, 256);
         assert_eq!((w, h), (64, 64));
+    }
+
+    /// Point this at a real height file to see exactly what the probe makes of it:
+    ///
+    /// ```text
+    /// FROST_PROBE_FILE=/path/to/Track.trh \
+    ///   cargo test -- --ignored --nocapture probe_a_real_height_file
+    /// ```
+    ///
+    /// Optionally set `FROST_PROBE_DIMS=512x512` to feed it a shape hint. Ignored by
+    /// default because it needs a file this repository can't carry: the format is
+    /// undocumented, so the only way to confirm the probe reads a real track is to run it
+    /// against one, on a machine that has one.
+    #[test]
+    #[ignore = "needs a real height file — set FROST_PROBE_FILE"]
+    fn probe_a_real_height_file() {
+        let path = std::env::var("FROST_PROBE_FILE")
+            .expect("set FROST_PROBE_FILE to a .trh/.map to inspect");
+        let bytes = std::fs::read(&path).expect("read the height file");
+        let hint = std::env::var("FROST_PROBE_DIMS").ok().and_then(|v| {
+            let (w, h) = v.split_once(['x', 'X', ','])?;
+            Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+        });
+        println!("{path}\n{}", report(&bytes, hint));
     }
 
     #[test]

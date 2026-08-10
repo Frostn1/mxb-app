@@ -522,6 +522,54 @@ fn prune_cache(app: &tauri::AppHandle) {
 mod tests {
     use super::*;
 
+    /// Point this at a real track — `.pkz` or unpacked folder — to see whether its terrain
+    /// reads, and if not, how close each candidate layout came:
+    ///
+    /// ```text
+    /// FROST_TRACK="C:/.../mods/tracks/Hangtown.pkz" \
+    ///   cargo test -- --ignored --nocapture read_a_real_track
+    /// ```
+    ///
+    /// Prints the inventory, any `.ini` hints, a full probe report per heightfield
+    /// candidate, and what the decoder settled on. This is the whole diagnostic in one
+    /// command, so a format that doesn't read can be diagnosed from its output alone.
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK"]
+    fn read_a_real_track() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
+        let p = Path::new(&path);
+
+        let names = entry_names(p).expect("list the track's entries");
+        println!("{path}\n{} entries", names.len());
+        for n in &names {
+            let role = role_of(n);
+            if !matches!(role, "other" | "image") {
+                println!("  [{role:<11}] {n}");
+            }
+        }
+
+        let ini = ini_text(p, &names);
+        let (hint, scale) = ini.as_deref().map(ini_hints).unwrap_or((None, None));
+        println!("ini dimensions {hint:?}, spacing {scale:?}");
+
+        let heightfields = heightfield_entries(&names);
+        if heightfields.is_empty() {
+            println!("no heightfield-looking entries — nothing for the probe to read");
+        }
+        for entry in heightfields {
+            println!("\n--- {entry} ---");
+            match read_entry(p, &entry) {
+                Ok(bytes) => println!("{}", heightfield::report(&bytes, hint)),
+                Err(e) => println!("couldn't read it: {e:#}"),
+            }
+        }
+
+        match decode_master(p) {
+            Ok(m) => println!("\nterrain: {:#?}", m.info),
+            Err(e) => println!("\nno terrain: {e:#}"),
+        }
+    }
+
     #[test]
     fn roles_come_from_the_extension() {
         assert_eq!(role_of("Hangtown/Hangtown.trh"), "heightfield");
