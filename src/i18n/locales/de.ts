@@ -1106,6 +1106,8 @@ export const de: Translation = {
     "Gemaltes liegt auf einer eigenen Ebene und hat damit Deckkraft, Mischmodus und Reihenfolge wie alles andere — die Vorlage darunter wird nie angefasst. Blende die Ebene aus und du hast die saubere Vorlage zurück. ⌘Z nimmt Striche zurück.",
   "showcase.v091.ghost":
     "Zeichne über einem Geist des Motorrads. Ein Blatt kann die Lackierung, mit der du angefangen hast, schwach darunter zum Abpausen zeigen — aus dem Blatt herausgehoben, also nicht in deine hineingespeichert — und dazu eine UV-Karte der Verkleidung des Modells, jedes Teil in eigener Farbe, damit du siehst, welches Panel du gerade lackierst.",
+  "showcase.v091.parts":
+    "Leg ein Foto auf ein einzelnes Panel. Wähle ein Verkleidungsteil, und die Ebene passt sich ihm an und wird auf seine Kontur beschnitten — ein Bild aus dem Netz deckt so den Spoiler ab und endet an der Naht. Beim Darüberfahren nennt das Blatt das Teil.",
   "showcase.v091.resize":
     "Ebenen lassen sich an ihren Ecken skalieren, nicht nur über den Regler.",
   "showcase.v091.macos":

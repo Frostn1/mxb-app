@@ -1086,6 +1086,8 @@ export const it: Translation = {
     "La pittura va su un livello suo, quindi ha opacità, fusione e ordine come tutto il resto — e il template sotto non viene mai toccato. Nascondi il livello e hai di nuovo il template pulito. ⌘Z annulla i tratti.",
   "showcase.v091.ghost":
     "Disegna sopra un fantasma della moto. Una planche può mostrare in trasparenza sotto la vernice di partenza da ricalcare — tolta dalla planche, quindi non finisce salvata nella tua — e una mappa UV delle carene del modello, ogni pezzo con il suo colore, per vedere su quale pannello stai dipingendo.",
+  "showcase.v091.parts":
+    "Metti una foto su un solo pannello. Scegli un pezzo della carena e il livello ci si adatta e viene ritagliato sul suo contorno, così un'immagine presa da internet copre il fianchetto e si ferma alla giunzione. Passando sulla planche compare il nome del pezzo.",
   "showcase.v091.resize":
     "I livelli si ridimensionano trascinando gli angoli, non solo con il cursore.",
   "showcase.v091.macos":

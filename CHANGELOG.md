@@ -1,29 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Added
-
-- **Drop a photo onto a specific piece of bodywork.** The UV map could show you where the shroud
-  was; it couldn't help you put anything there. Now the model's parts are a list you can pick
-  from, and a layer pinned to one gets two things: **Fit to part** places and scales it to cover
-  that panel, and the layer is **clipped** to the panel's outline, so a photo grabbed off the
-  internet stops at the seam instead of bleeding across the fender next to it. Fit *covers*
-  rather than fits inside — a livery panel with the sheet showing through at two edges isn't
-  what anyone meant — and the clip is what trims the overspill. It works on a paint layer too,
-  which is how you brush freely and still stay inside the shroud.
-- **The sheet says which part you're pointing at.** Hovering names the piece of bodywork under
-  the cursor, and outlines it while the UV map is on. The islands say a panel is *there*; only
-  the name says which one it is — and it's the fastest way to check the map is landing where the
-  bodywork actually is.
-
-### Changed
-
-- Parts split across several mesh nodes under the same name are merged into one entry, and the
-  list is ordered biggest first. A bike's shroud is regularly three nodes that all call
-  themselves `shroud`, and three identical entries holding different thirds of the answer is a
-  worse menu than none.
-
 ## Unannounced — a debugger can't ride along
 
 Left out of the release notes on purpose: a hardening measure advertised is a hardening
@@ -248,8 +224,9 @@ against a real bottle, so if Play does something odd on your machine the app log
 exact command it ran — please send it.
 
 Also worth knowing: the Designer's new UV map has been checked against synthetic meshes, not
-against a real bike's geometry. If the islands land somewhere that doesn't match the bodywork
-on the model beside them, that's the thing to report.
+against a real bike's geometry — and fitting and clipping a layer to a part both read from it,
+so all three are right or wrong together. Hover the sheet with the map on: if the part it names
+isn't the panel you're over, that's the thing to report, and it explains the rest.
 
 ### Added
 - **You can paint on a template.** The Designer could stack images and text on the sheets of an
@@ -295,6 +272,21 @@ on the model beside them, that's the thing to report.
   nothing on the mesh binds reports it in the panel instead of drawing an empty overlay, which
   had been indistinguishable from one still loading. It's the same mistake that makes a paint
   load and show nothing, caught before the save rather than after it.
+- **Drop a photo onto a specific piece of bodywork.** The UV map could show you where the shroud
+  was; it couldn't help you put anything there. Now the model's parts are a list you can pick
+  from, and a layer pinned to one gets two things: **Fit to part** places and scales it to cover
+  that panel, and the layer is **clipped** to the panel's outline, so a photo grabbed off the
+  internet stops at the seam instead of bleeding across the fender next to it. Fit *covers*
+  rather than fits inside — a livery panel with the sheet showing through at two edges isn't
+  what anyone meant — and the clip is what trims the overspill. It works on a paint layer too,
+  which is how you brush freely and still stay inside the shroud. Parts split across several
+  mesh nodes under the same name are listed once, biggest first: a bike's shroud is regularly
+  three nodes that all call themselves `shroud`, and three entries holding a third of the
+  answer each would be a worse menu than none.
+- **The sheet says which part you're pointing at.** Hovering names the piece of bodywork under
+  the cursor, and outlines it while the UV map is on. The islands say a panel is *there*; only
+  the name says which one it is — and it's the fastest way to check the map is landing where the
+  bodywork actually is.
 - **Play and Join Server work on macOS.** MX Bikes is a Windows game, so on a Mac it runs
   inside a CrossOver, Whisky or Wine bottle — and the app, which had a launcher for Windows
   and one for Linux, simply refused: *"Launching MX Bikes is supported on Windows and Linux
