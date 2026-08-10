@@ -1081,6 +1081,8 @@ export const fr: Translation = {
     "Un nouvel onglet Décos fabrique des décos à partir de simples fichiers image — TGA, PNG, JPG — et les installe là où le jeu les cherche : une livrée de moto, une déco de casque ou de masque, la tenue ou les gants de ton pilote. Décompresse une déco existante pour obtenir un gabarit vraiment adapté au modèle, retouche-la dans n'importe quel éditeur et remets-la telle quelle. Le studio vérifie tes noms de fichiers face à ceux que le maillage utilise avant l'enregistrement, puis affiche le résultat sur le vrai modèle.",
   "showcase.v090.reshade":
     "Parcours, installe et change de preset ReShade depuis l'app — avec une entrée Aucun pour comparer au rendu d'origine, et un avertissement quand un preset réclame des effets que tu n'as pas.",
+  "showcase.v090.bundles":
+    "Partage un preset en paquet complet : le code emporte les mods eux-mêmes — déco, casque et masque, tenue, gants, bottes, pneus. Import complet place chaque fichier là où le jeu le lit, si bien qu'une personne au dossier mods vide porte exactement ce que tu as monté.",
   "showcase.v090.purchases":
     "Mes achats se connecte à ton compte mxbikes-shop.com et installe ce que tu as déjà payé, via la même fiche de contrôle qu'un glisser-déposer.",
   "showcase.v090.ridingStyles":

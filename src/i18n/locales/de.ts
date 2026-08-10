@@ -1091,6 +1091,8 @@ export const de: Translation = {
     "Ein neuer Designs-Tab baut Designs aus ganz normalen Bilddateien — TGA, PNG, JPG — und installiert sie dort, wo das Spiel sucht: eine Bike-Lackierung, ein Helm- oder Brillen-Design, Kit oder Handschuhe deines Fahrers. Entpack ein vorhandenes Design, um eine Vorlage zu bekommen, die wirklich zum Modell passt, bearbeite sie in jedem Editor und leg sie direkt wieder ab. Das Studio prüft deine Dateinamen gegen die, die das Mesh bindet, bevor du speicherst, und zeigt das Ergebnis danach am echten Modell.",
   "showcase.v090.reshade":
     "ReShade-Presets im Programm durchsuchen, installieren und wechseln — mit einem Aus-Eintrag zum Vergleich mit dem Original-Look und einer Warnung, wenn einem Preset Effekte fehlen.",
+  "showcase.v090.bundles":
+    "Teile ein Preset als Komplettpaket — der Code trägt die Mods selbst: Lackierung, Helm und Brille, Kluft, Handschuhe, Stiefel, Reifen. Vollständiger Import legt jede Datei dorthin, wo das Spiel sie liest, sodass auch jemand mit leerem Mods-Ordner am Ende genau das trägt, was du gebaut hast.",
   "showcase.v090.purchases":
     "Meine Käufe meldet dich bei deinem mxbikes-shop.com-Konto an und installiert, was du schon bezahlt hast — über dieselbe Übersicht wie beim Drag-and-drop.",
   "showcase.v090.ridingStyles":

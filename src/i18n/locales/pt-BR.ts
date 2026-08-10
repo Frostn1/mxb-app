@@ -1071,6 +1071,8 @@ export const ptBR: Translation = {
     "Uma nova aba Pinturas monta pinturas a partir de arquivos de imagem comuns — TGA, PNG, JPG — e instala onde o jogo procura: a pintura de uma moto, de um capacete ou de um óculos, o kit ou as luvas do seu piloto. Descompacte uma pintura que você já tem para conseguir um molde que serve de verdade no modelo, edite em qualquer editor e devolva do mesmo jeito. O estúdio confere os nomes dos seus arquivos contra os que a malha usa antes de salvar, e depois mostra o resultado no modelo de verdade.",
   "showcase.v090.reshade":
     "Procure, instale e troque presets do ReShade pelo app — com uma opção Desligado para comparar com o visual original, e um aviso quando falta algum efeito que o preset precisa.",
+  "showcase.v090.bundles":
+    "Compartilhe um preset como pacote completo — o código leva as próprias mods: pintura, capacete e óculos, roupa, luvas, botas e pneus. Importação completa coloca cada arquivo onde o jogo lê, então quem está com a pasta de mods vazia acaba vestindo exatamente o que você montou.",
   "showcase.v090.purchases":
     "Minhas compras entra na sua conta do mxbikes-shop.com e instala o que você já pagou, pela mesma tela de conferência que o arrastar e soltar usa.",
   "showcase.v090.ridingStyles":
