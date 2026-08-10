@@ -1423,6 +1423,18 @@ export const ptBR: Translation = {
   "designer.noPreviewForGame":
     "A prévia 3D é só do MX Bikes por enquanto — os modelos do {{game}} precisam dos próprios vínculos de peças. Todo o resto funciona igual e a pintura salva normalmente.",
   "designer.gearNote": "Mostrado no piloto padrão — o seu equipamento não está carregado aqui.",
+  "designer.reference": "Referência",
+  "designer.traceTemplate": "Modelo",
+  "designer.traceHint":
+    "Tira da folha a pintura da qual você partiu e a mostra apagada por baixo, para decalcar. Ela deixa de fazer parte do que você salva.",
+  "designer.noTemplate": "Esta folha não tem modelo para decalcar — ela nasceu em branco.",
+  "designer.uvMap": "Mapa UV",
+  "designer.uvHint":
+    "Mostra onde as carenagens do modelo caem nesta folha, cada peça com sua cor.",
+  "designer.noGeometry": "Carregue um modelo na prévia para ver o layout UV dele.",
+  "designer.uvNoMatch":
+    "Nada no modelo usa uma textura chamada “{{name}}”, então não há layout UV para mostrar.",
+  "designer.ghostNote": "Apenas um guia — a referência nunca é salva na pintura.",
   "designer.resetView": "Redefinir visualização",
 
   // ── Designer › as ferramentas de pintura ──────────────────────────────────────

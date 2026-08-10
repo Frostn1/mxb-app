@@ -3,7 +3,9 @@ import {
   Eye,
   EyeOff,
   FilePlus2,
+  Grid3x3,
   ImagePlus,
+  Layers as LayersIcon,
   Loader2,
   PackageOpen,
   PaintRoller,
@@ -30,10 +32,12 @@ import {
 import { useT } from "../../../i18n/context";
 import { IMAGE_EXTS, PaintDestBar, usePaintDest } from "../paintDest";
 import { CanvasStage } from "./CanvasStage";
+import { Row, Slider } from "./controls";
 import { PreviewPanel } from "./PreviewPanel";
 import { LayerInspector } from "./LayerInspector";
 import { PaintTools } from "./PaintTools";
 import { bitmapFromRgba, composite, sheetTexture, toPng } from "./composite";
+import { EMPTY_GHOST, ghostShows, uvWireframe, type Ghost } from "./ghost";
 import {
   blankSheet,
   imageLayer,
@@ -53,6 +57,7 @@ import {
   type PaintTool,
   type Point,
 } from "./paint";
+import type { EdfNode } from "../../../types";
 
 /**
  * The paint designer: layers on a sheet, the sheet on the model, and a `.pnt` at the end.
@@ -109,6 +114,19 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // The pane stays mounted while another Studio tab is on screen, so the keyboard shortcuts
   // need a way to tell whether they're the ones being typed at.
   const rootRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Reference underlays, by sheet id — deliberately *beside* the sheets rather than inside them.
+   *
+   * A ghost is something to look at while drawing, not part of what is drawn, and keeping it
+   * out of `Sheet` means two things at once: the save path has nothing to filter out, and
+   * fading one in and out doesn't count as a change to the sheet, so it never triggers the
+   * recomposite that every real edit does.
+   */
+  const [ghosts, setGhosts] = useState<Map<string, Ghost>>(new Map());
+  // The mesh the preview is showing, reported back by it. Null until one loads, and null again
+  // if it fails — a UV map drawn from a model that isn't on screen would be a confident lie.
+  const [geometry, setGeometry] = useState<EdfNode[] | null>(null);
 
   const destState = usePaintDest();
   const { dest, hints } = destState;
@@ -535,6 +553,111 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [bump, patchLayer],
   );
 
+  /** A corner drag, as an absolute scale. Clamped by the stage to the inspector's range. */
+  const scaleLayer = useCallback(
+    (id: string, scale: number) => {
+      patchLayer(id, (l) => ({ ...l, scale }));
+      bump();
+    },
+    [bump, patchLayer],
+  );
+
+  /* ── The reference underlay ────────────────────────────────────────────────────────────
+     None of this touches a sheet, with one exception: turning tracing on *moves* the template
+     out of `Sheet.base`, which is a real edit to what would be saved and is meant to be — it
+     is the whole difference between drawing over a paint and drawing from one. ───────── */
+
+  const ghostOf = useCallback(
+    (id: string | null | undefined) => (id && ghosts.get(id)) || EMPTY_GHOST,
+    [ghosts],
+  );
+
+  const patchGhost = useCallback((id: string, fn: (g: Ghost) => Ghost) => {
+    setGhosts((prev) => {
+      const next = new Map(prev);
+      next.set(id, fn(prev.get(id) ?? EMPTY_GHOST));
+      return next;
+    });
+  }, []);
+
+  /**
+   * Take the model the preview loaded, and drop every wireframe built from the last one.
+   *
+   * Switching bikes keeps the sheet names, so without this a `livery` map rasterised from the
+   * previous model would look perfectly valid over the new one while describing bodywork that
+   * isn't there — the worst kind of wrong for a guide.
+   */
+  const geometryRef = useRef<EdfNode[] | null>(null);
+  const onGeometry = useCallback((nodes: EdfNode[] | null) => {
+    // Compared against a ref rather than inside a `setState` updater: an updater has to be
+    // pure, and this has to invalidate the wires as well as record the mesh.
+    if (geometryRef.current === nodes) return;
+    geometryRef.current = nodes;
+    setGeometry(nodes);
+    setGhosts((gs) =>
+      gs.size ? new Map([...gs].map(([id, g]) => [id, { ...g, wire: null, wireFor: null }])) : gs,
+    );
+  }, []);
+
+  /**
+   * Move the template between the sheet and the ghost.
+   *
+   * Moved, never copied. A template that stayed as `base` while also showing as a ghost would
+   * be saved into the paint, which is the thing somebody asking to trace is trying to avoid;
+   * and keeping the bitmap on the other side is what lets this be undone by pressing it again.
+   */
+  const toggleTrace = useCallback(
+    (sheetId: string) => {
+      const sheet = sheets.find((s) => s.id === sheetId);
+      if (!sheet) return;
+      const ghost = ghostOf(sheetId);
+      if (sheet.base) {
+        const template = sheet.base;
+        patchSheet(sheetId, (s) => ({ ...s, base: null }));
+        patchGhost(sheetId, (g) => ({ ...g, template, showTemplate: true }));
+      } else if (ghost.template) {
+        const base = ghost.template;
+        patchSheet(sheetId, (s) => ({ ...s, base }));
+        patchGhost(sheetId, (g) => ({ ...g, template: null }));
+      }
+      bump();
+    },
+    [bump, ghostOf, patchGhost, patchSheet, sheets],
+  );
+
+  /**
+   * Build the active sheet's UV map, once the user has asked for one.
+   *
+   * Lazily, and keyed on the sheet's *name*, because the name is the entire binding — rename a
+   * sheet from `livery` to `plate` and it describes different triangles. Rasterising eagerly
+   * would spend the work on sheets nobody looks at, and rasterising on every render would spend
+   * it again on every brush stroke, since a stroke replaces the sheet object.
+   */
+  useEffect(() => {
+    if (!active || !geometry) return;
+    // A half-typed name is not a name yet. Without this, every keystroke of "livery" would be
+    // asked of the mesh and answered "nothing binds that", which is true and useless.
+    if (!active.name.trim()) return;
+    const ghost = ghosts.get(active.id) ?? EMPTY_GHOST;
+    if (!ghost.showWire || ghost.wireFor === active.name) return;
+    // `wireFor` records the attempt whether or not it found anything, so a name that matches
+    // nothing is asked once rather than on every render. The panel reads the pair to say so —
+    // out loud, because an empty overlay is indistinguishable from one still being built.
+    const wire = uvWireframe(geometry, active.name, active.width, active.height);
+    patchGhost(active.id, (g) => ({ ...g, wire, wireFor: active.name }));
+  }, [active, geometry, ghosts, patchGhost]);
+
+  // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
+  // sheet, so leaving them behind would keep a closed paint's pixels alive for the session.
+  useEffect(() => {
+    setGhosts((prev) => {
+      if (!prev.size) return prev;
+      const live = new Set(sheets.map((s) => s.id));
+      if ([...prev.keys()].every((id) => live.has(id))) return prev;
+      return new Map([...prev].filter(([id]) => live.has(id)));
+    });
+  }, [sheets]);
+
   /** Reorder within the stack. `delta` of -1 is one step down (further back). */
   const reorder = useCallback(
     (id: string, delta: number) => {
@@ -743,6 +866,17 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           />
 
           {active && (
+            <GhostPanel
+              ghost={ghostOf(active.id)}
+              sheetName={active.name}
+              hasBase={!!active.base}
+              hasGeometry={!!geometry}
+              onTrace={() => toggleTrace(active.id)}
+              onChange={(fn) => patchGhost(active.id, fn)}
+            />
+          )}
+
+          {active && (
             <PaintTools
               settings={paint}
               onTool={pickTool}
@@ -786,9 +920,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               sheet={active}
               source={canvases.current.get(active.id) ?? null}
               version={version}
+              ghost={ghostOf(active.id)}
               selectedId={selectedId}
               onSelect={setSelectedId}
               onMove={moveLayer}
+              onScale={scaleLayer}
               tool={paint.tool}
               brushSize={paint.size}
               canPaint={!!target}
@@ -815,7 +951,13 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
 
       {/* ── The model ────────────────────────────────────────────────────────── */}
       <section className="flex min-h-0 flex-col">
-        <PreviewPanel state={destState} overrides={overrides} frameToken={version} className="flex-1" />
+        <PreviewPanel
+          state={destState}
+          overrides={overrides}
+          frameToken={version}
+          onGeometry={onGeometry}
+          className="flex-1"
+        />
       </section>
       </div>
     </div>
@@ -921,6 +1063,150 @@ function SheetList({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * The reference underlay's controls.
+ *
+ * Sits under the sheet list rather than in the layer panel, because a ghost belongs to the
+ * sheet and not to the stack — it can't be reordered, selected, painted on or saved, and
+ * putting it among things that can would be four wrong promises at once.
+ */
+function GhostPanel({
+  ghost,
+  sheetName,
+  hasBase,
+  hasGeometry,
+  onTrace,
+  onChange,
+}: {
+  ghost: Ghost;
+  sheetName: string;
+  /** Whether the sheet still holds a template that tracing could lift out of it. */
+  hasBase: boolean;
+  hasGeometry: boolean;
+  onTrace: () => void;
+  onChange: (fn: (g: Ghost) => Ghost) => void;
+}) {
+  const t = useT();
+  const tracing = !!ghost.template;
+  // A map was built for this name and came back with nothing on it. Distinct from "not built
+  // yet" (`wireFor` still null), which is why both halves are checked.
+  const noMatch = ghost.showWire && ghost.wireFor === sheetName && !ghost.wire;
+  // Nothing to trace: a blank sheet never had a template, and one that did has already had it
+  // lifted. The UV map is the guide that still applies, so the button says so rather than
+  // sitting there dead with no explanation.
+  const canTrace = hasBase || tracing;
+  const showing = ghostShows(ghost);
+
+  return (
+    <div className="rounded-lg border border-border bg-card/40 p-3.5">
+      <div className="mb-2.5 flex items-center gap-2">
+        <h2 className="text-[13px] font-semibold">{t("designer.reference")}</h2>
+        <button
+          type="button"
+          className="ml-auto text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
+          disabled={!ghost.template && !ghost.wire}
+          onClick={() =>
+            onChange((g) => {
+              // One eye over both, and it turns them off together rather than remembering
+              // which was on — coming back to a "reference" that shows half of what it did
+              // is the kind of state nobody is keeping track of.
+              const off = ghostShows(g);
+              return {
+                ...g,
+                showTemplate: !off,
+                showWire: !off && !!g.wire,
+                // Faded all the way out counts as hidden, so switching back on has to undo
+                // that too. Otherwise the eye says "showing" over a reference at zero.
+                opacity: !off && g.opacity <= 0 ? EMPTY_GHOST.opacity : g.opacity,
+              };
+            })
+          }
+          title={t(showing ? "designer.hide" : "designer.show")}
+        >
+          {showing ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+        </button>
+      </div>
+
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        <GhostToggle
+          icon={<LayersIcon className="size-3.5" />}
+          label={t("designer.traceTemplate")}
+          title={t(canTrace ? "designer.traceHint" : "designer.noTemplate")}
+          on={tracing && ghost.showTemplate}
+          disabled={!canTrace}
+          onClick={() => {
+            // Already lifted and visible — this press is asking to see it in the paint again,
+            // so put it back. Otherwise lift it, or just show what has already been lifted.
+            if (!tracing || ghost.showTemplate) onTrace();
+            else onChange((g) => ({ ...g, showTemplate: true }));
+          }}
+        />
+        <GhostToggle
+          icon={<Grid3x3 className="size-3.5" />}
+          label={t("designer.uvMap")}
+          title={t(hasGeometry ? "designer.uvHint" : "designer.noGeometry")}
+          on={ghost.showWire}
+          disabled={!hasGeometry}
+          onClick={() => onChange((g) => ({ ...g, showWire: !g.showWire }))}
+        />
+      </div>
+
+      <Row label={t("designer.opacity")}>
+        <Slider
+          value={ghost.opacity}
+          min={0}
+          max={1}
+          step={0.01}
+          onChange={(v) => onChange((g) => ({ ...g, opacity: v }))}
+          format={(v) => `${Math.round(v * 100)}%`}
+        />
+      </Row>
+
+      {/* The name binds the sheet to the mesh, so a name nothing asks for is worth saying
+          plainly — it is the same mistake that makes a paint load and show nothing. */}
+      {noMatch && (
+        <p className="mt-1.5 text-[11px] leading-snug text-destructive">
+          {t("designer.uvNoMatch", { name: sheetName.trim() })}
+        </p>
+      )}
+
+      <p className="mt-1.5 text-[11px] leading-snug text-faint">{t("designer.ghostNote")}</p>
+    </div>
+  );
+}
+
+function GhostToggle({
+  icon,
+  label,
+  title,
+  on,
+  disabled,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  title: string;
+  on: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-35",
+        on ? "border-primary/60 bg-primary/10 text-foreground" : "border-border text-faint",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

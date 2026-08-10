@@ -39,12 +39,21 @@ export function PreviewPanel({
   state,
   overrides,
   frameToken,
+  onGeometry,
   className,
 }: {
   state: PaintDestState;
   overrides: Map<string, THREE.Texture>;
   /** Bumped whenever the canvas changed, so a frame gets drawn without any prop moving. */
   frameToken?: number;
+  /**
+   * The mesh this is showing, handed back so the editor can draw its UV layout.
+   *
+   * Reported from here rather than loaded twice: this panel already resolves "which model, for
+   * which destination" through the library, and a second loader would be a second answer to
+   * that question — one that could quietly disagree about which bike is on screen.
+   */
+  onGeometry?: (nodes: EdfNode[] | null) => void;
   className?: string;
 }) {
   const t = useT();
@@ -154,6 +163,21 @@ export function PreviewPanel({
       alive = false;
     };
   }, [loadout]);
+
+  /**
+   * Hand the loaded mesh up, whichever of the two shapes it arrived in.
+   *
+   * One effect over both, rather than a call inside each loader: a failure sets its state back
+   * to null and this follows it, so the UV map cannot outlive the model it describes.
+   *
+   * The rider's parts are flattened because a UV layout is per texture name, not per part —
+   * a `suit` sheet is bound by whichever pieces ask for it, and asking which of them a triangle
+   * came from would be a distinction the sheet itself doesn't make.
+   */
+  useEffect(() => {
+    if (!onGeometry) return;
+    onGeometry(nodes ?? (riderParts ? riderParts.flatMap((p) => p.nodes) : null));
+  }, [nodes, riderParts, onGeometry]);
 
   // Toggled-off gear is dropped before it reaches the viewer, which is what makes hiding it
   // reveal what's underneath rather than just dimming it.

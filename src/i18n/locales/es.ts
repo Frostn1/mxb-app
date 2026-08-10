@@ -1434,6 +1434,18 @@ export const es: Translation = {
     "La vista 3D es solo para MX Bikes por ahora: los modelos de {{game}} necesitan sus propias asignaciones de piezas. Todo lo demás funciona igual y la pintura se guarda con normalidad.",
   "designer.gearNote":
     "Se muestra sobre el piloto de serie — tu propio equipo no está cargado aquí.",
+  "designer.reference": "Referencia",
+  "designer.traceTemplate": "Plantilla",
+  "designer.traceHint":
+    "Saca de la hoja la pintura de la que partiste y muéstrala tenue por debajo, para calcarla. Deja de formar parte de lo que guardas.",
+  "designer.noTemplate": "Esta hoja no tiene plantilla que calcar: nació en blanco.",
+  "designer.uvMap": "Mapa UV",
+  "designer.uvHint":
+    "Muestra dónde cae en esta hoja cada pieza del carenado del modelo, cada una con su color.",
+  "designer.noGeometry": "Carga un modelo en la vista previa para ver su distribución UV.",
+  "designer.uvNoMatch":
+    "Nada del modelo usa una textura llamada “{{name}}”, así que no hay distribución UV que mostrar.",
+  "designer.ghostNote": "Solo una guía: la referencia nunca se guarda en la pintura.",
   "designer.resetView": "Restablecer vista",
 
   // ── Designer › las herramientas de pintura ────────────────────────────────────

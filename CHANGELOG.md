@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **The Designer can show you what you're drawing on.** A livery is drawn flat and worn curved,
+  and the flat version gives away almost nothing about which rectangle of it ends up on a
+  shroud — so a sheet has a **reference underlay** now, and it answers that two ways. **Template**
+  lifts the paint you started from *out* of the sheet and shows it faintly underneath to trace
+  over; it stops being part of what you save, which is the difference between drawing *from* a
+  paint and drawing *over* one. **UV map** reads the model already standing beside the canvas
+  and draws its bodywork where it actually lands on the sheet, each piece in its own colour —
+  the thing an image editor cannot tell you. Neither is ever composited, staged or saved: they
+  live outside the sheet entirely, so a guide cannot end up shipped inside somebody's livery.
+  The template sits under your work because that is what tracing is; the UV map sits over it,
+  because a ruler beneath an opaque paint tells you nothing.
+- **Layers resize by their corners.** The selected layer's box has grabbable handles, dragged
+  from the centre the same way the inspector's slider scales from it, so the two controls agree
+  about where a logo grows from. The slider stays for typing an exact number; the corners are
+  for the other 90% of the time. Handles are still drawn on a layer too small to grab one —
+  the box is how you see what's selected — but the grab itself steps aside there rather than
+  leaving a tiny layer resizable and no longer draggable.
+- **A sheet name the model never asks for now says so.** Turning on the UV map for a sheet
+  nothing on the mesh binds reports it in the panel instead of drawing an empty overlay, which
+  had been indistinguishable from one still loading. It's the same mistake that makes a paint
+  load and show nothing, caught before the save rather than after it.
+
 ## Unannounced — a debugger can't ride along
 
 Left out of the release notes on purpose: a hardening measure advertised is a hardening

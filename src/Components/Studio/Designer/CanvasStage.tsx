@@ -2,8 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "../../../i18n/context";
 import { layerCorners } from "./composite";
+import type { Ghost } from "./ghost";
 import { hitTest, type Layer, type Sheet } from "./layers";
 import { constrained, hasTip, isDragTool, type PaintTool, type Point } from "./paint";
+
+/** Half-edge of a drawn corner handle, and how far off one a press still counts, in view px. */
+const HANDLE = 3.5;
+const GRAB = 9;
+
+/** The range a corner drag can take a layer to. The same as the inspector's slider, so the
+ *  two controls can't disagree about how big a logo is allowed to get. */
+const MIN_SCALE = 0.05;
+const MAX_SCALE = 4;
 
 interface CanvasStageProps {
   sheet: Sheet;
@@ -11,10 +21,14 @@ interface CanvasStageProps {
   source: HTMLCanvasElement | null;
   /** Bumped by the editor whenever the composite changes, to force a repaint. */
   version: number;
+  /** The reference underlay, if any. Drawn here and nowhere else — see `ghost.ts`. */
+  ghost: Ghost | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   /** Drag, in sheet pixels. */
   onMove: (id: string, dx: number, dy: number) => void;
+  /** Corner drag, as the layer's new absolute scale. */
+  onScale: (id: string, scale: number) => void;
   /** What the pointer does here. `move` is the select-and-drag behaviour. */
   tool: PaintTool;
   /** Brush and eraser diameter in sheet pixels, for the cursor. */
@@ -36,14 +50,19 @@ interface CanvasStageProps {
  * Zoom and pan are view state and live here; nothing in them reaches the sheet. Strokes are the
  * other way round: this turns pointer events into sheet coordinates and hands them up, because
  * the pixels they land on belong to the layer, not to the view they were drawn through.
+ *
+ * The ghost is drawn here for the same reason, read backwards: a guide that never enters the
+ * composite cannot reach the file, whatever anyone later does to the save path.
  */
 export function CanvasStage({
   sheet,
   source,
   version,
+  ghost,
   selectedId,
   onSelect,
   onMove,
+  onScale,
   tool,
   brushSize,
   canPaint,
@@ -63,7 +82,15 @@ export function CanvasStage({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   // Where the pointer went down, and what it was doing — a drag of a layer, or of the view.
   const drag = useRef<{ id: string | null; x: number; y: number } | null>(null);
+  // A corner drag: the layer's centre and the distance the press was from it, both in sheet
+  // pixels, plus the scale it started at. Scale comes out as a ratio of distances, so the
+  // grabbed corner stays under the pointer however the view is zoomed or panned mid-drag.
+  const sizing = useRef<{ id: string; cx: number; cy: number; dist: number; scale: number } | null>(
+    null,
+  );
   const painting = useRef(false);
+  // Which corner the pointer is over, purely so the cursor can say the layer is resizable.
+  const [overHandle, setOverHandle] = useState(-1);
   // The press and current point of a gradient or shape drag, so it can be shown while it's
   // being aimed. Only ever set between press and release.
   const [guide, setGuide] = useState<{ from: Point; to: Point } | null>(null);
@@ -109,6 +136,50 @@ export function CanvasStage({
     [originX, originY, scale, sheet.width, sheet.height],
   );
 
+  /**
+   * The selected layer's corners in view space — what's drawn as handles, and what's grabbed.
+   *
+   * Computed rather than remembered from the last paint, so a handle is always tested against
+   * where the corner is now. A resize moves all four while the pointer is still down, and a
+   * cached set would have the grab point drift away from the square under the cursor.
+   */
+  const handles = useCallback((): [number, number][] => {
+    const selected = sheet.layers.find((l) => l.id === selectedId);
+    // Paint layers are the sheet — see `layers.ts`. There is nothing to resize, and the
+    // corners would sit on the sheet edge where they'd catch every click near the border.
+    if (!selected || selected.kind === "paint") return [];
+    return layerCorners(selected).map((c) => toView({ x: c[0], y: c[1] }));
+  }, [sheet.layers, selectedId, toView]);
+
+  /**
+   * The corner under a client point, or -1.
+   *
+   * Corners are still *drawn* on a layer too small to have grabbable ones — the box is how you
+   * see what's selected, and it has to survive being small. What's dropped here is the grab:
+   * four 18px zones on a box 20px across leave no middle to take hold of, and a layer you can
+   * resize but can no longer drag is a worse trade than one that needs a zoom first.
+   */
+  const handleAt = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = viewRef.current?.getBoundingClientRect();
+      if (!rect) return -1;
+      const pts = handles();
+      if (!pts.length) return -1;
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      const room = Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+      if (room < GRAB * 3) return -1;
+
+      const vx = clientX - rect.left;
+      const vy = clientY - rect.top;
+      for (let i = 0; i < pts.length; i += 1) {
+        if (Math.abs(pts[i][0] - vx) <= GRAB && Math.abs(pts[i][1] - vy) <= GRAB) return i;
+      }
+      return -1;
+    },
+    [handles],
+  );
+
   // Repaint whenever anything visible changes. Not a `useEffect` on the layers themselves:
   // `version` is the editor's single "the composite moved" signal, and following it keeps
   // this from having an opinion about what counts as a change.
@@ -149,18 +220,40 @@ export function CanvasStage({
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
+
+    // The template ghost goes *under* the drawing, because that is what tracing is: the paint
+    // you are copying sits behind the one you are making. It only shows through where the
+    // sheet is still transparent, which is exactly where there is nothing drawn yet.
+    if (ghost?.showTemplate && ghost.template && ghost.opacity > 0) {
+      ctx.save();
+      ctx.globalAlpha = ghost.opacity;
+      ctx.drawImage(ghost.template, left, top, w, h);
+      ctx.restore();
+    }
+
     ctx.drawImage(source, left, top, w, h);
+
+    // The UV map goes *over* it, and that isn't an inconsistency — it answers a different
+    // question. A template is something to copy and belongs behind your work; the islands are
+    // a ruler, and a ruler underneath an opaque livery tells you nothing.
+    if (ghost?.showWire && ghost.wire && ghost.opacity > 0) {
+      ctx.save();
+      ctx.globalAlpha = ghost.opacity;
+      ctx.drawImage(ghost.wire, left, top, w, h);
+      ctx.restore();
+    }
 
     // Sheet edge, so you can see where the texture stops.
     ctx.strokeStyle = "rgba(255,255,255,0.18)";
     ctx.lineWidth = 1;
     ctx.strokeRect(left + 0.5, top + 0.5, w - 1, h - 1);
 
-    const selected = sheet.layers.find((l) => l.id === selectedId);
     // A paint layer's box is the sheet's own edge, which is already drawn — outlining it again
-    // would just put a blue border round everything for as long as a brush is selected.
-    if (selected && selected.kind !== "paint") {
-      const pts = layerCorners(selected).map(([sx, sy]) => toView({ x: sx, y: sy }));
+    // would just put a blue border round everything for as long as a brush is selected. That
+    // exclusion lives in `handles`, which is also what the corner grab tests against, so the
+    // squares you can see and the squares you can grab are one list.
+    const pts = handles();
+    if (pts.length) {
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
       for (const [px, py] of pts.slice(1)) ctx.lineTo(px, py);
@@ -168,8 +261,14 @@ export function CanvasStage({
       ctx.strokeStyle = "#3b82f6";
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      ctx.fillStyle = "#3b82f6";
-      for (const [px, py] of pts) ctx.fillRect(px - 2.5, py - 2.5, 5, 5);
+      // Filled white with a blue edge rather than solid blue: a handle has to look like
+      // something you take hold of, or a resizable layer reads as a decorated one.
+      ctx.lineWidth = 1;
+      for (const [px, py] of pts) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(px - HANDLE, py - HANDLE, HANDLE * 2, HANDLE * 2);
+        ctx.strokeRect(px - HANDLE, py - HANDLE, HANDLE * 2, HANDLE * 2);
+      }
     }
 
     // Where a gradient runs, or what a shape will cover. The stroke itself is already visible
@@ -199,7 +298,7 @@ export function CanvasStage({
       }
       ctx.restore();
     }
-  }, [box, scale, originX, originY, sheet, source, selectedId, version, guide, tool, toView]);
+  }, [box, scale, originX, originY, sheet, source, ghost, version, guide, tool, toView, handles]);
 
   /** Put the brush ring where the pointer is, at the size it will actually paint. */
   const moveCursor = useCallback(
@@ -236,16 +335,48 @@ export function CanvasStage({
         onPaintStart(at);
         return;
       }
+      // Corners before contents. A handle sits on the layer's own edge, so hit-testing first
+      // would answer "you clicked the layer" every time and there would be no way to resize
+      // anything — and the corner of a small layer often overlaps a bigger one behind it.
+      const corner = handleAt(e.clientX, e.clientY);
+      const selected = sheet.layers.find((l) => l.id === selectedId);
+      if (corner >= 0 && selected) {
+        const dist = Math.hypot(at.x - selected.x, at.y - selected.y);
+        // A press exactly on the centre has no distance to take a ratio of. Can only happen
+        // on a layer scaled down to nothing, and dropping the drag beats dividing by zero.
+        if (dist > 0.5) {
+          sizing.current = {
+            id: selected.id,
+            cx: selected.x,
+            cy: selected.y,
+            dist,
+            scale: selected.scale,
+          };
+          return;
+        }
+      }
       const hit = hitTest(sheet.layers, at.x, at.y);
       onSelect(hit?.id ?? null);
       drag.current = { id: hit?.id ?? null, x: e.clientX, y: e.clientY };
     },
-    [onPaintStart, onSelect, paints, sheet.layers, toSheet, tool],
+    [handleAt, onPaintStart, onSelect, paints, selectedId, sheet.layers, toSheet, tool],
   );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       moveCursor(e.clientX, e.clientY);
+
+      const size = sizing.current;
+      if (size) {
+        const p = toSheet(e.clientX, e.clientY);
+        if (!p) return;
+        // Scale as the ratio of distances from the layer's centre, which is where it grows
+        // from — the same fixed point the inspector's slider uses, so dragging a corner and
+        // typing a number move the layer's pixels the same way.
+        const next = (size.scale * Math.hypot(p.x - size.cx, p.y - size.cy)) / size.dist;
+        onScale(size.id, Math.min(MAX_SCALE, Math.max(MIN_SCALE, next)));
+        return;
+      }
 
       if (painting.current) {
         // Every sample the browser had, not just the one it chose to deliver. A fast stroke
@@ -271,7 +402,14 @@ export function CanvasStage({
       }
 
       const d = drag.current;
-      if (!d || !scale) return;
+      if (!d) {
+        // Nothing is being dragged, so this is a hover: say whether a corner is under the
+        // pointer. `setState` with an unchanged value doesn't re-render, so this only costs
+        // anything on the moves that actually cross a handle's edge.
+        setOverHandle(paints ? -1 : handleAt(e.clientX, e.clientY));
+        return;
+      }
+      if (!scale) return;
       const dx = e.clientX - d.x;
       const dy = e.clientY - d.y;
       if (!dx && !dy) return;
@@ -280,7 +418,7 @@ export function CanvasStage({
       if (d.id) onMove(d.id, dx / scale, dy / scale);
       else setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
     },
-    [moveCursor, onMove, onPaintMove, scale, toSheet, tool],
+    [handleAt, moveCursor, onMove, onPaintMove, onScale, paints, scale, toSheet, tool],
   );
 
   const endDrag = useCallback(
@@ -291,6 +429,7 @@ export function CanvasStage({
         onPaintEnd();
       }
       drag.current = null;
+      sizing.current = null;
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
       }
@@ -308,6 +447,11 @@ export function CanvasStage({
   }, []);
 
   const ringed = paints && hasTip(tool);
+  // Corners come out of `layerCorners` clockwise from the top left, so 0/2 are one diagonal
+  // and 1/3 the other. A rotated layer makes this an approximation — the arrow can end up a
+  // notch off the true diagonal — but the thing it has to say is "this corner resizes", and
+  // it says that at every angle.
+  const resizeCursor = overHandle < 0 ? null : overHandle % 2 === 0 ? "nwse-resize" : "nesw-resize";
 
   return (
     <div
@@ -322,7 +466,7 @@ export function CanvasStage({
           height: box.h,
           // The ring is the cursor for a brush, so the arrow would be a second one. Everything
           // else that paints aims at a point, and a crosshair is the thing that says so.
-          cursor: ringed ? "none" : paints ? "crosshair" : "default",
+          cursor: ringed ? "none" : paints ? "crosshair" : (resizeCursor ?? "default"),
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -330,6 +474,7 @@ export function CanvasStage({
         onPointerCancel={endDrag}
         onPointerLeave={() => {
           if (cursorRef.current) cursorRef.current.style.opacity = "0";
+          setOverHandle(-1);
         }}
         onPointerEnter={() => {
           if (cursorRef.current) cursorRef.current.style.opacity = "1";
