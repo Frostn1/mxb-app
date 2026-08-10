@@ -17,11 +17,12 @@
 /**
  * The Buy Me a Coffee page every button here opens.
  *
- * TODO(maintainer): confirm the handle before release — a wrong URL is a dead button in
- * a shipped build. `supportUrl` in the manifest overrides it without a release, so a
- * mistake here is fixable, but only for someone who can reach the network.
+ * The handle is the auto-generated one the account was created with, not a word — it's
+ * meant to be opened, never typed, so don't "tidy" it. `supportUrl` in the manifest
+ * overrides it, which is what to reach for if the page ever moves: a shipped build
+ * can't be told about a new link, but the manifest can.
  */
-export const SUPPORT_URL = "https://buymeacoffee.com/mxbapp";
+export const SUPPORT_URL = "https://buymeacoffee.com/22ypnh5yfme";
 
 /** Read from `main`, not from a tag: the list has to move faster than releases do. */
 export const SUPPORTERS_URL =
