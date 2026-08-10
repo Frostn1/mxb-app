@@ -1365,7 +1365,7 @@ export const de: Translation = {
 
   // ── Designer (der Ebenen-Editor) ──────────────────────────────────────────────
   "designer.help":
-    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Fang bei einem installierten Design an, damit die Bahnennamen stimmen, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
+    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Fang bei einem installierten Design an, damit die Bahnennamen stimmen, male mit Pinsel, Verlauf oder Formen darauf, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
   "designer.empty":
     "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an — dann hast du seine Bahnen samt Namen — oder füge eine leere hinzu.",
   "designer.startFromPaint": "Von einem Design ausgehen…",
@@ -1384,7 +1384,8 @@ export const de: Translation = {
   "designer.layers": "Ebenen",
   "designer.showRail": "Bahnen und Ebenen einblenden",
   "designer.hideRail": "Bahnen und Ebenen ausblenden",
-  "designer.noLayers": "Noch keine Ebenen — füge ein Bild oder Text hinzu.",
+  "designer.noLayers":
+    "Noch keine Ebenen — füge ein Bild, Text oder eine Malebene zum Zeichnen hinzu.",
   "designer.layerCount": "{{count}} Ebene(n)",
   "designer.layerTitle": "Ausgewählte Ebene",
   "designer.hide": "Ausblenden",
@@ -1414,4 +1415,40 @@ export const de: Translation = {
   "designer.gearNote":
     "Auf dem Standardfahrer gezeigt — deine eigene Ausrüstung ist hier nicht geladen.",
   "designer.resetView": "Ansicht zurücksetzen",
+
+  // ── Designer › die Malwerkzeuge ───────────────────────────────────────────────
+  "designer.paint": "Malen",
+  "designer.addPaint": "Malebene",
+  "designer.paintLayerName": "Malerei",
+  "designer.undoStroke": "Strich rückgängig",
+  "designer.redoStroke": "Strich wiederholen",
+  "designer.tool.move": "Verschieben",
+  "designer.tool.brush": "Pinsel",
+  "designer.tool.eraser": "Radierer",
+  "designer.tool.gradient": "Verlauf",
+  "designer.tool.fill": "Füllen",
+  "designer.tool.rect": "Rechteck",
+  "designer.tool.ellipse": "Ellipse",
+  "designer.tool.line": "Linie",
+  "designer.moveHint":
+    "Ziehe Ebenen auf der Bahn, um sie zu platzieren. Wähle oben ein Werkzeug, um stattdessen darauf zu malen.",
+  "designer.colourFrom": "Damit malen",
+  "designer.colourTo": "Dahin verlaufen",
+  "designer.swapColours": "Die beiden Farben tauschen",
+  "designer.brushSize": "Pinsel",
+  "designer.hardness": "Kante",
+  "designer.strength": "Stärke",
+  "designer.gradient": "Verlauf",
+  "designer.gradient.linear": "Linear",
+  "designer.gradient.radial": "Radial",
+  "designer.fadeOut": "Ausblenden",
+  "designer.shape": "Stil",
+  "designer.shape.fill": "Gefüllt",
+  "designer.shape.outline": "Umriss",
+  "designer.lineWidth": "Breite",
+  "designer.paintHint":
+    "Auf der Bahn ziehen. Shift halten für gerade Striche, mit rechts ziehen zum Verschieben.",
+  "designer.fillHint": "Auf die Bahn klicken, um die ganze Ebene zu füllen.",
+  "designer.gradientHint":
+    "Auf der Bahn ziehen, um festzulegen, wo der Übergang liegt. Er füllt diese ganze Ebene — füge eine weitere Malebene hinzu, um zu behalten, was darunter liegt.",
 };

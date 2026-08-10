@@ -194,6 +194,29 @@ them up.
   uses the same marker files the app's own library scanner keys on, and stops descending
   once it has found a track.
 
+## 2026-08-10 — the Designer paints
+
+### Added
+- **You can paint on a template.** The Designer could stack images and text on the sheets of an
+  unpacked paint, but it could not put down a single pixel — a fade across a shroud or a stripe
+  cut to follow a panel seam meant leaving for an image editor, exporting, coming back, and
+  losing the live-on-the-model loop that is the point of the tab. It has a tool kit now: a soft
+  brush with size, edge and strength, an eraser, a gradient, a fill, and rectangle, ellipse and
+  line. They land on the 2D sheet and on the 3D model at the same time, while you drag.
+- **A gradient that carries one colour into another.** Drag across the sheet to say where the
+  transition happens — the drag is the axis, not the extent, so everything before it is the
+  first colour and everything past it is the second. Linear or radial, and it can end at
+  nothing instead of at a colour, which is the version a livery usually wants.
+- **Painting happens on its own layer.** A "Paint layer" sits in the stack like any other, so it
+  gets opacity, blend mode, visibility and stacking for free — and the template underneath is
+  never written to, so hiding the layer gets the untouched template back. Picking up a brush
+  with nothing to paint into makes one rather than doing nothing.
+- **Undo, for strokes.** ⌘Z and ⇧⌘Z step through painting, remembering as much as fits in a
+  fixed memory budget — six steps on a 2048² sheet, a couple of dozen on a small one. Layer
+  edits are not part of it.
+- **Tools have keys.** V, B, E, G, F, R, O and L. Hold Shift for straight lines, squares and
+  circles; right-drag still pans, which matters more with a brush than with a logo.
+
 ## 2026-08-10 — v0.9.1 — Play works on a Mac, and SteamOS stops opening to a white screen
 
 A patch on top of v0.9.0 — everything that release added is still the news, and its notes

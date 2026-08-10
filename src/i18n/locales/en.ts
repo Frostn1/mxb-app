@@ -1320,7 +1320,7 @@ export const en = {
 
   // ── Designer (the layer editor) ───────────────────────────────────────────────
   "designer.help":
-    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Start from an installed paint to get the sheet names right, stack images and text on top, then save — what comes out is a .pnt the game loads, not an export to convert.",
+    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Start from an installed paint to get the sheet names right, paint on it with a brush, a gradient or a shape, stack images and text on top, then save — what comes out is a .pnt the game loads, not an export to convert.",
   "designer.empty":
     "Nothing to draw on yet. Start from a paint installed for this model to get its real sheets and their names, or add a blank one.",
   "designer.startFromPaint": "Start from a paint…",
@@ -1339,7 +1339,7 @@ export const en = {
   "designer.layers": "Layers",
   "designer.showRail": "Show sheets and layers",
   "designer.hideRail": "Hide sheets and layers",
-  "designer.noLayers": "No layers yet — add an image or some text.",
+  "designer.noLayers": "No layers yet — add an image, some text, or a paint layer to draw on.",
   "designer.layerCount": "{{count}} layer(s)",
   "designer.layerTitle": "Selected layer",
   "designer.hide": "Hide",
@@ -1368,4 +1368,40 @@ export const en = {
     "The 3D preview is MX Bikes only for now — the {{game}} models need their own part bindings. Everything else here works the same, and the paint saves normally.",
   "designer.gearNote": "Shown on the stock rider — your own kit isn't loaded here.",
   "designer.resetView": "Reset view",
+
+  // ── Designer › the paint tools ────────────────────────────────────────────────
+  "designer.paint": "Paint",
+  "designer.addPaint": "Paint layer",
+  "designer.paintLayerName": "Paint",
+  "designer.undoStroke": "Undo stroke",
+  "designer.redoStroke": "Redo stroke",
+  "designer.tool.move": "Move",
+  "designer.tool.brush": "Brush",
+  "designer.tool.eraser": "Eraser",
+  "designer.tool.gradient": "Gradient",
+  "designer.tool.fill": "Fill",
+  "designer.tool.rect": "Rectangle",
+  "designer.tool.ellipse": "Ellipse",
+  "designer.tool.line": "Line",
+  "designer.moveHint":
+    "Drag layers on the sheet to place them. Pick a tool above to paint on it instead.",
+  "designer.colourFrom": "Paint with this",
+  "designer.colourTo": "Run into this",
+  "designer.swapColours": "Swap the two colours",
+  "designer.brushSize": "Brush",
+  "designer.hardness": "Edge",
+  "designer.strength": "Strength",
+  "designer.gradient": "Gradient",
+  "designer.gradient.linear": "Linear",
+  "designer.gradient.radial": "Radial",
+  "designer.fadeOut": "Fade out",
+  "designer.shape": "Style",
+  "designer.shape.fill": "Filled",
+  "designer.shape.outline": "Outline",
+  "designer.lineWidth": "Width",
+  "designer.paintHint":
+    "Drag on the sheet. Hold Shift to keep it straight, right-drag to pan.",
+  "designer.fillHint": "Click the sheet to flood the whole layer.",
+  "designer.gradientHint":
+    "Drag across the sheet to set where the transition happens. It fills this whole layer — add another paint layer to keep what's underneath.",
 } as const;

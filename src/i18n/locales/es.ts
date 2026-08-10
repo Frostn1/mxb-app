@@ -1353,7 +1353,7 @@ export const es: Translation = {
 
   // ── Designer (el editor por capas) ────────────────────────────────────────────
   "designer.help":
-    "Dibuja una pintura sobre las hojas que el juego lee de verdad y mírala en el modelo mientras trabajas. Empieza desde una pintura instalada para acertar con los nombres de las hojas, apila imágenes y texto encima y guarda: lo que sale es un .pnt que el juego carga, no una exportación que convertir.",
+    "Dibuja una pintura sobre las hojas que el juego lee de verdad y mírala en el modelo mientras trabajas. Empieza desde una pintura instalada para acertar con los nombres de las hojas, píntala con pincel, degradado o formas, apila imágenes y texto encima y guarda: lo que sale es un .pnt que el juego carga, no una exportación que convertir.",
   "designer.empty":
     "Todavía no hay nada sobre lo que dibujar. Empieza desde una pintura instalada para este modelo — así obtienes sus hojas y sus nombres — o añade una en blanco.",
   "designer.startFromPaint": "Empezar desde una pintura…",
@@ -1372,7 +1372,8 @@ export const es: Translation = {
   "designer.layers": "Capas",
   "designer.showRail": "Mostrar hojas y capas",
   "designer.hideRail": "Ocultar hojas y capas",
-  "designer.noLayers": "Aún no hay capas — añade una imagen o texto.",
+  "designer.noLayers":
+    "Aún no hay capas — añade una imagen, texto o una capa de pintura sobre la que dibujar.",
   "designer.layerCount": "{{count}} capa(s)",
   "designer.layerTitle": "Capa seleccionada",
   "designer.hide": "Ocultar",
@@ -1402,4 +1403,40 @@ export const es: Translation = {
   "designer.gearNote":
     "Se muestra sobre el piloto de serie — tu propio equipo no está cargado aquí.",
   "designer.resetView": "Restablecer vista",
+
+  // ── Designer › las herramientas de pintura ────────────────────────────────────
+  "designer.paint": "Pintura",
+  "designer.addPaint": "Capa de pintura",
+  "designer.paintLayerName": "Pintura",
+  "designer.undoStroke": "Deshacer trazo",
+  "designer.redoStroke": "Rehacer trazo",
+  "designer.tool.move": "Mover",
+  "designer.tool.brush": "Pincel",
+  "designer.tool.eraser": "Borrador",
+  "designer.tool.gradient": "Degradado",
+  "designer.tool.fill": "Relleno",
+  "designer.tool.rect": "Rectángulo",
+  "designer.tool.ellipse": "Elipse",
+  "designer.tool.line": "Línea",
+  "designer.moveHint":
+    "Arrastra las capas sobre la hoja para colocarlas. Elige una herramienta arriba para pintar sobre ella.",
+  "designer.colourFrom": "Pinta con este",
+  "designer.colourTo": "Funde hacia este",
+  "designer.swapColours": "Intercambiar los dos colores",
+  "designer.brushSize": "Pincel",
+  "designer.hardness": "Borde",
+  "designer.strength": "Intensidad",
+  "designer.gradient": "Degradado",
+  "designer.gradient.linear": "Lineal",
+  "designer.gradient.radial": "Radial",
+  "designer.fadeOut": "Desvanecer",
+  "designer.shape": "Estilo",
+  "designer.shape.fill": "Relleno",
+  "designer.shape.outline": "Contorno",
+  "designer.lineWidth": "Grosor",
+  "designer.paintHint":
+    "Arrastra sobre la hoja. Mantén Shift para que salga recto, arrastra con el botón derecho para mover la vista.",
+  "designer.fillHint": "Haz clic en la hoja para inundar toda la capa.",
+  "designer.gradientHint":
+    "Arrastra sobre la hoja para marcar dónde ocurre la transición. Rellena toda esta capa: añade otra capa de pintura para conservar lo que hay debajo.",
 };

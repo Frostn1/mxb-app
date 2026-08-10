@@ -1344,7 +1344,7 @@ export const it: Translation = {
 
   // ── Designer (l'editor a livelli) ─────────────────────────────────────────────
   "designer.help":
-    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Parti da una livrea installata per avere i nomi giusti dei fogli, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
+    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Parti da una livrea installata per avere i nomi giusti dei fogli, dipingici sopra con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
   "designer.empty":
     "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello — così ottieni i suoi fogli e i loro nomi — oppure aggiungine uno vuoto.",
   "designer.startFromPaint": "Parti da una livrea…",
@@ -1363,7 +1363,8 @@ export const it: Translation = {
   "designer.layers": "Livelli",
   "designer.showRail": "Mostra fogli e livelli",
   "designer.hideRail": "Nascondi fogli e livelli",
-  "designer.noLayers": "Ancora nessun livello — aggiungi un'immagine o del testo.",
+  "designer.noLayers":
+    "Ancora nessun livello — aggiungi un'immagine, del testo o un livello pittura su cui disegnare.",
   "designer.layerCount": "{{count}} livello/i",
   "designer.layerTitle": "Livello selezionato",
   "designer.hide": "Nascondi",
@@ -1392,4 +1393,40 @@ export const it: Translation = {
     "L'anteprima 3D per ora è solo per MX Bikes: i modelli di {{game}} hanno bisogno delle proprie associazioni delle parti. Tutto il resto funziona uguale e la livrea si salva normalmente.",
   "designer.gearNote": "Mostrato sul pilota di serie — la tua tenuta non è caricata qui.",
   "designer.resetView": "Reimposta vista",
+
+  // ── Designer › gli strumenti di pittura ───────────────────────────────────────
+  "designer.paint": "Pittura",
+  "designer.addPaint": "Livello pittura",
+  "designer.paintLayerName": "Pittura",
+  "designer.undoStroke": "Annulla tratto",
+  "designer.redoStroke": "Ripeti tratto",
+  "designer.tool.move": "Sposta",
+  "designer.tool.brush": "Pennello",
+  "designer.tool.eraser": "Gomma",
+  "designer.tool.gradient": "Sfumatura",
+  "designer.tool.fill": "Riempimento",
+  "designer.tool.rect": "Rettangolo",
+  "designer.tool.ellipse": "Ellisse",
+  "designer.tool.line": "Linea",
+  "designer.moveHint":
+    "Trascina i livelli sul foglio per posizionarli. Scegli uno strumento qui sopra per dipingerci sopra.",
+  "designer.colourFrom": "Dipingi con questo",
+  "designer.colourTo": "Sfuma verso questo",
+  "designer.swapColours": "Scambia i due colori",
+  "designer.brushSize": "Pennello",
+  "designer.hardness": "Bordo",
+  "designer.strength": "Intensità",
+  "designer.gradient": "Sfumatura",
+  "designer.gradient.linear": "Lineare",
+  "designer.gradient.radial": "Radiale",
+  "designer.fadeOut": "Dissolvi",
+  "designer.shape": "Stile",
+  "designer.shape.fill": "Piena",
+  "designer.shape.outline": "Contorno",
+  "designer.lineWidth": "Spessore",
+  "designer.paintHint":
+    "Trascina sul foglio. Tieni premuto Shift per restare dritto, trascina col destro per spostare la vista.",
+  "designer.fillHint": "Clicca sul foglio per riempire tutto il livello.",
+  "designer.gradientHint":
+    "Trascina sul foglio per decidere dove avviene la transizione. Riempie tutto questo livello: aggiungi un altro livello pittura per conservare quello che c'è sotto.",
 };
