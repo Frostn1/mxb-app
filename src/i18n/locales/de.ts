@@ -54,13 +54,17 @@ export const de: Translation = {
   "nav.locker": "Spind",
   "nav.presets": "Presets",
   "nav.rider": "Fahrer",
+  "nav.designer": "Designer",
   "nav.paints": "Designs",
+  "nav.studio": "Studio",
   "nav.servers": "Server",
   "nav.manage": "Verwalten",
   "nav.settings": "Einstellungen",
 
   "sidebar.installing": "„{{name}}“ wird installiert",
   "sidebar.queued": "+{{count}} in der Warteschlange",
+  "sidebar.expand": "Seitenleiste ausklappen",
+  "sidebar.collapse": "Seitenleiste einklappen",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "FrostMod wird geprüft…",
@@ -1297,11 +1301,13 @@ export const de: Translation = {
   "paints.help":
     "Macht aus .tga- oder .png-Dateien aus GIMP oder Photoshop eine .pnt, die das Spiel lädt — und entpackt ein vorhandenes Design als Ausgangspunkt.",
   "paints.unpack": "Design entpacken…",
+  "paints.toDesigner": "Darauf zeichnen…",
   "paints.unpacked": "{{count}} Texturen entpackt — bearbeiten, dann speichern.",
   "paints.whereTitle": "Ziel",
   "paints.kind.bike": "Bike-Design",
   "paints.kind.helmet": "Helm",
   "paints.kind.goggles": "Brille",
+  "paints.kind.profileGoggles": "Brille (Fahrer)",
   "paints.kind.boots": "Stiefel",
   "paints.kind.protection": "Protektoren",
   "paints.kind.kit": "Fahrer-Outfit",
@@ -1333,4 +1339,56 @@ export const de: Translation = {
   "paints.replaceTitle": "Dieses Design ersetzen?",
   "paints.replaceBody": "{{path}} ist bereits vorhanden. Beim Speichern wird es ersetzt.",
   "paints.replace": "Ersetzen",
+
+  // ── Designer (der Ebenen-Editor) ──────────────────────────────────────────────
+  "designer.help":
+    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Fang bei einem installierten Design an, damit die Bahnennamen stimmen, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
+  "designer.empty":
+    "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an — dann hast du seine Bahnen samt Namen — oder füge eine leere hinzu.",
+  "designer.startFromPaint": "Von einem Design ausgehen…",
+  "designer.blankSheet": "Leere Bahn",
+  "designer.sheets": "Bahnen",
+  "designer.moveDown": "Nach unten",
+  "designer.moveUp": "Nach oben",
+  "designer.noSheetsFound":
+    "Dieses Design hat keine Bahnen ergeben, also gibt es nichts zum Zeichnen.",
+  "designer.loadedSheets": "{{count}} Bahn(en) geladen — zeichne darauf und speichere.",
+  "designer.sheetName": "Texturname",
+  "designer.editSheet": "Diese Bahn bearbeiten",
+  "designer.addImage": "Bild hinzufügen",
+  "designer.addText": "Text hinzufügen",
+  "designer.newTextValue": "TEXT",
+  "designer.layers": "Ebenen",
+  "designer.showRail": "Bahnen und Ebenen einblenden",
+  "designer.hideRail": "Bahnen und Ebenen ausblenden",
+  "designer.noLayers": "Noch keine Ebenen — füge ein Bild oder Text hinzu.",
+  "designer.layerCount": "{{count}} Ebene(n)",
+  "designer.layerTitle": "Ausgewählte Ebene",
+  "designer.hide": "Ausblenden",
+  "designer.show": "Einblenden",
+  "designer.raise": "Nach vorne",
+  "designer.lower": "Nach hinten",
+  "designer.scale": "Größe",
+  "designer.rotation": "Drehung",
+  "designer.opacity": "Deckkraft",
+  "designer.blend": "Modus",
+  "designer.blend.normal": "Normal",
+  "designer.blend.multiply": "Multiplizieren",
+  "designer.blend.screen": "Negativ multiplizieren",
+  "designer.blend.overlay": "Ineinanderkopieren",
+  "designer.text": "Text",
+  "designer.font": "Schrift",
+  "designer.size": "Textgröße",
+  "designer.colour": "Farbe",
+  "designer.outline": "Kontur",
+  "designer.needSheets": "Füge eine Bahn zum Zeichnen hinzu.",
+  "designer.noModelFound":
+    "„{{model}}“ ist nicht in deiner Bibliothek, also gibt es nichts, worauf es gezeigt werden könnte.",
+  "designer.noBikePreview":
+    "Dieser Build liest keine Motorrad-Geometrie, ein Design hat hier also kein Modell. Alles andere wird ganz normal gespeichert.",
+  "designer.noPreviewForGame":
+    "Die 3D-Vorschau gibt es vorerst nur für MX Bikes — die Modelle von {{game}} brauchen eigene Teil-Zuordnungen. Alles andere funktioniert gleich, und das Design wird ganz normal gespeichert.",
+  "designer.gearNote":
+    "Auf dem Standardfahrer gezeigt — deine eigene Ausrüstung ist hier nicht geladen.",
+  "designer.resetView": "Ansicht zurücksetzen",
 };

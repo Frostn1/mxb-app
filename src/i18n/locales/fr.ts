@@ -51,13 +51,17 @@ export const fr: Translation = {
   "nav.locker": "Casier",
   "nav.presets": "Presets",
   "nav.rider": "Pilote",
+  "nav.designer": "Designer",
   "nav.paints": "Décos",
+  "nav.studio": "Studio",
   "nav.servers": "Serveurs",
   "nav.manage": "Gérer",
   "nav.settings": "Réglages",
 
   "sidebar.installing": "Installation de « {{name}} »",
   "sidebar.queued": "+{{count}} en attente",
+  "sidebar.expand": "Développer la barre latérale",
+  "sidebar.collapse": "Réduire la barre latérale",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "Vérification de FrostMod…",
@@ -1288,11 +1292,13 @@ export const fr: Translation = {
   "paints.help":
     "Transforme des .tga ou .png dessinés dans GIMP ou Photoshop en un .pnt que le jeu charge — et décompresse une déco existante pour partir de celle-ci.",
   "paints.unpack": "Décompresser une déco…",
+  "paints.toDesigner": "Dessiner dessus…",
   "paints.unpacked": "{{count}} textures extraites — modifiez-les, puis enregistrez.",
   "paints.whereTitle": "Destination",
   "paints.kind.bike": "Déco de moto",
   "paints.kind.helmet": "Casque",
   "paints.kind.goggles": "Masque",
+  "paints.kind.profileGoggles": "Masque (pilote)",
   "paints.kind.boots": "Bottes",
   "paints.kind.protection": "Protections",
   "paints.kind.kit": "Tenue du pilote",
@@ -1324,4 +1330,56 @@ export const fr: Translation = {
   "paints.replaceTitle": "Remplacer cette déco ?",
   "paints.replaceBody": "{{path}} existe déjà. L'enregistrement la remplace.",
   "paints.replace": "Remplacer",
+
+  // ── Designer (l'éditeur par calques) ──────────────────────────────────────────
+  "designer.help":
+    "Dessine une déco sur les planches que le jeu lit vraiment, et regarde-la sur le modèle au fur et à mesure. Pars d'une déco installée pour avoir les bons noms de planches, empile images et textes par-dessus, puis enregistre : ce qui sort est un .pnt que le jeu charge, pas un export à convertir.",
+  "designer.empty":
+    "Rien sur quoi dessiner pour l'instant. Pars d'une déco installée pour ce modèle — tu récupères ses planches et leurs noms — ou ajoute une planche vierge.",
+  "designer.startFromPaint": "Partir d'une déco…",
+  "designer.blankSheet": "Planche vierge",
+  "designer.sheets": "Planches",
+  "designer.moveDown": "Descendre",
+  "designer.moveUp": "Monter",
+  "designer.noSheetsFound":
+    "Cette déco n'a produit aucune planche, il n'y a donc rien sur quoi dessiner.",
+  "designer.loadedSheets": "{{count}} planche(s) chargée(s) — dessine dessus et enregistre.",
+  "designer.sheetName": "Nom de texture",
+  "designer.editSheet": "Modifier cette planche",
+  "designer.addImage": "Ajouter une image",
+  "designer.addText": "Ajouter du texte",
+  "designer.newTextValue": "TEXTE",
+  "designer.layers": "Calques",
+  "designer.showRail": "Afficher planches et calques",
+  "designer.hideRail": "Masquer planches et calques",
+  "designer.noLayers": "Aucun calque — ajoute une image ou du texte.",
+  "designer.layerCount": "{{count}} calque(s)",
+  "designer.layerTitle": "Calque sélectionné",
+  "designer.hide": "Masquer",
+  "designer.show": "Afficher",
+  "designer.raise": "Vers l'avant",
+  "designer.lower": "Vers l'arrière",
+  "designer.scale": "Taille",
+  "designer.rotation": "Rotation",
+  "designer.opacity": "Opacité",
+  "designer.blend": "Fusion",
+  "designer.blend.normal": "Normal",
+  "designer.blend.multiply": "Produit",
+  "designer.blend.screen": "Superposition claire",
+  "designer.blend.overlay": "Incrustation",
+  "designer.text": "Texte",
+  "designer.font": "Police",
+  "designer.size": "Taille du texte",
+  "designer.colour": "Couleur",
+  "designer.outline": "Contour",
+  "designer.needSheets": "Ajoute une planche sur laquelle dessiner.",
+  "designer.noModelFound":
+    "« {{model}} » n'est pas dans ta bibliothèque, il n'y a donc rien pour l'afficher.",
+  "designer.noBikePreview":
+    "Cette version ne lit pas la géométrie des motos, une déco n'a donc pas de modèle où se poser. Tout le reste s'enregistre normalement.",
+  "designer.noPreviewForGame":
+    "L'aperçu 3D est réservé à MX Bikes pour l'instant : les modèles de {{game}} ont besoin de leurs propres liaisons de pièces. Tout le reste fonctionne pareil et la déco s'enregistre normalement.",
+  "designer.gearNote":
+    "Affiché sur le pilote d'origine — ta propre tenue n'est pas chargée ici.",
+  "designer.resetView": "Réinitialiser la vue",
 };

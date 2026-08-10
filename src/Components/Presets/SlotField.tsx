@@ -1,4 +1,5 @@
 import type React from "react";
+import { cn } from "@/lib/utils";
 import { Combobox } from "../ui/combobox";
 import type { SlotDef } from "../../lib/presets";
 import { useT } from "../../i18n/context";
@@ -15,6 +16,7 @@ export function SlotField({
   options,
   missing,
   hint,
+  compact,
   onChange,
 }: {
   slot: SlotDef;
@@ -23,11 +25,13 @@ export function SlotField({
   missing: boolean;
   /** Shown under the field — says why it's empty when "No matches." wouldn't. */
   hint?: React.ReactNode;
+  /** Tighter rows, for a screen showing a dozen of these next to a 3D render. */
+  compact?: boolean;
   onChange: (v: string) => void;
 }) {
   const t = useT();
   return (
-    <div className="flex flex-col gap-1">
+    <div className={cn("flex flex-col", compact ? "gap-0.5" : "gap-1")}>
       <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
         {t(slot.label)}
         {missing && (
@@ -39,7 +43,13 @@ export function SlotField({
           </span>
         )}
       </span>
-      <Combobox value={value} options={options} onChange={onChange} invalid={missing} />
+      <Combobox
+        value={value}
+        options={options}
+        onChange={onChange}
+        invalid={missing}
+        className={compact ? "h-7 text-[12px]" : undefined}
+      />
       {hint && <span className="text-[11px] leading-snug text-faint">{hint}</span>}
     </div>
   );

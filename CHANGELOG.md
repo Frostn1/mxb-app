@@ -10,6 +10,45 @@
   **Choose a folder…**, for an unpacked track) stages exactly what a drop stages: same
   classification, same review sheet showing where each piece lands, same collision
   warnings, and nothing written until you confirm.
+- **A paint designer, and one Studio instead of three tabs.** Designing a livery meant leaving
+  for a web editor, exporting a `.tga`, packing it, launching, looking, and starting over —
+  the loop was long enough that most of it happened blind. The **Designer** closes it: start
+  from a paint already installed for the model (which is how the sheets arrive named the way
+  the mesh binds them), stack images and text on top, drag them around, and **the bike or
+  rider beside you wears the drawing as you draw it**. Save writes the packed `.pnt` the game
+  reads, through the same destination picker, overwrite prompt and folder rules Paints already
+  used. No brushes and no filters — pixels still come from wherever you like drawing them;
+  this places them and knows where they go.
+- **Designer, Paints and Rider now live under one Studio tab**, switched by a segmented
+  control. They were three sidebar entries answering three halves of one question, and the
+  sidebar had started listing features rather than places; it's back to seven entries.
+- **The Studio works under GP Bikes too.** Building a `.pnt` is the same job for either title —
+  same container, same encoder, same folders — and only the 3D preview needs part bindings GP
+  Bikes doesn't have yet. So Designer and Paints are both there, the preview says plainly why
+  it isn't, and the Rider tab (which *is* the rig) stays MX Bikes-only. The destinations are
+  read from the game rather than listed in the app, so GP Bikes is offered its three — bike
+  livery, helmet, rider kit — instead of MX Bikes' boots and protection folders it has no use
+  for.
+- **The sidebar collapses to icons**, and the Designer's sheets/layers rail folds away, for
+  when the canvas and the model are what you want the width for.
+
+### Changed
+- The 3D viewer can be handed textures the backend has never seen, which is what lets the
+  Designer's canvas appear on real geometry. Everything else still arrives by token, unchanged.
+- Switching between the Studio's tabs no longer throws away what you were doing in the one you
+  left.
+- Sheets unpacked in Paints can be sent straight to the Designer to draw on, rather than
+  unpacked a second time.
+
+### Fixed
+- **Protection paints were being saved to a folder the game doesn't read.** Paint Studio wrote
+  them to `rider/protection/<model>/paints` — the singular folder an old version of this app
+  used — while the model itself lives in `rider/protections/` and every other path in the app
+  installs there. The paint saved, the app said so, and the gear turned up unpainted in game.
+  Destinations are now derived from the folders the game actually loads, so the two can't drift
+  apart again.
+- The Designer's "Start from a paint…" gave no sign it was working while it unpacked, and said
+  nothing at all if the paint yielded no sheets.
 
 ## Unreleased — paint sync actually closes the loop
 

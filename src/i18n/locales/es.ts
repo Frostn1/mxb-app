@@ -49,13 +49,17 @@ export const es: Translation = {
   "nav.locker": "Taquilla",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
+  "nav.designer": "Designer",
   "nav.paints": "Pinturas",
+  "nav.studio": "Studio",
   "nav.servers": "Servidores",
   "nav.manage": "Gestionar",
   "nav.settings": "Ajustes",
 
   "sidebar.installing": "Instalando «{{name}}»",
   "sidebar.queued": "+{{count}} en cola",
+  "sidebar.expand": "Expandir la barra lateral",
+  "sidebar.collapse": "Contraer la barra lateral",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "Comprobando FrostMod…",
@@ -1285,11 +1289,13 @@ export const es: Translation = {
   "paints.help":
     "Convierte archivos .tga o .png hechos en GIMP o Photoshop en un .pnt que el juego carga — y desempaqueta una pintura existente para partir de ella.",
   "paints.unpack": "Desempaquetar una pintura…",
+  "paints.toDesigner": "Dibujar sobre estas…",
   "paints.unpacked": "Extraídas {{count}} texturas — edítalas y luego guarda.",
   "paints.whereTitle": "Dónde va",
   "paints.kind.bike": "Decoración de moto",
   "paints.kind.helmet": "Casco",
   "paints.kind.goggles": "Gafas",
+  "paints.kind.profileGoggles": "Gafas (piloto)",
   "paints.kind.boots": "Botas",
   "paints.kind.protection": "Protecciones",
   "paints.kind.kit": "Equipación",
@@ -1321,4 +1327,56 @@ export const es: Translation = {
   "paints.replaceTitle": "¿Reemplazar esta pintura?",
   "paints.replaceBody": "{{path}} ya existe. Al guardar se reemplaza.",
   "paints.replace": "Reemplazar",
+
+  // ── Designer (el editor por capas) ────────────────────────────────────────────
+  "designer.help":
+    "Dibuja una pintura sobre las hojas que el juego lee de verdad y mírala en el modelo mientras trabajas. Empieza desde una pintura instalada para acertar con los nombres de las hojas, apila imágenes y texto encima y guarda: lo que sale es un .pnt que el juego carga, no una exportación que convertir.",
+  "designer.empty":
+    "Todavía no hay nada sobre lo que dibujar. Empieza desde una pintura instalada para este modelo — así obtienes sus hojas y sus nombres — o añade una en blanco.",
+  "designer.startFromPaint": "Empezar desde una pintura…",
+  "designer.blankSheet": "Hoja en blanco",
+  "designer.sheets": "Hojas",
+  "designer.moveDown": "Bajar",
+  "designer.moveUp": "Subir",
+  "designer.noSheetsFound":
+    "Esa pintura no produjo ninguna hoja, así que no hay nada sobre lo que dibujar.",
+  "designer.loadedSheets": "Se cargaron {{count}} hoja(s) — dibuja encima y guarda.",
+  "designer.sheetName": "Nombre de textura",
+  "designer.editSheet": "Editar esta hoja",
+  "designer.addImage": "Añadir imagen",
+  "designer.addText": "Añadir texto",
+  "designer.newTextValue": "TEXTO",
+  "designer.layers": "Capas",
+  "designer.showRail": "Mostrar hojas y capas",
+  "designer.hideRail": "Ocultar hojas y capas",
+  "designer.noLayers": "Aún no hay capas — añade una imagen o texto.",
+  "designer.layerCount": "{{count}} capa(s)",
+  "designer.layerTitle": "Capa seleccionada",
+  "designer.hide": "Ocultar",
+  "designer.show": "Mostrar",
+  "designer.raise": "Traer al frente",
+  "designer.lower": "Enviar atrás",
+  "designer.scale": "Tamaño",
+  "designer.rotation": "Rotación",
+  "designer.opacity": "Opacidad",
+  "designer.blend": "Fusión",
+  "designer.blend.normal": "Normal",
+  "designer.blend.multiply": "Multiplicar",
+  "designer.blend.screen": "Trama",
+  "designer.blend.overlay": "Superponer",
+  "designer.text": "Texto",
+  "designer.font": "Fuente",
+  "designer.size": "Tamaño del texto",
+  "designer.colour": "Color",
+  "designer.outline": "Contorno",
+  "designer.needSheets": "Añade una hoja sobre la que dibujar.",
+  "designer.noModelFound":
+    "“{{model}}” no está en tu biblioteca, así que no hay nada donde mostrarla.",
+  "designer.noBikePreview":
+    "Esta versión no puede leer la geometría de las motos, así que una pintura no tiene modelo donde ir. Todo lo demás se guarda con normalidad.",
+  "designer.noPreviewForGame":
+    "La vista 3D es solo para MX Bikes por ahora: los modelos de {{game}} necesitan sus propias asignaciones de piezas. Todo lo demás funciona igual y la pintura se guarda con normalidad.",
+  "designer.gearNote":
+    "Se muestra sobre el piloto de serie — tu propio equipo no está cargado aquí.",
+  "designer.resetView": "Restablecer vista",
 };
