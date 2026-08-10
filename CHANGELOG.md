@@ -1,5 +1,25 @@
 # Changelog
 
+## Unannounced — a debugger can't ride along
+
+Left out of the release notes on purpose: a hardening measure advertised is a hardening
+measure a reverse engineer knows to look for and patch out first. It folds into whichever
+release it ships under, unnamed.
+
+### Security
+
+- **Release builds refuse to run under a debugger.** The release profile already pays a lot
+  to make the shipped binary hard to read at rest — symbols stripped, fat LTO to dissolve the
+  call structure, no debug info — and all of it is undone the moment someone attaches a live
+  debugger to the running process: a breakpoint on the paint decrypt, a peek at the
+  `cf_clearance` the session is holding, a step through the IPC guard. So the process now
+  checks for an attached usermode debugger — `IsDebuggerPresent`/`CheckRemoteDebuggerPresent`
+  on Windows, a non-zero `TracerPid` on Linux, the `P_TRACED` flag on macOS — at startup and
+  on a slow poll after, and quietly exits if it finds one. The poll matters because attaching
+  to a process that is already up is the usual way in, so a one-shot check at launch would
+  miss the very thing it is meant to stop. Debug builds are exempt by construction — every
+  check is compiled only into release, so `tauri dev` and the test suite stay debuggable.
+
 ## Unannounced — servers and paint sync
 
 These ship in the app but are deliberately left out of the release notes: both need an
