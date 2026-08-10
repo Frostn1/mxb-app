@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Drop a photo onto a specific piece of bodywork.** The UV map could show you where the shroud
+  was; it couldn't help you put anything there. Now the model's parts are a list you can pick
+  from, and a layer pinned to one gets two things: **Fit to part** places and scales it to cover
+  that panel, and the layer is **clipped** to the panel's outline, so a photo grabbed off the
+  internet stops at the seam instead of bleeding across the fender next to it. Fit *covers*
+  rather than fits inside — a livery panel with the sheet showing through at two edges isn't
+  what anyone meant — and the clip is what trims the overspill. It works on a paint layer too,
+  which is how you brush freely and still stay inside the shroud.
+- **The sheet says which part you're pointing at.** Hovering names the piece of bodywork under
+  the cursor, and outlines it while the UV map is on. The islands say a panel is *there*; only
+  the name says which one it is — and it's the fastest way to check the map is landing where the
+  bodywork actually is.
+
+### Changed
+
+- Parts split across several mesh nodes under the same name are merged into one entry, and the
+  list is ordered biggest first. A bike's shroud is regularly three nodes that all call
+  themselves `shroud`, and three identical entries holding different thirds of the answer is a
+  worse menu than none.
+
 ## Unannounced — a debugger can't ride along
 
 Left out of the release notes on purpose: a hardening measure advertised is a hardening

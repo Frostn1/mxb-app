@@ -1,7 +1,9 @@
+import { Crop, Maximize2 } from "lucide-react";
 import { Input } from "../../ui/input";
 import { useT } from "../../../i18n/context";
 import { Row, Slider } from "./controls";
 import { BLEND_MODES, FONTS, type BlendMode, type Layer } from "./layers";
+import type { UvPart } from "./uv";
 
 /**
  * Everything about the selected layer that isn't its position on the sheet.
@@ -11,9 +13,18 @@ import { BLEND_MODES, FONTS, type BlendMode, type Layer } from "./layers";
  */
 export function LayerInspector({
   layer,
+  parts,
+  onClip,
+  onFit,
   onChange,
 }: {
   layer: Layer;
+  /** The model's bodywork for this sheet, empty when no model is loaded. */
+  parts: UvPart[];
+  /** Pin the layer to a part, or unpin it with null. */
+  onClip: (label: string | null) => void;
+  /** Place and scale the layer to cover a part. */
+  onFit: (label: string) => void;
   onChange: (fn: (l: Layer) => Layer) => void;
 }) {
   const t = useT();
@@ -48,6 +59,51 @@ export function LayerInspector({
               onChange={(v) => patch((l) => ({ ...l, rotation: (v * Math.PI) / 180 }))}
               format={(v) => `${v}°`}
             />
+          </Row>
+        </>
+      )}
+
+      {/* What the layer is *for*, rather than where it is: a photo dropped on a livery is
+          almost always meant for one panel, and this is where that gets said. Offered for
+          every layer kind — clipping a paint layer to a shroud is how you brush freely and
+          still stop at the seam. */}
+      {!!parts.length && (
+        <>
+          <Row label={t("designer.part")}>
+            <select
+              value={layer.clip?.label ?? ""}
+              onChange={(e) => onClip(e.target.value || null)}
+              className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-[11.5px]"
+            >
+              <option value="">{t("designer.wholeSheet")}</option>
+              {parts.map((p) => (
+                <option key={p.label} value={p.label}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </Row>
+
+          <Row label="">
+            <button
+              type="button"
+              disabled={!layer.clip || !movable}
+              onClick={() => layer.clip && onFit(layer.clip.label)}
+              title={t(movable ? "designer.fitToPartHint" : "designer.fitNotForPaint")}
+              className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] font-medium transition-colors hover:border-primary/60 disabled:opacity-35"
+            >
+              <Maximize2 className="size-3.5" />
+              {t("designer.fitToPart")}
+            </button>
+            {!!layer.clip && (
+              <span
+                className="flex items-center gap-1 text-[11px] text-faint"
+                title={t("designer.clippedHint")}
+              >
+                <Crop className="size-3" />
+                {t("designer.clipped")}
+              </span>
+            )}
           </Row>
         </>
       )}

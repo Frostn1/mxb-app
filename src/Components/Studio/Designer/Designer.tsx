@@ -37,10 +37,12 @@ import { PreviewPanel } from "./PreviewPanel";
 import { LayerInspector } from "./LayerInspector";
 import { PaintTools } from "./PaintTools";
 import { bitmapFromRgba, composite, sheetTexture, toPng } from "./composite";
-import { EMPTY_GHOST, ghostShows, uvWireframe, type Ghost } from "./ghost";
+import { EMPTY_GHOST, ghostShows, type Ghost } from "./ghost";
+import { partPath, uvParts, uvWireframe, type UvPart } from "./uv";
 import {
   blankSheet,
   imageLayer,
+  layerExtent,
   newId,
   paintLayer,
   textLayer,
@@ -567,6 +569,66 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
      out of `Sheet.base`, which is a real edit to what would be saved and is meant to be — it
      is the whole difference between drawing over a paint and drawing from one. ───────── */
 
+  /**
+   * The model's bodywork for the active sheet.
+   *
+   * Cheap — no rasterising, just a walk over the mesh — so it is derived rather than cached
+   * behind a toggle the way the wireframe is. Clipping and fitting need it whether or not
+   * anyone has asked to *see* the islands, and keying it on the name rather than the sheet
+   * keeps a brush stroke, which replaces the sheet object, from recomputing it.
+   */
+  const activeName = active?.name ?? "";
+  const parts = useMemo<UvPart[]>(
+    () => (geometry ? uvParts(geometry, activeName) : []),
+    [geometry, activeName],
+  );
+
+  /** Pin the selected layer to a piece of bodywork, or let it cover the sheet again. */
+  const clipLayer = useCallback(
+    (label: string | null) => {
+      if (!active || !selectedId) return;
+      const part = label ? parts.find((p) => p.label === label) : null;
+      patchLayer(selectedId, (l) => ({
+        ...l,
+        // Built here, at this sheet's size, so the composite never has to. Re-picking the
+        // part is what rebuilds it, which is also the answer to a resized sheet.
+        clip: part
+          ? { label: part.label, path: partPath(part, active.width, active.height) }
+          : null,
+      }));
+      bump();
+    },
+    [active, bump, parts, patchLayer, selectedId],
+  );
+
+  /**
+   * Place and scale the selected layer to cover a part.
+   *
+   * Cover, not contain: a photo meant for a shroud should reach every edge of it, and the
+   * clip is what trims the overspill. Contain would leave the sheet showing through at two
+   * sides of anything whose shape didn't happen to match the panel's.
+   */
+  const fitLayer = useCallback(
+    (label: string) => {
+      const layer = active?.layers.find((l) => l.id === selectedId);
+      const part = parts.find((p) => p.label === label);
+      if (!active || !layer || !part || layer.kind === "paint") return;
+      const bw = (part.maxU - part.minU) * active.width;
+      const bh = (part.maxV - part.minV) * active.height;
+      const { w, h } = layerExtent(layer);
+      if (!w || !h || !bw || !bh) return;
+      const scale = Math.min(4, Math.max(0.05, Math.max(bw / w, bh / h)));
+      patchLayer(layer.id, (l) => ({
+        ...l,
+        x: (part.minU + part.maxU) * 0.5 * active.width,
+        y: (part.minV + part.maxV) * 0.5 * active.height,
+        scale,
+      }));
+      bump();
+    },
+    [active, bump, parts, patchLayer, selectedId],
+  );
+
   const ghostOf = useCallback(
     (id: string | null | undefined) => (id && ghosts.get(id)) || EMPTY_GHOST,
     [ghosts],
@@ -643,9 +705,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     // `wireFor` records the attempt whether or not it found anything, so a name that matches
     // nothing is asked once rather than on every render. The panel reads the pair to say so —
     // out loud, because an empty overlay is indistinguishable from one still being built.
-    const wire = uvWireframe(geometry, active.name, active.width, active.height);
+    const wire = uvWireframe(parts, active.width, active.height);
     patchGhost(active.id, (g) => ({ ...g, wire, wireFor: active.name }));
-  }, [active, geometry, ghosts, patchGhost]);
+  }, [active, geometry, ghosts, parts, patchGhost]);
 
   // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
   // sheet, so leaving them behind would keep a closed paint's pixels alive for the session.
@@ -904,6 +966,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           {selected && (
             <LayerInspector
               layer={selected}
+              parts={parts}
+              onClip={clipLayer}
+              onFit={fitLayer}
               onChange={(fn) => {
                 patchLayer(selected.id, fn);
                 bump();
@@ -921,6 +986,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               source={canvases.current.get(active.id) ?? null}
               version={version}
               ghost={ghostOf(active.id)}
+              parts={parts}
               selectedId={selectedId}
               onSelect={setSelectedId}
               onMove={moveLayer}

@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { useT } from "../../../i18n/context";
 import { layerCorners } from "./composite";
 import type { Ghost } from "./ghost";
+import { partAt, partPath, type UvPart } from "./uv";
 import { hitTest, type Layer, type Sheet } from "./layers";
 import { constrained, hasTip, isDragTool, type PaintTool, type Point } from "./paint";
 
@@ -23,6 +24,8 @@ interface CanvasStageProps {
   version: number;
   /** The reference underlay, if any. Drawn here and nowhere else — see `ghost.ts`. */
   ghost: Ghost | null;
+  /** The model's bodywork for this sheet, for naming what the pointer is over. */
+  parts: UvPart[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   /** Drag, in sheet pixels. */
@@ -59,6 +62,7 @@ export function CanvasStage({
   source,
   version,
   ghost,
+  parts,
   selectedId,
   onSelect,
   onMove,
@@ -91,6 +95,10 @@ export function CanvasStage({
   const painting = useRef(false);
   // Which corner the pointer is over, purely so the cursor can say the layer is resizable.
   const [overHandle, setOverHandle] = useState(-1);
+  // The piece of bodywork under the pointer. The whole reason the UV map is worth having is
+  // being able to answer "what am I painting on" — an outline you have to interpret answers it
+  // less well than a name does.
+  const [overPart, setOverPart] = useState<UvPart | null>(null);
   // The press and current point of a gradient or shape drag, so it can be shown while it's
   // being aimed. Only ever set between press and release.
   const [guide, setGuide] = useState<{ from: Point; to: Point } | null>(null);
@@ -274,6 +282,18 @@ export function CanvasStage({
       }
     }
 
+    // The piece under the pointer, picked out of the map. Only while the map is on: a highlight
+    // that appeared over a livery with no islands showing would be an outline from nowhere.
+    if (overPart && ghost?.showWire && ghost.wire) {
+      ctx.save();
+      ctx.translate(left, top);
+      ctx.scale(w / sheet.width, h / sheet.height);
+      const path = partPath(overPart, sheet.width, sheet.height);
+      ctx.fillStyle = `hsla(${overPart.hue}, 85%, 65%, 0.18)`;
+      ctx.fill(path, "nonzero");
+      ctx.restore();
+    }
+
     // Where a gradient runs, or what a shape will cover. The stroke itself is already visible
     // in the composite underneath; this is the part you aim with.
     if (guide) {
@@ -301,7 +321,21 @@ export function CanvasStage({
       }
       ctx.restore();
     }
-  }, [box, scale, originX, originY, sheet, source, ghost, version, guide, tool, toView, handles]);
+  }, [
+    box,
+    scale,
+    originX,
+    originY,
+    sheet,
+    source,
+    ghost,
+    overPart,
+    version,
+    guide,
+    tool,
+    toView,
+    handles,
+  ]);
 
   /** Put the brush ring where the pointer is, at the size it will actually paint. */
   const moveCursor = useCallback(
@@ -407,9 +441,15 @@ export function CanvasStage({
       const d = drag.current;
       if (!d) {
         // Nothing is being dragged, so this is a hover: say whether a corner is under the
-        // pointer. `setState` with an unchanged value doesn't re-render, so this only costs
-        // anything on the moves that actually cross a handle's edge.
+        // pointer, and which piece of bodywork it is over. `setState` with an unchanged value
+        // doesn't re-render, so this only costs anything on the moves that cross a boundary.
         setOverHandle(paints ? -1 : handleAt(e.clientX, e.clientY));
+        if (parts.length) {
+          const at = toSheet(e.clientX, e.clientY);
+          setOverPart(
+            at ? partAt(parts, at.x / sheet.width, at.y / sheet.height) : null,
+          );
+        }
         return;
       }
       if (!scale) return;
@@ -421,7 +461,20 @@ export function CanvasStage({
       if (d.id) onMove(d.id, dx / scale, dy / scale);
       else setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
     },
-    [handleAt, moveCursor, onMove, onPaintMove, onScale, paints, scale, toSheet, tool],
+    [
+      handleAt,
+      moveCursor,
+      onMove,
+      onPaintMove,
+      onScale,
+      paints,
+      parts,
+      scale,
+      sheet.height,
+      sheet.width,
+      toSheet,
+      tool,
+    ],
   );
 
   const endDrag = useCallback(
@@ -478,6 +531,7 @@ export function CanvasStage({
         onPointerLeave={() => {
           if (cursorRef.current) cursorRef.current.style.opacity = "0";
           setOverHandle(-1);
+          setOverPart(null);
         }}
         onPointerEnter={() => {
           if (cursorRef.current) cursorRef.current.style.opacity = "1";
@@ -499,6 +553,14 @@ export function CanvasStage({
         </span>
         <span>·</span>
         <span>{Math.round(zoom * 100)}%</span>
+        {/* The answer to "what am I painting on", in words. Worth the corner it takes: the
+            islands say a panel is *there*, and only this says which panel it is. */}
+        {overPart && (
+          <>
+            <span>·</span>
+            <span className="max-w-[160px] truncate text-white/70">{overPart.label}</span>
+          </>
+        )}
       </div>
       <button
         type="button"
