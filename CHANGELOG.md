@@ -254,6 +254,19 @@
 - **FrostMod still starts when a runtime is missing.** It's a warning, not a gate: we can't
   tell from outside which PCs manage to inject anyway, and refusing to launch would take
   FrostMod away from anyone the check is wrong about.
+- **Opening a paint in the viewer is fast.** A gear paint is tens of megabytes of compressed
+  pixels — three 4096² sheets — and every one of them was inflated one after another, then
+  copied whole before being downscaled. They now inflate in parallel off a header walk that
+  reads the image table without touching a pixel, and the copy is gone. The roughness sheet
+  isn't decoded at all: the viewer samples a diffuse and a normal map, so that plane was 67 MB
+  allocated, resized, sent to the webview and turned into a mipmapped texture nothing binds.
+  Paints are also kept once decoded, so re-opening one or flicking back to it in the picker
+  costs nothing.
+- **Developer builds no longer run the paint decoder unoptimized.** `cargo`'s default leaves
+  every crate at `opt-level = 0` in a debug build, and essentially all of this work happens
+  inside `flate2` and `image`. Dependencies now build optimized and our own crate lightly so,
+  which is what made a locally-run app take seconds where the shipped one took a fraction of
+  one. Release builds are untouched.
 
 ### Fixed
 - **Signing in to the Shop no longer signs you straight back out.** A sign-in would land, show
