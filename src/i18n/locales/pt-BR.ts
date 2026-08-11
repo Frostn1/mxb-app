@@ -1108,6 +1108,19 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v092.hero.title": "Veja o terreno de uma pista em 3D",
+  "showcase.v092.hero.body":
+    "Pistas eram a única coisa que a biblioteca não conseguia te mostrar: um nome, uma imagem e um tamanho. O visualizador agora lê o mapa de alturas de uma pista e desenha o próprio terreno, então os saltos, os sulcos e o formato de uma curva estão ali para olhar antes mesmo de carregar. Abre a partir de uma pista na biblioteca, ao lado de Ver em 3D.",
+  "showcase.v092.surfaces":
+    "A pista é desenhada com as superfícies dela. Onde a pista diz qual é qual, a grama, o acostamento, o piso duro e a terra da linha de corrida ganham cada um a cor do material que ela nomeia — assim um traçado de fazenda sai como a terra que é e um circuito de grama sai verde.",
+  "showcase.v092.relief":
+    "O terreno é iluminado pelas próprias depressões e projeta sombras de verdade, então um sulco se lê como sulco e uma rampa como rampa, para qualquer lado que ela corra.",
+  "showcase.v092.accuracy":
+    "As pistas são desenhadas do jeito que o jogo as guarda: no sentido certo em vez de espelhadas, sem o muro de onze metros em volta das que ficam abaixo da cota de referência, e com cerca de quatro vezes mais detalhe no chão.",
+  "showcase.v092.voice":
+    "Ajustes do chat de voz: escolha o microfone pelo qual você é ouvido e o fone de onde os outros saem, com medidor de entrada ao vivo e um tom de teste. Nada é transmitido ainda — esta é a metade dos dispositivos, e a página diz isso.",
+  "showcase.v092.pushToTalk":
+    "Uma tecla push-to-talk que funciona enquanto o jogo está em foco, ligada pelo mesmo caminho do atalho do overlay.",
   "showcase.v091.hero.title": "Pinte direto no template",
   "showcase.v091.hero.body":
     "O Designer sabia posicionar imagens e texto nas folhas de uma pintura, mas não deixava colocar um único pixel à mão — um degradê numa carenagem significava sair para um editor de imagens e voltar. Agora ele tem um kit de ferramentas: pincel suave com tamanho, borda e intensidade, borracha, gradiente, preenchimento, retângulo, elipse e linha. Tudo aparece na folha e no modelo 3D ao mesmo tempo, enquanto você arrasta.",

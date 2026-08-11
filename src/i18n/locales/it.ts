@@ -1108,6 +1108,19 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v092.hero.title": "Guarda il terreno di una pista in 3D",
+  "showcase.v092.hero.body":
+    "Le piste erano l'unica cosa che la libreria non sapeva mostrarti: un nome, un'immagine e una dimensione. Il visualizzatore ora legge la mappa delle altezze di una pista e disegna il terreno vero e proprio, così i salti, i solchi e la forma di una curva ci sono da guardare prima ancora di caricarla. Si apre da una pista nella libreria, accanto a Vedi in 3D.",
+  "showcase.v092.surfaces":
+    "Una pista viene disegnata con le sue superfici. Dove la pista dice qual è quale, erba, bordo, fondo duro e la terra della traiettoria prendono ognuno il colore del materiale che nomina — così un tracciato in un campo esce come la terra che è e un circuito su erba esce verde.",
+  "showcase.v092.relief":
+    "Il terreno è illuminato dai suoi stessi avvallamenti e proietta ombre vere, così un solco si legge come un solco e una rampa come una rampa, in qualunque direzione vada.",
+  "showcase.v092.accuracy":
+    "Le piste sono disegnate come le tiene il gioco: nel verso giusto invece che specchiate, senza il muro di undici metri attorno a quelle che stanno sotto la loro quota di riferimento, e con circa quattro volte il dettaglio sul terreno.",
+  "showcase.v092.voice":
+    "Impostazioni della chat vocale: scegli il microfono con cui ti sentono e le cuffie da cui escono gli altri, con un misuratore d'ingresso dal vivo e un tono di prova. Non trasmette ancora niente — questa è la metà dei dispositivi, e la pagina lo dice.",
+  "showcase.v092.pushToTalk":
+    "Un tasto push-to-talk che funziona mentre il gioco tiene il fuoco, assegnato per la stessa via della scorciatoia dell'overlay.",
   "showcase.v091.hero.title": "Dipingi direttamente sul template",
   "showcase.v091.hero.body":
     "Il Designer sapeva posizionare immagini e testo sui fogli di una livrea, ma non ti lasciava mettere giù un solo pixel a mano — una sfumatura su una fiancata voleva dire uscire, aprire un editor di immagini e tornare indietro. Ora ha una cassetta degli attrezzi: pennello morbido con dimensione, bordo e intensità, gomma, sfumatura, riempimento, rettangolo, ellisse e linea. Tutto arriva sul foglio e sul modello 3D nello stesso momento, mentre trascini.",

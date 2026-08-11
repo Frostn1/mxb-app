@@ -9,6 +9,11 @@
  * else knows about versions.
  */
 import {
+  Mountain,
+  Sun,
+  Ruler,
+  Mic,
+  Keyboard,
   Apple,
   Blend,
   Brush,
@@ -59,6 +64,21 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.9.2",
+    hero: {
+      icon: Mountain,
+      title: "showcase.v092.hero.title",
+      body: "showcase.v092.hero.body",
+    },
+    highlights: [
+      { icon: Palette, text: "showcase.v092.surfaces" },
+      { icon: Sun, text: "showcase.v092.relief" },
+      { icon: Ruler, text: "showcase.v092.accuracy" },
+      { icon: Mic, text: "showcase.v092.voice" },
+      { icon: Keyboard, text: "showcase.v092.pushToTalk" },
+    ],
+  },
   {
     version: "0.9.1",
     hero: {

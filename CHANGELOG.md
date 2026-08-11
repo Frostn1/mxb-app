@@ -1,13 +1,44 @@
 # Changelog
 
-## 2026-08-11
+## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
+
+On top of v0.9.1 — the Designer's painting tools, Play on macOS and the SteamOS white screen
+are all still in here, and v0.9.0's notes are repeated below.
+
+Worth knowing: **voice chat doesn't transmit yet.** This is the device half — the mic, the
+headset, the levels and the key that opens the mic, with test buttons that do work. The codec
+and the voice room are still to come, and the Settings section says so rather than looking
+finished.
+
+Also worth knowing: the terrain is read from the game's own height file and checked against
+four published tracks' marshal posts, not against every track there is. If one comes out
+looking nothing like the track you ride, name it in the report — that's the thing to send.
 
 ### Added
-- **Kelso** credited on Settings → Supporters.
-
-## 2026-08-10
-
-### Added
+- **See a track's terrain in 3D.** Tracks were the one thing the library couldn't show you —
+  a name, a preview and a size. The viewer now reads the heightfield out of a track and draws
+  the ground, opening from the library detail view next to **View in 3D**.
+- **Tracks are drawn with their surfaces, where the track says what they are.** A track's
+  height file can carry coverage masks — one per surface the builder painted, a byte per cell
+  — and the viewer reads them, so grass, apron, hard standing and the dirt of the riding line
+  each get their own colour. Tracks that carry no masks keep the elevation shading.
+  - Each surface takes the colour of the material the track names for it — the ids below six
+    index the table every track carries (asphalt, grass, sand, kerb, soil, concrete), so a
+    farm's fields come out as the soil they are and a grass circuit comes out green, rather
+    than every track being coloured by whichever surface happened to cover the most of it.
+  - Tracks also ship a picture in `[ui] pic_info`, and that is deliberately *not* used. Some
+    of those are true overhead photographs, but others are branded posters — a diagram on a
+    paper texture with a series logo across the bottom — and laying one on the terrain puts a
+    logo on the dirt. Nothing in the file distinguishes them, and three ways of asking a
+    picture to prove it describes the ground all failed to separate a real photograph from a
+    poster (extents of 0.709 against 0.715). The masks need no such test: they are a byte per
+    cell of the very grid being drawn, so they line up by construction.
+- **The terrain is lit by its own hollows.** A directional light can only shade a slope by
+  which way it faces, so a rut running along the light and a ridge running along it were lit
+  identically and the shapes a track is made of came out flat. Every point is now measured
+  against a blurred copy of the terrain at two scales — tight enough to find a rut, wide
+  enough to see the bowl a turn sits in — and the result darkens hollows and lifts ridges.
+  The terrain also casts and receives real shadows now.
 - **Voice chat settings — microphone, output, levels and a push-to-talk key.** A new
   Settings section that picks the mic to listen to and the headset other riders will come
   out of, with a live input meter and a test tone. Both device settings default to *system
@@ -18,12 +49,43 @@
 - **Push-to-talk**, bound through the same global-shortcut path as the overlay hotkey, so
   it works while the game holds focus. It acts on both edges — mic opens on press, closes
   on release — and is bound even when the overlay is switched off.
-- **Qwest** credited on Settings → Supporters.
+- **Qwest and Kelso** credited on Settings → Supporters.
+
+### Fixed
+- **Terrain below a track's datum is no longer drawn as a wall around it.** A `.trh` stores
+  its samples *signed*, and they were read unsigned, so every point below the datum came out
+  a full half-range — eleven metres — too high. Tracks that sit entirely one side of it were
+  merely offset; ones that straddle it, like Farm14, were drawn as a plateau with the track
+  sunk in a pit and the jumps at the bottom of it. Confirmed against the marshal posts of two
+  published tracks: read signed, their stated ground heights come back to the centimetre
+  (SandPoint's median error is 0.000 m against 11.001 m read unsigned), and the 32768-unit
+  cliffs that wrapping left across three of four tracks disappear entirely.
+- **The track is no longer drawn mirrored.** The terrain was placed straight into the scene
+  while the game's frame is left-handed and the viewer's is not, so every track came out
+  flipped — a left-hander read as a right-hander. It now goes through the same axis
+  conversion every bike and rider model in the app already does (`edf::to_right_handed`),
+  with the triangle winding turned to match so the ground is still lit from above.
+- **Terrain is drawn at the detail it was asked for — twice over.** Reductions moved by a
+  whole number of samples in two separate places, and both overshot. Reading a heightfield
+  into the master could only halve a 2049-sample grid asked for 2048, so the master was 1025
+  and half the file was thrown away before the viewer could ask for it. The same fault in the
+  view's own reduction meant a request for 320 across a 410-sample master could only step by
+  two and drew 205 — one drawn square covering nearly three metres of ground, wider than the jump
+  faces and ruts it was meant to show. Reductions now land on the size requested, and the
+  master itself is kept at twice the resolution. A track is drawn with roughly 3.7x the
+  samples across it, and a drawn square covers under a metre.
+- **The blind heightfield probe no longer reads a shifted grid.** It required the samples to
+  run to the last byte of the file, so a height file with a trailing block — which is what a
+  real `.trh` is — could only fit by treating that block as a header, landing the grid over
+  half a row late and reporting full confidence while doing it. Alignment is now measured
+  rather than assumed: a read that starts in the wrong place wraps mid-row, breaking every
+  row in the same column, and that is what the probe now looks for.
+- **Relief is drawn at a fixed, gentle exaggeration.** The 1×/2×/4× control is gone: 4×
+  stretched a track's boundary into spikes without making the track itself any clearer. What
+  replaces it is a single 1.5×, which is enough for a jump face to cast a shadow while the
+  ground still reads as ground.
 
 ### Notes
-- **Nothing transmits yet.** This is the device half only; the codec and the voice room on
-  `mxb-agent` are still to come, and the section says so on the page rather than looking
-  finished. The test buttons do work today.
 - Voice is **off until turned on**. A feature that opens a microphone shouldn't be
   something a player discovers by accident.
 - Global shortcuts are now all rebound from one place. `unregister_all` clears every
@@ -250,70 +312,6 @@ them up.
   selectable names, and picking either would have restarted the server into nothing. It now
   uses the same marker files the app's own library scanner keys on, and stops descending
   once it has found a track.
-
-## 2026-08-10
-
-### Added
-- **See a track's terrain in 3D.** Tracks were the one thing the library couldn't show you —
-  a name, a preview and a size. The viewer now reads the heightfield out of a track and draws
-  the ground, opening from the library detail view next to **View in 3D**.
-- **Tracks are drawn with their surfaces, where the track says what they are.** A track's
-  height file can carry coverage masks — one per surface the builder painted, a byte per cell
-  — and the viewer reads them, so grass, apron, hard standing and the dirt of the riding line
-  each get their own colour. Tracks that carry no masks keep the elevation shading.
-
-  Tracks also ship a picture in `[ui] pic_info`, and that is deliberately *not* used. Some of
-  those are true overhead photographs, but others are branded posters — a diagram on a paper
-  texture with a series logo across the bottom — and laying one on the terrain puts a logo on
-  the dirt. Nothing in the file distinguishes them, and three ways of asking a picture to prove
-  it describes the ground all failed to separate a real photograph from a poster (extents of
-  0.709 against 0.715). The masks need no such test: they are a byte per cell of the very grid
-  being drawn, so they line up by construction.
-
-  Each surface takes the colour of the material the track names for it — the ids below six
-  index the table every track carries (asphalt, grass, sand, kerb, soil, concrete), so a farm's
-  fields come out as the soil they are and a grass circuit comes out green, rather than every
-  track being coloured by whichever surface happened to cover the most of it.
-- **The terrain is lit by its own hollows.** A directional light can only shade a slope by
-  which way it faces, so a rut running along the light and a ridge running along it were lit
-  identically and the shapes a track is made of came out flat. Every point is now measured
-  against a blurred copy of the terrain at two scales — tight enough to find a rut, wide
-  enough to see the bowl a turn sits in — and the result darkens hollows and lifts ridges.
-  The terrain also casts and receives real shadows now.
-
-### Fixed
-- **Terrain below a track's datum is no longer drawn as a wall around it.** A `.trh` stores
-  its samples *signed*, and they were read unsigned, so every point below the datum came out
-  a full half-range — eleven metres — too high. Tracks that sit entirely one side of it were
-  merely offset; ones that straddle it, like Farm14, were drawn as a plateau with the track
-  sunk in a pit and the jumps at the bottom of it. Confirmed against the marshal posts of two
-  published tracks: read signed, their stated ground heights come back to the centimetre
-  (SandPoint's median error is 0.000 m against 11.001 m read unsigned), and the 32768-unit
-  cliffs that wrapping left across three of four tracks disappear entirely.
-- **The track is no longer drawn mirrored.** The terrain was placed straight into the scene
-  while the game's frame is left-handed and the viewer's is not, so every track came out
-  flipped — a left-hander read as a right-hander. It now goes through the same axis
-  conversion every bike and rider model in the app already does (`edf::to_right_handed`),
-  with the triangle winding turned to match so the ground is still lit from above.
-- **Terrain is drawn at the detail it was asked for — twice over.** Reductions moved by a
-  whole number of samples in two separate places, and both overshot. Reading a heightfield
-  into the master could only halve a 2049-sample grid asked for 2048, so the master was 1025
-  and half the file was thrown away before the viewer could ask for it. The same fault in the
-  view's own reduction meant a request for 320 across a 410-sample master could only step by
-  two and drew 205 — one drawn square covering nearly three metres of ground, wider than the jump
-  faces and ruts it was meant to show. Reductions now land on the size requested, and the
-  master itself is kept at twice the resolution. A track is drawn with roughly 3.7x the
-  samples across it, and a drawn square covers under a metre.
-- **The blind heightfield probe no longer reads a shifted grid.** It required the samples to
-  run to the last byte of the file, so a height file with a trailing block — which is what a
-  real `.trh` is — could only fit by treating that block as a header, landing the grid over
-  half a row late and reporting full confidence while doing it. Alignment is now measured
-  rather than assumed: a read that starts in the wrong place wraps mid-row, breaking every
-  row in the same column, and that is what the probe now looks for.
-- **Relief is drawn at a fixed, gentle exaggeration.** The 1×/2×/4× control is gone: 4×
-  stretched a track's boundary into spikes without making the track itself any clearer. What
-  replaces it is a single 1.5×, which is enough for a jump face to cast a shadow while the
-  ground still reads as ground.
 
 ## 2026-08-10 — v0.9.1 — The Designer paints, Play works on a Mac, and SteamOS stops opening to a white screen
 

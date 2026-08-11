@@ -1085,6 +1085,19 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v092.hero.title": "See a track's terrain in 3D",
+  "showcase.v092.hero.body":
+    "Tracks were the one thing the library couldn't show you — a name, a picture and a size. The viewer now reads the heightfield out of a track and draws the ground itself, so the jumps, the ruts and the shape of a turn are there to look at before you ever load it. It opens from a track in the library, next to View in 3D.",
+  "showcase.v092.surfaces":
+    "A track is drawn with its own surfaces. Where the track says which is which, grass, apron, hard standing and the dirt of the riding line each take the colour of the material it names — so a farm's fields come out as soil and a grass circuit comes out green.",
+  "showcase.v092.relief":
+    "The terrain is lit by its own hollows and casts real shadows, so a rut reads as a rut and a jump face as a jump face — whichever way round it happens to run.",
+  "showcase.v092.accuracy":
+    "Tracks are drawn the way the game holds them: the right way round rather than mirrored, no eleven-metre wall around the ones that sit below their datum, and roughly four times the detail across the ground.",
+  "showcase.v092.voice":
+    "Voice chat settings: pick the microphone you're heard through and the headset everyone else comes out of, with a live input meter and a test tone. Nothing transmits yet — this is the device half, and the page says so.",
+  "showcase.v092.pushToTalk":
+    "A push-to-talk key that works while the game holds focus, bound the same way as the overlay hotkey.",
   "showcase.v091.hero.title": "Paint straight onto the template",
   "showcase.v091.hero.body":
     "The Designer could place images and text on a paint's sheets, but you couldn't put down a single pixel by hand — a fade across a shroud meant leaving for an image editor and coming back. It has a tool kit now: a soft brush with size, edge and strength, an eraser, a gradient, a fill, and rectangle, ellipse and line. Everything lands on the sheet and on the 3D model at the same time, while you drag.",

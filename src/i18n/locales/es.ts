@@ -1116,6 +1116,19 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v092.hero.title": "Mira el terreno de un circuito en 3D",
+  "showcase.v092.hero.body":
+    "Los circuitos eran lo único que la biblioteca no sabía enseñarte: un nombre, una imagen y un tamaño. El visor ahora lee el mapa de alturas de un circuito y dibuja el propio terreno, así que los saltos, las roderas y la forma de una curva están ahí para mirarlos antes incluso de cargarlo. Se abre desde un circuito en la biblioteca, junto a Ver en 3D.",
+  "showcase.v092.surfaces":
+    "Un circuito se dibuja con sus propias superficies. Donde el circuito dice cuál es cuál, la hierba, el arcén, el firme duro y la tierra de la trazada toman cada uno el color del material que nombra — así un campo de labranza sale como la tierra que es y un circuito de hierba sale verde.",
+  "showcase.v092.relief":
+    "El terreno se ilumina con sus propios huecos y proyecta sombras de verdad, así que una rodera se lee como rodera y una rampa como rampa, vaya en la dirección que vaya.",
+  "showcase.v092.accuracy":
+    "Los circuitos se dibujan como los guarda el juego: en el sentido correcto en vez de reflejados, sin el muro de once metros alrededor de los que quedan por debajo de su cota, y con unas cuatro veces más detalle sobre el terreno.",
+  "showcase.v092.voice":
+    "Ajustes de chat de voz: elige el micrófono por el que se te oye y los auriculares por los que sale todo el mundo, con medidor de entrada en vivo y tono de prueba. Todavía no se transmite nada — esta es la mitad de los dispositivos, y la página lo dice.",
+  "showcase.v092.pushToTalk":
+    "Una tecla de pulsar para hablar que funciona mientras el juego tiene el foco, asignada por la misma vía que el atajo del overlay.",
   "showcase.v091.hero.title": "Pinta directamente sobre la plantilla",
   "showcase.v091.hero.body":
     "El Designer sabía colocar imágenes y texto sobre las hojas de una pintura, pero no dejaba poner ni un píxel a mano — un degradado en un lateral obligaba a salir a un editor de imágenes y volver. Ahora tiene su caja de herramientas: pincel suave con tamaño, borde e intensidad, borrador, degradado, relleno, y rectángulo, elipse y línea. Todo aparece en la hoja y en el modelo 3D a la vez, mientras arrastras.",

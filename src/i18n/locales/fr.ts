@@ -1119,6 +1119,19 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v092.hero.title": "Regarde le terrain d'un circuit en 3D",
+  "showcase.v092.hero.body":
+    "Les circuits étaient la seule chose que la bibliothèque ne savait pas montrer : un nom, une image et une taille. Le visualiseur lit maintenant le champ de hauteurs d'un circuit et dessine le sol lui-même, donc les sauts, les ornières et la forme d'un virage sont là à regarder avant même de le charger. Il s'ouvre depuis un circuit dans la bibliothèque, à côté de Voir en 3D.",
+  "showcase.v092.surfaces":
+    "Un circuit est dessiné avec ses propres surfaces. Là où le circuit dit ce qui est quoi, l'herbe, l'accotement, le revêtement dur et la terre de la trajectoire prennent chacun la couleur du matériau qu'il nomme — un tracé de ferme ressort donc en terre et un circuit sur herbe ressort vert.",
+  "showcase.v092.relief":
+    "Le terrain est éclairé par ses propres creux et projette de vraies ombres : une ornière se lit comme une ornière et une table de saut comme une table, quel que soit son sens.",
+  "showcase.v092.accuracy":
+    "Les circuits sont dessinés comme le jeu les tient : dans le bon sens plutôt qu'en miroir, sans le mur de onze mètres autour de ceux qui passent sous leur niveau de référence, et avec environ quatre fois plus de détail au sol.",
+  "showcase.v092.voice":
+    "Réglages du chat vocal : choisis le micro par lequel on t'entend et le casque d'où sortent les autres, avec un vumètre en direct et une tonalité de test. Rien ne transmet encore — c'est la moitié « périphériques », et la page le dit.",
+  "showcase.v092.pushToTalk":
+    "Une touche push-to-talk qui fonctionne pendant que le jeu a le focus, attribuée par le même chemin que le raccourci de l'overlay.",
   "showcase.v091.hero.title": "Peins directement sur le gabarit",
   "showcase.v091.hero.body":
     "Le Designer savait placer images et textes sur les planches d'une déco, mais il ne laissait poser aucun pixel à la main — un dégradé sur un ouïe voulait dire partir dans un éditeur d'images et revenir. Il a maintenant sa boîte à outils : pinceau doux avec taille, bord et intensité, gomme, dégradé, remplissage, rectangle, ellipse et ligne. Tout arrive sur la planche et sur le modèle 3D en même temps, pendant que tu fais glisser.",

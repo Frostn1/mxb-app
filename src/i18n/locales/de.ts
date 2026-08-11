@@ -1128,6 +1128,19 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v092.hero.title": "Sieh dir das Gelände einer Strecke in 3D an",
+  "showcase.v092.hero.body":
+    "Strecken waren das Einzige, was die Bibliothek nicht zeigen konnte — ein Name, ein Bild und eine Größe. Der Viewer liest jetzt das Höhenfeld aus einer Strecke und zeichnet den Boden selbst, sodass Sprünge, Rillen und die Form einer Kurve zu sehen sind, bevor du sie überhaupt lädst. Er öffnet sich bei einer Strecke in der Bibliothek, neben In 3D ansehen.",
+  "showcase.v092.surfaces":
+    "Eine Strecke wird mit ihren eigenen Oberflächen gezeichnet. Wo die Strecke sagt, was was ist, bekommen Gras, Randstreifen, befestigter Grund und die Erde der Ideallinie die Farbe des Materials, das sie nennt — ein Bauernhof-Kurs kommt so als Erde heraus und ein Grasrundkurs grün.",
+  "showcase.v092.relief":
+    "Das Gelände wird von seinen eigenen Mulden beleuchtet und wirft echte Schatten, damit eine Rille als Rille und eine Sprungschanze als Schanze lesbar ist — egal, in welche Richtung sie verläuft.",
+  "showcase.v092.accuracy":
+    "Strecken werden so gezeichnet, wie das Spiel sie hält: richtig herum statt gespiegelt, ohne elf Meter hohe Wand um die, die unter ihrer Bezugshöhe liegen, und mit rund viermal so vielen Details über den Boden.",
+  "showcase.v092.voice":
+    "Voice-Chat-Einstellungen: wähle das Mikrofon, über das du zu hören bist, und das Headset, aus dem alle anderen kommen — mit Live-Pegelanzeige und Testton. Übertragen wird noch nichts: das ist die Geräte-Hälfte, und die Seite sagt das auch.",
+  "showcase.v092.pushToTalk":
+    "Eine Push-to-Talk-Taste, die funktioniert, während das Spiel den Fokus hat — gebunden auf demselben Weg wie das Overlay-Kürzel.",
   "showcase.v091.hero.title": "Male direkt auf die Vorlage",
   "showcase.v091.hero.body":
     "Der Designer konnte Bilder und Text auf den Bahnen eines Designs platzieren, aber keinen einzigen Pixel von Hand setzen — ein Verlauf über eine Spoiler-Flanke hieß: raus in einen Bildeditor und wieder zurück. Jetzt gibt es einen Werkzeugkasten: weicher Pinsel mit Größe, Kante und Stärke, Radierer, Verlauf, Füllung sowie Rechteck, Ellipse und Linie. Alles landet gleichzeitig auf der Bahn und am 3D-Modell, während du ziehst.",
