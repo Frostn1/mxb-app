@@ -1,19 +1,5 @@
 # Changelog
 
-## Unreleased -- paint sync keeps up with the grid
-
-### Fixed
-- **A rider who joins after you now shows up properly.** The pull happened once, at launch, so
-  paint sync was lopsided: whoever joined last saw everyone, and whoever was there first never
-  saw anyone who arrived afterwards -- they had pulled before those riders existed. The app now
-  keeps checking for the length of the session and installs what turns up.
-
-### Changed
-- **A roster means one grid, not the whole platform.** `GET /v1/roster` took a server and
-  ignored it, because nothing recorded where anyone was, so every rider downloaded the paints
-  of every other enrolled rider. Each app now reports the server it launched into, and a roster
-  returns the riders actually on it. A rider whose app goes quiet for ten minutes drops out.
-
 ## Unannounced — a debugger can't ride along
 
 Left out of the release notes on purpose: a hardening measure advertised is a hardening
@@ -322,6 +308,12 @@ isn't the panel you're over, that's the thing to report, and it explains the res
   lives somewhere unusual. It also shows which runner was found and how many bottles the app
   can see — so a bottle it *can't* see shows up as missing before you press Play, not after.
 
+### Changed
+- **A roster means one grid, not the whole platform.** `GET /v1/roster` took a server and
+  ignored it, because nothing recorded where anyone was, so every rider downloaded the paints
+  of every other enrolled rider. Each app now reports the server it launched into, and a roster
+  returns the riders actually on it. A rider whose app goes quiet for ten minutes drops out.
+
 ### Fixed
 - **The Linux app opens to its interface on SteamOS instead of a white screen.** Our AppImage
   carries Ubuntu 22.04's libwayland next to whatever Mesa the host ships — the pairing the
@@ -335,6 +327,10 @@ isn't the panel you're over, that's the thing to report, and it explains the res
   turns off GPU compositing and renders in software. The startup log now records the session
   the app began under and every graphics knob it settled on, so the next report of a blank
   window arrives with something to read.
+- **A rider who joins after you now shows up properly.** The pull happened once, at launch, so
+  paint sync was lopsided: whoever joined last saw everyone, and whoever was there first never
+  saw anyone who arrived afterwards — they had pulled before those riders existed. The app now
+  keeps checking for the length of the session and installs what turns up.
 
 ## 2026-08-10 — v0.9.0 — A studio for paints, the Shop installing what you bought, and presets that carry their own mods
 
