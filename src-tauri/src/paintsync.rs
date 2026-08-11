@@ -380,6 +380,25 @@ pub async fn publish_all(
     })
 }
 
+/// Tell the control plane which server this rider is on.
+///
+/// The roster is scoped by this. Without it the control plane has no idea where anyone is, so
+/// a roster can only mean "everyone enrolled" — which is what it used to mean, and why every
+/// rider downloaded the paints of every other rider on the platform.
+///
+/// Best-effort: failing to report presence costs a narrower roster for a minute, and must
+/// never be the thing that stops a sync.
+pub async fn report_presence(token: &str, server_id: &str) -> anyhow::Result<()> {
+    client()?
+        .put(format!("{}/v1/presence", control_plane()))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "serverId": server_id }))
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
+}
+
 /// A server in the control plane's registry, as `GET /v1/servers` returns it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
