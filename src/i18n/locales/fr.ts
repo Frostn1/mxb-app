@@ -1116,6 +1116,9 @@ export const fr: Translation = {
   "showcase.whileGameRunning": "pendant que MX Bikes tourne",
   "showcase.releaseNotes": "Lire les notes de version",
   "showcase.gotIt": "Compris",
+  "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
+  "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
+  "showcase.supporters.more": "+{{count}} autres",
   "showcase.v091.hero.title": "Peins directement sur le gabarit",
   "showcase.v091.hero.body":
     "Le Designer savait placer images et textes sur les planches d'une déco, mais il ne laissait poser aucun pixel à la main — un dégradé sur un ouïe voulait dire partir dans un éditeur d'images et revenir. Il a maintenant sa boîte à outils : pinceau doux avec taille, bord et intensité, gomme, dégradé, remplissage, rectangle, ellipse et ligne. Tout arrive sur la planche et sur le modèle 3D en même temps, pendant que tu fais glisser.",

@@ -1105,6 +1105,9 @@ export const it: Translation = {
   "showcase.whileGameRunning": "mentre MX Bikes è in esecuzione",
   "showcase.releaseNotes": "Leggi le note di rilascio",
   "showcase.gotIt": "Ho capito",
+  "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
+  "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
+  "showcase.supporters.more": "+{{count}} altri",
   "showcase.v091.hero.title": "Dipingi direttamente sul template",
   "showcase.v091.hero.body":
     "Il Designer sapeva posizionare immagini e testo sui fogli di una livrea, ma non ti lasciava mettere giù un solo pixel a mano — una sfumatura su una fiancata voleva dire uscire, aprire un editor di immagini e tornare indietro. Ora ha una cassetta degli attrezzi: pennello morbido con dimensione, bordo e intensità, gomma, sfumatura, riempimento, rettangolo, ellisse e linea. Tutto arriva sul foglio e sul modello 3D nello stesso momento, mentre trascini.",

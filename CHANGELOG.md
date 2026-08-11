@@ -256,7 +256,7 @@ them up.
 On top of v0.9.0 — everything that release added is still the news, and its notes are
 repeated below.
 
-Worth knowing for this beta: the Mac launch has been tested against a stand-in for Wine, not
+Worth knowing: the Mac launch has been tested against a stand-in for Wine, not
 against a real bottle, so if Play does something odd on your machine the app log names the
 exact command it ran — please send it.
 
@@ -344,6 +344,14 @@ isn't the panel you're over, that's the thing to report, and it explains the res
 - **A Wine runner picker in Settings**, for when the automatic choice is wrong or the wrapper
   lives somewhere unusual. It also shows which runner was found and how many bottles the app
   can see — so a bottle it *can't* see shows up as missing before you press Play, not after.
+- **"What's new" credits the people who paid for it.** The update notice now names the
+  supporters underneath the release it's announcing, and opens the full thank-you list in
+  Settings when you click it. The names are read live rather than baked into the build, so
+  somebody who started supporting after this version was cut is still thanked by it — and the
+  credit is part of the modal itself, not of any one release's entry, so every future update
+  carries it without having to remember to. It credits and links; the button that asks for
+  anything stays on the Settings page, because an update notice is the wrong place to hold
+  out a hat.
 
 ### Changed
 - **A roster means one grid, not the whole platform.** `GET /v1/roster` took a server and
@@ -352,6 +360,16 @@ isn't the panel you're over, that's the thing to report, and it explains the res
   returns the riders actually on it. A rider whose app goes quiet for ten minutes drops out.
 
 ### Fixed
+- **The Mac build starts at all.** It aborted on launch before drawing anything — which would
+  have made the Mac work above impossible to reach in the very release that added it. The
+  drag-drop fix earlier in this cycle moved the main window out of Tauri's startup and into
+  the app's own, so the handler can be switched off under Wine; that needs `"create": false`
+  in the window config, and it was set in the base config only. macOS keeps its own overrides
+  — the rounded title bar — and that file *replaces* the window config rather than merging
+  into it, so the flag was dropped on macOS alone: Tauri opened the window itself, the app
+  opened a second one under the same name, and the process aborted on the duplicate. Windows
+  never had an override, and Linux's doesn't name the window, which is why only the Mac was
+  hit and no beta caught it.
 - **The Linux app opens to its interface on SteamOS instead of a white screen.** Our AppImage
   carries Ubuntu 22.04's libwayland next to whatever Mesa the host ships — the pairing the
   AppImage excludelist warns about — and WebKitGTK 2.46 and later abort outright when that

@@ -1113,6 +1113,9 @@ export const es: Translation = {
   "showcase.whileGameRunning": "mientras MX Bikes está abierto",
   "showcase.releaseNotes": "Leer las notas de la versión",
   "showcase.gotIt": "Entendido",
+  "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
+  "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
+  "showcase.supporters.more": "+{{count}} más",
   "showcase.v091.hero.title": "Pinta directamente sobre la plantilla",
   "showcase.v091.hero.body":
     "El Designer sabía colocar imágenes y texto sobre las hojas de una pintura, pero no dejaba poner ni un píxel a mano — un degradado en un lateral obligaba a salir a un editor de imágenes y volver. Ahora tiene su caja de herramientas: pincel suave con tamaño, borde e intensidad, borrador, degradado, relleno, y rectángulo, elipse y línea. Todo aparece en la hoja y en el modelo 3D a la vez, mientras arrastras.",

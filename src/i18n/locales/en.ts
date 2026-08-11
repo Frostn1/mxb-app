@@ -1082,6 +1082,9 @@ export const en = {
   "showcase.whileGameRunning": "while MX Bikes is running",
   "showcase.releaseNotes": "Read the release notes",
   "showcase.gotIt": "Got it",
+  "showcase.supporters.title_one": "Made possible by {{count}} supporter",
+  "showcase.supporters.title_other": "Made possible by {{count}} supporters",
+  "showcase.supporters.more": "+{{count}} more",
   "showcase.v091.hero.title": "Paint straight onto the template",
   "showcase.v091.hero.body":
     "The Designer could place images and text on a paint's sheets, but you couldn't put down a single pixel by hand — a fade across a shroud meant leaving for an image editor and coming back. It has a tool kit now: a soft brush with size, edge and strength, an eraser, a gradient, a fill, and rectangle, ellipse and line. Everything lands on the sheet and on the 3D model at the same time, while you drag.",

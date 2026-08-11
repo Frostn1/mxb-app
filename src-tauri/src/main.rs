@@ -5632,7 +5632,9 @@ fn main() {
             // rather than by Tauri's own startup loop, which is the only way to decide the
             // drag-drop handler per run: it can only be turned off while the window is
             // being built. Everything else about the window still comes from the config,
-            // the macOS overrides in `tauri.macos.conf.json` included.
+            // the macOS overrides in `tauri.macos.conf.json` included — and that file
+            // replaces this array wholesale, so it has to repeat `"create": false` or
+            // Tauri opens `main` itself and the build below aborts on the duplicate.
             let drag_drop = drag_drop_enabled();
             log::info!("wine={} drag-drop-handler={}", under_wine(), drag_drop);
             for window_config in app

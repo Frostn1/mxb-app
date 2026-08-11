@@ -1105,6 +1105,9 @@ export const ptBR: Translation = {
   "showcase.whileGameRunning": "enquanto o MX Bikes está aberto",
   "showcase.releaseNotes": "Ler as notas da versão",
   "showcase.gotIt": "Entendi",
+  "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
+  "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
+  "showcase.supporters.more": "+{{count}} outros",
   "showcase.v091.hero.title": "Pinte direto no template",
   "showcase.v091.hero.body":
     "O Designer sabia posicionar imagens e texto nas folhas de uma pintura, mas não deixava colocar um único pixel à mão — um degradê numa carenagem significava sair para um editor de imagens e voltar. Agora ele tem um kit de ferramentas: pincel suave com tamanho, borda e intensidade, borracha, gradiente, preenchimento, retângulo, elipse e linha. Tudo aparece na folha e no modelo 3D ao mesmo tempo, enquanto você arrasta.",
