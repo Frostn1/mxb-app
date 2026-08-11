@@ -46,6 +46,7 @@ mod soundmods;
 mod texstore;
 mod upload;
 mod vcruntime;
+mod voice;
 mod winehost;
 
 use config::AppConfig;
@@ -4661,6 +4662,102 @@ fn set_overlay_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Strin
     overlay::register(&app, &cfg)
 }
 
+/// Every microphone and speaker the machine currently offers.
+///
+/// Not cached: the point is to notice the headset plugged in after the app launched.
+#[tauri::command]
+fn voice_devices() -> voice::Devices {
+    voice::devices()
+}
+
+/// Turn voice chat on or off. Rebinds shortcuts, since push-to-talk only exists while it's on.
+#[tauri::command]
+fn set_voice_enabled(
+    app: tauri::AppHandle,
+    monitor: State<voice::Monitor>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Turning voice off must close the microphone, not just stop transmitting from it.
+    if !enabled {
+        monitor.stop();
+    }
+    overlay::register(&app, &cfg)
+}
+
+/// Pick the microphone. A blank name means "follow the system default".
+#[tauri::command]
+fn set_voice_input_device(app: tauri::AppHandle, device: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_input_device = device;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Pick where other riders come out. A blank name means "follow the system default".
+#[tauri::command]
+fn set_voice_output_device(app: tauri::AppHandle, device: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_output_device = device;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Rebind push-to-talk. Registers before saving, so a combo another app owns leaves the
+/// working one in place — same contract as the overlay hotkey.
+#[tauri::command]
+fn set_voice_ptt_hotkey(app: tauri::AppHandle, hotkey: String) -> Result<(), String> {
+    let previous = config::load(&app).unwrap_or_default();
+    let mut cfg = previous.clone();
+    cfg.voice_ptt_hotkey = hotkey;
+    if let Err(e) = overlay::register(&app, &cfg) {
+        let _ = overlay::register(&app, &previous);
+        return Err(e);
+    }
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Set mic gain and playback volume together — they're one slider pair in the UI, and
+/// saving them separately would write the config file twice for one drag.
+#[tauri::command]
+fn set_voice_levels(
+    app: tauri::AppHandle,
+    input_gain: f32,
+    output_volume: f32,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_input_gain = input_gain.clamp(0.0, 4.0);
+    cfg.voice_output_volume = output_volume.clamp(0.0, 1.0);
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Open the mic and start reporting its level as `voice-input-level`.
+///
+/// Returns a warning string when the saved device is gone and we fell back to the default
+/// — the unplugged-headset case, which must be visible rather than silently mute.
+#[tauri::command]
+fn voice_meter_start(
+    app: tauri::AppHandle,
+    monitor: State<voice::Monitor>,
+) -> Result<Option<String>, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    monitor.start(app.clone(), &cfg.voice_input_device, cfg.voice_input_gain)
+}
+
+/// Close the mic. Idempotent — the settings page calls it on unmount.
+#[tauri::command]
+fn voice_meter_stop(monitor: State<voice::Monitor>) {
+    monitor.stop();
+}
+
+/// Play a short tone on the configured output, so the player can confirm which headset
+/// voice will come out of before they're on a grid with twenty people.
+#[tauri::command]
+fn voice_test_output(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    voice::test_output(&cfg.voice_output_device, cfg.voice_output_volume)
+}
+
 /// Rebind the overlay hotkey. Validates and registers before saving, so a combo that
 /// another app already owns leaves the working one in place.
 #[tauri::command]
@@ -5461,6 +5558,7 @@ fn main() {
         .manage(ProfileWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
+        .manage(voice::Monitor::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
 
@@ -5738,6 +5836,15 @@ fn main() {
             overlay_state,
             set_overlay_enabled,
             set_overlay_hotkey,
+            voice_devices,
+            set_voice_enabled,
+            set_voice_input_device,
+            set_voice_output_device,
+            set_voice_ptt_hotkey,
+            set_voice_levels,
+            voice_meter_start,
+            voice_meter_stop,
+            voice_test_output,
             set_watch_mods_reload,
             frostmod_reload,
             frostmod_running,

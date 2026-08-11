@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   RefreshCw,
@@ -39,6 +39,17 @@ import {
   experimentalState as experimentalStateApi,
   setExperimental,
   type ExperimentalState,
+  voiceDevices,
+  setVoiceEnabled,
+  setVoiceInputDevice,
+  setVoiceOutputDevice,
+  setVoicePttHotkey,
+  setVoiceLevels,
+  voiceMeterStart,
+  voiceMeterStop,
+  voiceTestOutput,
+  onVoiceInputLevel,
+  type VoiceDevices,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
@@ -76,6 +87,7 @@ export type SectionId =
   | "folder"
   | "general"
   | "overlay"
+  | "voice"
   | "appearance"
   | "frostmod"
   | "reshade"
@@ -86,6 +98,7 @@ const SECTIONS: { id: SectionId; label: TKey }[] = [
   { id: "folder", label: "settings.gameFolder" },
   { id: "general", label: "settings.general" },
   { id: "overlay", label: "overlay.section" },
+  { id: "voice", label: "voice.section" },
   { id: "appearance", label: "settings.appearance" },
   { id: "frostmod", label: "settings.frostmod" },
   { id: "reshade", label: "settings.reshade" },
@@ -95,6 +108,18 @@ const SECTIONS: { id: SectionId; label: TKey }[] = [
 
 /** Default shown before the backend answers, so the field is never blank. */
 const FALLBACK_HOTKEY = "CommandOrControl+Shift+X";
+
+/** Default push-to-talk combo shown before the backend answers. Mirrors
+ *  `DEFAULT_PTT_HOTKEY` in config.rs. */
+const FALLBACK_PTT_HOTKEY = "CommandOrControl+Shift+V";
+
+/** Stands in for the empty string in the device pickers.
+ *
+ * The config stores `""` to mean "follow the system default", but Radix reserves the empty
+ * string for *no selection* — an item valued `""` never reads as selected and can't be told
+ * apart from the placeholder. The sentinel only exists inside the Select; it is mapped back
+ * to `""` before anything is saved. */
+const DEVICE_DEFAULT = "__system_default__";
 
 /** How often the overlay's live state (game up? screen owned?) is re-read while
  *  Settings is on screen. Slow enough to be free, quick enough that alt-tabbing out of
@@ -217,6 +242,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     folder: null,
     general: null,
     overlay: null,
+    voice: null,
     appearance: null,
     frostmod: null,
     reshade: null,
@@ -269,6 +295,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
   const overlayEnabled = config.overlayEnabled ?? true;
   const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
+  // Same shape as the overlay pair above: the config's fields are optional (an install
+  // predating voice has none), so every read is defaulted here rather than at each use.
+  const voiceEnabled = config.voiceEnabled ?? false;
+  const voiceInput = config.voiceInputDevice ?? "";
+  const voiceOutput = config.voiceOutputDevice ?? "";
+  const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
+  const voiceGain = config.voiceInputGain ?? 1;
+  const voiceVolume = config.voiceOutputVolume ?? 1;
 
   // What the overlay is doing right now: is the game up, does something else own the
   // screen, and did the hotkey actually bind. A shortcut that never registered has
@@ -318,6 +352,124 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       toast.success(t("overlay.shortcutUpdated"));
     } catch (e) {
       toast.error(t("overlay.shortcutRejected"), { description: String(e) });
+    }
+  };
+
+  // ---- voice ------------------------------------------------------------------
+  // Devices are re-read on mount and whenever the section is opened rather than cached:
+  // the headset a player is asking about is usually the one they just plugged in.
+  const [devices, setDevices] = useState<VoiceDevices | null>(null);
+  const [micTesting, setMicTesting] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+
+  const refreshDevices = useCallback(async () => {
+    try {
+      setDevices(await voiceDevices());
+    } catch {
+      // A machine with no audio stack at all. The section shows the empty state.
+      setDevices({ inputs: [], outputs: [], error: null });
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshDevices();
+  }, [refreshDevices]);
+
+  // The meter is a live mic. It must never outlive the page that opened it — leaving it
+  // running would keep the microphone open behind a settings screen nobody is looking at.
+  useEffect(() => {
+    if (!micTesting) return;
+    let un: (() => void) | undefined;
+    void onVoiceInputLevel(({ rms }) => setMicLevel(rms)).then((f) => (un = f));
+    return () => {
+      un?.();
+      void voiceMeterStop();
+    };
+  }, [micTesting]);
+
+  useEffect(() => {
+    return () => {
+      void voiceMeterStop();
+    };
+  }, []);
+
+  const toggleVoice = async (v: boolean) => {
+    try {
+      await setVoiceEnabled(v);
+      if (!v) setMicTesting(false);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("voice.registerFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
+  const rebindPtt = async (accelerator: string) => {
+    try {
+      await setVoicePttHotkey(accelerator);
+      await reloadConfig();
+      toast.success(t("voice.pttUpdated"));
+    } catch (e) {
+      toast.error(t("overlay.shortcutRejected"), { description: String(e) });
+    }
+  };
+
+  const pickInput = async (name: string) => {
+    try {
+      await setVoiceInputDevice(name === DEVICE_DEFAULT ? "" : name);
+      await reloadConfig();
+      // A running meter is listening to the old device; restart it on the new one.
+      if (micTesting) {
+        await voiceMeterStop();
+        await voiceMeterStart();
+      }
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const pickOutput = async (name: string) => {
+    try {
+      await setVoiceOutputDevice(name === DEVICE_DEFAULT ? "" : name);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleMicTest = async () => {
+    if (micTesting) {
+      setMicTesting(false);
+      setMicLevel(0);
+      await voiceMeterStop();
+      return;
+    }
+    try {
+      const warning = await voiceMeterStart();
+      setMicTesting(true);
+      // The saved headset is gone and we fell back. Silently going mute is the failure
+      // that reads as "voice chat is broken", so it gets said out loud.
+      if (warning) toast.warning(t("voice.deviceGone"), { description: warning });
+    } catch (e) {
+      toast.error(t("voice.micFailed"), { description: String(e) });
+    }
+  };
+
+  const testOutput = async () => {
+    try {
+      const warning = await voiceTestOutput();
+      if (warning) toast.warning(t("voice.deviceGone"), { description: warning });
+    } catch (e) {
+      toast.error(t("voice.outputFailed"), { description: String(e) });
+    }
+  };
+
+  const changeLevels = async (gain: number, volume: number) => {
+    try {
+      await setVoiceLevels(gain, volume);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
     }
   };
 
@@ -897,6 +1049,179 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             </p>
           </Section>
 
+          {/* voice — devices, levels and the mic key. The transport that carries any of
+              this to other riders isn't built yet, which the callout says plainly rather
+              than leaving a page that looks finished and does nothing. */}
+          <Section
+            title={t("voice.section")}
+            desc={t("voice.sectionDesc")}
+            innerRef={(el) => (refs.current.voice = el)}
+          >
+            <ToggleRow
+              label={t("voice.enable")}
+              desc={t("voice.enableDesc")}
+              checked={voiceEnabled}
+              onChange={toggleVoice}
+            />
+
+            {devices?.error && (
+              <Callout tone="warning" title={t("voice.noDevices")}>
+                {devices.error}
+              </Callout>
+            )}
+
+            <div className="h-px bg-border" />
+
+            {/* Microphone. "" is a real, selectable value — it means "follow whatever
+                Windows is set to", which keeps tracking a default the player changes
+                later. Storing the resolved name would freeze it instead. */}
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col gap-1">
+                <span className="text-[12.5px] text-foreground/85">{t("voice.microphone")}</span>
+                <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {t("voice.microphoneDesc")}
+                </span>
+              </div>
+              <Select
+                value={voiceInput || DEVICE_DEFAULT}
+                onValueChange={pickInput}
+                disabled={!voiceEnabled}
+              >
+                <SelectTrigger className="h-8 w-[220px]" onClick={() => void refreshDevices()}>
+                  <SelectValue placeholder={t("voice.systemDefault")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEVICE_DEFAULT}>{t("voice.systemDefault")}</SelectItem>
+                  {devices?.inputs.map((d) => (
+                    <SelectItem key={d.name} value={d.name}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* The single most useful control here: "can it hear me" is most of what
+                anyone needs answered, and a meter answers it without a second person. */}
+            <div className="flex items-center gap-3">
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-foreground/[0.08]">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-[width] duration-75",
+                    micLevel > 0.85 ? "bg-warning" : "bg-success",
+                  )}
+                  style={{ width: `${Math.min(100, Math.round(micLevel * 140))}%` }}
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={toggleMicTest}
+                disabled={!voiceEnabled}
+              >
+                {micTesting ? (
+                  <>
+                    <Square className="size-3.5" /> {t("voice.stopTest")}
+                  </>
+                ) : (
+                  <>
+                    <Play className="size-3.5" /> {t("voice.testMic")}
+                  </>
+                )}
+              </Button>
+            </div>
+            {micTesting && (
+              <span className="-mt-1 text-[11.5px] text-muted-foreground">
+                {t("voice.speakNow")}
+              </span>
+            )}
+
+            <div className="h-px bg-border" />
+
+            {/* Output, deliberately separate from game audio: voice on the headset with
+                the game on speakers is a setup people actually run. */}
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col gap-1">
+                <span className="text-[12.5px] text-foreground/85">{t("voice.output")}</span>
+                <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {t("voice.outputDesc")}
+                </span>
+              </div>
+              <Select
+                value={voiceOutput || DEVICE_DEFAULT}
+                onValueChange={pickOutput}
+                disabled={!voiceEnabled}
+              >
+                <SelectTrigger className="h-8 w-[220px]" onClick={() => void refreshDevices()}>
+                  <SelectValue placeholder={t("voice.systemDefault")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEVICE_DEFAULT}>{t("voice.systemDefault")}</SelectItem>
+                  {devices?.outputs.map((d) => (
+                    <SelectItem key={d.name} value={d.name}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[11.5px] text-muted-foreground">
+                {t("voice.testOutputDesc")}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={testOutput}
+                disabled={!voiceEnabled}
+              >
+                <Play className="size-3.5" /> {t("voice.testOutput")}
+              </Button>
+            </div>
+
+            <div className="h-px bg-border" />
+
+            <LevelSlider
+              label={t("voice.micGain")}
+              value={voiceGain}
+              min={0}
+              max={2}
+              disabled={!voiceEnabled}
+              onCommit={(v) => changeLevels(v, voiceVolume)}
+            />
+            <LevelSlider
+              label={t("voice.volume")}
+              value={voiceVolume}
+              min={0}
+              max={1}
+              disabled={!voiceEnabled}
+              onCommit={(v) => changeLevels(voiceGain, v)}
+            />
+
+            <div className="h-px bg-border" />
+
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col gap-1">
+                <span className="text-[12.5px] text-foreground/85">{t("voice.ptt")}</span>
+                <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {t("voice.pttDesc")}
+                </span>
+              </div>
+              <HotkeyField
+                value={voicePtt}
+                onCapture={rebindPtt}
+                disabled={!voiceEnabled}
+              />
+            </div>
+
+            {/* Says what does and doesn't work today. A settings page that looks complete
+                while the feature can't reach anyone is the worse failure. */}
+            <Callout tone="info" title={t("voice.notConnected")}>
+              {t("voice.notConnectedDesc")}
+            </Callout>
+          </Section>
+
           {/* appearance */}
           <Section
             title={t("settings.appearance")}
@@ -1233,6 +1558,65 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           </Section>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A labelled 0..max slider that saves on release rather than on every pixel.
+ *
+ * Dragging fires a change per frame; committing each one would rewrite the config file
+ * dozens of times for one gesture. The displayed value tracks the thumb regardless, so
+ * the deferred save is invisible. */
+function LevelSlider({
+  label,
+  value,
+  min,
+  max,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  disabled?: boolean;
+  onCommit: (v: number) => void;
+}) {
+  const [local, setLocal] = useState(value);
+  const [dragging, setDragging] = useState(false);
+  // Follow the config while idle, so an external change (or a failed save that reverted)
+  // is reflected instead of being masked by stale local state.
+  useEffect(() => {
+    if (!dragging) setLocal(value);
+  }, [value, dragging]);
+
+  const commit = () => {
+    setDragging(false);
+    onCommit(local);
+  };
+
+  return (
+    <div className={cn("flex items-center gap-4", disabled && "opacity-60")}>
+      <span className="w-[130px] flex-none text-[12.5px] text-foreground/85">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={0.01}
+        value={local}
+        disabled={disabled}
+        onChange={(e) => {
+          setDragging(true);
+          setLocal(Number(e.target.value));
+        }}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={() => dragging && commit()}
+        className="h-1.5 flex-1 cursor-default appearance-none rounded-full bg-foreground/[0.12] accent-primary disabled:opacity-50"
+      />
+      <span className="w-[42px] flex-none text-right font-mono text-[11.5px] text-muted-foreground">
+        {Math.round((local / max) * 100)}%
+      </span>
     </div>
   );
 }

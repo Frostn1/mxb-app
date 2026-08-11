@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-08-10
+
+### Added
+- **Voice chat settings — microphone, output, levels and a push-to-talk key.** A new
+  Settings section that picks the mic to listen to and the headset other riders will come
+  out of, with a live input meter and a test tone. Both device settings default to *system
+  default* and mean it: they follow whatever Windows is set to rather than pinning the
+  headset that happened to be plugged in when you chose. A device that has since been
+  unplugged falls back to the default and **says so** — silently going mute is the failure
+  that reads as "voice chat is broken".
+- **Push-to-talk**, bound through the same global-shortcut path as the overlay hotkey, so
+  it works while the game holds focus. It acts on both edges — mic opens on press, closes
+  on release — and is bound even when the overlay is switched off.
+
+### Notes
+- **Nothing transmits yet.** This is the device half only; the codec and the voice room on
+  `mxb-agent` are still to come, and the section says so on the page rather than looking
+  finished. The test buttons do work today.
+- Voice is **off until turned on**. A feature that opens a microphone shouldn't be
+  something a player discovers by accident.
+- Global shortcuts are now all rebound from one place. `unregister_all` clears every
+  binding, so a push-to-talk key registered independently would have been wiped the next
+  time the overlay hotkey changed; the overlay binds first, so a push-to-talk combo another
+  app owns costs you the mic key and not the overlay as well.
+- Audio comes from `cpal`, pinned to 0.15 — 0.18 doesn't build for Windows in this
+  workspace (its WASAPI backend collides with the `windows-core` version Tauri unifies on).
+  The pin carries the reason, since a macOS build gives no hint that it's needed.
+
 ## Unannounced — a debugger can't ride along
 
 Left out of the release notes on purpose: a hardening measure advertised is a hardening
