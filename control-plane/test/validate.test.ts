@@ -11,6 +11,7 @@ import {
   isPublicGameAddress,
   isRegion,
   isRelDest,
+  isServerKey,
   isRiderName,
   isServerName,
   isSha256,
@@ -325,5 +326,21 @@ describe("bootstrap user data", () => {
         serverId: "abc", controlPlaneUrl: "https://cp",
       }),
     ).not.toThrow();
+  });
+});
+
+describe("server keys", () => {
+  it("takes both shapes the app computes", () => {
+    // A registry id for a server we run, a normalized host:port for one we do not.
+    for (const ok of ["eu-frankfurt-1", "203.0.113.10:54210", "8e68ebe5-ec6e-42dd"]) {
+      expect(isServerKey(ok), ok).toBe(true);
+    }
+  });
+
+  it("refuses what it should not store", () => {
+    const withNewline = "srv" + String.fromCharCode(10) + "other";
+    for (const bad of ["", "   ", "a".repeat(129), withNewline, 5, null]) {
+      expect(isServerKey(bad), JSON.stringify(bad)).toBe(false);
+    }
   });
 });

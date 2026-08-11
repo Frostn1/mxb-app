@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased -- paint sync keeps up with the grid
+
+### Fixed
+- **A rider who joins after you now shows up properly.** The pull happened once, at launch, so
+  paint sync was lopsided: whoever joined last saw everyone, and whoever was there first never
+  saw anyone who arrived afterwards -- they had pulled before those riders existed. The app now
+  keeps checking for the length of the session and installs what turns up.
+
+### Changed
+- **A roster means one grid, not the whole platform.** `GET /v1/roster` took a server and
+  ignored it, because nothing recorded where anyone was, so every rider downloaded the paints
+  of every other enrolled rider. Each app now reports the server it launched into, and a roster
+  returns the riders actually on it. A rider whose app goes quiet for ten minutes drops out.
+
 ## Unannounced — a debugger can't ride along
 
 Left out of the release notes on purpose: a hardening measure advertised is a hardening
