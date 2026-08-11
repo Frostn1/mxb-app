@@ -64,6 +64,7 @@ export const BUNDLED_SUPPORTERS: SupportersManifest = {
     { name: "Mouk" },
     { name: "SoggySwisher" },
     { name: "LupaHo" },
+    { name: "Qwest" },
   ],
 };
 
