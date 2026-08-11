@@ -1495,4 +1495,24 @@ export const en = {
   "designer.fillHint": "Click the sheet to flood the whole layer.",
   "designer.gradientHint":
     "Drag across the sheet to set where the transition happens. It fills this whole layer — add another paint layer to keep what's underneath.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "View terrain",
+  "trackViewer.title": "Track preview",
+  "trackViewer.loading": "Reading terrain…",
+  "trackViewer.refining": "Sharpening…",
+  "trackViewer.grid": "Grid",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
+  "trackViewer.relief": "Elevation range",
+  "trackViewer.noTerrain": "No terrain to show",
+  "trackViewer.noTerrainHint":
+    "This track's height data isn't in a layout the viewer can read yet.",
+  "trackViewer.inferredNote":
+    "This track's height file has no documented layout, so its shape was worked out from the data. Treat the terrain as a close reading rather than an exact one.",
+  "trackViewer.assumedScaleNote":
+    "This track doesn't state how far apart its height samples are, so the relief is real but how steep it looks is an approximation.",
+  "trackViewer.whyDetails": "Why?",
+  "trackViewer.copyDetails": "Copy details",
+  "trackViewer.copied": "Copied",
 } as const;

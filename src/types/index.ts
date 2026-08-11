@@ -452,6 +452,72 @@ export interface PkzMeta {
   thumbnail: string | null;
 }
 
+/** One file inside a track. `role` is a key the UI translates, not prose. */
+export interface TrackFile {
+  name: string;
+  role:
+    | "heightfield"
+    | "terrain"
+    | "scenery"
+    | "road"
+    | "surfaces"
+    | "config"
+    | "model"
+    | "image"
+    | "sound"
+    | "other";
+}
+
+/**
+ * A track's metadata and contents. Deliberately cheap — the backend answers it from the
+ * archive's index without inflating anything, so the track view can paint before the
+ * terrain has been read.
+ */
+export interface TrackInfo {
+  meta: PkzMeta;
+  files: TrackFile[];
+  /** Whether the track carries a heightfield at all, so the view can say so up front. */
+  hasTerrain: boolean;
+}
+
+/** A track's terrain grid, unpacked from the binary IPC blob. */
+/**
+ * A picture of a track's surfaces, laid over the terrain.
+ *
+ * Built from the coverage masks in the track's own height file, so it describes exactly the
+ * ground the grid does.
+ */
+export interface TrackOverview {
+  width: number;
+  height: number;
+  /** `width * height * 4` bytes, RGBA, first row first. */
+  pixels: Uint8Array<ArrayBuffer>;
+}
+
+export interface TrackTerrain {
+  width: number;
+  height: number;
+  /** Metres of ground covered by one sample at this level of detail. */
+  metresPerSample: number;
+  /** Over the whole master grid, so the colour ramp doesn't shift between detail levels. */
+  minHeight: number;
+  maxHeight: number;
+  /**
+   * Whether the track stated its sample spacing. When it didn't, the relief is real but the
+   * ground it is drawn across was assumed, so how steep the terrain looks is a guess.
+   */
+  scaleKnown: boolean;
+  /** 0–1. How sure the backend's probe was that it read the height file correctly. */
+  confidence: number;
+  /**
+   * Whether the heights are metres. A height file that doesn't say what its samples mean
+   * leaves them as raw units, and the elevation range is then a number about nothing.
+   */
+  heightsInMetres: boolean;
+  /** `width * height` heights in metres, row-major. */
+  heights: Float32Array;
+}
+
 /** What the dropzone decided a dropped item is. Mirrors `dropzone::ContentKind`. */
 export type DropKind =
   | "modsTree"

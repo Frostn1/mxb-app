@@ -1519,4 +1519,24 @@ export const ptBR: Translation = {
   "designer.fillHint": "Clique na folha para preencher a camada inteira.",
   "designer.gradientHint":
     "Arraste na folha para definir onde acontece a transição. Ele preenche esta camada inteira — adicione outra camada de pintura para manter o que está embaixo.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "Ver o terreno",
+  "trackViewer.title": "Prévia da pista",
+  "trackViewer.loading": "Lendo o terreno…",
+  "trackViewer.refining": "Refinando…",
+  "trackViewer.grid": "Grade",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
+  "trackViewer.relief": "Desnível",
+  "trackViewer.noTerrain": "Nenhum terreno para mostrar",
+  "trackViewer.noTerrainHint":
+    "Os dados de altura desta pista não estão em um formato que o visualizador saiba ler ainda.",
+  "trackViewer.inferredNote":
+    "O arquivo de alturas desta pista não tem formato documentado, então sua forma foi deduzida dos dados. Trate o terreno como uma leitura próxima, não exata.",
+  "trackViewer.assumedScaleNote":
+    "Esta pista não informa a distância entre seus pontos de altura: o relevo é real, mas sua inclinação é aproximada.",
+  "trackViewer.whyDetails": "Por quê?",
+  "trackViewer.copyDetails": "Copiar detalhes",
+  "trackViewer.copied": "Copiado",
 };

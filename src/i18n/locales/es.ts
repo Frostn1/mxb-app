@@ -1530,4 +1530,24 @@ export const es: Translation = {
   "designer.fillHint": "Haz clic en la hoja para inundar toda la capa.",
   "designer.gradientHint":
     "Arrastra sobre la hoja para marcar dónde ocurre la transición. Rellena toda esta capa: añade otra capa de pintura para conservar lo que hay debajo.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "Ver el terreno",
+  "trackViewer.title": "Vista previa del circuito",
+  "trackViewer.loading": "Leyendo el terreno…",
+  "trackViewer.refining": "Afinando…",
+  "trackViewer.grid": "Cuadrícula",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
+  "trackViewer.relief": "Desnivel",
+  "trackViewer.noTerrain": "No hay terreno que mostrar",
+  "trackViewer.noTerrainHint":
+    "Los datos de altura de este circuito no están en un formato que el visor sepa leer todavía.",
+  "trackViewer.inferredNote":
+    "El archivo de alturas de este circuito no tiene un formato documentado, así que su forma se dedujo de los datos. Tómalo como una lectura aproximada, no exacta.",
+  "trackViewer.assumedScaleNote":
+    "Este circuito no indica la separación entre sus puntos de altura: el relieve es real, pero su pendiente es aproximada.",
+  "trackViewer.whyDetails": "¿Por qué?",
+  "trackViewer.copyDetails": "Copiar detalles",
+  "trackViewer.copied": "Copiado",
 };

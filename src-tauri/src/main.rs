@@ -15,6 +15,7 @@ mod frostmod_manage;
 mod game;
 mod gameproc;
 mod gearrepair;
+mod heightfield;
 mod imgcache;
 mod install;
 mod library;
@@ -44,6 +45,7 @@ mod shop_installed;
 mod shop_session;
 mod soundmods;
 mod texstore;
+mod track;
 mod upload;
 mod vcruntime;
 mod voice;
@@ -693,6 +695,70 @@ async fn get_pkz_preview(path: String) -> Result<Option<String>, String> {
 
 fn get_pkz_preview_blocking(path: String) -> Result<Option<String>, String> {
     pkz::read_preview(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+}
+
+/// A track's metadata and contents. Cheap by construction — nothing is inflated — so the
+/// track view can paint everything except the terrain immediately.
+#[tauri::command]
+async fn read_track_info(app: tauri::AppHandle, path: String) -> Result<track::TrackInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        track::read_info(&app, &path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_info task failed: {e}"))?
+}
+
+/// A plain-text account of what a track's terrain looks like to the reader.
+///
+/// Shown in the viewer when a track's terrain won't load. The height format is undocumented,
+/// so a track that fails is evidence we don't otherwise have — and the player holding it is
+/// rarely the person who can rebuild the app to investigate.
+#[tauri::command]
+async fn diagnose_track(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || track::diagnose(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("diagnose_track task failed: {e}"))
+}
+
+/// A track's terrain grid, at no more than `max_dim` samples on its longest edge.
+///
+/// Returned as raw bytes rather than JSON: a grid is a few hundred thousand floats, and
+/// serialising that as a JSON array costs more than reading it out of the archive did. The
+/// app reads the header described in [`track::BLOB_HEADER`] and takes the rest in place.
+#[tauri::command]
+async fn load_track_terrain(
+    app: tauri::AppHandle,
+    path: String,
+    max_dim: u32,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let master = track::load_master(&app, &path).map_err(|e| format!("{e:#}"))?;
+        Ok(tauri::ipc::Response::new(track::terrain_blob(
+            &master, max_dim,
+        )))
+    })
+    .await
+    .map_err(|e| format!("load_track_terrain task failed: {e}"))?
+}
+
+/// A picture of a track's surfaces, to lay over its terrain.
+///
+/// Empty — not an error — when the track's height file carries no coverage masks. That track
+/// draws on its relief alone, which is what every track did before this existed, so there is
+/// nothing here worth failing a view over.
+#[tauri::command]
+async fn load_track_overview(
+    app: tauri::AppHandle,
+    path: String,
+    max_dim: u32,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let blob = track::overview_blob(&app, std::path::Path::new(&path), max_dim)
+            .unwrap_or_default();
+        tauri::ipc::Response::new(blob)
+    })
+    .await
+    .map_err(|e| format!("load_track_overview task failed: {e}"))
 }
 
 #[tauri::command]
@@ -5841,6 +5907,10 @@ fn main() {
             get_pkz_meta_cached,
             get_pkz_meta,
             get_pkz_preview,
+            read_track_info,
+            load_track_terrain,
+            load_track_overview,
+            diagnose_track,
             unpack_paint,
             texture_bytes,
             unpack_pkz,
