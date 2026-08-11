@@ -46,8 +46,10 @@ import {
   newId,
   paintLayer,
   textLayer,
+  unionRegion,
   type Layer,
   type PaintLayer,
+  type Region,
   type Sheet,
 } from "./layers";
 import {
@@ -140,6 +142,19 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const textures = useRef(new Map<string, THREE.DataTexture>());
   // The sheet object each canvas was last drawn from, so an untouched sheet isn't redrawn.
   const drawn = useRef(new Map<string, Sheet>());
+  /**
+   * What has changed on each stale sheet since its canvas was last drawn.
+   *
+   * An entry of `null` means "somewhere, unspecified" and buys nothing — the recomposite falls
+   * back to the whole sheet, which is what it always did. A region is a promise that nothing
+   * outside it moved, and only a stroke is in a position to make that promise, because only a
+   * stroke knows where its own pixels went. Everything else goes through `patchSheet`, which
+   * says `null` on the way past.
+   *
+   * Cleared by the recomposite that consumes it: a region held over from a redraw that already
+   * happened would describe the wrong sheet by the time the next one came round.
+   */
+  const dirty = useRef(new Map<string, Region | null>());
   // The live map the viewer reads, plus the only thing allowed to change its identity.
   const overridesRef = useRef(new Map<string, THREE.Texture>());
   const [overrideNames, setOverrideNames] = useState("");
@@ -166,24 +181,34 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * front of the blit.
    *
    * Sheets are compared by identity: an edit replaces exactly the sheet it touched, so this
-   * redraws one 2048² canvas per pointer move rather than all of them.
+   * redraws one 2048² canvas per pointer move rather than all of them. The texture behind it
+   * follows the same test rather than being rebuilt every pass — reading a canvas back is the
+   * most expensive thing in here, and re-reading the three sheets a stroke did not touch was
+   * paying that price for pixels that were identical to the ones already uploaded.
+   *
+   * What did change is redrawn and read back across the region the stroke reported, which is
+   * the difference between a stamp's worth of work per sample and a sheet's worth.
    */
   useLayoutEffect(() => {
     const next = new Map<string, THREE.Texture>();
     for (const sheet of sheets) {
       const canvas = canvasFor(sheet);
+      let tex = textures.current.get(sheet.id) ?? null;
       if (drawn.current.get(sheet.id) !== sheet) {
-        composite(canvas, sheet);
+        const area = composite(canvas, sheet, dirty.current.get(sheet.id) ?? null);
         drawn.current.set(sheet.id, sheet);
+        // Built the same way the viewer builds an installed paint's texture, so the drawing
+        // lands on the mesh exactly where the `.pnt` would have. `needsUpdate` inside carries
+        // the new pixels without any React work. A sheet that turned out to have no pixels to
+        // redraw has none to upload either.
+        if (area) tex = sheetTexture(canvas, tex, area);
       }
-      // Built the same way the viewer builds an installed paint's texture, so the drawing
-      // lands on the mesh exactly where the `.pnt` would have. `needsUpdate` inside carries
-      // the new pixels without any React work.
-      const tex = sheetTexture(canvas, textures.current.get(sheet.id) ?? null);
+      if (!tex) tex = sheetTexture(canvas, null);
       if (!tex) continue;
       textures.current.set(sheet.id, tex);
       if (sheet.name.trim()) next.set(sheet.name.trim().toLowerCase(), tex);
     }
+    dirty.current.clear();
     // Identity changes only when the *names* do. The viewer memoises one material per submesh
     // on this map, so handing it a fresh one per pointer move rebuilt every material in the
     // model on every frame of a drag — which is exactly as slow as it sounds. The textures
@@ -221,6 +246,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, []);
 
   const patchSheet = useCallback((id: string, fn: (s: Sheet) => Sheet) => {
+    // Every route into a sheet but a stroke comes through here, and none of them says where it
+    // drew. Marking the sheet wholly dirty on the way past is what lets the recomposite treat a
+    // region as a promise rather than a hint: if one is there, a stroke put it there.
+    dirty.current.set(id, null);
     setSheets((prev) => prev.map((s) => (s.id === id ? fn(s) : s)));
   }, []);
 
@@ -241,17 +270,87 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
      higher `rev` inside a fresh sheet, which is exactly the signal the recomposite above
      watches for. ─────────────────────────────────────────────────────────────────────── */
 
-  const touchPaint = useCallback(
+  /**
+   * Record where a stroke drew, without telling React anything.
+   *
+   * Split from the notification below because the two want different rates. Pixels have to be
+   * accounted for the instant they land — miss one sample's region and that part of the stroke
+   * never reaches the composite — while the render they add up to is worth doing once a frame.
+   */
+  const markPaint = useCallback((sheetId: string, region: Region | null) => {
+    const held = dirty.current.get(sheetId);
+    // Once a sheet is wholly dirty it stays that way until the redraw: a region unioned onto
+    // "everything" would narrow the redraw to less than is actually stale.
+    if (region && held !== null) dirty.current.set(sheetId, unionRegion(held ?? null, region));
+    else dirty.current.set(sheetId, null);
+  }, []);
+
+  /** Make the pixels a stroke has already written exist as far as React is concerned. */
+  const notifyPaint = useCallback(
     (sheetId: string, layerId: string) => {
-      patchSheet(sheetId, (s) => ({
-        ...s,
-        layers: s.layers.map((l) =>
-          l.id === layerId && l.kind === "paint" ? { ...l, rev: l.rev + 1 } : l,
+      setSheets((prev) =>
+        prev.map((s) =>
+          s.id === sheetId
+            ? {
+                ...s,
+                layers: s.layers.map((l) =>
+                  l.id === layerId && l.kind === "paint" ? { ...l, rev: l.rev + 1 } : l,
+                ),
+              }
+            : s,
         ),
-      }));
+      );
       bump();
     },
-    [bump, patchSheet],
+    [bump],
+  );
+
+  const touchPaint = useCallback(
+    (sheetId: string, layerId: string, region?: Region | null) => {
+      markPaint(sheetId, region ?? null);
+      notifyPaint(sheetId, layerId);
+    },
+    [markPaint, notifyPaint],
+  );
+
+  /**
+   * One render per frame, however fast the pointer reports.
+   *
+   * Pointer samples are not paced by the display. A high-rate mouse on a webview that doesn't
+   * align them to the frame delivers a dozen or more between two paints, and each one used to
+   * drive a full React commit, a recomposite, a texture upload and a redraw of both views — a
+   * dozen renders where the screen could show one. The stroke itself still takes every sample
+   * the moment it arrives, because that is what the mark is made of; only the telling-everyone
+   * waits, and it waits at most until the next frame, which is the soonest anyone could see it.
+   */
+  const queued = useRef<{ sheetId: string; layerId: string } | null>(null);
+  const frame = useRef(0);
+
+  const flushPaint = useCallback(() => {
+    if (frame.current) {
+      cancelAnimationFrame(frame.current);
+      frame.current = 0;
+    }
+    const q = queued.current;
+    queued.current = null;
+    if (q) notifyPaint(q.sheetId, q.layerId);
+  }, [notifyPaint]);
+
+  const schedulePaint = useCallback(
+    (sheetId: string, layerId: string) => {
+      queued.current = { sheetId, layerId };
+      if (!frame.current) frame.current = requestAnimationFrame(flushPaint);
+    },
+    [flushPaint],
+  );
+
+  // A stroke abandoned by an unmount has already written its pixels; the frame that would have
+  // announced them has nowhere left to land.
+  useEffect(
+    () => () => {
+      if (frame.current) cancelAnimationFrame(frame.current);
+    },
+    [],
   );
 
   /** The paint layer a stroke would land on: the selected one, when it is one. */
@@ -291,30 +390,39 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const startPaint = useCallback(
     (at: Point) => {
       if (!target || !activeId) return;
-      stroke.current = new Stroke(target.canvas, paint, at);
-      touchPaint(activeId, target.id);
+      const next = new Stroke(target.canvas, paint, at);
+      stroke.current = next;
+      // Straight through rather than queued: the press is the one sample nobody would forgive a
+      // frame's wait on, and a tool that puts nothing down on the press has nothing to show.
+      if (next.dirty) touchPaint(activeId, target.id, next.dirty);
     },
     [activeId, paint, target, touchPaint],
   );
 
   const movePaint = useCallback(
     (points: Point[], constrain: boolean) => {
-      if (!stroke.current || !target || !activeId) return;
-      stroke.current.move(points, constrain);
-      touchPaint(activeId, target.id);
+      const live = stroke.current;
+      if (!live || !target || !activeId) return;
+      live.move(points, constrain);
+      if (!live.dirty) return;
+      markPaint(activeId, live.dirty);
+      schedulePaint(activeId, target.id);
     },
-    [activeId, target, touchPaint],
+    [activeId, markPaint, schedulePaint, target],
   );
 
   const endPaint = useCallback(() => {
     const done = stroke.current;
     stroke.current = null;
+    // Whatever the last frame didn't get to, now — a stroke that ended between two frames would
+    // otherwise leave its final samples drawn on the layer and missing from the composite.
+    flushPaint();
     // A press that put nothing down isn't a step to undo — clicking to check the tool would
     // otherwise fill the history with states identical to the one before them.
     if (!done?.end() || !target || !activeId) return;
     history.current.push(activeId, target.id, done.before);
     setHistoryRev((v) => v + 1);
-  }, [activeId, target]);
+  }, [activeId, flushPaint, target]);
 
   /** The live canvas behind a layer id, wherever it lives — history spans every sheet. */
   const paintCanvas = useCallback(

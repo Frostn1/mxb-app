@@ -94,6 +94,52 @@ export interface PaintLayer extends LayerCommon {
 
 export type Layer = ImageLayer | TextLayer | PaintLayer;
 
+/**
+ * A rectangle of a sheet, in the sheet's own pixels.
+ *
+ * The unit of "what just changed". A brush stamp touches a few hundred pixels of a 2048² sheet,
+ * and the whole chain behind one pointer sample — restore the layer, recomposite it, read it
+ * back for the 3D preview — costs what it is told changed. Redrawing four million pixels to
+ * move a brush a few of them is the difference between a mark that follows the hand and one
+ * that trails behind it.
+ */
+export interface Region {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The smallest region containing both, or whichever one exists. */
+export function unionRegion(a: Region | null, b: Region | null): Region | null {
+  if (!a) return b;
+  if (!b) return a;
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    w: Math.max(a.x + a.w, b.x + b.w) - x,
+    h: Math.max(a.y + a.h, b.y + b.h) - y,
+  };
+}
+
+/**
+ * A region snapped out to whole pixels and trimmed to `width × height`, or null if none of it
+ * lands on the sheet.
+ *
+ * Outwards on every side: a stamp that covers four tenths of a pixel still tints it, and a
+ * region rounded inwards would leave that tenth showing the pixels from before the stroke.
+ */
+export function clampRegion(r: Region, width: number, height: number): Region | null {
+  const x = Math.max(0, Math.floor(r.x));
+  const y = Math.max(0, Math.floor(r.y));
+  const right = Math.min(width, Math.ceil(r.x + r.w));
+  const bottom = Math.min(height, Math.ceil(r.y + r.h));
+  if (right <= x || bottom <= y) return null;
+  return { x, y, w: right - x, h: bottom - y };
+}
+
 /** One texture of the paint: a name the mesh binds, and what's drawn under that name. */
 export interface Sheet {
   id: string;
