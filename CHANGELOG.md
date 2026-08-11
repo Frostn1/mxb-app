@@ -27,6 +27,9 @@
 - Audio comes from `cpal`, pinned to 0.15 — 0.18 doesn't build for Windows in this
   workspace (its WASAPI backend collides with the `windows-core` version Tauri unifies on).
   The pin carries the reason, since a macOS build gives no hint that it's needed.
+- The Linux build and CI now install `libasound2-dev`. cpal reaches ALSA through
+  `alsa-sys`, whose build script shells out to `pkg-config` and fails the entire build
+  without it — the AppImage would not have built either.
 
 ## Unannounced — a debugger can't ride along
 
