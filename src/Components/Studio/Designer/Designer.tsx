@@ -143,9 +143,22 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // The live map the viewer reads, plus the only thing allowed to change its identity.
   const overridesRef = useRef(new Map<string, THREE.Texture>());
   const [overrideNames, setOverrideNames] = useState("");
+  // What was last published as `overrideNames`. Held beside the state so the recomposite below
+  // can tell whether it has anything to say *before* saying it — see the note there.
+  const publishedNames = useRef("");
 
   const active = sheets.find((s) => s.id === activeId) ?? null;
   const bump = useCallback(() => setVersion((v) => v + 1), []);
+
+  /**
+   * The sheets that exist, as a string.
+   *
+   * A stroke replaces the sheet it touches on every pointer sample, so `sheets` is a new array
+   * a hundred times a second while the brush is down — and an effect that follows it re-runs
+   * just as often. The housekeeping below only cares about *which sheets there are*, which a
+   * stroke never changes, so it follows this instead.
+   */
+  const sheetIdKey = useMemo(() => sheets.map((s) => s.id).join(" "), [sheets]);
 
   const canvasFor = useCallback((sheet: Sheet) => {
     let canvas = canvases.current.get(sheet.id);
@@ -189,8 +202,15 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     // model on every frame of a drag — which is exactly as slow as it sounds. The textures
     // inside are the same objects either way; `needsUpdate` above is what carries the pixels.
     overridesRef.current = next;
+    // Compared against a ref, and only *then* set. An updater that returns its own argument
+    // still counts as an update: React re-renders this component to find out that nothing
+    // moved, and this effect runs once per pointer sample of a stroke — so guarding inside the
+    // updater bought a wasted render of the whole editor per sample of every drag.
     const names = [...next.keys()].sort().join(" ");
-    setOverrideNames((prev) => (prev === names ? prev : names));
+    if (publishedNames.current !== names) {
+      publishedNames.current = names;
+      setOverrideNames(names);
+    }
   }, [sheets, version, canvasFor]);
 
   const overrides = useMemo(
@@ -210,7 +230,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         drawn.current.delete(id);
       }
     }
-  }, [sheets]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetIdKey]);
 
   useEffect(() => {
     const held = textures.current;
@@ -578,6 +599,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * keeps a brush stroke, which replaces the sheet object, from recomputing it.
    */
   const activeName = active?.name ?? "";
+  // The rest of what the UV map is built from, pulled out for the same reason: a stroke
+  // replaces the sheet object without changing any of these.
+  const activeWidth = active?.width ?? 0;
+  const activeHeight = active?.height ?? 0;
   const parts = useMemo<UvPart[]>(
     () => (geometry ? uvParts(geometry, activeName) : []),
     [geometry, activeName],
@@ -694,20 +719,24 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * sheet from `livery` to `plate` and it describes different triangles. Rasterising eagerly
    * would spend the work on sheets nobody looks at, and rasterising on every render would spend
    * it again on every brush stroke, since a stroke replaces the sheet object.
+   *
+   * Which is also why this takes the sheet apart rather than depending on it: every field it
+   * reads survives a stroke untouched, so following the sheet itself would re-run this — and
+   * re-check a guard that has already been satisfied — once per pointer sample of every drag.
    */
   useEffect(() => {
-    if (!active || !geometry) return;
+    if (!activeId || !geometry) return;
     // A half-typed name is not a name yet. Without this, every keystroke of "livery" would be
     // asked of the mesh and answered "nothing binds that", which is true and useless.
-    if (!active.name.trim()) return;
-    const ghost = ghosts.get(active.id) ?? EMPTY_GHOST;
-    if (!ghost.showWire || ghost.wireFor === active.name) return;
+    if (!activeName.trim()) return;
+    const ghost = ghosts.get(activeId) ?? EMPTY_GHOST;
+    if (!ghost.showWire || ghost.wireFor === activeName) return;
     // `wireFor` records the attempt whether or not it found anything, so a name that matches
     // nothing is asked once rather than on every render. The panel reads the pair to say so —
     // out loud, because an empty overlay is indistinguishable from one still being built.
-    const wire = uvWireframe(parts, active.width, active.height);
-    patchGhost(active.id, (g) => ({ ...g, wire, wireFor: active.name }));
-  }, [active, geometry, ghosts, parts, patchGhost]);
+    const wire = uvWireframe(parts, activeWidth, activeHeight);
+    patchGhost(activeId, (g) => ({ ...g, wire, wireFor: activeName }));
+  }, [activeId, activeName, activeWidth, activeHeight, geometry, ghosts, parts, patchGhost]);
 
   // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
   // sheet, so leaving them behind would keep a closed paint's pixels alive for the session.
@@ -718,7 +747,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       if ([...prev.keys()].every((id) => live.has(id))) return prev;
       return new Map([...prev].filter(([id]) => live.has(id)));
     });
-  }, [sheets]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetIdKey]);
 
   /** Reorder within the stack. `delta` of -1 is one step down (further back). */
   const reorder = useCallback(
