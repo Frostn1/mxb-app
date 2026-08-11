@@ -13,6 +13,7 @@
 - **Push-to-talk**, bound through the same global-shortcut path as the overlay hotkey, so
   it works while the game holds focus. It acts on both edges — mic opens on press, closes
   on release — and is bound even when the overlay is switched off.
+- **Qwest** credited on Settings → Supporters.
 
 ### Notes
 - **Nothing transmits yet.** This is the device half only; the codec and the voice room on
