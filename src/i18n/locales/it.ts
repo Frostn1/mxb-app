@@ -1331,6 +1331,30 @@ export const it: Translation = {
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Preset di post-processing — l'aspetto di {{game}} a schermo.",
 
+  // ── Log ────────────────────────────────────────────────────────────────────
+  "settings.logs": "Log",
+  "logs.desc":
+    "I file da inviare quando qualcosa non va. MXB App e {{game}} tengono ciascuno i propri — apri una delle due cartelle, oppure salva entrambi in un unico zip da allegare a una segnalazione.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "Quello che ha registrato l'app stessa",
+  "logs.gameLogsDesc": "Il log del gioco, accanto ai suoi file",
+  "logs.open": "Apri cartella",
+  "logs.save": "Salva i log…",
+  "logs.saving": "Salvataggio…",
+  "logs.refresh": "Aggiorna",
+  "logs.loading": "Ricerca…",
+  "logs.empty": "Ancora nessun file di log qui.",
+  "logs.folderMissing":
+    "Quella cartella non c'è — nessuno ci ha ancora scritto un log.",
+  "logs.summary_one": "{{count}} file · {{size}} · più recente {{when}}",
+  "logs.summary_other": "{{count}} file · {{size}} · più recente {{when}}",
+  "logs.saved": "Log salvati",
+  "logs.savedDesc_one": "{{count}} file di log, {{size}}",
+  "logs.savedDesc_other": "{{count}} file di log, {{size}}",
+  "logs.saveFailed": "Impossibile salvare i log",
+  "logs.privacy":
+    "I log contengono percorsi di cartelle e cosa stava facendo l'app — mai le tue password o i cookie di sessione, e nessun file di impostazioni è incluso.",
+
   // ── Sostenitori (Buy Me a Coffee) ──────────────────────────────────────────
   "settings.supporters": "Sostenitori",
   "settings.supportersDesc": "Chi tiene in piedi MXB App su Buy Me a Coffee.",

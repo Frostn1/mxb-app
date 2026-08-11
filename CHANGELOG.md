@@ -49,6 +49,15 @@ looking nothing like the track you ride, name it in the report — that's the th
 - **Push-to-talk**, bound through the same global-shortcut path as the overlay hotkey, so
   it works while the game holds focus. It acts on both edges — mic opens on press, closes
   on release — and is bound even when the overlay is switched off.
+- **Your logs, in Settings → Logs.** "Send me your logs" was the first thing every bug
+  report asked for and the one thing there was no way to do: MXB App writes its own log
+  into a folder buried in AppData, and the game writes `log.txt` beside its executable —
+  and when the game's folder has been moved, somewhere only the app knows. Both are now
+  named on one page, with how many files are there and how old the newest one is, so a log
+  that predates the run you're reporting can be seen for what it is. **Open folder** takes
+  you to either with the newest file selected, and **Save logs…** writes the pair into a
+  single zip to attach. The zip holds the logs and a summary of the folders they came from
+  — never the settings file, which carries session cookies.
 - **Qwest and Kelso** credited on Settings → Supporters.
 
 ### Fixed

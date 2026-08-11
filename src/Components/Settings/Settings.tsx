@@ -10,16 +10,24 @@ import {
   Monitor,
   TriangleAlert,
   Sparkles,
+  FolderOpen,
+  Download,
 } from "lucide-react";
-import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import {
   countProfilesIn,
   detectGamePath,
+  exportLogs,
   getModsRoot,
   getOverlayState,
+  logsInfo,
+  openLogsFolder,
+  type LogGroup,
+  type LogsInfo,
+  type LogsKind,
   overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
@@ -60,9 +68,10 @@ import SupportersCard from "./SupportersCard";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
-import { LOCALE_OPTIONS } from "../../i18n/core";
+import { getLocale, LOCALE_OPTIONS } from "../../i18n/core";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
+import { formatBytes, formatDateShort } from "../../lib/mods";
 import { useTour } from "../Tour/Tour";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
@@ -91,6 +100,7 @@ export type SectionId =
   | "appearance"
   | "frostmod"
   | "reshade"
+  | "logs"
   | "supporters"
   | "about";
 const SECTIONS: { id: SectionId; label: TKey }[] = [
@@ -102,6 +112,7 @@ const SECTIONS: { id: SectionId; label: TKey }[] = [
   { id: "appearance", label: "settings.appearance" },
   { id: "frostmod", label: "settings.frostmod" },
   { id: "reshade", label: "settings.reshade" },
+  { id: "logs", label: "settings.logs" },
   { id: "supporters", label: "settings.supporters" },
   { id: "about", label: "settings.about" },
 ];
@@ -246,6 +257,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     appearance: null,
     frostmod: null,
     reshade: null,
+    logs: null,
     supporters: null,
     about: null,
   });
@@ -279,6 +291,51 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       .then(setModsRoot)
       .catch(() => setModsRoot(null));
   }, [config.modsPath]);
+
+  // Where the logs are and what's in them. Re-read whenever the Logs section is opened
+  // (and after an export) rather than once on mount: the reason anyone comes here is that
+  // something just went wrong, and a count from ten minutes ago answers the wrong question.
+  const [logs, setLogs] = useState<LogsInfo | null>(null);
+  const [exportingLogs, setExportingLogs] = useState(false);
+  const refreshLogs = useCallback(() => {
+    logsInfo()
+      .then(setLogs)
+      .catch(() => setLogs(null));
+  }, []);
+  const logsOpen = active === "logs";
+  useEffect(() => {
+    refreshLogs();
+  }, [refreshLogs, config.modsPath, config.gamePath, logsOpen]);
+
+  const openLogs = (which: LogsKind) => {
+    openLogsFolder(which).catch((e) => toast.error(String(e)));
+  };
+
+  const saveLogs = async () => {
+    // A date rather than a clock time: the file is named for the day it was collected,
+    // which is what a support thread refers back to.
+    const stamp = new Date().toISOString().slice(0, 10);
+    const dest = await pickSavePath({
+      defaultPath: `mxb-app-logs-${stamp}.zip`,
+      filters: [{ name: "Zip", extensions: ["zip"] }],
+    }).catch(() => null);
+    if (!dest) return;
+    setExportingLogs(true);
+    try {
+      const written = await exportLogs(dest);
+      toast.success(t("logs.saved"), {
+        description: t("logs.savedDesc", {
+          count: written.files,
+          size: formatBytes(written.bytes),
+        }),
+      });
+      refreshLogs();
+    } catch (e) {
+      toast.error(t("logs.saveFailed"), { description: String(e) });
+    } finally {
+      setExportingLogs(false);
+    }
+  };
 
   const profilesSep = config.modsPath.includes("\\") ? "\\" : "/";
   const defaultProfilesPath =
@@ -1486,6 +1543,41 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
             />
           </Section>
 
+          {/* logs — the first thing any bug report asks for, and the one thing a player
+              has no way to find on their own: MXB App's log dir is buried in AppData, and
+              the game writes its own beside the executable. Both are named here, either
+              can be opened, and the pair zips into one file to attach. */}
+          <Section
+            title={t("settings.logs")}
+            desc={t("logs.desc")}
+            innerRef={(el) => (refs.current.logs = el)}
+          >
+            <LogRow
+              label={t("logs.appLogs")}
+              hint={t("logs.appLogsDesc")}
+              group={logs?.app}
+              onOpen={() => openLogs("app")}
+            />
+            <LogRow
+              label={game.display}
+              hint={t("logs.gameLogsDesc")}
+              group={logs?.game}
+              onOpen={() => openLogs("game")}
+            />
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={saveLogs} disabled={exportingLogs}>
+                <Download className="size-3.5" />
+                {exportingLogs ? t("logs.saving") : t("logs.save")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={refreshLogs} disabled={exportingLogs}>
+                <RefreshCw className="size-3.5" /> {t("logs.refresh")}
+              </Button>
+            </div>
+            <p className="text-[11.5px] leading-relaxed text-faint">
+              {t("logs.privacy")}
+            </p>
+          </Section>
+
           {/* supporters — who's buying the coffees that pay for the app. Above About
               rather than inside it: a thank-you buried under the version number and the
               update button is one nobody reads. */}
@@ -1619,6 +1711,83 @@ function LevelSlider({
       </span>
     </div>
   );
+}
+
+/** One log location: where it is, what's in it, and a way into the folder.
+ *
+ * The line under the path is the point of the row. "3 files, newest 12 minutes ago" is
+ * what tells someone the log covers the run that just went wrong — a path on its own
+ * can't say whether there's anything there worth sending. */
+function LogRow({
+  label,
+  hint,
+  group,
+  onOpen,
+}: {
+  label: string;
+  hint: string;
+  /** Undefined until the backend answers. */
+  group?: LogGroup;
+  onOpen: () => void;
+}) {
+  const { t } = useI18n();
+  const newest = group?.files[0];
+  const status = !group
+    ? t("logs.loading")
+    : !group.exists
+      ? t("logs.folderMissing")
+      : group.files.length === 0
+        ? t("logs.empty")
+        : t("logs.summary", {
+            count: group.files.length,
+            size: formatBytes(group.files.reduce((sum, f) => sum + f.bytes, 0)),
+            when: formatWhen(newest?.modified ?? null),
+          });
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[12.5px] font-semibold text-foreground/85">{label}</span>
+        <span className="text-[11.5px] text-muted-foreground">{hint}</span>
+      </div>
+      <div className="flex gap-2">
+        <div className="flex min-w-0 flex-1 items-center rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground">
+          <span className="flex-1 truncate" title={group?.dir || undefined}>
+            {group?.dir || t("settings.notSet")}
+          </span>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onOpen}
+          // Nothing to open until we know the folder is there. The button going quiet is
+          // itself the answer: the game hasn't written anything here yet.
+          disabled={!group?.exists}
+        >
+          <FolderOpen className="size-3.5" /> {t("logs.open")}
+        </Button>
+      </div>
+      <span
+        className={cn(
+          "text-[11.5px]",
+          group && !group.exists ? "text-warning" : "text-muted-foreground",
+        )}
+      >
+        {status}
+      </span>
+    </div>
+  );
+}
+
+/** "today at 14:32" / "Aug 11 at 14:32" for a log's mtime — the age is what matters,
+ *  so the time of day is always shown and the year never is. */
+function formatWhen(ms: number | null): string {
+  if (!ms) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const time = d.toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
+  const sameDay = new Date().toDateString() === d.toDateString();
+  return sameDay ? time : `${formatDateShort(d.toISOString())} ${time}`;
 }
 
 function ToggleRow({

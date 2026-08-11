@@ -1339,6 +1339,30 @@ export const es: Translation = {
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Ajustes de posprocesado — cómo se ve {{game}} en pantalla.",
 
+  // ── Registros ──────────────────────────────────────────────────────────────
+  "settings.logs": "Registros",
+  "logs.desc":
+    "Los archivos que hay que enviar cuando algo falla. MXB App y {{game}} guardan los suyos por separado — abre cualquiera de las dos carpetas o guarda ambos en un zip para adjuntarlo a un informe.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "Lo que registró la propia app",
+  "logs.gameLogsDesc": "El registro del juego, junto a sus archivos",
+  "logs.open": "Abrir carpeta",
+  "logs.save": "Guardar registros…",
+  "logs.saving": "Guardando…",
+  "logs.refresh": "Actualizar",
+  "logs.loading": "Buscando…",
+  "logs.empty": "Aquí todavía no hay archivos de registro.",
+  "logs.folderMissing":
+    "Esa carpeta no está ahí — nada ha escrito aún un registro en ella.",
+  "logs.summary_one": "{{count}} archivo · {{size}} · el más reciente {{when}}",
+  "logs.summary_other": "{{count}} archivos · {{size}} · el más reciente {{when}}",
+  "logs.saved": "Registros guardados",
+  "logs.savedDesc_one": "{{count}} archivo de registro, {{size}}",
+  "logs.savedDesc_other": "{{count}} archivos de registro, {{size}}",
+  "logs.saveFailed": "No se pudieron guardar los registros",
+  "logs.privacy":
+    "Los registros contienen rutas de carpetas y lo que estaba haciendo la app — nunca tus contraseñas ni las cookies de sesión, y no se incluye ningún archivo de ajustes.",
+
   // ── Mecenas (Buy Me a Coffee) ──────────────────────────────────────────────
   "settings.supporters": "Mecenas",
   "settings.supportersDesc": "Quienes mantienen MXB App en Buy Me a Coffee.",

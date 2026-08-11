@@ -20,6 +20,7 @@ mod imgcache;
 mod install;
 mod library;
 mod linkwalk;
+mod logs;
 mod lru;
 mod modelswap;
 mod mods;
@@ -3380,6 +3381,51 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
 }
 
+/// Where MXB App's own logs are, where the game's are, and what's currently in each.
+///
+/// Read fresh on every call rather than cached: the whole reason someone opens this is
+/// that something just went wrong, and a stale "no logs found" would send them looking in
+/// the wrong place.
+#[tauri::command]
+fn logs_info(app: tauri::AppHandle) -> logs::LogsInfo {
+    let cfg = config::load(&app).unwrap_or_default();
+    logs::info(&app_log_dir(&app), &cfg)
+}
+
+/// Open the folder one of the two log sets lives in, newest file selected where the OS
+/// can do that. `which` is `"app"` or `"game"`.
+#[tauri::command]
+fn open_logs_folder(app: tauri::AppHandle, which: String) -> Result<(), String> {
+    let info = logs_info(app);
+    let group = if which == "game" { &info.game } else { &info.app };
+    logs::open_location(group).map_err(|e| format!("{e:#}"))
+}
+
+/// Zip both sets of logs to `dest` — a path the user just picked in a save dialog.
+///
+/// Blocking work (reads the whole of every log), so it goes off the UI thread: an app log
+/// that has been growing for a month would otherwise freeze Settings while it's read.
+#[tauri::command]
+async fn export_logs(app: tauri::AppHandle, dest: String) -> Result<logs::ExportResult, String> {
+    let version = app.package_info().version.to_string();
+    let log_dir = app_log_dir(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).unwrap_or_default();
+        let info = logs::info(&log_dir, &cfg);
+        let summary = logs::summary(&version, &cfg, &info);
+        logs::export(std::path::Path::new(&dest), &info, &summary).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("export_logs task failed: {e}"))?
+}
+
+/// Where `tauri_plugin_log`'s `LogDir` target writes. Empty when the path can't be
+/// resolved at all, which [`logs::info`] reports as a folder that isn't there — the same
+/// as any other missing folder, rather than a special failure mode of its own.
+fn app_log_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
+    app.path().app_log_dir().unwrap_or_default()
+}
+
 #[tauri::command]
 fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -5954,6 +6000,9 @@ fn main() {
             move_mod,
             uninstall_mod,
             reveal_in_explorer,
+            logs_info,
+            open_logs_folder,
+            export_logs,
             set_game_path,
             set_wine_runner,
             wine_host_info,
