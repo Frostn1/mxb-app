@@ -1097,6 +1097,9 @@ export const de: Translation = {
   "showcase.whileGameRunning": "während MX Bikes läuft",
   "showcase.releaseNotes": "Release Notes lesen",
   "showcase.gotIt": "Alles klar",
+  "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
+  "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
+  "showcase.supporters.more": "+{{count}} weitere",
   "showcase.v091.hero.title": "Male direkt auf die Vorlage",
   "showcase.v091.hero.body":
     "Der Designer konnte Bilder und Text auf den Bahnen eines Designs platzieren, aber keinen einzigen Pixel von Hand setzen — ein Verlauf über eine Spoiler-Flanke hieß: raus in einen Bildeditor und wieder zurück. Jetzt gibt es einen Werkzeugkasten: weicher Pinsel mit Größe, Kante und Stärke, Radierer, Verlauf, Füllung sowie Rechteck, Ellipse und Linie. Alles landet gleichzeitig auf der Bahn und am 3D-Modell, während du ziehst.",

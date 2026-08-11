@@ -11,6 +11,8 @@ import { useConfig } from "../../Context/Config";
 import { useI18n } from "../../i18n/context";
 import { prettyHotkey } from "../../lib/hotkey";
 import { usePlatform } from "../../lib/usePlatform";
+import type { SectionId } from "../Settings/Settings";
+import ShowcaseSupporters from "./ShowcaseSupporters";
 import type { Release } from "./releases";
 
 const RELEASE_NOTES_URL = "https://github.com/Frostn1/mxb-app/releases/tag/v";
@@ -19,8 +21,9 @@ interface ReleaseShowcaseProps {
   release: Release;
   /** Close it and remember this version has been seen. */
   onDone: () => void;
-  /** Jump to a Settings section — used by the hero's call to action. */
-  onOpenSettings: (section: "overlay") => void;
+  /** Jump to a Settings section — used by the hero's call to action and the supporters
+   *  credit, which lands on the full thank-you list. */
+  onOpenSettings: (section: SectionId) => void;
 }
 
 /**
@@ -51,7 +54,9 @@ export default function ReleaseShowcase({
   return (
     <Dialog open onOpenChange={(open) => !open && onDone()}>
       <DialogContent
-        className="max-w-[520px] gap-5"
+        // The window can be as short as 700px, and a release with a full set of
+        // highlights plus the supporters credit is taller than that leaves room for.
+        className="max-h-[85vh] max-w-[520px] gap-5 overflow-y-auto"
         // Closing by clicking away would leave someone unsure whether it counted;
         // Esc and the corner X both land on `onDone`, which does record it.
         onPointerDownOutside={(e) => e.preventDefault()}
@@ -121,6 +126,14 @@ export default function ReleaseShowcase({
             );
           })}
         </ul>
+
+        {/* Shown with every release, not just this one — see ShowcaseSupporters. */}
+        <ShowcaseSupporters
+          onOpen={() => {
+            onDone();
+            onOpenSettings("supporters");
+          }}
+        />
 
         <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
           <button
