@@ -251,17 +251,36 @@ pub fn register<R: Runtime>(app: &AppHandle<R>, cfg: &config::AppConfig) -> Resu
     result
 }
 
+/// Rebind **every** global shortcut the app owns.
+///
+/// `unregister_all` is why this is one function rather than each feature registering its
+/// own key: whoever called it last would otherwise wipe the others. Push-to-talk is bound
+/// here for that reason, even though it belongs to [`crate::voice`] in every other sense.
+///
+/// The overlay is bound first so that a push-to-talk combo another app owns costs the
+/// player their mic key and not their overlay as well.
 fn bind<R: Runtime>(app: &AppHandle<R>, cfg: &config::AppConfig) -> Result<(), String> {
     let shortcuts = app.global_shortcut();
     let _ = shortcuts.unregister_all();
-    if !cfg.overlay_enabled {
-        log::info!("overlay hotkey disabled by config");
-        return Ok(());
-    }
 
+    let overlay_result = if cfg.overlay_enabled {
+        bind_overlay(app, cfg)
+    } else {
+        log::info!("overlay hotkey disabled by config");
+        Ok(())
+    };
+
+    // Bound even when the overlay is off — the two features are unrelated, and an early
+    // return here would leave a player who hid the overlay with no working mic key.
+    let ptt_result = crate::voice::bind_ptt(app, cfg);
+
+    overlay_result.and(ptt_result)
+}
+
+fn bind_overlay<R: Runtime>(app: &AppHandle<R>, cfg: &config::AppConfig) -> Result<(), String> {
     let combo = hotkey_of(cfg).to_string();
     let shortcut = parse_hotkey(&combo)?;
-    shortcuts
+    app.global_shortcut()
         .on_shortcut(shortcut, move |app, _shortcut, event| {
             // Fires on both press and release; acting on both would toggle twice.
             if event.state() != ShortcutState::Pressed {

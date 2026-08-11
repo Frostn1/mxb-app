@@ -104,6 +104,16 @@ md-5 = "0.10"
 # binary and decoded on the stack at use, so they don't show up in a `strings` dump.
 obfstr = "0.4"
 tauri-plugin-deep-link = "2.4.9"
+# Microphone capture and playback for voice chat (WASAPI on Windows, CoreAudio on macOS).
+#
+# Held at 0.15 deliberately: 0.18 does not build for Windows in this workspace. Its WASAPI
+# backend implements COM interfaces against a newer `windows-core` than the one Cargo
+# unifies on here (Tauri pulls the `windows` crates in too), so `IMMNotificationClient`
+# and friends fail their `Interface`/`RuntimeName` bounds — 18 errors, none of them ours.
+# 0.15 vendors its own `windows 0.54` and sidesteps the conflict entirely. Check
+# `cargo check --target x86_64-pc-windows-gnu` before raising this; a macOS build won't
+# catch it, and a Windows-first app can't ship without it.
+cpal = "0.15"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

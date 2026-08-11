@@ -1620,6 +1620,73 @@ export function onOverlayFullscreenBlocked(cb: () => void): Promise<UnlistenFn> 
   return listen("overlay-fullscreen-blocked", () => cb());
 }
 
+export type VoiceDevice = { name: string; isDefault: boolean };
+export type VoiceDevices = {
+  inputs: VoiceDevice[];
+  outputs: VoiceDevice[];
+  /** Set when the machine has no audio at all, so the UI can say so instead of
+   *  showing two empty dropdowns. */
+  error: string | null;
+};
+
+/** Every microphone and output the machine currently offers.
+ *
+ * Call it each time the picker opens rather than caching — the point is to notice the
+ * headset that was plugged in after the app launched. */
+export function voiceDevices(): Promise<VoiceDevices> {
+  return invoke<VoiceDevices>("voice_devices");
+}
+
+export function setVoiceEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_voice_enabled", { enabled });
+}
+
+/** Pick the microphone. `""` means "follow the system default". */
+export function setVoiceInputDevice(device: string): Promise<void> {
+  return invoke<void>("set_voice_input_device", { device });
+}
+
+/** Pick where other riders come out. `""` means "follow the system default". */
+export function setVoiceOutputDevice(device: string): Promise<void> {
+  return invoke<void>("set_voice_output_device", { device });
+}
+
+/** Rebind push-to-talk. Rejects (leaving the old one live) if the combo is taken. */
+export function setVoicePttHotkey(hotkey: string): Promise<void> {
+  return invoke<void>("set_voice_ptt_hotkey", { hotkey });
+}
+
+export function setVoiceLevels(inputGain: number, outputVolume: number): Promise<void> {
+  return invoke<void>("set_voice_levels", { inputGain, outputVolume });
+}
+
+/** Open the mic and start the level meter. Resolves to a warning when the saved device
+ *  is gone and we fell back to the default — the unplugged-headset case. */
+export function voiceMeterStart(): Promise<string | null> {
+  return invoke<string | null>("voice_meter_start");
+}
+
+export function voiceMeterStop(): Promise<void> {
+  return invoke<void>("voice_meter_stop");
+}
+
+/** Play a short tone on the configured output. Same warning contract as the meter. */
+export function voiceTestOutput(): Promise<string | null> {
+  return invoke<string | null>("voice_test_output");
+}
+
+export type VoiceLevel = { rms: number; peak: number };
+
+/** Live microphone level while the meter is running. */
+export function onVoiceInputLevel(cb: (level: VoiceLevel) => void): Promise<UnlistenFn> {
+  return listen<VoiceLevel>("voice-input-level", (e) => cb(e.payload));
+}
+
+/** Fires on both edges of the push-to-talk key: `true` on press, `false` on release. */
+export function onVoicePtt(cb: (down: boolean) => void): Promise<UnlistenFn> {
+  return listen<boolean>("voice-ptt", (e) => cb(e.payload));
+}
+
 /** Toggle watching the mods folder to reload the game on external changes. */
 export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });

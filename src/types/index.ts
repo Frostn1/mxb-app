@@ -102,6 +102,20 @@ export interface Config {
   overlayEnabled?: boolean;
   /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+X"`. */
   overlayHotkey?: string;
+  /** Voice chat is off until turned on — a feature that opens a microphone shouldn't be
+   *  something anyone discovers by accident. */
+  voiceEnabled?: boolean;
+  /** Microphone to listen to. **Blank means "follow the system default"**, so a player
+   *  who never picks one keeps tracking the device they change in Windows later. */
+  voiceInputDevice?: string;
+  /** Where other riders come out. Blank means the system default, as above. */
+  voiceOutputDevice?: string;
+  /** Push-to-talk combo in Tauri accelerator syntax. */
+  voicePttHotkey?: string;
+  /** Microphone gain, 1 = untouched. */
+  voiceInputGain?: number;
+  /** Playback volume for other riders, 0..1. */
+  voiceOutputVolume?: number;
   /** App version whose release showcase has been seen. Blank on an install that
    *  predates the showcase, which is what marks it as an upgrade worth telling. */
   seenVersion?: string;

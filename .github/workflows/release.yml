@@ -57,7 +57,8 @@ jobs:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       # Tauri links against the GTK/WebKit stack on Linux; `patchelf` is what the
-      # AppImage bundler uses to rewrite the runtime paths. Mirrors ci.yml.
+      # AppImage bundler uses to rewrite the runtime paths. Mirrors ci.yml —
+      # including `libasound2-dev`, which cpal's alsa-sys needs to build at all.
       - name: Install Linux system dependencies
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
@@ -68,6 +69,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libsoup-3.0-dev \
+            libasound2-dev \
             patchelf
 
       - name: Cache Rust build

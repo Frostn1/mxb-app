@@ -75,6 +75,24 @@ pub struct AppConfig {
     /// The combo that toggles the overlay, in Tauri accelerator syntax
     /// (`"CommandOrControl+Shift+X"`). Blank falls back to [`DEFAULT_OVERLAY_HOTKEY`].
     pub overlay_hotkey: String,
+    /// Voice chat is off until the player turns it on. A feature that opens a microphone
+    /// is not something anyone should discover by accident.
+    pub voice_enabled: bool,
+    /// Microphone to listen to. **Blank means "follow the system default"** — storing the
+    /// resolved name instead would pin the player to whichever headset was plugged in the
+    /// day they set it, and stop tracking the default they later change in Windows.
+    pub voice_input_device: String,
+    /// Where other riders come out. Blank means the system default, as above. Separate
+    /// from game audio on purpose: voice on the headset with the game on speakers is a
+    /// setup people actually run.
+    pub voice_output_device: String,
+    /// Push-to-talk combo, Tauri accelerator syntax. Blank falls back to
+    /// [`DEFAULT_PTT_HOTKEY`].
+    pub voice_ptt_hotkey: String,
+    /// Microphone gain, 1.0 = untouched. Clamped when applied.
+    pub voice_input_gain: f32,
+    /// Playback volume for other riders, 0..1.
+    pub voice_output_volume: f32,
     /// The app version whose release showcase has already been shown. Blank means the
     /// install predates the showcase — an upgrade, so the newest showcase is due.
     /// A *fresh* install is stamped with the running version at setup (see
@@ -153,6 +171,14 @@ impl AppConfig {
 /// Steam (Shift+Tab) and GeForce Experience (Alt+Z, Alt+F*).
 pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+X";
 
+/// Push-to-talk combo used until the player picks another one.
+///
+/// A modifier chord rather than a bare key, and not one MX Bikes binds: the game has
+/// keyboard focus during a race, so a single letter would both open the mic and do
+/// whatever that letter does in-game. Players who want a thumb button rebind it — which is
+/// why this is a default and not a constant the UI hides.
+pub const DEFAULT_PTT_HOTKEY: &str = "CommandOrControl+Shift+V";
+
 /// Defaults we've shipped and then moved away from.
 ///
 /// Ctrl+Shift+M is Discord's mute toggle. Discord registers it globally and gets there
@@ -180,6 +206,12 @@ impl Default for AppConfig {
             tour_done: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
+            voice_enabled: false,
+            voice_input_device: String::new(),
+            voice_output_device: String::new(),
+            voice_ptt_hotkey: DEFAULT_PTT_HOTKEY.to_string(),
+            voice_input_gain: 1.0,
+            voice_output_volume: 1.0,
             seen_version: String::new(),
             servers: Vec::new(),
             experimental: false,
