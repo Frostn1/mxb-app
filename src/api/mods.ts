@@ -663,13 +663,14 @@ export interface LogGroup {
   files: LogFile[];
 }
 
-/** Both log sets: MXB App's own, and the game's `log.txt`. */
+/** Every log set: MXB App's own, FrostMod's managed folder, and the game's `log.txt`. */
 export interface LogsInfo {
   app: LogGroup;
+  frostmod: LogGroup;
   game: LogGroup;
 }
 
-export type LogsKind = "app" | "game";
+export type LogsKind = "app" | "frostmod" | "game";
 
 export function logsInfo(): Promise<LogsInfo> {
   return invoke<LogsInfo>("logs_info");
@@ -686,7 +687,7 @@ export interface LogsExport {
   bytes: number;
 }
 
-/** Zip both log sets to `dest` — a path the user picked in a save dialog. */
+/** Zip every log set to `dest` — a path the user picked in a save dialog. */
 export function exportLogs(dest: string): Promise<LogsExport> {
   return invoke<LogsExport>("export_logs", { dest });
 }

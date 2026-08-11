@@ -1,14 +1,17 @@
 //! Where the logs are, and how to get them off the machine they're on.
 //!
-//! Two sets matter when something has gone wrong, and they live in different places:
+//! Three sets matter when something has gone wrong, and they live in different places:
 //! MXB App's own file log — written by `tauri_plugin_log` into the OS log dir
-//! (`%LOCALAPPDATA%\com.frost.mxbikes\logs` on Windows) — and the game's `log.txt`,
-//! which PiBoSo titles write beside the executable or into the user folder depending on
-//! how the game was started.
+//! (`%LOCALAPPDATA%\com.frost.mxbikes\logs` on Windows) — the game's `log.txt`, which
+//! PiBoSo titles write beside the executable or into the user folder depending on how the
+//! game was started, and whatever FrostMod leaves in the folder we install and run it
+//! from. Which of the three matters depends entirely on what broke, and the player
+//! reporting it is the last person who can tell.
 //!
-//! Neither is somewhere a player finds on their own, and "send me your logs" is the first
-//! thing every bug report asks for. So this module answers three questions for Settings:
-//! where they are, what's actually in there, and how to hand the lot over as one file.
+//! None of them is somewhere a player finds on their own, and "send me your logs" is the
+//! first thing every bug report asks for. So this module answers three questions for
+//! Settings: where they are, what's actually in there, and how to hand the lot over as
+//! one file.
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -62,6 +65,8 @@ impl LogGroup {
 pub struct LogsInfo {
     /// MXB App's own log dir.
     pub app: LogGroup,
+    /// The managed FrostMod folder — where we install it and where it runs from.
+    pub frostmod: LogGroup,
     /// The active game's logs.
     pub game: LogGroup,
 }
@@ -87,6 +92,29 @@ fn is_game_log(name: &str) -> bool {
     lower.ends_with(".log")
         || (lower.starts_with("log") && lower.ends_with(".txt"))
         || (lower.starts_with("crash") && (lower.ends_with(".txt") || lower.ends_with(".log")))
+}
+
+/// Whether a file in the *FrostMod* folder is a log.
+///
+/// Inverted against [`is_game_log`], and deliberately: this folder is the app's own —
+/// we create it, install into it, and run FrostMod with it as the working directory — so
+/// its non-log contents are a known, short list, while what FrostMod names its log is
+/// decided in another repo and could change with any release. Excluding what we put there
+/// therefore catches a log we've never seen the name of; matching on `log*.txt` would
+/// quietly miss it.
+///
+/// The server filter is excluded with the binaries: it's a settings file, and this button
+/// promises not to collect those.
+fn is_frostmod_log(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let ours = lower.ends_with(".exe")
+        || lower.ends_with(".dll")
+        || lower == "version.txt"
+        || lower.ends_with(".yaml")
+        // A binary moved aside mid-update because the game still had it mapped —
+        // `frostmod.dll.in-use-1723…`, swept on the next start.
+        || lower.contains(".in-use-");
+    !ours
 }
 
 fn describe(path: &Path) -> Option<LogFile> {
@@ -177,8 +205,12 @@ fn game_group(cfg: &AppConfig) -> LogGroup {
     fallback.unwrap_or_else(|| LogGroup::missing(first))
 }
 
-pub fn info(app_log_dir: &Path, cfg: &AppConfig) -> LogsInfo {
-    LogsInfo { app: scan_all(app_log_dir), game: game_group(cfg) }
+pub fn info(app_log_dir: &Path, frostmod_dir: &Path, cfg: &AppConfig) -> LogsInfo {
+    LogsInfo {
+        app: scan_all(app_log_dir),
+        frostmod: scan(frostmod_dir, is_frostmod_log),
+        game: game_group(cfg),
+    }
 }
 
 /// Open the folder a group lives in, with its newest file selected where the platform can
@@ -191,7 +223,7 @@ pub fn open_location(group: &LogGroup) -> anyhow::Result<()> {
     }
 }
 
-/// Write both groups into one zip at `dest`.
+/// Write every group into one zip at `dest`, a folder each.
 ///
 /// Deliberately just the logs and a summary of where they came from — not the config
 /// file, which holds session cookies and shop credentials. The whole point of this button
@@ -212,7 +244,7 @@ pub fn export(dest: &Path, info: &LogsInfo, summary: &str) -> anyhow::Result<Exp
 
     let mut written = 0usize;
     let mut bytes = 0u64;
-    for (folder, group) in [("app", &info.app), ("game", &info.game)] {
+    for (folder, group) in groups(info) {
         for log in &group.files {
             if log.bytes > MAX_EXPORT_FILE {
                 continue;
@@ -231,6 +263,13 @@ pub fn export(dest: &Path, info: &LogsInfo, summary: &str) -> anyhow::Result<Exp
     Ok(ExportResult { path: dest.to_string_lossy().into_owned(), files: written, bytes })
 }
 
+/// The three groups in the order they're written, paired with the folder each takes
+/// inside an exported zip. Named once so the archive's layout and the summary listing it
+/// can't drift apart.
+fn groups(info: &LogsInfo) -> [(&'static str, &LogGroup); 3] {
+    [("app", &info.app), ("frostmod", &info.frostmod), ("game", &info.game)]
+}
+
 /// The plain-text header that goes in beside the logs: what was included, and the handful
 /// of facts every report starts by asking for.
 pub fn summary(version: &str, cfg: &AppConfig, info: &LogsInfo) -> String {
@@ -241,7 +280,7 @@ pub fn summary(version: &str, cfg: &AppConfig, info: &LogsInfo) -> String {
     out.push_str(&format!("mods folder: {}\n", show(&cfg.mods_path)));
     out.push_str(&format!("install folder: {}\n", show(&cfg.install_dir())));
     out.push_str(&format!("profiles folder: {}\n", cfg.profiles_dir().display()));
-    for (label, group) in [("app", &info.app), ("game", &info.game)] {
+    for (label, group) in groups(info) {
         out.push_str(&format!(
             "\n{label} logs: {}{}\n",
             if group.dir.is_empty() { "(unknown)" } else { &group.dir },
@@ -301,6 +340,22 @@ mod tests {
     }
 
     #[test]
+    fn keeps_frostmods_log_and_drops_what_we_put_beside_it() {
+        // Whatever FrostMod writes, under any name — the filter can't be told the name in
+        // advance, so it works by knowing what *isn't* a log.
+        assert!(is_frostmod_log("frostmod.log"));
+        assert!(is_frostmod_log("log.txt"));
+        assert!(is_frostmod_log("frostmod-2026-08-11.txt"));
+        // The install: our binaries, our version marker, our server filter, and a binary
+        // parked mid-update because the game still had it mapped.
+        assert!(!is_frostmod_log("frostmod.exe"));
+        assert!(!is_frostmod_log("frostmod.dll"));
+        assert!(!is_frostmod_log("version.txt"));
+        assert!(!is_frostmod_log("frostmod_serverfilter.yaml"));
+        assert!(!is_frostmod_log("frostmod.dll.in-use-1723500000"));
+    }
+
+    #[test]
     fn scans_newest_first() {
         let dir = tmpdir("order");
         write(&dir, "old.log", "one");
@@ -357,13 +412,17 @@ mod tests {
     }
 
     #[test]
-    fn export_holds_both_sides_and_a_summary() {
+    fn export_holds_every_group_and_a_summary() {
         let root = tmpdir("export");
         let app_dir = root.join("applogs");
+        let frostmod_dir = root.join("frostmod");
         let game_dir = root.join("game");
-        std::fs::create_dir_all(&app_dir).unwrap();
-        std::fs::create_dir_all(&game_dir).unwrap();
+        for d in [&app_dir, &frostmod_dir, &game_dir] {
+            std::fs::create_dir_all(d).unwrap();
+        }
         write(&app_dir, "frost.log", "app side");
+        write(&frostmod_dir, "frostmod.log", "loader side");
+        write(&frostmod_dir, "frostmod.exe", "not a log");
         write(&game_dir, "log.txt", "game side");
         write(&game_dir, "mxbikes.ini", "not a log");
 
@@ -371,20 +430,24 @@ mod tests {
             game_path: game_dir.to_string_lossy().into_owned(),
             ..Default::default()
         };
-        let info = info(&app_dir, &cfg);
+        let info = info(&app_dir, &frostmod_dir, &cfg);
         assert_eq!(info.app.files.len(), 1);
+        assert_eq!(info.frostmod.files.len(), 1);
         assert_eq!(info.game.files.len(), 1);
 
         let dest = root.join("out").join("logs.zip");
         let result = export(&dest, &info, &summary("9.9.9", &cfg, &info)).unwrap();
-        assert_eq!(result.files, 2);
+        assert_eq!(result.files, 3);
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
         let names: Vec<String> = zip.file_names().map(str::to_string).collect();
         assert!(names.contains(&"summary.txt".to_string()));
         assert!(names.contains(&"app/frost.log".to_string()));
+        assert!(names.contains(&"frostmod/frostmod.log".to_string()));
         assert!(names.contains(&"game/log.txt".to_string()));
+        // Neither folder's non-log contents came along.
         assert!(!names.iter().any(|n| n.ends_with("mxbikes.ini")));
+        assert!(!names.iter().any(|n| n.ends_with("frostmod.exe")));
 
         let mut body = String::new();
         std::io::Read::read_to_string(&mut zip.by_name("game/log.txt").unwrap(), &mut body).unwrap();

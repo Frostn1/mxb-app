@@ -1354,9 +1354,10 @@ export const de: Translation = {
   // ── Logs ───────────────────────────────────────────────────────────────────
   "settings.logs": "Logs",
   "logs.desc":
-    "Die Dateien, die du schickst, wenn etwas schiefgeht. MXB App und {{game}} führen jeweils eigene — öffne einen der beiden Ordner, oder speichere beide als ein Zip für einen Fehlerbericht.",
+    "Die Dateien, die du schickst, wenn etwas schiefgeht. MXB App, FrostMod und {{game}} führen jeweils eigene — öffne den Ordner, den du brauchst, oder speichere alle als ein Zip für einen Fehlerbericht.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Was die App selbst aufgezeichnet hat",
+  "logs.frostmodLogsDesc": "Was der Loader in seinen eigenen Ordner geschrieben hat",
   "logs.gameLogsDesc": "Das Log des Spiels, neben seinen Dateien",
   "logs.open": "Ordner öffnen",
   "logs.save": "Logs speichern…",

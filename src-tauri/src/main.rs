@@ -3389,19 +3389,23 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
 #[tauri::command]
 fn logs_info(app: tauri::AppHandle) -> logs::LogsInfo {
     let cfg = config::load(&app).unwrap_or_default();
-    logs::info(&app_log_dir(&app), &cfg)
+    logs::info(&app_log_dir(&app), &frostmod_manage::frostmod_dir(&app), &cfg)
 }
 
-/// Open the folder one of the two log sets lives in, newest file selected where the OS
-/// can do that. `which` is `"app"` or `"game"`.
+/// Open the folder one of the log sets lives in, newest file selected where the OS can do
+/// that. `which` is `"app"`, `"frostmod"` or `"game"`.
 #[tauri::command]
 fn open_logs_folder(app: tauri::AppHandle, which: String) -> Result<(), String> {
     let info = logs_info(app);
-    let group = if which == "game" { &info.game } else { &info.app };
+    let group = match which.as_str() {
+        "game" => &info.game,
+        "frostmod" => &info.frostmod,
+        _ => &info.app,
+    };
     logs::open_location(group).map_err(|e| format!("{e:#}"))
 }
 
-/// Zip both sets of logs to `dest` — a path the user just picked in a save dialog.
+/// Zip every set of logs to `dest` — a path the user just picked in a save dialog.
 ///
 /// Blocking work (reads the whole of every log), so it goes off the UI thread: an app log
 /// that has been growing for a month would otherwise freeze Settings while it's read.
@@ -3409,9 +3413,10 @@ fn open_logs_folder(app: tauri::AppHandle, which: String) -> Result<(), String> 
 async fn export_logs(app: tauri::AppHandle, dest: String) -> Result<logs::ExportResult, String> {
     let version = app.package_info().version.to_string();
     let log_dir = app_log_dir(&app);
+    let frostmod_dir = frostmod_manage::frostmod_dir(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).unwrap_or_default();
-        let info = logs::info(&log_dir, &cfg);
+        let info = logs::info(&log_dir, &frostmod_dir, &cfg);
         let summary = logs::summary(&version, &cfg, &info);
         logs::export(std::path::Path::new(&dest), &info, &summary).map_err(|e| format!("{e:#}"))
     })

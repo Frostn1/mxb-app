@@ -1345,9 +1345,10 @@ export const fr: Translation = {
   // ── Journaux ───────────────────────────────────────────────────────────────
   "settings.logs": "Journaux",
   "logs.desc":
-    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App et {{game}} ont chacun les leurs — ouvre l'un des deux dossiers, ou enregistre les deux dans un zip à joindre à un rapport.",
+    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App, FrostMod et {{game}} ont chacun les leurs — ouvre le dossier qu'il te faut, ou enregistre le tout dans un zip à joindre à un rapport.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Ce que l'app elle-même a enregistré",
+  "logs.frostmodLogsDesc": "Ce que le loader a écrit dans son propre dossier",
   "logs.gameLogsDesc": "Le journal du jeu, à côté de ses fichiers",
   "logs.open": "Ouvrir le dossier",
   "logs.save": "Enregistrer les journaux…",

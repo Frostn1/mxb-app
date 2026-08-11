@@ -1558,6 +1558,19 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               group={logs?.app}
               onOpen={() => openLogs("app")}
             />
+            {/* FrostMod's folder is ours — we install it and run it from there — so it
+                is offered on the same terms as the rest, on the same condition as the
+                FrostMod section above: a Win32 DLL injected into the game has no folder
+                to open anywhere else, and a permanently empty row would be the only
+                mention of it on the page. */}
+            {isWindows && caps.frostmod && (
+              <LogRow
+                label="FrostMod"
+                hint={t("logs.frostmodLogsDesc")}
+                group={logs?.frostmod}
+                onOpen={() => openLogs("frostmod")}
+              />
+            )}
             <LogRow
               label={game.display}
               hint={t("logs.gameLogsDesc")}
