@@ -19,11 +19,13 @@ use std::path::{Path, PathBuf};
 
 use crate::heightfield::{self, Layout};
 
-/// The resolution the master grid is kept at. Chosen against the ground rather than the
-/// screen: a track is a few hundred metres across, and at 512 one sample stood for more than
-/// a metre — wider than the jump faces and ruts that make a track readable, so they were
-/// averaged away before the viewer ever saw them.
-const MASTER_DIM: u32 = 1024;
+/// The resolution the master grid is kept at.
+///
+/// Every published track measured has a 2049- or 4097-sample heightfield, and this is the
+/// power of two under that — so for the common case the master is the file's own grid with
+/// nothing averaged away. Anything less throws away detail before the viewer can ask for it:
+/// at 1024 a sample of a 600 m track stood for 0.6 m, wider than the lip of a jump.
+const MASTER_DIM: u32 = 2048;
 
 /// Cache generation. Bump when the blob layout or the probe changes shape, so entries
 /// written by an older build are ignored rather than misread.
@@ -33,11 +35,13 @@ const MASTER_DIM: u32 = 1024;
 // coarser grid for as long as it stayed cached.
 // v4: `.trh` samples are read signed, so every height below the datum has moved — a v3 entry
 // holds the ground below a track standing as a wall around it.
-const CACHE_DIR: &str = "track-terrain-v4";
+// v5: masters are kept at the source's own resolution; a v4 entry would pin a track to half
+// of it for as long as it stayed cached.
+const CACHE_DIR: &str = "track-terrain-v5";
 
-/// How many cached masters to keep. Four megabytes each at [`MASTER_DIM`], so this holds the
-/// same budget the smaller grid did rather than quadrupling what the cache costs on disk.
-const CACHE_KEEP: usize = 16;
+/// How many cached masters to keep. Sixteen megabytes each at [`MASTER_DIM`], so this is kept
+/// small deliberately — the cache saves a second of archive reading, not a scarce resource.
+const CACHE_KEEP: usize = 6;
 
 /// Files that carry a terrain grid. Just the one: PiBoSo's track guide has `.trh` as the
 /// collision terrain and `.map` as the track *graphics*, so probing a `.map` would mean
@@ -394,27 +398,37 @@ pub const BLOB_HEADER: usize = 32;
 /// [`BLOB_HEADER`].
 pub const TEXTURE_HEADER: usize = 16;
 
-/// Surface colours, in the order surfaces are ranked by how much of the track they cover.
-///
-/// Keyed to rank rather than to the id in the file, because that id cannot be resolved to a
-/// material: every track examined carries the same six names (asphalt, grass, sand, kerb,
-/// soil, concrete) byte for byte, so that table is a default the editor writes, and the masks
-/// reference ids past the end of it. Colouring by it put a farm's fields down as soil.
-///
-/// Rank is a property of the track rather than a guess about the format: what covers the most
-/// ground is the vegetation the circuit is cut through, on every track examined, so it leads.
-/// The rest descend through the surfaces a track is built from — apron, dirt, hard standing.
-const SURFACE_RANK_COLOURS: [[u8; 3]; 6] = [
-    [104, 132, 74],  // the ground it's all cut through — grass
-    [206, 188, 142], // apron / sand
-    [138, 108, 74],  // worked soil
-    [128, 128, 132], // hard standing
-    [122, 140, 88],  // rougher vegetation
-    [150, 122, 86],
-];
+/// Bump when [`surface_colour`] changes, so cached textures drawn with the old palette are
+/// retired rather than kept.
+const SURFACE_SCHEME: u32 = 1;
 
-fn surface_colour(rank: usize) -> [u8; 3] {
-    SURFACE_RANK_COLOURS[rank.min(SURFACE_RANK_COLOURS.len() - 1)]
+/// The colour of a surface, by the id the track states for it.
+///
+/// The ids below six index the material table every track carries — asphalt, grass, sand,
+/// kerb, soil, concrete — and they are trustworthy: Briarcliff paints its surroundings as id
+/// 1 and its table calls that grass, which is exactly what the ground there is. So a farm's
+/// fields come out as the soil they are and a grass circuit comes out green, rather than
+/// every track being coloured by which surface happened to cover the most of it.
+///
+/// Ids past the table appear across unrelated tracks — 10 and 12 — so they name surfaces
+/// from a list the file doesn't carry. 10 is the riding line itself: it is the ribbon on
+/// Briarcliff and the dominant surface on I40. It gets a worked-dirt colour on that evidence;
+/// the rest get something neutral rather than a guess dressed up as a fact.
+///
+/// Hues are kept apart on purpose. Half of these are browns, and a track whose surfaces are
+/// all a similar brown reads as one flat surface no matter how correct each colour is.
+fn surface_colour(id: u32) -> [u8; 3] {
+    match id {
+        0 => [84, 86, 92],     // asphalt — cold, dark
+        1 => [98, 132, 66],    // grass — the only green
+        2 => [216, 198, 152],  // sand — pale, warm
+        3 => [186, 146, 92],   // kerb — tan, between sand and soil
+        4 => [138, 100, 62],   // soil — mid brown
+        5 => [158, 156, 150],  // concrete — light, neutral
+        10 => [122, 78, 52],   // the riding line — darkest, reddest
+        12 => [112, 120, 92],  // olive, so it parts from both grass and soil
+        _ => [126, 114, 96],
+    }
 }
 
 /// Where the terrain data stops and the material table begins.
@@ -493,7 +507,35 @@ fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
 ///
 /// Each cell takes the colour of whichever surface covers it most; cells nothing covers are
 /// left as bare dirt, which is exactly what the riding line is.
-pub fn overview_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
+pub fn overview_blob(app: &tauri::AppHandle, path: &Path, max_dim: u32) -> Option<Vec<u8>> {
+    // Cached beside the master, and for the same reason: building it is milliseconds, but
+    // pulling the height file out of a several-hundred-megabyte archive to get at the masks
+    // is most of a second, and that read has already happened once for the terrain.
+    // The scheme number is part of the key, so changing how surfaces are coloured retires
+    // every cached texture on its own. Without it a track keeps whatever colours it was first
+    // drawn with, and the change only shows on machines that had never opened it.
+    let key = stamp(&path.to_string_lossy())
+        .ok()
+        .map(|st| format!("{}:tex{max_dim}v{SURFACE_SCHEME}", cache_key(&path.to_string_lossy(), st)));
+    if let Some(f) = key.as_deref().and_then(|k| cache_file(app, k)) {
+        if let Ok(bytes) = std::fs::read(&f) {
+            if bytes.len() > TEXTURE_HEADER && bytes.starts_with(b"FTEX") {
+                return Some(bytes);
+            }
+        }
+    }
+
+    let built = build_surface_blob(path, max_dim)?;
+    if let Some(f) = key.as_deref().and_then(|k| cache_file(app, k)) {
+        if let Some(parent) = f.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&f, &built);
+    }
+    Some(built)
+}
+
+fn build_surface_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
     let names = entry_names(path).ok()?;
     let entry = heightfield_entries(&names).into_iter().next()?;
     let bytes = read_entry(path, &entry).ok()?;
@@ -507,32 +549,14 @@ pub fn overview_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
         return None;
     }
 
-    // Ranked by how much ground each covers, sampled rather than summed in full — a dozen
-    // masks of four million cells is a lot of adding to decide an ordering.
-    let mut ranked: Vec<(usize, u64)> = masks
-        .iter()
-        .enumerate()
-        .map(|(i, m)| {
-            let cells = m.width as usize * m.height as usize;
-            let total: u64 = (0..cells)
-                .step_by(97)
-                .filter_map(|c| block.get(m.at + c))
-                .map(|&v| v as u64)
-                .sum();
-            (i, total)
-        })
-        .collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1));
-    let mut rank_of = vec![0usize; masks.len()];
-    for (rank, (i, _)) in ranked.iter().enumerate() {
-        rank_of[*i] = rank;
-    }
-
     let src_w = masks[0].width as usize;
     let src_h = masks[0].height as usize;
     let scale = (src_w.max(src_h) as f32 / max_dim.max(1) as f32).ceil().max(1.0) as usize;
     let out_w = src_w.div_ceil(scale);
     let out_h = src_h.div_ceil(scale);
+    // At least two cells across even when drawing a mask at its own resolution, so the dither
+    // is resolved rather than reproduced.
+    let window = scale.max(2);
 
     // Bare dirt, for everything no surface was painted over.
     const BARE: [u8; 3] = [124, 96, 70];
@@ -540,23 +564,60 @@ pub fn overview_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
     let mut px = Vec::with_capacity(out_w * out_h * 4);
     for y in 0..out_h {
         for x in 0..out_w {
-            let mut best = 0u8;
+            // The surface that covers this cell most, at its own colour rather than mixed
+            // toward the bare ground beneath it. Weighting by coverage instead reads as
+            // honest and looks like mud: these masks are dithered, so even a patch meant to
+            // be solid grass averages to about half strength, and mixing that with dirt
+            // leaves the whole track a flat brown with nothing to pick features out by.
+            let mut best = 0u32;
             let mut colour = BARE;
             for (i, m) in masks.iter().enumerate() {
-                // Masks may differ in size from one another; sample each in its own space.
                 let mx = x * scale * m.width as usize / src_w.max(1);
                 let my = y * scale * m.height as usize / src_h.max(1);
-                let Some(&v) = block.get(m.at + my.min(m.height as usize - 1) * m.width as usize
-                    + mx.min(m.width as usize - 1))
-                else {
-                    continue;
-                };
+
+                // Averaged over a small window, never a single cell: a dithered mask stores a
+                // half-covered patch as cells alternating between nothing and everything, so
+                // one cell answers 0 or 255 where the truth is in between, and reading it
+                // straight turns every soft edge into salt and pepper.
+                let mut sum = 0u32;
+                let mut count = 0u32;
+                for dy in 0..window {
+                    for dx in 0..window {
+                        let sx = (mx + dx).min(m.width as usize - 1);
+                        let sy = (my + dy).min(m.height as usize - 1);
+                        if let Some(&v) = block.get(m.at + sy * m.width as usize + sx) {
+                            sum += v as u32;
+                            count += 1;
+                        }
+                    }
+                }
+                let v = if count == 0 { 0 } else { sum / count };
                 if v > best {
                     best = v;
-                    colour = surface_colour(rank_of[i]);
+                    colour = surface_colour(m.id);
                 }
             }
-            px.extend_from_slice(&colour);
+            // Only where genuinely nothing was painted does the bare ground show — that is
+            // the riding line, and it should read as dirt rather than as a gap.
+            if best < 10 {
+                colour = BARE;
+            }
+
+            // A little grain so ground reads as ground rather than as paint — gentle, and in
+            // patches rather than per cell. Single-cell noise is white noise: at any real
+            // zoom it stops reading as dirt and starts reading as broken pixels, and it
+            // fights the shading that the relief is supposed to be read by. Hashed from the
+            // patch so it is stable — the same track redrawn is the same dirt.
+            let n = {
+                let mut v = (x as u32 / 3).wrapping_mul(374_761_393)
+                    ^ (y as u32 / 3).wrapping_mul(668_265_263);
+                v ^= v >> 13;
+                v = v.wrapping_mul(1_274_126_177);
+                ((v >> 16 & 0xff) as f32 / 255.0 - 0.5) * 0.05
+            };
+            for k in 0..3 {
+                px.push((colour[k] as f32 * (1.0 + n)).clamp(0.0, 255.0) as u8);
+            }
             px.push(255);
         }
     }
@@ -858,7 +919,7 @@ mod tests {
             }
         }
 
-        match overview_blob(path, 1024) {
+        match build_surface_blob(path, 1024) {
             Some(b) => {
                 let w = u32::from_le_bytes(b[8..12].try_into().unwrap());
                 let h = u32::from_le_bytes(b[12..16].try_into().unwrap());
@@ -1008,15 +1069,26 @@ mod tests {
     }
 
     #[test]
-    fn every_rank_has_its_own_colour_and_ranks_beyond_the_last_still_answer() {
-        let all: Vec<[u8; 3]> = (0..SURFACE_RANK_COLOURS.len()).map(surface_colour).collect();
-        for (i, a) in all.iter().enumerate() {
-            for b in &all[i + 1..] {
-                assert_ne!(a, b, "two surfaces sharing a colour cannot be told apart");
+    fn each_named_surface_is_told_apart_from_the_others() {
+        // The six the table names, plus the riding line. Half of them are browns, and a
+        // track whose surfaces share a colour reads as one flat surface however correct
+        // each one is on its own.
+        let ids = [0u32, 1, 2, 3, 4, 5, 10];
+        for (n, &a) in ids.iter().enumerate() {
+            for &b in &ids[n + 1..] {
+                let (x, y) = (surface_colour(a), surface_colour(b));
+                let apart: i32 = (0..3).map(|k| (x[k] as i32 - y[k] as i32).abs()).sum();
+                assert!(apart > 40, "surfaces {a} and {b} look alike: {x:?} vs {y:?}");
             }
         }
-        // A track may paint more surfaces than there are colours; that must not panic.
-        assert_eq!(surface_colour(99), *SURFACE_RANK_COLOURS.last().unwrap());
+    }
+
+    #[test]
+    fn a_surface_the_file_does_not_name_still_gets_a_colour() {
+        // Ids past the table turn up on real tracks, and one that panicked or came back
+        // black would be worse than one that is merely approximate.
+        assert_ne!(surface_colour(200), [0, 0, 0]);
+        assert_eq!(surface_colour(200), surface_colour(201));
     }
 
     #[test]
@@ -1218,6 +1290,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+
+
+
 
 
 

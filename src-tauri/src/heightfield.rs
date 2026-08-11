@@ -692,18 +692,32 @@ pub fn read_grid(bytes: &[u8], layout: &Layout, max_dim: u32) -> (u32, u32, Vec<
     let w = layout.width as usize;
     let h = layout.height as usize;
     let size = layout.sample.size();
+    let max_dim = max_dim.max(1) as usize;
+    let longest = w.max(h);
 
-    let step = ((w.max(h) as f32) / max_dim.max(1) as f32).ceil().max(1.0) as usize;
-    let out_w = w.div_ceil(step);
-    let out_h = h.div_ceil(step);
+    // Exactly the size asked for, not the nearest whole-sample stride. A stride of one leaves
+    // a 2049-sample grid untouched while a stride of two halves it, so asking a heightfield
+    // for 2048 across used to hand back 1025 — every other sample dropped, and the lip of a
+    // jump with it. Sizing the blocks by ratio instead lands on the request however the grid
+    // divides.
+    let (out_w, out_h) = if longest <= max_dim {
+        (w, h)
+    } else {
+        (((w * max_dim) / longest).max(1), ((h * max_dim) / longest).max(1))
+    };
 
     let mut out = Vec::with_capacity(out_w * out_h);
     for oy in 0..out_h {
+        let y0 = oy * h / out_h;
+        let y1 = (((oy + 1) * h) / out_h).max(y0 + 1).min(h);
         for ox in 0..out_w {
+            let x0 = ox * w / out_w;
+            let x1 = (((ox + 1) * w) / out_w).max(x0 + 1).min(w);
+
             let mut total = 0.0f64;
             let mut count = 0usize;
-            for y in oy * step..((oy + 1) * step).min(h) {
-                for x in ox * step..((ox + 1) * step).min(w) {
+            for y in y0..y1 {
+                for x in x0..x1 {
                     let v = (layout.sample.read(bytes, layout.offset + (y * w + x) * size)
                         + layout.bias)
                         * layout.height_scale.unwrap_or(1.0);
@@ -1047,6 +1061,19 @@ mod tests {
         let max = grid.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         assert!(min >= full_min - 0.01 && max <= full_max + 0.01);
         assert!(max - min > (full_max - full_min) * 0.5);
+    }
+
+    #[test]
+    fn a_grid_is_read_at_the_size_asked_for() {
+        // 2049 is what every published track uses, and 2048 is the power of two under it.
+        // A whole-sample stride can only halve that, so this used to answer 1025 — half the
+        // samples thrown away before the viewer ever saw the terrain.
+        let heights = terrain(2049, 2049);
+        let bytes = with_header(&heights, &[]);
+        let layout = probe(&bytes, None).expect("a square grid should be recovered");
+        let (w, h, grid) = read_grid(&bytes, &layout, 2048);
+        assert_eq!((w, h), (2048, 2048));
+        assert_eq!(grid.len(), 2048 * 2048);
     }
 
     #[test]

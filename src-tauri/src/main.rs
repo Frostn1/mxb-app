@@ -746,12 +746,13 @@ async fn load_track_terrain(
 /// nothing here worth failing a view over.
 #[tauri::command]
 async fn load_track_overview(
+    app: tauri::AppHandle,
     path: String,
     max_dim: u32,
 ) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let blob =
-            track::overview_blob(std::path::Path::new(&path), max_dim).unwrap_or_default();
+        let blob = track::overview_blob(&app, std::path::Path::new(&path), max_dim)
+            .unwrap_or_default();
         tauri::ipc::Response::new(blob)
     })
     .await

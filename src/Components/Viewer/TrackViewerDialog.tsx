@@ -22,11 +22,12 @@ import { useT } from "../../i18n/context";
  * a transfer rather than another read of the archive.
  */
 const COARSE_DIM = 128;
-const FINE_DIM = 768;
+const FINE_DIM = 2048;
 
-/** The surface picture's longest edge. A track's own is rarely bigger, and past this the
+/** The surface picture's longest edge. Matches the masks' own 2048, so the surface is drawn
+ *  at the resolution the track painted it rather than at half of it. A track's own is rarely bigger, and past this the
  *  picture costs more to move than it adds to a terrain drawn at 320 samples across. */
-const OVERVIEW_DIM = 1024;
+const OVERVIEW_DIM = 2048;
 
 /** Metres. Below this, `[info] length` is a placeholder rather than a lap. */
 const MIN_PLAUSIBLE_LENGTH = 50;
@@ -78,20 +79,22 @@ export function TrackViewerDialog({
 
     void (async () => {
       try {
+        // Started before anything is awaited, so the archive read it needs overlaps the
+        // terrain's rather than following it.
+        const surface = loadTrackOverview(path, OVERVIEW_DIM).catch(() => null);
+
         const coarse = await loadTrackTerrain(path, COARSE_DIM);
         if (!alive) return;
         setTerrain(coarse);
         setLoading(false);
 
-        // Fetched once the terrain is up rather than alongside it: the track is on screen
-        // sooner, and a surface that never arrives leaves a working view rather than no view.
-        void loadTrackOverview(path, OVERVIEW_DIM)
-          .then((map) => alive && setOverview(map))
-          .catch(() => {});
-
         setRefining(true);
-        const fine = await loadTrackTerrain(path, FINE_DIM);
+        // Both together, and applied in one go: the mesh is built from the terrain *and*
+        // whether there's a surface to lay on it, so settling them separately would build a
+        // grid of a million-odd vertices twice and throw the first away.
+        const [fine, map] = await Promise.all([loadTrackTerrain(path, FINE_DIM), surface]);
         if (!alive) return;
+        setOverview(map);
         // Only an upgrade: a backend that capped the master below the fine size would
         // otherwise have us swap a grid for an identical one and rebuild the mesh for free.
         if (fine.width > coarse.width) setTerrain(fine);

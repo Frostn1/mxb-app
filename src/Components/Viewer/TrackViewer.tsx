@@ -47,6 +47,132 @@ function rampAt(t: number, out: THREE.Color): THREE.Color {
 }
 
 /**
+ * How sunk each sample is against the ground around it, as a brightness multiplier.
+ *
+ * A directional light can only shade a slope by which way it faces, so a rut running along
+ * the light and a ridge running along it are lit identically, and the hollows a track is
+ * actually made of come out flat. This measures each point against a blurred copy of the
+ * terrain — below its surroundings is a hollow, above is a ridge — which is the cheap
+ * standing-in for ambient occlusion, and on a heightfield it is most of what the eye reads
+ * as depth.
+ *
+ * Two separable box passes rather than a gathered kernel: the same answer for a couple of
+ * million samples in a few milliseconds instead of a few seconds.
+ */
+function cavityShade(heights: Float32Array, width: number, height: number): Float32Array {
+  const n = width * height;
+
+  // Blurred once tight and once wide, and read against both. One radius can only find
+  // hollows of one size: a wide blur sees the bowl a turn sits in and steps straight over a
+  // rut, a tight one finds the rut and cannot see the bowl at all. Together they give a track
+  // its shape at both scales, which is what the eye actually reads as depth.
+  const blur = (radius: number): Float32Array => {
+    const tmp = new Float32Array(n);
+    const out = new Float32Array(n);
+    for (let y = 0; y < height; y += 1) {
+      const row = y * width;
+      let total = 0;
+      let count = 0;
+      // Running sum: the window moves one sample at a time, so re-adding every cell of it
+      // would make a wide radius cost many times a tight one for no better answer.
+      for (let x = 0; x < width; x += 1) {
+        if (x === 0) {
+          for (let d = 0; d <= radius && d < width; d += 1) {
+            total += heights[row + d];
+            count += 1;
+          }
+        } else {
+          const add = x + radius;
+          const drop = x - radius - 1;
+          if (add < width) {
+            total += heights[row + add];
+            count += 1;
+          }
+          if (drop >= 0) {
+            total -= heights[row + drop];
+            count -= 1;
+          }
+        }
+        tmp[row + x] = total / count;
+      }
+    }
+    for (let x = 0; x < width; x += 1) {
+      let total = 0;
+      let count = 0;
+      for (let y = 0; y < height; y += 1) {
+        if (y === 0) {
+          for (let d = 0; d <= radius && d < height; d += 1) {
+            total += tmp[d * width + x];
+            count += 1;
+          }
+        } else {
+          const add = y + radius;
+          const drop = y - radius - 1;
+          if (add < height) {
+            total += tmp[add * width + x];
+            count += 1;
+          }
+          if (drop >= 0) {
+            total -= tmp[drop * width + x];
+            count -= 1;
+          }
+        }
+        out[y * width + x] = total / count;
+      }
+    }
+    return out;
+  };
+
+  const fine = blur(3);
+  const broad = blur(14);
+
+  // Each scale is measured against how much this track actually undulates at that scale, so
+  // a supercross floor and an alpine hillside both read rather than one washing out and the
+  // other going to soot.
+  let fineSpread = 0;
+  let broadSpread = 0;
+  let sampled = 0;
+  for (let i = 0; i < n; i += 7) {
+    fineSpread += Math.abs(heights[i] - fine[i]);
+    broadSpread += Math.abs(heights[i] - broad[i]);
+    sampled += 1;
+  }
+  fineSpread = fineSpread / sampled || 1;
+  broadSpread = broadSpread / sampled || 1;
+
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i += 1) {
+    const f = (heights[i] - fine[i]) / (fineSpread * 2.2);
+    const b = (heights[i] - broad[i]) / (broadSpread * 2.2);
+    // Hollows darken further than ridges brighten: light fills a dip from fewer directions
+    // than it leaves a rise, and an over-brightened ridge just looks chalky.
+    out[i] = Math.min(1.16, Math.max(0.42, 1 + f * 0.40 + b * 0.40));
+  }
+  return out;
+}
+
+/**
+ * The height band the colour ramp is spread across: the 2nd to 98th percentile of the grid.
+ *
+ * Sampled rather than fully sorted — a million heights is a lot of sorting to place a colour
+ * ramp, and every hundredth is plenty to find a percentile.
+ */
+function reliefBand(heights: Float32Array): [number, number] {
+  const step = Math.max(1, Math.floor(heights.length / 20000));
+  const sample: number[] = [];
+  for (let i = 0; i < heights.length; i += step) {
+    const v = heights[i];
+    if (Number.isFinite(v)) sample.push(v);
+  }
+  if (sample.length < 2) return [0, 1];
+  sample.sort((a, b) => a - b);
+  const lo = sample[Math.floor(sample.length * 0.02)];
+  const hi = sample[Math.floor(sample.length * 0.98)];
+  // A track genuinely flat across that band still has to get a ramp rather than a divide.
+  return hi > lo ? [lo, hi] : [sample[0], sample[sample.length - 1] || sample[0] + 1];
+}
+
+/**
  * Turn a height grid into a mesh.
  *
  * Written straight into typed arrays rather than through `PlaneGeometry` and a displacement
@@ -58,7 +184,7 @@ function rampAt(t: number, out: THREE.Color): THREE.Color {
  * relief is proportionate everywhere — a flat supercross floor still looks flatter than a
  * hillside, it is just not drawn so shallow that nothing casts a shadow.
  */
-function buildGeometry(terrain: TrackTerrain): THREE.BufferGeometry {
+function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGeometry {
   const { width, height, heights, metresPerSample, minHeight, maxHeight } = terrain;
 
   // Metres across the widest edge, and the units-per-metre that fits it to the view.
@@ -66,8 +192,15 @@ function buildGeometry(terrain: TrackTerrain): THREE.BufferGeometry {
   const unitsPerMetre = spanMetres > 0 ? VIEW_SPAN / spanMetres : 1;
   const step = metresPerSample * unitsPerMetre;
 
-  const relief = maxHeight - minHeight;
   const midHeight = (minHeight + maxHeight) / 2;
+
+  // The ramp is spread over where the ground actually is, not over its extremes. A track's
+  // full range is set by whatever sits at its edges — a boundary wall, a quarry face, one
+  // stray sample — and keying colour to that leaves the entire riding area inside a single
+  // band of the ramp, which is what made every track read as one flat brown.
+  const [rampLow, rampHigh] = reliefBand(heights);
+  const relief = rampHigh - rampLow;
+  const cavity = cavityShade(heights, width, height);
 
   const count = width * height;
   const positions = new Float32Array(count * 3);
@@ -92,10 +225,22 @@ function buildGeometry(terrain: TrackTerrain): THREE.BufferGeometry {
       positions[o + 1] = (metres - midHeight) * unitsPerMetre * RELIEF_EXAGGERATION;
       positions[o + 2] = y * step - originZ;
 
-      rampAt(relief > 0 ? (metres - minHeight) / relief : 0.5, colour);
-      colors[o] = colour.r;
-      colors[o + 1] = colour.g;
-      colors[o + 2] = colour.b;
+      // Vertex colour carries the cavity shading whether or not there is a texture: with
+      // one, three.js multiplies the two, so the surface keeps its own colours and gains the
+      // depth; without one, it darkens the elevation ramp the same way.
+      const shade = cavity[i];
+      if (textured) {
+        // Neutral: the surface picture already says what colour the ground is, and tinting
+        // it by elevation on top would report a height as a change of material.
+        colors[o] = shade;
+        colors[o + 1] = shade;
+        colors[o + 2] = shade;
+      } else {
+        rampAt(relief > 0 ? (metres - rampLow) / relief : 0.5, colour);
+        colors[o] = colour.r * shade;
+        colors[o + 1] = colour.g * shade;
+        colors[o + 2] = colour.b * shade;
+      }
 
       const u = i * 2;
       uvs[u] = width > 1 ? x / (width - 1) : 0;
@@ -146,7 +291,7 @@ function TerrainMesh({
   terrain: TrackTerrain;
   overview: TrackOverview | null;
 }) {
-  const geometry = useMemo(() => buildGeometry(terrain), [terrain]);
+  const geometry = useMemo(() => buildGeometry(terrain, overview != null), [terrain, overview]);
 
   // Built once per picture and handed to the GPU as-is. `sRGB` because it's artwork rather
   // than measurements: skipping that draws the whole track washed out.
@@ -178,12 +323,15 @@ function TerrainMesh({
   useEffect(() => invalidate(), [texture, geometry, invalidate]);
 
   return (
-    // No shadow casting: relief this size would need a huge shadow map to look like
-    // anything, and the directional key below already reads the terrain's shape.
-    <mesh geometry={geometry}>
+    // Both cast and receive: the terrain is the only thing in the scene, so every shadow it
+    // shows is its own — a jump face darkening the ground in front of it, a berm shading its
+    // own inside. That self-shadowing is most of what makes the relief read as ground.
+    <mesh geometry={geometry} castShadow receiveShadow>
       {/* Flat-ish and unshiny: dirt, and it keeps the relief legible rather than glared out.
-          With a map the height ramp steps aside — the two together would tint the picture by
-          elevation and misreport what the track's own artwork says. */}
+          Vertex colours stay on with a texture, because three.js multiplies the two: the
+          surface keeps the colours the track states while the cavity shading underneath gives
+          its hollows depth. Without a texture the same vertex colours carry the elevation
+          ramp instead. */}
       {/* Keyed on whether there's a texture, so the material is rebuilt rather than mutated
           when one arrives. Both taking a `map` and dropping `vertexColors` change the shader
           three.js compiles, and assigning them to a live material leaves it running the
@@ -192,7 +340,7 @@ function TerrainMesh({
       <meshStandardMaterial
         key={texture ? "textured" : "plain"}
         map={texture ?? undefined}
-        vertexColors={!texture}
+        vertexColors
         roughness={0.95}
         metalness={0}
       />
@@ -234,10 +382,13 @@ export function TrackViewer({ terrain, overview = null, className }: TrackViewer
       <ErrorBoundary compact label="track-viewer">
         <Canvas
           className="h-full w-full"
+          // Soft (PCF): a hard shadow map on ground this flat reads as speckle, because one
+          // of its texels covers about one triangle of a grid this fine.
+          shadows="soft"
           // Nothing in the scene animates, so a parked terrain costs no frames at all.
           frameloop="demand"
           dpr={[1, 1.5]}
-          camera={{ position: [0, 7.5, 11], fov: 45, near: 0.05, far: 200 }}
+          camera={{ position: [0, 7.5, 11], fov: 45, near: 0.01, far: 200 }}
           onCreated={({ gl, invalidate }) => {
             gl.domElement.addEventListener(
               "webglcontextlost",
@@ -255,8 +406,34 @@ export function TrackViewer({ terrain, overview = null, className }: TrackViewer
           <ambientLight intensity={0.5} />
           {/* Sky above, warm bounce below — enough to keep hollows from going solid black. */}
           <hemisphereLight args={[0xdfe8ff, 0x4a4133, 0.8]} />
-          {/* Low and to one side: relief reads by its shadows, and an overhead key flattens it. */}
-          <directionalLight position={[8, 6, 4]} intensity={1.15} />
+          {/* Low and to one side: relief reads by its shadows, and an overhead key flattens
+              it. This is the only light that casts — a second caster would double the cost to
+              soften shadows the fill light below already softens for free.
+              The shadow camera is bounded to the terrain's own span, which is fixed however
+              big the real track is, so the whole map fits one map at full precision. */}
+          <directionalLight
+            position={[8, 6, 4]}
+            intensity={1.15}
+            castShadow
+            // Four times the map over a box barely wider than the terrain: the tighter the
+            // camera and the denser the map, the smaller a shadow texel is against the
+            // triangles it has to resolve, which is what decides whether ground shadows
+            // itself into speckle.
+            shadow-mapSize={[4096, 4096]}
+            shadow-camera-left={-5.6}
+            shadow-camera-right={5.6}
+            shadow-camera-top={5.6}
+            shadow-camera-bottom={-5.6}
+            shadow-camera-near={0.5}
+            shadow-camera-far={40}
+            // Offsetting along the normal is what actually cures acne on a heightfield —
+            // there is no back face to push the comparison onto, so the sample has to be
+            // moved off the surface it is testing. About three triangles' worth: enough to
+            // clear a shadow texel several times over, and small enough that a jump's shadow
+            // still starts at the jump instead of floating clear of it.
+            shadow-normalBias={0.02}
+            shadow-bias={-0.0006}
+          />
           <directionalLight position={[-6, 3, -5]} intensity={0.4} />
           {terrain && <TerrainMesh terrain={terrain} overview={overview} />}
           <OrbitControls
@@ -264,8 +441,10 @@ export function TrackViewer({ terrain, overview = null, className }: TrackViewer
             enablePan
             screenSpacePanning={false}
             zoomToCursor
-            minDistance={1.5}
-            maxDistance={40}
+            // Close enough to put the camera on the dirt and read a single jump face, far
+            // enough to hold a 1 km circuit in frame.
+            minDistance={0.15}
+            maxDistance={60}
             // Stop the camera going under the ground, where the terrain is an unlit shell.
             maxPolarAngle={Math.PI / 2.05}
             target={[0, 0, 0]}

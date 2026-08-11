@@ -212,6 +212,18 @@ them up.
   it describes the ground all failed to separate a real photograph from a poster (extents of
   0.709 against 0.715). The masks need no such test: they are a byte per cell of the very grid
   being drawn, so they line up by construction.
+
+  Each surface takes the colour of the material the track names for it — the ids below six
+  index the table every track carries (asphalt, grass, sand, kerb, soil, concrete), so a farm's
+  fields come out as the soil they are and a grass circuit comes out green, rather than every
+  track being coloured by whichever surface happened to cover the most of it.
+- **The terrain is lit by its own hollows.** A directional light can only shade a slope by
+  which way it faces, so a rut running along the light and a ridge running along it were lit
+  identically and the shapes a track is made of came out flat. Every point is now measured
+  against a blurred copy of the terrain at two scales — tight enough to find a rut, wide
+  enough to see the bowl a turn sits in — and the result darkens hollows and lifts ridges.
+  The terrain also casts and receives real shadows now.
+
 ### Fixed
 - **Terrain below a track's datum is no longer drawn as a wall around it.** A `.trh` stores
   its samples *signed*, and they were read unsigned, so every point below the datum came out
@@ -226,9 +238,12 @@ them up.
   flipped — a left-hander read as a right-hander. It now goes through the same axis
   conversion every bike and rider model in the app already does (`edf::to_right_handed`),
   with the triangle winding turned to match so the ground is still lit from above.
-- **Terrain is drawn at the detail it was asked for.** A view reduced the grid by a whole
-  number of samples, so a request for 320 across a 410-sample master could only step by two
-  and drew 205 — one drawn square covering nearly three metres of ground, wider than the jump
+- **Terrain is drawn at the detail it was asked for — twice over.** Reductions moved by a
+  whole number of samples in two separate places, and both overshot. Reading a heightfield
+  into the master could only halve a 2049-sample grid asked for 2048, so the master was 1025
+  and half the file was thrown away before the viewer could ask for it. The same fault in the
+  view's own reduction meant a request for 320 across a 410-sample master could only step by
+  two and drew 205 — one drawn square covering nearly three metres of ground, wider than the jump
   faces and ruts it was meant to show. Reductions now land on the size requested, and the
   master itself is kept at twice the resolution. A track is drawn with roughly 3.7x the
   samples across it, and a drawn square covers under a metre.
