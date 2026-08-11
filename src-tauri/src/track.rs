@@ -394,83 +394,6 @@ pub const BLOB_HEADER: usize = 32;
 /// [`BLOB_HEADER`].
 pub const TEXTURE_HEADER: usize = 16;
 
-/// How far a texture's proportions may differ from the grid's and still be believed to cover
-/// the same ground. A map is drawn to the track's footprint, so it matches closely or it is
-/// not a map of it.
-const ASPECT_TOLERANCE: f32 = 0.02;
-
-/// The entry holding a picture of the track *as ground*, if the track ships one.
-///
-/// Tracks carry two picture slots in `[ui]`, and only one of them is a map: `pic` is the
-/// artwork shown while the track loads — a photograph, usually with the track's name across
-/// it — while `pic_info` is the overhead view. The ARL packs name them exactly that way,
-/// `track_image` against `track_map`.
-///
-/// An author who fills both slots with the same file has supplied artwork twice rather than
-/// a map, so that is read as having no map at all. Stretching a photograph of a truck over
-/// the terrain would be worse than the plain relief it replaced.
-fn overview_entry(names: &[String], ini: Option<&str>) -> Option<String> {
-    let text = ini?;
-    let value = |key: &str| -> Option<String> {
-        for line in text.lines() {
-            // Section headers and blanks are simply not `key = value` lines, so skip them
-            // rather than letting one end the search.
-            let Some((k, v)) = line.trim().split_once('=') else {
-                continue;
-            };
-            if k.trim().eq_ignore_ascii_case(key) {
-                let v = v.trim();
-                return (!v.is_empty()).then(|| v.to_string());
-            }
-        }
-        None
-    };
-
-    let map = value("pic_info")?;
-    if value("pic").is_some_and(|p| p.eq_ignore_ascii_case(&map)) {
-        return None;
-    }
-
-    // The `.ini` names the file, not its path inside the archive.
-    let want = map.to_ascii_lowercase();
-    names
-        .iter()
-        .find(|n| {
-            n.rsplit('/')
-                .next()
-                .unwrap_or(n)
-                .to_ascii_lowercase()
-                == want
-        })
-        .cloned()
-}
-
-/// Decode one named picture out of a track.
-///
-/// The format is taken from the entry's extension before the bytes are consulted, because a
-/// `.tga` can't be recognised any other way: TGA carries no leading magic, so guessing from
-/// content silently fails on every one of them — which would leave only the DDS tracks
-/// textured while looking like the maps simply weren't there.
-fn decode_overview(path: &Path, entry: &str) -> Option<image::DynamicImage> {
-    let bytes = read_entry(path, entry).ok()?;
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes));
-    match entry
-        .rsplit('.')
-        .next()
-        .and_then(image::ImageFormat::from_extension)
-    {
-        Some(format) => reader.set_format(format),
-        None => reader = reader.with_guessed_format().ok()?,
-    }
-    match reader.decode() {
-        Ok(img) => Some(img),
-        Err(e) => {
-            log::info!("track overview {entry} didn't decode: {e}");
-            None
-        }
-    }
-}
-
 /// Surface colours, in the order surfaces are ranked by how much of the track they cover.
 ///
 /// Keyed to rank rather than to the id in the file, because that id cannot be resolved to a
@@ -559,11 +482,18 @@ fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
 
 /// A picture of what the track is *made of*, built from its coverage masks.
 ///
-/// Every track carries these, including the ones that ship no overview picture at all, so
-/// this is what gives those a surface instead of a bare elevation ramp. Each cell takes the
-/// colour of whichever surface covers it most; cells nothing covers are left as bare dirt,
-/// which is exactly what the riding line is.
-fn surface_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
+/// The only source of ground colour, deliberately. Tracks also carry a picture in
+/// `[ui] pic_info`, and some are true overhead photographs — but others are branded posters,
+/// a diagram on a paper texture with a series logo across the bottom, and laid on the terrain
+/// that puts a logo on the dirt. Nothing in the file says which kind it is, and three
+/// different ways of asking the picture to prove it describes this ground all failed to
+/// separate them: structural correlation, top-decile overlap, and extent (0.709 against 0.715
+/// — a real photograph and a poster, indistinguishable). The masks need no such test, being a
+/// byte per cell of this very grid, so they line up by construction.
+///
+/// Each cell takes the colour of whichever surface covers it most; cells nothing covers are
+/// left as bare dirt, which is exactly what the riding line is.
+pub fn overview_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
     let names = entry_names(path).ok()?;
     let entry = heightfield_entries(&names).into_iter().next()?;
     let bytes = read_entry(path, &entry).ok()?;
@@ -638,59 +568,6 @@ fn surface_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
     out.extend_from_slice(&(out_w as u32).to_le_bytes());
     out.extend_from_slice(&(out_h as u32).to_le_bytes());
     out.extend_from_slice(&px);
-    Some(out)
-}
-
-/// A track's overview map, decoded and reduced, ready to lay over the terrain.
-///
-/// `None` — never an error — when the track has no map, when its map won't decode, or when
-/// what it names doesn't cover the same ground as the grid. Every one of those is a track
-/// that simply draws without a texture, which is what it did before.
-pub fn overview_blob(path: &Path, max_dim: u32, grid_aspect: f32) -> Option<Vec<u8>> {
-    // A picture of the track beats a diagram of it — the author's overhead view carries ruts
-    // and tyre marks that no colour-per-surface can. Only the tracks without one fall through
-    // to their coverage masks, and every track has those.
-    picture_blob(path, max_dim, grid_aspect).or_else(|| surface_blob(path, max_dim))
-}
-
-/// The track's own overhead picture, when it ships one drawn to the same ground as the grid.
-fn picture_blob(path: &Path, max_dim: u32, grid_aspect: f32) -> Option<Vec<u8>> {
-    let names = entry_names(path).ok()?;
-    let ini = ini_text(path, &names);
-    let entry = overview_entry(&names, ini.as_deref())?;
-
-    let img = decode_overview(path, &entry)?;
-
-    // Proportions are the check that this is a map *of this track*. A square picture over a
-    // grid twice as wide as it is tall would be drawn stretched across ground it never
-    // described, and it would look plausible while being fiction.
-    let aspect = img.width() as f32 / img.height().max(1) as f32;
-    if grid_aspect > 0.0 && (aspect / grid_aspect - 1.0).abs() > ASPECT_TOLERANCE {
-        log::info!(
-            "track overview {entry} is {}x{} ({aspect:.2}:1) but the grid is {grid_aspect:.2}:1 — not a map of this track",
-            img.width(),
-            img.height(),
-        );
-        return None;
-    }
-
-    let img = if img.width().max(img.height()) > max_dim {
-        img.thumbnail(max_dim, max_dim)
-    } else {
-        img
-    };
-    // RGBA rather than RGB: it's the only layout three.js still takes for a data texture,
-    // and four bytes a pixel keeps the block aligned so the app can read it in place.
-    let rgba = img.to_rgba8();
-    let (w, h) = (rgba.width(), rgba.height());
-
-    let mut out = Vec::with_capacity(TEXTURE_HEADER + (w * h * 4) as usize);
-    out.extend_from_slice(b"FTEX");
-    out.extend_from_slice(&1u16.to_le_bytes()); // version
-    out.extend_from_slice(&0u16.to_le_bytes()); // reserved, keeps the pixels aligned
-    out.extend_from_slice(&w.to_le_bytes());
-    out.extend_from_slice(&h.to_le_bytes());
-    out.extend_from_slice(rgba.as_raw());
     Some(out)
 }
 
@@ -955,46 +832,14 @@ mod tests {
         println!("{}", diagnose(Path::new(&path)));
     }
 
-    const UI_INI: &str = "[info]\nname = Test\n\n[ui]\npic = Thumb.tga\npic_info = TMa.tga\n";
 
-    #[test]
-    fn the_overview_map_is_taken_from_the_map_slot_not_the_loading_picture() {
-        let names = vec!["T/Thumb.tga".to_string(), "T/TMa.tga".to_string()];
-        assert_eq!(
-            overview_entry(&names, Some(UI_INI)).as_deref(),
-            Some("T/TMa.tga"),
-            "`pic` is the artwork shown while the track loads; `pic_info` is the overhead view",
-        );
-    }
 
-    #[test]
-    fn one_picture_in_both_slots_is_artwork_rather_than_a_map() {
-        // Briarcliff does exactly this — and its `Main.tga` is a photograph with the track's
-        // name painted across it, which over the terrain would be worse than no texture.
-        let ini = "[ui]\npic = Main.tga\npic_info = Main.tga\n";
-        let names = vec!["T/Main.tga".to_string()];
-        assert_eq!(overview_entry(&names, Some(ini)), None);
-    }
 
-    #[test]
-    fn a_track_that_names_no_map_has_none() {
-        let names = vec!["T/track_image.tga".to_string()];
-        assert_eq!(overview_entry(&names, Some("[ui]\npic = track_image.tga\n")), None);
-        assert_eq!(overview_entry(&names, Some("[ui]\npic_info =\n")), None);
-        assert_eq!(overview_entry(&names, None), None);
-    }
 
-    #[test]
-    fn a_named_map_that_isnt_in_the_archive_is_not_invented() {
-        let names = vec!["T/Thumb.tga".to_string()];
-        assert_eq!(overview_entry(&names, Some(UI_INI)), None);
-    }
-
-    /// Point this at a real track to see whether its overview map is found, decoded and
-    /// accepted as covering the same ground:
+    /// Point this at a real track to see the surfaces its height file paints:
     ///
     /// ```text
-    /// FROST_TRACK="…/SandPointMX.pkz" \
+    /// FROST_TRACK="…/Farm14.pkz" \
     ///   cargo test -- --ignored --nocapture read_a_real_overview
     /// ```
     #[test]
@@ -1002,42 +847,25 @@ mod tests {
     fn read_a_real_overview() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
         let path = Path::new(&path);
+
         let names = entry_names(path).unwrap();
-        let ini = ini_text(path, &names);
-        let slot = overview_entry(&names, ini.as_deref());
-        println!("map slot: {slot:?}");
-        // Its own proportions, so a rejection can be told apart from a decode that failed.
-        if let Some(e) = &slot {
-            match decode_overview(path, e) {
-                Some(img) => println!(
-                    "  decodes to {}x{} ({:.2}:1)",
-                    img.width(),
-                    img.height(),
-                    img.width() as f32 / img.height().max(1) as f32
-                ),
-                None => println!("  did not decode"),
+        if let Some(entry) = heightfield_entries(&names).into_iter().next() {
+            let bytes = read_entry(path, &entry).unwrap();
+            let gw = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+            let gh = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+            for (i, m) in coverage_masks(&bytes[12 + gw * gh * 2..]).iter().enumerate() {
+                println!("  surface {i}: id={} {}x{}", m.id, m.width, m.height);
             }
         }
 
-        let aspect = match decode_master(path) {
-            Ok(m) => m.info.source_width as f32 / m.info.source_height as f32,
-            Err(e) => {
-                println!("no terrain ({e:#}) — using 1.0");
-                1.0
-            }
-        };
-        match overview_blob(path, 1024, aspect) {
+        match overview_blob(path, 1024) {
             Some(b) => {
                 let w = u32::from_le_bytes(b[8..12].try_into().unwrap());
                 let h = u32::from_le_bytes(b[12..16].try_into().unwrap());
-                println!(
-                    "grid aspect {aspect:.2}:1 -> texture {w}x{h}, {} bytes ({} px)",
-                    b.len(),
-                    w * h
-                );
+                println!("texture {w}x{h}, {} bytes", b.len());
                 assert_eq!(b.len(), TEXTURE_HEADER + (w * h * 4) as usize);
             }
-            None => println!("grid aspect {aspect:.2}:1 -> no usable overview map"),
+            None => println!("no surfaces in this track"),
         }
     }
 

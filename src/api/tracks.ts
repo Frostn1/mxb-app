@@ -70,26 +70,18 @@ const TEXTURE_HEADER = 16;
 const TEXTURE_MAGIC = 0x58455446;
 
 /**
- * A track's overview map, to lay over its terrain.
+ * A picture of a track's surfaces, to lay over its terrain.
  *
- * `null` whenever the track hasn't got one that covers the same ground — most tracks ship
- * only loading artwork, and a few ship none at all. That's an ordinary outcome rather than a
- * failure: the terrain draws on its relief alone, exactly as it did before.
- *
- * `gridAspect` is the terrain's own width-over-height, which the backend uses to refuse a
- * picture drawn to different proportions than the ground it would be stretched over.
+ * Built from the coverage masks in the track's own height file — a byte per cell per surface
+ * the builder painted — so it describes exactly the ground the grid does. `null` when a track
+ * carries no masks, in which case the terrain draws on its relief alone.
  */
 export async function loadTrackOverview(
   path: string,
   maxDim: number,
-  gridAspect: number,
 ): Promise<TrackOverview | null> {
-  const buf = await invoke<ArrayBuffer>("load_track_overview", {
-    path,
-    maxDim,
-    gridAspect,
-  });
-  // The track simply hasn't got one.
+  const buf = await invoke<ArrayBuffer>("load_track_overview", { path, maxDim });
+  // The track simply hasn't got any.
   if (buf.byteLength === 0) return null;
 
   const view = new DataView(buf);

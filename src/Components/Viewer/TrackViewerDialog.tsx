@@ -24,7 +24,7 @@ import { useT } from "../../i18n/context";
 const COARSE_DIM = 128;
 const FINE_DIM = 768;
 
-/** The overview map's longest edge. A track's own is rarely bigger, and past this the
+/** The surface picture's longest edge. A track's own is rarely bigger, and past this the
  *  picture costs more to move than it adds to a terrain drawn at 320 samples across. */
 const OVERVIEW_DIM = 1024;
 
@@ -84,9 +84,8 @@ export function TrackViewerDialog({
         setLoading(false);
 
         // Fetched once the terrain is up rather than alongside it: the track is on screen
-        // sooner, and a map that never arrives leaves a working view rather than no view.
-        // Its own proportions are checked against the grid's, so this needs the grid first.
-        void loadTrackOverview(path, OVERVIEW_DIM, coarse.width / coarse.height)
+        // sooner, and a surface that never arrives leaves a working view rather than no view.
+        void loadTrackOverview(path, OVERVIEW_DIM)
           .then((map) => alive && setOverview(map))
           .catch(() => {});
 
@@ -134,6 +133,8 @@ export function TrackViewerDialog({
       ]);
     }
   }
+
+  if (overview) rows.push([t("trackViewer.surface"), t("trackViewer.surfaceMasks")]);
 
   // Nothing to load rather than something that failed — worth saying plainly, since the
   // inventory can tell us before the terrain read even finishes.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
@@ -172,6 +172,11 @@ function TerrainMesh({
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => () => texture?.dispose(), [texture]);
 
+  // The canvas only draws when asked, and the map arrives well after the terrain settled —
+  // so without this the texture sits on a material nothing ever repaints.
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => invalidate(), [texture, geometry, invalidate]);
+
   return (
     // No shadow casting: relief this size would need a huge shadow map to look like
     // anything, and the directional key below already reads the terrain's shape.
@@ -179,7 +184,13 @@ function TerrainMesh({
       {/* Flat-ish and unshiny: dirt, and it keeps the relief legible rather than glared out.
           With a map the height ramp steps aside — the two together would tint the picture by
           elevation and misreport what the track's own artwork says. */}
+      {/* Keyed on whether there's a texture, so the material is rebuilt rather than mutated
+          when one arrives. Both taking a `map` and dropping `vertexColors` change the shader
+          three.js compiles, and assigning them to a live material leaves it running the
+          program it was built with — the terrain keeps its elevation ramp and never shows the
+          picture at all. */}
       <meshStandardMaterial
+        key={texture ? "textured" : "plain"}
         map={texture ?? undefined}
         vertexColors={!texture}
         roughness={0.95}

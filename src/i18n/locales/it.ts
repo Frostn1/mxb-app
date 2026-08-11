@@ -1447,6 +1447,8 @@ export const it: Translation = {
   "trackViewer.loading": "Lettura del terreno…",
   "trackViewer.refining": "Definizione…",
   "trackViewer.grid": "Griglia",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Dislivello",
   "trackViewer.noTerrain": "Nessun terreno da mostrare",
   "trackViewer.noTerrainHint":

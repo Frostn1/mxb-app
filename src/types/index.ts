@@ -468,10 +468,10 @@ export interface TrackInfo {
 
 /** A track's terrain grid, unpacked from the binary IPC blob. */
 /**
- * A track's overview map — the overhead picture of the track, laid over the terrain.
+ * A picture of a track's surfaces, laid over the terrain.
  *
- * Only present when the track ships one drawn to the same proportions as its height grid;
- * most tracks carry loading artwork instead, which describes no ground at all.
+ * Built from the coverage masks in the track's own height file, so it describes exactly the
+ * ground the grid does.
  */
 export interface TrackOverview {
   width: number;

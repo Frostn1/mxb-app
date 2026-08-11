@@ -1446,6 +1446,8 @@ export const ptBR: Translation = {
   "trackViewer.loading": "Lendo o terreno…",
   "trackViewer.refining": "Refinando…",
   "trackViewer.grid": "Grade",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Desnível",
   "trackViewer.noTerrain": "Nenhum terreno para mostrar",
   "trackViewer.noTerrainHint":

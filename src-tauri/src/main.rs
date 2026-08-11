@@ -739,20 +739,19 @@ async fn load_track_terrain(
     .map_err(|e| format!("load_track_terrain task failed: {e}"))?
 }
 
-/// A track's overview map, to lay over its terrain.
+/// A picture of a track's surfaces, to lay over its terrain.
 ///
-/// Empty — not an error — when the track ships no map, or ships one that doesn't cover the
-/// same ground as its grid. A track without one draws on its relief alone, which is what
-/// every track did before this existed, so there is nothing here worth failing a view over.
+/// Empty — not an error — when the track's height file carries no coverage masks. That track
+/// draws on its relief alone, which is what every track did before this existed, so there is
+/// nothing here worth failing a view over.
 #[tauri::command]
 async fn load_track_overview(
     path: String,
     max_dim: u32,
-    grid_aspect: f32,
 ) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let blob = track::overview_blob(std::path::Path::new(&path), max_dim, grid_aspect)
-            .unwrap_or_default();
+        let blob =
+            track::overview_blob(std::path::Path::new(&path), max_dim).unwrap_or_default();
         tauri::ipc::Response::new(blob)
     })
     .await

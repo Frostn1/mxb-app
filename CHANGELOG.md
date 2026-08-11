@@ -200,18 +200,18 @@ them up.
 - **See a track's terrain in 3D.** Tracks were the one thing the library couldn't show you —
   a name, a preview and a size. The viewer now reads the heightfield out of a track and draws
   the ground, opening from the library detail view next to **View in 3D**.
-- **Every track is drawn with its surfaces, not just its shape.** A track's height file also
-  carries coverage masks — one per surface the builder painted, a byte per cell — and the
-  viewer now reads them, so grass, apron, hard standing and the dirt of the riding line each
-  get their own colour. This is what the five tracks that ship no overview picture get instead
-  of a bare elevation ramp; every track has these masks.
-- **Tracks are drawn with their own overview map.** Where a track ships an overhead picture of
-  itself, it's laid over the terrain, so the turns, ruts and jump faces read as the track
-  rather than as bare relief. A motocross track is only a few metres of relief across a few
-  hundred of ground, so shading alone was never going to show it. Taken from the `[ui]
-  pic_info` slot and only when it's a different file from `pic` and drawn to the same
-  proportions as the grid — a loading screen stretched over the ground would be fiction.
+- **Tracks are drawn with their surfaces, where the track says what they are.** A track's
+  height file can carry coverage masks — one per surface the builder painted, a byte per cell
+  — and the viewer reads them, so grass, apron, hard standing and the dirt of the riding line
+  each get their own colour. Tracks that carry no masks keep the elevation shading.
 
+  Tracks also ship a picture in `[ui] pic_info`, and that is deliberately *not* used. Some of
+  those are true overhead photographs, but others are branded posters — a diagram on a paper
+  texture with a series logo across the bottom — and laying one on the terrain puts a logo on
+  the dirt. Nothing in the file distinguishes them, and three ways of asking a picture to prove
+  it describes the ground all failed to separate a real photograph from a poster (extents of
+  0.709 against 0.715). The masks need no such test: they are a byte per cell of the very grid
+  being drawn, so they line up by construction.
 ### Fixed
 - **Terrain below a track's datum is no longer drawn as a wall around it.** A `.trh` stores
   its samples *signed*, and they were read unsigned, so every point below the datum came out

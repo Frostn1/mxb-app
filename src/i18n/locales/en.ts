@@ -1422,6 +1422,8 @@ export const en = {
   "trackViewer.loading": "Reading terrain…",
   "trackViewer.refining": "Sharpening…",
   "trackViewer.grid": "Grid",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Elevation range",
   "trackViewer.noTerrain": "No terrain to show",
   "trackViewer.noTerrainHint":
