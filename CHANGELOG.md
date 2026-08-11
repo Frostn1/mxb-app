@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-11
+
+### Added
+- **Kelso** credited on Settings → Supporters.
+
 ## 2026-08-10
 
 ### Added
