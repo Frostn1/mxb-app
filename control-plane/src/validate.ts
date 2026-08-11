@@ -259,3 +259,32 @@ export function isBootstrapStage(value: unknown): value is string {
   return /^[a-z0-9 :\-]+$/i.test(stage);
 }
 
+/**
+ * A mirrored content file name, as stored under `content/bikes/`.
+ *
+ * Becomes both an R2 key and a filename on a server's disk, so it is held to a plain name:
+ * no separators, no traversal, and the extension the game actually loads.
+ */
+export function isContentName(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const name = value.trim();
+  if (name.length === 0 || name.length > 128) return false;
+  if (/[/\\]/.test(name) || name.includes("..")) return false;
+  if (/[\u0000-\u001f\u007f]/.test(name)) return false;
+  return /\.pkz$/i.test(name);
+}
+
+/**
+ * A server key, as the app computes it: a registry id, or a normalized `host:port` for a
+ * server we do not run.
+ *
+ * Loose on purpose — it is an opaque grouping key, not an address anything dials — but still
+ * bounded and free of control characters, since it is stored and echoed back.
+ */
+export function isServerKey(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const key = value.trim();
+  if (key.length === 0 || key.length > 128) return false;
+  return !/[\u0000-\u001f\u007f]/.test(key);
+}
+

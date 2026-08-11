@@ -21,6 +21,7 @@ import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
   isBikeId,
   isBootstrapStage,
+  isContentName,
   isGuid,
   isPaintFileName,
   isPaintSize,
@@ -28,6 +29,7 @@ import {
   isPublicGameAddress,
   isRegion,
   isRelDest,
+  isServerKey,
   isRiderName,
   isServerName,
   isSha256,
@@ -82,6 +84,22 @@ async function route(request: Request, env: Env): Promise<Response> {
   // it is the same agent anyone can build from the public repository.
   if (method === "GET" && path === "/v1/agent.exe") return artifact(env, "artifacts/mxb-agent.exe");
 
+  // The bikes a provisioned server needs in order to accept the ones players ride.
+  //
+  // Unauthenticated for the same reason as the agent binary: a booting instance holds no
+  // credential and has no way to be given one. Nothing here is secret — it is the same
+  // content every client already has installed — and the listing is what lets the bootstrap
+  // stay ignorant of which bikes exist.
+  if (method === "GET" && path === "/v1/content/bikes") return listContent(env);
+  const content = /^\/v1\/content\/bikes\/(.+)$/.exec(path);
+  if (content && method === "GET") {
+    const name = decodeURIComponent(content[1]);
+    // Validated rather than trusted: this segment becomes an R2 key and then a filename on
+    // someone's disk.
+    if (!isContentName(name)) return json(400, { error: "not a content file" });
+    return artifact(env, `content/bikes/${name}`);
+  }
+
   // Enrollment is the one unauthenticated write: it trades an invite code for a token.
   // Steam sign-in will replace the invite code without changing anything downstream.
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
@@ -109,6 +127,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
+  if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
   if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
@@ -439,6 +458,21 @@ async function putPaint(request: Request, sha256: string, env: Env): Promise<Res
     await env.PAINTS.put(sha256, body);
   }
   return json(201, { ok: true, sha256, size: body.byteLength });
+}
+
+/**
+ * What bikes are mirrored, so a server can install them without being told the list.
+ *
+ * A dedicated server rejects any bike it does not itself have installed — which is why a
+ * freshly provisioned one refuses every rider on a mod bike. Mirroring the pack means a new
+ * server can be rideable the moment it boots rather than only for whoever owns stock content.
+ */
+async function listContent(env: Env): Promise<Response> {
+  const listed = await env.PAINTS.list({ prefix: "content/bikes/" });
+  const bikes = listed.objects
+    .map((o) => ({ name: o.key.slice("content/bikes/".length), size: o.size }))
+    .filter((b) => b.name.length > 0);
+  return json(200, { bikes, totalBytes: bikes.reduce((n, b) => n + b.size, 0) });
 }
 
 /**
@@ -1060,47 +1094,80 @@ async function connectedCount(
   }
 }
 
+/** How long a presence heartbeat counts for before the rider is treated as gone. */
+const PRESENCE_TTL_MS = 10 * 60 * 1000;
+
 /**
- * Every rider currently registered against a server, with what they are wearing.
+ * "I am on this server."
  *
- * This is what the app polls to know which paints to fetch. Until the agent reports live
- * rosters it returns the whole enrolled set, which on an invite-only server is close enough
- * to be useful and is a strict superset of who is actually on.
+ * Reported by the player's own app, which knows the server it launched into. That is what
+ * lets a roster mean one grid instead of every enrolled account — see `0008_presence.sql`.
+ *
+ * One row per account: a rider is in one place at a time, and the last thing they said wins.
+ */
+async function putPresence(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { serverId } = body as { serverId?: unknown };
+  if (!isServerKey(serverId)) return json(400, { error: "that isn't a server" });
+
+  await env.DB.prepare(
+    "INSERT INTO presence (account_id, server_id, updated_at) VALUES (?, ?, ?)" +
+      " ON CONFLICT(account_id) DO UPDATE SET server_id = excluded.server_id," +
+      " updated_at = excluded.updated_at",
+  )
+    .bind(account.id, (serverId as string).trim(), Date.now())
+    .run();
+  return json(200, { ok: true });
+}
+
+/**
+ * The riders on one server, and what they are wearing.
+ *
+ * This is what the app polls to know which paints to fetch. It is scoped to the riders whose
+ * apps have said they are on this server recently — previously it returned every enrolled
+ * account, because nothing recorded where anyone was, so every rider downloaded the paints of
+ * every other rider on the platform.
+ *
+ * A rider whose app has gone quiet for `PRESENCE_TTL_MS` drops out. Better to miss someone
+ * who is genuinely there — the next heartbeat brings them back within a minute — than to
+ * accumulate a grid of people who left hours ago.
  */
 async function roster(url: URL, env: Env): Promise<Response> {
   const serverId = url.searchParams.get("server");
   if (!serverId) return json(400, { error: "a server id is required" });
 
-  // DISTINCT on the destination: loadouts are per bike now, and gear repeats across every
-  // bike a rider owns, so the raw join returns the same helmet paint a dozen times over. The
-  // receiver installs by destination and de-duplicates anyway — doing it here keeps the
-  // response the size it was before bikes were separated.
+  // DISTINCT on the destination: loadouts are per bike, and gear repeats across every bike a
+  // rider owns, so the raw join returns the same helmet paint many times over. The receiver
+  // installs by destination and de-duplicates anyway.
   //
   // MIN(slot) only picks a stable representative for a destination two slots agree on; the
   // client keys on rel_dest, not on slot.
   const rows = await env.DB.prepare(
     "SELECT a.rider_name, a.guid, MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest" +
-      " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id" +
+      " FROM accounts a" +
+      " JOIN presence pr ON pr.account_id = a.id" +
+      " JOIN loadout_paints p ON p.account_id = a.id" +
+      " WHERE pr.server_id = ? AND pr.updated_at > ?" +
       " GROUP BY a.id, p.rel_dest, p.sha256",
-  ).all<{
-    rider_name: string;
-    guid: string | null;
-    slot: string;
-    file_name: string;
-    sha256: string;
-    size: number;
-    rel_dest: string;
-  }>();
+  )
+    .bind(serverId, Date.now() - PRESENCE_TTL_MS)
+    .all<{
+      rider_name: string;
+      guid: string | null;
+      slot: string;
+      file_name: string;
+      sha256: string;
+      size: number;
+      rel_dest: string;
+    }>();
 
   const riders = new Map<string, { riderName: string; guid: string | null; paints: unknown[] }>();
   for (const r of rows.results) {
-    // Re-checked on the way out as well as in. A row predating the validation, or one
-    // written by some future path that forgot it, must not reach a client that is about to
-    // turn it into a filesystem path.
+    // Re-checked on the way out as well as in. A row predating the validation, or one written
+    // by some future path that forgot it, must not reach a client that is about to turn it
+    // into a filesystem path.
     if (!isRelDest(r.rel_dest)) continue;
-    // Group by GUID where the account has claimed one — it is stable across name changes
-    // and cannot be taken by someone else. Name is the fallback for accounts that have not
-    // supplied a GUID yet, which is every account until the player has connected once.
     const key = r.guid ?? `name:${r.rider_name.toLowerCase()}`;
     let rider = riders.get(key);
     if (!rider) {

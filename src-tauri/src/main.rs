@@ -3576,6 +3576,7 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
         // Both directions, because Play is the last moment before either one matters: the
         // grid needs everyone else's paints on disk, and everyone else needs ours.
         publish_paints_soon(&app, &cfg, None);
+        live_sync_session(&app, None);
         // No address to aim at — they'll pick from the in-game browser — so this covers
         // the whole registry.
         sync_paints_soon(&app, None);
@@ -4026,6 +4027,62 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     });
 }
 
+/// How often to re-check the grid while a session is running.
+///
+/// A rider who joins after you did is invisible until the next pull, so this is the gap
+/// between someone arriving and their paint appearing. Short enough not to matter in a race,
+/// long enough that an unchanged roster — the overwhelmingly common answer — costs nothing.
+const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// How long to wait for the game to show up before giving up on a session.
+///
+/// MX Bikes takes a while to appear in the process list, and on a platform where we cannot
+/// see processes at all it never will. Either way, stopping is right: the launch pull has
+/// already run.
+const LIVE_SYNC_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// A session's worth of syncing, so a rider who arrives after you do still renders.
+///
+/// The pull used to happen once, at launch. That made the whole thing lopsided: whoever
+/// joined last saw everybody, and whoever was there first never saw anyone who turned up
+/// afterwards — they had pulled before those riders existed.
+///
+/// Runs until the game exits. Each pass also re-reports presence, which is what keeps this
+/// rider in other people's rosters; the control plane forgets anyone who goes quiet.
+fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        let mut seen_running = false;
+        loop {
+            tokio::time::sleep(LIVE_SYNC_EVERY).await;
+
+            let cfg = config::load_or_detect(&app).unwrap_or_default();
+            if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+                return;
+            }
+            // The game is the session. Once it has been seen and then gone, so are we.
+            if gameproc::is_game_running() {
+                seen_running = true;
+            } else if seen_running || started.elapsed() > LIVE_SYNC_STARTUP_GRACE {
+                log::info!("[sync] session over, stopping the live sync");
+                return;
+            }
+
+            match pull_rosters(&app, address.clone()).await {
+                // Only say so when something actually arrived: an unchanged grid is the
+                // common case and does not need announcing every 45 seconds.
+                Ok(o) if o.installed > 0 => {
+                    log::info!("[sync] {} new paints mid-session", o.installed);
+                    emit_sync(&app, SyncEvent::pulled(&o));
+                }
+                Ok(_) => {}
+                Err(e) => log::debug!("[sync] live pull failed: {e}"),
+            }
+        }
+    });
+}
+
 /// Pull the rosters for wherever the player is, or could be, riding.
 ///
 /// `address` narrows this to a single server when we know where they're headed. Without
@@ -4055,6 +4112,14 @@ async fn pull_rosters(
     };
     if keys.is_empty() {
         return Err("No servers to sync with yet.".into());
+    }
+
+    // Say where we are before asking who else is here: the roster is scoped by presence, so
+    // reporting first is what puts this rider into everyone else's grid too.
+    for key in &keys {
+        if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
+            log::debug!("[sync] couldn't report presence on {key}: {e:#}");
+        }
     }
 
     let outcome = paintsync::pull(&cfg, &cfg.cp_token, &keys)
@@ -4521,6 +4586,7 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
         publish_paints_soon(&app, &cfg, None);
+        live_sync_session(&app, Some(address.clone()));
         // We know exactly where they're going, so this syncs that server alone.
         sync_paints_soon(&app, Some(address));
     }

@@ -147,6 +147,31 @@ if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) {
   Move-Item -Path "$($inner.Directory.FullName)\\*" -Destination "${ROOT}\\game" -Force
 }
 
+# The bikes. A dedicated server refuses any bike it does not itself have installed, which is
+# why a freshly provisioned one rejects every rider on a mod bike -- the base install carries
+# only stock content. These are mirrored in R2 and listed by the control plane, so the box
+# fetches them itself at cloud speed rather than anyone uploading gigabytes from home.
+#
+# Best-effort: a server with no mod bikes is still a working server for stock ones, and is a
+# far better outcome than destroying the instance over content that can be added later.
+Send-Stage -Stage "installing bikes"
+try {
+  $bikesDir = "${ROOT}\\game\\mods\\bikes"
+  New-Item -ItemType Directory -Force -Path $bikesDir | Out-Null
+  $listing = Invoke-RestMethod -Uri "${input.controlPlaneUrl}/v1/content/bikes" -TimeoutSec 60
+  $count = 0
+  foreach ($bike in $listing.bikes) {
+    $dest = Join-Path $bikesDir $bike.name
+    & $curl -L --fail --silent --show-error --retry 3 --retry-delay 5 \`
+      -o $dest "${input.controlPlaneUrl}/v1/content/bikes/$($bike.name)"
+    if ($LASTEXITCODE -eq 0) { $count = $count + 1 }
+    else { Write-Output "couldn't fetch $($bike.name) (curl $LASTEXITCODE)" }
+  }
+  Write-Output "installed $count of $($listing.bikes.Count) bikes"
+} catch {
+  Write-Output "couldn't install the bike pack: $_"
+}
+
 Send-Stage -Stage "installing the agent"
 Write-Output "fetching the agent"
 Invoke-WebRequest -Uri "${input.agentUrl}" -OutFile "${ROOT}\\mxb-agent.exe" -UseBasicParsing
