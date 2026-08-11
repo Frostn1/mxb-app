@@ -56,11 +56,40 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
   return tex;
 }
 
+/**
+ * The map a mesh with nothing to wear gets — one shared instance, never written to.
+ *
+ * Shared rather than freshly built, because handing out a new empty `Map` is a *state change*
+ * as far as React is concerned, and the effect below would schedule the render that re-runs it.
+ */
+const NO_TEXTURES: Map<string, THREE.Texture> = new Map();
+
+/** The same, for the `textures` prop — a default of `[]` would be a new list per render. */
+const NO_PAINT_TEXTURES: PaintTexture[] = [];
+
+/**
+ * What a list of textures is, as far as this hook is concerned: the names it binds under and
+ * the pixels behind them.
+ *
+ * The effect below is keyed on this rather than on the array's identity, and that isn't a
+ * micro-optimisation — it's what stops the hook looping. A caller that builds its list inline,
+ * or leaves the prop off and takes the default, hands over a new array on every render; keyed
+ * on identity, the effect would re-run each time, `setMap` would schedule another render, and
+ * that render would re-run the effect. React ends that with "Maximum update depth exceeded".
+ */
+function texturesKey(textures: PaintTexture[]): string {
+  return textures.map((t) => `${t.name} ${t.token} ${t.width}x${t.height}`).join("\n");
+}
+
 function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
-  const [map, setMap] = useState<Map<string, THREE.Texture>>(new Map());
+  const [map, setMap] = useState<Map<string, THREE.Texture>>(NO_TEXTURES);
+  const key = texturesKey(textures);
   useEffect(() => {
     if (!textures.length) {
-      setMap(new Map());
+      // The same map every time, so an untextured mesh settles instead of re-rendering
+      // forever. `prev` is returned untouched when it is already empty, which is the bail-out
+      // React needs to stop scheduling work.
+      setMap((prev) => (prev.size ? NO_TEXTURES : prev));
       return;
     }
     let alive = true;
@@ -87,7 +116,10 @@ function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
       alive = false;
       settled?.forEach((tex) => tex.dispose());
     };
-  }, [textures]);
+    // `textures` is read through `key`: it changes exactly when the list's contents do, so the
+    // closure is never stale — and never re-run for an array that only *looks* new.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
   return map;
 }
 
@@ -955,7 +987,7 @@ export interface ModelViewerProps {
 export function ModelViewer({
   mode,
   texture,
-  textures = [],
+  textures = NO_PAINT_TEXTURES,
   overrides,
   frameToken,
   nodes,
