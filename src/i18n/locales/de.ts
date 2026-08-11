@@ -1468,7 +1468,6 @@ export const de: Translation = {
   "trackViewer.title": "Streckenvorschau",
   "trackViewer.loading": "Gelände wird gelesen…",
   "trackViewer.refining": "Wird verfeinert…",
-  "trackViewer.exaggeration": "Relief",
   "trackViewer.grid": "Raster",
   "trackViewer.relief": "Höhenunterschied",
   "trackViewer.noTerrain": "Kein Gelände zum Anzeigen",

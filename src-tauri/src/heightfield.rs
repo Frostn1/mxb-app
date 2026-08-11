@@ -72,6 +72,13 @@ pub struct Layout {
     /// `trh` when the file described itself, otherwise how the shape was inferred:
     /// `header` (numbers in the file), `ini` (a hint from the track) or `square`.
     pub source: &'static str,
+    /// Added to a raw sample before it is scaled.
+    ///
+    /// A `.trh` stores its samples *signed*, with the terrain's datum at zero, so half the
+    /// range is below it. Adding half the range back puts the grid where the game puts it —
+    /// verified against the marshal posts of two published tracks, whose stated ground
+    /// heights this reproduces to the centimetre.
+    pub bias: f32,
     /// Multiply a raw sample by this for metres. `None` when the file doesn't say, in which
     /// case the grid is in raw sample units and its relief means nothing in the world.
     pub height_scale: Option<f32>,
@@ -83,21 +90,26 @@ pub struct Layout {
 /// The magic that opens a real `.trh`.
 const TRH_MAGIC: &[u8; 4] = b"TRH\0";
 
+/// Half the 16-bit range, added back to a `.trh`'s signed samples. See [`Layout::bias`].
+const TRH_BIAS: f32 = 32768.0;
+
 /// Read MX Bikes' own heightfield layout, confirmed against a published track:
 ///
 /// ```text
 ///  0   "TRH\0"
 ///  4   u32   width
 ///  8   u32   height
-/// 12   u16 × width × height    raw samples spanning the height range
+/// 12   i16 × width × height    signed samples, the datum at zero
 ///  …   trailing block, opening with three floats: size x, relief, size z — all metres
 /// ```
 ///
 /// Worth having as its own reader rather than leaving to [`probe`], which cannot see it at
 /// all: the grid doesn't run to the end of the file, and the blind search derives the sample
 /// offset from the file's length precisely so that it never has to guess. It also can't
-/// know that the samples are a quantised range rather than metres, so it would report a
-/// track's relief as tens of thousands of units.
+/// know that the samples are a signed quantised range rather than metres, so it would report
+/// a track's relief as tens of thousands of units — and reading them unsigned puts every
+/// sample below the datum a full half-range too high, which draws the ground below a track
+/// as an eleven-metre wall around it.
 fn parse_trh(bytes: &[u8]) -> Option<Layout> {
     if bytes.len() < 12 || &bytes[..4] != TRH_MAGIC {
         return None;
@@ -117,7 +129,7 @@ fn parse_trh(bytes: &[u8]) -> Option<Layout> {
         offset: 12,
         width,
         height,
-        sample: Sample::U16,
+        sample: Sample::I16,
         source: "trh",
     };
     // A self-describing file is still measured. A header that says one thing while the body
@@ -131,9 +143,10 @@ fn parse_trh(bytes: &[u8]) -> Option<Layout> {
         offset: 12,
         width,
         height,
-        sample: Sample::U16,
+        sample: Sample::I16,
         confidence,
         source: "trh",
+        bias: TRH_BIAS,
         height_scale: scale.map(|(_, h)| h),
         metres_per_sample: scale.map(|(s, _)| s),
     })
@@ -186,6 +199,18 @@ const MAX_DIM: u32 = 8193;
 /// wrong guess is one rejected candidate, and a header this big is still cheap to skip.
 const MAX_HEADER: usize = 4096;
 
+/// The largest trailing block we'll believe sits after the samples. A real `.trh` carries
+/// one — its size and relief in metres — so a grid is not required to run to the end of its
+/// file. See [`seam`] for what makes that safe to allow.
+const MAX_TRAILER: usize = 4096;
+
+/// A row whose largest step is this many times its typical step has a discontinuity in it,
+/// not a slope.
+const SEAM_STEP_RATIO: f32 = 8.0;
+
+/// Rejected once this fraction of rows break at the same column.
+const MAX_SEAM_ROWS: f32 = 0.75;
+
 /// Roughness above this is noise, not terrain. Expressed as a fraction of the grid's own
 /// height spread, so it holds whether the track is a supercross floor or an alpine hillside.
 const MAX_ROUGHNESS: f32 = 0.12;
@@ -213,13 +238,14 @@ fn candidates(bytes: &[u8], hint: Option<(u32, u32)>) -> Vec<Candidate> {
     let len = bytes.len();
     let mut out = Vec::new();
 
-    // Any (width, height) we have reason to believe in, wherever it came from. For each one
-    // the sample block's size is known, so the header length is whatever is left over —
-    // which means we never have to guess where the samples start.
-    let mut dims: Vec<(u32, u32, &'static str)> = Vec::new();
+    // Any (width, height) we have reason to believe in, wherever it came from, and the byte
+    // just past whatever stated it — the samples most often start there.
+    let mut dims: Vec<(u32, u32, &'static str, Option<usize>)> = Vec::new();
 
     if let Some((w, h)) = hint {
-        dims.push((w, h, "ini"));
+        // An `.ini` is a separate file; it says nothing about where in *this* one the
+        // samples begin.
+        dims.push((w, h, "ini", None));
     }
 
     // A header that states its own dimensions almost always does so as two adjacent 32-bit
@@ -235,51 +261,58 @@ fn candidates(bytes: &[u8], hint: Option<(u32, u32)>) -> Vec<Candidate> {
             bytes[off + 7],
         ]);
         if (MIN_DIM..=MAX_DIM).contains(&w) && (MIN_DIM..=MAX_DIM).contains(&h) {
-            dims.push((w, h, "header"));
+            dims.push((w, h, "header", Some(off + 8)));
         }
     }
 
-    for (w, h, source) in dims {
+    for (w, h, source, stated_end) in dims {
         let count = w as usize * h as usize;
         for sample in [Sample::F32, Sample::U16, Sample::I16] {
             let Some(need) = count.checked_mul(sample.size()) else {
                 continue;
             };
-            // The samples are taken to run to the end of the file, which derives the header
-            // length exactly instead of guessing at it. Guessing is what it looks like it
-            // should do, and it can't: terrain read a few samples early is still smooth, so
-            // a wrong offset scores as well as the right one and there is nothing in the
-            // roughness to separate them. Deriving the offset admits exactly one answer.
-            // The cost is that a file with a *trailing* section wouldn't be recognised.
-            let Some(offset) = len.checked_sub(need) else {
-                continue;
-            };
-            if offset > MAX_HEADER {
-                continue;
+            // Two ways the block can sit in the file, and both are derived rather than
+            // guessed: it runs to the end, or it begins right after whatever stated the
+            // dimensions. A real `.trh` is the second — its size and relief are written
+            // after the samples, so requiring the grid to reach the end reads it 1566
+            // samples late. [`seam`] is what separates the two once both are on the table;
+            // the mean roughness cannot, which is why only one used to be offered.
+            let mut offsets = Vec::new();
+            if let Some(offset) = len.checked_sub(need) {
+                offsets.push(offset);
             }
-            out.push(Candidate {
-                offset,
-                width: w,
-                height: h,
-                sample,
-                source,
-            });
+            if let Some(start) = stated_end {
+                if start + need <= len && !offsets.contains(&start) {
+                    offsets.push(start);
+                }
+            }
+            for offset in offsets {
+                if offset > MAX_HEADER {
+                    continue;
+                }
+                out.push(Candidate {
+                    offset,
+                    width: w,
+                    height: h,
+                    sample,
+                    source,
+                });
+            }
         }
     }
 
     // Nothing stated the shape: try a square grid, which is what a terrain heightfield
-    // usually is. Every header length that leaves a perfect square of samples is a
-    // candidate, and the roughness test decides between them.
+    // usually is. Every header length that leaves room for a square of samples is a
+    // candidate, and the roughness and seam tests decide between them.
     for sample in [Sample::F32, Sample::U16, Sample::I16] {
         let size = sample.size();
         for offset in (0..=MAX_HEADER.min(len)).step_by(4) {
             let rest = len - offset;
-            if rest % size != 0 {
-                continue;
-            }
             let count = rest / size;
             let side = isqrt(count);
-            if side * side != count {
+            // The square needn't end at the file's last byte — what it doesn't fill is a
+            // trailing block, so long as that block is small enough to be one.
+            if rest - side * side * size > MAX_TRAILER {
                 continue;
             }
             let side = side as u32;
@@ -369,6 +402,88 @@ fn roughness(bytes: &[u8], c: &Candidate, stride: u32) -> Result<(f32, f32), &'s
     Ok(((diff_total / diff_count as f64) as f32, max - min))
 }
 
+/// How much of a *wrapped* read a candidate looks like: the fraction of rows whose largest
+/// step falls in the same column.
+///
+/// This is the measurement that lets the offset be searched rather than derived. A grid read
+/// at the wrong offset is the true terrain shifted by some samples, so every row spans the
+/// end of one true row and the start of the next, and every row carries one big step at the
+/// same column. Terrain doesn't do that: a real ridge doesn't sit in the same column of
+/// every row and dwarf everything around it.
+///
+/// The mean roughness can't see this — it samples a few dozen columns of a grid thousands
+/// wide, so it misses the seam entirely and averages away what it does catch. That is why a
+/// shifted read scores as well as the truth there, and why this is measured separately.
+///
+/// Every column of the sampled rows is scanned, because a seam is one column wide and
+/// subsampling would step straight over it.
+fn seam(bytes: &[u8], c: &Candidate) -> f32 {
+    let size = c.sample.size();
+    let w = c.width as usize;
+    let h = c.height as usize;
+    if w < 4 || h < 4 {
+        return 0.0;
+    }
+
+    let rows = h.min(8);
+    let row_step = (h / rows).max(1);
+
+    // Where each row broke, for rows that broke at all.
+    let mut breaks: Vec<usize> = Vec::new();
+    let mut examined = 0usize;
+
+    let mut y = 0usize;
+    while y < h && examined < rows {
+        examined += 1;
+        let base = y * w;
+        let mut total = 0.0f64;
+        let mut worst = f32::NEG_INFINITY;
+        let mut worst_at = 0usize;
+        let mut ok = true;
+
+        for x in 0..w - 1 {
+            let a = c.sample.read(bytes, c.offset + (base + x) * size);
+            let b = c.sample.read(bytes, c.offset + (base + x + 1) * size);
+            if !a.is_finite() || !b.is_finite() {
+                ok = false;
+                break;
+            }
+            let d = (a - b).abs();
+            total += d as f64;
+            if d > worst {
+                worst = d;
+                worst_at = x;
+            }
+        }
+
+        if ok && worst.is_finite() {
+            let mean = (total / (w - 1) as f64) as f32;
+            // A flat row has no worst step worth the name, and a row that is all step is
+            // noise rather than a seam. Neither votes.
+            if mean > 0.0 && worst >= mean * SEAM_STEP_RATIO {
+                breaks.push(worst_at);
+            }
+        }
+        y += row_step;
+    }
+
+    if examined == 0 || breaks.is_empty() {
+        return 0.0;
+    }
+
+    // The modal break column, allowing a column either side: a wrap seam lands in the same
+    // place every row, but the exact argmax can drift by one where the terrain is steep.
+    let mut best = 0usize;
+    for &col in &breaks {
+        let agree = breaks
+            .iter()
+            .filter(|&&other| other.abs_diff(col) <= 1)
+            .count();
+        best = best.max(agree);
+    }
+    best as f32 / examined as f32
+}
+
 /// What the roughness test made of a candidate.
 enum Assessment {
     /// Confidence 0–1, with the two measurements that produced it.
@@ -408,6 +523,11 @@ fn assess(bytes: &[u8], c: &Candidate) -> Assessment {
     if rough_y > MAX_ROUGHNESS {
         return Assessment::Rejected("rows aren't neighbours (wrong width)");
     }
+    // Last, because it costs a full row where the two above cost a sample of one, and a
+    // layout that fails either of them is not worth asking about alignment.
+    if seam(bytes, c) >= MAX_SEAM_ROWS {
+        return Assessment::Rejected("every row breaks in the same column (offset is shifted)");
+    }
 
     // How far inside the threshold it landed, worst axis first — a layout that only just
     // scraped in should not present itself as a confident read.
@@ -443,7 +563,7 @@ pub fn report(bytes: &[u8], hint: Option<(u32, u32)>) -> String {
     if let Some(l) = parse_trh(bytes) {
         let _ = writeln!(
             out,
-            "reads as a self-describing .trh: {}x{} u16 at 12, confidence {:.2}\n\
+            "reads as a self-describing .trh: {}x{} i16 at 12, confidence {:.2}\n\
              spacing {:?} m/sample, height scale {:?} m/unit",
             l.width, l.height, l.confidence, l.metres_per_sample, l.height_scale
         );
@@ -524,8 +644,9 @@ pub fn probe(bytes: &[u8], hint: Option<(u32, u32)>) -> Option<Layout> {
             sample: c.sample,
             confidence,
             source: c.source,
-            // Nothing inferred carries a scale: a grid recovered by its shape says nothing
-            // about the ground it covers or what its numbers mean.
+            // Nothing inferred carries a scale or a datum: a grid recovered by its shape
+            // says nothing about the ground it covers or what its numbers mean.
+            bias: 0.0,
             height_scale: None,
             metres_per_sample: None,
         };
@@ -583,7 +704,8 @@ pub fn read_grid(bytes: &[u8], layout: &Layout, max_dim: u32) -> (u32, u32, Vec<
             let mut count = 0usize;
             for y in oy * step..((oy + 1) * step).min(h) {
                 for x in ox * step..((ox + 1) * step).min(w) {
-                    let v = layout.sample.read(bytes, layout.offset + (y * w + x) * size)
+                    let v = (layout.sample.read(bytes, layout.offset + (y * w + x) * size)
+                        + layout.bias)
                         * layout.height_scale.unwrap_or(1.0);
                     if v.is_finite() {
                         total += v as f64;
@@ -643,8 +765,10 @@ mod tests {
         for v in &heights {
             // Quantised across the whole 16-bit range, which is what makes the trailing
             // block's relief figure the only thing that turns these back into metres.
-            let q = ((v - lo) / (hi - lo) * u16::MAX as f32) as u16;
-            bytes.extend_from_slice(&q.to_le_bytes());
+            // Stored the way a real file stores it: signed, so the bottom of the range is
+            // the most negative value rather than zero.
+            let q = ((v - lo) / (hi - lo) * u16::MAX as f32) as i32 - 32768;
+            bytes.extend_from_slice(&(q as i16).to_le_bytes());
         }
         bytes.extend_from_slice(footer);
         bytes
@@ -667,7 +791,7 @@ mod tests {
 
         assert_eq!(l.source, "trh", "it describes itself — nothing should be inferred");
         assert_eq!((l.width, l.height), (257, 257));
-        assert_eq!(l.sample, Sample::U16);
+        assert_eq!(l.sample, Sample::I16, "a .trh stores its samples signed");
         assert_eq!(l.offset, 12);
         // 250 m spread across 256 steps.
         assert!((l.metres_per_sample.unwrap() - 250.0 / 256.0).abs() < 1e-4);
@@ -676,7 +800,13 @@ mod tests {
         // point of reading the trailing block.
         let (_, _, grid) = read_grid(&bytes, &l, 512);
         let max = grid.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let min = grid.iter().copied().fold(f32::INFINITY, f32::min);
         assert!((max - 18.36).abs() < 0.05, "relief should be metres, got {max}");
+        // The samples are signed, so half of them are below the datum. Read unsigned they
+        // land a half-range high, which is what drew the ground below a track as a wall
+        // around it — the grid has to start at the datum, not at half the range.
+        assert!(min.abs() < 0.05, "the bottom of the range is the datum, got {min}");
+        assert!((max - min - 18.36).abs() < 0.05, "relief spans the stated height");
     }
 
     #[test]
@@ -724,6 +854,83 @@ mod tests {
         assert_eq!((layout.width, layout.height), (256, 256));
         assert_eq!(layout.offset, 0);
         assert_eq!(layout.sample, Sample::F32);
+    }
+
+    /// Terrain that drains one way, so its left edge and its right edge don't match. Real
+    /// ground rarely joins up across a row boundary; [`terrain`] happens to nearly do so,
+    /// which would hide the very discontinuity these tests are about.
+    fn ramped(w: u32, h: u32) -> Vec<f32> {
+        let mut out = terrain(w, h);
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                out[y * w as usize + x] += x as f32 / w as f32 * 40.0;
+            }
+        }
+        out
+    }
+
+    /// A grid that stops before the file does is still found where it sits.
+    ///
+    /// This is the shape of a real `.trh`: samples, then a small block stating the track's
+    /// size and relief. Reading the grid flush against the end of the file instead lands it
+    /// a row and a half late — smooth, plausible, and wrong.
+    #[test]
+    fn a_grid_that_ends_before_the_file_does_is_read_where_it_sits() {
+        let heights = ramped(96, 96);
+        let mut bytes = with_header(&heights, &[]);
+        bytes.extend_from_slice(&[7u8; 48]);
+
+        let layout = probe(&bytes, None).expect("a grid followed by a footer still reads");
+        assert_eq!(layout.offset, 0, "the grid starts at the top of the file");
+        assert_eq!((layout.width, layout.height), (96, 96));
+    }
+
+    /// The same, with the dimensions stated up front — the grid begins after them, not at
+    /// whatever offset makes it reach the last byte.
+    #[test]
+    fn stated_dimensions_are_read_from_the_front_when_a_footer_follows() {
+        let heights = ramped(160, 96);
+        let mut header = Vec::new();
+        header.extend_from_slice(&160u32.to_le_bytes());
+        header.extend_from_slice(&96u32.to_le_bytes());
+        let mut bytes = with_header(&heights, &header);
+        bytes.extend_from_slice(&[0u8; 64]);
+
+        let layout = probe(&bytes, None).expect("stated dimensions with a footer should read");
+        assert_eq!((layout.width, layout.height), (160, 96));
+        assert_eq!(layout.offset, 8, "samples begin right after the dimensions");
+        assert_eq!(layout.source, "header");
+    }
+
+    /// The measurement that lets the offset be searched at all: a read that starts in the
+    /// wrong place wraps mid-row, so every row breaks in the same column.
+    #[test]
+    fn a_shifted_read_breaks_in_the_same_column_every_row() {
+        let bytes = with_header(&ramped(128, 128), &[]);
+        let aligned = Candidate {
+            offset: 0,
+            width: 128,
+            height: 128,
+            sample: Sample::F32,
+            source: "square",
+        };
+        let shifted = Candidate {
+            offset: 40 * 4,
+            width: 128,
+            height: 128,
+            sample: Sample::F32,
+            source: "square",
+        };
+
+        assert!(seam(&bytes, &aligned) < MAX_SEAM_ROWS, "terrain read straight has no seam");
+        assert!(
+            seam(&bytes, &shifted) >= MAX_SEAM_ROWS,
+            "a read 40 samples late wraps in every row",
+        );
+        assert!(
+            matches!(assess(&bytes, &shifted), Assessment::Rejected(_)),
+            "and the scorer throws it out rather than drawing it",
+        );
     }
 
     #[test]

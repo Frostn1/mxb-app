@@ -1445,7 +1445,6 @@ export const ptBR: Translation = {
   "trackViewer.title": "Prévia da pista",
   "trackViewer.loading": "Lendo o terreno…",
   "trackViewer.refining": "Refinando…",
-  "trackViewer.exaggeration": "Relevo",
   "trackViewer.grid": "Grade",
   "trackViewer.relief": "Desnível",
   "trackViewer.noTerrain": "Nenhum terreno para mostrar",

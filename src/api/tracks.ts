@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { TrackInfo, TrackTerrain } from "../types";
+import type { TrackInfo, TrackOverview, TrackTerrain } from "../types";
 
 /**
  * A track's metadata and contents.
@@ -61,6 +61,50 @@ export async function loadTrackTerrain(
     // a copy — a 512² grid is a megabyte that never needs to be duplicated.
     heights: new Float32Array(buf, HEADER, width * height),
   };
+}
+
+/** Header bytes before the pixels. Mirrors `track::TEXTURE_HEADER`. */
+const TEXTURE_HEADER = 16;
+
+/** `"FTEX"`, the texture blob's leading magic. */
+const TEXTURE_MAGIC = 0x58455446;
+
+/**
+ * A track's overview map, to lay over its terrain.
+ *
+ * `null` whenever the track hasn't got one that covers the same ground — most tracks ship
+ * only loading artwork, and a few ship none at all. That's an ordinary outcome rather than a
+ * failure: the terrain draws on its relief alone, exactly as it did before.
+ *
+ * `gridAspect` is the terrain's own width-over-height, which the backend uses to refuse a
+ * picture drawn to different proportions than the ground it would be stretched over.
+ */
+export async function loadTrackOverview(
+  path: string,
+  maxDim: number,
+  gridAspect: number,
+): Promise<TrackOverview | null> {
+  const buf = await invoke<ArrayBuffer>("load_track_overview", {
+    path,
+    maxDim,
+    gridAspect,
+  });
+  // The track simply hasn't got one.
+  if (buf.byteLength === 0) return null;
+
+  const view = new DataView(buf);
+  if (buf.byteLength < TEXTURE_HEADER || view.getUint32(0, true) !== TEXTURE_MAGIC) {
+    throw new Error("track overview is not in the expected format");
+  }
+  const width = view.getUint32(8, true);
+  const height = view.getUint32(12, true);
+  const expected = width * height * 4;
+  if (buf.byteLength - TEXTURE_HEADER !== expected) {
+    throw new Error(
+      `track overview is ${buf.byteLength - TEXTURE_HEADER}B, expected ${expected}B`,
+    );
+  }
+  return { width, height, pixels: new Uint8Array(buf, TEXTURE_HEADER, expected) };
 }
 
 /**

@@ -194,6 +194,55 @@ them up.
   uses the same marker files the app's own library scanner keys on, and stops descending
   once it has found a track.
 
+## 2026-08-10
+
+### Added
+- **See a track's terrain in 3D.** Tracks were the one thing the library couldn't show you —
+  a name, a preview and a size. The viewer now reads the heightfield out of a track and draws
+  the ground, opening from the library detail view next to **View in 3D**.
+- **Every track is drawn with its surfaces, not just its shape.** A track's height file also
+  carries coverage masks — one per surface the builder painted, a byte per cell — and the
+  viewer now reads them, so grass, apron, hard standing and the dirt of the riding line each
+  get their own colour. This is what the five tracks that ship no overview picture get instead
+  of a bare elevation ramp; every track has these masks.
+- **Tracks are drawn with their own overview map.** Where a track ships an overhead picture of
+  itself, it's laid over the terrain, so the turns, ruts and jump faces read as the track
+  rather than as bare relief. A motocross track is only a few metres of relief across a few
+  hundred of ground, so shading alone was never going to show it. Taken from the `[ui]
+  pic_info` slot and only when it's a different file from `pic` and drawn to the same
+  proportions as the grid — a loading screen stretched over the ground would be fiction.
+
+### Fixed
+- **Terrain below a track's datum is no longer drawn as a wall around it.** A `.trh` stores
+  its samples *signed*, and they were read unsigned, so every point below the datum came out
+  a full half-range — eleven metres — too high. Tracks that sit entirely one side of it were
+  merely offset; ones that straddle it, like Farm14, were drawn as a plateau with the track
+  sunk in a pit and the jumps at the bottom of it. Confirmed against the marshal posts of two
+  published tracks: read signed, their stated ground heights come back to the centimetre
+  (SandPoint's median error is 0.000 m against 11.001 m read unsigned), and the 32768-unit
+  cliffs that wrapping left across three of four tracks disappear entirely.
+- **The track is no longer drawn mirrored.** The terrain was placed straight into the scene
+  while the game's frame is left-handed and the viewer's is not, so every track came out
+  flipped — a left-hander read as a right-hander. It now goes through the same axis
+  conversion every bike and rider model in the app already does (`edf::to_right_handed`),
+  with the triangle winding turned to match so the ground is still lit from above.
+- **Terrain is drawn at the detail it was asked for.** A view reduced the grid by a whole
+  number of samples, so a request for 320 across a 410-sample master could only step by two
+  and drew 205 — one drawn square covering nearly three metres of ground, wider than the jump
+  faces and ruts it was meant to show. Reductions now land on the size requested, and the
+  master itself is kept at twice the resolution. A track is drawn with roughly 3.7x the
+  samples across it, and a drawn square covers under a metre.
+- **The blind heightfield probe no longer reads a shifted grid.** It required the samples to
+  run to the last byte of the file, so a height file with a trailing block — which is what a
+  real `.trh` is — could only fit by treating that block as a header, landing the grid over
+  half a row late and reporting full confidence while doing it. Alignment is now measured
+  rather than assumed: a read that starts in the wrong place wraps mid-row, breaking every
+  row in the same column, and that is what the probe now looks for.
+- **Relief is drawn at a fixed, gentle exaggeration.** The 1×/2×/4× control is gone: 4×
+  stretched a track's boundary into spikes without making the track itself any clearer. What
+  replaces it is a single 1.5×, which is enough for a jump face to cast a shadow while the
+  ground still reads as ground.
+
 ## 2026-08-10 — v0.9.1 — The Designer paints, Play works on a Mac, and SteamOS stops opening to a white screen
 
 On top of v0.9.0 — everything that release added is still the news, and its notes are

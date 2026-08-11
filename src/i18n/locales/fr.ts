@@ -1460,7 +1460,6 @@ export const fr: Translation = {
   "trackViewer.title": "Aperçu du circuit",
   "trackViewer.loading": "Lecture du terrain…",
   "trackViewer.refining": "Affinage…",
-  "trackViewer.exaggeration": "Relief",
   "trackViewer.grid": "Grille",
   "trackViewer.relief": "Dénivelé",
   "trackViewer.noTerrain": "Aucun terrain à afficher",

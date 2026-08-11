@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, Loader2, Mountain, X } from "lucide-react";
 import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
-import { Segmented } from "../ui/segmented";
 import { Button } from "@/Components/ui/button";
 import { TrackViewer } from "./TrackViewer";
-import { diagnoseTrack, loadTrackTerrain, readTrackInfo } from "../../api/tracks";
-import type { TrackInfo, TrackTerrain } from "../../types";
+import {
+  diagnoseTrack,
+  loadTrackOverview,
+  loadTrackTerrain,
+  readTrackInfo,
+} from "../../api/tracks";
+import type { TrackInfo, TrackOverview, TrackTerrain } from "../../types";
 import { formatLength } from "../../lib/mods";
 import { useT } from "../../i18n/context";
 
@@ -17,13 +21,15 @@ import { useT } from "../../i18n/context";
  * come from the same cached master in the backend, so the second pass costs a resample and
  * a transfer rather than another read of the archive.
  */
-const COARSE_DIM = 96;
-const FINE_DIM = 320;
+const COARSE_DIM = 128;
+const FINE_DIM = 768;
+
+/** The overview map's longest edge. A track's own is rarely bigger, and past this the
+ *  picture costs more to move than it adds to a terrain drawn at 320 samples across. */
+const OVERVIEW_DIM = 1024;
 
 /** Metres. Below this, `[info] length` is a placeholder rather than a lap. */
 const MIN_PLAUSIBLE_LENGTH = 50;
-
-type Exaggeration = "1" | "2" | "4";
 
 interface TrackViewerDialogProps {
   open: boolean;
@@ -42,12 +48,12 @@ export function TrackViewerDialog({
   const t = useT();
   const [info, setInfo] = useState<TrackInfo | null>(null);
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
+  const [overview, setOverview] = useState<TrackOverview | null>(null);
   // True only until the *coarse* pass lands — the refine that follows happens under a
   // terrain that is already up, and covering it with a spinner would be a step backwards.
   const [loading, setLoading] = useState(false);
   const [refining, setRefining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [exaggeration, setExaggeration] = useState<Exaggeration>("1");
   // Only fetched when a track fails, and only when asked for — it re-reads the archive.
   const [diagnosis, setDiagnosis] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -58,6 +64,7 @@ export function TrackViewerDialog({
 
     setInfo(null);
     setTerrain(null);
+    setOverview(null);
     setError(null);
     setDiagnosis(null);
     setCopied(false);
@@ -75,6 +82,13 @@ export function TrackViewerDialog({
         if (!alive) return;
         setTerrain(coarse);
         setLoading(false);
+
+        // Fetched once the terrain is up rather than alongside it: the track is on screen
+        // sooner, and a map that never arrives leaves a working view rather than no view.
+        // Its own proportions are checked against the grid's, so this needs the grid first.
+        void loadTrackOverview(path, OVERVIEW_DIM, coarse.width / coarse.height)
+          .then((map) => alive && setOverview(map))
+          .catch(() => {});
 
         setRefining(true);
         const fine = await loadTrackTerrain(path, FINE_DIM);
@@ -142,19 +156,6 @@ export function TrackViewerDialog({
             )}
           </div>
           <div className="flex flex-none items-center gap-2">
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {t("trackViewer.exaggeration")}
-              <Segmented
-                size="sm"
-                value={exaggeration}
-                onChange={setExaggeration}
-                options={[
-                  { value: "1", label: "1×" },
-                  { value: "2", label: "2×" },
-                  { value: "4", label: "4×" },
-                ]}
-              />
-            </label>
             <DialogClose className="rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
               <X className="size-4" />
               <span className="sr-only">{t("common.close")}</span>
@@ -166,7 +167,7 @@ export function TrackViewerDialog({
           <div className="relative min-w-0 flex-1">
             <TrackViewer
               terrain={terrain}
-              exaggeration={Number(exaggeration)}
+              overview={overview}
               className="absolute inset-0"
             />
             {loading && !terrain && (

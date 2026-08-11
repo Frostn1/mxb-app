@@ -1421,7 +1421,6 @@ export const en = {
   "trackViewer.title": "Track preview",
   "trackViewer.loading": "Reading terrain…",
   "trackViewer.refining": "Sharpening…",
-  "trackViewer.exaggeration": "Relief",
   "trackViewer.grid": "Grid",
   "trackViewer.relief": "Elevation range",
   "trackViewer.noTerrain": "No terrain to show",
