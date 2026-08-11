@@ -1351,6 +1351,31 @@ export const de: Translation = {
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Postprocessing-Presets — wie {{game}} auf dem Bildschirm aussieht.",
 
+  // ── Logs ───────────────────────────────────────────────────────────────────
+  "settings.logs": "Logs",
+  "logs.desc":
+    "Die Dateien, die du schickst, wenn etwas schiefgeht. MXB App, FrostMod und {{game}} führen jeweils eigene — öffne den Ordner, den du brauchst, oder speichere alle als ein Zip für einen Fehlerbericht.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "Was die App selbst aufgezeichnet hat",
+  "logs.frostmodLogsDesc": "Was der Loader in seinen eigenen Ordner geschrieben hat",
+  "logs.gameLogsDesc": "Das Log des Spiels, neben seinen Dateien",
+  "logs.open": "Ordner öffnen",
+  "logs.save": "Logs speichern…",
+  "logs.saving": "Wird gespeichert…",
+  "logs.refresh": "Aktualisieren",
+  "logs.loading": "Wird gesucht…",
+  "logs.empty": "Hier gibt es noch keine Log-Dateien.",
+  "logs.folderMissing":
+    "Diesen Ordner gibt es nicht — es hat noch nichts ein Log hineingeschrieben.",
+  "logs.summary_one": "{{count}} Datei · {{size}} · neueste {{when}}",
+  "logs.summary_other": "{{count}} Dateien · {{size}} · neueste {{when}}",
+  "logs.saved": "Logs gespeichert",
+  "logs.savedDesc_one": "{{count}} Log-Datei, {{size}}",
+  "logs.savedDesc_other": "{{count}} Log-Dateien, {{size}}",
+  "logs.saveFailed": "Logs konnten nicht gespeichert werden",
+  "logs.privacy":
+    "Logs enthalten Ordnerpfade und was die App gerade getan hat — nie deine Passwörter oder Session-Cookies, und keine Einstellungsdatei ist dabei.",
+
   // ── Unterstützer (Buy Me a Coffee) ─────────────────────────────────────────
   "settings.supporters": "Unterstützer",
   "settings.supportersDesc":

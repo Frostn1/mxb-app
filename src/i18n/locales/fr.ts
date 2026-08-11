@@ -1342,6 +1342,31 @@ export const fr: Translation = {
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Préréglages de post-traitement — le rendu de {{game}} à l'écran.",
 
+  // ── Journaux ───────────────────────────────────────────────────────────────
+  "settings.logs": "Journaux",
+  "logs.desc":
+    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App, FrostMod et {{game}} ont chacun les leurs — ouvre le dossier qu'il te faut, ou enregistre le tout dans un zip à joindre à un rapport.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "Ce que l'app elle-même a enregistré",
+  "logs.frostmodLogsDesc": "Ce que le loader a écrit dans son propre dossier",
+  "logs.gameLogsDesc": "Le journal du jeu, à côté de ses fichiers",
+  "logs.open": "Ouvrir le dossier",
+  "logs.save": "Enregistrer les journaux…",
+  "logs.saving": "Enregistrement…",
+  "logs.refresh": "Actualiser",
+  "logs.loading": "Recherche…",
+  "logs.empty": "Aucun fichier de journal ici pour l'instant.",
+  "logs.folderMissing":
+    "Ce dossier n'existe pas — rien n'y a encore écrit de journal.",
+  "logs.summary_one": "{{count}} fichier · {{size}} · le plus récent {{when}}",
+  "logs.summary_other": "{{count}} fichiers · {{size}} · le plus récent {{when}}",
+  "logs.saved": "Journaux enregistrés",
+  "logs.savedDesc_one": "{{count}} fichier de journal, {{size}}",
+  "logs.savedDesc_other": "{{count}} fichiers de journal, {{size}}",
+  "logs.saveFailed": "Impossible d'enregistrer les journaux",
+  "logs.privacy":
+    "Les journaux contiennent des chemins de dossiers et ce que faisait l'app — jamais tes mots de passe ni tes cookies de session, et aucun fichier de réglages n'est inclus.",
+
   // ── Soutiens (Buy Me a Coffee) ─────────────────────────────────────────────
   "settings.supporters": "Soutiens",
   "settings.supportersDesc": "Les personnes qui font vivre MXB App sur Buy Me a Coffee.",
