@@ -60,6 +60,18 @@ mod ffi {
     pub const PROCESS_VM_WRITE: u32 = 0x0020;
     pub const PROCESS_VM_READ: u32 = 0x0010;
 
+    /// Enough to ask a process for its token, and the most an unelevated caller can be
+    /// granted on a process of its own user. Deliberately not `PROCESS_QUERY_INFORMATION`:
+    /// that one is refused across an integrity line for reasons of its own, which would
+    /// blur the very distinction [`super::steam_elevation_conflict`] reads out of it.
+    pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+
+    pub const TOKEN_QUERY: u32 = 0x0008;
+    /// `TokenElevation` in `TOKEN_INFORMATION_CLASS`.
+    pub const TOKEN_ELEVATION_CLASS: i32 = 20;
+
+    pub const ERROR_ACCESS_DENIED: u32 = 5;
+
     pub const WAIT_TIMEOUT_MS: u32 = 5_000;
 
     /// `SHQueryUserNotificationState` — a DirectX app owns the screen exclusively.
@@ -69,6 +81,39 @@ mod ffi {
 
     /// `ShowWindow` — un-minimize without changing the restored size/position.
     pub const SW_RESTORE: i32 = 9;
+    /// `ShellExecuteEx` — let the handler open the way it normally would.
+    pub const SW_SHOWNORMAL: i32 = 1;
+
+    /// We aren't pumping messages on this thread; without it the shell can return before
+    /// it has finished with the string buffers we lent it.
+    pub const SEE_MASK_NOASYNC: u32 = 0x0000_0100;
+
+    /// `TOKEN_ELEVATION` — one `BOOL`, non-zero when the token is an elevated one.
+    #[repr(C)]
+    pub struct TokenElevation {
+        pub token_is_elevated: u32,
+    }
+
+    /// `SHELLEXECUTEINFOW`. Field order and the two implicit padding slots (after
+    /// `n_show` and after `dw_hot_key`) match the Win32 x64 layout under `repr(C)`.
+    #[repr(C)]
+    pub struct ShellExecuteInfoW {
+        pub cb_size: u32,
+        pub f_mask: u32,
+        pub hwnd: Handle,
+        pub lp_verb: *const u16,
+        pub lp_file: *const u16,
+        pub lp_parameters: *const u16,
+        pub lp_directory: *const u16,
+        pub n_show: i32,
+        pub h_inst_app: Handle,
+        pub lp_id_list: *mut c_void,
+        pub lp_class: *const u16,
+        pub hkey_class: Handle,
+        pub dw_hot_key: u32,
+        pub h_icon_or_monitor: Handle,
+        pub h_process: Handle,
+    }
 
     #[repr(C)]
     pub struct ProcessEntry32 {
@@ -117,6 +162,21 @@ mod ffi {
         pub fn WaitForSingleObject(handle: Handle, ms: u32) -> u32;
         pub fn CloseHandle(handle: Handle) -> i32;
         pub fn GetCurrentProcessId() -> u32;
+        /// A pseudo-handle for our own process — a constant, not a handle to close.
+        pub fn GetCurrentProcess() -> Handle;
+        pub fn GetLastError() -> u32;
+    }
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        pub fn OpenProcessToken(process: Handle, access: u32, token: *mut Handle) -> i32;
+        pub fn GetTokenInformation(
+            token: Handle,
+            class: i32,
+            info: *mut c_void,
+            len: u32,
+            out_len: *mut u32,
+        ) -> i32;
     }
 
     /// `EnumWindows` callback: return 0 to stop the walk, non-zero to continue.
@@ -146,6 +206,7 @@ mod ffi {
     #[link(name = "shell32")]
     extern "system" {
         pub fn SHQueryUserNotificationState(state: *mut i32) -> i32;
+        pub fn ShellExecuteExW(info: *mut ShellExecuteInfoW) -> i32;
     }
 
     /// Compare a fixed-size NUL-padded ANSI field against `name`, case-insensitively.
@@ -161,9 +222,9 @@ mod ffi {
     }
 }
 
-/// Find the PID of the running game, if any.
+/// Find the PID of a running process by executable name, if any.
 #[cfg(windows)]
-fn find_game_pid() -> Option<u32> {
+fn find_pid(exe_name: &str) -> Option<u32> {
     // SAFETY: standard Toolhelp process walk; we close the snapshot handle before
     // returning and only read fields the API populated.
     unsafe {
@@ -176,7 +237,7 @@ fn find_game_pid() -> Option<u32> {
         let mut pid = None;
         if ffi::Process32First(snap, &mut entry) != 0 {
             loop {
-                if ffi::field_eq_ignore_case(&entry.sz_exe_file, crate::game::active().exe) {
+                if ffi::field_eq_ignore_case(&entry.sz_exe_file, exe_name) {
                     pid = Some(entry.th32_process_id);
                     break;
                 }
@@ -188,6 +249,12 @@ fn find_game_pid() -> Option<u32> {
         ffi::CloseHandle(snap);
         pid
     }
+}
+
+/// Find the PID of the running game, if any.
+#[cfg(windows)]
+fn find_game_pid() -> Option<u32> {
+    find_pid(crate::game::active().exe)
 }
 
 /// Runtime base address of `mxbikes.exe` in `pid` (retries transient snapshot failures).
@@ -469,13 +536,180 @@ fn resolve_exe(cfg: &AppConfig) -> anyhow::Result<(std::path::PathBuf, std::path
     Ok((dir, exe))
 }
 
+/// The Steam client's own executable.
+#[cfg(windows)]
+const STEAM_EXE: &str = "steam.exe";
+
+/// Did Steam install this copy of the game?
+///
+/// The path alone decides it. A Steam library can sit on any drive under any name, but
+/// every install inside one lands under `steamapps/common`, and nothing else puts a game
+/// there.
+///
+/// Deliberately *not* also sniffing for `steam_api64.dll` beside the exe, which would
+/// catch the rarer case of a Steam copy moved out of its library: the standalone build
+/// PiBoSo sells direct can carry the same Steam library, and reading that as a Steam copy
+/// would hand Play to a Steam that doesn't own the game. The two mistakes aren't
+/// symmetrical — missing a Steam copy costs nothing but the old behaviour, while claiming
+/// one wrongly leaves Play doing nothing at all.
+// Only the Windows arm picks a route, but the tests cover this on every platform.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn steam_owned(dir: &std::path::Path) -> bool {
+    dir.components().any(|c| c.as_os_str().eq_ignore_ascii_case("steamapps"))
+}
+
+/// The `steam://` URL that asks Steam to start the game, connect flag and all.
+///
+/// Launch arguments go after a `//` separator, space-separated. The separator is
+/// percent-encoded because the whole thing is a URL and a raw space is not one — and it
+/// is the only thing that needs encoding, since [`parse_server_address`] has already
+/// limited the address to characters a URL carries as they are.
+// Windows and Linux both hand Steam a URL; macOS goes through Wine and never does.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn steam_url(appid: &str, address: Option<&str>) -> String {
+    match address {
+        Some(addr) => format!("steam://rungameid/{appid}//{}", connect_args(addr).join("%20")),
+        None => format!("steam://rungameid/{appid}"),
+    }
+}
+
+#[cfg(windows)]
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Hand `url` to whichever program Windows has registered for its scheme.
+#[cfg(windows)]
+fn shell_open(url: &str) -> anyhow::Result<()> {
+    let verb = wide("open");
+    let file = wide(url);
+    let mut info = ffi::ShellExecuteInfoW {
+        cb_size: std::mem::size_of::<ffi::ShellExecuteInfoW>() as u32,
+        f_mask: ffi::SEE_MASK_NOASYNC,
+        hwnd: std::ptr::null_mut(),
+        lp_verb: verb.as_ptr(),
+        lp_file: file.as_ptr(),
+        lp_parameters: std::ptr::null(),
+        lp_directory: std::ptr::null(),
+        n_show: ffi::SW_SHOWNORMAL,
+        h_inst_app: std::ptr::null_mut(),
+        lp_id_list: std::ptr::null_mut(),
+        lp_class: std::ptr::null(),
+        hkey_class: std::ptr::null_mut(),
+        dw_hot_key: 0,
+        h_icon_or_monitor: std::ptr::null_mut(),
+        h_process: std::ptr::null_mut(),
+    };
+    // SAFETY: `info` is a correctly sized, fully initialised SHELLEXECUTEINFOW whose
+    // string pointers refer to NUL-terminated buffers that outlive the call —
+    // `SEE_MASK_NOASYNC` is what makes that last part true off a message-pumping thread.
+    // We ask for no process handle back, so there is none to close.
+    if unsafe { ffi::ShellExecuteExW(&mut info) } == 0 {
+        let err = unsafe { ffi::GetLastError() };
+        anyhow::bail!("Windows wouldn't open {url} (error {err})");
+    }
+    Ok(())
+}
+
+/// Is the token elevated? `None` when Windows won't say.
+///
+/// SAFETY: `process` must be a live process handle opened with at least
+/// `PROCESS_QUERY_LIMITED_INFORMATION`. The token handle we open here is closed before
+/// returning; `process` is the caller's to close.
+#[cfg(windows)]
+unsafe fn token_elevated(process: ffi::Handle) -> Option<bool> {
+    let mut token: ffi::Handle = std::ptr::null_mut();
+    if ffi::OpenProcessToken(process, ffi::TOKEN_QUERY, &mut token) == 0 {
+        return None;
+    }
+    let mut elevation = ffi::TokenElevation { token_is_elevated: 0 };
+    let mut written = 0u32;
+    let ok = ffi::GetTokenInformation(
+        token,
+        ffi::TOKEN_ELEVATION_CLASS,
+        &mut elevation as *mut ffi::TokenElevation as *mut std::os::raw::c_void,
+        std::mem::size_of::<ffi::TokenElevation>() as u32,
+        &mut written,
+    ) != 0;
+    ffi::CloseHandle(token);
+    ok.then(|| elevation.token_is_elevated != 0)
+}
+
+/// Why Steam is about to refuse us, when it is.
+///
+/// Steam will not start a game for a program running at a different Windows integrity
+/// level. The request comes back `ERROR_ACCESS_DENIED`, and what the player sees is
+/// Steam's own "Access is denied. (0x5)" box — never anything we said. Worth naming
+/// *before* we ask, because both routes to a Steam copy end at that same dialog: the
+/// URL, and the exe, whose Steam layer hands itself back to the client anyway.
+///
+/// `None` when the two agree, when Steam isn't up (the shell starts it at our own level),
+/// or when Windows won't tell us — a guess here would be worse than the dialog.
+#[cfg(windows)]
+fn steam_elevation_conflict() -> Option<&'static str> {
+    const WE_ARE_ELEVATED: &str = "MXB App is running as administrator and Steam isn't. \
+        Steam refuses to start a game for a program above it, and that refusal is the \
+        \"Access is denied. (0x5)\" box. Close MXB App and start it normally — or run \
+        Steam as administrator too — then press Play again.";
+    const STEAM_IS_ELEVATED: &str = "Steam is running as administrator and MXB App isn't, \
+        so Steam won't take a launch from us — the refusal comes back as \"Access is \
+        denied. (0x5)\". Restart Steam normally — or run MXB App as administrator too — \
+        then press Play again.";
+
+    let pid = find_pid(STEAM_EXE)?;
+    // SAFETY: `GetCurrentProcess` hands back a pseudo-handle to ourselves, which is a
+    // constant rather than a handle to close.
+    let ours = unsafe { token_elevated(ffi::GetCurrentProcess()) }?;
+
+    // SAFETY: the handle is opened for a query-only right and closed on every path out.
+    let theirs = unsafe {
+        let proc = ffi::OpenProcess(ffi::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if proc.is_null() {
+            // A process of our own user that we may not even look at is one sitting above
+            // us — which only leaves elevation, and only when we're the unelevated one.
+            // Any other failure (Steam exited between the walk and here) says nothing.
+            if ours || ffi::GetLastError() != ffi::ERROR_ACCESS_DENIED {
+                return None;
+            }
+            Some(true)
+        } else {
+            let elevated = token_elevated(proc);
+            ffi::CloseHandle(proc);
+            elevated
+        }
+    }?;
+
+    (ours != theirs).then_some(if ours { WE_ARE_ELEVATED } else { STEAM_IS_ELEVATED })
+}
+
+/// Turn a refused `CreateProcess` into something the player can act on.
+///
+/// `PermissionDenied` is Windows' `ERROR_ACCESS_DENIED`, the 0x5 that antivirus and
+/// folder permissions produce. None of it is ours to fix, so the message names where it
+/// comes from rather than only repeating the number.
+#[cfg(windows)]
+fn spawn_error(exe: &std::path::Path, err: &std::io::Error) -> anyhow::Error {
+    if err.kind() == std::io::ErrorKind::PermissionDenied {
+        return anyhow::anyhow!(
+            "Windows refused to start {} — access denied (0x5). Something outside the game \
+             is blocking it: add the install folder to your antivirus / Windows Security \
+             exclusions, and check the folder isn't one your account can only read. \
+             Starting the game straight from Explorer hits the same block, which is the \
+             quickest way to confirm it isn't MXB App.",
+            exe.display()
+        );
+    }
+    anyhow::anyhow!("Couldn't start {}: {err}", exe.display())
+}
+
 /// Start MX Bikes, unless it's already running.
 ///
-/// Windows runs the exe directly rather than going through `steam://`: that works for
-/// standalone (non-Steam) copies too, and doesn't need Steam to be up. Under Proton the
-/// exe isn't ours to spawn — Steam has to set up the prefix — so Linux hands the Steam
-/// URL to the desktop instead. macOS runs the exe too, but through the Wine wrapper that
-/// owns the prefix it lives in (see [`crate::winehost`]).
+/// A Steam copy is Steam's to start, on Windows as much as on Linux — see [`launch_with`].
+/// A standalone (non-Steam) copy has nobody to ask, so Windows runs its exe directly and
+/// needs no Steam to be up. Under Proton the exe isn't ours to spawn at all — Steam has to
+/// set up the prefix — so Linux always hands the Steam URL to the desktop. macOS runs the
+/// exe too, but through the Wine wrapper that owns the prefix it lives in (see
+/// [`crate::winehost`]).
 pub fn launch(cfg: &AppConfig) -> anyhow::Result<LaunchOutcome> {
     launch_with(cfg, None)
 }
@@ -560,6 +794,28 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
 
     #[cfg(windows)]
     {
+        // Running a Steam copy's exe ourselves does work — the build's Steam layer hands
+        // itself straight back to the client — but it puts us on the path a launch has to
+        // survive, and that path is where the "Access is denied. (0x5)" reports come from:
+        // security software vetoing *our* CreateProcess of a game exe, or an install
+        // folder this account may read and not execute out of. Asking Steam to start its
+        // own game takes us out of it, and gets the playtime counted besides.
+        if steam_owned(&dir) {
+            // Not a fallback: while the integrity line is crossed nothing we spawn will
+            // work, and running the exe would only move the same refusal into a dialog
+            // that doesn't say who to blame.
+            if let Some(reason) = steam_elevation_conflict() {
+                anyhow::bail!("{reason}");
+            }
+            let url = steam_url(cfg.game().steam_appid, address);
+            match shell_open(&url) {
+                Ok(()) => return Ok(LaunchOutcome::Launched),
+                // A Steam whose own URL scheme isn't registered is a broken install, not a
+                // reason to leave Play dead — the exe is still sitting right there.
+                Err(e) => log::warn!("{e:#}; running {} directly instead", exe.display()),
+            }
+        }
+
         // No CREATE_NO_WINDOW here (unlike the headless FrostMod child) — the game
         // draws its own window and hiding the console would gain nothing.
         let mut cmd = std::process::Command::new(&exe);
@@ -567,21 +823,16 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
         if let Some(addr) = address {
             cmd.args(connect_args(addr));
         }
-        cmd.spawn()
-            .map_err(|e| anyhow::anyhow!("Couldn't start {}: {e}", exe.display()))?;
+        cmd.spawn().map_err(|e| spawn_error(&exe, &e))?;
         Ok(LaunchOutcome::Launched)
     }
 
     #[cfg(target_os = "linux")]
     {
         let _ = dir;
-        // Steam takes launch arguments after a `//` separator. Under Proton this is the
-        // only way to reach the exe's argv, since Steam — not us — spawns it.
-        let appid = cfg.game().steam_appid;
-        let url = match address {
-            Some(addr) => format!("steam://rungameid/{appid}//{}", connect_args(addr).join(" ")),
-            None => format!("steam://rungameid/{appid}"),
-        };
+        // Under Proton this is the only way to reach the exe's argv, since Steam — not
+        // us — spawns it.
+        let url = steam_url(cfg.game().steam_appid, address);
         std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| {
             anyhow::anyhow!("Couldn't ask Steam to launch {} ({url}): {e}", cfg.game().display)
         })?;
@@ -687,6 +938,44 @@ mod tests {
             connect_args("203.0.113.10:54210"),
             ["-directconnect".to_string(), "203.0.113.10:54210".to_string()]
         );
+    }
+
+    #[test]
+    fn asks_steam_for_the_game_by_appid() {
+        assert_eq!(steam_url("655500", None), "steam://rungameid/655500");
+    }
+
+    /// A raw space would end the URL at the flag and drop the address, so the game would
+    /// come up on the main menu with no sign of why.
+    #[test]
+    fn encodes_the_separator_between_steam_launch_arguments() {
+        assert_eq!(
+            steam_url("655500", Some("203.0.113.10:54210")),
+            "steam://rungameid/655500//-directconnect%20203.0.113.10:54210"
+        );
+    }
+
+    #[test]
+    fn a_folder_in_a_steam_library_belongs_to_steam() {
+        let root = temp_dir("steam-library");
+        let dir = root.join("SteamLibrary/steamapps/common/MX Bikes");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(steam_owned(&dir), "a steamapps path is a Steam copy even when it's empty");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The standalone copy PiBoSo sells direct: nobody to ask, so Play runs the exe.
+    /// The Steam library beside the exe is exactly the false signal `steam_owned` refuses
+    /// to read — asking Steam for a game it doesn't own would leave Play doing nothing.
+    #[test]
+    fn a_standalone_install_does_not_belong_to_steam() {
+        let dir = temp_dir("standalone");
+        std::fs::write(dir.join(crate::game::MXB.exe), b"stub").unwrap();
+        std::fs::write(dir.join("steam_api64.dll"), b"stub").unwrap();
+        assert!(!steam_owned(&dir));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
