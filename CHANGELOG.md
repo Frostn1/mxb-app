@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — a full share isn't capped at 200 MB any more
+
+### Changed
+- **Full-share bundles are no longer capped at 200 MB.** That ceiling was the upload host's,
+  not ours, and a preset carrying a big track or a few detailed bikes ran straight into it. A
+  bundle past 190 MB is now sliced across several uploads and stitched back together on
+  import, taking the limit to 2 GB. Codes for smaller bundles are unchanged, and a share whose
+  parts have gone missing says so — with the size it expected — instead of failing at the
+  unzip.
+
 ## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
 
 On top of v0.9.1 — the Designer's painting tools, Play on macOS and the SteamOS white screen
