@@ -522,6 +522,11 @@ export const en = {
 
   // ── Settings ───────────────────────────────────────────────────────────────
   "settings.help": "Configure your game folder, updates, and app preferences.",
+  // Nav groups. One section shows at a time; these head the list on the left.
+  "settings.groupSetup": "Setup",
+  "settings.groupApp": "App",
+  "settings.groupAdvanced": "Advanced",
+  "settings.groupAbout": "About",
   "settings.gameFolder": "Game folder",
   "settings.general": "General",
   "settings.appearance": "Appearance",
@@ -1036,13 +1041,9 @@ export const en = {
   // Voice chat — devices and levels. The transport that carries this to other riders
   // isn't built yet; `voice.notConnected*` is what says so on the page.
   "voice.section": "Voice chat",
-  "voice.sectionDesc": "Your microphone, your headset, and the key that opens the mic.",
   "voice.enable": "Enable voice chat",
-  "voice.enableDesc": "Off until you turn it on. While it's on, holding the push-to-talk key opens your microphone.",
   "voice.microphone": "Microphone",
-  "voice.microphoneDesc": "Leave it on the system default and it follows whatever you set in Windows.",
   "voice.output": "Output",
-  "voice.outputDesc": "Where other riders come out. Separate from game audio, so you can keep the game on speakers.",
   "voice.systemDefault": "System default",
   "voice.testMic": "Test mic",
   "voice.stopTest": "Stop",
@@ -1052,7 +1053,6 @@ export const en = {
   "voice.micGain": "Microphone gain",
   "voice.volume": "Volume",
   "voice.ptt": "Push to talk",
-  "voice.pttDesc": "Works while the game has focus. Hold it to talk, release to stop.",
   "voice.pttUpdated": "Push-to-talk key updated",
   "voice.micFailed": "Couldn't open the microphone",
   "voice.outputFailed": "Couldn't play the test tone",
@@ -1357,7 +1357,15 @@ export const en = {
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ReShade presets",
   "reshade.needsGameFolder":
-    "Set your {{game}} folder above and ReShade presets show up here.",
+    "ReShade sits in your {{game}} folder — set that under Game folder, or point straight at it here.",
+  "reshade.folder": "Looking in your {{game}} folder:",
+  "reshade.customFolder": "Looking in the folder you picked:",
+  "reshade.browse": "Choose folder…",
+  "reshade.pickFolder": "Choose the folder ReShade is installed in",
+  "reshade.folderMissing": "The folder you picked isn't there any more.",
+  "reshade.resetFolder": "Go back to the {{game}} folder",
+  "reshade.folderSet": "ReShade found",
+  "reshade.notThere": "No ReShade in that folder",
   "reshade.intro":
     "ReShade adds post-processing to {{game}}. It's a separate free tool — install it once, then pick a preset here.",
   "reshade.wrongApi":

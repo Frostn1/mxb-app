@@ -60,6 +60,24 @@ looking nothing like the track you ride, name it in the report — that's the th
   writes the lot into a single zip to attach. The zip holds the logs and a summary of the
   folders they came from — never the settings file, which carries session cookies.
 - **Qwest and Kelso** credited on Settings → Supporters.
+- **Point ReShade at the folder it's actually in.** The ReShade card only ever looked in the
+  game's install folder, so if that was unset or detection landed somewhere else, it said
+  "not installed" to people with ReShade sitting right there, and offered nothing to do about
+  it. It now names the folder it looked in and takes a pick of your own, kept separately from
+  the game folder — that one also drives the 3D rider, the game log location and Play, none of
+  which a choice made on this card should move. A folder with no ReShade in it is still
+  accepted and simply reported as such, and there's a link back to the game folder.
+
+### Changed
+- **Settings shows one section at a time.** Twelve sections rendered into a single column
+  meant the folder settings and the version number shared a scrollbar, and the nav on the left
+  only scrolled you to an anchor in it. That nav is now grouped — Setup, App, Advanced, About
+  — and opens each section on its own. **Experimental** was in that column with nothing in the
+  nav pointing at it; it has an entry now, under Advanced.
+- **Voice chat settings read shorter.** Five lines of help text under controls whose labels
+  already said the same thing are gone — a device picker labelled "Microphone" didn't need a
+  sentence under it explaining that it picks a microphone. What's left is the things the
+  labels can't say: that nothing transmits yet, and what the test buttons do.
 
 ### Fixed
 - **Terrain below a track's datum is no longer drawn as a wall around it.** A `.trh` stores

@@ -429,6 +429,17 @@ export function reshadeStatus(): Promise<ReshadeStatus> {
   return invoke<ReshadeStatus>("reshade_status");
 }
 
+/**
+ * Point ReShade support at a folder of the player's choosing. Pass an empty string to clear
+ * it, back to the game's install dir.
+ *
+ * Taken as given, ReShade there or not — {@link reshadeStatus} reports what's actually in the
+ * folder on the very next read, which is a better answer than a rejected pick.
+ */
+export function setReshadePath(path: string): Promise<void> {
+  return invoke<void>("set_reshade_path", { path });
+}
+
 /** Make `name` the active preset. `RESHADE_OFF` is the no-effects preset. */
 export function applyReshadePreset(name: string): Promise<ReshadeApplyOutcome> {
   return invoke<ReshadeApplyOutcome>("apply_reshade_preset", { name });

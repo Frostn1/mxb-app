@@ -541,6 +541,10 @@ export const de: Translation = {
   // ── Einstellungen ──────────────────────────────────────────────────────────
   "settings.help":
     "Konfiguriere deinen Spielordner, Updates und App-Einstellungen.",
+  "settings.groupSetup": "Einrichtung",
+  "settings.groupApp": "App",
+  "settings.groupAdvanced": "Erweitert",
+  "settings.groupAbout": "Über",
   "settings.gameFolder": "Spielordner",
   "settings.general": "Allgemein",
   "settings.appearance": "Darstellung",
@@ -1078,13 +1082,9 @@ export const de: Translation = {
   "overlay.notWorkingDesc": "Prüfe das Kürzel oben: eine andere App hat diese Kombination womöglich schon, und eine freie zu wählen ist die Lösung.",
   // Voice chat — devices and levels.
   "voice.section": "Voice-Chat",
-  "voice.sectionDesc": "Dein Mikrofon, dein Headset und die Taste, die das Mikro öffnet.",
   "voice.enable": "Voice-Chat aktivieren",
-  "voice.enableDesc": "Standardmäßig aus. Wenn er an ist, öffnet die Push-to-Talk-Taste dein Mikrofon, solange du sie hältst.",
   "voice.microphone": "Mikrofon",
-  "voice.microphoneDesc": "Lass es auf dem Systemstandard, dann folgt es dem, was du in Windows einstellst.",
   "voice.output": "Ausgabe",
-  "voice.outputDesc": "Wo die anderen Fahrer rauskommen. Getrennt vom Spiel-Audio, damit das Spiel auf den Boxen bleiben kann.",
   "voice.systemDefault": "Systemstandard",
   "voice.testMic": "Mikro testen",
   "voice.stopTest": "Stopp",
@@ -1094,7 +1094,6 @@ export const de: Translation = {
   "voice.micGain": "Mikrofonverstärkung",
   "voice.volume": "Lautstärke",
   "voice.ptt": "Push-to-Talk",
-  "voice.pttDesc": "Funktioniert, während das Spiel im Vordergrund ist. Halten zum Sprechen, loslassen zum Beenden.",
   "voice.pttUpdated": "Push-to-Talk-Taste aktualisiert",
   "voice.micFailed": "Mikrofon konnte nicht geöffnet werden",
   "voice.outputFailed": "Testton konnte nicht abgespielt werden",
@@ -1400,7 +1399,15 @@ export const de: Translation = {
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ReShade-Presets",
   "reshade.needsGameFolder":
-    "Lege oben deinen {{game}}-Ordner fest, dann erscheinen die ReShade-Presets hier.",
+    "ReShade liegt in deinem {{game}}-Ordner — lege den unter Spielordner fest, oder zeige hier direkt darauf.",
+  "reshade.folder": "Gesucht wird in deinem {{game}}-Ordner:",
+  "reshade.customFolder": "Gesucht wird in dem Ordner, den du gewählt hast:",
+  "reshade.browse": "Ordner wählen…",
+  "reshade.pickFolder": "Wähle den Ordner, in dem ReShade installiert ist",
+  "reshade.folderMissing": "Den gewählten Ordner gibt es nicht mehr.",
+  "reshade.resetFolder": "Zurück zum {{game}}-Ordner",
+  "reshade.folderSet": "ReShade gefunden",
+  "reshade.notThere": "Kein ReShade in diesem Ordner",
   "reshade.intro":
     "ReShade fügt {{game}} Postprocessing hinzu. Es ist ein separates, kostenloses Tool — einmal installieren, dann hier ein Preset wählen.",
   "reshade.wrongApi":

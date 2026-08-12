@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, ExternalLink, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  ExternalLink,
+  FolderOpen,
+  RefreshCw,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
+import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { toast } from "sonner";
 import {
   applyReshadePreset,
   deleteReshadePreset,
   reshadeStatus,
+  setReshadePath,
   RESHADE_OFF,
 } from "../../api/mods";
 import type { ReshadePreset, ReshadeStatus } from "../../types";
@@ -25,10 +34,15 @@ const RESHADE_URL = "https://reshade.me/";
  * Two jobs, in order of what the player needs: say whether ReShade is there at all — and if
  * it's there under the wrong graphics API, say *that*, because these games are OpenGL and a
  * DirectX install simply never loads — then let them switch between the presets they have.
+ *
+ * Every answer comes from one folder, normally the game's install dir. When the app's idea of
+ * that folder is wrong or missing, the player can name it themselves — see `reshadePath` in
+ * the config, and `Choose folder…` below, which is offered in every state where the card has
+ * bad news.
  */
 export default function ReshadeCard() {
   const { t } = useI18n();
-  const { config, game } = useConfig();
+  const { config, reloadConfig, game } = useConfig();
   const { running } = useGameRunning();
   const [status, setStatus] = useState<ReshadeStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -41,11 +55,62 @@ export default function ReshadeCard() {
     }
   }, []);
 
-  // Re-read on mount and whenever the game folder changes — that folder is where every
-  // answer on this card comes from.
+  // Re-read on mount and whenever either folder changes — the override when it's set, the
+  // game folder when it isn't.
   useEffect(() => {
     void refresh();
-  }, [refresh, config.gamePath]);
+  }, [refresh, config.gamePath, config.reshadePath]);
+
+  /** Name the folder ReShade is in. Kept whether or not ReShade turns out to be there:
+   *  the card re-reads immediately and says which, and a rejected pick would leave the
+   *  player guessing what the app disagreed with. */
+  const chooseFolder = async () => {
+    const picked = await pickFolder({
+      directory: true,
+      multiple: false,
+      title: t("reshade.pickFolder"),
+    });
+    if (typeof picked !== "string") return;
+    try {
+      await setReshadePath(picked);
+      await reloadConfig();
+      const next = await reshadeStatus();
+      setStatus(next);
+      if (next.installed) {
+        toast.success(t("reshade.folderSet"), { description: picked });
+      } else {
+        toast.warning(t("reshade.notThere"), { description: picked });
+      }
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  const revertToGameFolder = async () => {
+    try {
+      await setReshadePath("");
+      await reloadConfig();
+      setStatus(await reshadeStatus());
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  const chooseButton = (
+    <Button size="sm" variant="outline" onClick={() => void chooseFolder()}>
+      <FolderOpen className="size-3.5" />
+      {t("reshade.browse")}
+    </Button>
+  );
+
+  const gameFolderLink = status?.custom ? (
+    <button
+      onClick={() => void revertToGameFolder()}
+      className="cursor-default self-start text-[11.5px] font-semibold text-primary hover:brightness-110"
+    >
+      {t("reshade.resetFolder")}
+    </button>
+  ) : null;
 
   const activate = async (name: string) => {
     setBusy(name);
@@ -79,13 +144,36 @@ export default function ReshadeCard() {
 
   const openSite = () => void openUrl(RESHADE_URL);
 
-  // The game folder isn't set, so nothing below can be answered. Saying "not installed"
-  // here would send someone off to install what they may well already have.
+  // No folder at all, so nothing below can be answered. Saying "not installed" here would
+  // send someone off to install what they may well already have — but they can name the
+  // folder themselves rather than being sent to the game-folder setting and back.
   if (!status || !status.gameDir) {
     return (
-      <p className="text-[12px] leading-relaxed text-muted-foreground">
-        {t("reshade.needsGameFolder")}
-      </p>
+      <div className="flex flex-col items-start gap-3">
+        <p className="text-[12px] leading-relaxed text-muted-foreground">
+          {t("reshade.needsGameFolder")}
+        </p>
+        {chooseButton}
+      </div>
+    );
+  }
+
+  // A folder was picked and has since moved. Distinct from the case above: the path is the
+  // whole answer, and "set your game folder" would be the wrong thing to say.
+  if (status.folderMissing) {
+    return (
+      <div className="flex flex-col items-start gap-3">
+        <div className="flex gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3">
+          <TriangleAlert className="mt-px size-4 shrink-0 text-warning" />
+          <p className="text-[12px] leading-relaxed text-foreground/85">
+            {t("reshade.folderMissing")}
+            <br />
+            <span className="font-mono text-[11.5px]">{status.gameDir}</span>
+          </p>
+        </div>
+        {chooseButton}
+        {gameFolderLink}
+      </div>
     );
   }
 
@@ -112,16 +200,23 @@ export default function ReshadeCard() {
           <li className="text-foreground/85">{t("reshade.step3")}</li>
         </ol>
 
-        <div className="flex gap-2">
+        {/* Which folder we looked in. Without it "not installed" is unarguable — someone
+            who has ReShade sitting right there has no way to see that we're looking
+            somewhere else, and no reason to think the button below applies to them. */}
+        <FolderLine dir={status.gameDir} custom={status.custom} />
+
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={openSite}>
             <ExternalLink className="size-3.5" />
             {t("reshade.getIt")}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void refresh()}>
+          {chooseButton}
+          <Button size="sm" variant="ghost" onClick={() => void refresh()}>
             <RefreshCw className="size-3.5" />
             {t("reshade.recheck")}
           </Button>
         </div>
+        {gameFolderLink}
       </div>
     );
   }
@@ -220,6 +315,27 @@ export default function ReshadeCard() {
             ? t("reshade.nextLaunchHint")
             : t("reshade.browseHint")}
       </p>
+
+      {/* Only worth saying once ReShade is found, and only when it isn't where the app
+          would have looked on its own — otherwise it's the game folder, which the setting
+          above this section already names. */}
+      {status.custom && (
+        <div className="flex flex-col items-start gap-1.5">
+          <FolderLine dir={status.gameDir} custom />
+          {gameFolderLink}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** The folder every answer on this card came from. */
+function FolderLine({ dir, custom }: { dir: string; custom?: boolean }) {
+  const { t } = useI18n();
+  return (
+    <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+      {custom ? t("reshade.customFolder") : t("reshade.folder")}{" "}
+      <span className="break-all font-mono">{dir}</span>
+    </p>
   );
 }

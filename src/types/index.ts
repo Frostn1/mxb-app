@@ -59,6 +59,7 @@ export interface GamePaths {
   modsPath?: string;
   gamePath?: string;
   profilesPath?: string;
+  reshadePath?: string;
 }
 
 export interface Config {
@@ -76,6 +77,12 @@ export interface Config {
    * `<modsPath>/profiles`; set only when profiles sit outside the game folder.
    */
   profilesPath?: string;
+  /**
+   * Override for the folder ReShade is installed in. Empty (normal) means the game's
+   * install dir. Kept apart from `gamePath` on purpose: that one also drives `rider.pkz`
+   * lookup, the game log folder and launching.
+   */
+  reshadePath?: string;
   /**
    * macOS: the Wine binary that starts the game. Empty (normal) means auto-detected.
    * Ignored on Windows and Linux.
@@ -690,8 +697,12 @@ export interface ReshadePreset {
 
 /** State of the ReShade install and its presets. Mirrors `reshade::Status`. */
 export interface ReshadeStatus {
-  /** The game's install dir. Empty means it isn't configured — "don't know", not "absent". */
+  /** The folder we looked in. Empty means none is configured — "don't know", not "absent". */
   gameDir: string;
+  /** That folder is the player's `reshadePath` override rather than the game's install dir. */
+  custom: boolean;
+  /** A folder is configured and isn't there — distinct from never having picked one. */
+  folderMissing: boolean;
   /** A ReShade `opengl32.dll` is in place. MX Bikes and GP Bikes are OpenGL. */
   installed: boolean;
   /** ReShade is here under a DirectX name these games never load — a fixable mistake. */

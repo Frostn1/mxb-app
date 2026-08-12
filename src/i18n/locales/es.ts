@@ -533,6 +533,10 @@ export const es: Translation = {
   // ── Ajustes ────────────────────────────────────────────────────────────────
   "settings.help":
     "Configura tu carpeta de juego, las actualizaciones y las preferencias de la aplicación.",
+  "settings.groupSetup": "Configuración",
+  "settings.groupApp": "App",
+  "settings.groupAdvanced": "Avanzado",
+  "settings.groupAbout": "Acerca de",
   "settings.gameFolder": "Carpeta del juego",
   "settings.general": "General",
   "settings.appearance": "Apariencia",
@@ -1066,13 +1070,9 @@ export const es: Translation = {
   "overlay.notWorkingDesc": "Revisa el atajo de arriba: puede que otra aplicación ya tenga esa combinación, y elegir una libre es lo que lo arregla.",
   // Voice chat — devices and levels.
   "voice.section": "Chat de voz",
-  "voice.sectionDesc": "Tu micrófono, tus auriculares y la tecla que abre el micro.",
   "voice.enable": "Activar el chat de voz",
-  "voice.enableDesc": "Desactivado hasta que lo actives. Mientras esté activo, mantener la tecla de pulsar para hablar abre tu micrófono.",
   "voice.microphone": "Micrófono",
-  "voice.microphoneDesc": "Déjalo en el predeterminado del sistema y seguirá lo que configures en Windows.",
   "voice.output": "Salida",
-  "voice.outputDesc": "Por dónde salen los demás pilotos. Independiente del audio del juego, así puedes dejar el juego en los altavoces.",
   "voice.systemDefault": "Predeterminado del sistema",
   "voice.testMic": "Probar micro",
   "voice.stopTest": "Parar",
@@ -1082,7 +1082,6 @@ export const es: Translation = {
   "voice.micGain": "Ganancia del micrófono",
   "voice.volume": "Volumen",
   "voice.ptt": "Pulsar para hablar",
-  "voice.pttDesc": "Funciona mientras el juego tiene el foco. Mantén para hablar, suelta para parar.",
   "voice.pttUpdated": "Tecla de pulsar para hablar actualizada",
   "voice.micFailed": "No se pudo abrir el micrófono",
   "voice.outputFailed": "No se pudo reproducir el tono de prueba",
@@ -1387,7 +1386,15 @@ export const es: Translation = {
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ajustes de ReShade",
   "reshade.needsGameFolder":
-    "Configura la carpeta de {{game}} arriba y los ajustes de ReShade aparecerán aquí.",
+    "ReShade está en tu carpeta de {{game}} — configúrala en Carpeta del juego, o apunta directamente aquí.",
+  "reshade.folder": "Buscando en tu carpeta de {{game}}:",
+  "reshade.customFolder": "Buscando en la carpeta que elegiste:",
+  "reshade.browse": "Elegir carpeta…",
+  "reshade.pickFolder": "Elige la carpeta donde está instalado ReShade",
+  "reshade.folderMissing": "La carpeta que elegiste ya no está.",
+  "reshade.resetFolder": "Volver a la carpeta de {{game}}",
+  "reshade.folderSet": "ReShade encontrado",
+  "reshade.notThere": "No hay ReShade en esa carpeta",
   "reshade.intro":
     "ReShade añade posprocesado a {{game}}. Es una herramienta gratuita aparte: instálala una vez y luego elige un ajuste aquí.",
   "reshade.wrongApi":
