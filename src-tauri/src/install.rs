@@ -1143,11 +1143,97 @@ fn apply(placement: &Placement) -> anyhow::Result<usize> {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
-        std::fs::copy(src, dst).with_context(|| {
-            format!("copying {} to {}", src.display(), dst.display())
-        })?;
+        copy_staged(src, dst)?;
     }
     Ok(writes.len())
+}
+
+/// How long [`copy_staged`] keeps waiting out a copy that still looks transient.
+///
+/// Two seconds all told: long enough for a scanner to finish with a freshly unpacked file,
+/// short enough that a genuinely doomed install still fails while the user is watching.
+const COPY_ATTEMPTS: u32 = 13;
+const COPY_RETRY_WAIT: Duration = Duration::from_millis(150);
+
+/// Copy one staged file into place, waiting out a failure that may not be permanent.
+///
+/// Every source here was listed by [`writes_for`]'s `read_dir` moments earlier, so a copy
+/// that reports the file as missing is describing something that happened *since* — and on
+/// Windows that is nearly always a real-time virus scanner reacting to a mod file appearing
+/// in `%TEMP%`. Track `.pkz`es are a standing false positive: the scanner opens the new file
+/// exclusively (or quarantines it outright) in the gap between the walk and the copy, and the
+/// install died with a bare "The system cannot find the file specified. (os error 2)" naming
+/// a file that had been there a moment earlier. Most such holds are released within a moment
+/// — [`crate::frostmod_manage`] already waits one out on its own binary — so wait here too
+/// rather than fail a whole install over it.
+fn copy_staged(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    let mut waited = false;
+    for attempt in 1..=COPY_ATTEMPTS {
+        let err = match std::fs::copy(src, dst) {
+            Ok(_) => {
+                if waited {
+                    // Worth a line: it says the install only survived because of the wait,
+                    // which is the signal that a player's scanner needs an exclusion.
+                    log::warn!(
+                        "copying {} succeeded on attempt {attempt} — something was holding it",
+                        src.display()
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => e,
+        };
+        if attempt == COPY_ATTEMPTS || !worth_retrying(dst, &err) {
+            return Err(copy_failure(src, dst, err));
+        }
+        waited = true;
+        std::thread::sleep(COPY_RETRY_WAIT);
+    }
+    unreachable!("the loop returns on its last attempt")
+}
+
+/// Whether a failed copy could plausibly succeed if we tried again in a moment.
+///
+/// Waiting is only ever worth it for a *transient* holder. A folder sitting where the file
+/// has to land is not one — it fails identically forever — so that case fails immediately
+/// rather than making the user watch the retries run out.
+fn worth_retrying(dst: &Path, e: &std::io::Error) -> bool {
+    if dst.is_dir() {
+        return false;
+    }
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+    ) || matches!(
+        e.raw_os_error(),
+        // ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION: someone else has the file open.
+        // Rust has no stable `ErrorKind` for either, so match the Windows codes directly.
+        Some(32) | Some(33)
+    )
+}
+
+/// Turn a failed copy into something a player can act on.
+///
+/// A staged file that has gone missing is the one case where the raw error actively
+/// misleads: it reads as if the *mod* were broken, when the bytes downloaded fine and
+/// something on the machine took them away afterwards. Name the culprit and the folder to
+/// exclude, because "os error 2" leaves a player with nowhere to go.
+fn copy_failure(src: &Path, dst: &Path, e: std::io::Error) -> anyhow::Error {
+    if e.kind() == std::io::ErrorKind::NotFound && !src.exists() {
+        let name = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let folder = src
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| src.display().to_string());
+        return anyhow::anyhow!(
+            "{name} vanished from the staging folder part-way through the install. The \
+             download itself worked — something deleted or quarantined the file before it \
+             could be copied into place, which is almost always antivirus (mod .pkz files \
+             are a common false positive) or a temp-folder cleaner. Add an exclusion for \
+             {folder} and install it again."
+        );
+    }
+    anyhow::Error::new(e).context(format!("copying {} to {}", src.display(), dst.display()))
 }
 
 fn walk_merge(src: &Path, dst: &Path, out: &mut Vec<(PathBuf, PathBuf)>) {
@@ -2035,6 +2121,74 @@ mod tests {
         assert!(msg.contains("copying"), "{msg}");
         assert!(msg.contains("cool.pnt"), "{msg}");
         assert!(msg.contains(&mods.display().to_string()), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A staged file that disappears mid-install is not a broken mod, and the raw error
+    /// says the opposite: "cannot find the file specified" reads as if the download had
+    /// failed. Name the file and the folder to exclude instead.
+    #[test]
+    fn a_vanished_staged_file_blames_the_right_thing() {
+        let root = place_tmp("vanished");
+        let staging = root.join("ex");
+        std::fs::create_dir_all(&staging).unwrap();
+        let mods = root.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+
+        // The state `apply` finds itself in once a scanner has taken the file away: the
+        // walk listed it, the copy can no longer see it.
+        let err = copy_staged(&staging.join("Scottsdale.pkz"), &mods.join("Scottsdale.pkz"))
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Scottsdale.pkz"), "{msg}");
+        assert!(msg.contains(&staging.display().to_string()), "{msg}");
+        assert!(msg.to_lowercase().contains("antivirus"), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A scanner holding a just-unpacked file lets go within a moment. Waiting it out is
+    /// the difference between an install that works and one that fails on a file the user
+    /// can plainly see on disk.
+    #[test]
+    fn a_copy_waits_out_whatever_is_holding_the_file() {
+        let root = place_tmp("copy-retry");
+        let staging = root.join("ex");
+        std::fs::create_dir_all(&staging).unwrap();
+        let mods = root.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        let src = staging.join("Scottsdale.pkz");
+        let dst = mods.join("Scottsdale.pkz");
+
+        // Stands in for the scanner releasing the file: unreadable at the first attempt,
+        // there well inside the retry window.
+        let late = src.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            std::fs::write(&late, b"track").unwrap();
+        });
+
+        copy_staged(&src, &dst).expect("the copy should have waited");
+        writer.join().unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), b"track");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Waiting is for holders that let go. A folder sitting where the file has to land
+    /// never will, so that failure must not sit through the whole retry window.
+    #[test]
+    fn a_hopeless_copy_gives_up_immediately() {
+        let root = place_tmp("copy-hopeless");
+        let staging = root.join("ex");
+        touch(&staging.join("cool.pnt"));
+        let dst = root.join("mods/cool.pnt");
+        std::fs::create_dir_all(&dst).unwrap();
+
+        let start = std::time::Instant::now();
+        assert!(copy_staged(&staging.join("cool.pnt"), &dst).is_err());
+        assert!(
+            start.elapsed() < COPY_RETRY_WAIT,
+            "a directory in the way was retried"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
