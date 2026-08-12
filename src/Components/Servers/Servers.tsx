@@ -531,6 +531,10 @@ const PaintSync = () => {
       );
       if (r.skippedBikes > 0)
         toast.warning(t("sync.skippedBikes", { count: r.skippedBikes }));
+      // A livery that never leaves the machine is worth saying out loud; otherwise the rider
+      // looks default to everyone else and nothing ever explains why.
+      if (r.oversizedPaints > 0)
+        toast.warning(t("sync.oversized", { count: r.oversizedPaints }));
       refresh();
     } catch (e) {
       toast.error(t("sync.publishFailed"), { description: String(e) });

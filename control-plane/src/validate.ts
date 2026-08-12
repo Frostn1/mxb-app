@@ -110,7 +110,18 @@ export function isRelDest(value: unknown): value is string {
 }
 
 /** Paints are single-digit megabytes; anything far past that is not a paint. */
-export const MAX_PAINT_BYTES = 32 * 1024 * 1024;
+/**
+ * The largest paint that may be published.
+ *
+ * Was 32 MiB, which real content simply exceeds: a 4K livery runs well past it, and the
+ * biggest on a normal install measured 121.7 MB. Every paint over the limit was refused, and
+ * because a loadout is validated as a whole, one of them meant the rider published nothing.
+ *
+ * 192 MiB clears the largest seen with room to spare while still being a bound. It is not
+ * free — every other rider on the server downloads these — which is the argument for the app
+ * skipping the outliers rather than the limit going away.
+ */
+export const MAX_PAINT_BYTES = 192 * 1024 * 1024;
 
 export function isPaintSize(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_PAINT_BYTES;

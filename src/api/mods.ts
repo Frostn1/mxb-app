@@ -1939,6 +1939,8 @@ export interface PublishOutcome {
   bikes: number;
   /** Bikes beyond the cap that were left out. */
   skippedBikes: number;
+  /** Paints too large for the control plane to store, so nobody else will see them. */
+  oversizedPaints: number;
   digest: string;
   /** The look already matched what was last sent, so nothing went up. */
   unchanged: boolean;

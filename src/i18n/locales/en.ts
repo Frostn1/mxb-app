@@ -768,6 +768,8 @@ export const en = {
   "sync.lastPulled": "Last checked {{ago}}. It runs again by itself when you press Play.",
   "sync.neverPulled": "You haven't fetched anyone else's paints yet",
   "sync.neverPulledWhy": "Until you do, other riders show up on default bikes even if they've published theirs.",
+  "sync.oversized_one": "{{count}} paint is too large to share, so other riders won't see it.",
+  "sync.oversized_other": "{{count}} paints are too large to share, so other riders won't see them.",
   "sync.skippedBikes_one": "{{count}} bike wasn't published — you have more than we can hold.",
   "sync.skippedBikes_other": "{{count}} bikes weren't published — you have more than we can hold.",
   "sync.noMatchingProfile": "This name doesn't match any MX Bikes profile on this PC, so there's nothing to publish. Check the profiles folder in Settings.",

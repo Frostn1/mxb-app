@@ -793,6 +793,8 @@ export const fr: Translation = {
   "sync.lastPulled": "Dernière vérification {{ago}}. Elle repart seule quand vous appuyez sur Jouer.",
   "sync.neverPulled": "Vous n'avez pas encore récupéré les peintures des autres",
   "sync.neverPulledWhy": "Tant que ce n'est pas fait, les autres pilotes apparaissent avec des motos par défaut même s'ils ont publié les leurs.",
+  "sync.oversized_one": "{{count}} peinture est trop lourde à partager, les autres pilotes ne la verront pas.",
+  "sync.oversized_other": "{{count}} peintures sont trop lourdes à partager, les autres pilotes ne les verront pas.",
   "sync.skippedBikes_one": "{{count}} moto n'a pas été publiée — vous en avez plus que ce que nous pouvons stocker.",
   "sync.skippedBikes_other": "{{count}} motos n'ont pas été publiées — vous en avez plus que ce que nous pouvons stocker.",
   "sync.noMatchingProfile": "Ce nom ne correspond à aucun profil MX Bikes sur ce PC, il n'y a donc rien à publier. Vérifiez le dossier des profils dans les Réglages.",
