@@ -2,6 +2,14 @@
 
 ## Unreleased — publishing your paints stops failing outright
 
+### Changed
+- **Full-share bundles are no longer capped at 200 MB.** That ceiling was the upload host's,
+  not ours, and a preset carrying a big track or a few detailed bikes ran straight into it. A
+  bundle past 190 MB is now sliced across several uploads and stitched back together on
+  import, taking the limit to 2 GB. Codes for smaller bundles are unchanged, and a share whose
+  parts have gone missing says so — with the size it expected — instead of failing at the
+  unzip.
+
 ### Fixed
 - **A loadout the control plane refused took your whole look with it.** Two things a real
   install produces would fail the entire publish: a paint filed under a slot the control plane

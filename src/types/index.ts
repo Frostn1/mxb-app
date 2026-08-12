@@ -811,6 +811,11 @@ export interface BundleRef {
   host: string;
   /** Bundle size in bytes. */
   size: number;
+  /**
+   * Every slice of the bundle, in order, when it was too big for one upload. Absent means
+   * the whole thing is at `url` — which is also the first slice.
+   */
+  parts?: string[];
 }
 
 /**
