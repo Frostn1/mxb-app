@@ -1331,6 +1331,31 @@ export const ptBR: Translation = {
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Presets de pós-processamento — como {{game}} aparece na tela.",
 
+  // ── Logs ───────────────────────────────────────────────────────────────────
+  "settings.logs": "Logs",
+  "logs.desc":
+    "Os arquivos para enviar quando algo dá errado. MXB App, FrostMod e {{game}} guardam os seus separadamente — abra a pasta que precisar, ou salve todos num zip para anexar a um relato de bug.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "O que o próprio app registrou",
+  "logs.frostmodLogsDesc": "O que o loader escreveu na pasta dele",
+  "logs.gameLogsDesc": "O log do jogo, junto dos arquivos dele",
+  "logs.open": "Abrir pasta",
+  "logs.save": "Salvar logs…",
+  "logs.saving": "Salvando…",
+  "logs.refresh": "Atualizar",
+  "logs.loading": "Procurando…",
+  "logs.empty": "Ainda não há arquivos de log aqui.",
+  "logs.folderMissing":
+    "Essa pasta não existe — nada escreveu um log nela ainda.",
+  "logs.summary_one": "{{count}} arquivo · {{size}} · mais recente {{when}}",
+  "logs.summary_other": "{{count}} arquivos · {{size}} · mais recente {{when}}",
+  "logs.saved": "Logs salvos",
+  "logs.savedDesc_one": "{{count}} arquivo de log, {{size}}",
+  "logs.savedDesc_other": "{{count}} arquivos de log, {{size}}",
+  "logs.saveFailed": "Não foi possível salvar os logs",
+  "logs.privacy":
+    "Os logs contêm caminhos de pastas e o que o app estava fazendo — nunca suas senhas ou cookies de sessão, e nenhum arquivo de configurações é incluído.",
+
   // ── Apoiadores (Buy Me a Coffee) ───────────────────────────────────────────
   "settings.supporters": "Apoiadores",
   "settings.supportersDesc": "Quem mantém o MXB App de pé no Buy Me a Coffee.",

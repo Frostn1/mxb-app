@@ -645,6 +645,53 @@ export function revealInExplorer(path: string): Promise<void> {
   return invoke<void>("reveal_in_explorer", { path });
 }
 
+export interface LogFile {
+  name: string;
+  path: string;
+  bytes: number;
+  /** Last modified, Unix ms — null when the OS wouldn't say. */
+  modified: number | null;
+}
+
+/** One place logs come from. `dir` is always set: when nothing was found it's the folder
+ *  we looked in, which is still what someone needs to be told. */
+export interface LogGroup {
+  dir: string;
+  /** Whether the folder itself is there — a different problem from it being empty. */
+  exists: boolean;
+  /** Newest first. */
+  files: LogFile[];
+}
+
+/** Every log set: MXB App's own, FrostMod's managed folder, and the game's `log.txt`. */
+export interface LogsInfo {
+  app: LogGroup;
+  frostmod: LogGroup;
+  game: LogGroup;
+}
+
+export type LogsKind = "app" | "frostmod" | "game";
+
+export function logsInfo(): Promise<LogsInfo> {
+  return invoke<LogsInfo>("logs_info");
+}
+
+/** Open the folder a log set lives in, newest file selected where the OS can. */
+export function openLogsFolder(which: LogsKind): Promise<void> {
+  return invoke<void>("open_logs_folder", { which });
+}
+
+export interface LogsExport {
+  path: string;
+  files: number;
+  bytes: number;
+}
+
+/** Zip every log set to `dest` — a path the user picked in a save dialog. */
+export function exportLogs(dest: string): Promise<LogsExport> {
+  return invoke<LogsExport>("export_logs", { dest });
+}
+
 /** Hide-to-tray + keep-running toggle. */
 export function setRunInBackground(enabled: boolean): Promise<void> {
   return invoke<void>("set_run_in_background", { enabled });

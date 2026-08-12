@@ -208,6 +208,32 @@ pub fn reveal_in_explorer(path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Open a folder in the OS file manager.
+///
+/// The sibling of [`reveal_in_explorer`] for when there is no file to select — an empty
+/// log folder, say. Explorer's `/select,` on a folder highlights it in its *parent*, which
+/// is not what "open this folder" means, so Windows gets the plain form here.
+pub fn open_folder(path: &str) -> anyhow::Result<()> {
+    let p = PathBuf::from(path);
+    if !p.is_dir() {
+        anyhow::bail!("folder not found: {path}");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer").arg(&p).spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(&p).spawn()?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(&p).spawn()?;
+    }
+    Ok(())
+}
+
 pub fn scan_mods(mods_path: &str, subpath: &str) -> anyhow::Result<Vec<InstalledMod>> {
     let dir = mods_subdir(mods_path, subpath);
     if !dir.exists() {

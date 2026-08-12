@@ -1309,6 +1309,31 @@ export const en = {
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Post-processing presets — how {{game}} looks on screen.",
 
+  // ── Logs ───────────────────────────────────────────────────────────────────
+  "settings.logs": "Logs",
+  "logs.desc":
+    "The files to send when something goes wrong. MXB App, FrostMod and {{game}} each keep their own — open any of them, or save the lot as one zip to attach to a bug report.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "What the app itself recorded",
+  "logs.frostmodLogsDesc": "Whatever the loader wrote in its own folder",
+  "logs.gameLogsDesc": "The game's own log, beside its files",
+  "logs.open": "Open folder",
+  "logs.save": "Save logs…",
+  "logs.saving": "Saving…",
+  "logs.refresh": "Refresh",
+  "logs.loading": "Looking…",
+  "logs.empty": "No log files here yet.",
+  "logs.folderMissing":
+    "That folder isn't there — nothing has written a log to it yet.",
+  "logs.summary_one": "{{count}} file · {{size}} · newest {{when}}",
+  "logs.summary_other": "{{count}} files · {{size}} · newest {{when}}",
+  "logs.saved": "Logs saved",
+  "logs.savedDesc_one": "{{count}} log file, {{size}}",
+  "logs.savedDesc_other": "{{count}} log files, {{size}}",
+  "logs.saveFailed": "Couldn't save the logs",
+  "logs.privacy":
+    "Logs hold folder paths and what the app was doing — never your passwords or session cookies, and no settings file is included.",
+
   // ── Supporters (Buy Me a Coffee) ───────────────────────────────────────────
   "settings.supporters": "Supporters",
   "settings.supportersDesc": "The people keeping MXB App going on Buy Me a Coffee.",
