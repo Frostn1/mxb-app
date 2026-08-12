@@ -8,6 +8,7 @@ import {
   Maximize2,
   Box,
   Mountain,
+  Share2,
   type LucideIcon,
 } from "lucide-react";
 import { getPkzMeta, getPkzPreview, type ModType } from "../../api/mods";
@@ -35,6 +36,7 @@ interface LibraryDetailProps {
   onReveal: (e: LibraryEntry) => void;
   onUninstall: (e: LibraryEntry) => void;
   onMove: (e: LibraryEntry) => void;
+  onShare: (e: LibraryEntry) => void;
   onOpenEntry: (e: LibraryEntry) => void;
 }
 
@@ -50,6 +52,7 @@ export default function LibraryDetail({
   onReveal,
   onUninstall,
   onMove,
+  onShare,
   onOpenEntry,
 }: LibraryDetailProps) {
   const t = useT();
@@ -184,6 +187,9 @@ export default function LibraryDetail({
                   <FolderInput className="size-3.5" /> Move
                 </Button>
               )}
+              <Button variant="outline" size="sm" onClick={() => onShare(entry)}>
+                <Share2 className="size-3.5" /> {t("share.share")}
+              </Button>
               <Button variant="outline" size="sm" onClick={() => onReveal(entry)}>
                 <FolderOpen className="size-3.5" /> Show in Explorer
               </Button>

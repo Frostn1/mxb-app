@@ -892,6 +892,36 @@ export const fr: Translation = {
   "library.bulkMoved_one": "{{count}} élément déplacé vers {{folder}}",
   "library.bulkMoved_other": "{{count}} éléments déplacés vers {{folder}}",
 
+  // ── Partage des fichiers installés (n'importe quel circuit ou peinture) ────
+  "share.share": "Partager",
+  "share.action": "Partager…",
+  "share.title": "Partager ces fichiers",
+  "share.hint":
+    "On les empaquette, on les envoie, et tu récupères un seul code à coller où tu veux. Celui qui le colle retrouve les fichiers dans les mêmes dossiers.",
+  "share.hintDone": "Envoie ce code : il installe tout ce qui est listé au-dessus.",
+  "share.nothingToShare":
+    "Rien à partager ici : seuls les fichiers de ton dossier mods peuvent entrer dans un code.",
+  "share.skipped_one": "1 élément écarté ({{reason}}).",
+  "share.skipped_other": "{{count}} éléments écartés ({{reason}}).",
+  "share.createCode_one": "Partager 1 fichier ({{size}})",
+  "share.createCode_other": "Partager {{count}} fichiers ({{size}})",
+  "share.copyCode": "Copier le code",
+  "share.copied": "Code de partage copié.",
+  "share.uploaded": "Envoyé : copie le code ci-dessous.",
+  "share.uploadedCopied": "Envoyé : le code est dans le presse-papiers.",
+  "share.importAction": "Coller un code…",
+  "share.importTitle": "Importer des fichiers partagés",
+  "share.importBody":
+    "Colle le code qu'on t'a envoyé. Les fichiers s'installent là où l'expéditeur les avait.",
+  "share.downloadNotice": "Télécharge {{size}} depuis {{host}}.",
+  "share.install": "Télécharger et installer",
+  "share.installed_one": "1 fichier installé.",
+  "share.installed_other": "{{count}} fichiers installés.",
+  "share.phasePacking": "Préparation des fichiers…",
+  "share.phaseUploading": "Envoi…",
+  "share.phaseDownloading": "Téléchargement…",
+  "share.phaseInstalling": "Installation…",
+
   // ── Casier ─────────────────────────────────────────────────────────────────
   "locker.help":
     "Changez le modèle et le son moteur de chaque moto parmi les sets que vous avez installés.",

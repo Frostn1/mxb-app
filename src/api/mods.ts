@@ -48,6 +48,8 @@ import type {
   ReloadOutcome,
   BundlePlan,
   BundleProgress,
+  SharePlan,
+  FileShare,
   GameId,
   GameInfo,
 } from "../types";
@@ -1897,6 +1899,36 @@ export function onPresetBundleProgress(
   cb: (p: BundleProgress) => void,
 ): Promise<UnlistenFn> {
   return listen<BundleProgress>("preset-bundle-progress", (event) => cb(event.payload));
+}
+
+// ── Sharing installed files (any track, paint or pack — not just presets) ────
+
+/** What sharing these installed paths would carry, and what it would leave out. */
+export function fileSharePlan(paths: string[]): Promise<SharePlan> {
+  return invoke<SharePlan>("file_share_plan", { paths });
+}
+
+/** Pack + upload the picked files, returning a one-line share code (`MXBS1-…`). */
+export function fileShareCreate(paths: string[]): Promise<string> {
+  return invoke<string>("file_share_create", { paths });
+}
+
+/** Read a share code *without* downloading — preview what it carries. */
+export function fileSharePreview(text: string): Promise<FileShare> {
+  return invoke<FileShare>("file_share_preview", { text });
+}
+
+/** Download a share code's files and install them where the sender had them. */
+export function fileShareImport(text: string): Promise<FileShare> {
+  return invoke<FileShare>("file_share_import", { text });
+}
+
+/** Subscribe to file-share create/import phase updates. Same payload as the preset
+ *  bundle's, on its own event so the two dialogs never cross. */
+export function onFileShareProgress(
+  cb: (p: BundleProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<BundleProgress>("file-share-progress", (event) => cb(event.payload));
 }
 
 /** `"windows"` | `"macos"` | `"linux"`. Features gated on the OS ask the backend rather

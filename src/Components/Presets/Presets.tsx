@@ -75,6 +75,7 @@ import {
   type Scans,
 } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
+import { copyText } from "../../lib/clipboard";
 
 function humanSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -94,27 +95,6 @@ function phaseLabel(phase: BundlePhase, t: TFunc): string {
       return t("presets.phaseInstalling");
     case "done":
       return t("common.done");
-  }
-}
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      return ok;
-    } catch {
-      return false;
-    }
   }
 }
 
