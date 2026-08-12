@@ -13,6 +13,7 @@ pub struct GamePaths {
     pub mods_path: String,
     pub game_path: String,
     pub profiles_path: String,
+    pub reshade_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +48,13 @@ pub struct AppConfig {
     /// resolved from `mods_path` — see [`AppConfig::profiles_dir`]. Set it when the
     /// resolver can't find the folder, e.g. profiles on a drive we don't probe.
     pub profiles_path: String,
+    /// Override for the folder ReShade is installed in. Empty (the normal case) means the
+    /// game's install dir — see [`AppConfig::reshade_dir`]. Set it when detection lands on
+    /// the wrong folder, or when the install dir isn't configured at all and the player
+    /// only wants to point at ReShade. Deliberately not `game_path`: that one also drives
+    /// `rider.pkz` lookup, the game log folder and launching, none of which a pick made
+    /// from the ReShade card should move.
+    pub reshade_path: String,
     /// macOS: the Wine binary that starts the game. Empty (the normal case) means it's
     /// auto-detected — see [`crate::winehost::resolve`]. Machine-wide rather than
     /// per-game: one Mac has one set of wrappers installed. Ignored on Windows and Linux.
@@ -196,6 +204,7 @@ impl Default for AppConfig {
             mods_path: String::new(),
             game_path: String::new(),
             profiles_path: String::new(),
+            reshade_path: String::new(),
             wine_runner: String::new(),
             run_in_background: true,
             launch_at_startup: true,
@@ -258,6 +267,7 @@ impl AppConfig {
                 mods_path: self.mods_path.clone(),
                 game_path: self.game_path.clone(),
                 profiles_path: self.profiles_path.clone(),
+                reshade_path: self.reshade_path.clone(),
             },
         );
     }
@@ -279,6 +289,7 @@ impl AppConfig {
         self.mods_path = next.mods_path;
         self.game_path = next.game_path;
         self.profiles_path = next.profiles_path;
+        self.reshade_path = next.reshade_path;
         true
     }
 
@@ -307,6 +318,22 @@ impl AppConfig {
             return gp.to_string();
         }
         detect_game_path(self.game()).unwrap_or_default()
+    }
+
+    /// The folder ReShade is installed in — everything in [`crate::reshade`] reads this
+    /// rather than [`AppConfig::install_dir`].
+    ///
+    /// Normally they are the same folder: ReShade attaches by sitting next to the
+    /// executable, so it can't be anywhere else and still load. The override exists for
+    /// when the app's idea of the install dir is wrong or missing — Steam detection came up
+    /// empty, or the player runs two copies — and it stays separate from `game_path` so
+    /// pointing this at the wrong place can only ever break ReShade.
+    pub fn reshade_dir(&self) -> String {
+        let custom = self.reshade_path.trim();
+        if !custom.is_empty() {
+            return custom.to_string();
+        }
+        self.install_dir()
     }
 
     pub fn profiles_dir(&self) -> PathBuf {

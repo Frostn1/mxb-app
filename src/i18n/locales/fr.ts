@@ -537,6 +537,10 @@ export const fr: Translation = {
   // ── Réglages ───────────────────────────────────────────────────────────────
   "settings.help":
     "Configurez votre dossier de jeu, les mises à jour et les préférences de l'application.",
+  "settings.groupSetup": "Configuration",
+  "settings.groupApp": "App",
+  "settings.groupAdvanced": "Avancé",
+  "settings.groupAbout": "À propos",
   "settings.gameFolder": "Dossier de jeu",
   "settings.general": "Général",
   "settings.appearance": "Apparence",
@@ -1069,13 +1073,9 @@ export const fr: Translation = {
   "overlay.notWorkingDesc": "Vérifie le raccourci ci-dessus : une autre application a peut-être déjà cette combinaison, et en choisir une libre suffit à régler ça.",
   // Voice chat — devices and levels.
   "voice.section": "Chat vocal",
-  "voice.sectionDesc": "Ton micro, ton casque et la touche qui ouvre le micro.",
   "voice.enable": "Activer le chat vocal",
-  "voice.enableDesc": "Désactivé tant que tu ne l'actives pas. Une fois actif, maintenir la touche push-to-talk ouvre ton micro.",
   "voice.microphone": "Microphone",
-  "voice.microphoneDesc": "Laisse-le sur le périphérique par défaut et il suivra ce que tu règles dans Windows.",
   "voice.output": "Sortie",
-  "voice.outputDesc": "Par où sortent les autres pilotes. Séparé du son du jeu, pour garder le jeu sur les enceintes.",
   "voice.systemDefault": "Périphérique par défaut",
   "voice.testMic": "Tester le micro",
   "voice.stopTest": "Arrêter",
@@ -1085,7 +1085,6 @@ export const fr: Translation = {
   "voice.micGain": "Gain du microphone",
   "voice.volume": "Volume",
   "voice.ptt": "Push-to-talk",
-  "voice.pttDesc": "Fonctionne quand le jeu a le focus. Maintiens pour parler, relâche pour arrêter.",
   "voice.pttUpdated": "Touche push-to-talk mise à jour",
   "voice.micFailed": "Impossible d'ouvrir le microphone",
   "voice.outputFailed": "Impossible de jouer le son test",
@@ -1390,7 +1389,15 @@ export const fr: Translation = {
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "préréglages ReShade",
   "reshade.needsGameFolder":
-    "Indique ton dossier {{game}} ci-dessus et les préréglages ReShade apparaîtront ici.",
+    "ReShade se trouve dans ton dossier {{game}} — indique-le dans Dossier de jeu, ou pointe directement dessus ici.",
+  "reshade.folder": "Recherche dans ton dossier {{game}} :",
+  "reshade.customFolder": "Recherche dans le dossier que tu as choisi :",
+  "reshade.browse": "Choisir un dossier…",
+  "reshade.pickFolder": "Choisis le dossier où ReShade est installé",
+  "reshade.folderMissing": "Le dossier que tu as choisi n'existe plus.",
+  "reshade.resetFolder": "Revenir au dossier {{game}}",
+  "reshade.folderSet": "ReShade trouvé",
+  "reshade.notThere": "Pas de ReShade dans ce dossier",
   "reshade.intro":
     "ReShade ajoute du post-traitement à {{game}}. C'est un outil gratuit distinct : installe-le une fois, puis choisis un préréglage ici.",
   "reshade.wrongApi":

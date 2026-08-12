@@ -337,7 +337,7 @@ fn scan_library_blocking(
     // names against catalog titles to draw its "Installed" badge, so it has to be the real
     // list. See `reshade::status`.
     if reshade::is_reshade_subpath(&subpath) {
-        return Ok(reshade::status(&cfg.install_dir())
+        return Ok(reshade::status(&cfg.reshade_dir())
             .presets
             .into_iter()
             .map(|p| library::LibraryEntry {
@@ -544,15 +544,34 @@ async fn apply_sound_swap(
     .map_err(|e| format!("apply_sound_swap task failed: {e}"))?
 }
 
-/// The ReShade card's whole state, read fresh from the game folder — see [`reshade`].
+/// The ReShade card's whole state, read fresh from the folder ReShade lives in — see
+/// [`reshade`].
 #[tauri::command]
 async fn reshade_status(app: tauri::AppHandle) -> Result<reshade::Status, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        Ok(reshade::status(&cfg.install_dir()))
+        let mut status = reshade::status(&cfg.reshade_dir());
+        // Only this side knows where that folder came from, and the card has to say so
+        // before it offers to hand the folder back to the game's install dir.
+        status.custom = !cfg.reshade_path.trim().is_empty();
+        Ok(status)
     })
     .await
     .map_err(|e| format!("reshade_status task failed: {e}"))?
+}
+
+/// Point the ReShade card at a folder of the player's choosing. An empty string clears the
+/// override, back to the game's install dir.
+///
+/// The pick is taken as given rather than validated: a folder with no ReShade in it is a
+/// perfectly ordinary thing to land on mid-setup, and `reshade_status` says so plainly on
+/// the very next read. Refusing it would leave the player with a dialog and no way to see
+/// what the app thinks is wrong.
+#[tauri::command]
+fn set_reshade_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.reshade_path = path;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -562,7 +581,7 @@ async fn apply_reshade_preset(
 ) -> Result<ReshadeApplyOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        reshade::apply(&cfg.install_dir(), &name).map_err(|e| format!("{e:#}"))?;
+        reshade::apply(&cfg.reshade_dir(), &name).map_err(|e| format!("{e:#}"))?;
         // Unlike a content swap there is nothing to signal: ReShade owns its own config and
         // FrostMod has no part in it. All the UI needs is whether the player will see this
         // now or on the next launch.
@@ -578,7 +597,7 @@ async fn apply_reshade_preset(
 async fn delete_reshade_preset(app: tauri::AppHandle, name: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        reshade::delete(&cfg.install_dir(), &name).map_err(|e| format!("{e:#}"))
+        reshade::delete(&cfg.reshade_dir(), &name).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| format!("delete_reshade_preset task failed: {e}"))?
@@ -5990,6 +6009,7 @@ fn main() {
             bind_sound,
             unbind_sound,
             reshade_status,
+            set_reshade_path,
             apply_reshade_preset,
             delete_reshade_preset,
             detect_loose_swaps,

@@ -529,6 +529,10 @@ export const it: Translation = {
   // ── Impostazioni ───────────────────────────────────────────────────────────
   "settings.help":
     "Configura la cartella di gioco, gli aggiornamenti e le preferenze dell'app.",
+  "settings.groupSetup": "Configurazione",
+  "settings.groupApp": "App",
+  "settings.groupAdvanced": "Avanzate",
+  "settings.groupAbout": "Info",
   "settings.gameFolder": "Cartella di gioco",
   "settings.general": "Generali",
   "settings.appearance": "Aspetto",
@@ -1058,13 +1062,9 @@ export const it: Translation = {
   "overlay.notWorkingDesc": "Controlla la scorciatoia qui sopra: un'altra app potrebbe già avere quella combinazione, e sceglierne una libera è ciò che risolve.",
   // Voice chat — devices and levels.
   "voice.section": "Chat vocale",
-  "voice.sectionDesc": "Il tuo microfono, le tue cuffie e il tasto che apre il micro.",
   "voice.enable": "Attiva la chat vocale",
-  "voice.enableDesc": "Disattivata finché non la accendi. Quando è attiva, tenere premuto il tasto push-to-talk apre il microfono.",
   "voice.microphone": "Microfono",
-  "voice.microphoneDesc": "Lascialo sul predefinito di sistema e seguirà quello che imposti in Windows.",
   "voice.output": "Uscita",
-  "voice.outputDesc": "Da dove escono gli altri piloti. Separata dall'audio del gioco, così puoi tenere il gioco sulle casse.",
   "voice.systemDefault": "Predefinito di sistema",
   "voice.testMic": "Prova il micro",
   "voice.stopTest": "Ferma",
@@ -1074,7 +1074,6 @@ export const it: Translation = {
   "voice.micGain": "Guadagno del microfono",
   "voice.volume": "Volume",
   "voice.ptt": "Push-to-talk",
-  "voice.pttDesc": "Funziona mentre il gioco ha il focus. Tieni premuto per parlare, rilascia per smettere.",
   "voice.pttUpdated": "Tasto push-to-talk aggiornato",
   "voice.micFailed": "Impossibile aprire il microfono",
   "voice.outputFailed": "Impossibile riprodurre il tono di prova",
@@ -1379,7 +1378,15 @@ export const it: Translation = {
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "preset ReShade",
   "reshade.needsGameFolder":
-    "Imposta la cartella di {{game}} qui sopra e i preset ReShade compariranno qui.",
+    "ReShade sta nella tua cartella di {{game}} — impostala in Cartella di gioco, oppure puntala direttamente qui.",
+  "reshade.folder": "Sto guardando nella tua cartella di {{game}}:",
+  "reshade.customFolder": "Sto guardando nella cartella che hai scelto:",
+  "reshade.browse": "Scegli cartella…",
+  "reshade.pickFolder": "Scegli la cartella in cui è installato ReShade",
+  "reshade.folderMissing": "La cartella che hai scelto non c'è più.",
+  "reshade.resetFolder": "Torna alla cartella di {{game}}",
+  "reshade.folderSet": "ReShade trovato",
+  "reshade.notThere": "Nessun ReShade in quella cartella",
   "reshade.intro":
     "ReShade aggiunge il post-processing a {{game}}. È uno strumento gratuito a parte: installalo una volta, poi scegli un preset qui.",
   "reshade.wrongApi":

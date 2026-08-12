@@ -166,10 +166,10 @@ pub(crate) fn extract_and_place(
 
     emit(app, slug, "placing", None, None);
 
-    // A ReShade preset lands in the game's *install* dir, not the mods tree, and is sorted by
+    // A ReShade preset lands beside ReShade itself, not in the mods tree, and is sorted by
     // file type rather than routed by folder — none of the placement planner below applies.
     if crate::reshade::is_reshade_subpath(subpath) {
-        crate::reshade::install_extracted(&extracted, &cfg.install_dir())?;
+        crate::reshade::install_extracted(&extracted, &cfg.reshade_dir())?;
         let _ = std::fs::remove_dir_all(work);
         emit(app, slug, "done", None, None);
         return Ok(());
@@ -324,7 +324,7 @@ pub fn import_file(
     }
 
     if crate::reshade::is_reshade_subpath(subpath) {
-        crate::reshade::install_extracted(&extracted, &cfg.install_dir())?;
+        crate::reshade::install_extracted(&extracted, &cfg.reshade_dir())?;
         let _ = std::fs::remove_dir_all(&work);
         return Ok(());
     }
