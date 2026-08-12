@@ -795,6 +795,8 @@ export const de: Translation = {
   "sync.lastPulled": "Zuletzt geprüft {{ago}}. Läuft von selbst wieder, wenn du auf Spielen drückst.",
   "sync.neverPulled": "Du hast noch keine Lackierungen der anderen geholt",
   "sync.neverPulledWhy": "Bis dahin erscheinen andere Fahrer mit Standard-Bikes, auch wenn sie ihre veröffentlicht haben.",
+  "sync.oversized_one": "{{count}} Lackierung ist zu groß zum Teilen, andere Fahrer sehen sie nicht.",
+  "sync.oversized_other": "{{count}} Lackierungen sind zu groß zum Teilen, andere Fahrer sehen sie nicht.",
   "sync.skippedBikes_one": "{{count}} Bike wurde nicht veröffentlicht — du hast mehr, als wir speichern können.",
   "sync.skippedBikes_other": "{{count}} Bikes wurden nicht veröffentlicht — du hast mehr, als wir speichern können.",
   "sync.noMatchingProfile": "Dieser Name passt zu keinem MX-Bikes-Profil auf diesem PC, es gibt also nichts zu veröffentlichen. Prüfe den Profilordner in den Einstellungen.",

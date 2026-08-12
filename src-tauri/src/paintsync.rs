@@ -72,6 +72,8 @@ pub struct PublishOutcome {
     pub bikes: usize,
     /// Bikes past [`MAX_BIKES`] that were left out.
     pub skipped_bikes: usize,
+    /// Paints too large for the control plane to store, so nobody else will see them.
+    pub oversized_paints: usize,
     /// Digest of what was sent, for the caller to remember — see [`LocalLook::digest`].
     pub digest: String,
     /// The look already matched `known_digest`, so nothing was sent.
@@ -191,6 +193,9 @@ pub struct LocalLook {
     /// Bikes left out by [`MAX_BIKES`]. Reported rather than dropped quietly — a cap that
     /// silently covers less than it claims is indistinguishable from a bug.
     pub skipped: usize,
+    /// Paints too large to publish. Named for the same reason: a rider whose livery never
+    /// reaches anyone deserves to be told, not left wondering why they look default.
+    pub oversized: usize,
 }
 
 impl LocalLook {
@@ -249,9 +254,10 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let plans = bundle::plan_many(cfg, &loadouts.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>());
 
     let mut sources = std::collections::HashMap::new();
+    let mut oversized = 0usize;
     let mut bikes = Vec::new();
     for ((bike_id, _), plan) in loadouts.into_iter().zip(plans) {
-        let paints = paints_of(&plan, &mut sources);
+        let paints = paints_of(&plan, &mut sources, &mut oversized);
         // A bike with nothing custom on it is not worth a row; the receiver would install
         // nothing and the roster would carry an empty entry for every bike ever ridden.
         if paints.is_empty() {
@@ -259,7 +265,7 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
         }
         bikes.push(BikeLoadout { bike_id, paints });
     }
-    Ok(LocalLook { bikes, sources, skipped })
+    Ok(LocalLook { bikes, sources, skipped, oversized })
 }
 
 /// The slots the control plane stores.
@@ -269,6 +275,11 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
 /// that are models rather than paints — a helmet, boots, a tyre set — and while those are
 /// usually folders or archives and get filtered out by extension, a `.pnt` sitting in one of
 /// those categories would be sent and refused, taking the whole publish with it.
+/// The largest paint the control plane will store, mirrored here for the same reason as
+/// [`PUBLISHABLE_SLOTS`]: a loadout is validated whole, so one file over the limit is a rider
+/// publishing nothing at all. Skipping it costs that one paint; sending it costs the lot.
+const MAX_PAINT_BYTES: u64 = 192 * 1024 * 1024;
+
 const PUBLISHABLE_SLOTS: [&str; 9] = [
     "paint",
     "bike_font",
@@ -285,6 +296,7 @@ const PUBLISHABLE_SLOTS: [&str; 9] = [
 fn paints_of(
     plan: &bundle::BundlePlan,
     sources: &mut std::collections::HashMap<String, PathBuf>,
+    oversized: &mut usize,
 ) -> Vec<PaintEntry> {
     let mut out = Vec::new();
     for asset in &plan.assets {
@@ -310,6 +322,16 @@ fn paints_of(
         // the rider publishes nothing at all. First match wins, as it does in the game.
         if out.iter().any(|e: &PaintEntry| e.slot == asset.slot) {
             log::debug!("[sync] {} matched twice; keeping the first", asset.slot);
+            continue;
+        }
+        if asset.size > MAX_PAINT_BYTES {
+            log::warn!(
+                "[sync] {} is {} MB, past the {} MB limit — not published",
+                asset.name,
+                asset.size / 1_048_576,
+                MAX_PAINT_BYTES / 1_048_576
+            );
+            *oversized += 1;
             continue;
         }
         let Ok(sha) = sha256_file(path) else { continue };
@@ -354,6 +376,7 @@ pub async fn publish_all(
             uploaded: 0,
             bikes: look.bikes.len(),
             skipped_bikes: look.skipped,
+            oversized_paints: look.oversized,
             digest,
             unchanged: true,
         });
@@ -415,6 +438,7 @@ pub async fn publish_all(
         uploaded,
         bikes: look.bikes.len(),
         skipped_bikes: look.skipped,
+        oversized_paints: look.oversized,
         digest,
         unchanged: false,
     })
@@ -883,7 +907,7 @@ mod tests {
     }
 
     fn look(bikes: Vec<BikeLoadout>) -> LocalLook {
-        LocalLook { bikes, sources: std::collections::HashMap::new(), skipped: 0 }
+        LocalLook { bikes, sources: std::collections::HashMap::new(), skipped: 0, oversized: 0 }
     }
 
     // The digest is what lets every path that might have changed a look publish without
@@ -956,7 +980,8 @@ mod tests {
             total_size: 0,
         };
         let mut sources = std::collections::HashMap::new();
-        assert!(paints_of(&plan, &mut sources).is_empty());
+        let mut big = 0;
+        assert!(paints_of(&plan, &mut sources, &mut big).is_empty());
     }
 
     #[test]
@@ -970,9 +995,27 @@ mod tests {
             total_size: 0,
         };
         let mut sources = std::collections::HashMap::new();
+        let mut big = 0;
         // Hashing a path that does not exist drops the entry, so this asserts the guard
         // rather than the file work: at most one `paint` survives either way.
-        assert!(paints_of(&plan, &mut sources).len() <= 1);
+        assert!(paints_of(&plan, &mut sources, &mut big).len() <= 1);
+    }
+
+    // Four paints on a normal install are past the old 32 MiB limit, the largest 121.7 MB.
+    // A loadout is validated whole, so one of them meant the rider published nothing at all.
+    #[test]
+    fn a_paint_too_large_to_store_is_left_behind_rather_than_failing_the_lot() {
+        let mut huge = asset("paint", "Enormous");
+        huge.size = MAX_PAINT_BYTES + 1;
+        let plan = bundle::BundlePlan {
+            assets: vec![huge, asset("helmet_paint", "Normal")],
+            unresolved: Vec::new(),
+            total_size: 0,
+        };
+        let mut sources = std::collections::HashMap::new();
+        let mut oversized = 0;
+        paints_of(&plan, &mut sources, &mut oversized);
+        assert_eq!(oversized, 1, "the outsized paint must be counted, not silently dropped");
     }
 
     #[test]
