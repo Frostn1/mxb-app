@@ -386,17 +386,73 @@ async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String>
         .text()
         .await?;
 
-    // The direct CDN link is usually present verbatim in the page.
-    let direct = Regex::new(r#"https?://download[0-9]+\.mediafire\.com/[^"'<>\\ ]+"#).unwrap();
-    if let Some(m) = direct.find(&html) {
-        return Ok(m.as_str().to_string());
+    parse_mediafire_link(&html).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Couldn't find the MediaFire download link — open the mod page to download it manually."
+        )
+    })
+}
+
+/// Pull the direct CDN link out of a MediaFire file page.
+///
+/// MediaFire keeps changing where it puts that link, and any one of these shapes can be
+/// the only one on a given page — so try them all rather than betting on the current
+/// layout. The base64 `data-scrambled-url` is the one that matters most: pages that carry
+/// it leave the button's `href` as a placeholder, so a resolver that only reads `href`
+/// finds nothing at all.
+fn parse_mediafire_link(html: &str) -> Option<String> {
+    let doc = Html::parse_document(html);
+
+    // 1. The scrambled attribute, wherever it hangs — the button today, something else
+    //    tomorrow. It is plain base64 of the real URL.
+    if let Ok(sel) = Selector::parse("[data-scrambled-url]") {
+        for el in doc.select(&sel) {
+            let scrambled = el.value().attr("data-scrambled-url").unwrap_or("");
+            if let Some(u) = decode_scrambled(scrambled) {
+                return Some(u);
+            }
+        }
     }
-    // Fallback: match the download button's `aria-label="Download file"` href.
-    let button = Regex::new(r#"aria-label="Download file"[^>]*href="([^"]+)""#).unwrap();
-    if let Some(c) = button.captures(&html) {
-        return Ok(c[1].to_string());
+
+    // 2. The download button's own href. Matched through the parser rather than a regex
+    //    so attribute order can't hide it — `href` before `aria-label` used to.
+    for css in ["a#downloadButton[href]", "a[aria-label='Download file'][href]"] {
+        if let Ok(sel) = Selector::parse(css) {
+            if let Some(href) = doc.select(&sel).find_map(|el| el.value().attr("href")) {
+                if let Some(u) = usable_link(href) {
+                    return Some(u);
+                }
+            }
+        }
     }
-    anyhow::bail!("Couldn't find the MediaFire download link — open the mod page to download it manually.")
+
+    // 3. Anywhere in the page source, including inside scripts: the CDN host is
+    //    distinctive enough to match on its own. Un-escape the JSON slashes the scripts
+    //    write (`https:\/\/download7…\/file.zip`) first, so one pattern covers both forms.
+    let flat = html.replace("\\/", "/");
+    let direct = Regex::new(r#"(?:https?:)?//download[0-9]+\.mediafire\.com/[^"'<>\\ ]+"#).unwrap();
+    direct.find(&flat).and_then(|m| usable_link(m.as_str()))
+}
+
+fn decode_scrambled(value: &str) -> Option<String> {
+    use base64::Engine;
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(value.trim())
+        .ok()?;
+    usable_link(std::str::from_utf8(&raw).ok()?)
+}
+
+/// Normalise a link off the page, rejecting the placeholders MediaFire parks in `href`
+/// (`#`, `javascript:void(0)`) that would otherwise be "found" and then fail to download.
+fn usable_link(href: &str) -> Option<String> {
+    let href = html_escape::decode_html_entities(href.trim()).into_owned();
+    if href.starts_with("//") {
+        Some(format!("https:{href}"))
+    } else if href.starts_with("http://") || href.starts_with("https://") {
+        Some(href)
+    } else {
+        None
+    }
 }
 
 fn resolve_gdrive(url: &str) -> String {
@@ -588,23 +644,202 @@ pub(crate) async fn download(
     let total = resp.content_length();
     let filename = filename_from(&resp, url);
     let path = dir.join(filename);
+    // Resume against the URL that actually served the bytes, not the one we asked for:
+    // for Drive that is the post-confirm URL, and for everyone else it is wherever the
+    // redirect chain landed. Re-asking the original would start the dance over.
+    let source = resp.url().clone();
+
     let mut file = File::create(&path)?;
-    let mut stream = resp.bytes_stream();
     let mut received: u64 = 0;
     let mut last_emit: u64 = 0;
+    let mut next = Some(resp);
+    let mut breaks: u32 = 0;
+    // Always set before it is read: nothing reports a stall without first recording why.
+    let mut last_err: Option<String>;
 
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        file.write_all(&chunk)?;
-        received += chunk.len() as u64;
-        if received - last_emit >= EMIT_EVERY_BYTES {
-            last_emit = received;
-            emit(app, slug, "downloading", Some(received), total);
+    loop {
+        let resp = match next.take() {
+            Some(r) => r,
+            // Without a `Content-Length` there is nothing to resume *against*: reqwest
+            // hands back decompressed bytes for an encoded body, and that count means
+            // nothing to a `Range` header. Ask for the file from the top instead.
+            None => match resume_request(client, &source, total.map(|_| received)).await {
+                Ok(Resumed::Partial(r)) => r,
+                Ok(Resumed::Restarted(r)) => {
+                    // The host ignored `Range` and started the file over, so we have to
+                    // as well — appending its second copy onto our first would corrupt
+                    // the archive in a way only the extractor would notice.
+                    file = File::create(&path)?;
+                    received = 0;
+                    last_emit = 0;
+                    r
+                }
+                // 416: it has nothing left to give, so what we hold is the whole file.
+                Ok(Resumed::Exhausted) => break,
+                Err(e) => {
+                    last_err = Some(format!("{e:#}"));
+                    breaks += 1;
+                    if breaks > RESUME_ATTEMPTS {
+                        return Err(stalled(received, total, breaks, last_err));
+                    }
+                    tokio::time::sleep(Duration::from_millis(600 * breaks as u64)).await;
+                    continue;
+                }
+            },
+        };
+
+        let end = stream_to_file(app, slug, resp, &mut file, &mut received, &mut last_emit, total)
+            .await?;
+        // A body can come up short without erroring — some hosts just close the socket
+        // cleanly mid-file. Content-Length is what says whether we actually have it all.
+        let short = total.is_some_and(|t| received < t);
+        match end {
+            BodyEnd::Complete if !short => break,
+            BodyEnd::Complete => {
+                last_err = Some(format!(
+                    "the host closed the connection after {}",
+                    crate::bundle::human_size(received)
+                ))
+            }
+            BodyEnd::Broken(e) => last_err = Some(e.to_string()),
         }
+
+        breaks += 1;
+        if breaks > RESUME_ATTEMPTS {
+            return Err(stalled(received, total, breaks, last_err));
+        }
+        // Hold the last reported byte count on screen; the bar picks up where it stalled.
+        emit(app, slug, "downloading", Some(received), total);
+        tokio::time::sleep(Duration::from_millis(600 * breaks as u64)).await;
     }
+
     file.flush()?;
     emit(app, slug, "downloading", Some(received), total);
     Ok(path)
+}
+
+/// How a response body ended.
+enum BodyEnd {
+    /// The stream ran to its end. Says nothing about whether that was the end of the
+    /// *file* — check the byte count against `Content-Length` for that.
+    Complete,
+    /// The connection broke mid-body. Kept for the message we show if resuming fails too.
+    Broken(reqwest::Error),
+}
+
+/// Times a broken download is picked back up before we give up on it.
+///
+/// Mod mirrors drop long transfers routinely — a 400 MB track over a home connection can
+/// lose its socket more than once — and every byte re-fetched is a byte the user already
+/// waited for, so this is deliberately more patient than [`get_with_retry`].
+const RESUME_ATTEMPTS: u32 = 5;
+
+async fn stream_to_file(
+    app: &AppHandle,
+    slug: &str,
+    resp: reqwest::Response,
+    file: &mut File,
+    received: &mut u64,
+    last_emit: &mut u64,
+    total: Option<u64>,
+) -> anyhow::Result<BodyEnd> {
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk) => {
+                file.write_all(&chunk)?;
+                *received += chunk.len() as u64;
+                if *received - *last_emit >= EMIT_EVERY_BYTES {
+                    *last_emit = *received;
+                    emit(app, slug, "downloading", Some(*received), total);
+                }
+            }
+            // Not fatal by itself — the caller asks for the rest with a `Range` request.
+            Err(e) => return Ok(BodyEnd::Broken(e)),
+        }
+    }
+    Ok(BodyEnd::Complete)
+}
+
+/// What came back when we asked for the rest of a file.
+#[derive(Debug)]
+enum Resumed {
+    /// A `206` carrying the bytes from where we left off: append them.
+    Partial(reqwest::Response),
+    /// A `200` — `Range` was ignored and this is the file from the top again.
+    Restarted(reqwest::Response),
+    /// A `416` — there is nothing past the offset we asked from, so we already have it all.
+    Exhausted,
+}
+
+/// Ask for the rest of a file from byte `from`, or for the whole file again when `from`
+/// is `None`.
+async fn resume_request(
+    client: &Client,
+    url: &reqwest::Url,
+    from: Option<u64>,
+) -> anyhow::Result<Resumed> {
+    let mut req = client.get(url.clone());
+    if let Some(from) = from {
+        req = req.header(reqwest::header::RANGE, format!("bytes={from}-"));
+    }
+    let resp = req.send().await?;
+    if resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        return Ok(Resumed::Exhausted);
+    }
+    let resp = resp.error_for_status()?;
+    if content_type(&resp).starts_with("text/html") {
+        // An expired CDN link answers with a page, not the rest of the file. Writing that
+        // into the archive would surface much later as "couldn't determine the archive type".
+        anyhow::bail!("the host answered with a web page instead of the rest of the file");
+    }
+    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        return Ok(Resumed::Restarted(resp));
+    }
+    // A 206 is only appendable if it starts exactly where we left off. A host that
+    // answers from somewhere else would leave a hole in the file that nothing downstream
+    // could detect until extraction failed on a corrupt archive.
+    match (from, content_range_start(&resp)) {
+        (Some(want), Some(got)) if got != want => {
+            anyhow::bail!("the host resumed from byte {got} instead of {want}")
+        }
+        _ => Ok(Resumed::Partial(resp)),
+    }
+}
+
+/// The first byte a `206` covers, from its `Content-Range: bytes <start>-<end>/<total>`.
+fn content_range_start(resp: &reqwest::Response) -> Option<u64> {
+    resp.headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|v| v.to_str().ok())?
+        .trim()
+        .strip_prefix("bytes ")?
+        .split('-')
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// The message for a download that kept breaking off. Says how far it got, so a transfer
+/// dying at the same byte every time reads differently from one dying at random.
+fn stalled(received: u64, total: Option<u64>, breaks: u32, last_err: Option<String>) -> anyhow::Error {
+    let got = match total {
+        Some(t) => format!(
+            "{} of {}",
+            crate::bundle::human_size(received),
+            crate::bundle::human_size(t)
+        ),
+        None => crate::bundle::human_size(received),
+    };
+    let because = last_err
+        .map(|e| format!(" ({e})"))
+        .unwrap_or_default();
+    anyhow::anyhow!(
+        "The download kept breaking off — got {got} before the connection dropped, and {breaks} \
+         attempts to pick it back up failed too{because}. The download host is struggling; try \
+         again in a few minutes, or open the mod page to download it manually."
+    )
 }
 
 fn content_type(resp: &reqwest::Response) -> String {
@@ -1390,6 +1625,137 @@ pub(crate) fn sanitize(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shape that broke installs: the button's `href` is a placeholder and the real
+    /// link is only there base64-scrambled, so reading `href` alone finds nothing.
+    #[test]
+    fn mediafire_link_comes_out_of_the_scrambled_attribute() {
+        let html = r#"
+          <html><body>
+            <a id="downloadButton" class="input popsok" aria-label="Download file"
+               href="javascript:void(0)"
+               data-scrambled-url="aHR0cHM6Ly9kb3dubG9hZDIyMDIubWVkaWFmaXJlLmNvbS9hYmMvdHJhY2sucGt6">
+               Download</a>
+          </body></html>"#;
+        assert_eq!(
+            parse_mediafire_link(html).as_deref(),
+            Some("https://download2202.mediafire.com/abc/track.pkz")
+        );
+    }
+
+    /// `href` before `aria-label` — the old regex demanded the other order and missed this.
+    #[test]
+    fn mediafire_link_survives_attribute_order() {
+        let html = r#"<a href="https://download1234.mediafire.com/xyz/bike.zip"
+                         aria-label="Download file" id="downloadButton">Download</a>"#;
+        assert_eq!(
+            parse_mediafire_link(html).as_deref(),
+            Some("https://download1234.mediafire.com/xyz/bike.zip")
+        );
+    }
+
+    /// Protocol-relative and JSON-escaped forms both appear in the page's scripts.
+    #[test]
+    fn mediafire_link_from_page_source() {
+        let relative = r#"<a id="downloadButton" href="//download99.mediafire.com/q/track.rar">go</a>"#;
+        assert_eq!(
+            parse_mediafire_link(relative).as_deref(),
+            Some("https://download99.mediafire.com/q/track.rar")
+        );
+
+        let escaped = r#"<script>var u = "https:\/\/download7.mediafire.com\/k\/paint.pnt";</script>"#;
+        assert_eq!(
+            parse_mediafire_link(escaped).as_deref(),
+            Some("https://download7.mediafire.com/k/paint.pnt")
+        );
+    }
+
+    /// A page with nothing usable must say so rather than hand back `#` and fail later.
+    #[test]
+    fn mediafire_placeholder_href_is_not_a_link() {
+        let html = r##"<a id="downloadButton" href="#">Download</a>"##;
+        assert!(parse_mediafire_link(html).is_none());
+    }
+
+    /// Answer one request with a canned response, then drop the connection.
+    fn serve_once(response: &'static [u8]) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut sock, _)) = listener.accept() {
+                // Drain the request first — writing to a socket whose peer is still
+                // sending can reset the connection before the response lands.
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf);
+                let _ = sock.write_all(response);
+                let _ = sock.flush();
+            }
+        });
+        format!("http://127.0.0.1:{port}/mod.zip")
+    }
+
+    async fn resume_against(response: &'static [u8]) -> anyhow::Result<Resumed> {
+        let client = build_client().unwrap();
+        let url = reqwest::Url::parse(&serve_once(response)).unwrap();
+        resume_request(&client, &url, Some(4)).await
+    }
+
+    /// A host that honours `Range` hands back the tail, and we append it.
+    #[tokio::test]
+    async fn resume_takes_a_206_as_the_rest_of_the_file() {
+        let resp = resume_against(
+            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 4-7/8\r\nContent-Type: application/zip\r\n\r\ntail",
+        )
+        .await
+        .expect("206 resumes");
+        assert!(matches!(resp, Resumed::Partial(_)));
+    }
+
+    /// A host that ignores `Range` sends the file from the top — appending that onto what
+    /// we already hold would produce an archive that only fails at extraction.
+    #[tokio::test]
+    async fn resume_takes_a_200_as_a_restart() {
+        let resp = resume_against(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nContent-Type: application/zip\r\n\r\nwholefil",
+        )
+        .await
+        .expect("200 is a restart, not a failure");
+        assert!(matches!(resp, Resumed::Restarted(_)));
+    }
+
+    /// 416 means there is nothing past our offset — we already have the whole file.
+    #[tokio::test]
+    async fn resume_takes_a_416_as_already_complete() {
+        let resp = resume_against(
+            b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\n\r\n",
+        )
+        .await
+        .expect("416 is not an error here");
+        assert!(matches!(resp, Resumed::Exhausted));
+    }
+
+    /// A 206 that starts somewhere other than where we left off would leave a hole in the
+    /// file — refuse it rather than write an archive that only fails at extraction.
+    #[tokio::test]
+    async fn resume_refuses_a_206_from_the_wrong_offset() {
+        let err = resume_against(
+            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 6-9/10\r\nContent-Type: application/zip\r\n\r\ntail",
+        )
+        .await
+        .expect_err("a 206 from byte 6 does not continue byte 4");
+        assert!(format!("{err:#}").contains("instead of 4"), "{err:#}");
+    }
+
+    /// An expired CDN link answers with a page. That must not get appended to the archive.
+    #[tokio::test]
+    async fn resume_refuses_a_web_page() {
+        let err = resume_against(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\nContent-Type: text/html\r\n\r\n<html>gone</h",
+        )
+        .await
+        .expect_err("HTML is not the rest of the file");
+        assert!(format!("{err:#}").contains("web page"), "{err:#}");
+    }
 
     /// A Proton Drive share is end-to-end encrypted, so there is no direct URL to hand
     /// back. It has to fail *here*, with an explanation — fetching the link returns the
