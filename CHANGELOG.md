@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — publishing your paints stops failing outright
+
+### Fixed
+- **A loadout the control plane refused took your whole look with it.** Two things a real
+  install produces would fail the entire publish: a paint filed under a slot the control plane
+  does not store, and the same slot resolving twice — a livery installed both loose and inside
+  a pack. Either one meant a rider published nothing at all. Only publishable slots are sent
+  now, one paint per slot, first match winning as it does in the game.
+- **A refused publish says why.** The app reported the status and discarded the explanation, so
+  "400 Bad Request" was the whole story. It now carries the control plane's reason.
+
 ## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
 
 On top of v0.9.1 — the Designer's painting tools, Play on macOS and the SteamOS white screen

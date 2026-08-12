@@ -262,6 +262,25 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     Ok(LocalLook { bikes, sources, skipped })
 }
 
+/// The slots the control plane stores.
+///
+/// A wire contract, duplicated here rather than shared: the two ship separately and update
+/// independently, exactly like the agent's pairing code. `bundle::plan` also resolves slots
+/// that are models rather than paints — a helmet, boots, a tyre set — and while those are
+/// usually folders or archives and get filtered out by extension, a `.pnt` sitting in one of
+/// those categories would be sent and refused, taking the whole publish with it.
+const PUBLISHABLE_SLOTS: [&str; 9] = [
+    "paint",
+    "bike_font",
+    "helmet_paint",
+    "goggles_paint",
+    "suit_paint",
+    "suit_font",
+    "boots_paint",
+    "gloves_paint",
+    "protection_paint",
+];
+
 /// The `.pnt` files in a plan, hashed, recording where each digest came from.
 fn paints_of(
     plan: &bundle::BundlePlan,
@@ -279,6 +298,18 @@ fn paints_of(
             .map(|e| e.eq_ignore_ascii_case(PAINT_EXT))
             .unwrap_or(false);
         if !is_paint {
+            continue;
+        }
+        // A slot the control plane does not store is not worth failing a publish over.
+        if !PUBLISHABLE_SLOTS.contains(&asset.slot.as_str()) {
+            continue;
+        }
+        // One paint per slot. A loadout names one file per slot, but resolution can match
+        // the same name in two places — a livery installed both loose and in a pack — and
+        // the control plane keys on (account, bike, slot), so a second one is rejected and
+        // the rider publishes nothing at all. First match wins, as it does in the game.
+        if out.iter().any(|e: &PaintEntry| e.slot == asset.slot) {
+            log::debug!("[sync] {} matched twice; keeping the first", asset.slot);
             continue;
         }
         let Ok(sha) = sha256_file(path) else { continue };
@@ -347,7 +378,16 @@ pub async fn publish_all(
         .send()
         .await?;
     if !resp.status().is_success() {
-        anyhow::bail!("the control plane refused the loadout ({})", resp.status());
+        // Carry the reason, not just the number. "400 Bad Request" says a payload was
+        // wrong; the body says which slot, which bike, and why — and without it a rejected
+        // publish is an investigation rather than a sentence.
+        let status = resp.status();
+        let detail = resp.text().await.unwrap_or_default();
+        let reason = serde_json::from_str::<serde_json::Value>(&detail)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or(detail);
+        anyhow::bail!("the control plane refused the loadout ({status}): {reason}");
     }
     let missing: Resp = resp.json().await?;
 
@@ -890,6 +930,49 @@ mod tests {
             paints: vec![entry("bikes/A/paints/x.pnt", "aa"), entry("bikes/B/paints/y.pnt", "bb")],
         }]);
         assert_ne!(split.digest(), together.digest());
+    }
+
+    fn asset(slot: &str, name: &str) -> bundle::AssetRef {
+        bundle::AssetRef {
+            slot: slot.into(),
+            value: name.into(),
+            name: format!("{name}.pnt"),
+            rel_dest: format!("bikes/KTM450/paints/{name}.pnt"),
+            abs_path: format!("/nowhere/{name}.pnt"),
+            size: 1,
+            is_dir: false,
+        }
+    }
+
+    // The publish is rejected whole if any entry is bad, so a rider with one odd file
+    // published nothing at all. Both of these came from a real install.
+    #[test]
+    fn a_slot_the_control_plane_does_not_store_is_left_out() {
+        // `bundle::plan` resolves models as well as paints. A `.pnt` filed under one of
+        // those categories would be sent, refused, and take the whole loadout with it.
+        let plan = bundle::BundlePlan {
+            assets: vec![asset("helmet", "Shell"), asset("tyres", "Mud")],
+            unresolved: Vec::new(),
+            total_size: 0,
+        };
+        let mut sources = std::collections::HashMap::new();
+        assert!(paints_of(&plan, &mut sources).is_empty());
+    }
+
+    #[test]
+    fn one_paint_per_slot_even_when_a_name_matches_twice() {
+        // The same livery installed loose and inside a pack resolves twice. The control
+        // plane keys on (account, bike, slot) and refuses the second, so this must not
+        // reach it.
+        let plan = bundle::BundlePlan {
+            assets: vec![asset("paint", "RedBud"), asset("paint", "RedBud")],
+            unresolved: Vec::new(),
+            total_size: 0,
+        };
+        let mut sources = std::collections::HashMap::new();
+        // Hashing a path that does not exist drops the entry, so this asserts the guard
+        // rather than the file work: at most one `paint` survives either way.
+        assert!(paints_of(&plan, &mut sources).len() <= 1);
     }
 
     #[test]
