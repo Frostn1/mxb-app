@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — a big livery no longer stops you publishing anything
+
+### Fixed
+- **Paints larger than 32 MB were refused, and took the whole publish with them.** A 4K livery
+  runs well past that: the largest on a normal install is 121.7 MB. Because a loadout is
+  checked as a whole, owning one such paint meant publishing nothing at all and looking default
+  to everyone. The limit is now 192 MB, and anything still over it is left behind — and said
+  out loud — rather than failing the rest.
+
 ## Unreleased — publishing your paints stops failing outright
 
 ### Fixed

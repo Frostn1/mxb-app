@@ -788,6 +788,8 @@ export const es: Translation = {
   "sync.lastPulled": "Última comprobación {{ago}}. Se repite sola cuando pulsas Jugar.",
   "sync.neverPulled": "Aún no has descargado las pinturas de los demás",
   "sync.neverPulledWhy": "Hasta que lo hagas, los otros pilotos aparecen con motos por defecto aunque hayan publicado las suyas.",
+  "sync.oversized_one": "{{count}} pintura es demasiado grande para compartirla, así que los demás pilotos no la verán.",
+  "sync.oversized_other": "{{count}} pinturas son demasiado grandes para compartirlas, así que los demás pilotos no las verán.",
   "sync.skippedBikes_one": "{{count}} moto no se publicó — tienes más de las que podemos guardar.",
   "sync.skippedBikes_other": "{{count}} motos no se publicaron — tienes más de las que podemos guardar.",
   "sync.noMatchingProfile": "Este nombre no coincide con ningún perfil de MX Bikes en este PC, así que no hay nada que publicar. Revisa la carpeta de perfiles en Ajustes.",
