@@ -4452,7 +4452,14 @@ async fn frostmod_install_runtime(
     app: tauri::AppHandle,
     runtime: vcruntime::Runtime,
 ) -> Result<vcruntime::InstallOutcome, String> {
-    vcruntime::install(&app, runtime)
+    // VC90 isn't finished by the installer alone: the copy that serves plain imports has
+    // to land beside the game exe, so the install needs to know where that is.
+    let game_dir = config::load(&app)
+        .ok()
+        .map(|c| c.install_dir())
+        .filter(|d| !d.trim().is_empty())
+        .map(std::path::PathBuf::from);
+    vcruntime::install(&app, runtime, game_dir.as_deref())
         .await
         .map_err(|e| format!("{e:#}"))
 }

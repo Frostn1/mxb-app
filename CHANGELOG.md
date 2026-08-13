@@ -1,6 +1,24 @@
 # Changelog
 
-## 2026-08-09 — The gear repair no longer invents a helmet
+## 2026-08-09 — The msvcr90 box, actually closed
+
+### Fixed
+- **"MSVCR90.dll was not found" now gets the fix it was always missing.** Installing
+  Microsoft's 2008 redistributable registers a side-by-side assembly under `WinSxS` and puts
+  nothing on the ordinary DLL search path. The game reaches that assembly because its manifest
+  asks for it by name; a plugin with a plain `MSVCR90.dll` import and no VC90 manifest — most
+  things built with VS2008 — gets the ordinary search order instead, and never sees it. So the
+  install succeeded, the check went green, and the box kept appearing. The app now also places
+  a copy of `msvcr90.dll` beside the game executable, which is the one place that import will
+  look. Taken from the machine's own `WinSxS` (newest servicing build), skipped silently where
+  the game folder isn't writable.
+- **A game folder that carries its own copy of the CRT is no longer called broken.** The check
+  only ever looked in `WinSxS`, so an install keeping the runtime beside the executable — the
+  way PiBoSo's own installers have long shipped it — showed a warning bar it could never clear.
+- **The missing-runtime check now looks for `vcruntime140_1.dll`.** FrostMod imports it, but
+  only `vcruntime140.dll` and `msvcp140.dll` were probed. A machine still on the original 2015
+  redistributable has those two and not this one, so it read as perfectly healthy while
+  injection failed naming a file the app never checked for.
 
 ### Fixed
 - **"A helmets mod was installed loose" no longer fires on a paint pack.** The repair asked
