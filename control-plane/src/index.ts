@@ -10,13 +10,15 @@
 
 import {
   awsEnv,
+  createImage,
   fleet,
+  imageState,
   latestWindowsAmi,
   REGION,
   runInstance,
   terminateInstance,
 } from "./aws";
-import { bootstrapScript } from "./bootstrap";
+import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
   isBikeId,
@@ -68,7 +70,9 @@ export default {
    * charges for an empty grid.
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(reapIdleServers(env));
+    ctx.waitUntil(
+      Promise.all([reapIdleServers(env), advanceImageBuild(env)]).then(() => undefined),
+    );
   },
 } satisfies ExportedHandler<Env>;
 
@@ -132,6 +136,8 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
   if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
   if (method === "POST" && path === "/v1/provision") return provision(request, account, env);
+  if (method === "POST" && path === "/v1/images/build") return buildImage(request, account, env);
+  if (method === "GET" && path === "/v1/images") return imageStatus(env);
 
   const owned = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})$/.exec(path);
   if (owned && method === "DELETE") return deleteServer(owned[1], account, env);
@@ -673,6 +679,161 @@ async function fleetState(account: Account, env: Env): Promise<Response> {
   }
 }
 
+/** Where the built image's id lives, and where a build in progress keeps its place. */
+const SETTING_AMI = "server_ami_id";
+const SETTING_PENDING_AMI = "pending_ami_id";
+
+async function getSetting(env: Env, key: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?")
+    .bind(key)
+    .first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+async function setSetting(env: Env, key: string, value: string | null): Promise<void> {
+  if (value === null) {
+    await env.DB.prepare("DELETE FROM settings WHERE key = ?").bind(key).run();
+    return;
+  }
+  await env.DB.prepare(
+    "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)" +
+      " ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+  )
+    .bind(key, value, Date.now())
+    .run();
+}
+
+/**
+ * Build the image every later server launches from.
+ *
+ * Installing the game and the bike pack takes a quarter of an hour and produces the same disk
+ * every time. Doing it once and snapshotting the result is the difference between a server
+ * arriving in fifteen minutes and arriving in two — and it stops getting slower as the pack
+ * grows, which it just did, from 1.9 GB to 3.8.
+ *
+ * The builder is an ordinary provisioned instance running the ordinary bootstrap, so what gets
+ * captured is exactly what a working server looks like. It is marked with a role so the idle
+ * reaper leaves it alone: an instance with nobody connected is precisely what a builder is.
+ */
+async function buildImage(request: Request, account: Account, env: Env): Promise<Response> {
+  void request;
+  const aws = awsEnv(env);
+  if (!aws) return json(503, { error: "provisioning isn't configured on this deployment" });
+  const securityGroupId = env.MXB_SECURITY_GROUP_ID?.trim();
+  const agentDownload = env.MXB_AGENT_DOWNLOAD_URL?.trim();
+  const gameDownload = env.MXB_GAME_DOWNLOAD_URL?.trim();
+  if (!securityGroupId || !agentDownload || !gameDownload) {
+    return json(503, { error: "provisioning isn't finished being set up yet" });
+  }
+  if (await getSetting(env, SETTING_PENDING_AMI)) {
+    return json(409, { error: "an image is already being built" });
+  }
+  const existingBuilder = await env.DB.prepare(
+    "SELECT id FROM servers WHERE role = 'builder'",
+  ).first<{ id: string }>();
+  if (existingBuilder) return json(409, { error: "a builder is already running" });
+
+  const id = crypto.randomUUID();
+  const agentToken = newToken();
+  await env.DB.prepare(
+    "INSERT INTO servers (id, name, region, address, created_at, owner_account_id, published," +
+      " agent_token, role) VALUES (?, ?, ?, '', ?, ?, 0, ?, 'builder')",
+  )
+    .bind(id, "image builder", REGION, Date.now(), account.id, agentToken)
+    .run();
+
+  try {
+    const amiId = await latestWindowsAmi(aws);
+    const instanceId = await runInstance(
+      aws,
+      {
+        name: "mxb image builder",
+        instanceType: env.MXB_INSTANCE_TYPE?.trim() || "t3.small",
+        securityGroupId,
+        userData: bootstrapScript({
+          agentToken,
+          agentUrl: agentDownload,
+          gameUrl: gameDownload,
+          serverName: "image builder",
+          gamePort: GAME_PORT,
+          agentPort: AGENT_PORT,
+          serverId: id,
+          controlPlaneUrl: new URL(request.url).origin,
+        }),
+      },
+      amiId,
+    );
+    await env.DB.prepare("UPDATE servers SET instance_id = ? WHERE id = ?")
+      .bind(instanceId, id)
+      .run();
+    return json(201, { id, instanceId, state: "building" });
+  } catch (err) {
+    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(id).run();
+    console.error(JSON.stringify({ msg: "buildImage", error: String(err) }));
+    return json(502, { error: String(err) });
+  }
+}
+
+/** What the image situation is: none, building, baking, or ready. */
+async function imageStatus(env: Env): Promise<Response> {
+  const ami = await getSetting(env, SETTING_AMI);
+  const pending = await getSetting(env, SETTING_PENDING_AMI);
+  const builder = await env.DB.prepare(
+    "SELECT bootstrap_stage FROM servers WHERE role = 'builder'",
+  ).first<{ bootstrap_stage: string | null }>();
+  return json(200, {
+    amiId: ami,
+    pendingAmiId: pending,
+    builderStage: builder?.bootstrap_stage ?? null,
+    state: ami ? "ready" : pending ? "baking" : builder ? "building" : "none",
+  });
+}
+
+/**
+ * Move a finished build along, one cron tick at a time.
+ *
+ * Three states, none of which can be waited on inline: the builder installing (~15 minutes),
+ * EC2 baking the image (~10), and then the swap. Each run does whichever step is due.
+ */
+async function advanceImageBuild(env: Env): Promise<void> {
+  const aws = awsEnv(env);
+  if (!aws) return;
+
+  const pending = await getSetting(env, SETTING_PENDING_AMI);
+  if (pending) {
+    const state = await imageState(aws, pending);
+    if (state === "available") {
+      const previous = await getSetting(env, SETTING_AMI);
+      await setSetting(env, SETTING_AMI, pending);
+      await setSetting(env, SETTING_PENDING_AMI, null);
+      console.log(JSON.stringify({ msg: "image ready", ami: pending, replaced: previous }));
+    } else if (state === "failed" || state === null) {
+      // Nothing to salvage, and leaving it pending would block every future build.
+      await setSetting(env, SETTING_PENDING_AMI, null);
+      console.error(JSON.stringify({ msg: "image failed", ami: pending, state }));
+    }
+    return;
+  }
+
+  const builder = await env.DB.prepare(
+    "SELECT id, instance_id, bootstrap_stage FROM servers WHERE role = 'builder'",
+  ).first<{ id: string; instance_id: string | null; bootstrap_stage: string | null }>();
+  if (!builder?.instance_id) return;
+
+  if (builder.bootstrap_stage === "ready") {
+    const imageId = await createImage(aws, builder.instance_id, `mxb-server-${Date.now()}`);
+    await setSetting(env, SETTING_PENDING_AMI, imageId);
+    // CreateImage stops the instance to take a consistent disk; it is of no further use.
+    await terminateInstance(aws, builder.instance_id);
+    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(builder.id).run();
+    console.log(JSON.stringify({ msg: "image baking", ami: imageId }));
+  } else if (builder.bootstrap_stage === "failed") {
+    await terminateInstance(aws, builder.instance_id).catch(() => {});
+    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(builder.id).run();
+    console.error(JSON.stringify({ msg: "image build failed", id: builder.id }));
+  }
+}
+
 /**
  * Create a server: launch the machine, and record it.
  *
@@ -718,14 +879,19 @@ async function provision(request: Request, account: Account, env: Env): Promise<
     .run();
 
   try {
-    const amiId = await latestWindowsAmi(aws);
+    // Launch from the prebuilt image when there is one: the game and the bike pack are
+    // already on its disk, so the server only has to write its own config and start. That is
+    // two minutes instead of fifteen, and it does not grow with the pack.
+    const built = await getSetting(env, SETTING_AMI);
+    const amiId = built ?? (await latestWindowsAmi(aws));
+    const script = built ? imageBootstrapScript : bootstrapScript;
     const instanceId = await runInstance(
       aws,
       {
         name: `mxb ${(name as string).trim()}`,
         instanceType: env.MXB_INSTANCE_TYPE?.trim() || "t3.small",
         securityGroupId,
-        userData: bootstrapScript({
+        userData: script({
           agentToken,
           agentUrl: agentDownload,
           gameUrl: gameDownload,
@@ -1000,7 +1166,10 @@ async function reapIdleServers(env: Env): Promise<void> {
   // cannot be trusted to find them.
   const instances = await fleet(aws);
   const rows = await env.DB.prepare(
-    "SELECT id, instance_id, agent_token, idle_since FROM servers WHERE instance_id IS NOT NULL",
+    // Builders are excluded: an instance with nobody connected is exactly what a builder is,
+    // and reaping one destroys a quarter of an hour of install.
+    "SELECT id, instance_id, agent_token, idle_since FROM servers" +
+      " WHERE instance_id IS NOT NULL AND (role IS NULL OR role != 'builder')",
   ).all<{
     id: string;
     instance_id: string;

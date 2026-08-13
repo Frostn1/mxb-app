@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Unreleased — an import fills the gaps, it doesn't trade
 
 ### Fixed
 - **Importing a full bundle no longer overwrites the mods you already have.** A bundle carries
@@ -8,6 +8,52 @@
   on it travel too — so importing one quietly replaced your copy of a model with the sender's.
   An import now writes only the files you're missing and leaves anything already on disk alone.
   Downloading or dropping a mod still overwrites, which is how updating one works.
+
+## Unreleased — a server arrives in two minutes, not fifteen
+
+### Added
+- **Servers launch from a prebuilt image.** Every one of them used to download and install the
+  same 6 GB — the game, then the whole bike pack — which was the entire wait. That work now
+  happens once, into a machine image, and each new server writes its own config and starts.
+  Two minutes instead of fifteen, and it stops getting slower every time the pack grows.
+  Building the image is a one-off `POST /v1/images/build`; until one exists, servers install
+  from scratch exactly as before.
+
+## Unreleased — share any track or paint, not just a preset
+
+### Added
+- **Share installed files with a code.** Sharing was a preset's privilege: a code carried a
+  *look*, and the full bundle packed whatever its slots resolved to. Handing someone the track
+  you just rode, or the paint you just made, still meant uploading it somewhere and pasting a
+  link. Anything the Library lists can now go straight into a code — **Share** on any item, or
+  pick several with **Select** and share them together. It packs them, uploads them, and puts
+  one line on your clipboard.
+- **The other end: Import → Paste a share code…** Files land back in the folders the sender
+  had them in — a track filed under `tracks/EU/` arrives under `tracks/EU/`, a helmet paint
+  goes to the helmet it belongs to — so a share carries where things go, not just what they
+  are. The code is previewed before anything downloads: what it holds, how big it is, and
+  where it's hosted.
+- Sharing reuses the preset bundle's upload, so the same 2 GB ceiling and the same slicing
+  past one part apply, and a share whose parts have gone missing says which one.
+
+## Unreleased — a created server can see the bikes it installed
+
+### Fixed
+- **A provisioned server rejected riders on bikes it had been given.** The pack was downloaded
+  into the game folder, and MX Bikes reads mods from PiBoSo's user folder instead — the same
+  place the client uses, which under the service account lives elsewhere entirely. The files
+  were on disk the whole time and the game was never looking there. They now install where the
+  game reads, with the game folder linked to the same content so nothing is copied twice.
+
+## Unreleased — a full share isn't capped at 200 MB any more
+
+### Changed
+- **Full-share bundles are no longer capped at 200 MB.** That ceiling was the upload host's,
+  not ours, and a preset carrying a big track or a few detailed bikes ran straight into it. A
+  bundle past 190 MB is now sliced across several uploads and stitched back together on
+  import, taking the limit to 2 GB. Codes for smaller bundles are unchanged, and a share whose
+  parts have gone missing says so — with the size it expected — instead of failing at the
+  unzip.
 
 ## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
 
@@ -190,7 +236,6 @@ looking nothing like the track you ride, name it in the report — that's the th
 - The `msvcr90.dll` copy beside the executable is written without elevation, so it cannot
   land in a game folder under `Program Files`. A Steam install there still needs the runtime
   repaired by hand until the elevated fallback lands.
-
 
 ## Unannounced — a debugger can't ride along
 
