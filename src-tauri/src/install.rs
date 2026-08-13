@@ -1305,6 +1305,17 @@ fn gear_model_folder(
     (!name.trim().is_empty()).then_some(name)
 }
 
+/// What a placement does with a file that is already sitting at the destination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OnConflict {
+    /// Overwrite it. Re-installing a mod is how a player updates it.
+    Overwrite,
+    /// Keep what's on disk. A preset bundle carries whole asset folders — the sender's
+    /// helmet mesh rides along with the one paint they meant to share — so an import must
+    /// fill in what's missing and never trade the receiver's copy for the sender's.
+    Keep,
+}
+
 pub(crate) fn place_mod(
     extracted: &Path,
     mods_dir: &Path,
@@ -1312,8 +1323,19 @@ pub(crate) fn place_mod(
     dest_folder: &str,
     slug: &str,
 ) -> anyhow::Result<usize> {
+    place_mod_with(extracted, mods_dir, type_folder, dest_folder, slug, OnConflict::Overwrite)
+}
+
+pub(crate) fn place_mod_with(
+    extracted: &Path,
+    mods_dir: &Path,
+    type_folder: &str,
+    dest_folder: &str,
+    slug: &str,
+    on_conflict: OnConflict,
+) -> anyhow::Result<usize> {
     let route = plan_placement(extracted, mods_dir, type_folder, dest_folder, slug);
-    apply(&route.placement).inspect_err(|e| {
+    apply(&route.placement, on_conflict).inspect_err(|e| {
         // The one place every install — download, import, drop — funnels through, so one
         // log line here covers all three. Without it a failed install left no trace at all
         // beyond a toast the player had already dismissed by the time they reported it.
@@ -1367,20 +1389,33 @@ fn roots_for(placement: &Placement) -> Vec<PathBuf> {
 /// or even whether it was the source or the destination. Every step says what it was doing
 /// to what, and a failure is logged as well as returned — the toast is transient, the log
 /// is what a player can send back.
-fn apply(placement: &Placement) -> anyhow::Result<usize> {
+fn apply(placement: &Placement, on_conflict: OnConflict) -> anyhow::Result<usize> {
     for root in roots_for(placement) {
         std::fs::create_dir_all(&root)
             .with_context(|| format!("creating {}", root.display()))?;
     }
     let writes = writes_for(placement);
+    let mut written = 0;
+    let mut kept = 0;
     for (src, dst) in &writes {
+        // The skip sits here rather than in `writes_for` so the enumeration stays the one
+        // description of what a placement covers — the dropzone's preview still lists every
+        // file, whatever this install then decides to leave alone.
+        if on_conflict == OnConflict::Keep && dst.exists() {
+            kept += 1;
+            continue;
+        }
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
         copy_staged(src, dst)?;
+        written += 1;
     }
-    Ok(writes.len())
+    if kept > 0 {
+        log::info!("kept {kept} file(s) already on disk, wrote {written}");
+    }
+    Ok(written)
 }
 
 /// How long [`copy_staged`] keeps waiting out a copy that still looks transient.
@@ -2163,6 +2198,26 @@ mod tests {
         assert!(!mods.join("tracks/readme.txt").exists());
         let _ = std::fs::remove_dir_all(&base);
         Ok(())
+    }
+
+    /// Re-installing a mod is how a player updates it, so the default has to keep clobbering.
+    /// Only [`OnConflict::Keep`] — the preset-bundle import — steps around what's on disk.
+    #[test]
+    fn reinstalling_overwrites_by_default() {
+        let root = place_tmp("overwrite");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"new").unwrap();
+
+        let mods = root.join("mods");
+        std::fs::create_dir_all(mods.join("tracks")).unwrap();
+        std::fs::write(mods.join("tracks/track.pkz"), b"old").unwrap();
+
+        let placed = place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"new");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -430,7 +430,16 @@ pub async fn import(
     std::fs::create_dir_all(&extracted)?;
     install::extract_archive(&archive, &extracted)?;
     let mods_dir = library::mods_subdir(&cfg.mods_path, "mods");
-    install::place_mod(&extracted, &mods_dir, "bikes", "", BUNDLE_SLUG)?;
+    // Anything the receiver already has wins: a bundle ships whole asset folders, so
+    // overwriting would swap their helmet mesh and their liveries for the sender's.
+    install::place_mod_with(
+        &extracted,
+        &mods_dir,
+        "bikes",
+        "",
+        BUNDLE_SLUG,
+        install::OnConflict::Keep,
+    )?;
 
     presets::save_preset(presets_dir, preset.clone())?;
 
@@ -759,6 +768,47 @@ mod tests {
 
         assert!(mods.join("bikes/KTM450/paints/RedBud.pnt").exists());
         assert!(mods.join("rider/helmets/AGV/model.edf").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An import fills gaps, it doesn't trade. Sharing one helmet paint ships the whole
+    /// helmet — `dedup_assets` collapses the paint into its parent folder — so a receiver
+    /// who already owns that helmet would otherwise have their mesh and their own liveries
+    /// replaced by the sender's copies.
+    #[test]
+    fn importing_keeps_what_the_receiver_already_has() {
+        let root = tmp("keep-existing");
+        let src = root.join("bundle");
+        std::fs::create_dir_all(src.join("mods/rider/helmets/AGV/paints")).unwrap();
+        std::fs::write(src.join("mods/rider/helmets/AGV/model.edf"), b"theirs").unwrap();
+        std::fs::write(src.join("mods/rider/helmets/AGV/paints/Theirs.pnt"), b"theirs").unwrap();
+
+        let zip_path = root.join("b.zip");
+        zip_dir(&src, &zip_path).unwrap();
+        let extracted = root.join("extracted");
+        std::fs::create_dir_all(&extracted).unwrap();
+        install::extract_archive(&zip_path, &extracted).unwrap();
+
+        let mods = root.join("game/mods");
+        std::fs::create_dir_all(mods.join("rider/helmets/AGV/paints")).unwrap();
+        std::fs::write(mods.join("rider/helmets/AGV/model.edf"), b"mine").unwrap();
+        std::fs::write(mods.join("rider/helmets/AGV/paints/Mine.pnt"), b"mine").unwrap();
+
+        let written = install::place_mod_with(
+            &extracted,
+            &mods,
+            "bikes",
+            "",
+            "slug",
+            install::OnConflict::Keep,
+        )
+        .unwrap();
+
+        let read = |p: &str| std::fs::read(mods.join(p)).unwrap();
+        assert_eq!(read("rider/helmets/AGV/model.edf"), b"mine", "their mesh stays");
+        assert_eq!(read("rider/helmets/AGV/paints/Mine.pnt"), b"mine", "their paint stays");
+        assert_eq!(read("rider/helmets/AGV/paints/Theirs.pnt"), b"theirs", "the new paint lands");
+        assert_eq!(written, 1, "only the file they were missing was written");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
