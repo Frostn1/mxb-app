@@ -820,6 +820,18 @@ async function advanceImageBuild(env: Env): Promise<void> {
   ).first<{ id: string; instance_id: string | null; bootstrap_stage: string | null }>();
   if (!builder?.instance_id) return;
 
+  // An instance that is no longer there cannot finish. Without this the row sits at
+  // "building" forever and every later build is refused as one already in progress — which is
+  // exactly what happened when the reaper was killing builders as orphans.
+  const live = await fleet(aws).catch(() => []);
+  if (!live.some((i) => i.instanceId === builder.instance_id)) {
+    await env.DB.prepare("DELETE FROM servers WHERE id = ?").bind(builder.id).run();
+    console.error(
+      JSON.stringify({ msg: "image builder vanished", id: builder.id, instance: builder.instance_id }),
+    );
+    return;
+  }
+
   if (builder.bootstrap_stage === "ready") {
     const imageId = await createImage(aws, builder.instance_id, `mxb-server-${Date.now()}`);
     await setSetting(env, SETTING_PENDING_AMI, imageId);
@@ -1166,15 +1178,19 @@ async function reapIdleServers(env: Env): Promise<void> {
   // cannot be trusted to find them.
   const instances = await fleet(aws);
   const rows = await env.DB.prepare(
-    // Builders are excluded: an instance with nobody connected is exactly what a builder is,
-    // and reaping one destroys a quarter of an hour of install.
-    "SELECT id, instance_id, agent_token, idle_since FROM servers" +
-      " WHERE instance_id IS NOT NULL AND (role IS NULL OR role != 'builder')",
+    // Every row with an instance, builders included. Filtering them out here is what killed
+    // the first image build: absent from this map, the builder matched the orphan check below
+    // — "no database row points at this instance" — and was terminated within five minutes of
+    // launching. Builders are skipped at the idle check instead, which is the only part that
+    // should ignore them.
+    "SELECT id, instance_id, agent_token, idle_since, role FROM servers" +
+      " WHERE instance_id IS NOT NULL",
   ).all<{
     id: string;
     instance_id: string;
     agent_token: string | null;
     idle_since: number | null;
+    role: string | null;
   }>();
   const byInstance = new Map(rows.results.map((r) => [r.instance_id, r]));
 
@@ -1203,6 +1219,10 @@ async function reapIdleServers(env: Env): Promise<void> {
       await kill("orphan: no database row points at this instance");
       continue;
     }
+
+    // A builder has nobody connected because nobody rides on it. Reaping one throws away a
+    // quarter of an hour of install; `advanceImageBuild` owns its lifetime instead.
+    if (row.role === "builder") continue;
 
     // The backstop that catches everything else: a bootstrap that hung instead of trapping,
     // an agent that never started, a failure mode nobody has thought of yet. Without this,
