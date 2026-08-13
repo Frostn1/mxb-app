@@ -1,66 +1,5 @@
 # Changelog
 
-## Unreleased — the msvcr90 box, actually closed
-
-### Fixed
-- **"MSVCR90.dll was not found" now gets the fix it was always missing.** Installing
-  Microsoft's 2008 redistributable registers a side-by-side assembly under `WinSxS` and puts
-  nothing on the ordinary DLL search path. The game reaches that assembly because its manifest
-  asks for it by name; a module with a plain `MSVCR90.dll` import and no VC90 manifest — most
-  things built with VS2008 — gets the ordinary search order instead, and never sees it. So the
-  install succeeded, the check went green, and the box kept appearing. The app now also places
-  a copy of `msvcr90.dll` beside the game executable, which is the one place that import will
-  look. Taken from the machine's own `WinSxS` (newest servicing build). This corrects the fix
-  described under v0.9.0, which addressed the wrong half of the problem.
-- **A game folder that carries its own copy of the CRT is no longer called broken.** The check
-  only ever looked in `WinSxS`, so an install keeping the runtime beside the executable — the
-  way PiBoSo's own installers have long shipped it — showed a warning bar it could never clear.
-- **The missing-runtime check now looks for `vcruntime140_1.dll`.** FrostMod imports it, but
-  only `vcruntime140.dll` and `msvcp140.dll` were probed. A machine still on the original 2015
-  redistributable has those two and not this one, so it read as perfectly healthy while
-  injection failed naming a file the app never checked for.
-
-### Known
-- The copy beside the executable is written without elevation, so it cannot land in a game
-  folder under `Program Files`. A Steam install there still needs the runtime repaired by
-  hand until the elevated fallback lands.
-
-## Unreleased — share any track or paint, not just a preset
-
-### Added
-- **Share installed files with a code.** Sharing was a preset's privilege: a code carried a
-  *look*, and the full bundle packed whatever its slots resolved to. Handing someone the track
-  you just rode, or the paint you just made, still meant uploading it somewhere and pasting a
-  link. Anything the Library lists can now go straight into a code — **Share** on any item, or
-  pick several with **Select** and share them together. It packs them, uploads them, and puts
-  one line on your clipboard.
-- **The other end: Import → Paste a share code…** Files land back in the folders the sender
-  had them in — a track filed under `tracks/EU/` arrives under `tracks/EU/`, a helmet paint
-  goes to the helmet it belongs to — so a share carries where things go, not just what they
-  are. The code is previewed before anything downloads: what it holds, how big it is, and
-  where it's hosted.
-- Sharing reuses the preset bundle's upload, so the same 2 GB ceiling and the same slicing
-  past one part apply, and a share whose parts have gone missing says which one.
-
-## Unreleased — a created server can see the bikes it installed
-
-### Fixed
-- **A provisioned server rejected riders on bikes it had been given.** The pack was downloaded
-  into the game folder, and MX Bikes reads mods from PiBoSo's user folder instead — the same
-  place the client uses, which under the service account lives elsewhere entirely. The files
-  were on disk the whole time and the game was never looking there. They now install where the
-  game reads, with the game folder linked to the same content so nothing is copied twice.
-
-## Unreleased — a full share isn't capped at 200 MB any more
-
-### Changed
-- **Full-share bundles are no longer capped at 200 MB.** That ceiling was the upload host's,
-  not ours, and a preset carrying a big track or a few detailed bikes ran straight into it. A
-  bundle past 190 MB is now sliced across several uploads and stitched back together on
-  import, taking the limit to 2 GB. Codes for smaller bundles are unchanged, and a share whose
-  parts have gone missing says so — with the size it expected — instead of failing at the
-  unzip.
-
 ## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
 
 On top of v0.9.1 — the Designer's painting tools, Play on macOS and the SteamOS white screen
@@ -128,6 +67,19 @@ looking nothing like the track you ride, name it in the report — that's the th
   the game folder — that one also drives the 3D rider, the game log location and Play, none of
   which a choice made on this card should move. A folder with no ReShade in it is still
   accepted and simply reported as such, and there's a link back to the game folder.
+- **Share installed files with a code.** Sharing was a preset's privilege: a code carried a
+  *look*, and the full bundle packed whatever its slots resolved to. Handing someone the track
+  you just rode, or the paint you just made, still meant uploading it somewhere and pasting a
+  link. Anything the Library lists can now go straight into a code — **Share** on any item, or
+  pick several with **Select** and share them together. It packs them, uploads them, and puts
+  one line on your clipboard.
+- **The other end: Import → Paste a share code…** Files land back in the folders the sender
+  had them in — a track filed under `tracks/EU/` arrives under `tracks/EU/`, a helmet paint
+  goes to the helmet it belongs to — so a share carries where things go, not just what they
+  are. The code is previewed before anything downloads: what it holds, how big it is, and
+  where it's hosted.
+- Sharing reuses the preset bundle's upload, so the same 2 GB ceiling and the same slicing
+  past one part apply, and a share whose parts have gone missing says which one.
 
 ### Changed
 - **Settings shows one section at a time.** Twelve sections rendered into a single column
@@ -191,6 +143,27 @@ looking nothing like the track you ride, name it in the report — that's the th
   now, one paint per slot, first match winning as it does in the game.
 - **A refused publish says why.** The app reported the status and discarded the explanation, so
   "400 Bad Request" was the whole story. It now carries the control plane's reason.
+- **A provisioned server rejected riders on bikes it had been given.** The pack was downloaded
+  into the game folder, and MX Bikes reads mods from PiBoSo's user folder instead — the same
+  place the client uses, which under the service account lives elsewhere entirely. The files
+  were on disk the whole time and the game was never looking there. They now install where the
+  game reads, with the game folder linked to the same content so nothing is copied twice.
+- **"MSVCR90.dll was not found" now gets the fix it was always missing.** Installing
+  Microsoft's 2008 redistributable registers a side-by-side assembly under `WinSxS` and puts
+  nothing on the ordinary DLL search path. The game reaches that assembly because its manifest
+  asks for it by name; a module with a plain `MSVCR90.dll` import and no VC90 manifest — most
+  things built with VS2008 — gets the ordinary search order instead, and never sees it. So the
+  install succeeded, the check went green, and the box kept appearing. The app now also places
+  a copy of `msvcr90.dll` beside the game executable, which is the one place that import will
+  look. Taken from the machine's own `WinSxS` (newest servicing build). This corrects the fix
+  described under v0.9.0, which addressed the wrong half of the problem.
+- **A game folder that carries its own copy of the CRT is no longer called broken.** The check
+  only ever looked in `WinSxS`, so an install keeping the runtime beside the executable — the
+  way PiBoSo's own installers have long shipped it — showed a warning bar it could never clear.
+- **The missing-runtime check now looks for `vcruntime140_1.dll`.** FrostMod imports it, but
+  only `vcruntime140.dll` and `msvcp140.dll` were probed. A machine still on the original 2015
+  redistributable has those two and not this one, so it read as perfectly healthy while
+  injection failed naming a file the app never checked for.
 
 ### Notes
 - Voice is **off until turned on**. A feature that opens a microphone shouldn't be
@@ -205,6 +178,10 @@ looking nothing like the track you ride, name it in the report — that's the th
 - The Linux build and CI now install `libasound2-dev`. cpal reaches ALSA through
   `alsa-sys`, whose build script shells out to `pkg-config` and fails the entire build
   without it — the AppImage would not have built either.
+- The `msvcr90.dll` copy beside the executable is written without elevation, so it cannot
+  land in a game folder under `Program Files`. A Steam install there still needs the runtime
+  repaired by hand until the elevated fallback lands.
+
 
 ## Unannounced — a debugger can't ride along
 
