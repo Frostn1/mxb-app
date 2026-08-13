@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 const LIB_DIR: &str = "FrostMod Models";
 const MARKER: &str = "_active.txt";
 const ORIGINAL: &str = "Original";
+/// The game's own model, inside the bike's `.pkz`. Never a folder — it's reached by
+/// clearing the loose set so the packed one takes over again.
+const STOCK: &str = "Stock";
 /// Per-variant record of the filenames that variant owns, written whenever we park a
 /// set. Lets the reverse swap move back exactly what it moved out instead of guessing.
 const MANIFEST: &str = "_files.txt";
@@ -87,6 +90,7 @@ fn read_active(mods_path: &str, bike: &str) -> String {
 }
 
 pub const ORIGINAL_LABEL: &str = ORIGINAL;
+pub const STOCK_LABEL: &str = STOCK;
 
 pub fn current_active(mods_path: &str, bike: &str) -> String {
     let a = read_active(mods_path, bike);
@@ -120,6 +124,13 @@ fn list_files(dir: &Path) -> Vec<String> {
 
 fn dir_exists(p: &Path) -> bool {
     p.is_dir()
+}
+
+/// True if the bike ships a `.pkz` — a packed model the loose files layer over. It's what
+/// makes "no loose model" still mean *a* model, and so the only case where reverting to
+/// the game's own model is possible at all.
+fn has_packed_fallback(bike_dir: &Path) -> bool {
+    list_files(bike_dir).iter().any(|f| f.to_ascii_lowercase().ends_with(".pkz"))
 }
 fn is_bookkeeping(name: &str) -> bool {
     name.eq_ignore_ascii_case(MANIFEST) || name.eq_ignore_ascii_case(MARKER)
@@ -296,6 +307,25 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
             });
         }
     }
+    // Guarantee a Stock row so a bike with a single swap can still go back to the game's
+    // own model, exactly as `soundmods` does for sounds. Unconditional on purpose: nothing
+    // on disk distinguishes an OEM bike carrying a dropped-in swap from an unpacked mod
+    // bike — an OEM bike keeps its model in the game's own archive, with nothing of it in
+    // `mods/bikes` at all (see `library::scan_bike_targets`) — so gating would hide the row
+    // from the very bikes that need it. Reverting only ever *parks* the loose set, so the
+    // worst case is a bike left without a model and one click to put it back.
+    // Skipped when nothing is loose: the active row is already stock, whatever it's called.
+    let has_stock = |v: &ModelVariant| v.name.eq_ignore_ascii_case(STOCK);
+    if !variants[0].empty && !variants.iter().chain(others.iter()).any(has_stock) {
+        others.push(ModelVariant {
+            name: STOCK.to_string(),
+            active: false,
+            valid: false,
+            empty: true,
+            file_count: 0,
+        });
+    }
+
     others.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     variants.extend(others);
     variants
@@ -349,9 +379,14 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
         anyhow::bail!("'{target}' is already the active model");
     }
 
+    let is_stock = target.eq_ignore_ascii_case(STOCK);
     let backup_dir = variant_dir(mods_path, bike, &active_label); // park the live set here
     let target_dir = variant_dir(mods_path, bike, target); // bring this set in
-    if !dir_exists(&target_dir) {
+
+    // Stock is never a folder — it's whatever model the game itself has for this bike,
+    // reached by parking the loose set and bringing in nothing. Every other target has to
+    // exist in the library.
+    if !is_stock && !dir_exists(&target_dir) {
         anyhow::bail!("model '{target}' not found");
     }
 
@@ -365,7 +400,20 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
     }
 
     // Only the files that belong to the model move. The bike's own setup stays put.
-    let root_files = active_set_files(mods_path, bike, &active_label, &target_files);
+    let mut root_files = active_set_files(mods_path, bike, &active_label, &target_files);
+
+    // Reverting to Stock has to clear every loose override, not just the meshes. A swap
+    // dropped straight at the bike root was never registered, so it has no manifest and
+    // `active_set_files` finds only its meshes — leaving its `.hrc`/`.cfg` behind, still
+    // overriding the `.pkz` but now naming meshes that are gone. Nothing is deleted: it
+    // parks with the rest, and the manifest written below makes the way back exact.
+    if is_stock && read_manifest(&backup_dir).is_none() {
+        for f in root_setup_files(mods_path, bike) {
+            if !contains_ci(&root_files, &f) {
+                root_files.push(f);
+            }
+        }
+    }
 
     // 1) Back up the current set into the library (all-or-nothing).
     if !root_files.is_empty() && !move_set(&root, &backup_dir, &root_files) {
@@ -415,7 +463,7 @@ fn orphaned_setup_for(mods_path: &str, bike: &str) -> Vec<(String, PathBuf)> {
     let root = bike_dir(mods_path, bike);
     // A `.pkz` sitting in the bike folder is a packed fallback the loose files layer over,
     // so having no `.hrc` of its own is normal there, not damage.
-    if list_files(&root).iter().any(|f| f.to_ascii_lowercase().ends_with(".pkz")) {
+    if has_packed_fallback(&root) {
         return Vec::new();
     }
     let at_root = root_setup_files(mods_path, bike);
@@ -845,7 +893,12 @@ mod tests {
 
         let bikes = scan_model_swaps(mp);
         assert_eq!(bikes.len(), 1, "per-part bike lists");
-        assert!(bikes[0].variants.iter().all(|v| v.valid), "both sets are valid");
+        // The synthesized Stock row is empty by definition — it's the real sets that must
+        // not be written off for lacking a `model.edf`.
+        assert!(
+            bikes[0].variants.iter().filter(|v| !v.empty).all(|v| v.valid),
+            "both sets are valid"
+        );
 
         apply_model_swap(mp, "CR250", "OEM").unwrap();
         let at_root = names_at(&bike_dir(mp, "CR250"));
@@ -1238,6 +1291,119 @@ mod tests {
         // ...and never land in the model's Original backup.
         assert!(!file_exists(&variant_dir(mp, "KTM", "Original").join("engine.scl")));
         assert!(!file_exists(&variant_dir(mp, "KTM", "Original").join("idle.wav")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// An OEM bike as the game ships it: every mesh inside the `.pkz`, only paints loose,
+    /// with a model swap dropped over the top (mesh + the setup naming it).
+    fn make_packed_bike_with_dropin(mp: &str, bike: &str) {
+        touch(&bike_dir(mp, bike).join(format!("{bike}.pkz")));
+        touch(&bike_dir(mp, bike).join("paints").join("Red.pnt"));
+        make_bike(mp, bike, "model.edf");
+    }
+
+    #[test]
+    fn stock_row_is_offered_when_the_bike_has_a_packed_fallback() {
+        let root = tmp("stock-row");
+        let mp = root.to_str().unwrap();
+        make_packed_bike_with_dropin(mp, "KTM");
+
+        let bikes = scan_model_swaps(mp);
+        let names: Vec<&str> = bikes[0].variants.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&STOCK), "a Stock row is offered: {names:?}");
+
+        let stock = bikes[0].variants.iter().find(|v| v.name == STOCK).unwrap();
+        assert!(stock.empty && !stock.valid && !stock.active);
+        assert_eq!(stock.file_count, 0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stock_row_is_offered_without_a_packed_fallback_too() {
+        // Nothing on disk tells an OEM bike carrying a dropped-in swap apart from an
+        // unpacked mod bike, so the row is unconditional — gating it would hide it from
+        // exactly the bikes that need it.
+        let root = tmp("stock-unpacked");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM", "model.edf"); // no `.pkz`
+        touch(&variant_dir(mp, "KTM", "Factory").join("model.edf"));
+
+        let bikes = scan_model_swaps(mp);
+        let names: Vec<&str> = bikes[0].variants.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&STOCK), "Stock is always offered: {names:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stock_row_is_never_duplicated() {
+        let root = tmp("stock-dup");
+        let mp = root.to_str().unwrap();
+        make_packed_bike_with_dropin(mp, "KTM");
+        apply_model_swap(mp, "KTM", STOCK).unwrap();
+
+        // Active *is* Stock now — the synthesized row must not be added a second time.
+        let bikes = scan_model_swaps(mp);
+        let stock: Vec<_> = bikes[0].variants.iter().filter(|v| v.name == STOCK).collect();
+        assert_eq!(stock.len(), 1, "exactly one Stock row: {:?}", bikes[0].variants);
+        assert!(stock[0].active);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apply_stock_clears_every_loose_override() {
+        let root = tmp("stock-apply");
+        let mp = root.to_str().unwrap();
+        make_packed_bike_with_dropin(mp, "KTM");
+
+        apply_model_swap(mp, "KTM", STOCK).unwrap();
+
+        // The drop-in never had a manifest, so its setup would have been left behind by
+        // the mesh-only rule — still overriding the `.pkz`, now naming a mesh that's gone.
+        let at_root = names_at(&bike_dir(mp, "KTM"));
+        assert_eq!(at_root, vec!["KTM.pkz"], "only the packed bike is left: {at_root:?}");
+        assert!(file_exists(&bike_dir(mp, "KTM").join("paints").join("Red.pnt")), "paints untouched");
+
+        let parked = names_at(&variant_dir(mp, "KTM", ORIGINAL));
+        for f in ["model.edf", "chassis.hrc", "bike.cfg", "wheel.geom"] {
+            assert!(parked.contains(&f.to_string()), "{f} parked, not deleted: {parked:?}");
+        }
+        assert_eq!(read_active(mp, "KTM"), STOCK);
+        // Stock is not a folder — nothing was created for it.
+        assert!(!dir_exists(&variant_dir(mp, "KTM", STOCK)));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn swapping_back_off_stock_restores_the_whole_set() {
+        let root = tmp("stock-back");
+        let mp = root.to_str().unwrap();
+        make_packed_bike_with_dropin(mp, "KTM");
+        let before = names_at(&bike_dir(mp, "KTM"));
+
+        apply_model_swap(mp, "KTM", STOCK).unwrap();
+        apply_model_swap(mp, "KTM", ORIGINAL).unwrap();
+
+        assert_eq!(names_at(&bike_dir(mp, "KTM")), before, "the bike folder is exactly as it was");
+        assert_eq!(read_active(mp, "KTM"), ORIGINAL);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stock_on_a_bike_with_nothing_behind_it_is_still_reversible() {
+        // The cost of offering Stock unconditionally: a bike with no packed model is left
+        // without one. That has to stay a parking job, never a delete, and one swap back
+        // has to undo it completely — otherwise the row is a trap.
+        let root = tmp("stock-no-fallback");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM", "model.edf"); // no `.pkz` behind it
+        let before = names_at(&bike_dir(mp, "KTM"));
+
+        apply_model_swap(mp, "KTM", STOCK).unwrap();
+        assert!(names_at(&bike_dir(mp, "KTM")).is_empty(), "the root is bare");
+        assert!(file_exists(&variant_dir(mp, "KTM", ORIGINAL).join("model.edf")), "parked, not deleted");
+
+        apply_model_swap(mp, "KTM", ORIGINAL).unwrap();
+        assert_eq!(names_at(&bike_dir(mp, "KTM")), before, "one click puts it all back");
         let _ = fs::remove_dir_all(&root);
     }
 

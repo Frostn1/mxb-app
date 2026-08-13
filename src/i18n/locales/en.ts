@@ -927,9 +927,12 @@ export const en = {
   "locker.onlyStock": "Only Stock — install a sound mod to swap",
   "locker.noModel": "No model",
   "locker.stock": "Stock",
+  "locker.stockModel": "Game default",
   "locker.activeModel": "Active model",
   "locker.activeSound": "Active sound",
   "locker.switchToNoModel": "Switch to no model — removes the current model files",
+  "locker.switchToStockModel":
+    "Removes the current model so the game's own takes over — it's filed away, not deleted",
   "locker.switchToStock":
     "Switch to Stock — removes the sound mod (built-in sound plays)",
   "locker.missingModelEdf": "This set has no model.edf",

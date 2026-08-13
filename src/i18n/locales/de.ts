@@ -961,10 +961,13 @@ export const de: Translation = {
     "Nur Stock — installiere einen Sound-Mod zum Tauschen",
   "locker.noModel": "Kein Modell",
   "locker.stock": "Stock",
+  "locker.stockModel": "Spielstandard",
   "locker.activeModel": "Aktives Modell",
   "locker.activeSound": "Aktiver Sound",
   "locker.switchToNoModel":
     "Auf kein Modell wechseln — entfernt die aktuellen Modelldateien",
+  "locker.switchToStockModel":
+    "Entfernt das aktuelle Modell, damit das spieleigene übernimmt — es wird abgelegt, nicht gelöscht",
   "locker.switchToStock":
     "Auf Stock wechseln — entfernt den Sound-Mod (der Originalsound spielt)",
   "locker.missingModelEdf": "Diesem Set fehlt model.edf",
