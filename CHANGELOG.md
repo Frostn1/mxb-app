@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-12
+
+### Fixed
+- **A bike with one model swap can go back to the game's own model.** The Locker only ever
+  listed model sets that existed as folders, so a bike carrying a single swap showed one tile
+  and "Only one model — install more to swap", with no way back. Every bike now gets a
+  **Stock** row, the way sounds always have. Choosing it files the loose model away under
+  `FrostMod Models/` — never deletes it — and one click puts it back.
+- **Reverting to Stock clears the setup files a swap brought with it.** A swap dropped
+  straight into a bike folder was never registered, so only its meshes were filed away and
+  its `.hrc`/`.cfg` stayed behind, still overriding the packed bike but naming meshes that
+  were gone. Those now travel with the model they belong to.
+
 ## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
 
 On top of v0.9.1 — the Designer's painting tools, Play on macOS and the SteamOS white screen

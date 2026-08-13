@@ -947,10 +947,13 @@ export const ptBR: Translation = {
   "locker.onlyStock": "Só Stock — instale um mod de som para poder trocar",
   "locker.noModel": "Sem modelo",
   "locker.stock": "Stock",
+  "locker.stockModel": "Padrão do jogo",
   "locker.activeModel": "Modelo ativo",
   "locker.activeSound": "Som ativo",
   "locker.switchToNoModel":
     "Mudar para nenhum modelo — remove os arquivos do modelo atual",
+  "locker.switchToStockModel":
+    "Remove o modelo atual para o do jogo assumir — ele é arquivado, não excluído",
   "locker.switchToStock":
     "Mudar para Stock — remove o mod de som (toca o som original)",
   "locker.missingModelEdf": "Este set não tem model.edf",

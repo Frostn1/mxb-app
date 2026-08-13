@@ -521,7 +521,20 @@ function VariantButton({
   onClick: () => void;
 }) {
   const t = useT();
-  const emptyLabel = kind === "model" ? t("locker.noModel") : t("locker.stock");
+  // A model row named "Stock" is the game's own model, packed in the bike's `.pkz` —
+  // reached by clearing the loose set, so it's empty like a "no model" row but means the
+  // opposite. Only the wording differs.
+  const isStockModel = kind === "model" && v.name.toLowerCase() === "stock";
+  const emptyLabel = isStockModel
+    ? t("locker.stockModel")
+    : kind === "model"
+      ? t("locker.noModel")
+      : t("locker.stock");
+  const emptyTitle = isStockModel
+    ? t("locker.switchToStockModel")
+    : kind === "model"
+      ? t("locker.switchToNoModel")
+      : t("locker.switchToStock");
   // An empty set is applicable (revert to no-model / Stock); a set with files but
   // missing its required file is incomplete and stays disabled.
   const applicable = v.valid || v.empty;
@@ -536,9 +549,7 @@ function VariantButton({
             ? t("locker.activeModel")
             : t("locker.activeSound")
           : v.empty
-            ? kind === "model"
-              ? t("locker.switchToNoModel")
-              : t("locker.switchToStock")
+            ? emptyTitle
             : !v.valid
               ? kind === "model"
                 ? t("locker.missingModelEdf")
