@@ -48,13 +48,17 @@ export const en = {
   "nav.locker": "Locker",
   "nav.presets": "Presets",
   "nav.rider": "Rider",
+  "nav.designer": "Designer",
   "nav.paints": "Paints",
+  "nav.studio": "Studio",
   "nav.servers": "Servers",
   "nav.manage": "Manage",
   "nav.settings": "Settings",
 
   "sidebar.installing": "Installing “{{name}}”",
   "sidebar.queued": "+{{count}} queued",
+  "sidebar.expand": "Expand the sidebar",
+  "sidebar.collapse": "Collapse the sidebar",
 
   // ── FrostMod status + actions ──────────────────────────────────────────────
   "frostmod.checking": "Checking FrostMod…",
@@ -236,7 +240,7 @@ export const en = {
   "tour.frostmod.body":
     "This shows FrostMod's status. It live-reloads MX Bikes after an install, so new content shows up without restarting the game.",
   "tour.servers.title": "Look right online",
-  "tour.servers.body": "MX Bikes never sends paints between players, so everyone shows up in default gear unless you already hold their exact file. Enrol here and the app publishes your look and fetches everyone else's — and you can start a dedicated server from the same page.",
+  "tour.servers.body": "MX Bikes never sends paints between players, so everyone shows up in default gear unless you already hold their exact file. Enroll here and the app publishes your look and fetches everyone else's — and you can start a dedicated server from the same page.",
   "tour.settings.title": "Settings",
   "tour.settings.body":
     "Set your game folder, background behaviour and FrostMod options here. You can replay this tour from here too.",
@@ -391,6 +395,14 @@ export const en = {
   "purchases.installed": "Installed",
   "purchases.downloading": "Downloading…",
   "purchases.downloadFailed": "Couldn't download {{title}}",
+  "purchases.searchPlaceholder": "Search your purchases…",
+  "purchases.otherCategory": "Other",
+  "purchases.notInstalledOnly": "Not installed",
+  "purchases.noMatches": "None of your purchases match that.",
+  "purchases.viewDetails": "View details",
+  "purchaseSort.recentlyPurchased": "Recently purchased",
+  "purchaseSort.nameAsc": "Name (A–Z)",
+  "purchaseSort.notInstalled": "Not installed first",
 
   // ── MX Bikes Shop catalog (browse-only; buying happens on the store) ───────
   "shopCatalog.searchPlaceholder": "Search the shop…",
@@ -510,6 +522,11 @@ export const en = {
 
   // ── Settings ───────────────────────────────────────────────────────────────
   "settings.help": "Configure your game folder, updates, and app preferences.",
+  // Nav groups. One section shows at a time; these head the list on the left.
+  "settings.groupSetup": "Setup",
+  "settings.groupApp": "App",
+  "settings.groupAdvanced": "Advanced",
+  "settings.groupAbout": "About",
   "settings.gameFolder": "Game folder",
   "settings.general": "General",
   "settings.appearance": "Appearance",
@@ -593,6 +610,15 @@ export const en = {
     "No Steam install detected — set the folder manually.",
   "settings.installFound": "Found your {{game}} install",
   "settings.detectInstallFailed": "Couldn't detect install folder",
+  "settings.wineRunnerDesc":
+    "{{game}} is a Windows game, so on a Mac it runs inside a CrossOver, Whisky or Wine bottle. This is what Play launches it through.",
+  "settings.wineRunnerNone": "No Wine runner found",
+  "settings.pickWineRunner": "Select a Wine binary (e.g. CrossOver's wine)",
+  "settings.wineRunnerFailed": "Couldn't set the Wine runner",
+  "settings.wineBottlesFound_one": "Found {{count}} bottle to search for your install.",
+  "settings.wineBottlesFound_other": "Found {{count}} bottles to search for your install.",
+  "settings.wineBottlesNone":
+    "No bottles found — install {{game}} in CrossOver, Whisky or Wine first.",
   "settings.pickProfilesFolder": "Select your {{game}} profiles folder",
   "settings.profilesSet": "Profiles folder set",
   "settings.profilesFound_one": "Found {{count}} profile.",
@@ -742,6 +768,8 @@ export const en = {
   "sync.lastPulled": "Last checked {{ago}}. It runs again by itself when you press Play.",
   "sync.neverPulled": "You haven't fetched anyone else's paints yet",
   "sync.neverPulledWhy": "Until you do, other riders show up on default bikes even if they've published theirs.",
+  "sync.oversized_one": "{{count}} paint is too large to share, so other riders won't see it.",
+  "sync.oversized_other": "{{count}} paints are too large to share, so other riders won't see them.",
   "sync.skippedBikes_one": "{{count}} bike wasn't published — you have more than we can hold.",
   "sync.skippedBikes_other": "{{count}} bikes weren't published — you have more than we can hold.",
   "sync.noMatchingProfile": "This name doesn't match any MX Bikes profile on this PC, so there's nothing to publish. Check the profiles folder in Settings.",
@@ -750,6 +778,8 @@ export const en = {
   "sync.keptYours_other": "{{count}} paints were left alone",
   "sync.keptYoursWhy": "Another rider uses the same file name for a different paint. Yours was kept — the app never overwrites a livery it didn't install. You'll see that rider in your version of it.",
   "servers.booting": "Starting up…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "This server couldn't finish setting itself up, so it shut down. Here's what it reported:",
   "servers.bootingWhy": "Installing the game on the new machine. This takes a few minutes — it downloads the full installer.",
   "servers.shutsDown": "Shuts down",
   "servers.inUse": "In use",
@@ -836,6 +866,36 @@ export const en = {
   "library.bulkMovePartial": "Moved {{ok}}, {{fail}} failed",
   "library.bulkMoved_one": "Moved {{count}} item to {{folder}}",
   "library.bulkMoved_other": "Moved {{count}} items to {{folder}}",
+
+  // ── Sharing installed files (any track or paint, not just presets) ─────────
+  "share.share": "Share",
+  "share.action": "Share…",
+  "share.title": "Share these files",
+  "share.hint":
+    "Packs them up, uploads them, and gives you one code to paste anywhere. Whoever pastes it back gets the files in the same folders.",
+  "share.hintDone": "Send this code — it installs everything listed above.",
+  "share.nothingToShare":
+    "Nothing here can be shared — only files inside your mods folder can go in a code.",
+  "share.skipped_one": "1 pick left out ({{reason}}).",
+  "share.skipped_other": "{{count}} picks left out ({{reason}}).",
+  "share.createCode_one": "Share 1 file ({{size}})",
+  "share.createCode_other": "Share {{count}} files ({{size}})",
+  "share.copyCode": "Copy code",
+  "share.copied": "Share code copied.",
+  "share.uploaded": "Uploaded — copy the code below.",
+  "share.uploadedCopied": "Uploaded — the code is on your clipboard.",
+  "share.importAction": "Paste a share code…",
+  "share.importTitle": "Import shared files",
+  "share.importBody":
+    "Paste a share code someone sent you. The files install where they had them.",
+  "share.downloadNotice": "Downloads {{size}} from {{host}}.",
+  "share.install": "Download & install",
+  "share.installed_one": "Installed 1 file.",
+  "share.installed_other": "Installed {{count}} files.",
+  "share.phasePacking": "Packing files…",
+  "share.phaseUploading": "Uploading…",
+  "share.phaseDownloading": "Downloading…",
+  "share.phaseInstalling": "Installing…",
 
   // ── Locker (per-bike model + sound swaps) ──────────────────────────────────
   "locker.help":
@@ -1010,6 +1070,29 @@ export const en = {
   "overlay.fullscreenNowDesc": "The overlay still opens — the game is simply drawn over it. Switch to borderless or windowed in Options → Video.",
   "overlay.notWorking": "Pressed it and nothing happened?",
   "overlay.notWorkingDesc": "Check the shortcut above: another app may already own that combo, and picking a free one is what fixes it.",
+  // Voice chat — devices and levels. The transport that carries this to other riders
+  // isn't built yet; `voice.notConnected*` is what says so on the page.
+  "voice.section": "Voice chat",
+  "voice.enable": "Enable voice chat",
+  "voice.microphone": "Microphone",
+  "voice.output": "Output",
+  "voice.systemDefault": "System default",
+  "voice.testMic": "Test mic",
+  "voice.stopTest": "Stop",
+  "voice.speakNow": "Say something — the bar should move.",
+  "voice.testOutput": "Play test tone",
+  "voice.testOutputDesc": "Check you'll hear other riders in the right headset.",
+  "voice.micGain": "Microphone gain",
+  "voice.volume": "Volume",
+  "voice.ptt": "Push to talk",
+  "voice.pttUpdated": "Push-to-talk key updated",
+  "voice.micFailed": "Couldn't open the microphone",
+  "voice.outputFailed": "Couldn't play the test tone",
+  "voice.registerFailed": "Voice settings saved, but the push-to-talk key didn't register",
+  "voice.deviceGone": "That device isn't connected",
+  "voice.noDevices": "No audio devices found",
+  "voice.notConnected": "Not connected to anyone yet",
+  "voice.notConnectedDesc": "These settings control your own microphone and headset, and the test buttons work today. Actually talking to other riders needs the voice server, which isn't built yet — nothing here transmits.",
   "overlay.pressKeys": "Press keys…",
   "overlay.needModifier": "Add a modifier",
   "overlay.needModifierDesc": "Hold Ctrl, Alt or Shift so the shortcut can't fire while you type.",
@@ -1031,11 +1114,46 @@ export const en = {
   "showcase.whileGameRunning": "while MX Bikes is running",
   "showcase.releaseNotes": "Read the release notes",
   "showcase.gotIt": "Got it",
+  "showcase.supporters.title_one": "Made possible by {{count}} supporter",
+  "showcase.supporters.title_other": "Made possible by {{count}} supporters",
+  "showcase.supporters.more": "+{{count}} more",
+  "showcase.v092.hero.title": "See a track's terrain in 3D",
+  "showcase.v092.hero.body":
+    "Tracks were the one thing the library couldn't show you — a name, a picture and a size. The viewer now reads the heightfield out of a track and draws the ground itself, so the jumps, the ruts and the shape of a turn are there to look at before you ever load it. It opens from a track in the library, next to View in 3D.",
+  "showcase.v092.surfaces":
+    "A track is drawn with its own surfaces. Where the track says which is which, grass, apron, hard standing and the dirt of the riding line each take the colour of the material it names — so a farm's fields come out as soil and a grass circuit comes out green.",
+  "showcase.v092.relief":
+    "The terrain is lit by its own hollows and casts real shadows, so a rut reads as a rut and a jump face as a jump face — whichever way round it happens to run.",
+  "showcase.v092.accuracy":
+    "Tracks are drawn the way the game holds them: the right way round rather than mirrored, no eleven-metre wall around the ones that sit below their datum, and roughly four times the detail across the ground.",
+  "showcase.v092.voice":
+    "Voice chat settings: pick the microphone you're heard through and the headset everyone else comes out of, with a live input meter and a test tone. Nothing transmits yet — this is the device half, and the page says so.",
+  "showcase.v092.pushToTalk":
+    "A push-to-talk key that works while the game holds focus, bound the same way as the overlay hotkey.",
+  "showcase.v091.hero.title": "Paint straight onto the template",
+  "showcase.v091.hero.body":
+    "The Designer could place images and text on a paint's sheets, but you couldn't put down a single pixel by hand — a fade across a shroud meant leaving for an image editor and coming back. It has a tool kit now: a soft brush with size, edge and strength, an eraser, a gradient, a fill, and rectangle, ellipse and line. Everything lands on the sheet and on the 3D model at the same time, while you drag.",
+  "showcase.v091.gradient":
+    "A gradient that carries one colour into another. Drag to say where the transition happens — everything before it is the first colour, everything past it the second. Linear or radial, and it can fade out to nothing instead of to a colour.",
+  "showcase.v091.paintLayer":
+    "Painting goes on its own layer, so it gets opacity, blending and stacking like everything else — and the template underneath is never touched. Hide the layer and you have the clean template back. ⌘Z undoes strokes.",
+  "showcase.v091.ghost":
+    "Draw against a ghost of the bike. A sheet can show the paint you started from faintly underneath to trace over — lifted out of the sheet, so it isn't saved into yours — and a UV map of the model's bodywork, each piece in its own colour, so you can see which panel you're painting on.",
+  "showcase.v091.parts":
+    "Drop a photo onto one panel. Pick a piece of the bike's bodywork and a layer fits to it and is clipped to its outline, so an image off the internet covers the shroud and stops at the seam. Hovering the sheet names the part you're over.",
+  "showcase.v091.resize":
+    "Layers resize by dragging their corners, not just by the slider.",
+  "showcase.v091.macos":
+    "Play and Join Server work on macOS, through whichever CrossOver, Whisky or Wine bottle holds the game — and the app finds a bottled install by itself instead of asking you to type the path.",
+  "showcase.v091.steamos":
+    "The Linux app opens to its interface on SteamOS instead of a white screen.",
   "showcase.v090.hero.title": "Turn your artwork into a paint the game loads",
   "showcase.v090.hero.body":
     "A new Paints tab builds paints out of ordinary image sheets — TGA, PNG, JPG — and installs them where the game looks: a bike livery, a helmet or goggle paint, a rider's kit or gloves. Unpack a paint you already have to get a template that actually fits the model, edit it in any editor, and put it straight back. The studio checks your sheet names against the ones the mesh binds before you save, then previews the result on the real model.",
   "showcase.v090.reshade":
     "Browse, install and switch ReShade presets from the app — with an Off entry to compare against the stock look, and a warning when a preset needs effects you don't have.",
+  "showcase.v090.bundles":
+    "Share a preset as a full bundle and the code carries the mods themselves — livery, helmet and goggles, kit, gloves, boots, tyres. Full import puts every file where the game reads it, so someone with an empty mods folder still ends up wearing exactly what you built.",
   "showcase.v090.purchases":
     "My purchases signs in to your mxbikes-shop.com account and installs what you've already paid for, through the same review sheet a drag-and-drop uses.",
   "showcase.v090.ridingStyles":
@@ -1222,10 +1340,64 @@ export const en = {
   // ReShade is a product name and stays untranslated everywhere, capital S included.
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Post-processing presets — how {{game}} looks on screen.",
+
+  // ── Logs ───────────────────────────────────────────────────────────────────
+  "settings.logs": "Logs",
+  "logs.desc":
+    "The files to send when something goes wrong. MXB App, FrostMod and {{game}} each keep their own — open any of them, or save the lot as one zip to attach to a bug report.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "What the app itself recorded",
+  "logs.frostmodLogsDesc": "Whatever the loader wrote in its own folder",
+  "logs.gameLogsDesc": "The game's own log, beside its files",
+  "logs.open": "Open folder",
+  "logs.save": "Save logs…",
+  "logs.saving": "Saving…",
+  "logs.refresh": "Refresh",
+  "logs.loading": "Looking…",
+  "logs.empty": "No log files here yet.",
+  "logs.folderMissing":
+    "That folder isn't there — nothing has written a log to it yet.",
+  "logs.summary_one": "{{count}} file · {{size}} · newest {{when}}",
+  "logs.summary_other": "{{count}} files · {{size}} · newest {{when}}",
+  "logs.saved": "Logs saved",
+  "logs.savedDesc_one": "{{count}} log file, {{size}}",
+  "logs.savedDesc_other": "{{count}} log files, {{size}}",
+  "logs.saveFailed": "Couldn't save the logs",
+  "logs.privacy":
+    "Logs hold folder paths and what the app was doing — never your passwords or session cookies, and no settings file is included.",
+
+  // ── Supporters (Buy Me a Coffee) ───────────────────────────────────────────
+  "settings.supporters": "Supporters",
+  "settings.supportersDesc": "The people keeping MXB App going on Buy Me a Coffee.",
+  "supporters.intro":
+    "MXB App is free, and stays that way. The coffees below are what pay for the time behind it — the people who bought them are why there's a new build to install.",
+  "supporters.count_one": "{{count}} supporter",
+  "supporters.count_other": "{{count}} supporters",
+  "supporters.untiered": "Supporters",
+  "supporters.since": "since {{date}}",
+  "supporters.loading": "Fetching the list…",
+  "supporters.refresh": "Refresh",
+  "supporters.become": "Buy me a coffee",
+  "supporters.empty": "Nobody's listed here yet",
+  "supporters.emptyDesc":
+    "The list updates on its own — buy a coffee and your name shows up here, no new version needed.",
+  "supporters.offline":
+    "Couldn't reach the list just now — this is the last one we saw.",
+  "supporters.optOut":
+    "Names are shown with permission. Ask on Discord or Buy Me a Coffee and yours comes straight off.",
+
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ReShade presets",
   "reshade.needsGameFolder":
-    "Set your {{game}} folder above and ReShade presets show up here.",
+    "ReShade sits in your {{game}} folder — set that under Game folder, or point straight at it here.",
+  "reshade.folder": "Looking in your {{game}} folder:",
+  "reshade.customFolder": "Looking in the folder you picked:",
+  "reshade.browse": "Choose folder…",
+  "reshade.pickFolder": "Choose the folder ReShade is installed in",
+  "reshade.folderMissing": "The folder you picked isn't there any more.",
+  "reshade.resetFolder": "Go back to the {{game}} folder",
+  "reshade.folderSet": "ReShade found",
+  "reshade.notThere": "No ReShade in that folder",
   "reshade.intro":
     "ReShade adds post-processing to {{game}}. It's a separate free tool — install it once, then pick a preset here.",
   "reshade.wrongApi":
@@ -1254,11 +1426,13 @@ export const en = {
   "paints.help":
     "Turn .tga or .png sheets drawn in GIMP or Photoshop into a .pnt the game loads — and unpack an existing paint to start from.",
   "paints.unpack": "Unpack a paint…",
+  "paints.toDesigner": "Draw on these…",
   "paints.unpacked": "Unpacked {{count}} sheet(s) — edit them, then save.",
   "paints.whereTitle": "Where it goes",
   "paints.kind.bike": "Bike livery",
   "paints.kind.helmet": "Helmet",
   "paints.kind.goggles": "Goggles",
+  "paints.kind.profileGoggles": "Goggles (rider)",
   "paints.kind.boots": "Boots",
   "paints.kind.protection": "Protection",
   "paints.kind.kit": "Rider kit",
@@ -1290,4 +1464,133 @@ export const en = {
   "paints.replaceTitle": "Replace this paint?",
   "paints.replaceBody": "{{path}} is already there. Saving replaces it.",
   "paints.replace": "Replace",
+
+  // ── Designer (the layer editor) ───────────────────────────────────────────────
+  "designer.help":
+    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Start from an installed paint to get the sheet names right, paint on it with a brush, a gradient or a shape, stack images and text on top, then save — what comes out is a .pnt the game loads, not an export to convert.",
+  "designer.empty":
+    "Nothing to draw on yet. Start from a paint installed for this model to get its real sheets and their names, or add a blank one.",
+  "designer.startFromPaint": "Start from a paint…",
+  "designer.blankSheet": "Blank sheet",
+  "designer.sheets": "Sheets",
+  "designer.moveDown": "Move down",
+  "designer.moveUp": "Move up",
+  "designer.noSheetsFound":
+    "That paint didn't unpack into any sheets, so there's nothing to draw on.",
+  "designer.loadedSheets": "Loaded {{count}} sheet(s) — draw on them and save.",
+  "designer.sheetName": "Texture name",
+  "designer.editSheet": "Edit this sheet",
+  "designer.addImage": "Add image",
+  "designer.addText": "Add text",
+  "designer.newTextValue": "TEXT",
+  "designer.layers": "Layers",
+  "designer.showRail": "Show sheets and layers",
+  "designer.hideRail": "Hide sheets and layers",
+  "designer.noLayers": "No layers yet — add an image, some text, or a paint layer to draw on.",
+  "designer.layerCount": "{{count}} layer(s)",
+  "designer.layerTitle": "Selected layer",
+  "designer.hide": "Hide",
+  "designer.show": "Show",
+  "designer.raise": "Bring forward",
+  "designer.lower": "Send back",
+  "designer.scale": "Size",
+  "designer.rotation": "Rotation",
+  "designer.part": "Part",
+  "designer.wholeSheet": "Whole sheet",
+  "designer.fitToPart": "Fit to part",
+  "designer.fitToPartHint":
+    "Place and scale this layer to cover the chosen part. It covers rather than fits inside, so the part has no gaps — clip it to trim the overspill.",
+  "designer.fitNotForPaint": "A paint layer is the sheet, so there is nothing to move or scale.",
+  "designer.clipped": "Clipped",
+  "designer.clippedHint": "This layer is trimmed to the part — nothing it holds spills past the seam.",
+  "designer.opacity": "Opacity",
+  "designer.blend": "Blend",
+  "designer.blend.normal": "Normal",
+  "designer.blend.multiply": "Multiply",
+  "designer.blend.screen": "Screen",
+  "designer.blend.overlay": "Overlay",
+  "designer.text": "Text",
+  "designer.font": "Font",
+  "designer.size": "Text size",
+  "designer.colour": "Colour",
+  "designer.outline": "Outline",
+  "designer.needSheets": "Add a sheet to draw on.",
+  "designer.noModelFound":
+    "“{{model}}” isn't in your library, so there's nothing to show it on.",
+  "designer.noBikePreview":
+    "This build can't read bike geometry, so a livery has no model to sit on. Everything else still saves normally.",
+  "designer.noPreviewForGame":
+    "The 3D preview is MX Bikes only for now — the {{game}} models need their own part bindings. Everything else here works the same, and the paint saves normally.",
+  "designer.gearNote": "Shown on the stock rider — your own kit isn't loaded here.",
+  "designer.reference": "Reference",
+  "designer.traceTemplate": "Template",
+  "designer.traceHint":
+    "Lift the paint you started from out of the sheet and show it faintly underneath, to trace over. It stops being part of what you save.",
+  "designer.noTemplate": "This sheet has no template to trace â it started blank.",
+  "designer.uvMap": "UV map",
+  "designer.uvHint":
+    "Show where the model's bodywork lands on this sheet, each piece in its own colour.",
+  "designer.noGeometry": "Load a model in the preview to see its UV layout.",
+  "designer.uvNoMatch":
+    "Nothing on the model uses a texture called “{{name}}”, so there is no UV layout to show.",
+  "designer.ghostBuried":
+    "The reference sits under the sheet, and this sheet’s template is opaque — turn on Template to lift it out and see through.",
+  "designer.ghostNote": "A guide only â the reference is never saved into the paint.",
+  "designer.resetView": "Reset view",
+
+  // ── Designer › the paint tools ────────────────────────────────────────────────
+  "designer.paint": "Paint",
+  "designer.addPaint": "Paint layer",
+  "designer.paintLayerName": "Paint",
+  "designer.undoStroke": "Undo stroke",
+  "designer.redoStroke": "Redo stroke",
+  "designer.tool.move": "Move",
+  "designer.tool.brush": "Brush",
+  "designer.tool.eraser": "Eraser",
+  "designer.tool.gradient": "Gradient",
+  "designer.tool.fill": "Fill",
+  "designer.tool.rect": "Rectangle",
+  "designer.tool.ellipse": "Ellipse",
+  "designer.tool.line": "Line",
+  "designer.moveHint":
+    "Drag layers on the sheet to place them. Pick a tool above to paint on it instead.",
+  "designer.colourFrom": "Paint with this",
+  "designer.colourTo": "Run into this",
+  "designer.swapColours": "Swap the two colours",
+  "designer.brushSize": "Brush",
+  "designer.hardness": "Edge",
+  "designer.strength": "Strength",
+  "designer.gradient": "Gradient",
+  "designer.gradient.linear": "Linear",
+  "designer.gradient.radial": "Radial",
+  "designer.fadeOut": "Fade out",
+  "designer.shape": "Style",
+  "designer.shape.fill": "Filled",
+  "designer.shape.outline": "Outline",
+  "designer.lineWidth": "Width",
+  "designer.paintHint":
+    "Drag on the sheet. Hold Shift to keep it straight, right-drag to pan.",
+  "designer.fillHint": "Click the sheet to flood the whole layer.",
+  "designer.gradientHint":
+    "Drag across the sheet to set where the transition happens. It fills this whole layer — add another paint layer to keep what's underneath.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "View terrain",
+  "trackViewer.title": "Track preview",
+  "trackViewer.loading": "Reading terrain…",
+  "trackViewer.refining": "Sharpening…",
+  "trackViewer.grid": "Grid",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
+  "trackViewer.relief": "Elevation range",
+  "trackViewer.noTerrain": "No terrain to show",
+  "trackViewer.noTerrainHint":
+    "This track's height data isn't in a layout the viewer can read yet.",
+  "trackViewer.inferredNote":
+    "This track's height file has no documented layout, so its shape was worked out from the data. Treat the terrain as a close reading rather than an exact one.",
+  "trackViewer.assumedScaleNote":
+    "This track doesn't state how far apart its height samples are, so the relief is real but how steep it looks is an approximation.",
+  "trackViewer.whyDetails": "Why?",
+  "trackViewer.copyDetails": "Copy details",
+  "trackViewer.copied": "Copied",
 } as const;

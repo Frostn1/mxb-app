@@ -5,8 +5,7 @@ import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
 import Servers from "../Servers/Servers";
-import RiderStudio from "../Rider/RiderStudio";
-import PaintStudio from "../PaintStudio/PaintStudio";
+import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
 import ModDetail from "../ModDetail/ModDetail";
@@ -34,6 +33,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // A preset handed off from the Presets tab to load in the Rider tab (its
   // "View in Rider" button). Consumed once by the Rider view, then cleared.
   const [riderPreset, setRiderPreset] = useState<Loadout | null>(null);
+  // Which Studio sub-view is open. Here rather than inside `Studio` because two things
+  // outside it open the Studio *at* a sub-view — Presets' "View in Rider", and the tour.
+  const [studioTab, setStudioTab] = useState<StudioTab>("designer");
 
   const showBrowse = useCallback(() => setView("browse"), []);
   const {
@@ -59,8 +61,9 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   const [settingsSection, setSettingsSection] = useState<SectionId | undefined>();
 
   const navigate = useCallback(
-    (v: DashboardView) => {
+    (v: DashboardView, studio?: StudioTab) => {
       setView(v);
+      if (studio) setStudioTab(studio);
       closeMod();
       if (v !== "settings") setSettingsSection(undefined);
     },
@@ -108,7 +111,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
   const openInRider = useCallback((lo: Loadout) => {
     setRiderPreset(lo);
-    navigate("rider");
+    navigate("studio", "rider");
   }, [navigate]);
   const clearRiderPreset = useCallback(() => setRiderPreset(null), []);
 
@@ -159,10 +162,13 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenLocker={() => setView("locker")}
               onOpenSettings={() => openSettingsSection("folder")}
             />
-          ) : view === "rider" ? (
-            <RiderStudio initialLoadout={riderPreset} onLoaded={clearRiderPreset} />
-          ) : view === "paints" ? (
-            <PaintStudio />
+          ) : view === "studio" ? (
+            <Studio
+              tab={studioTab}
+              onTab={setStudioTab}
+              riderPreset={riderPreset}
+              onRiderPresetLoaded={clearRiderPreset}
+            />
           ) : view === "servers" ? (
             <Servers />
           ) : view === "manage" ? (

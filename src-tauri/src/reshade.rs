@@ -93,9 +93,16 @@ pub struct Preset {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
-    /// The game's install dir. Empty when it isn't configured yet, which is the one state
+    /// The folder we looked in. Empty when none is configured yet, which is the one state
     /// where nothing below can be trusted.
     pub game_dir: String,
+    /// That folder came from the player's `reshade_path` override rather than from the
+    /// game's install dir. Set by the command layer, which is the only side that knows.
+    pub custom: bool,
+    /// A folder *is* configured, and it isn't there. Distinct from the empty `game_dir`
+    /// above: "the folder you picked has moved" and "you haven't picked one" need
+    /// different answers, and both used to come back as the latter.
+    pub folder_missing: bool,
     /// A ReShade `opengl32.dll` is in place — the game will load it.
     pub installed: bool,
     /// ReShade is here, but as this DLL, which these games never load. Set only when the
@@ -420,15 +427,22 @@ fn ini_files(dir: &Path) -> Vec<PathBuf> {
 // Public surface
 // ---------------------------------------------------------------------------
 
-/// Everything the ReShade card renders, in one pass over the game folder.
-pub fn status(game_path: &str) -> Status {
-    let game_path = game_path.trim();
-    if game_path.is_empty() {
+/// Everything the ReShade card renders, in one pass over the folder ReShade lives in —
+/// [`crate::config::AppConfig::reshade_dir`], normally the game's install dir.
+pub fn status(reshade_path: &str) -> Status {
+    let reshade_path = reshade_path.trim();
+    if reshade_path.is_empty() {
         return Status::default();
     }
-    let game_dir = PathBuf::from(game_path);
+    let game_dir = PathBuf::from(reshade_path);
     if !game_dir.is_dir() {
-        return Status::default();
+        // Named rather than blanked. A folder that has been picked and has since moved is
+        // a different problem from one that was never set, and only the path says which.
+        return Status {
+            game_dir: reshade_path.to_string(),
+            folder_missing: true,
+            ..Status::default()
+        };
     }
 
     let gl = probe_dll(&resolve_child(&game_dir, OPENGL_DLL));
@@ -480,6 +494,8 @@ pub fn status(game_path: &str) -> Status {
 
     Status {
         game_dir: game_dir.to_string_lossy().into_owned(),
+        custom: false,
+        folder_missing: false,
         installed,
         wrong_api,
         version: gl.flatten(),
@@ -1177,6 +1193,44 @@ mod tests {
     fn unset_game_folder_is_empty_not_negative() {
         let s = status("   ");
         assert!(s.game_dir.is_empty());
+        assert!(!s.folder_missing);
         assert!(s.presets.is_empty());
+    }
+
+    /// A folder that was picked and has since moved is a different problem from one that was
+    /// never picked — and it used to come back as the latter, with the path thrown away.
+    #[test]
+    fn a_configured_folder_that_is_gone_is_named() {
+        let dir = tmp("folder-gone");
+        let path = dir.join("moved-away");
+        let s = status(&path.to_string_lossy());
+        assert!(s.folder_missing);
+        assert_eq!(s.game_dir, path.to_string_lossy());
+        assert!(!s.installed);
+    }
+
+    /// The whole point of the override: presets are read from wherever the player pointed us,
+    /// not from the game's install dir.
+    #[test]
+    fn presets_come_from_whichever_folder_it_is_given() {
+        let install = fixture("override-install", OPENGL_DLL);
+        let elsewhere = fixture("override-elsewhere", OPENGL_DLL);
+        write(&install.join(PRESET_DIR).join("FromInstall.ini"), PRESET);
+        write(&elsewhere.join(PRESET_DIR).join("FromElsewhere.ini"), PRESET);
+
+        let names = |dir: &Path| {
+            status(&game(dir))
+                .presets
+                .into_iter()
+                .map(|p| p.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&install), vec!["FromInstall"]);
+        assert_eq!(names(&elsewhere), vec!["FromElsewhere"]);
+
+        // And applying writes the config next to the ReShade that will read it.
+        apply(&game(&elsewhere), "FromElsewhere").unwrap();
+        assert!(elsewhere.join(CONFIG).is_file());
+        assert!(!install.join(CONFIG).exists());
     }
 }

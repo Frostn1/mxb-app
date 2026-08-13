@@ -3,8 +3,9 @@ use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
 use md5::{Digest, Md5};
+use rayon::prelude::*;
 use serde::Serialize;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 const MAGIC: &[u8; 4] = b"PNT\x00";
@@ -14,6 +15,28 @@ const IMAGE_HEADER_SIZE: usize = NAME_SIZE + 4 + 4 + 16 + 4;
 const IMAGE_PADDING: usize = 8;
 /// The digest between a texture's dimensions and its payload length — see [`encode`].
 const DIGEST_SIZE: usize = 16;
+
+/// Ceilings on the two numbers a `.pnt` header supplies before anything has checked them:
+/// how many textures follow, and how big each one inflates to. Both are read straight out
+/// of the file and both feed an allocation, so a corrupt or truncated paint would otherwise
+/// ask for one the size of the machine. Set well above any real paint — the game's own
+/// sheets top out at 4096² — so they bound the damage without rejecting anything.
+const MAX_TEXTURES: usize = 256;
+const MAX_TEXTURE_BYTES: u64 = 16384 * 16384 * 4;
+/// Pre-reserve up to a 4096² sheet. A bigger texture still decodes; the vector grows.
+const MAX_RESERVE: usize = 4096 * 4096 * 4;
+
+/// A texture's inflated size, refusing dimensions that describe no real texture.
+fn texture_bytes(width: u32, height: u32) -> Result<usize> {
+    let n = (width as u64)
+        .checked_mul(height as u64)
+        .and_then(|n| n.checked_mul(4))
+        .unwrap_or(u64::MAX);
+    if n > MAX_TEXTURE_BYTES {
+        bail!("{width}x{height} is not a texture any paint carries");
+    }
+    Ok(n as usize)
+}
 
 #[derive(Debug, Clone)]
 pub struct PntTexture {
@@ -50,13 +73,24 @@ fn read_name(buf: &[u8], off: usize) -> Result<String> {
     Ok(String::from_utf8_lossy(&raw[..n]).into_owned())
 }
 
-pub fn decode(buf: &[u8]) -> Result<Vec<PntTexture>> {
+/// One image's header, and where its payload sits in the file.
+struct ImageHeader {
+    name: String,
+    width: u32,
+    height: u32,
+    /// The deflate payload's byte range within the whole `.pnt`.
+    data: std::ops::Range<usize>,
+}
+
+/// Walk the image table without inflating a pixel — the same walk [`texture_names`] does,
+/// keeping the payload ranges so the planes can then be inflated in any order.
+fn image_headers(buf: &[u8]) -> Result<Vec<ImageHeader>> {
     if buf.len() < HEADER_SIZE || &buf[..4] != MAGIC {
         bail!("not a .pnt file (bad magic)");
     }
     let count = read_u32(buf, HEADER_SIZE - 4)? as usize;
 
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(count.min(MAX_TEXTURES));
     let mut off = HEADER_SIZE;
     for i in 0..count {
         let name = read_name(buf, off)?;
@@ -68,34 +102,73 @@ pub fn decode(buf: &[u8]) -> Result<Vec<PntTexture>> {
         }
 
         let data_start = off + IMAGE_HEADER_SIZE + IMAGE_PADDING;
-        let comp_len = data_size - IMAGE_PADDING;
-        let data_end = data_start + comp_len;
+        let data_end = data_start + (data_size - IMAGE_PADDING);
         if data_end > buf.len() {
             bail!("texture {i} '{name}': payload runs past end of file");
         }
 
-        let mut rgba = Vec::with_capacity((width as usize) * (height as usize) * 4);
-        DeflateDecoder::new(&buf[data_start..data_end])
-            .read_to_end(&mut rgba)
-            .with_context(|| format!("inflate texture {i} '{name}'"))?;
+        // Refused here rather than at the inflate, so a header that describes no real
+        // texture is rejected before anything downstream reserves for it.
+        texture_bytes(width, height).with_context(|| format!("texture {i} '{name}'"))?;
 
-        let expected = (width as usize) * (height as usize) * 4;
-        if rgba.len() != expected {
-            bail!(
-                "texture {i} '{name}': inflated {} bytes, expected {expected} ({width}x{height} RGBA)",
-                rgba.len()
-            );
-        }
-
-        out.push(PntTexture {
+        out.push(ImageHeader {
             name,
             width,
             height,
-            rgba,
+            data: data_start..data_end,
         });
-        off = data_start + comp_len;
+        off = data_end;
     }
     Ok(out)
+}
+
+pub fn decode(buf: &[u8]) -> Result<Vec<PntTexture>> {
+    decode_where(buf, |_| true)
+}
+
+/// [`decode`], inflating only the textures `want` accepts.
+///
+/// The filter runs on the name, before any of that texture's pixels exist: a 4096² plane the
+/// caller is going to throw away otherwise costs a 67 MB allocation and its share of the
+/// inflate. Planes are independent, so they inflate in parallel — the payload ranges come off
+/// the header walk, which is the only part that has to be sequential.
+pub fn decode_where(
+    buf: &[u8],
+    want: impl Fn(&str) -> bool + Sync,
+) -> Result<Vec<PntTexture>> {
+    image_headers(buf)?
+        .into_par_iter()
+        .enumerate()
+        .filter(|(_, h)| want(&h.name))
+        .map(|(i, h)| {
+            let expected = texture_bytes(h.width, h.height)?;
+            let mut rgba = Vec::with_capacity(expected.min(MAX_RESERVE));
+            // Stop one byte past what the header promised. Deflate expands ~1000:1, so a
+            // mis-framed payload inflates until it runs the machine out of memory otherwise —
+            // and the length check below turns the overrun into an error either way.
+            DeflateDecoder::new(&buf[h.data])
+                .take(expected as u64 + 1)
+                .read_to_end(&mut rgba)
+                .with_context(|| format!("inflate texture {i} '{}'", h.name))?;
+
+            if rgba.len() != expected {
+                bail!(
+                    "texture {i} '{}': inflated {} bytes, expected {expected} ({}x{} RGBA)",
+                    h.name,
+                    rgba.len(),
+                    h.width,
+                    h.height
+                );
+            }
+
+            Ok(PntTexture {
+                name: h.name,
+                width: h.width,
+                height: h.height,
+                rgba,
+            })
+        })
+        .collect()
 }
 
 /// The texture names a `.pnt` supplies, read from the headers alone.
@@ -109,7 +182,7 @@ pub fn texture_names(buf: &[u8]) -> Result<Vec<String>> {
         bail!("not a .pnt file (bad magic)");
     }
     let count = read_u32(buf, HEADER_SIZE - 4)? as usize;
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(count.min(MAX_TEXTURES));
     let mut off = HEADER_SIZE;
     for _ in 0..count {
         out.push(read_name(buf, off)?);
@@ -118,6 +191,40 @@ pub fn texture_names(buf: &[u8]) -> Result<Vec<String>> {
             break;
         }
         off = off + IMAGE_HEADER_SIZE + data_size;
+    }
+    Ok(out)
+}
+
+/// [`texture_names`] for a paint on disk, without reading the paint.
+///
+/// The same walk, done with seeks: each image header states its payload's length, so the
+/// next name is reachable without touching the pixels in between. A 38 MB outfit is answered
+/// by a few hundred bytes rather than a 38 MB read — which is the whole difference when the
+/// question is only "which model does this paint?" and it is being asked of every file in a
+/// dropped folder.
+///
+/// A sealed paint has no headers until it is decrypted, so that one reads whole.
+pub fn texture_names_at(path: &Path) -> Result<Vec<String>> {
+    let mut f = std::fs::File::open(path).with_context(|| format!("open {path:?}"))?;
+    let mut head = [0u8; HEADER_SIZE];
+    if f.read_exact(&mut head).is_err() || &head[..4] != MAGIC {
+        return texture_names_any(&std::fs::read(path)?);
+    }
+    let count = read_u32(&head, HEADER_SIZE - 4)? as usize;
+
+    let mut out = Vec::with_capacity(count.min(MAX_TEXTURES));
+    let mut off = HEADER_SIZE as u64;
+    let mut image = [0u8; IMAGE_HEADER_SIZE];
+    for _ in 0..count {
+        f.seek(SeekFrom::Start(off))?;
+        f.read_exact(&mut image)
+            .with_context(|| format!("truncated .pnt: wanted an image header at {off}"))?;
+        out.push(read_name(&image, 0)?);
+        let data_size = read_u32(&image, NAME_SIZE + 8 + DIGEST_SIZE)? as u64;
+        if data_size < IMAGE_PADDING as u64 {
+            break;
+        }
+        off += IMAGE_HEADER_SIZE as u64 + data_size;
     }
     Ok(out)
 }
@@ -135,13 +242,22 @@ pub fn texture_names_any(buf: &[u8]) -> Result<Vec<String>> {
 }
 
 pub fn decode_any(buf: &[u8]) -> Result<Vec<PntTexture>> {
+    decode_any_where(buf, |_| true)
+}
+
+/// [`decode_any`], for a caller that only wants some of the textures — the same pairing as
+/// [`decode`]/[`decode_where`].
+pub fn decode_any_where(
+    buf: &[u8],
+    want: impl Fn(&str) -> bool + Sync,
+) -> Result<Vec<PntTexture>> {
     if buf.len() >= 4 && &buf[..4] == MAGIC {
-        return decode(buf);
+        return decode_where(buf, want);
     }
     if let Some(plain) = crate::pkz::read_sidecar_blob(buf) {
-        return decode(&plain);
+        return decode_where(&plain, want);
     }
-    decode(buf)
+    decode_where(buf, want)
 }
 
 /// Whether `buf` is a paint stored in the open format this module also writes.
@@ -279,19 +395,35 @@ pub fn extract_edf_textures_where(
         .collect()
 }
 
-pub fn to_texture(t: &PntTexture) -> PaintTexture {
-    if t.width.max(t.height) > MAX_EDGE {
-        if let Some(img) = image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone()) {
+/// A decoded texture, downscaled if it is larger than the viewer needs, moved into the
+/// texture store.
+///
+/// Takes the pixels rather than borrowing them: a 4096² plane is 67 MB, and copying one is
+/// the same order of work as the downscale it feeds.
+pub fn into_texture(t: PntTexture) -> PaintTexture {
+    let PntTexture {
+        name,
+        width,
+        height,
+        rgba,
+    } = t;
+    // `from_raw` takes the buffer and hands back nothing when it isn't `w*h*4`, so the length
+    // is checked here instead — a truncated plane then goes through verbatim, exactly as
+    // before, and the viewer renders it grey.
+    if width.max(height) > MAX_EDGE && rgba.len() == (width as usize) * (height as usize) * 4 {
+        if let Some(img) = image::RgbaImage::from_raw(width, height, rgba) {
             let scaled = image::DynamicImage::ImageRgba8(img).thumbnail(MAX_EDGE, MAX_EDGE);
             return store_rgba(
-                &t.name,
+                &name,
                 scaled.width(),
                 scaled.height(),
                 scaled.to_rgba8().into_raw(),
             );
         }
+        // Unreachable — the only thing `from_raw` rejects is the length checked above.
+        return store_rgba(&name, width, height, Vec::new());
     }
-    store_rgba(&t.name, t.width, t.height, t.rgba.clone())
+    store_rgba(&name, width, height, rgba)
 }
 
 pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
@@ -304,14 +436,46 @@ pub fn decode_image(name: &str, bytes: &[u8]) -> Option<PaintTexture> {
     Some(store_rgba(name, w, h, rgba.into_raw()))
 }
 
+/// Whether the viewer can do anything with a texture of this name.
+///
+/// It samples a diffuse and — the one companion it does read — a `_n` normal map. Every other
+/// map is a full-size plane inflated, downscaled, shipped over IPC and turned into a mipmapped
+/// `DataTexture` that nothing ever binds: a gear paint's roughness sheet alone is 4096², and
+/// dropping it is the difference between allocating 67 MB and not.
+///
+/// Safe to drop rather than merely ignore, because the binder never points a submesh at one:
+/// [`crate::edf::is_companion_texture`] is what keeps them out of the declared list in the
+/// first place, and reusing it here is what stops the two notions drifting apart.
+fn viewer_binds(name: &str) -> bool {
+    !crate::edf::is_companion_texture(name) || name.to_ascii_lowercase().ends_with("_n")
+}
+
 pub fn unpack_file(path: &Path) -> Result<Vec<PaintTexture>> {
     let bytes = std::fs::read(path).with_context(|| format!("read {path:?}"))?;
-    Ok(decode_any(&bytes)?.iter().map(to_texture).collect())
+    Ok(decode_any_where(&bytes, viewer_binds)?
+        .into_par_iter()
+        .map(into_texture)
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What opening a paint in the viewer actually costs, against a real one. Run under the
+    /// `dev` profile — that's what `tauri dev` builds, and it's where this was ever slow:
+    /// `MXB_PNT=<paint.pnt> cargo test --bins unpack_file_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn unpack_file_timing() {
+        let path = std::env::var("MXB_PNT").expect("set MXB_PNT");
+        let t = std::time::Instant::now();
+        let texs = unpack_file(std::path::Path::new(&path)).expect("unpack");
+        eprintln!("unpack_file({path}) -> {} texture(s) in {:?}", texs.len(), t.elapsed());
+        for x in &texs {
+            eprintln!("  '{}' {}x{}", x.name, x.width, x.height);
+        }
+    }
 
     #[test]
     #[ignore]
@@ -397,6 +561,116 @@ mod tests {
         assert_eq!(texture_names(&bytes).unwrap(), vec!["livery", "numberplate"]);
     }
 
+    /// Both name walks over a folder of real paints, sealed ones included: same answers,
+    /// and what each costs to get them. `MXB_PNT_DIR=<folder> cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn texture_names_at_against_real_paints() {
+        let Ok(dir) = std::env::var("MXB_PNT_DIR") else {
+            return;
+        };
+        let paints: Vec<_> = std::fs::read_dir(&dir)
+            .expect("read dir")
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pnt")))
+            .collect();
+        assert!(!paints.is_empty(), "no .pnt files in {dir}");
+
+        for p in &paints {
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            let size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+
+            let t = std::time::Instant::now();
+            let seeked = texture_names_at(p);
+            let seek_took = t.elapsed();
+
+            let bytes = std::fs::read(p).expect("read");
+            let t = std::time::Instant::now();
+            let inflated =
+                decode_any(&bytes).map(|v| v.iter().map(|x| x.name.clone()).collect::<Vec<_>>());
+            let full_took = t.elapsed();
+
+            eprintln!(
+                "{name} ({:.1} MB)  names {seek_took:?}  vs  decode {full_took:?}",
+                size as f64 / 1e6
+            );
+            match (seeked, inflated) {
+                (Ok(a), Ok(b)) => assert_eq!(a, b, "{name}: the two walks must agree"),
+                (Err(a), Err(_)) => eprintln!("  both refused: {a:#}"),
+                (a, b) => panic!("{name}: one walk read it and the other didn't: {a:?} / {b:?}"),
+            }
+        }
+    }
+
+    fn write_tmp(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let p = std::env::temp_dir()
+            .join(format!("frost-pnt-{name}-{}.pnt", std::process::id()));
+        std::fs::write(&p, bytes).unwrap();
+        p
+    }
+
+    /// The names a paint on disk declares, without the paint being read.
+    ///
+    /// Proven by corrupting the pixels rather than by timing: the headers stay intact and
+    /// the payloads become garbage, so a walk that inflates anything fails and a walk that
+    /// only seeks does not. The second texture's name sits past the first's payload, so this
+    /// also covers the seek actually landing where the header said it would.
+    #[test]
+    fn texture_names_at_reads_headers_and_never_the_pixels() {
+        let bytes = encode("Outfit", &[tex("rider", 32, 32), tex("rider_n", 16, 16)]).unwrap();
+        let clean = write_tmp("clean", &bytes);
+        assert_eq!(
+            texture_names_at(&clean).unwrap(),
+            vec!["rider", "rider_n"],
+            "same answer as the in-memory walk"
+        );
+
+        // The first texture's payload, flipped byte for byte. Every header — including the
+        // second texture's, which sits on the far side of it — is left exactly as written.
+        let mut wrecked = bytes.clone();
+        let payload = HEADER_SIZE + IMAGE_HEADER_SIZE + IMAGE_PADDING;
+        let end = payload
+            + read_u32(&bytes, HEADER_SIZE + NAME_SIZE + 8 + DIGEST_SIZE).unwrap() as usize
+            - IMAGE_PADDING;
+        for b in wrecked[payload..end].iter_mut() {
+            *b = !*b;
+        }
+        let bad = write_tmp("wrecked", &wrecked);
+        assert!(decode(&wrecked).is_err(), "the pixels really are unreadable");
+        assert_eq!(
+            texture_names_at(&bad).unwrap(),
+            vec!["rider", "rider_n"],
+            "classification never touches them"
+        );
+
+        let _ = std::fs::remove_file(&clean);
+        let _ = std::fs::remove_file(&bad);
+    }
+
+    /// A sealed paint has no headers to seek through, so it takes the whole-file path — and
+    /// a file that is neither is an error, not a guess.
+    #[test]
+    fn texture_names_at_rejects_what_is_not_a_paint() {
+        let p = write_tmp("garbage", b"this is not a paint file, not even close");
+        assert!(texture_names_at(&p).is_err());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// A corrupt header states dimensions no texture has. The reservation it implies is the
+    /// machine's memory, so it has to be refused before the allocator sees it.
+    #[test]
+    fn absurd_dimensions_are_refused_rather_than_allocated() {
+        assert!(texture_bytes(4096, 4096).is_ok(), "a real sheet still decodes");
+        assert!(texture_bytes(u32::MAX, u32::MAX).is_err());
+
+        let mut bytes = encode("Paint", &[tex("livery", 4, 4)]).unwrap();
+        let dims = HEADER_SIZE + NAME_SIZE;
+        bytes[dims..dims + 8].copy_from_slice(&[0xFF; 8]);
+        let err = decode(&bytes).unwrap_err();
+        assert!(format!("{err:#}").contains("not a texture"), "{err:#}");
+    }
+
     /// The header the game reads: magic, the paint's own name, then the texture count.
     #[test]
     fn encode_writes_the_documented_header() {
@@ -445,14 +719,55 @@ mod tests {
     }
 
     #[test]
-    fn to_texture_stores_pixels_verbatim() {
-        let texs = decode(FIXTURE_PNT).unwrap();
-        let out = to_texture(&texs[0]);
+    fn into_texture_stores_pixels_verbatim() {
+        let mut texs = decode(FIXTURE_PNT).unwrap();
+        let out = into_texture(texs.remove(0));
         assert_eq!((out.width, out.height), (4, 4));
         assert_eq!(
             *crate::texstore::get(&out.token).expect("token resolves"),
             fixture_stored_pixels()
         );
+    }
+
+    /// The decode went parallel; the file format did not. Every texture must still come back
+    /// in the order the image table lists it — material indices count that list, so a shuffle
+    /// would silently move a paint's textures onto the wrong parts.
+    #[test]
+    fn decode_keeps_the_files_texture_order() {
+        let texs = [tex("livery", 4, 4), tex("livery_n", 2, 2), tex("plate", 8, 8)];
+        let bytes = encode("p", &texs).unwrap();
+        let out = decode(&bytes).expect("decode what we just encoded");
+        assert_eq!(
+            out.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["livery", "livery_n", "plate"],
+        );
+        for (a, b) in out.iter().zip(&texs) {
+            assert_eq!((a.width, a.height, &a.rgba), (b.width, b.height, &b.rgba));
+        }
+    }
+
+    /// Filtering happens before the inflate, and it must not disturb what survives it.
+    #[test]
+    fn decode_where_skips_only_what_it_is_told_to() {
+        let texs = [tex("livery", 4, 4), tex("livery_n", 2, 2), tex("livery_r", 8, 8)];
+        let bytes = encode("p", &texs).unwrap();
+        let out = decode_where(&bytes, |n| !n.ends_with("_r")).expect("decode");
+        assert_eq!(
+            out.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["livery", "livery_n"],
+        );
+        assert_eq!(out[1].rgba, texs[1].rgba, "the kept planes decode unchanged");
+    }
+
+    /// The viewer samples a diffuse and a `_n` normal map. Dropping `_n` would strip the
+    /// relief off every gear paint, which is exactly the mistake this filter invites.
+    #[test]
+    fn viewer_binds_keeps_the_normal_map_and_nothing_else() {
+        assert!(viewer_binds("rider"), "the livery itself");
+        assert!(viewer_binds("rider_n"), "the normal map the viewer binds");
+        assert!(!viewer_binds("rider_r"), "roughness");
+        assert!(!viewer_binds("rider_s"), "specular");
+        assert!(!viewer_binds("rider_roughness"), "the exporter's spelling");
     }
 
     #[test]

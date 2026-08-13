@@ -29,6 +29,7 @@ import { useConfig } from "../../Context/Config";
 import { experimentalState } from "../../api/mods";
 import type { GameCaps } from "../../types";
 import type { DashboardView } from "../Shell/Sidebar";
+import type { StudioTab } from "../Studio/Studio";
 
 /** Bumped when the tour changes enough to warrant showing it again. */
 export const TOUR_DONE_KEY = "mxb:tourDone:v1";
@@ -44,6 +45,9 @@ export const useTour = () => useContext(TourContext);
 interface Step {
   /** View to switch to before highlighting, so the real screen sits behind the spotlight. */
   view?: DashboardView;
+  /** Which Studio sub-view to open with it — a step anchored in the Studio has to name one,
+   *  or it lands on whichever was last open. */
+  studio?: StudioTab;
   /** CSS selector of the element to spotlight. Omit for a centered, un-anchored step. */
   selector?: string;
   icon: LucideIcon;
@@ -93,8 +97,9 @@ const STEPS: Step[] = [
     body: "tour.presets.body",
   },
   {
-    view: "rider",
-    selector: '[data-tour="rider"]',
+    view: "studio",
+    studio: "rider",
+    selector: '[data-tour="studio"]',
     icon: User,
     title: "tour.rider.title",
     body: "tour.rider.body",
@@ -161,7 +166,7 @@ function bubbleStyle(rect: Rect | null, bubbleH: number): React.CSSProperties {
 }
 
 interface TourProps {
-  navigate: (v: DashboardView) => void;
+  navigate: (v: DashboardView, studio?: StudioTab) => void;
   onDone: () => void;
 }
 
@@ -191,8 +196,8 @@ export default function Tour({ navigate, onDone }: TourProps) {
 
   // Switch to the step's view first, so the correct screen renders behind the spotlight.
   useLayoutEffect(() => {
-    if (step.view) navigate(step.view);
-  }, [index, step.view, navigate]);
+    if (step.view) navigate(step.view, step.studio);
+  }, [index, step.view, step.studio, navigate]);
 
   // Measure the target after the view switch has had a frame to lay out; keep it
   // in sync with window resizes. Un-anchored steps clear the rect (centered bubble).

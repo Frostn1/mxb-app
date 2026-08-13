@@ -184,7 +184,7 @@ export function ViewerPanel({
           <div className="flex items-center gap-2">
             {!riderOnly && <ModeToggle mode={mode} onChange={setMode} />}
             <Button
-              variant="ghost"
+              variant="chip"
               size="icon"
               className="h-7 w-7"
               title={t("viewer.expand")}

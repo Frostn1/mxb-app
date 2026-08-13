@@ -18,13 +18,18 @@ import type { DownloadOption, ModDetail as Detail } from "../../types";
 
 export interface InstallChoice {
   destFolder: string;
-  mirror: DownloadOption;
+  /** Absent when there was nothing to choose between — a shop purchase has one file. */
+  mirror?: DownloadOption;
 }
 
 interface InstallDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  detail: Detail;
+  /** Absent for a shop purchase: it has no mirrors, and its artwork comes from the catalog. */
+  detail?: Detail;
+  /** Header title/thumbnail when there is no `detail` to take them from. */
+  title?: string;
+  image?: string | null;
   modType: ModType;
   destOptions: DestOption[];
   /** Ranked "probable" destination values (best first) — e.g. the matched bike. */
@@ -44,14 +49,16 @@ interface InstallDialogProps {
 const RESHADE_DEST = "FrostMod ReShade";
 
 /** Ordered, de-duped playable mirrors with the "official" default first. */
-function useMirrors(detail: Detail): DownloadOption[] {
-  return useMemo(() => sortMirrors(detail), [detail]);
+function useMirrors(detail: Detail | undefined): DownloadOption[] {
+  return useMemo(() => (detail ? sortMirrors(detail) : []), [detail]);
 }
 
 export default function InstallDialog({
   open,
   onOpenChange,
   detail,
+  title,
+  image,
   modType,
   destOptions,
   suggestions,
@@ -122,7 +129,7 @@ export default function InstallDialog({
   );
 
   const selectedMirror = mirrors[mirrorIdx];
-  const thumb = detail.images[0];
+  const thumb = image ?? detail?.images[0];
   const subtitleType =
     modType.id === "bikes"
       ? t("category.bike")
@@ -169,7 +176,8 @@ export default function InstallDialog({
   };
 
   const confirm = () => {
-    if (!selectedMirror) return;
+    // Only a mod with mirrors has one to insist on; a purchase has a single file.
+    if (detail && !selectedMirror) return;
     const destFolder = creating && newFolder.trim() ? newFolder.trim() : folder;
     onConfirm({ destFolder, mirror: selectedMirror });
   };
@@ -191,10 +199,12 @@ export default function InstallDialog({
             style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-[14px] font-bold">{detail.title}</span>
+            <span className="truncate text-[14px] font-bold">
+              {title ?? detail?.title}
+            </span>
             <span className="text-[11.5px] text-muted-foreground">
               {subtitleType}
-              {detail.version ? ` · ${detail.version}` : ""}
+              {detail?.version ? ` · ${detail.version}` : ""}
             </span>
           </div>
           <button
@@ -400,7 +410,7 @@ export default function InstallDialog({
           <Button
             className="min-w-0 flex-1"
             onClick={confirm}
-            disabled={!selectedMirror}
+            disabled={!!detail && !selectedMirror}
           >
             <span className="truncate">
               {t("installDialog.installToFolder", { folder: folderLabel })}

@@ -56,11 +56,40 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
   return tex;
 }
 
+/**
+ * The map a mesh with nothing to wear gets — one shared instance, never written to.
+ *
+ * Shared rather than freshly built, because handing out a new empty `Map` is a *state change*
+ * as far as React is concerned, and the effect below would schedule the render that re-runs it.
+ */
+const NO_TEXTURES: Map<string, THREE.Texture> = new Map();
+
+/** The same, for the `textures` prop — a default of `[]` would be a new list per render. */
+const NO_PAINT_TEXTURES: PaintTexture[] = [];
+
+/**
+ * What a list of textures is, as far as this hook is concerned: the names it binds under and
+ * the pixels behind them.
+ *
+ * The effect below is keyed on this rather than on the array's identity, and that isn't a
+ * micro-optimisation — it's what stops the hook looping. A caller that builds its list inline,
+ * or leaves the prop off and takes the default, hands over a new array on every render; keyed
+ * on identity, the effect would re-run each time, `setMap` would schedule another render, and
+ * that render would re-run the effect. React ends that with "Maximum update depth exceeded".
+ */
+function texturesKey(textures: PaintTexture[]): string {
+  return textures.map((t) => `${t.name} ${t.token} ${t.width}x${t.height}`).join("\n");
+}
+
 function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
-  const [map, setMap] = useState<Map<string, THREE.Texture>>(new Map());
+  const [map, setMap] = useState<Map<string, THREE.Texture>>(NO_TEXTURES);
+  const key = texturesKey(textures);
   useEffect(() => {
     if (!textures.length) {
-      setMap(new Map());
+      // The same map every time, so an untextured mesh settles instead of re-rendering
+      // forever. `prev` is returned untouched when it is already empty, which is the bail-out
+      // React needs to stop scheduling work.
+      setMap((prev) => (prev.size ? NO_TEXTURES : prev));
       return;
     }
     let alive = true;
@@ -87,8 +116,30 @@ function useTextureMap(textures: PaintTexture[]): Map<string, THREE.Texture> {
       alive = false;
       settled?.forEach((tex) => tex.dispose());
     };
-  }, [textures]);
+    // `textures` is read through `key`: it changes exactly when the list's contents do, so the
+    // closure is never stale — and never re-run for an array that only *looks* new.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
   return map;
+}
+
+/**
+ * [`useTextureMap`], with caller-owned textures layered over it by name.
+ *
+ * The override is how pixels that only exist in this webview — the Designer's live composite
+ * canvas — reach a mesh, which otherwise only ever sees textures fetched by token. Layered
+ * last so a sheet being edited replaces the installed one it is named after, and never merged
+ * into the disposal set below: these belong to whoever passed them in.
+ */
+function useTextureMapWith(
+  textures: PaintTexture[],
+  overrides?: Map<string, THREE.Texture>,
+): Map<string, THREE.Texture> {
+  const loaded = useTextureMap(textures);
+  return useMemo(
+    () => (overrides?.size ? new Map([...loaded, ...overrides]) : loaded),
+    [loaded, overrides],
+  );
 }
 
 function submeshTexture(
@@ -300,6 +351,7 @@ function RiderGearMesh({
   alignY = "center",
   pitch = 0,
   fit: fitMode = "box",
+  overrides,
 }: {
   part: RiderPart;
   anchor: [number, number, number];
@@ -316,8 +368,9 @@ function RiderGearMesh({
    * it was authored at, and ignores `target`.
    */
   fit?: "box" | "native";
+  overrides?: Map<string, THREE.Texture>;
 }) {
-  const texMap = useTextureMap(part.textures);
+  const texMap = useTextureMapWith(part.textures, overrides);
   const geoms = useNodeGeometries(part.nodes);
   const mats = useGearMaterials(part, texMap);
 
@@ -565,8 +618,14 @@ function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THRE
   });
 }
 
-function RiderBodyMesh({ part }: { part: RiderPart }) {
-  const tex = useTextureMap(part.textures);
+function RiderBodyMesh({
+  part,
+  overrides,
+}: {
+  part: RiderPart;
+  overrides?: Map<string, THREE.Texture>;
+}) {
+  const tex = useTextureMapWith(part.textures, overrides);
   const geoms = useNodeGeometries(part.nodes);
   // One material per submesh; a node with no submesh table takes a single suit material.
   const mats = useMemo(
@@ -594,8 +653,14 @@ function RiderBodyMesh({ part }: { part: RiderPart }) {
   );
 }
 
-function RiderGearSolo({ part }: { part: RiderPart }) {
-  const tex = useTextureMap(part.textures);
+function RiderGearSolo({
+  part,
+  overrides,
+}: {
+  part: RiderPart;
+  overrides?: Map<string, THREE.Texture>;
+}) {
+  const tex = useTextureMapWith(part.textures, overrides);
   const geoms = useNodeGeometries(part.nodes);
   const mats = useGearMaterials(part, tex);
   const rot = part.part === "boots" ? BOOT_ROT : GEAR_ROT;
@@ -659,7 +724,13 @@ function RiderGearSolo({ part }: { part: RiderPart }) {
   );
 }
 
-function RiderComposite({ parts }: { parts: RiderPart[] }) {
+function RiderComposite({
+  parts,
+  overrides,
+}: {
+  parts: RiderPart[];
+  overrides?: Map<string, THREE.Texture>;
+}) {
   const byPart = (p: RiderPart["part"]) => parts.find((x) => x.part === p);
   const body = byPart("body");
   const helmet = byPart("helmet");
@@ -701,17 +772,18 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
   const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.74 * h, cz] : [0, 1.16, 0.03];
   const bootTarget = hasBody ? 0.44 * h : 0.32;
 
-  if (solo) return <RiderGearSolo part={solo} />;
+  if (solo) return <RiderGearSolo part={solo} overrides={overrides} />;
 
   return (
     <group>
       {hasBody ? (
-        <RiderBodyMesh part={body!} />
+        <RiderBodyMesh part={body!} overrides={overrides} />
       ) : (
         <RiderBody suit={suit} gloves={gloves} showHead={!hasHelmet} />
       )}
       {hasHelmet && (
         <RiderGearMesh
+          overrides={overrides}
           part={helmet!}
           anchor={helmetAnchor}
           target={hasBody ? 0.38 * h : 0.52}
@@ -725,6 +797,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
           threw away the offset a piece like a chain or a hood hangs at deliberately. */}
       {!!protection?.nodes.length && (
         <RiderGearMesh
+          overrides={overrides}
           part={protection!}
           anchor={protAnchor}
           yaw={PROT_YAW}
@@ -736,6 +809,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
         (boots!.nodes.length === 2 ? (
           bootSides(boots!).map(({ node, side }, i) => (
             <RiderGearMesh
+          overrides={overrides}
               key={i}
               part={{ ...boots!, nodes: [node] }}
               anchor={[cx + side * legX, footY, bootZ]}
@@ -748,6 +822,7 @@ function RiderComposite({ parts }: { parts: RiderPart[] }) {
           ))
         ) : (
           <RiderGearMesh
+          overrides={overrides}
             part={boots!}
             anchor={[cx, footY, bootZ]}
             target={bootTarget}
@@ -869,10 +944,39 @@ function ControlsHint() {
   );
 }
 
+/** Asks for one frame whenever `token` changes. Nothing else in the scene re-renders. */
+function FrameOnChange({ token }: { token?: number }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    invalidate();
+  }, [token, invalidate]);
+  return null;
+}
+
 export interface ModelViewerProps {
   mode: ViewerMode;
   texture?: PaintTexture | null;
   textures?: PaintTexture[];
+  /**
+   * Textures that win over `textures`, keyed by lowercase texture name.
+   *
+   * For a caller holding pixels the backend has never seen — the Designer's live composite,
+   * which is a canvas in this webview. Everything else arrives by token and goes through
+   * `textures`; this is the door for the one case that can't.
+   *
+   * The caller owns these and must dispose them: unlike `useTextureMap`'s, their lifetime is
+   * the editor's, not this component's.
+   */
+  overrides?: Map<string, THREE.Texture>;
+  /**
+   * Draw a frame when this changes.
+   *
+   * `frameloop="demand"` only redraws on a React commit, and a caller mutating a texture in
+   * place — the Designer, repainting its canvas — deliberately doesn't cause one: handing the
+   * material map a new identity per frame is what made dragging crawl. This is the way to say
+   * "the pixels moved" without saying "rebuild everything".
+   */
+  frameToken?: number;
   nodes?: EdfNode[] | null;
   riderParts?: RiderPart[] | null;
   loading?: boolean;
@@ -883,7 +987,9 @@ export interface ModelViewerProps {
 export function ModelViewer({
   mode,
   texture,
-  textures = [],
+  textures = NO_PAINT_TEXTURES,
+  overrides,
+  frameToken,
   nodes,
   riderParts,
   loading = false,
@@ -891,7 +997,7 @@ export function ModelViewer({
   className,
 }: ModelViewerProps) {
   const map = useDataTexture(texture);
-  const texMap = useTextureMap(textures);
+  const texMap = useTextureMapWith(textures, overrides);
   const hasReal = mode === "bike" && !!nodes?.length;
   const hasRider = mode === "rider" && !!riderParts?.length;
   // A single gear item (no body) is a small centred object — frame it level.
@@ -927,6 +1033,7 @@ export function ModelViewer({
           }}
         >
           <color attach="background" args={["#0e0f13"]} />
+          <FrameOnChange token={frameToken} />
           <CameraRig solo={gearSolo} />
           <ambientLight intensity={0.75} />
           {/* Even sky/ground fill so matte paint reads its true colour. */}
@@ -944,7 +1051,7 @@ export function ModelViewer({
             {hasReal ? (
               <EdfMesh nodes={nodes!} textures={texMap} />
             ) : hasRider ? (
-              <RiderComposite parts={riderParts!} />
+              <RiderComposite parts={riderParts!} overrides={overrides} />
             ) : loading || noStandIn ? null : mode === "bike" ? (
               <BikeStandIn map={map} />
             ) : (

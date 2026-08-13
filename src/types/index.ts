@@ -59,6 +59,7 @@ export interface GamePaths {
   modsPath?: string;
   gamePath?: string;
   profilesPath?: string;
+  reshadePath?: string;
 }
 
 export interface Config {
@@ -76,6 +77,17 @@ export interface Config {
    * `<modsPath>/profiles`; set only when profiles sit outside the game folder.
    */
   profilesPath?: string;
+  /**
+   * Override for the folder ReShade is installed in. Empty (normal) means the game's
+   * install dir. Kept apart from `gamePath` on purpose: that one also drives `rider.pkz`
+   * lookup, the game log folder and launching.
+   */
+  reshadePath?: string;
+  /**
+   * macOS: the Wine binary that starts the game. Empty (normal) means auto-detected.
+   * Ignored on Windows and Linux.
+   */
+  wineRunner?: string;
   /** Hide to the tray on close and keep running (default true). */
   runInBackground?: boolean;
   /** Launch on login (default true). */
@@ -97,6 +109,20 @@ export interface Config {
   overlayEnabled?: boolean;
   /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+X"`. */
   overlayHotkey?: string;
+  /** Voice chat is off until turned on — a feature that opens a microphone shouldn't be
+   *  something anyone discovers by accident. */
+  voiceEnabled?: boolean;
+  /** Microphone to listen to. **Blank means "follow the system default"**, so a player
+   *  who never picks one keeps tracking the device they change in Windows later. */
+  voiceInputDevice?: string;
+  /** Where other riders come out. Blank means the system default, as above. */
+  voiceOutputDevice?: string;
+  /** Push-to-talk combo in Tauri accelerator syntax. */
+  voicePttHotkey?: string;
+  /** Microphone gain, 1 = untouched. */
+  voiceInputGain?: number;
+  /** Playback volume for other riders, 0..1. */
+  voiceOutputVolume?: number;
   /** App version whose release showcase has been seen. Blank on an install that
    *  predates the showcase, which is what marks it as an upgrade worth telling. */
   seenVersion?: string;
@@ -433,6 +459,72 @@ export interface PkzMeta {
   thumbnail: string | null;
 }
 
+/** One file inside a track. `role` is a key the UI translates, not prose. */
+export interface TrackFile {
+  name: string;
+  role:
+    | "heightfield"
+    | "terrain"
+    | "scenery"
+    | "road"
+    | "surfaces"
+    | "config"
+    | "model"
+    | "image"
+    | "sound"
+    | "other";
+}
+
+/**
+ * A track's metadata and contents. Deliberately cheap — the backend answers it from the
+ * archive's index without inflating anything, so the track view can paint before the
+ * terrain has been read.
+ */
+export interface TrackInfo {
+  meta: PkzMeta;
+  files: TrackFile[];
+  /** Whether the track carries a heightfield at all, so the view can say so up front. */
+  hasTerrain: boolean;
+}
+
+/** A track's terrain grid, unpacked from the binary IPC blob. */
+/**
+ * A picture of a track's surfaces, laid over the terrain.
+ *
+ * Built from the coverage masks in the track's own height file, so it describes exactly the
+ * ground the grid does.
+ */
+export interface TrackOverview {
+  width: number;
+  height: number;
+  /** `width * height * 4` bytes, RGBA, first row first. */
+  pixels: Uint8Array<ArrayBuffer>;
+}
+
+export interface TrackTerrain {
+  width: number;
+  height: number;
+  /** Metres of ground covered by one sample at this level of detail. */
+  metresPerSample: number;
+  /** Over the whole master grid, so the colour ramp doesn't shift between detail levels. */
+  minHeight: number;
+  maxHeight: number;
+  /**
+   * Whether the track stated its sample spacing. When it didn't, the relief is real but the
+   * ground it is drawn across was assumed, so how steep the terrain looks is a guess.
+   */
+  scaleKnown: boolean;
+  /** 0–1. How sure the backend's probe was that it read the height file correctly. */
+  confidence: number;
+  /**
+   * Whether the heights are metres. A height file that doesn't say what its samples mean
+   * leaves them as raw units, and the elevation range is then a number about nothing.
+   */
+  heightsInMetres: boolean;
+  /** `width * height` heights in metres, row-major. */
+  heights: Float32Array;
+}
+
 /** What the dropzone decided a dropped item is. Mirrors `dropzone::ContentKind`. */
 export type DropKind =
   | "modsTree"
@@ -605,8 +697,12 @@ export interface ReshadePreset {
 
 /** State of the ReShade install and its presets. Mirrors `reshade::Status`. */
 export interface ReshadeStatus {
-  /** The game's install dir. Empty means it isn't configured — "don't know", not "absent". */
+  /** The folder we looked in. Empty means none is configured — "don't know", not "absent". */
   gameDir: string;
+  /** That folder is the player's `reshadePath` override rather than the game's install dir. */
+  custom: boolean;
+  /** A folder is configured and isn't there — distinct from never having picked one. */
+  folderMissing: boolean;
   /** A ReShade `opengl32.dll` is in place. MX Bikes and GP Bikes are OpenGL. */
   installed: boolean;
   /** ReShade is here under a DirectX name these games never load — a fixable mistake. */
@@ -711,10 +807,15 @@ export interface Loadout {
 export interface BundleRef {
   /** Direct-download URL of the uploaded `.zip`. */
   url: string;
-  /** Host label (e.g. `pixeldrain`), shown in the import dialog. */
+  /** Host label (e.g. `catbox`), shown in the import dialog. */
   host: string;
   /** Bundle size in bytes. */
   size: number;
+  /**
+   * Every slice of the bundle, in order, when it was too big for one upload. Absent means
+   * the whole thing is at `url` — which is also the first slice.
+   */
+  parts?: string[];
 }
 
 /**
@@ -814,6 +915,36 @@ export type BundlePhase =
 export interface BundleProgress {
   phase: BundlePhase;
   message?: string;
+}
+
+/** Where a shared file goes back on the importer's machine. */
+export interface ShareItem {
+  name: string;
+  /** Path under the mods root, forward-slashed (`tracks/EU/RedBud.pkz`). */
+  rel: string;
+  size: number;
+  isDir: boolean;
+}
+
+/** A picked path that can't be shared, and why. */
+export interface ShareSkipped {
+  path: string;
+  reason: string;
+}
+
+/** Preview of what sharing the current picks would carry — nothing is uploaded yet. */
+export interface SharePlan {
+  items: ShareItem[];
+  skipped: ShareSkipped[];
+  totalSize: number;
+}
+
+/** What a `MXBS1-` file-share code decodes to. */
+export interface FileShare {
+  items: ShareItem[];
+  /** Size of the hosted zip — what an import downloads. */
+  totalSize: number;
+  bundle: BundleRef;
 }
 
 export type SlotSource =

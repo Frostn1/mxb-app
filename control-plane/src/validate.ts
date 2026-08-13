@@ -110,7 +110,18 @@ export function isRelDest(value: unknown): value is string {
 }
 
 /** Paints are single-digit megabytes; anything far past that is not a paint. */
-export const MAX_PAINT_BYTES = 32 * 1024 * 1024;
+/**
+ * The largest paint that may be published.
+ *
+ * Was 32 MiB, which real content simply exceeds: a 4K livery runs well past it, and the
+ * biggest on a normal install measured 121.7 MB. Every paint over the limit was refused, and
+ * because a loadout is validated as a whole, one of them meant the rider published nothing.
+ *
+ * 192 MiB clears the largest seen with room to spare while still being a bound. It is not
+ * free — every other rider on the server downloads these — which is the argument for the app
+ * skipping the outliers rather than the limit going away.
+ */
+export const MAX_PAINT_BYTES = 192 * 1024 * 1024;
 
 export function isPaintSize(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_PAINT_BYTES;
@@ -242,3 +253,49 @@ export function isBikeId(value: unknown): value is string {
   // players' apps read.
   return !/[/\\]/.test(id);
 }
+
+/** How much of a failed bootstrap's transcript is worth keeping. */
+export const MAX_BOOTSTRAP_LOG = 16 * 1024;
+
+/**
+ * A bootstrap stage name.
+ *
+ * Written by a script on a machine we launched, and read back into the app's UI, so it is
+ * held to being a short plain label rather than trusted because of where it came from.
+ */
+export function isBootstrapStage(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const stage = value.trim();
+  if (stage.length === 0 || stage.length > 64) return false;
+  return /^[a-z0-9 :\-]+$/i.test(stage);
+}
+
+/**
+ * A mirrored content file name, as stored under `content/bikes/`.
+ *
+ * Becomes both an R2 key and a filename on a server's disk, so it is held to a plain name:
+ * no separators, no traversal, and the extension the game actually loads.
+ */
+export function isContentName(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const name = value.trim();
+  if (name.length === 0 || name.length > 128) return false;
+  if (/[/\\]/.test(name) || name.includes("..")) return false;
+  if (/[\u0000-\u001f\u007f]/.test(name)) return false;
+  return /\.pkz$/i.test(name);
+}
+
+/**
+ * A server key, as the app computes it: a registry id, or a normalized `host:port` for a
+ * server we do not run.
+ *
+ * Loose on purpose — it is an opaque grouping key, not an address anything dials — but still
+ * bounded and free of control characters, since it is stored and echoed back.
+ */
+export function isServerKey(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const key = value.trim();
+  if (key.length === 0 || key.length > 128) return false;
+  return !/[\u0000-\u001f\u007f]/.test(key);
+}
+

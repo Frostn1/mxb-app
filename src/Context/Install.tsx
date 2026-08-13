@@ -15,17 +15,18 @@ import {
   importFile,
   onFrostmodReload,
   onInstallProgress,
+  shopInstall,
+  type ShopItem,
 } from "../api/mods";
 import type { InstallStage, ReloadOutcome } from "../types";
 import { useT } from "../i18n/context";
 
-/** Where the bytes come from — a resolvable host, or a file the user picked.
- *
- * MX Bikes Shop purchases are deliberately absent: they stage a plan and finish through the
- * review sheet (`DropReviewProvider`), not through this one-shot installer. */
+/** Where the bytes come from — a resolvable host, a file the user picked, or a shop purchase
+ *  (whose download goes through a WebView, because Cloudflare refuses our HTTP client). */
 export type InstallSource =
   | { kind: "download"; url: string; host: string }
-  | { kind: "import"; path: string };
+  | { kind: "import"; path: string }
+  | { kind: "shop"; item: ShopItem };
 
 interface StartParams {
   slug: string;
@@ -69,6 +70,8 @@ interface InstallContextValue {
     p: Omit<StartParams, "source"> & { url: string; host: string },
   ) => void;
   startImport: (p: Omit<StartParams, "source"> & { path: string }) => void;
+  /** A purchase from the shop, queued exactly like any other install. */
+  startShopInstall: (p: Omit<StartParams, "source"> & { item: ShopItem }) => void;
   /** Clear a finished (done/error) install card. */
   clear: () => void;
 }
@@ -150,6 +153,8 @@ export function InstallProvider({
     try {
       if (source.kind === "download") {
         await addToLibrary(slug, source.url, source.host, subpath, destFolder);
+      } else if (source.kind === "shop") {
+        await shopInstall(source.item, subpath, destFolder);
       } else {
         await importFile(source.path, subpath, destFolder);
       }
@@ -174,10 +179,6 @@ export function InstallProvider({
       setActive((cur) =>
         cur && cur.slug === slug ? { ...cur, stage: "error", message } : cur,
       );
-      // Both remaining sources are started from a mod's detail page, so a failure can always
-      // offer the way back to it. (Purchases used to be the exception — they had nowhere to
-      // send anyone — and they now fail inside the review sheet instead, which is on screen.)
-      //
       // Retry goes through `enqueue`, never straight to `run`: a second impatient click used
       // to start a *parallel* run of the same job.
       const target: ModTarget = { slug, subpath, categoryId: params.categoryId };
@@ -258,6 +259,11 @@ export function InstallProvider({
     [enqueue],
   );
 
+  const startShopInstall: InstallContextValue["startShopInstall"] = useCallback(
+    ({ item, ...rest }) => enqueue({ ...rest, source: { kind: "shop", item } }),
+    [enqueue],
+  );
+
   const clear = useCallback(() => setActive(null), []);
 
   const value = useMemo(
@@ -266,9 +272,10 @@ export function InstallProvider({
       queueLength,
       startInstall,
       startImport,
+      startShopInstall,
       clear,
     }),
-    [active, queueLength, startInstall, startImport, clear],
+    [active, queueLength, startInstall, startImport, startShopInstall, clear],
   );
 
   return (

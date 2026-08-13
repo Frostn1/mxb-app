@@ -300,7 +300,9 @@ fn dedup_assets(assets: &mut Vec<AssetRef>) {
     });
 }
 
-fn dir_size_deep(dir: &Path) -> u64 {
+/// Total bytes under `dir`, following the links a mods tree is full of. Shared with
+/// [`crate::fileshare`], which sizes a picked folder the same way this sizes a model variant.
+pub(crate) fn dir_size_deep(dir: &Path) -> u64 {
     let mut total = 0;
     for e in crate::linkwalk::walk(dir).into_iter().flatten() {
         if e.file_type().is_file() {
@@ -320,8 +322,17 @@ struct BundleProgress {
 
 pub const BUNDLE_SLUG: &str = "__preset_bundle__";
 
+pub const BUNDLE_EVENT: &str = "preset-bundle-progress";
+
+/// Emit one phase update on `event`. The event name is a parameter because the same
+/// create/download machinery serves two flows — the preset bundle here and the file share
+/// in [`crate::fileshare`] — and each has its own dialog listening.
+pub(crate) fn emit(app: &AppHandle, event: &str, phase: &'static str, message: Option<String>) {
+    let _ = app.emit(event, BundleProgress { phase, message });
+}
+
 fn phase(app: &AppHandle, phase: &'static str, message: Option<String>) {
-    let _ = app.emit("preset-bundle-progress", BundleProgress { phase, message });
+    emit(app, BUNDLE_EVENT, phase, message);
 }
 
 pub async fn create(
@@ -367,13 +378,30 @@ pub async fn create(
     let zip_path = work.join(format!("{}.zip", sanitize_file(name)));
     zip_dir(&root, &zip_path)?;
 
-    phase(app, "uploading", Some(format!("Uploading {}…", human_size(file_size(&zip_path)))));
+    let total = human_size(file_size(&zip_path));
+    phase(app, "uploading", Some(format!("Uploading {total}…")));
     let client = install::build_client()?;
-    let up = upload::upload_file(&client, &zip_path).await?;
+    let up = upload::upload_file(&client, &zip_path, |i, n| {
+        let msg = if n > 1 {
+            format!("Uploading part {i} of {n} ({total})…")
+        } else {
+            format!("Uploading {total}…")
+        };
+        phase(app, "uploading", Some(msg));
+    })
+    .await?;
 
     let _ = std::fs::remove_dir_all(&work);
 
-    preset.bundle = Some(BundleRef { url: up.url, host: up.host, size: up.size });
+    let first = up
+        .parts
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("the upload returned no link"))?;
+    // `url` stays the first slice so a one-part bundle reads exactly as it always has;
+    // `parts` is only carried when there's more than one to stitch.
+    let parts = if up.parts.len() > 1 { up.parts } else { Vec::new() };
+    preset.bundle = Some(BundleRef { url: first, host: up.host, size: up.size, parts });
     let code = presets::encode_code_public(&preset);
     phase(app, "done", None);
     Ok(code)
@@ -395,17 +423,7 @@ pub async fn import(
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work)?;
 
-    // MEGA links decrypt in-app; everything else streams via the shared downloader.
-    phase(app, "downloading", None);
-    let client = install::build_client()?;
-    let h = bundle.host.to_lowercase();
-    let u = bundle.url.to_lowercase();
-    let archive = if h.contains("mega") || u.contains("mega.nz") || u.contains("mega.co") {
-        install::download_mega(app, &client, BUNDLE_SLUG, &bundle.url, &work).await?
-    } else {
-        let direct = install::resolve_direct_url(&client, &bundle.url, &bundle.host).await?;
-        install::download(app, &client, BUNDLE_SLUG, &direct, &work).await?
-    };
+    let archive = fetch(app, BUNDLE_EVENT, BUNDLE_SLUG, &bundle, &work).await?;
 
     phase(app, "installing", None);
     let extracted = work.join("extracted");
@@ -423,7 +441,87 @@ pub async fn import(
     Ok(preset)
 }
 
-fn rel_to_native(rel: &str) -> PathBuf {
+/// Bring a hosted bundle down to `work` as one archive file, whatever shape it was uploaded
+/// in: a MEGA link that decrypts in-app, a sliced upload that has to be stitched, or a plain
+/// single file. Shared with [`crate::fileshare`], which hosts its payload the same way.
+pub(crate) async fn fetch(
+    app: &AppHandle,
+    event: &str,
+    slug: &str,
+    bundle: &BundleRef,
+    work: &Path,
+) -> anyhow::Result<PathBuf> {
+    emit(app, event, "downloading", None);
+    let client = install::build_client()?;
+    let h = bundle.host.to_lowercase();
+    let u = bundle.url.to_lowercase();
+    if h.contains("mega") || u.contains("mega.nz") || u.contains("mega.co") {
+        install::download_mega(app, &client, slug, &bundle.url, work).await
+    } else if bundle.parts.len() > 1 {
+        download_parts(app, event, slug, &client, bundle, work).await
+    } else {
+        let direct = install::resolve_direct_url(&client, &bundle.url, &bundle.host).await?;
+        install::download(app, &client, slug, &direct, work).await
+    }
+}
+
+/// Fetch every slice of a multi-part bundle and stitch them back into one zip. The slices are
+/// raw byte ranges, so concatenating them in order reproduces the original file exactly.
+async fn download_parts(
+    app: &AppHandle,
+    event: &str,
+    slug: &str,
+    client: &reqwest::Client,
+    bundle: &BundleRef,
+    work: &Path,
+) -> anyhow::Result<PathBuf> {
+    let n = bundle.parts.len();
+    let dir = work.join("parts");
+
+    let mut paths = Vec::with_capacity(n);
+    for (i, url) in bundle.parts.iter().enumerate() {
+        emit(app, event, "downloading", Some(format!("Downloading part {} of {n}…", i + 1)));
+        // Each part lands in its own folder: the host names the file, and two parts of the
+        // same bundle can easily come back under the same name.
+        let into = dir.join(format!("part{}", i + 1));
+        std::fs::create_dir_all(&into)?;
+        let direct = install::resolve_direct_url(client, url, &bundle.host).await?;
+        paths.push(
+            install::download(app, client, slug, &direct, &into)
+                .await
+                .with_context(|| format!("part {} of {n} couldn't be downloaded", i + 1))?,
+        );
+    }
+
+    emit(app, event, "downloading", Some(format!("Joining {n} parts…")));
+    let zip_path = work.join("bundle.zip");
+    let written = concat_files(&paths, &zip_path)?;
+    if written != bundle.size {
+        anyhow::bail!(
+            "This bundle came back as {} instead of {} — one of its {n} parts is incomplete or \
+             no longer hosted. Ask whoever shared it for a fresh code.",
+            human_size(written),
+            human_size(bundle.size)
+        );
+    }
+    Ok(zip_path)
+}
+
+/// Concatenate `parts` into `dest` in order, returning the bytes written.
+fn concat_files(parts: &[PathBuf], dest: &Path) -> anyhow::Result<u64> {
+    let mut out = std::fs::File::create(dest)
+        .with_context(|| format!("creating {}", dest.display()))?;
+    let mut total = 0u64;
+    for p in parts {
+        let mut input =
+            std::fs::File::open(p).with_context(|| format!("reading {}", p.display()))?;
+        total += std::io::copy(&mut input, &mut out)?;
+    }
+    std::io::Write::flush(&mut out)?;
+    Ok(total)
+}
+
+pub(crate) fn rel_to_native(rel: &str) -> PathBuf {
     let mut p = PathBuf::new();
     for seg in rel.split('/').filter(|s| !s.is_empty()) {
         p.push(seg);
@@ -434,11 +532,11 @@ fn rel_to_native(rel: &str) -> PathBuf {
 /// Copy an asset folder into the bundle, resolving any links inside it — a bundle is for
 /// someone else's machine, where the far end of the sender's junction doesn't exist. See
 /// [`crate::linkwalk::copy_tree`].
-fn copy_tree(src: &Path, dst: &Path) -> anyhow::Result<()> {
+pub(crate) fn copy_tree(src: &Path, dst: &Path) -> anyhow::Result<()> {
     Ok(crate::linkwalk::copy_tree(src, dst)?)
 }
 
-fn zip_dir(root: &Path, zip_path: &Path) -> anyhow::Result<()> {
+pub(crate) fn zip_dir(root: &Path, zip_path: &Path) -> anyhow::Result<()> {
     let file = std::fs::File::create(zip_path)?;
     let mut zip = zip::ZipWriter::new(file);
     // Stored (no re-compression): payload is mostly already-compressed `.pkz`/`.pnt`.
@@ -463,11 +561,11 @@ fn zip_dir(root: &Path, zip_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn file_size(p: &Path) -> u64 {
+pub(crate) fn file_size(p: &Path) -> u64 {
     std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
 }
 
-fn human_size(bytes: u64) -> String {
+pub(crate) fn human_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     if bytes >= MB {
@@ -479,7 +577,7 @@ fn human_size(bytes: u64) -> String {
     }
 }
 
-fn sanitize_file(name: &str) -> String {
+pub(crate) fn sanitize_file(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| match c {
@@ -505,6 +603,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// The whole multi-part scheme rests on this: slices are raw byte ranges, so joining
+    /// them back in order has to give the original zip byte for byte.
+    #[test]
+    fn joining_slices_rebuilds_the_zip() {
+        let dir = tmp("concat");
+        let original: Vec<u8> = (0..9000u32).map(|i| (i % 251) as u8).collect();
+
+        let mut paths = Vec::new();
+        for (i, chunk) in original.chunks(2048).enumerate() {
+            let p = dir.join(format!("part{i}"));
+            std::fs::write(&p, chunk).unwrap();
+            paths.push(p);
+        }
+        assert_eq!(paths.len(), 5, "expected a short final slice");
+
+        let dest = dir.join("bundle.zip");
+        let written = concat_files(&paths, &dest).unwrap();
+
+        assert_eq!(written, original.len() as u64);
+        assert_eq!(std::fs::read(&dest).unwrap(), original);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn joining_a_missing_slice_fails_instead_of_truncating() {
+        let dir = tmp("concat-missing");
+        let present = dir.join("part0");
+        std::fs::write(&present, b"abc").unwrap();
+        let paths = vec![present, dir.join("part1-never-downloaded")];
+
+        assert!(concat_files(&paths, &dir.join("bundle.zip")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

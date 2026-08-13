@@ -48,6 +48,8 @@ import type {
   ReloadOutcome,
   BundlePlan,
   BundleProgress,
+  SharePlan,
+  FileShare,
   GameId,
   GameInfo,
 } from "../types";
@@ -429,6 +431,17 @@ export function reshadeStatus(): Promise<ReshadeStatus> {
   return invoke<ReshadeStatus>("reshade_status");
 }
 
+/**
+ * Point ReShade support at a folder of the player's choosing. Pass an empty string to clear
+ * it, back to the game's install dir.
+ *
+ * Taken as given, ReShade there or not — {@link reshadeStatus} reports what's actually in the
+ * folder on the very next read, which is a better answer than a rejected pick.
+ */
+export function setReshadePath(path: string): Promise<void> {
+  return invoke<void>("set_reshade_path", { path });
+}
+
 /** Make `name` the active preset. `RESHADE_OFF` is the no-effects preset. */
 export function applyReshadePreset(name: string): Promise<ReshadeApplyOutcome> {
   return invoke<ReshadeApplyOutcome>("apply_reshade_preset", { name });
@@ -508,6 +521,29 @@ export function unpackPaint(path: string): Promise<PaintTexture[]> {
 /** Read image files as textures — non-power-of-two sizes come back resized, flagged. */
 export function paintStudioLoad(paths: string[]): Promise<StudioImage[]> {
   return invoke<StudioImage[]>("paint_studio_load", { paths });
+}
+
+/**
+ * One image at its own resolution, for the Designer to composite with.
+ *
+ * Not {@link paintStudioLoad}: that answers with a thumbnail token, and a sheet composited
+ * from thumbnails would be saved as one. Read the pixels with {@link textureBytes}.
+ */
+export function paintStudioPixels(path: string): Promise<PaintTexture> {
+  return invoke<PaintTexture>("paint_studio_pixels", { path });
+}
+
+/**
+ * Stage a composited sheet as a file, returning the path to pack.
+ *
+ * The PNG goes up as the raw request body — a 4096² sheet is megabytes, and an argument
+ * would be JSON-encoded as a list of numbers. Tauri sends an `ArrayBuffer` passed in the
+ * argument position as `InvokeBody::Raw`, so the sheet's name has to travel as a header.
+ */
+export function paintStudioStage(name: string, png: ArrayBuffer): Promise<string> {
+  return invoke<string>("paint_studio_stage", png, {
+    headers: { "x-sheet-name": name },
+  });
 }
 
 /** The file a save would write, resolved but not written — so we can ask before replacing. */
@@ -622,6 +658,53 @@ export function revealInExplorer(path: string): Promise<void> {
   return invoke<void>("reveal_in_explorer", { path });
 }
 
+export interface LogFile {
+  name: string;
+  path: string;
+  bytes: number;
+  /** Last modified, Unix ms — null when the OS wouldn't say. */
+  modified: number | null;
+}
+
+/** One place logs come from. `dir` is always set: when nothing was found it's the folder
+ *  we looked in, which is still what someone needs to be told. */
+export interface LogGroup {
+  dir: string;
+  /** Whether the folder itself is there — a different problem from it being empty. */
+  exists: boolean;
+  /** Newest first. */
+  files: LogFile[];
+}
+
+/** Every log set: MXB App's own, FrostMod's managed folder, and the game's `log.txt`. */
+export interface LogsInfo {
+  app: LogGroup;
+  frostmod: LogGroup;
+  game: LogGroup;
+}
+
+export type LogsKind = "app" | "frostmod" | "game";
+
+export function logsInfo(): Promise<LogsInfo> {
+  return invoke<LogsInfo>("logs_info");
+}
+
+/** Open the folder a log set lives in, newest file selected where the OS can. */
+export function openLogsFolder(which: LogsKind): Promise<void> {
+  return invoke<void>("open_logs_folder", { which });
+}
+
+export interface LogsExport {
+  path: string;
+  files: number;
+  bytes: number;
+}
+
+/** Zip every log set to `dest` — a path the user picked in a save dialog. */
+export function exportLogs(dest: string): Promise<LogsExport> {
+  return invoke<LogsExport>("export_logs", { dest });
+}
+
 /** Hide-to-tray + keep-running toggle. */
 export function setRunInBackground(enabled: boolean): Promise<void> {
   return invoke<void>("set_run_in_background", { enabled });
@@ -629,6 +712,30 @@ export function setRunInBackground(enabled: boolean): Promise<void> {
 
 export function setGamePath(path: string): Promise<void> {
   return invoke<void>("set_game_path", { path });
+}
+
+/**
+ * macOS only: what the app found to run the game with.
+ *
+ * MX Bikes is a Windows binary, so on a Mac it runs inside a CrossOver, Whisky or Wine
+ * bottle. `runner` is the binary we'd launch through — empty means none was found and
+ * Play can't work until one is installed or picked.
+ */
+export interface WineHostInfo {
+  runner: string;
+  /** Which wrapper the runner belongs to ("CrossOver", "Whisky", "Wine"). */
+  via: string;
+  /** Wine prefixes we can see, so a bottle we're missing shows up as missing. */
+  bottles: string[];
+}
+
+export function wineHostInfo(): Promise<WineHostInfo> {
+  return invoke<WineHostInfo>("wine_host_info");
+}
+
+/** Pick the Wine binary that starts the game. Pass an empty string to auto-detect again. */
+export function setWineRunner(path: string): Promise<WineHostInfo> {
+  return invoke<WineHostInfo>("set_wine_runner", { path });
 }
 
 /** Auto-detect the Steam MX Bikes install (holds `rider.pkz`); null if not found. */
@@ -1406,19 +1513,40 @@ export function shopLogout(): Promise<void> {
 }
 
 /** The signed-in user's purchased downloads ("All My Downloads"). */
-export function shopMyDownloads(): Promise<ShopItem[]> {
-  return invoke<ShopItem[]>("shop_my_downloads");
+/**
+ * The purchases page is read out of a hidden WebView parked on it — an HTTP client can't get
+ * past the store's Cloudflare challenge. That window keeps whatever it last loaded, so
+ * `reload` is what makes Refresh actually re-fetch rather than re-read the same DOM.
+ */
+export function shopMyDownloads(reload = false): Promise<ShopItem[]> {
+  return invoke<ShopItem[]>("shop_my_downloads", { reload });
 }
 
 /**
- * Download a purchased file and stage it for review. Nothing is written under `mods/`.
+ * Download a purchased file and install it where the caller chose.
  *
- * Returns an ordinary `DropPlan`, so a purchase finishes through the same review sheet and the
- * same `commitDrop` a drag-and-drop does — and lands where its *contents* say it belongs
- * rather than where its title was guessed to. Progress arrives via `onInstallProgress`.
+ * The shop's `addToLibrary`: same destination arguments, same progress events, same placement —
+ * only the bytes differ, arriving through a WebView because the store's file URLs sit behind
+ * Cloudflare's managed challenge.
  */
-export function shopStage(item: ShopItem): Promise<DropPlan> {
-  return invoke<DropPlan>("shop_stage", { item });
+export function shopInstall(
+  item: ShopItem,
+  subpath: string,
+  destFolder: string,
+): Promise<void> {
+  return invoke<void>("shop_install", { item, subpath, destFolder });
+}
+
+/**
+ * Which purchased products have a recorded install, and the folders they claim.
+ *
+ * Recorded at install time so the "Installed" badge is a fact. It used to be inferred by
+ * comparing the product name to library folder names, which routinely disagree — `2022 ARL MX
+ * Round 1` ships as `2022.ARL.MX.RD01.pkz` and lands in a folder named after the file. The
+ * fuzzy comparison stays as the fallback for anything installed before this existed.
+ */
+export function shopInstalledMap(): Promise<Record<string, string[]>> {
+  return invoke<Record<string, string[]>>("shop_installed_map");
 }
 
 /** Fires after a WebView sign-in completes; payload is whether it succeeded. */
@@ -1550,6 +1678,73 @@ export function setOverlayHotkey(hotkey: string): Promise<void> {
 /** Fires when the overlay was summoned while the game held the screen exclusively. */
 export function onOverlayFullscreenBlocked(cb: () => void): Promise<UnlistenFn> {
   return listen("overlay-fullscreen-blocked", () => cb());
+}
+
+export type VoiceDevice = { name: string; isDefault: boolean };
+export type VoiceDevices = {
+  inputs: VoiceDevice[];
+  outputs: VoiceDevice[];
+  /** Set when the machine has no audio at all, so the UI can say so instead of
+   *  showing two empty dropdowns. */
+  error: string | null;
+};
+
+/** Every microphone and output the machine currently offers.
+ *
+ * Call it each time the picker opens rather than caching — the point is to notice the
+ * headset that was plugged in after the app launched. */
+export function voiceDevices(): Promise<VoiceDevices> {
+  return invoke<VoiceDevices>("voice_devices");
+}
+
+export function setVoiceEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_voice_enabled", { enabled });
+}
+
+/** Pick the microphone. `""` means "follow the system default". */
+export function setVoiceInputDevice(device: string): Promise<void> {
+  return invoke<void>("set_voice_input_device", { device });
+}
+
+/** Pick where other riders come out. `""` means "follow the system default". */
+export function setVoiceOutputDevice(device: string): Promise<void> {
+  return invoke<void>("set_voice_output_device", { device });
+}
+
+/** Rebind push-to-talk. Rejects (leaving the old one live) if the combo is taken. */
+export function setVoicePttHotkey(hotkey: string): Promise<void> {
+  return invoke<void>("set_voice_ptt_hotkey", { hotkey });
+}
+
+export function setVoiceLevels(inputGain: number, outputVolume: number): Promise<void> {
+  return invoke<void>("set_voice_levels", { inputGain, outputVolume });
+}
+
+/** Open the mic and start the level meter. Resolves to a warning when the saved device
+ *  is gone and we fell back to the default — the unplugged-headset case. */
+export function voiceMeterStart(): Promise<string | null> {
+  return invoke<string | null>("voice_meter_start");
+}
+
+export function voiceMeterStop(): Promise<void> {
+  return invoke<void>("voice_meter_stop");
+}
+
+/** Play a short tone on the configured output. Same warning contract as the meter. */
+export function voiceTestOutput(): Promise<string | null> {
+  return invoke<string | null>("voice_test_output");
+}
+
+export type VoiceLevel = { rms: number; peak: number };
+
+/** Live microphone level while the meter is running. */
+export function onVoiceInputLevel(cb: (level: VoiceLevel) => void): Promise<UnlistenFn> {
+  return listen<VoiceLevel>("voice-input-level", (e) => cb(e.payload));
+}
+
+/** Fires on both edges of the push-to-talk key: `true` on press, `false` on release. */
+export function onVoicePtt(cb: (down: boolean) => void): Promise<UnlistenFn> {
+  return listen<boolean>("voice-ptt", (e) => cb(e.payload));
 }
 
 /** Toggle watching the mods folder to reload the game on external changes. */
@@ -1706,6 +1901,36 @@ export function onPresetBundleProgress(
   return listen<BundleProgress>("preset-bundle-progress", (event) => cb(event.payload));
 }
 
+// ── Sharing installed files (any track, paint or pack — not just presets) ────
+
+/** What sharing these installed paths would carry, and what it would leave out. */
+export function fileSharePlan(paths: string[]): Promise<SharePlan> {
+  return invoke<SharePlan>("file_share_plan", { paths });
+}
+
+/** Pack + upload the picked files, returning a one-line share code (`MXBS1-…`). */
+export function fileShareCreate(paths: string[]): Promise<string> {
+  return invoke<string>("file_share_create", { paths });
+}
+
+/** Read a share code *without* downloading — preview what it carries. */
+export function fileSharePreview(text: string): Promise<FileShare> {
+  return invoke<FileShare>("file_share_preview", { text });
+}
+
+/** Download a share code's files and install them where the sender had them. */
+export function fileShareImport(text: string): Promise<FileShare> {
+  return invoke<FileShare>("file_share_import", { text });
+}
+
+/** Subscribe to file-share create/import phase updates. Same payload as the preset
+ *  bundle's, on its own event so the two dialogs never cross. */
+export function onFileShareProgress(
+  cb: (p: BundleProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<BundleProgress>("file-share-progress", (event) => cb(event.payload));
+}
+
 /** `"windows"` | `"macos"` | `"linux"`. Features gated on the OS ask the backend rather
  *  than guessing from `navigator.userAgent`, which can't tell Windows from Linux. */
 export function appPlatform(): Promise<string> {
@@ -1746,6 +1971,8 @@ export interface PublishOutcome {
   bikes: number;
   /** Bikes beyond the cap that were left out. */
   skippedBikes: number;
+  /** Paints too large for the control plane to store, so nobody else will see them. */
+  oversizedPaints: number;
   digest: string;
   /** The look already matched what was last sent, so nothing went up. */
   unchanged: boolean;
@@ -1939,6 +2166,15 @@ export const SERVER_REGIONS = [
   "ap-southeast-2",
 ] as const;
 
+/**
+ * What the region picker starts on.
+ *
+ * Where somebody else's hardware physically sits is unknowable from here, so this is a
+ * guess either way — but the control plane provisions in `us-west-2` and nothing else, so
+ * that is the better guess than whichever region happened to be first in the list.
+ */
+export const DEFAULT_SERVER_REGION = "us-west-2";
+
 /** An EC2 instance the control plane launched, as AWS reports it. */
 export interface FleetInstance {
   instanceId: string;
@@ -1982,6 +2218,16 @@ export interface CloudServer {
   /** `pending` | `running` | `stopping` | `stopped` | `gone` | `self-hosted`. */
   state: string;
   publicIp: string | null;
+  /**
+   * What the box last reported doing — `downloading the game`, `ready`, `failed`.
+   *
+   * The only window into a machine with no console and no key pair. A bootstrap that failed
+   * and one still downloading are otherwise indistinguishable from here.
+   */
+  bootstrapStage: string | null;
+  bootstrapAt: number | null;
+  /** The tail of the transcript, present only when the bootstrap gave up. */
+  bootstrapLog: string | null;
 }
 
 /** The servers the control plane runs for this account, and what it takes to drive them. */

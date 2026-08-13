@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Button } from "../ui/button";
+import { Button, CHIP } from "../ui/button";
 import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
@@ -75,6 +75,7 @@ import {
   type Scans,
 } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
+import { copyText } from "../../lib/clipboard";
 
 function humanSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -94,27 +95,6 @@ function phaseLabel(phase: BundlePhase, t: TFunc): string {
       return t("presets.phaseInstalling");
     case "done":
       return t("common.done");
-  }
-}
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      return ok;
-    } catch {
-      return false;
-    }
   }
 }
 
@@ -761,7 +741,7 @@ function PresetCard({
           <IconBtn title={t("presets.editNameOrOptions")} onClick={onEdit}>
             <Pencil className="size-3.5" />
           </IconBtn>
-          <IconBtn title={t("presets.share")} onClick={onShare}>
+          <IconBtn chip title={t("presets.share")} onClick={onShare}>
             <Share2 className="size-3.5" />
           </IconBtn>
           <IconBtn title={t("common.delete")} onClick={onDelete}>
@@ -781,16 +761,24 @@ function IconBtn({
   title,
   onClick,
   children,
+  chip = false,
 }: {
   title: string;
   onClick: () => void;
   children: React.ReactNode;
+  /** Keep a background at rest, so the action doesn't read as one more grey glyph. */
+  chip?: boolean;
 }) {
   return (
     <button
       title={title}
       onClick={onClick}
-      className="cursor-default rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+      className={cn(
+        "cursor-default rounded-md p-1.5 transition-colors",
+        chip
+          ? CHIP
+          : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+      )}
     >
       {children}
     </button>
@@ -934,7 +922,7 @@ function ShareDialog({ preset, onClose }: { preset: Preset | null; onClose: () =
 
         {/* Full-bundle section */}
         {!isFull && (
-          <div className="rounded-lg border border-white/[0.07] bg-card/40 p-3 text-[12px]">
+          <div className="rounded-lg border border-white/[0.07] bg-card/40 p-3 text-[12px] break-words">
             <div className="flex items-center gap-1.5 font-semibold">
               <Package className="size-3.5" />
               Full bundle
@@ -1115,7 +1103,7 @@ function ImportDialog({
           </p>
         )}
         {preview && (
-          <div className="rounded-lg border border-white/[0.07] bg-card/40 p-2.5 text-[12px]">
+          <div className="rounded-lg border border-white/[0.07] bg-card/40 p-2.5 text-[12px] break-words">
             <div className="font-semibold">{preview.name}</div>
             <div className="text-muted-foreground">{loadoutSummary(preview.loadout)}</div>
             {hasBundle && (

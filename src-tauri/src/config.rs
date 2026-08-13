@@ -13,6 +13,7 @@ pub struct GamePaths {
     pub mods_path: String,
     pub game_path: String,
     pub profiles_path: String,
+    pub reshade_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +48,17 @@ pub struct AppConfig {
     /// resolved from `mods_path` — see [`AppConfig::profiles_dir`]. Set it when the
     /// resolver can't find the folder, e.g. profiles on a drive we don't probe.
     pub profiles_path: String,
+    /// Override for the folder ReShade is installed in. Empty (the normal case) means the
+    /// game's install dir — see [`AppConfig::reshade_dir`]. Set it when detection lands on
+    /// the wrong folder, or when the install dir isn't configured at all and the player
+    /// only wants to point at ReShade. Deliberately not `game_path`: that one also drives
+    /// `rider.pkz` lookup, the game log folder and launching, none of which a pick made
+    /// from the ReShade card should move.
+    pub reshade_path: String,
+    /// macOS: the Wine binary that starts the game. Empty (the normal case) means it's
+    /// auto-detected — see [`crate::winehost::resolve`]. Machine-wide rather than
+    /// per-game: one Mac has one set of wrappers installed. Ignored on Windows and Linux.
+    pub wine_runner: String,
     /// Hide to the tray on window close and keep running.
     pub run_in_background: bool,
     /// Start MXB App automatically on login.
@@ -71,6 +83,24 @@ pub struct AppConfig {
     /// The combo that toggles the overlay, in Tauri accelerator syntax
     /// (`"CommandOrControl+Shift+X"`). Blank falls back to [`DEFAULT_OVERLAY_HOTKEY`].
     pub overlay_hotkey: String,
+    /// Voice chat is off until the player turns it on. A feature that opens a microphone
+    /// is not something anyone should discover by accident.
+    pub voice_enabled: bool,
+    /// Microphone to listen to. **Blank means "follow the system default"** — storing the
+    /// resolved name instead would pin the player to whichever headset was plugged in the
+    /// day they set it, and stop tracking the default they later change in Windows.
+    pub voice_input_device: String,
+    /// Where other riders come out. Blank means the system default, as above. Separate
+    /// from game audio on purpose: voice on the headset with the game on speakers is a
+    /// setup people actually run.
+    pub voice_output_device: String,
+    /// Push-to-talk combo, Tauri accelerator syntax. Blank falls back to
+    /// [`DEFAULT_PTT_HOTKEY`].
+    pub voice_ptt_hotkey: String,
+    /// Microphone gain, 1.0 = untouched. Clamped when applied.
+    pub voice_input_gain: f32,
+    /// Playback volume for other riders, 0..1.
+    pub voice_output_volume: f32,
     /// The app version whose release showcase has already been shown. Blank means the
     /// install predates the showcase — an upgrade, so the newest showcase is due.
     /// A *fresh* install is stamped with the running version at setup (see
@@ -149,6 +179,14 @@ impl AppConfig {
 /// Steam (Shift+Tab) and GeForce Experience (Alt+Z, Alt+F*).
 pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+X";
 
+/// Push-to-talk combo used until the player picks another one.
+///
+/// A modifier chord rather than a bare key, and not one MX Bikes binds: the game has
+/// keyboard focus during a race, so a single letter would both open the mic and do
+/// whatever that letter does in-game. Players who want a thumb button rebind it — which is
+/// why this is a default and not a constant the UI hides.
+pub const DEFAULT_PTT_HOTKEY: &str = "CommandOrControl+Shift+V";
+
 /// Defaults we've shipped and then moved away from.
 ///
 /// Ctrl+Shift+M is Discord's mute toggle. Discord registers it globally and gets there
@@ -166,6 +204,8 @@ impl Default for AppConfig {
             mods_path: String::new(),
             game_path: String::new(),
             profiles_path: String::new(),
+            reshade_path: String::new(),
+            wine_runner: String::new(),
             run_in_background: true,
             launch_at_startup: true,
             auto_run_frostmod: true,
@@ -175,6 +215,12 @@ impl Default for AppConfig {
             tour_done: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
+            voice_enabled: false,
+            voice_input_device: String::new(),
+            voice_output_device: String::new(),
+            voice_ptt_hotkey: DEFAULT_PTT_HOTKEY.to_string(),
+            voice_input_gain: 1.0,
+            voice_output_volume: 1.0,
             seen_version: String::new(),
             servers: Vec::new(),
             experimental: false,
@@ -221,6 +267,7 @@ impl AppConfig {
                 mods_path: self.mods_path.clone(),
                 game_path: self.game_path.clone(),
                 profiles_path: self.profiles_path.clone(),
+                reshade_path: self.reshade_path.clone(),
             },
         );
     }
@@ -242,6 +289,7 @@ impl AppConfig {
         self.mods_path = next.mods_path;
         self.game_path = next.game_path;
         self.profiles_path = next.profiles_path;
+        self.reshade_path = next.reshade_path;
         true
     }
 
@@ -270,6 +318,22 @@ impl AppConfig {
             return gp.to_string();
         }
         detect_game_path(self.game()).unwrap_or_default()
+    }
+
+    /// The folder ReShade is installed in — everything in [`crate::reshade`] reads this
+    /// rather than [`AppConfig::install_dir`].
+    ///
+    /// Normally they are the same folder: ReShade attaches by sitting next to the
+    /// executable, so it can't be anywhere else and still load. The override exists for
+    /// when the app's idea of the install dir is wrong or missing — Steam detection came up
+    /// empty, or the player runs two copies — and it stays separate from `game_path` so
+    /// pointing this at the wrong place can only ever break ReShade.
+    pub fn reshade_dir(&self) -> String {
+        let custom = self.reshade_path.trim();
+        if !custom.is_empty() {
+            return custom.to_string();
+        }
+        self.install_dir()
     }
 
     pub fn profiles_dir(&self) -> PathBuf {
@@ -323,10 +387,11 @@ fn resolve_profiles_dir(primary: PathBuf, fallback: impl FnOnce() -> Option<Path
     }
 }
 
-/// The game's user folder where it puts it when nothing has been moved: the Proton
-/// prefix on Linux, `Documents\PiBoSo\<game>` elsewhere.
+/// The game's user folder where it puts it when nothing has been moved: inside the Wine
+/// prefix wherever the game runs as a Windows process (Proton on Linux, a bottle on
+/// macOS), `Documents\PiBoSo\<game>` on Windows.
 fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
-    if let Some(p) = detect_proton_mods_path(game) {
+    if let Some(p) = detect_prefix_mods_path(game) {
         return Some(PathBuf::from(p));
     }
     Some(dirs_next::document_dir()?.join("PiBoSo").join(game.user_dir))
@@ -669,32 +734,56 @@ fn parse_ini_mods_folder(bytes: &[u8]) -> Option<String> {
     fallback
 }
 
-/// The game's user folder inside a Proton prefix.
+/// The game's user folder inside a Wine prefix.
 ///
-/// Under Proton the game is a Windows process, so `Documents` is the prefix's fake
-/// `C:` drive — `compatdata/<appid>/pfx/drive_c/users/steamuser/Documents/PiBoSo/<game>`
-/// — and nothing is ever written to the user's real `~/Documents`. Without this a Linux
-/// player lands on the setup screen with no working default to accept.
+/// Wherever the game runs as a Windows process — Proton on Linux, CrossOver/Whisky on
+/// macOS — `Documents` is the prefix's fake `C:` drive, and nothing is ever written to the
+/// user's real `~/Documents`. Without this a player lands on the setup screen with no
+/// working default to accept.
 ///
 /// Returns the first prefix that actually looks like a mods dir, so a stale prefix from an
 /// uninstalled copy can't win over a real one.
-fn detect_proton_mods_path(game: &GameProfile) -> Option<String> {
-    if cfg!(not(target_os = "linux")) {
-        return None;
-    }
-    for lib in steam_libraries() {
-        let candidate = lib
-            .join("steamapps")
-            .join("compatdata")
-            .join(game.steam_appid)
-            .join("pfx/drive_c/users/steamuser/Documents/PiBoSo")
-            .join(game.user_dir);
-        let as_str = candidate.to_string_lossy().into_owned();
-        if looks_like_mods_dir(&as_str) {
-            return Some(as_str);
+fn detect_prefix_mods_path(game: &GameProfile) -> Option<String> {
+    wine_prefixes(game)
+        .iter()
+        .find_map(|prefix| mods_dir_in_prefix(prefix, game))
+}
+
+/// Wine prefixes that could hold the game's user folder: Proton's per-game `compatdata`
+/// on Linux, every CrossOver/Whisky/Wine bottle on macOS. Empty on Windows, where the
+/// game is native and writes to the real `Documents`.
+fn wine_prefixes(game: &GameProfile) -> Vec<PathBuf> {
+    let mut prefixes: Vec<PathBuf> = Vec::new();
+    if cfg!(target_os = "linux") {
+        for lib in steam_libraries() {
+            prefixes.push(
+                lib.join("steamapps")
+                    .join("compatdata")
+                    .join(game.steam_appid)
+                    .join("pfx"),
+            );
         }
     }
-    None
+    prefixes.extend(crate::winehost::bottles());
+    prefixes
+}
+
+/// `<prefix>/drive_c/users/<user>/Documents/PiBoSo/<game>`, if it's really there.
+///
+/// The Windows user varies by wrapper — `steamuser` under Proton, `crossover` under
+/// CrossOver, the login name under plain Wine — so every user in the prefix is tried
+/// rather than guessing which one built it.
+fn mods_dir_in_prefix(prefix: &Path, game: &GameProfile) -> Option<String> {
+    let users = std::fs::read_dir(prefix.join("drive_c").join("users")).ok()?;
+    users.flatten().find_map(|user| {
+        let candidate = user
+            .path()
+            .join("Documents")
+            .join("PiBoSo")
+            .join(game.user_dir);
+        let as_str = candidate.to_string_lossy().into_owned();
+        looks_like_mods_dir(&as_str).then_some(as_str)
+    })
 }
 
 /// Locate the game's install folder (the one holding its `install_marker`) by scanning
@@ -750,6 +839,13 @@ fn steam_libraries() -> Vec<PathBuf> {
                 home.join(".var/app/com.valvesoftware.Steam/data/Steam"),
             );
             push(&mut roots, home.join("snap/steam/common/.local/share/Steam"));
+        }
+        // macOS: the game is a Windows title, so a Steam that owns it is a *Windows* Steam
+        // installed inside a Wine bottle. The native paths above can never hold it.
+        for bottle in crate::winehost::bottles() {
+            let c = bottle.join("drive_c");
+            push(&mut roots, c.join("Program Files (x86)/Steam"));
+            push(&mut roots, c.join("Program Files/Steam"));
         }
     }
 
@@ -1322,7 +1418,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod linux_paths_tests {
+mod prefix_paths_tests {
     use super::*;
 
     /// A Proton prefix laid out the way Steam actually makes one, checked through the
@@ -1354,11 +1450,36 @@ mod linux_paths_tests {
     }
 
     #[test]
-    fn proton_detection_is_linux_only() {
-        // On Windows/macOS the game is native and writes to the real Documents folder,
-        // so the prefix probe must never hijack detection there.
-        if cfg!(not(target_os = "linux")) {
-            assert!(detect_proton_mods_path(&crate::game::MXB).is_none());
+    fn prefix_detection_never_runs_on_windows() {
+        // On Windows the game is native and writes to the real Documents folder, so the
+        // prefix probe must never hijack detection there.
+        if cfg!(windows) {
+            assert!(detect_prefix_mods_path(&crate::game::MXB).is_none());
         }
+    }
+
+    /// A CrossOver bottle's user folder, found without being told which Windows user
+    /// built it — `crossover` here, `steamuser` under Proton, a login name under Wine.
+    #[test]
+    fn finds_the_user_folder_in_a_bottle_whatever_the_windows_user_is_called() {
+        let root = std::env::temp_dir().join(format!("frost-bottle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let users = root.join("drive_c/users");
+        // A user with nothing in it must not be mistaken for the one that has the game.
+        std::fs::create_dir_all(users.join("Public")).unwrap();
+        let mods = users.join("crossover/Documents/PiBoSo/MX Bikes");
+        std::fs::create_dir_all(mods.join("mods").join("bikes")).unwrap();
+        std::fs::create_dir_all(mods.join("profiles")).unwrap();
+
+        assert_eq!(
+            mods_dir_in_prefix(&root, &crate::game::MXB).map(PathBuf::from),
+            Some(mods)
+        );
+        // Wrong title: GP Bikes isn't in this bottle.
+        assert!(mods_dir_in_prefix(&root, &crate::game::GPB).is_none());
+        // Not a prefix at all.
+        assert!(mods_dir_in_prefix(&root.join("nope"), &crate::game::MXB).is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

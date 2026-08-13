@@ -39,6 +39,7 @@ import {
   provisionServer,
   publishServer,
   saveServers,
+  DEFAULT_SERVER_REGION,
   SERVER_REGIONS,
   serverAction,
   serverProbe,
@@ -92,7 +93,7 @@ const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
   // server into nothing. `null` while we're still asking.
   const [tracks, setTracks] = useState<string[] | null>(null);
   // The one fact about a server no machine on this end can infer.
-  const [region, setRegion] = useState<string>(SERVER_REGIONS[0]);
+  const [region, setRegion] = useState<string>(DEFAULT_SERVER_REGION);
 
   useEffect(() => {
     let cancelled = false;
@@ -199,7 +200,9 @@ const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
               {status?.server.name || server.name}
             </span>
           </div>
-          <div className="mt-1 truncate text-[12px] text-muted-foreground">{server.url}</div>
+          <div className="mt-1 truncate text-[12px] text-muted-foreground">
+            {server.url}
+          </div>
         </div>
         <button
           onClick={() => onRemove(server.id)}
@@ -228,7 +231,9 @@ const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
           </div>
           <div>
             <dt className="text-muted-foreground">{t("servers.uptime")}</dt>
-            <dd>{running ? uptime(status.game.uptime_secs) : t("servers.stopped")}</dd>
+            <dd>
+              {running ? uptime(status.game.uptime_secs) : t("servers.stopped")}
+            </dd>
           </div>
           <div>
             <dt className="text-muted-foreground">{t("servers.restarts")}</dt>
@@ -238,20 +243,41 @@ const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" disabled={busy || running} onClick={() => run("start")}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || running}
+          onClick={() => run("start")}
+        >
           <Play className="size-3.5" /> {t("servers.start")}
         </Button>
-        <Button size="sm" variant="outline" disabled={busy || !running} onClick={() => run("stop")}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || !running}
+          onClick={() => run("stop")}
+        >
           <Square className="size-3.5" /> {t("servers.stop")}
         </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => run("restart")}>
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}{" "}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => run("restart")}
+        >
+          {busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <RotateCw className="size-3.5" />
+          )}{" "}
           {t("servers.restart")}
         </Button>
 
         <div className="ml-auto flex items-center gap-2">
           {tracks === null ? (
-            <span className="text-[12px] text-muted-foreground">{t("servers.trackLoading")}</span>
+            <span className="text-[12px] text-muted-foreground">
+              {t("servers.trackLoading")}
+            </span>
           ) : tracks.length > 0 ? (
             <select
               value={track}
@@ -277,7 +303,11 @@ const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
             />
           )}
           {/* Changing the track restarts the game — the .ini is only read at startup. */}
-          <Button size="sm" disabled={busy || !track.trim()} onClick={applyTrack}>
+          <Button
+            size="sm"
+            disabled={busy || !track.trim()}
+            onClick={applyTrack}
+          >
             {t("servers.setTrack")}
           </Button>
         </div>
@@ -290,7 +320,9 @@ const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
         <Globe className="size-3.5 flex-none text-muted-foreground" />
         {listed ? (
           <>
-            <span className="text-[12px] text-muted-foreground">{t("servers.listed")}</span>
+            <span className="text-[12px] text-muted-foreground">
+              {t("servers.listed")}
+            </span>
             <Button
               className="ml-auto"
               size="sm"
@@ -303,7 +335,9 @@ const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
           </>
         ) : (
           <>
-            <span className="text-[12px] text-muted-foreground">{t("servers.notListed")}</span>
+            <span className="text-[12px] text-muted-foreground">
+              {t("servers.notListed")}
+            </span>
             <div className="ml-auto flex items-center gap-2">
               <select
                 value={region}
@@ -378,7 +412,9 @@ const StatusRow = ({
     <div className="min-w-0 flex-1">
       <div className="text-[12.5px] text-foreground/85">{title}</div>
       {detail && (
-        <div className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">{detail}</div>
+        <div className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+          {detail}
+        </div>
       )}
     </div>
     {action && <div className="flex-none pt-0.5">{action}</div>}
@@ -426,7 +462,8 @@ const PaintSync = () => {
         setProfiles(scan.profiles);
         // One profile is the overwhelmingly common case — preselect it so enrolling is the
         // invite code and nothing else.
-        if (scan.profiles.length > 0) setRiderName((cur) => cur || scan.profiles[0]);
+        if (scan.profiles.length > 0)
+          setRiderName((cur) => cur || scan.profiles[0]);
       })
       .catch(() => setProfiles([]));
   }, []);
@@ -445,7 +482,9 @@ const PaintSync = () => {
   // player triggered here, and all of it belongs on screen.
   useEffect(() => {
     const pending = onSyncEvent((e) => {
-      setLive(e.phase === "publishing" || e.phase === "pulling" ? e.phase : null);
+      setLive(
+        e.phase === "publishing" || e.phase === "pulling" ? e.phase : null,
+      );
       // Re-read rather than patching from the payload: the backend writes what it achieved
       // to the config, and that record is what survives a restart.
       if (e.phase !== "publishing" && e.phase !== "pulling") refresh();
@@ -487,8 +526,15 @@ const PaintSync = () => {
       // Forced: pressing this after a successful publish is otherwise correctly a no-op,
       // which reads as a broken button.
       const r = await publishPaints(true);
-      toast.success(t("sync.published", { paints: r.published, bikes: r.bikes }));
-      if (r.skippedBikes > 0) toast.warning(t("sync.skippedBikes", { count: r.skippedBikes }));
+      toast.success(
+        t("sync.published", { paints: r.published, bikes: r.bikes }),
+      );
+      if (r.skippedBikes > 0)
+        toast.warning(t("sync.skippedBikes", { count: r.skippedBikes }));
+      // A livery that never leaves the machine is worth saying out loud; otherwise the rider
+      // looks default to everyone else and nothing ever explains why.
+      if (r.oversizedPaints > 0)
+        toast.warning(t("sync.oversized", { count: r.oversizedPaints }));
       refresh();
     } catch (e) {
       toast.error(t("sync.publishFailed"), { description: String(e) });
@@ -501,9 +547,14 @@ const PaintSync = () => {
     try {
       const r = await syncPaints();
       toast.success(
-        t("sync.pulled", { installed: r.installed, riders: r.riders, had: r.alreadyHad }),
+        t("sync.pulled", {
+          installed: r.installed,
+          riders: r.riders,
+          had: r.alreadyHad,
+        }),
       );
-      if (r.rejected > 0) toast.warning(t("sync.rejected", { count: r.rejected }));
+      if (r.rejected > 0)
+        toast.warning(t("sync.rejected", { count: r.rejected }));
       refresh();
     } catch (e) {
       toast.error(t("sync.pullFailed"), { description: String(e) });
@@ -523,7 +574,9 @@ const PaintSync = () => {
         <Shirt className="size-4 text-muted-foreground" />
         <h2 className="font-semibold">{t("sync.title")}</h2>
       </div>
-      <p className="mt-1 text-[12.5px] text-muted-foreground">{t("sync.desc")}</p>
+      <p className="mt-1 text-[12.5px] text-muted-foreground">
+        {t("sync.desc")}
+      </p>
 
       {state?.enrolled ? (
         <>
@@ -539,7 +592,13 @@ const PaintSync = () => {
             />
 
             <StatusRow
-              tone={live === "publishing" ? "busy" : hasPublished ? "good" : "missing"}
+              tone={
+                live === "publishing"
+                  ? "busy"
+                  : hasPublished
+                    ? "good"
+                    : "missing"
+              }
               title={
                 live === "publishing"
                   ? t("sync.publishing")
@@ -558,14 +617,21 @@ const PaintSync = () => {
                   : t("sync.neverPublishedWhy")
               }
               action={
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void publish()}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void publish()}
+                >
                   <Upload className="size-3.5" /> {t("sync.publishNow")}
                 </Button>
               }
             />
 
             <StatusRow
-              tone={live === "pulling" ? "busy" : hasPulled ? "good" : "missing"}
+              tone={
+                live === "pulling" ? "busy" : hasPulled ? "good" : "missing"
+              }
               title={
                 live === "pulling"
                   ? t("sync.pulling")
@@ -581,7 +647,12 @@ const PaintSync = () => {
                   : t("sync.neverPulledWhy")
               }
               action={
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void pull()}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void pull()}
+                >
                   <Download className="size-3.5" /> {t("sync.pull")}
                 </Button>
               }
@@ -592,7 +663,10 @@ const PaintSync = () => {
                 it from the server log the first time one of their servers sees them connect.
                 Never an error — a rider name identifies you perfectly well until then. */}
             {state.guid ? (
-              <StatusRow tone="good" title={t("sync.guidClaimed", { guid: state.guid })} />
+              <StatusRow
+                tone="good"
+                title={t("sync.guidClaimed", { guid: state.guid })}
+              />
             ) : manualGuid ? (
               <div className="flex flex-wrap items-end gap-2 py-2">
                 <label className="flex-1 text-[11.5px] text-muted-foreground">
@@ -647,7 +721,9 @@ const PaintSync = () => {
             </div>
           )}
 
-          <p className="mt-3 text-[11.5px] text-muted-foreground">{t("sync.autoNote")}</p>
+          <p className="mt-3 text-[11.5px] text-muted-foreground">
+            {t("sync.autoNote")}
+          </p>
         </>
       ) : (
         <div className="mt-4 space-y-2">
@@ -685,11 +761,15 @@ const PaintSync = () => {
             spellCheck={false}
           />
           <p className="text-[11.5px] text-muted-foreground">
-            {profiles && profiles.length === 0 ? t("sync.noProfiles") : t("sync.pickProfileHint")}
+            {profiles && profiles.length === 0
+              ? t("sync.noProfiles")
+              : t("sync.pickProfileHint")}
           </p>
           {/* Where the code comes from. Invites are issued by hand, so without this the
               field is a box with no answer anywhere in the app. */}
-          <p className="text-[11.5px] text-muted-foreground">{t("sync.whereCode")}</p>
+          <p className="text-[11.5px] text-muted-foreground">
+            {t("sync.whereCode")}
+          </p>
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <Button
               size="sm"
@@ -698,7 +778,11 @@ const PaintSync = () => {
             >
               {t("sync.enroll")}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => void openUrl(DISCORD_URL)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void openUrl(DISCORD_URL)}
+            >
               <MessagesSquare className="size-3.5" /> {t("sync.getCode")}
             </Button>
           </div>
@@ -820,7 +904,11 @@ const CloudServerRow = ({
             <span
               className={cn(
                 "size-[7px] flex-none rounded-full",
-                ready && running ? "bg-success" : ready ? "bg-warning" : "bg-muted-foreground/50",
+                ready && running
+                  ? "bg-success"
+                  : ready
+                    ? "bg-warning"
+                    : "bg-muted-foreground/50",
               )}
             />
             <span className="truncate font-semibold">{server.name}</span>
@@ -847,9 +935,30 @@ const CloudServerRow = ({
       {!ready ? (
         // The wait is minutes, not seconds — the bootstrap downloads a 2 GB installer. Saying
         // so is the difference between "still working" and "something has gone wrong".
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-white/[0.07] px-3 py-2 text-[12px] text-muted-foreground">
-          <Loader2 className="size-3.5 animate-spin" />
-          {t("servers.bootingWhy")}
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2 rounded-lg border border-white/[0.07] px-3 py-2 text-[12px] text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            {/* The box reports each step, so a ten-minute wait can say which part it is on
+                rather than spinning with nothing to show. */}
+            {server.bootstrapStage && server.bootstrapStage !== "failed"
+              ? t("servers.bootingStage", { stage: server.bootstrapStage })
+              : t("servers.bootingWhy")}
+          </div>
+          {/* A bootstrap that gave up used to take its own log down with it. This is that
+              log, which is the only thing that can say why. */}
+          {server.bootstrapStage === "failed" && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3">
+              <div className="flex items-center gap-2 text-[12px] font-semibold">
+                <TriangleAlert className="size-3.5 flex-none text-destructive" />
+                {t("servers.bootFailed")}
+              </div>
+              {server.bootstrapLog && (
+                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[11px] leading-relaxed text-muted-foreground">
+                  {server.bootstrapLog}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -864,18 +973,32 @@ const CloudServerRow = ({
             </div>
             <div>
               <dt className="text-muted-foreground">{t("servers.uptime")}</dt>
-              <dd>{running ? uptime(status?.game.uptime_secs ?? 0) : t("servers.stopped")}</dd>
+              <dd>
+                {running
+                  ? uptime(status?.game.uptime_secs ?? 0)
+                  : t("servers.stopped")}
+              </dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">{t("servers.shutsDown")}</dt>
+              <dt className="text-muted-foreground">
+                {t("servers.shutsDown")}
+              </dt>
               {/* The bill is the reason this exists, so the countdown is a first-class fact
                   rather than something to discover from a server that vanished. */}
-              <dd>{left === null ? t("servers.inUse") : t("servers.inMinutes", { count: left })}</dd>
+              <dd>
+                {left === null
+                  ? t("servers.inUse")
+                  : t("servers.inMinutes", { count: left })}
+              </dd>
             </div>
           </dl>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button size="sm" disabled={busy} onClick={() => onJoin(server.address)}>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => onJoin(server.address)}
+            >
               <Plug className="size-3.5" /> {t("join.action")}
             </Button>
             <Button
@@ -918,7 +1041,11 @@ const CloudServerRow = ({
                   className="h-8 w-40 text-[12.5px]"
                 />
               )}
-              <Button size="sm" disabled={busy || !track.trim()} onClick={() => void applyTrack()}>
+              <Button
+                size="sm"
+                disabled={busy || !track.trim()}
+                onClick={() => void applyTrack()}
+              >
                 {t("servers.setTrack")}
               </Button>
             </div>
@@ -992,14 +1119,21 @@ const CreateServer = ({ onJoin }: { onJoin: (address: string) => void }) => {
         <h2 className="font-semibold">{t("servers.createTitle")}</h2>
         {fleet && (
           <span className="ml-auto text-[12px] text-muted-foreground">
-            {t("servers.runningOfCap", { count: fleet.running, cap: fleet.cap })}
+            {t("servers.runningOfCap", {
+              count: fleet.running,
+              cap: fleet.cap,
+            })}
           </span>
         )}
       </div>
-      <p className="mt-1 text-[12.5px] text-muted-foreground">{t("servers.createDesc")}</p>
+      <p className="mt-1 text-[12.5px] text-muted-foreground">
+        {t("servers.createDesc")}
+      </p>
 
       {unavailable ? (
-        <p className="mt-3 text-[11.5px] text-muted-foreground">{unavailable}</p>
+        <p className="mt-3 text-[11.5px] text-muted-foreground">
+          {unavailable}
+        </p>
       ) : (
         <>
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1014,7 +1148,11 @@ const CreateServer = ({ onJoin }: { onJoin: (address: string) => void }) => {
               disabled={busy || atCap || name.trim().length < 2}
               onClick={() => void create()}
             >
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+              {busy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Plus className="size-3.5" />
+              )}
               {t("servers.create")}
             </Button>
           </div>
@@ -1031,7 +1169,12 @@ const CreateServer = ({ onJoin }: { onJoin: (address: string) => void }) => {
       {mine && mine.length > 0 && (
         <div className="mt-4 space-y-3">
           {mine.map((s) => (
-            <CloudServerRow key={s.id} server={s} onGone={refresh} onJoin={onJoin} />
+            <CloudServerRow
+              key={s.id}
+              server={s}
+              onGone={refresh}
+              onJoin={onJoin}
+            />
           ))}
         </div>
       )}
@@ -1071,7 +1214,9 @@ const Servers = () => {
   // Re-read from the backend rather than patching local state: publishing writes the
   // registry id into the saved list on the Rust side, so that file is the source of truth.
   const reload = useCallback(() => {
-    void listServers().then(setServers).catch(() => {});
+    void listServers()
+      .then(setServers)
+      .catch(() => {});
   }, []);
   useEffect(reload, [reload]);
 
@@ -1148,100 +1293,140 @@ const Servers = () => {
   };
 
   return (
-    <div className="mx-auto w-full max-w-4xl p-6">
-      <header className="mb-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-xl font-semibold">{t("servers.title")}</h1>
-          {/* Every other screen has one of these; this is the screen that needed it most. */}
-          <HelpHint title={t("servers.title")} description={t("servers.help")} />
-        </div>
-        <p className="mt-1 text-[13px] text-muted-foreground">{t("servers.subtitle")}</p>
-      </header>
+    // The Dashboard gives every view a fixed, `overflow-hidden` box and expects the view to
+    // scroll itself. This page never did: it was short enough to fit, so everything below
+    // the fold was simply clipped with no scrollbar to suggest there was more.
+    //
+    // The column-plus-`min-h-0` shape is copied from Settings and Presets rather than
+    // invented. A bare `h-full overflow-y-auto` does not work here — the percentage has no
+    // definite height to resolve against, so the box grows to fit its content, never
+    // overflows, and is clipped by the parent exactly as before. `min-h-0` is the part that
+    // makes it real: without it a flex child refuses to shrink below its content.
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl p-6">
+          <header className="mb-5">
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-xl font-semibold">{t("servers.title")}</h1>
+              {/* Every other screen has one of these; this is the screen that needed it most. */}
+              <HelpHint
+                title={t("servers.title")}
+                description={t("servers.help")}
+              />
+            </div>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              {t("servers.subtitle")}
+            </p>
+          </header>
 
-      <PaintSync />
+          <PaintSync />
 
-      <CreateServer onJoin={join} />
+          <CreateServer onJoin={join} />
 
-      {servers.length === 0 && !adding && (
-        <div className="rounded-xl border border-dashed border-white/[0.1] p-8 text-center">
-          <ServerIcon className="mx-auto size-6 text-muted-foreground" />
-          <p className="mt-2 text-[13px] text-muted-foreground">{t("servers.empty")}</p>
-        </div>
-      )}
+          {servers.length === 0 && !adding && (
+            <div className="rounded-xl border border-dashed border-white/[0.1] p-8 text-center">
+              <ServerIcon className="mx-auto size-6 text-muted-foreground" />
+              <p className="mt-2 text-[13px] text-muted-foreground">
+                {t("servers.empty")}
+              </p>
+            </div>
+          )}
 
-      <div className="space-y-3">
-        {servers.map((s) => (
-          <ServerRow
-            key={s.id}
-            server={s}
-            onRemove={(id) => void persist(servers.filter((x) => x.id !== id))}
-            onChanged={reload}
-          />
-        ))}
-      </div>
+          <div className="space-y-3">
+            {servers.map((s) => (
+              <ServerRow
+                key={s.id}
+                server={s}
+                onRemove={(id) =>
+                  void persist(servers.filter((x) => x.id !== id))
+                }
+                onChanged={reload}
+              />
+            ))}
+          </div>
 
-      {adding ? (
-        <div className="mt-4 space-y-2 rounded-xl border border-white/[0.07] p-4">
-          {/* One field, not four. The pairing code carries the address and the token, and
+          {adding ? (
+            <div className="mt-4 space-y-2 rounded-xl border border-white/[0.07] p-4">
+              {/* One field, not four. The pairing code carries the address and the token, and
               the name comes off the host — so the manual fields are collapsed behind a
               disclosure rather than sitting here implying they all need filling in. */}
-          <Input
-            autoFocus
-            value={pairingBlob}
-            onChange={(e) => void onPairingPaste(e.target.value)}
-            placeholder={t("servers.pairingPlaceholder")}
-            spellCheck={false}
-          />
-          <p className="text-[11.5px] text-muted-foreground">{t("servers.pairingWhere")}</p>
+              <Input
+                autoFocus
+                value={pairingBlob}
+                onChange={(e) => void onPairingPaste(e.target.value)}
+                placeholder={t("servers.pairingPlaceholder")}
+                spellCheck={false}
+              />
+              <p className="text-[11.5px] text-muted-foreground">
+                {t("servers.pairingWhere")}
+              </p>
 
-          {manualServer ? (
-            <>
-              <Input
-                value={draft.url}
-                onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-                placeholder="http://203.0.113.10:8787"
-                spellCheck={false}
-              />
-              <Input
-                type="password"
-                value={draft.token}
-                onChange={(e) => setDraft({ ...draft, token: e.target.value })}
-                placeholder={t("servers.tokenPlaceholder")}
-                spellCheck={false}
-              />
-              <Input
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder={t("servers.nameOptional")}
-              />
-            </>
+              {manualServer ? (
+                <>
+                  <Input
+                    value={draft.url}
+                    onChange={(e) =>
+                      setDraft({ ...draft, url: e.target.value })
+                    }
+                    placeholder="http://203.0.113.10:8787"
+                    spellCheck={false}
+                  />
+                  <Input
+                    type="password"
+                    value={draft.token}
+                    onChange={(e) =>
+                      setDraft({ ...draft, token: e.target.value })
+                    }
+                    placeholder={t("servers.tokenPlaceholder")}
+                    spellCheck={false}
+                  />
+                  <Input
+                    value={draft.name}
+                    onChange={(e) =>
+                      setDraft({ ...draft, name: e.target.value })
+                    }
+                    placeholder={t("servers.nameOptional")}
+                  />
+                </>
+              ) : (
+                <button
+                  onClick={() => setManualServer(true)}
+                  className="cursor-default text-left text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                >
+                  {t("servers.manualEntry")}
+                </button>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={probing}
+                  onClick={() => setAdding(false)}
+                >
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={probing || !draft.url.trim() || !draft.token.trim()}
+                  onClick={() => void add()}
+                >
+                  {probing && <Loader2 className="size-3.5 animate-spin" />}
+                  {probing ? t("servers.probing") : t("servers.add")}
+                </Button>
+              </div>
+            </div>
           ) : (
-            <button
-              onClick={() => setManualServer(true)}
-              className="cursor-default text-left text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-            >
-              {t("servers.manualEntry")}
-            </button>
-          )}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button size="sm" variant="outline" disabled={probing} onClick={() => setAdding(false)}>
-              {t("common.cancel")}
-            </Button>
             <Button
+              className="mt-4"
               size="sm"
-              disabled={probing || !draft.url.trim() || !draft.token.trim()}
-              onClick={() => void add()}
+              variant="outline"
+              onClick={() => setAdding(true)}
             >
-              {probing && <Loader2 className="size-3.5 animate-spin" />}
-              {probing ? t("servers.probing") : t("servers.add")}
+              <Plus className="size-3.5" /> {t("servers.add")}
             </Button>
-          </div>
+          )}
         </div>
-      ) : (
-        <Button className="mt-4" size="sm" variant="outline" onClick={() => setAdding(true)}>
-          <Plus className="size-3.5" /> {t("servers.add")}
-        </Button>
-      )}
+      </div>
     </div>
   );
 };

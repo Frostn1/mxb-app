@@ -49,13 +49,17 @@ export const it: Translation = {
   "nav.locker": "Armadietto",
   "nav.presets": "Preset",
   "nav.rider": "Pilota",
+  "nav.designer": "Designer",
   "nav.paints": "Livree",
+  "nav.studio": "Studio",
   "nav.servers": "Server",
   "nav.manage": "Gestisci",
   "nav.settings": "Impostazioni",
 
   "sidebar.installing": "Installazione di “{{name}}”",
   "sidebar.queued": "+{{count}} in coda",
+  "sidebar.expand": "Espandi la barra laterale",
+  "sidebar.collapse": "Riduci la barra laterale",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "Controllo di FrostMod…",
@@ -397,6 +401,14 @@ export const it: Translation = {
   "purchases.installed": "Installato",
   "purchases.downloading": "Download in corso…",
   "purchases.downloadFailed": "Impossibile scaricare {{title}}",
+  "purchases.searchPlaceholder": "Cerca nei tuoi acquisti…",
+  "purchases.otherCategory": "Altro",
+  "purchases.notInstalledOnly": "Non installati",
+  "purchases.noMatches": "Nessuno dei tuoi acquisti corrisponde.",
+  "purchases.viewDetails": "Vedi dettagli",
+  "purchaseSort.recentlyPurchased": "Acquistati di recente",
+  "purchaseSort.nameAsc": "Nome (A–Z)",
+  "purchaseSort.notInstalled": "Prima i non installati",
   // ── Catalogo MX Bikes Shop (solo consultazione; si acquista sul sito) ──────
   "shopCatalog.searchPlaceholder": "Cerca nel negozio…",
   "shopCatalog.allCategories": "Tutto",
@@ -517,6 +529,10 @@ export const it: Translation = {
   // ── Impostazioni ───────────────────────────────────────────────────────────
   "settings.help":
     "Configura la cartella di gioco, gli aggiornamenti e le preferenze dell'app.",
+  "settings.groupSetup": "Configurazione",
+  "settings.groupApp": "App",
+  "settings.groupAdvanced": "Avanzate",
+  "settings.groupAbout": "Info",
   "settings.gameFolder": "Cartella di gioco",
   "settings.general": "Generali",
   "settings.appearance": "Aspetto",
@@ -602,6 +618,17 @@ export const it: Translation = {
   "settings.installFound": "Installazione di {{game}} trovata",
   "settings.detectInstallFailed":
     "Impossibile rilevare la cartella d'installazione",
+  "settings.wineRunnerDesc":
+    "{{game}} è un gioco Windows, quindi su Mac gira dentro una bottle di CrossOver, Whisky o Wine. È da qui che Gioca lo avvia.",
+  "settings.wineRunnerNone": "Nessun runner Wine trovato",
+  "settings.pickWineRunner": "Seleziona un binario Wine (es. il wine di CrossOver)",
+  "settings.wineRunnerFailed": "Impossibile impostare il runner Wine",
+  "settings.wineBottlesFound_one":
+    "Trovata {{count}} bottle in cui cercare la tua installazione.",
+  "settings.wineBottlesFound_other":
+    "Trovate {{count}} bottle in cui cercare la tua installazione.",
+  "settings.wineBottlesNone":
+    "Nessuna bottle trovata — installa prima {{game}} in CrossOver, Whisky o Wine.",
   "settings.pickProfilesFolder":
     "Seleziona la cartella dei profili di {{game}}",
   "settings.profilesSet": "Cartella dei profili impostata",
@@ -756,6 +783,8 @@ export const it: Translation = {
   "sync.lastPulled": "Ultimo controllo {{ago}}. Riparte da solo quando premi Gioca.",
   "sync.neverPulled": "Non hai ancora scaricato le grafiche degli altri",
   "sync.neverPulledWhy": "Finché non lo fai, gli altri piloti appaiono con moto predefinite anche se hanno pubblicato le loro.",
+  "sync.oversized_one": "{{count}} grafica è troppo grande da condividere, quindi gli altri piloti non la vedranno.",
+  "sync.oversized_other": "{{count}} grafiche sono troppo grandi da condividere, quindi gli altri piloti non le vedranno.",
   "sync.skippedBikes_one": "{{count}} moto non è stata pubblicata — ne hai più di quante possiamo tenerne.",
   "sync.skippedBikes_other": "{{count}} moto non sono state pubblicate — ne hai più di quante possiamo tenerne.",
   "sync.noMatchingProfile": "Questo nome non corrisponde a nessun profilo MX Bikes su questo PC, quindi non c'è nulla da pubblicare. Controlla la cartella dei profili nelle Impostazioni.",
@@ -764,6 +793,8 @@ export const it: Translation = {
   "sync.keptYours_other": "{{count}} grafiche sono state lasciate intatte",
   "sync.keptYoursWhy": "Un altro pilota usa lo stesso nome file per una grafica diversa. La tua è stata mantenuta — l'app non sovrascrive mai una livrea che non ha installato. Vedrai quel pilota con la tua versione.",
   "servers.booting": "Avvio in corso…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "Questo server non è riuscito a completare la configurazione e si è spento. Ecco cosa ha riportato:",
   "servers.bootingWhy": "Installazione del gioco sulla nuova macchina. Richiede qualche minuto — scarica l'installer completo.",
   "servers.shutsDown": "Si spegne",
   "servers.inUse": "In uso",
@@ -850,6 +881,36 @@ export const it: Translation = {
   "library.bulkMovePartial": "Spostati {{ok}}, {{fail}} falliti",
   "library.bulkMoved_one": "Spostato {{count}} elemento in {{folder}}",
   "library.bulkMoved_other": "Spostati {{count}} elementi in {{folder}}",
+
+  // ── Condivisione dei file installati (qualsiasi pista o vernice) ───────────
+  "share.share": "Condividi",
+  "share.action": "Condividi…",
+  "share.title": "Condividi questi file",
+  "share.hint":
+    "Li impacchetta, li carica e ti dà un unico codice da incollare dove vuoi. Chi lo incolla ottiene i file nelle stesse cartelle.",
+  "share.hintDone": "Invia questo codice: installa tutto quello che vedi sopra.",
+  "share.nothingToShare":
+    "Qui non c'è niente da condividere: in un codice possono finire solo i file dentro la tua cartella mods.",
+  "share.skipped_one": "1 elemento escluso ({{reason}}).",
+  "share.skipped_other": "{{count}} elementi esclusi ({{reason}}).",
+  "share.createCode_one": "Condividi 1 file ({{size}})",
+  "share.createCode_other": "Condividi {{count}} file ({{size}})",
+  "share.copyCode": "Copia codice",
+  "share.copied": "Codice di condivisione copiato.",
+  "share.uploaded": "Caricato: copia il codice qui sotto.",
+  "share.uploadedCopied": "Caricato: il codice è negli appunti.",
+  "share.importAction": "Incolla un codice…",
+  "share.importTitle": "Importa file condivisi",
+  "share.importBody":
+    "Incolla il codice che ti hanno mandato. I file si installano dove li teneva chi li ha condivisi.",
+  "share.downloadNotice": "Scarica {{size}} da {{host}}.",
+  "share.install": "Scarica e installa",
+  "share.installed_one": "Installato 1 file.",
+  "share.installed_other": "Installati {{count}} file.",
+  "share.phasePacking": "Preparazione dei file…",
+  "share.phaseUploading": "Caricamento…",
+  "share.phaseDownloading": "Download…",
+  "share.phaseInstalling": "Installazione…",
 
   // ── Armadietto ─────────────────────────────────────────────────────────────
   "locker.help":
@@ -1031,6 +1092,29 @@ export const it: Translation = {
   "overlay.fullscreenNowDesc": "L'overlay si apre lo stesso — è il gioco a essere disegnato sopra. Passa a senza bordi o finestra in Options → Video.",
   "overlay.notWorking": "L'hai premuta e non è successo nulla?",
   "overlay.notWorkingDesc": "Controlla la scorciatoia qui sopra: un'altra app potrebbe già avere quella combinazione, e sceglierne una libera è ciò che risolve.",
+  // Voice chat — devices and levels.
+  "voice.section": "Chat vocale",
+  "voice.enable": "Attiva la chat vocale",
+  "voice.microphone": "Microfono",
+  "voice.output": "Uscita",
+  "voice.systemDefault": "Predefinito di sistema",
+  "voice.testMic": "Prova il micro",
+  "voice.stopTest": "Ferma",
+  "voice.speakNow": "Di' qualcosa — la barra dovrebbe muoversi.",
+  "voice.testOutput": "Riproduci tono di prova",
+  "voice.testOutputDesc": "Controlla che sentirai gli altri nelle cuffie giuste.",
+  "voice.micGain": "Guadagno del microfono",
+  "voice.volume": "Volume",
+  "voice.ptt": "Push-to-talk",
+  "voice.pttUpdated": "Tasto push-to-talk aggiornato",
+  "voice.micFailed": "Impossibile aprire il microfono",
+  "voice.outputFailed": "Impossibile riprodurre il tono di prova",
+  "voice.registerFailed": "Impostazioni vocali salvate, ma il tasto push-to-talk non è stato registrato",
+  "voice.deviceGone": "Quel dispositivo non è collegato",
+  "voice.noDevices": "Nessun dispositivo audio trovato",
+  "voice.notConnected": "Non ancora connesso a nessuno",
+  "voice.notConnectedDesc": "Queste impostazioni controllano il tuo microfono e le tue cuffie, e i pulsanti di prova funzionano già. Per parlare davvero con gli altri piloti serve il server vocale, che non è ancora pronto: qui non viene trasmesso nulla.",
+
   "overlay.pressKeys": "Premi i tasti…",
   "overlay.needModifier": "Aggiungi un modificatore",
   "overlay.needModifierDesc": "Tieni premuto Ctrl, Alt o Shift, così la scorciatoia non scatta mentre scrivi.",
@@ -1052,11 +1136,46 @@ export const it: Translation = {
   "showcase.whileGameRunning": "mentre MX Bikes è in esecuzione",
   "showcase.releaseNotes": "Leggi le note di rilascio",
   "showcase.gotIt": "Ho capito",
+  "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
+  "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
+  "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v092.hero.title": "Guarda il terreno di una pista in 3D",
+  "showcase.v092.hero.body":
+    "Le piste erano l'unica cosa che la libreria non sapeva mostrarti: un nome, un'immagine e una dimensione. Il visualizzatore ora legge la mappa delle altezze di una pista e disegna il terreno vero e proprio, così i salti, i solchi e la forma di una curva ci sono da guardare prima ancora di caricarla. Si apre da una pista nella libreria, accanto a Vedi in 3D.",
+  "showcase.v092.surfaces":
+    "Una pista viene disegnata con le sue superfici. Dove la pista dice qual è quale, erba, bordo, fondo duro e la terra della traiettoria prendono ognuno il colore del materiale che nomina — così un tracciato in un campo esce come la terra che è e un circuito su erba esce verde.",
+  "showcase.v092.relief":
+    "Il terreno è illuminato dai suoi stessi avvallamenti e proietta ombre vere, così un solco si legge come un solco e una rampa come una rampa, in qualunque direzione vada.",
+  "showcase.v092.accuracy":
+    "Le piste sono disegnate come le tiene il gioco: nel verso giusto invece che specchiate, senza il muro di undici metri attorno a quelle che stanno sotto la loro quota di riferimento, e con circa quattro volte il dettaglio sul terreno.",
+  "showcase.v092.voice":
+    "Impostazioni della chat vocale: scegli il microfono con cui ti sentono e le cuffie da cui escono gli altri, con un misuratore d'ingresso dal vivo e un tono di prova. Non trasmette ancora niente — questa è la metà dei dispositivi, e la pagina lo dice.",
+  "showcase.v092.pushToTalk":
+    "Un tasto push-to-talk che funziona mentre il gioco tiene il fuoco, assegnato per la stessa via della scorciatoia dell'overlay.",
+  "showcase.v091.hero.title": "Dipingi direttamente sul template",
+  "showcase.v091.hero.body":
+    "Il Designer sapeva posizionare immagini e testo sui fogli di una livrea, ma non ti lasciava mettere giù un solo pixel a mano — una sfumatura su una fiancata voleva dire uscire, aprire un editor di immagini e tornare indietro. Ora ha una cassetta degli attrezzi: pennello morbido con dimensione, bordo e intensità, gomma, sfumatura, riempimento, rettangolo, ellisse e linea. Tutto arriva sul foglio e sul modello 3D nello stesso momento, mentre trascini.",
+  "showcase.v091.gradient":
+    "Una sfumatura che porta un colore dentro un altro. Trascina per dire dove avviene la transizione: prima c'è il primo colore, dopo il secondo. Lineare o radiale, e può dissolversi nel nulla invece che in un colore.",
+  "showcase.v091.paintLayer":
+    "La pittura va su un livello suo, quindi ha opacità, fusione e ordine come tutto il resto — e il template sotto non viene mai toccato. Nascondi il livello e hai di nuovo il template pulito. ⌘Z annulla i tratti.",
+  "showcase.v091.ghost":
+    "Disegna sopra un fantasma della moto. Una planche può mostrare in trasparenza sotto la vernice di partenza da ricalcare — tolta dalla planche, quindi non finisce salvata nella tua — e una mappa UV delle carene del modello, ogni pezzo con il suo colore, per vedere su quale pannello stai dipingendo.",
+  "showcase.v091.parts":
+    "Metti una foto su un solo pannello. Scegli un pezzo della carena e il livello ci si adatta e viene ritagliato sul suo contorno, così un'immagine presa da internet copre il fianchetto e si ferma alla giunzione. Passando sulla planche compare il nome del pezzo.",
+  "showcase.v091.resize":
+    "I livelli si ridimensionano trascinando gli angoli, non solo con il cursore.",
+  "showcase.v091.macos":
+    "Gioca e Entra nel server funzionano su macOS, attraverso la bottiglia CrossOver, Whisky o Wine che contiene il gioco — e l'app trova da sola un'installazione in bottiglia invece di chiederti il percorso.",
+  "showcase.v091.steamos":
+    "Su SteamOS l'app Linux si apre sulla sua interfaccia invece che su una schermata bianca.",
   "showcase.v090.hero.title": "Trasforma le tue immagini in una livrea che il gioco carica",
   "showcase.v090.hero.body":
     "Una nuova scheda Livree costruisce le livree da normali file immagine — TGA, PNG, JPG — e le installa dove il gioco le cerca: la livrea di una moto, la grafica di un casco o di una maschera, il completo o i guanti del tuo pilota. Estrai una livrea che hai già per ottenere un template che calza davvero sul modello, modificalo in qualsiasi editor e rimettilo dentro così com'è. Lo studio controlla i nomi dei tuoi file contro quelli che la mesh usa prima del salvataggio, poi mostra il risultato sul modello vero.",
   "showcase.v090.reshade":
     "Sfoglia, installa e cambia i preset ReShade dall'app — con una voce Nessuno per confrontare con l'aspetto originale, e un avviso quando a un preset mancano degli effetti.",
+  "showcase.v090.bundles":
+    "Condividi un preset come pacchetto completo: il codice porta con sé le mod stesse — livrea, casco e maschera, completo, guanti, stivali, gomme. Importazione completa mette ogni file dove il gioco lo legge, così anche chi ha la cartella mod vuota finisce per indossare esattamente quello che hai creato.",
   "showcase.v090.purchases":
     "I miei acquisti accede al tuo account mxbikes-shop.com e installa ciò che hai già pagato, con lo stesso riepilogo usato dal trascinamento.",
   "showcase.v090.ridingStyles":
@@ -1242,10 +1361,64 @@ export const it: Translation = {
   // ── ReShade ────────────────────────────────────────────────────────────────
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Preset di post-processing — l'aspetto di {{game}} a schermo.",
+
+  // ── Log ────────────────────────────────────────────────────────────────────
+  "settings.logs": "Log",
+  "logs.desc":
+    "I file da inviare quando qualcosa non va. MXB App, FrostMod e {{game}} tengono ciascuno i propri — apri la cartella che ti serve, oppure salvali tutti in un unico zip da allegare a una segnalazione.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "Quello che ha registrato l'app stessa",
+  "logs.frostmodLogsDesc": "Quello che il loader ha scritto nella sua cartella",
+  "logs.gameLogsDesc": "Il log del gioco, accanto ai suoi file",
+  "logs.open": "Apri cartella",
+  "logs.save": "Salva i log…",
+  "logs.saving": "Salvataggio…",
+  "logs.refresh": "Aggiorna",
+  "logs.loading": "Ricerca…",
+  "logs.empty": "Ancora nessun file di log qui.",
+  "logs.folderMissing":
+    "Quella cartella non c'è — nessuno ci ha ancora scritto un log.",
+  "logs.summary_one": "{{count}} file · {{size}} · più recente {{when}}",
+  "logs.summary_other": "{{count}} file · {{size}} · più recente {{when}}",
+  "logs.saved": "Log salvati",
+  "logs.savedDesc_one": "{{count}} file di log, {{size}}",
+  "logs.savedDesc_other": "{{count}} file di log, {{size}}",
+  "logs.saveFailed": "Impossibile salvare i log",
+  "logs.privacy":
+    "I log contengono percorsi di cartelle e cosa stava facendo l'app — mai le tue password o i cookie di sessione, e nessun file di impostazioni è incluso.",
+
+  // ── Sostenitori (Buy Me a Coffee) ──────────────────────────────────────────
+  "settings.supporters": "Sostenitori",
+  "settings.supportersDesc": "Chi tiene in piedi MXB App su Buy Me a Coffee.",
+  "supporters.intro":
+    "MXB App è gratuita, e resta così. I caffè qui sotto pagano il tempo che ci sta dietro: chi li ha offerti è il motivo per cui c'è una nuova build da installare.",
+  "supporters.count_one": "{{count}} sostenitore",
+  "supporters.count_other": "{{count}} sostenitori",
+  "supporters.untiered": "Sostenitori",
+  "supporters.since": "da {{date}}",
+  "supporters.loading": "Carico l'elenco…",
+  "supporters.refresh": "Aggiorna",
+  "supporters.become": "Offrimi un caffè",
+  "supporters.empty": "Ancora nessuno in elenco",
+  "supporters.emptyDesc":
+    "L'elenco si aggiorna da solo: offri un caffè e il tuo nome compare qui, senza aspettare una nuova versione.",
+  "supporters.offline":
+    "Non sono riuscito a raggiungere l'elenco — questo è l'ultimo che abbiamo visto.",
+  "supporters.optOut":
+    "I nomi sono mostrati con il consenso di chi li porta. Scrivi su Discord o su Buy Me a Coffee e il tuo viene tolto subito.",
+
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "preset ReShade",
   "reshade.needsGameFolder":
-    "Imposta la cartella di {{game}} qui sopra e i preset ReShade compariranno qui.",
+    "ReShade sta nella tua cartella di {{game}} — impostala in Cartella di gioco, oppure puntala direttamente qui.",
+  "reshade.folder": "Sto guardando nella tua cartella di {{game}}:",
+  "reshade.customFolder": "Sto guardando nella cartella che hai scelto:",
+  "reshade.browse": "Scegli cartella…",
+  "reshade.pickFolder": "Scegli la cartella in cui è installato ReShade",
+  "reshade.folderMissing": "La cartella che hai scelto non c'è più.",
+  "reshade.resetFolder": "Torna alla cartella di {{game}}",
+  "reshade.folderSet": "ReShade trovato",
+  "reshade.notThere": "Nessun ReShade in quella cartella",
   "reshade.intro":
     "ReShade aggiunge il post-processing a {{game}}. È uno strumento gratuito a parte: installalo una volta, poi scegli un preset qui.",
   "reshade.wrongApi":
@@ -1276,11 +1449,13 @@ export const it: Translation = {
   "paints.help":
     "Trasforma file .tga o .png disegnati in GIMP o Photoshop in un .pnt che il gioco carica — e scompatta una livrea esistente da cui partire.",
   "paints.unpack": "Scompatta una livrea…",
+  "paints.toDesigner": "Disegna su questi…",
   "paints.unpacked": "Estratte {{count}} texture — modificale, poi salva.",
   "paints.whereTitle": "Dove va",
   "paints.kind.bike": "Livrea moto",
   "paints.kind.helmet": "Casco",
   "paints.kind.goggles": "Maschera",
+  "paints.kind.profileGoggles": "Maschera (pilota)",
   "paints.kind.boots": "Stivali",
   "paints.kind.protection": "Protezioni",
   "paints.kind.kit": "Completo pilota",
@@ -1312,4 +1487,134 @@ export const it: Translation = {
   "paints.replaceTitle": "Sostituire questa livrea?",
   "paints.replaceBody": "{{path}} esiste già. Salvando la sostituisci.",
   "paints.replace": "Sostituisci",
+
+  // ── Designer (l'editor a livelli) ─────────────────────────────────────────────
+  "designer.help":
+    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Parti da una livrea installata per avere i nomi giusti dei fogli, dipingici sopra con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
+  "designer.empty":
+    "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello — così ottieni i suoi fogli e i loro nomi — oppure aggiungine uno vuoto.",
+  "designer.startFromPaint": "Parti da una livrea…",
+  "designer.blankSheet": "Foglio vuoto",
+  "designer.sheets": "Fogli",
+  "designer.moveDown": "Sposta giù",
+  "designer.moveUp": "Sposta su",
+  "designer.noSheetsFound":
+    "Quella livrea non ha prodotto alcun foglio, quindi non c'è niente su cui disegnare.",
+  "designer.loadedSheets": "Caricati {{count}} foglio/i — disegnaci sopra e salva.",
+  "designer.sheetName": "Nome texture",
+  "designer.editSheet": "Modifica questo foglio",
+  "designer.addImage": "Aggiungi immagine",
+  "designer.addText": "Aggiungi testo",
+  "designer.newTextValue": "TESTO",
+  "designer.layers": "Livelli",
+  "designer.showRail": "Mostra fogli e livelli",
+  "designer.hideRail": "Nascondi fogli e livelli",
+  "designer.noLayers":
+    "Ancora nessun livello — aggiungi un'immagine, del testo o un livello pittura su cui disegnare.",
+  "designer.layerCount": "{{count}} livello/i",
+  "designer.layerTitle": "Livello selezionato",
+  "designer.hide": "Nascondi",
+  "designer.show": "Mostra",
+  "designer.raise": "Porta avanti",
+  "designer.lower": "Porta indietro",
+  "designer.scale": "Dimensione",
+  "designer.rotation": "Rotazione",
+  "designer.part": "Pezzo",
+  "designer.wholeSheet": "Tutta la planche",
+  "designer.fitToPart": "Adatta al pezzo",
+  "designer.fitToPartHint":
+    "Posiziona e ridimensiona questo livello per coprire il pezzo scelto. Lo copre invece di starci dentro, così non restano spazi vuoti: ritaglialo per togliere quel che esce.",
+  "designer.fitNotForPaint": "Un livello pittura è la planche stessa: non c'è nulla da spostare o ridimensionare.",
+  "designer.clipped": "Ritagliato",
+  "designer.clippedHint": "Questo livello è tagliato sul pezzo: niente esce oltre la giunzione.",
+  "designer.opacity": "Opacità",
+  "designer.blend": "Fusione",
+  "designer.blend.normal": "Normale",
+  "designer.blend.multiply": "Moltiplica",
+  "designer.blend.screen": "Scherma",
+  "designer.blend.overlay": "Sovrapponi",
+  "designer.text": "Testo",
+  "designer.font": "Font",
+  "designer.size": "Dimensione testo",
+  "designer.colour": "Colore",
+  "designer.outline": "Contorno",
+  "designer.needSheets": "Aggiungi un foglio su cui disegnare.",
+  "designer.noModelFound":
+    "“{{model}}” non è nella tua libreria, quindi non c'è niente su cui mostrarla.",
+  "designer.noBikePreview":
+    "Questa build non legge la geometria delle moto, quindi una livrea non ha un modello su cui stare. Tutto il resto si salva normalmente.",
+  "designer.noPreviewForGame":
+    "L'anteprima 3D per ora è solo per MX Bikes: i modelli di {{game}} hanno bisogno delle proprie associazioni delle parti. Tutto il resto funziona uguale e la livrea si salva normalmente.",
+  "designer.gearNote": "Mostrato sul pilota di serie — la tua tenuta non è caricata qui.",
+  "designer.reference": "Riferimento",
+  "designer.traceTemplate": "Modello",
+  "designer.traceHint":
+    "Togli dalla planche la vernice di partenza e mostrala in trasparenza sotto, per ricalcarla. Smette di far parte di ciò che salvi.",
+  "designer.noTemplate": "Questa planche non ha un modello da ricalcare: è nata vuota.",
+  "designer.uvMap": "Mappa UV",
+  "designer.uvHint":
+    "Mostra dove finiscono su questa planche le carene del modello, ognuna con il suo colore.",
+  "designer.noGeometry": "Carica un modello nell'anteprima per vederne il layout UV.",
+  "designer.uvNoMatch":
+    "Nessuna parte del modello usa una texture chiamata “{{name}}”, quindi non c'è un layout UV da mostrare.",
+  "designer.ghostBuried":
+    "Il riferimento sta sotto la planche, e il modello di questa planche è opaco: attiva Modello per toglierlo e vedere attraverso.",
+  "designer.ghostNote": "Solo una guida: il riferimento non viene mai salvato nella vernice.",
+  "designer.resetView": "Reimposta vista",
+
+  // ── Designer › gli strumenti di pittura ───────────────────────────────────────
+  "designer.paint": "Pittura",
+  "designer.addPaint": "Livello pittura",
+  "designer.paintLayerName": "Pittura",
+  "designer.undoStroke": "Annulla tratto",
+  "designer.redoStroke": "Ripeti tratto",
+  "designer.tool.move": "Sposta",
+  "designer.tool.brush": "Pennello",
+  "designer.tool.eraser": "Gomma",
+  "designer.tool.gradient": "Sfumatura",
+  "designer.tool.fill": "Riempimento",
+  "designer.tool.rect": "Rettangolo",
+  "designer.tool.ellipse": "Ellisse",
+  "designer.tool.line": "Linea",
+  "designer.moveHint":
+    "Trascina i livelli sul foglio per posizionarli. Scegli uno strumento qui sopra per dipingerci sopra.",
+  "designer.colourFrom": "Dipingi con questo",
+  "designer.colourTo": "Sfuma verso questo",
+  "designer.swapColours": "Scambia i due colori",
+  "designer.brushSize": "Pennello",
+  "designer.hardness": "Bordo",
+  "designer.strength": "Intensità",
+  "designer.gradient": "Sfumatura",
+  "designer.gradient.linear": "Lineare",
+  "designer.gradient.radial": "Radiale",
+  "designer.fadeOut": "Dissolvi",
+  "designer.shape": "Stile",
+  "designer.shape.fill": "Piena",
+  "designer.shape.outline": "Contorno",
+  "designer.lineWidth": "Spessore",
+  "designer.paintHint":
+    "Trascina sul foglio. Tieni premuto Shift per restare dritto, trascina col destro per spostare la vista.",
+  "designer.fillHint": "Clicca sul foglio per riempire tutto il livello.",
+  "designer.gradientHint":
+    "Trascina sul foglio per decidere dove avviene la transizione. Riempie tutto questo livello: aggiungi un altro livello pittura per conservare quello che c'è sotto.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "Vedi il terreno",
+  "trackViewer.title": "Anteprima tracciato",
+  "trackViewer.loading": "Lettura del terreno…",
+  "trackViewer.refining": "Definizione…",
+  "trackViewer.grid": "Griglia",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
+  "trackViewer.relief": "Dislivello",
+  "trackViewer.noTerrain": "Nessun terreno da mostrare",
+  "trackViewer.noTerrainHint":
+    "I dati di altezza di questo tracciato non sono in un formato che il visualizzatore sa ancora leggere.",
+  "trackViewer.inferredNote":
+    "Il file di altezze di questo tracciato non ha un formato documentato, quindi la sua forma è stata dedotta dai dati. Consideralo una lettura fedele, non esatta.",
+  "trackViewer.assumedScaleNote":
+    "Questo tracciato non dichiara la distanza fra i suoi punti di altezza: il rilievo è reale, ma la sua pendenza è approssimativa.",
+  "trackViewer.whyDetails": "Perché?",
+  "trackViewer.copyDetails": "Copia i dettagli",
+  "trackViewer.copied": "Copiato",
 };

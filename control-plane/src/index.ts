@@ -20,6 +20,8 @@ import { bootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
   isBikeId,
+  isBootstrapStage,
+  isContentName,
   isGuid,
   isPaintFileName,
   isPaintSize,
@@ -27,10 +29,12 @@ import {
   isPublicGameAddress,
   isRegion,
   isRelDest,
+  isServerKey,
   isRiderName,
   isServerName,
   isSha256,
   isSlot,
+  MAX_BOOTSTRAP_LOG,
   MAX_PAINT_BYTES,
 } from "./validate";
 
@@ -80,6 +84,22 @@ async function route(request: Request, env: Env): Promise<Response> {
   // it is the same agent anyone can build from the public repository.
   if (method === "GET" && path === "/v1/agent.exe") return artifact(env, "artifacts/mxb-agent.exe");
 
+  // The bikes a provisioned server needs in order to accept the ones players ride.
+  //
+  // Unauthenticated for the same reason as the agent binary: a booting instance holds no
+  // credential and has no way to be given one. Nothing here is secret — it is the same
+  // content every client already has installed — and the listing is what lets the bootstrap
+  // stay ignorant of which bikes exist.
+  if (method === "GET" && path === "/v1/content/bikes") return listContent(env);
+  const content = /^\/v1\/content\/bikes\/(.+)$/.exec(path);
+  if (content && method === "GET") {
+    const name = decodeURIComponent(content[1]);
+    // Validated rather than trusted: this segment becomes an R2 key and then a filename on
+    // someone's disk.
+    if (!isContentName(name)) return json(400, { error: "not a content file" });
+    return artifact(env, `content/bikes/${name}`);
+  }
+
   // Enrollment is the one unauthenticated write: it trades an invite code for a token.
   // Steam sign-in will replace the invite code without changing anything downstream.
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
@@ -96,6 +116,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   const hello = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/hello$/.exec(path);
   if (hello && method === "POST") return serverHello(request, hello[1], env);
 
+  const boot = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/bootstrap$/.exec(path);
+  if (boot && method === "POST") return serverBootstrap(request, boot[1], env);
+
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
@@ -104,6 +127,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
+  if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
   if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
@@ -437,6 +461,21 @@ async function putPaint(request: Request, sha256: string, env: Env): Promise<Res
 }
 
 /**
+ * What bikes are mirrored, so a server can install them without being told the list.
+ *
+ * A dedicated server rejects any bike it does not itself have installed — which is why a
+ * freshly provisioned one refuses every rider on a mod bike. Mirroring the pack means a new
+ * server can be rideable the moment it boots rather than only for whoever owns stock content.
+ */
+async function listContent(env: Env): Promise<Response> {
+  const listed = await env.PAINTS.list({ prefix: "content/bikes/" });
+  const bikes = listed.objects
+    .map((o) => ({ name: o.key.slice("content/bikes/".length), size: o.size }))
+    .filter((b) => b.name.length > 0);
+  return json(200, { bikes, totalBytes: bikes.reduce((n, b) => n + b.size, 0) });
+}
+
+/**
  * Serve a build artifact a booting instance needs.
  *
  * Streamed from R2 through the Worker rather than from a public bucket: the bucket stays
@@ -732,16 +771,70 @@ async function provision(request: Request, account: Account, env: Env): Promise<
  * Idempotent: a bootstrap that retries, or an instance that reboots and announces itself
  * again, simply rewrites the same row.
  */
-async function serverHello(request: Request, id: string, env: Env): Promise<Response> {
-  const row = await env.DB.prepare(
-    "SELECT agent_token, instance_id FROM servers WHERE id = ?",
-  )
+/**
+ * Prove a request came from the box a row was provisioned for.
+ *
+ * The agent token is the only credential that machine has — it holds no account and there is
+ * no way to give it one. Shared by every route the box itself calls, so the answer to a wrong
+ * token cannot drift between them: an unknown id and a bad token return the same 403, which
+ * is what stops this being a way to discover which server ids exist.
+ */
+async function asProvisionedServer(
+  request: Request,
+  id: string,
+  env: Env,
+): Promise<{ instance_id: string | null } | null> {
+  const row = await env.DB.prepare("SELECT agent_token, instance_id FROM servers WHERE id = ?")
     .bind(id)
     .first<{ agent_token: string | null; instance_id: string | null }>();
-  // The same answer for an unknown id and a wrong token, so this can't be used to find out
-  // which server ids exist.
   const presented = bearer(request.headers.get("Authorization"));
   if (!row?.agent_token || !presented || !tokenMatches(row.agent_token, presented)) {
+    return null;
+  }
+  return { instance_id: row.instance_id };
+}
+
+/**
+ * A booting instance reporting what it is doing, and why it died if it did.
+ *
+ * Nothing else can tell you. The box has no console and no key pair, so `C:\mxb-bootstrap.log`
+ * is unreadable from outside — and the bootstrap's own failure trap shuts the machine down,
+ * which terminates it and takes the log with it. Before this, a bootstrap that failed at
+ * minute twelve and one still downloading looked exactly the same from here: nothing.
+ *
+ * Also what lets "Create a server" say `extracting the game` instead of spinning for a
+ * quarter of an hour with nothing to show.
+ */
+async function serverBootstrap(request: Request, id: string, env: Env): Promise<Response> {
+  if (!(await asProvisionedServer(request, id, env))) {
+    return json(403, { error: "not this server" });
+  }
+  const body = (await readJson(request)) as
+    | { stage?: unknown; ok?: unknown; log?: unknown }
+    | null;
+  if (!isBootstrapStage(body?.stage)) return json(400, { error: "that isn't a stage" });
+
+  // Kept only when something went wrong, and only the tail: this is a transcript written by a
+  // script, and there is no version of "store all of it" that ends well.
+  const log =
+    body?.ok === false && typeof body.log === "string"
+      ? body.log.slice(-MAX_BOOTSTRAP_LOG)
+      : null;
+
+  await env.DB.prepare(
+    "UPDATE servers SET bootstrap_stage = ?, bootstrap_at = ?, bootstrap_log = COALESCE(?, bootstrap_log)" +
+      " WHERE id = ?",
+  )
+    .bind((body!.stage as string).trim(), Date.now(), log, id)
+    .run();
+
+  console.log(JSON.stringify({ msg: "bootstrap", id, stage: body!.stage, failed: log !== null }));
+  return json(200, { ok: true });
+}
+
+async function serverHello(request: Request, id: string, env: Env): Promise<Response> {
+  const row = await asProvisionedServer(request, id, env);
+  if (!row) {
     return json(403, { error: "not this server" });
   }
 
@@ -785,7 +878,8 @@ function isPort(value: unknown): value is number {
 async function myServers(account: Account, env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
     "SELECT id, name, region, address, agent_url, agent_token, instance_id, published," +
-      " created_at, idle_since FROM servers WHERE owner_account_id = ? ORDER BY created_at",
+      " created_at, idle_since, bootstrap_stage, bootstrap_at, bootstrap_log" +
+      " FROM servers WHERE owner_account_id = ? ORDER BY created_at",
   )
     .bind(account.id)
     .all<{
@@ -799,6 +893,9 @@ async function myServers(account: Account, env: Env): Promise<Response> {
       published: number;
       created_at: number;
       idle_since: number | null;
+      bootstrap_stage: string | null;
+      bootstrap_at: number | null;
+      bootstrap_log: string | null;
     }>();
 
   // Only ask EC2 when at least one row is a machine we launched; a player who only runs
@@ -834,6 +931,11 @@ async function myServers(account: Account, env: Env): Promise<Response> {
         idleMinutes: Number(env.MXB_IDLE_MINUTES ?? "20"),
         state: r.instance_id ? (instance?.state ?? "gone") : "self-hosted",
         publicIp: instance?.publicIp ?? null,
+        // What the box last said it was doing, and why it gave up if it did. The only
+        // window into a machine with no console.
+        bootstrapStage: r.bootstrap_stage,
+        bootstrapAt: r.bootstrap_at,
+        bootstrapLog: r.bootstrap_log,
       };
     }),
   });
@@ -992,47 +1094,80 @@ async function connectedCount(
   }
 }
 
+/** How long a presence heartbeat counts for before the rider is treated as gone. */
+const PRESENCE_TTL_MS = 10 * 60 * 1000;
+
 /**
- * Every rider currently registered against a server, with what they are wearing.
+ * "I am on this server."
  *
- * This is what the app polls to know which paints to fetch. Until the agent reports live
- * rosters it returns the whole enrolled set, which on an invite-only server is close enough
- * to be useful and is a strict superset of who is actually on.
+ * Reported by the player's own app, which knows the server it launched into. That is what
+ * lets a roster mean one grid instead of every enrolled account — see `0008_presence.sql`.
+ *
+ * One row per account: a rider is in one place at a time, and the last thing they said wins.
+ */
+async function putPresence(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { serverId } = body as { serverId?: unknown };
+  if (!isServerKey(serverId)) return json(400, { error: "that isn't a server" });
+
+  await env.DB.prepare(
+    "INSERT INTO presence (account_id, server_id, updated_at) VALUES (?, ?, ?)" +
+      " ON CONFLICT(account_id) DO UPDATE SET server_id = excluded.server_id," +
+      " updated_at = excluded.updated_at",
+  )
+    .bind(account.id, (serverId as string).trim(), Date.now())
+    .run();
+  return json(200, { ok: true });
+}
+
+/**
+ * The riders on one server, and what they are wearing.
+ *
+ * This is what the app polls to know which paints to fetch. It is scoped to the riders whose
+ * apps have said they are on this server recently — previously it returned every enrolled
+ * account, because nothing recorded where anyone was, so every rider downloaded the paints of
+ * every other rider on the platform.
+ *
+ * A rider whose app has gone quiet for `PRESENCE_TTL_MS` drops out. Better to miss someone
+ * who is genuinely there — the next heartbeat brings them back within a minute — than to
+ * accumulate a grid of people who left hours ago.
  */
 async function roster(url: URL, env: Env): Promise<Response> {
   const serverId = url.searchParams.get("server");
   if (!serverId) return json(400, { error: "a server id is required" });
 
-  // DISTINCT on the destination: loadouts are per bike now, and gear repeats across every
-  // bike a rider owns, so the raw join returns the same helmet paint a dozen times over. The
-  // receiver installs by destination and de-duplicates anyway — doing it here keeps the
-  // response the size it was before bikes were separated.
+  // DISTINCT on the destination: loadouts are per bike, and gear repeats across every bike a
+  // rider owns, so the raw join returns the same helmet paint many times over. The receiver
+  // installs by destination and de-duplicates anyway.
   //
   // MIN(slot) only picks a stable representative for a destination two slots agree on; the
   // client keys on rel_dest, not on slot.
   const rows = await env.DB.prepare(
     "SELECT a.rider_name, a.guid, MIN(p.slot) AS slot, p.file_name, p.sha256, p.size, p.rel_dest" +
-      " FROM accounts a JOIN loadout_paints p ON p.account_id = a.id" +
+      " FROM accounts a" +
+      " JOIN presence pr ON pr.account_id = a.id" +
+      " JOIN loadout_paints p ON p.account_id = a.id" +
+      " WHERE pr.server_id = ? AND pr.updated_at > ?" +
       " GROUP BY a.id, p.rel_dest, p.sha256",
-  ).all<{
-    rider_name: string;
-    guid: string | null;
-    slot: string;
-    file_name: string;
-    sha256: string;
-    size: number;
-    rel_dest: string;
-  }>();
+  )
+    .bind(serverId, Date.now() - PRESENCE_TTL_MS)
+    .all<{
+      rider_name: string;
+      guid: string | null;
+      slot: string;
+      file_name: string;
+      sha256: string;
+      size: number;
+      rel_dest: string;
+    }>();
 
   const riders = new Map<string, { riderName: string; guid: string | null; paints: unknown[] }>();
   for (const r of rows.results) {
-    // Re-checked on the way out as well as in. A row predating the validation, or one
-    // written by some future path that forgot it, must not reach a client that is about to
-    // turn it into a filesystem path.
+    // Re-checked on the way out as well as in. A row predating the validation, or one written
+    // by some future path that forgot it, must not reach a client that is about to turn it
+    // into a filesystem path.
     if (!isRelDest(r.rel_dest)) continue;
-    // Group by GUID where the account has claimed one — it is stable across name changes
-    // and cannot be taken by someone else. Name is the fallback for accounts that have not
-    // supplied a GUID yet, which is every account until the player has connected once.
     const key = r.guid ?? `name:${r.rider_name.toLowerCase()}`;
     let rider = riders.get(key);
     if (!rider) {

@@ -1,6 +1,6 @@
 [package]
 name = "frost"
-version = "0.9.0"
+version = "0.9.2"
 description = "Frost — MX Bikes mod manager"
 authors = ["Frost"]
 edition = "2021"
@@ -51,6 +51,8 @@ reqwest = { version = "0.12", default-features = false, features = [
     "cookies",
     "gzip",
     "brotli",
+    # Preset bundles upload as a multipart form.
+    "multipart",
 ] }
 # `sync` for the mutex that stops two simultaneous 403s opening two clearance windows.
 tokio = { version = "1", features = ["time", "sync", "rt"] }
@@ -102,6 +104,16 @@ md-5 = "0.10"
 # binary and decoded on the stack at use, so they don't show up in a `strings` dump.
 obfstr = "0.4"
 tauri-plugin-deep-link = "2.4.9"
+# Microphone capture and playback for voice chat (WASAPI on Windows, CoreAudio on macOS).
+#
+# Held at 0.15 deliberately: 0.18 does not build for Windows in this workspace. Its WASAPI
+# backend implements COM interfaces against a newer `windows-core` than the one Cargo
+# unifies on here (Tauri pulls the `windows` crates in too), so `IMMNotificationClient`
+# and friends fail their `Interface`/`RuntimeName` bounds — 18 errors, none of them ours.
+# 0.15 vendors its own `windows 0.54` and sidesteps the conflict entirely. Check
+# `cargo check --target x86_64-pc-windows-gnu` before raising this; a macOS build won't
+# catch it, and a Windows-first app can't ship without it.
+cpal = "0.15"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
@@ -115,6 +127,19 @@ tauri = { version = "2", features = ["test"] }
 # `#[tokio::test]` for the live network checks against mxb-mods.com. Dev-only, so the
 # shipped binary keeps the minimal `time`-only tokio it already had.
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
+
+# `tauri dev` builds this profile, and cargo's default leaves everything at opt-level 0 —
+# which is fine for our own glue but not for the crates doing the heavy lifting. Unpacking one
+# 36 MB gear paint (three 4096² textures) spends nearly all its time inside `flate2`'s inflate
+# and `image`'s resize: 4.3 s unoptimized against 0.33 s optimized.
+[profile.dev]
+# The local crate too, but only lightly: a creator-sealed `.pnt` is decrypted a byte at a time
+# over the whole file before it is even parsed, and that loop is ours. Keeps debug info.
+opt-level = 1
+
+[profile.dev.package."*"]
+# Dependencies are never stepped through, and they're built once and then cached.
+opt-level = 3
 
 # Ship a hardened, hard-to-reverse binary. cargo defaults leave the symbol table in and
 # emit no debug info; this strips symbols and leans on the optimizer to erase structure.

@@ -115,6 +115,11 @@ pub struct BundleRef {
     pub url: String,
     pub host: String,
     pub size: u64,
+    /// Every slice of the bundle, in order, when it was too big for one upload. Empty means
+    /// the whole thing is at `url` — which is also the first slice, so old codes and
+    /// single-part codes stay byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<String>,
 }
 
 /// The content a preset needs on disk, beyond the cosmetics in its [`Loadout`].
@@ -921,6 +926,33 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         // And it round-trips back out without growing a `content` key.
         let out = serde_json::to_string(&back).unwrap();
         assert!(!out.contains("content"), "{out}");
+    }
+
+    /// Codes shared before bundles could be sliced carry no `parts` key, and a one-part
+    /// bundle must not grow one — an old app reading a new single-part code has to see
+    /// exactly what it saw before.
+    #[test]
+    fn a_bundle_without_parts_still_loads() {
+        let json = r#"{"name":"Old","loadout":{},"bundle":{"url":"https://x/a.zip","host":"catbox","size":10}}"#;
+        let back = decode_code(json).unwrap();
+        let bundle = back.bundle.clone().unwrap();
+        assert!(bundle.parts.is_empty());
+
+        let out = serde_json::to_string(&back).unwrap();
+        assert!(!out.contains("parts"), "{out}");
+    }
+
+    #[test]
+    fn a_sliced_bundle_carries_its_parts_in_order() {
+        let json = r#"{"name":"Big","loadout":{},"bundle":{"url":"https://x/1.zip","host":"catbox","size":300,"parts":["https://x/1.zip","https://x/2.zip"]}}"#;
+        let back = decode_code(json).unwrap();
+        let bundle = back.bundle.clone().unwrap();
+        assert_eq!(bundle.parts, vec!["https://x/1.zip", "https://x/2.zip"]);
+        // The first slice is also the plain `url`, so nothing has to look in two places.
+        assert_eq!(bundle.url, bundle.parts[0]);
+
+        let back = decode_code(&encode_code(&back)).unwrap();
+        assert_eq!(back.bundle.unwrap().parts.len(), 2);
     }
 
     fn round_trip_raw_json(preset: &Preset) -> anyhow::Result<()> {

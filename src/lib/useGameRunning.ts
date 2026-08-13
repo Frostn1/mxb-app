@@ -11,9 +11,9 @@ const POLL_MS = 5000;
  * and the game is a separate thing to watch. `refresh` is exposed so a launch can check
  * straight away instead of waiting out the interval.
  *
- * Note the probe is Win32-only, so off Windows this is permanently `false` — a Linux
- * player sees Play rather than "MX Bikes running", which is harmless: the backend still
- * routes through Steam, which focuses the running game instead of starting a second one.
+ * Windows and macOS both really probe (Win32 on one, `ps` on the other — under Wine the
+ * game is a normal process). Linux is permanently `false`, which is harmless: the backend
+ * routes through Steam, and Steam focuses the running game rather than starting a second.
  */
 export function useGameRunning(): { running: boolean; refresh: () => void } {
   const [running, setRunning] = useState(false);

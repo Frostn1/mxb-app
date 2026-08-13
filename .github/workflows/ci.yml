@@ -62,7 +62,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # The crate links against Tauri's webview stack, so a Linux build needs the
-      # system libs even when we're only running tests.
+      # system libs even when we're only running tests. `libasound2-dev` is for voice
+      # chat: cpal pulls in alsa-sys, whose build script shells out to pkg-config and
+      # fails the whole job without it.
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-latest'
         run: |
@@ -73,6 +75,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libsoup-3.0-dev \
+            libasound2-dev \
             patchelf
 
       - name: Cache Rust build

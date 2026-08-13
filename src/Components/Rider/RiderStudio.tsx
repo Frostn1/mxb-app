@@ -3,7 +3,6 @@ import { RefreshCw, AlertTriangle, Save, Loader2, FolderInput } from "lucide-rea
 import { toast } from "sonner";
 import { useT, type TKey } from "../../i18n/context";
 import { Button } from "../ui/button";
-import HelpHint from "../ui/help-hint";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import type { Loadout, RiderPart } from "../../types";
@@ -143,17 +142,8 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   );
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5 pt-5">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">
-            {t("nav.rider")}
-          </h1>
-          <HelpHint
-            title={t("nav.rider")}
-            description={t("rider.help")}
-          />
-        </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <header className="flex flex-none items-center gap-3.5 px-7 pb-3.5">
         <div className="ml-auto flex items-center gap-2">
           <Input
             value={name}
@@ -234,11 +224,11 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
 
           {/* Rider slot groups */}
           {grouped.map((g) => (
-            <div key={g.id} className="flex flex-col gap-2">
+            <div key={g.id} className="flex flex-col gap-1.5">
               <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
                 {t(g.label)}
               </h2>
-              <div className="grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2">
                 {g.slots.map((slot) => (
                   <SlotField
                     key={slot.key}
@@ -246,6 +236,7 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
                     value={loadout[slot.key]}
                     options={optionsFor(slot, "", scans)}
                     missing={missingFor(slot, "", scans)}
+                    compact
                     onChange={(v) => setSlot(slot.key, v)}
                   />
                 ))}

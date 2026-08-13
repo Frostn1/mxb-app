@@ -49,13 +49,17 @@ export const es: Translation = {
   "nav.locker": "Taquilla",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
+  "nav.designer": "Designer",
   "nav.paints": "Pinturas",
+  "nav.studio": "Studio",
   "nav.servers": "Servidores",
   "nav.manage": "Gestionar",
   "nav.settings": "Ajustes",
 
   "sidebar.installing": "Instalando «{{name}}»",
   "sidebar.queued": "+{{count}} en cola",
+  "sidebar.expand": "Expandir la barra lateral",
+  "sidebar.collapse": "Contraer la barra lateral",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "Comprobando FrostMod…",
@@ -401,6 +405,14 @@ export const es: Translation = {
   "purchases.installed": "Instalado",
   "purchases.downloading": "Descargando…",
   "purchases.downloadFailed": "No se pudo descargar {{title}}",
+  "purchases.searchPlaceholder": "Buscar en tus compras…",
+  "purchases.otherCategory": "Otros",
+  "purchases.notInstalledOnly": "Sin instalar",
+  "purchases.noMatches": "Ninguna de tus compras coincide con eso.",
+  "purchases.viewDetails": "Ver detalles",
+  "purchaseSort.recentlyPurchased": "Compradas recientemente",
+  "purchaseSort.nameAsc": "Nombre (A–Z)",
+  "purchaseSort.notInstalled": "Sin instalar primero",
   // ── Catálogo de MX Bikes Shop (solo explorar; la compra es en la tienda) ───
   "shopCatalog.searchPlaceholder": "Buscar en la tienda…",
   "shopCatalog.allCategories": "Todo",
@@ -521,6 +533,10 @@ export const es: Translation = {
   // ── Ajustes ────────────────────────────────────────────────────────────────
   "settings.help":
     "Configura tu carpeta de juego, las actualizaciones y las preferencias de la aplicación.",
+  "settings.groupSetup": "Configuración",
+  "settings.groupApp": "App",
+  "settings.groupAdvanced": "Avanzado",
+  "settings.groupAbout": "Acerca de",
   "settings.gameFolder": "Carpeta del juego",
   "settings.general": "General",
   "settings.appearance": "Apariencia",
@@ -607,6 +623,17 @@ export const es: Translation = {
   "settings.installFound": "Instalación de {{game}} encontrada",
   "settings.detectInstallFailed":
     "No se pudo detectar la carpeta de instalación",
+  "settings.wineRunnerDesc":
+    "{{game}} es un juego de Windows, así que en un Mac se ejecuta dentro de una bottle de CrossOver, Whisky o Wine. Es lo que usa Jugar para arrancarlo.",
+  "settings.wineRunnerNone": "No se encontró ningún runner de Wine",
+  "settings.pickWineRunner": "Selecciona un binario de Wine (p. ej. el wine de CrossOver)",
+  "settings.wineRunnerFailed": "No se pudo definir el runner de Wine",
+  "settings.wineBottlesFound_one":
+    "Se encontró {{count}} bottle donde buscar tu instalación.",
+  "settings.wineBottlesFound_other":
+    "Se encontraron {{count}} bottles donde buscar tu instalación.",
+  "settings.wineBottlesNone":
+    "No se encontraron bottles — instala primero {{game}} en CrossOver, Whisky o Wine.",
   "settings.pickProfilesFolder":
     "Selecciona tu carpeta de perfiles de {{game}}",
   "settings.profilesSet": "Carpeta de perfiles definida",
@@ -761,6 +788,8 @@ export const es: Translation = {
   "sync.lastPulled": "Última comprobación {{ago}}. Se repite sola cuando pulsas Jugar.",
   "sync.neverPulled": "Aún no has descargado las pinturas de los demás",
   "sync.neverPulledWhy": "Hasta que lo hagas, los otros pilotos aparecen con motos por defecto aunque hayan publicado las suyas.",
+  "sync.oversized_one": "{{count}} pintura es demasiado grande para compartirla, así que los demás pilotos no la verán.",
+  "sync.oversized_other": "{{count}} pinturas son demasiado grandes para compartirlas, así que los demás pilotos no las verán.",
   "sync.skippedBikes_one": "{{count}} moto no se publicó — tienes más de las que podemos guardar.",
   "sync.skippedBikes_other": "{{count}} motos no se publicaron — tienes más de las que podemos guardar.",
   "sync.noMatchingProfile": "Este nombre no coincide con ningún perfil de MX Bikes en este PC, así que no hay nada que publicar. Revisa la carpeta de perfiles en Ajustes.",
@@ -769,6 +798,8 @@ export const es: Translation = {
   "sync.keptYours_other": "{{count}} pinturas se dejaron intactas",
   "sync.keptYoursWhy": "Otro piloto usa el mismo nombre de archivo para una pintura distinta. La tuya se conservó — la app nunca sobrescribe una librea que no instaló. Verás a ese piloto con tu versión.",
   "servers.booting": "Arrancando…",
+  "servers.bootingStage": "{{stage}}…",
+  "servers.bootFailed": "Este servidor no pudo terminar de configurarse y se apagó. Esto es lo que informó:",
   "servers.bootingWhy": "Instalando el juego en la máquina nueva. Tarda unos minutos — descarga el instalador completo.",
   "servers.shutsDown": "Se apaga",
   "servers.inUse": "En uso",
@@ -857,6 +888,36 @@ export const es: Translation = {
   "library.bulkMovePartial": "{{ok}} movidos, {{fail}} fallidos",
   "library.bulkMoved_one": "{{count}} elemento movido a {{folder}}",
   "library.bulkMoved_other": "{{count}} elementos movidos a {{folder}}",
+
+  // ── Compartir archivos instalados (cualquier pista o pintura) ──────────────
+  "share.share": "Compartir",
+  "share.action": "Compartir…",
+  "share.title": "Comparte estos archivos",
+  "share.hint":
+    "Los empaqueta, los sube y te da un único código para pegar donde quieras. Quien lo pegue recibe los archivos en las mismas carpetas.",
+  "share.hintDone": "Envía este código: instala todo lo que aparece arriba.",
+  "share.nothingToShare":
+    "Aquí no hay nada que compartir: en un código solo caben archivos de tu carpeta mods.",
+  "share.skipped_one": "1 elemento excluido ({{reason}}).",
+  "share.skipped_other": "{{count}} elementos excluidos ({{reason}}).",
+  "share.createCode_one": "Compartir 1 archivo ({{size}})",
+  "share.createCode_other": "Compartir {{count}} archivos ({{size}})",
+  "share.copyCode": "Copiar código",
+  "share.copied": "Código de compartir copiado.",
+  "share.uploaded": "Subido: copia el código de abajo.",
+  "share.uploadedCopied": "Subido: el código está en el portapapeles.",
+  "share.importAction": "Pegar un código…",
+  "share.importTitle": "Importar archivos compartidos",
+  "share.importBody":
+    "Pega el código que te han enviado. Los archivos se instalan donde los tenía quien los compartió.",
+  "share.downloadNotice": "Descarga {{size}} desde {{host}}.",
+  "share.install": "Descargar e instalar",
+  "share.installed_one": "1 archivo instalado.",
+  "share.installed_other": "{{count}} archivos instalados.",
+  "share.phasePacking": "Empaquetando archivos…",
+  "share.phaseUploading": "Subiendo…",
+  "share.phaseDownloading": "Descargando…",
+  "share.phaseInstalling": "Instalando…",
 
   // ── Taquilla ───────────────────────────────────────────────────────────────
   "locker.help":
@@ -1039,6 +1100,29 @@ export const es: Translation = {
   "overlay.fullscreenNowDesc": "El overlay sí se abre — es el juego el que se dibuja encima. Cambia a sin bordes o en ventana desde Options → Video.",
   "overlay.notWorking": "¿Lo pulsaste y no pasó nada?",
   "overlay.notWorkingDesc": "Revisa el atajo de arriba: puede que otra aplicación ya tenga esa combinación, y elegir una libre es lo que lo arregla.",
+  // Voice chat — devices and levels.
+  "voice.section": "Chat de voz",
+  "voice.enable": "Activar el chat de voz",
+  "voice.microphone": "Micrófono",
+  "voice.output": "Salida",
+  "voice.systemDefault": "Predeterminado del sistema",
+  "voice.testMic": "Probar micro",
+  "voice.stopTest": "Parar",
+  "voice.speakNow": "Di algo — la barra debería moverse.",
+  "voice.testOutput": "Reproducir tono de prueba",
+  "voice.testOutputDesc": "Comprueba que oirás a los demás en los auriculares correctos.",
+  "voice.micGain": "Ganancia del micrófono",
+  "voice.volume": "Volumen",
+  "voice.ptt": "Pulsar para hablar",
+  "voice.pttUpdated": "Tecla de pulsar para hablar actualizada",
+  "voice.micFailed": "No se pudo abrir el micrófono",
+  "voice.outputFailed": "No se pudo reproducir el tono de prueba",
+  "voice.registerFailed": "Ajustes de voz guardados, pero la tecla de pulsar para hablar no se registró",
+  "voice.deviceGone": "Ese dispositivo no está conectado",
+  "voice.noDevices": "No se encontraron dispositivos de audio",
+  "voice.notConnected": "Aún no conectado con nadie",
+  "voice.notConnectedDesc": "Estos ajustes controlan tu propio micrófono y auriculares, y los botones de prueba ya funcionan. Hablar de verdad con otros pilotos necesita el servidor de voz, que todavía no está hecho: aquí no se transmite nada.",
+
   "overlay.pressKeys": "Pulsa las teclas…",
   "overlay.needModifier": "Añade un modificador",
   "overlay.needModifierDesc": "Mantén Ctrl, Alt o Shift para que el atajo no salte mientras escribes.",
@@ -1060,11 +1144,46 @@ export const es: Translation = {
   "showcase.whileGameRunning": "mientras MX Bikes está abierto",
   "showcase.releaseNotes": "Leer las notas de la versión",
   "showcase.gotIt": "Entendido",
+  "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
+  "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
+  "showcase.supporters.more": "+{{count}} más",
+  "showcase.v092.hero.title": "Mira el terreno de un circuito en 3D",
+  "showcase.v092.hero.body":
+    "Los circuitos eran lo único que la biblioteca no sabía enseñarte: un nombre, una imagen y un tamaño. El visor ahora lee el mapa de alturas de un circuito y dibuja el propio terreno, así que los saltos, las roderas y la forma de una curva están ahí para mirarlos antes incluso de cargarlo. Se abre desde un circuito en la biblioteca, junto a Ver en 3D.",
+  "showcase.v092.surfaces":
+    "Un circuito se dibuja con sus propias superficies. Donde el circuito dice cuál es cuál, la hierba, el arcén, el firme duro y la tierra de la trazada toman cada uno el color del material que nombra — así un campo de labranza sale como la tierra que es y un circuito de hierba sale verde.",
+  "showcase.v092.relief":
+    "El terreno se ilumina con sus propios huecos y proyecta sombras de verdad, así que una rodera se lee como rodera y una rampa como rampa, vaya en la dirección que vaya.",
+  "showcase.v092.accuracy":
+    "Los circuitos se dibujan como los guarda el juego: en el sentido correcto en vez de reflejados, sin el muro de once metros alrededor de los que quedan por debajo de su cota, y con unas cuatro veces más detalle sobre el terreno.",
+  "showcase.v092.voice":
+    "Ajustes de chat de voz: elige el micrófono por el que se te oye y los auriculares por los que sale todo el mundo, con medidor de entrada en vivo y tono de prueba. Todavía no se transmite nada — esta es la mitad de los dispositivos, y la página lo dice.",
+  "showcase.v092.pushToTalk":
+    "Una tecla de pulsar para hablar que funciona mientras el juego tiene el foco, asignada por la misma vía que el atajo del overlay.",
+  "showcase.v091.hero.title": "Pinta directamente sobre la plantilla",
+  "showcase.v091.hero.body":
+    "El Designer sabía colocar imágenes y texto sobre las hojas de una pintura, pero no dejaba poner ni un píxel a mano — un degradado en un lateral obligaba a salir a un editor de imágenes y volver. Ahora tiene su caja de herramientas: pincel suave con tamaño, borde e intensidad, borrador, degradado, relleno, y rectángulo, elipse y línea. Todo aparece en la hoja y en el modelo 3D a la vez, mientras arrastras.",
+  "showcase.v091.gradient":
+    "Un degradado que lleva un color hasta otro. Arrastra para decir dónde ocurre la transición: antes está el primer color, después el segundo. Lineal o radial, y puede desvanecerse hasta nada en lugar de hasta un color.",
+  "showcase.v091.paintLayer":
+    "Lo que pintas va en su propia capa, así que tiene opacidad, fusión y orden como todo lo demás — y la plantilla de debajo no se toca nunca. Oculta la capa y tienes la plantilla limpia otra vez. ⌘Z deshace trazos.",
+  "showcase.v091.ghost":
+    "Dibuja sobre un fantasma de la moto. Una hoja puede mostrar tenue por debajo la pintura de la que partiste para calcarla — sacada de la hoja, así que no se guarda en la tuya — y un mapa UV del carenado del modelo, cada pieza con su color, para ver sobre qué panel estás pintando.",
+  "showcase.v091.parts":
+    "Pon una foto en un solo panel. Elige una pieza del carenado y la capa se ajusta a ella y se recorta a su contorno, así una imagen de internet cubre el spoiler y se detiene en la junta. Al pasar por la hoja se muestra el nombre de la pieza.",
+  "showcase.v091.resize":
+    "Las capas se redimensionan arrastrando sus esquinas, no solo con el deslizador.",
+  "showcase.v091.macos":
+    "Jugar y Unirse a un servidor funcionan en macOS, a través de la botella CrossOver, Whisky o Wine que contenga el juego — y la app encuentra sola una instalación embotellada en vez de pedirte la ruta.",
+  "showcase.v091.steamos":
+    "En SteamOS la app de Linux abre en su interfaz en lugar de una pantalla en blanco.",
   "showcase.v090.hero.title": "Convierte tus imágenes en un diseño que el juego carga",
   "showcase.v090.hero.body":
     "Una nueva pestaña Diseños crea diseños a partir de imágenes corrientes — TGA, PNG, JPG — y los instala donde el juego los busca: una decoración de moto, un diseño de casco o de gafas, el kit o los guantes de tu piloto. Descomprime un diseño que ya tengas para conseguir una plantilla que encaje de verdad con el modelo, edítala en cualquier editor y devuélvela tal cual. El estudio comprueba tus nombres de archivo frente a los que usa la malla antes de guardar, y luego muestra el resultado sobre el modelo real.",
   "showcase.v090.reshade":
     "Explora, instala y cambia presets de ReShade desde la app — con una entrada Desactivado para comparar con el aspecto original, y un aviso cuando a un preset le faltan efectos.",
+  "showcase.v090.bundles":
+    "Comparte un preset como paquete completo y el código lleva los propios mods: decoración, casco y gafas, equipación, guantes, botas y neumáticos. Importación completa deja cada archivo donde el juego lo lee, así que alguien con la carpeta de mods vacía acaba llevando exactamente lo que creaste.",
   "showcase.v090.purchases":
     "Mis compras entra en tu cuenta de mxbikes-shop.com e instala lo que ya has pagado, con la misma hoja de revisión que usa el arrastrar y soltar.",
   "showcase.v090.ridingStyles":
@@ -1250,10 +1369,64 @@ export const es: Translation = {
   // ── ReShade ────────────────────────────────────────────────────────────────
   "settings.reshade": "ReShade",
   "settings.reshadeDesc": "Ajustes de posprocesado — cómo se ve {{game}} en pantalla.",
+
+  // ── Registros ──────────────────────────────────────────────────────────────
+  "settings.logs": "Registros",
+  "logs.desc":
+    "Los archivos que hay que enviar cuando algo falla. MXB App, FrostMod y {{game}} guardan los suyos por separado — abre la carpeta que necesites o guárdalos todos en un zip para adjuntarlo a un informe.",
+  "logs.appLogs": "MXB App",
+  "logs.appLogsDesc": "Lo que registró la propia app",
+  "logs.frostmodLogsDesc": "Lo que el cargador escribió en su propia carpeta",
+  "logs.gameLogsDesc": "El registro del juego, junto a sus archivos",
+  "logs.open": "Abrir carpeta",
+  "logs.save": "Guardar registros…",
+  "logs.saving": "Guardando…",
+  "logs.refresh": "Actualizar",
+  "logs.loading": "Buscando…",
+  "logs.empty": "Aquí todavía no hay archivos de registro.",
+  "logs.folderMissing":
+    "Esa carpeta no está ahí — nada ha escrito aún un registro en ella.",
+  "logs.summary_one": "{{count}} archivo · {{size}} · el más reciente {{when}}",
+  "logs.summary_other": "{{count}} archivos · {{size}} · el más reciente {{when}}",
+  "logs.saved": "Registros guardados",
+  "logs.savedDesc_one": "{{count}} archivo de registro, {{size}}",
+  "logs.savedDesc_other": "{{count}} archivos de registro, {{size}}",
+  "logs.saveFailed": "No se pudieron guardar los registros",
+  "logs.privacy":
+    "Los registros contienen rutas de carpetas y lo que estaba haciendo la app — nunca tus contraseñas ni las cookies de sesión, y no se incluye ningún archivo de ajustes.",
+
+  // ── Mecenas (Buy Me a Coffee) ──────────────────────────────────────────────
+  "settings.supporters": "Mecenas",
+  "settings.supportersDesc": "Quienes mantienen MXB App en Buy Me a Coffee.",
+  "supporters.intro":
+    "MXB App es gratis, y así seguirá. Los cafés de abajo son los que pagan el tiempo que hay detrás: quienes los invitaron son la razón de que haya una versión nueva que instalar.",
+  "supporters.count_one": "{{count}} mecenas",
+  "supporters.count_other": "{{count}} mecenas",
+  "supporters.untiered": "Mecenas",
+  "supporters.since": "desde {{date}}",
+  "supporters.loading": "Cargando la lista…",
+  "supporters.refresh": "Actualizar",
+  "supporters.become": "Invítame a un café",
+  "supporters.empty": "Todavía no hay nadie en la lista",
+  "supporters.emptyDesc":
+    "La lista se actualiza sola: invita a un café y tu nombre aparecerá aquí sin esperar a una versión nueva.",
+  "supporters.offline":
+    "No se pudo consultar la lista ahora mismo — esta es la última que vimos.",
+  "supporters.optOut":
+    "Los nombres se muestran con permiso. Escribe por Discord o por Buy Me a Coffee y el tuyo se quita al momento.",
+
   "modType.reshade": "ReShade",
   "modType.reshadeInline": "ajustes de ReShade",
   "reshade.needsGameFolder":
-    "Configura la carpeta de {{game}} arriba y los ajustes de ReShade aparecerán aquí.",
+    "ReShade está en tu carpeta de {{game}} — configúrala en Carpeta del juego, o apunta directamente aquí.",
+  "reshade.folder": "Buscando en tu carpeta de {{game}}:",
+  "reshade.customFolder": "Buscando en la carpeta que elegiste:",
+  "reshade.browse": "Elegir carpeta…",
+  "reshade.pickFolder": "Elige la carpeta donde está instalado ReShade",
+  "reshade.folderMissing": "La carpeta que elegiste ya no está.",
+  "reshade.resetFolder": "Volver a la carpeta de {{game}}",
+  "reshade.folderSet": "ReShade encontrado",
+  "reshade.notThere": "No hay ReShade en esa carpeta",
   "reshade.intro":
     "ReShade añade posprocesado a {{game}}. Es una herramienta gratuita aparte: instálala una vez y luego elige un ajuste aquí.",
   "reshade.wrongApi":
@@ -1285,11 +1458,13 @@ export const es: Translation = {
   "paints.help":
     "Convierte archivos .tga o .png hechos en GIMP o Photoshop en un .pnt que el juego carga — y desempaqueta una pintura existente para partir de ella.",
   "paints.unpack": "Desempaquetar una pintura…",
+  "paints.toDesigner": "Dibujar sobre estas…",
   "paints.unpacked": "Extraídas {{count}} texturas — edítalas y luego guarda.",
   "paints.whereTitle": "Dónde va",
   "paints.kind.bike": "Decoración de moto",
   "paints.kind.helmet": "Casco",
   "paints.kind.goggles": "Gafas",
+  "paints.kind.profileGoggles": "Gafas (piloto)",
   "paints.kind.boots": "Botas",
   "paints.kind.protection": "Protecciones",
   "paints.kind.kit": "Equipación",
@@ -1321,4 +1496,135 @@ export const es: Translation = {
   "paints.replaceTitle": "¿Reemplazar esta pintura?",
   "paints.replaceBody": "{{path}} ya existe. Al guardar se reemplaza.",
   "paints.replace": "Reemplazar",
+
+  // ── Designer (el editor por capas) ────────────────────────────────────────────
+  "designer.help":
+    "Dibuja una pintura sobre las hojas que el juego lee de verdad y mírala en el modelo mientras trabajas. Empieza desde una pintura instalada para acertar con los nombres de las hojas, píntala con pincel, degradado o formas, apila imágenes y texto encima y guarda: lo que sale es un .pnt que el juego carga, no una exportación que convertir.",
+  "designer.empty":
+    "Todavía no hay nada sobre lo que dibujar. Empieza desde una pintura instalada para este modelo — así obtienes sus hojas y sus nombres — o añade una en blanco.",
+  "designer.startFromPaint": "Empezar desde una pintura…",
+  "designer.blankSheet": "Hoja en blanco",
+  "designer.sheets": "Hojas",
+  "designer.moveDown": "Bajar",
+  "designer.moveUp": "Subir",
+  "designer.noSheetsFound":
+    "Esa pintura no produjo ninguna hoja, así que no hay nada sobre lo que dibujar.",
+  "designer.loadedSheets": "Se cargaron {{count}} hoja(s) — dibuja encima y guarda.",
+  "designer.sheetName": "Nombre de textura",
+  "designer.editSheet": "Editar esta hoja",
+  "designer.addImage": "Añadir imagen",
+  "designer.addText": "Añadir texto",
+  "designer.newTextValue": "TEXTO",
+  "designer.layers": "Capas",
+  "designer.showRail": "Mostrar hojas y capas",
+  "designer.hideRail": "Ocultar hojas y capas",
+  "designer.noLayers":
+    "Aún no hay capas — añade una imagen, texto o una capa de pintura sobre la que dibujar.",
+  "designer.layerCount": "{{count}} capa(s)",
+  "designer.layerTitle": "Capa seleccionada",
+  "designer.hide": "Ocultar",
+  "designer.show": "Mostrar",
+  "designer.raise": "Traer al frente",
+  "designer.lower": "Enviar atrás",
+  "designer.scale": "Tamaño",
+  "designer.rotation": "Rotación",
+  "designer.part": "Pieza",
+  "designer.wholeSheet": "Toda la hoja",
+  "designer.fitToPart": "Ajustar a la pieza",
+  "designer.fitToPartHint":
+    "Coloca y escala esta capa para cubrir la pieza elegida. La cubre en vez de caber dentro, así no quedan huecos: recórtala para quitar lo que sobresale.",
+  "designer.fitNotForPaint": "Una capa de pintura es la hoja, así que no hay nada que mover ni escalar.",
+  "designer.clipped": "Recortada",
+  "designer.clippedHint": "Esta capa está recortada a la pieza: nada se sale por la junta.",
+  "designer.opacity": "Opacidad",
+  "designer.blend": "Fusión",
+  "designer.blend.normal": "Normal",
+  "designer.blend.multiply": "Multiplicar",
+  "designer.blend.screen": "Trama",
+  "designer.blend.overlay": "Superponer",
+  "designer.text": "Texto",
+  "designer.font": "Fuente",
+  "designer.size": "Tamaño del texto",
+  "designer.colour": "Color",
+  "designer.outline": "Contorno",
+  "designer.needSheets": "Añade una hoja sobre la que dibujar.",
+  "designer.noModelFound":
+    "“{{model}}” no está en tu biblioteca, así que no hay nada donde mostrarla.",
+  "designer.noBikePreview":
+    "Esta versión no puede leer la geometría de las motos, así que una pintura no tiene modelo donde ir. Todo lo demás se guarda con normalidad.",
+  "designer.noPreviewForGame":
+    "La vista 3D es solo para MX Bikes por ahora: los modelos de {{game}} necesitan sus propias asignaciones de piezas. Todo lo demás funciona igual y la pintura se guarda con normalidad.",
+  "designer.gearNote":
+    "Se muestra sobre el piloto de serie — tu propio equipo no está cargado aquí.",
+  "designer.reference": "Referencia",
+  "designer.traceTemplate": "Plantilla",
+  "designer.traceHint":
+    "Saca de la hoja la pintura de la que partiste y muéstrala tenue por debajo, para calcarla. Deja de formar parte de lo que guardas.",
+  "designer.noTemplate": "Esta hoja no tiene plantilla que calcar: nació en blanco.",
+  "designer.uvMap": "Mapa UV",
+  "designer.uvHint":
+    "Muestra dónde cae en esta hoja cada pieza del carenado del modelo, cada una con su color.",
+  "designer.noGeometry": "Carga un modelo en la vista previa para ver su distribución UV.",
+  "designer.uvNoMatch":
+    "Nada del modelo usa una textura llamada “{{name}}”, así que no hay distribución UV que mostrar.",
+  "designer.ghostBuried":
+    "La referencia va debajo de la hoja, y la plantilla de esta hoja es opaca: activa Plantilla para sacarla y poder ver a través.",
+  "designer.ghostNote": "Solo una guía: la referencia nunca se guarda en la pintura.",
+  "designer.resetView": "Restablecer vista",
+
+  // ── Designer › las herramientas de pintura ────────────────────────────────────
+  "designer.paint": "Pintura",
+  "designer.addPaint": "Capa de pintura",
+  "designer.paintLayerName": "Pintura",
+  "designer.undoStroke": "Deshacer trazo",
+  "designer.redoStroke": "Rehacer trazo",
+  "designer.tool.move": "Mover",
+  "designer.tool.brush": "Pincel",
+  "designer.tool.eraser": "Borrador",
+  "designer.tool.gradient": "Degradado",
+  "designer.tool.fill": "Relleno",
+  "designer.tool.rect": "Rectángulo",
+  "designer.tool.ellipse": "Elipse",
+  "designer.tool.line": "Línea",
+  "designer.moveHint":
+    "Arrastra las capas sobre la hoja para colocarlas. Elige una herramienta arriba para pintar sobre ella.",
+  "designer.colourFrom": "Pinta con este",
+  "designer.colourTo": "Funde hacia este",
+  "designer.swapColours": "Intercambiar los dos colores",
+  "designer.brushSize": "Pincel",
+  "designer.hardness": "Borde",
+  "designer.strength": "Intensidad",
+  "designer.gradient": "Degradado",
+  "designer.gradient.linear": "Lineal",
+  "designer.gradient.radial": "Radial",
+  "designer.fadeOut": "Desvanecer",
+  "designer.shape": "Estilo",
+  "designer.shape.fill": "Relleno",
+  "designer.shape.outline": "Contorno",
+  "designer.lineWidth": "Grosor",
+  "designer.paintHint":
+    "Arrastra sobre la hoja. Mantén Shift para que salga recto, arrastra con el botón derecho para mover la vista.",
+  "designer.fillHint": "Haz clic en la hoja para inundar toda la capa.",
+  "designer.gradientHint":
+    "Arrastra sobre la hoja para marcar dónde ocurre la transición. Rellena toda esta capa: añade otra capa de pintura para conservar lo que hay debajo.",
+
+  // The track terrain viewer.
+  "trackViewer.open": "Ver el terreno",
+  "trackViewer.title": "Vista previa del circuito",
+  "trackViewer.loading": "Leyendo el terreno…",
+  "trackViewer.refining": "Afinando…",
+  "trackViewer.grid": "Cuadrícula",
+  "trackViewer.surface": "Surface",
+  "trackViewer.surfaceMasks": "From the track's surface data",
+  "trackViewer.relief": "Desnivel",
+  "trackViewer.noTerrain": "No hay terreno que mostrar",
+  "trackViewer.noTerrainHint":
+    "Los datos de altura de este circuito no están en un formato que el visor sepa leer todavía.",
+  "trackViewer.inferredNote":
+    "El archivo de alturas de este circuito no tiene un formato documentado, así que su forma se dedujo de los datos. Tómalo como una lectura aproximada, no exacta.",
+  "trackViewer.assumedScaleNote":
+    "Este circuito no indica la separación entre sus puntos de altura: el relieve es real, pero su pendiente es aproximada.",
+  "trackViewer.whyDetails": "¿Por qué?",
+  "trackViewer.copyDetails": "Copiar detalles",
+  "trackViewer.copied": "Copiado",
 };

@@ -1,6 +1,7 @@
 // Prevents an additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod antidebug;
 mod bikefiles;
 mod bikeswap;
 mod bundle;
@@ -9,15 +10,18 @@ mod config;
 mod cookie_session;
 mod dropzone;
 mod edf;
+mod fileshare;
 mod frostmod;
 mod frostmod_manage;
 mod game;
 mod gameproc;
 mod gearrepair;
+mod heightfield;
 mod imgcache;
 mod install;
 mod library;
 mod linkwalk;
+mod logs;
 mod lru;
 mod modelswap;
 mod mods;
@@ -38,17 +42,25 @@ mod reshade;
 mod servers;
 mod shop_catalog_session;
 mod shop_credentials;
+mod shop_fetch;
+mod shop_installed;
 mod shop_session;
 mod soundmods;
 mod texstore;
+mod track;
 mod upload;
 mod vcruntime;
+mod voice;
+mod winehost;
 
 use config::AppConfig;
 use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
+// Decoding a paint's textures is per-texture CPU work over no shared state, and every path
+// that does it wants the same treatment — so this sits here rather than in one function.
+use rayon::prelude::*;
 use profilewatch::ProfileWatcher;
 use mods::mxb::WpModsSource;
 use mods::{ModDetail, ModRating, ModSort, ModSource, ModSummary};
@@ -81,16 +93,18 @@ fn parks_in_tray(label: &str) -> bool {
 
 /// Whether a window may make this IPC call.
 ///
-/// Exists for one window. [`mxb_fetch`] parks a hidden webview on the *remote* mxb-mods.com
-/// origin, and giving it a capability is what lets its page hand fetch results back. But a
-/// capability grants IPC in general, and the commands registered with `generate_handler!`
-/// are not covered by the permission ACL — so without this, script on mxb-mods.com could
-/// call `create_config`, `install_mod` or anything else the app exposes.
+/// Exists for the two windows that run a *remote* origin. [`mxb_fetch`] parks a hidden webview
+/// on mxb-mods.com and hands catalog fetches back; [`shop_fetch`] parks one on
+/// mxbikes-shop.com and hands the signed-in purchases page back. Giving each a capability is
+/// what lets its page speak to us at all. But a capability grants IPC in general, and the
+/// commands registered with `generate_handler!` are not covered by the permission ACL — so
+/// without this, script on either site could call `create_config`, `install_mod` or anything
+/// else the app exposes.
 ///
-/// So that window gets an allowlist of exactly one call: emitting the result event. Every
-/// other window is unaffected and keeps whatever its own capability file grants.
+/// So both get an allowlist of exactly one call: emitting their result event. Every other
+/// window is unaffected and keeps whatever its own capability file grants.
 fn ipc_allowed(label: &str, command: &str) -> bool {
-    if label != mxb_fetch::WINDOW {
+    if label != mxb_fetch::WINDOW && label != shop_fetch::WINDOW {
         return true;
     }
     command == "plugin:event|emit"
@@ -324,7 +338,7 @@ fn scan_library_blocking(
     // names against catalog titles to draw its "Installed" badge, so it has to be the real
     // list. See `reshade::status`.
     if reshade::is_reshade_subpath(&subpath) {
-        return Ok(reshade::status(&cfg.install_dir())
+        return Ok(reshade::status(&cfg.reshade_dir())
             .presets
             .into_iter()
             .map(|p| library::LibraryEntry {
@@ -531,15 +545,34 @@ async fn apply_sound_swap(
     .map_err(|e| format!("apply_sound_swap task failed: {e}"))?
 }
 
-/// The ReShade card's whole state, read fresh from the game folder — see [`reshade`].
+/// The ReShade card's whole state, read fresh from the folder ReShade lives in — see
+/// [`reshade`].
 #[tauri::command]
 async fn reshade_status(app: tauri::AppHandle) -> Result<reshade::Status, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        Ok(reshade::status(&cfg.install_dir()))
+        let mut status = reshade::status(&cfg.reshade_dir());
+        // Only this side knows where that folder came from, and the card has to say so
+        // before it offers to hand the folder back to the game's install dir.
+        status.custom = !cfg.reshade_path.trim().is_empty();
+        Ok(status)
     })
     .await
     .map_err(|e| format!("reshade_status task failed: {e}"))?
+}
+
+/// Point the ReShade card at a folder of the player's choosing. An empty string clears the
+/// override, back to the game's install dir.
+///
+/// The pick is taken as given rather than validated: a folder with no ReShade in it is a
+/// perfectly ordinary thing to land on mid-setup, and `reshade_status` says so plainly on
+/// the very next read. Refusing it would leave the player with a dialog and no way to see
+/// what the app thinks is wrong.
+#[tauri::command]
+fn set_reshade_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.reshade_path = path;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
@@ -549,7 +582,7 @@ async fn apply_reshade_preset(
 ) -> Result<ReshadeApplyOutcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        reshade::apply(&cfg.install_dir(), &name).map_err(|e| format!("{e:#}"))?;
+        reshade::apply(&cfg.reshade_dir(), &name).map_err(|e| format!("{e:#}"))?;
         // Unlike a content swap there is nothing to signal: ReShade owns its own config and
         // FrostMod has no part in it. All the UI needs is whether the player will see this
         // now or on the next launch.
@@ -565,7 +598,7 @@ async fn apply_reshade_preset(
 async fn delete_reshade_preset(app: tauri::AppHandle, name: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        reshade::delete(&cfg.install_dir(), &name).map_err(|e| format!("{e:#}"))
+        reshade::delete(&cfg.reshade_dir(), &name).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| format!("delete_reshade_preset task failed: {e}"))?
@@ -685,6 +718,70 @@ fn get_pkz_preview_blocking(path: String) -> Result<Option<String>, String> {
     pkz::read_preview(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
+/// A track's metadata and contents. Cheap by construction — nothing is inflated — so the
+/// track view can paint everything except the terrain immediately.
+#[tauri::command]
+async fn read_track_info(app: tauri::AppHandle, path: String) -> Result<track::TrackInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        track::read_info(&app, &path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_info task failed: {e}"))?
+}
+
+/// A plain-text account of what a track's terrain looks like to the reader.
+///
+/// Shown in the viewer when a track's terrain won't load. The height format is undocumented,
+/// so a track that fails is evidence we don't otherwise have — and the player holding it is
+/// rarely the person who can rebuild the app to investigate.
+#[tauri::command]
+async fn diagnose_track(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || track::diagnose(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| format!("diagnose_track task failed: {e}"))
+}
+
+/// A track's terrain grid, at no more than `max_dim` samples on its longest edge.
+///
+/// Returned as raw bytes rather than JSON: a grid is a few hundred thousand floats, and
+/// serialising that as a JSON array costs more than reading it out of the archive did. The
+/// app reads the header described in [`track::BLOB_HEADER`] and takes the rest in place.
+#[tauri::command]
+async fn load_track_terrain(
+    app: tauri::AppHandle,
+    path: String,
+    max_dim: u32,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let master = track::load_master(&app, &path).map_err(|e| format!("{e:#}"))?;
+        Ok(tauri::ipc::Response::new(track::terrain_blob(
+            &master, max_dim,
+        )))
+    })
+    .await
+    .map_err(|e| format!("load_track_terrain task failed: {e}"))?
+}
+
+/// A picture of a track's surfaces, to lay over its terrain.
+///
+/// Empty — not an error — when the track's height file carries no coverage masks. That track
+/// draws on its relief alone, which is what every track did before this existed, so there is
+/// nothing here worth failing a view over.
+#[tauri::command]
+async fn load_track_overview(
+    app: tauri::AppHandle,
+    path: String,
+    max_dim: u32,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let blob = track::overview_blob(&app, std::path::Path::new(&path), max_dim)
+            .unwrap_or_default();
+        tauri::ipc::Response::new(blob)
+    })
+    .await
+    .map_err(|e| format!("load_track_overview task failed: {e}"))
+}
+
 #[tauri::command]
 async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     tauri::async_runtime::spawn_blocking(move || unpack_paint_blocking(path))
@@ -692,8 +789,44 @@ async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> 
         .map_err(|e| format!("unpack_paint task failed: {e}"))?
 }
 
+/// Paints decoded for the viewer, so re-opening one doesn't inflate it a second time.
+///
+/// The picker re-runs this on every selection change and on every re-open, and a gear paint is
+/// tens of megabytes of DEFLATE — the pixels behind an entry, on the other hand, are small,
+/// because each is downscaled to 1024² before it is stored.
+const PAINT_CACHE_CAP: usize = 4;
+
+fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(PAINT_CACHE_CAP)))
+}
+
 fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
-    paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+    let t0 = std::time::Instant::now();
+    // Path *and* mtime, as the bike cache does, so a paint re-saved under the same name misses.
+    let key = bike_cache_key(&path);
+    if let Some(t) = paint_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+        log::info!("unpack_paint {path}: cache hit ({:?})", t0.elapsed());
+        return Ok(t);
+    }
+
+    let textures = paint::unpack_file(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+    log::info!(
+        "unpack_paint {path}: {} texture(s) in {:?} | {:.1} MB resident in the texture store",
+        textures.len(),
+        t0.elapsed(),
+        texstore::resident_bytes() as f64 / (1024.0 * 1024.0),
+    );
+    if let Ok(mut c) = paint_cache().lock() {
+        // Cloning an entry copies names, sizes and tokens — never pixels, which stay in the
+        // texture store. The evicted paint's go with it; nothing else holds those tokens.
+        if let Some(dropped) = c.insert(key, textures.clone()) {
+            let tokens: Vec<String> = dropped.iter().map(|t| t.token.clone()).collect();
+            texstore::release(&tokens);
+        }
+    }
+    Ok(textures)
 }
 
 // ── Paint studio ────────────────────────────────────────────────────────────────────
@@ -751,6 +884,50 @@ async fn paint_studio_load(paths: Vec<String>) -> Result<Vec<paintstudio::Studio
     })
     .await
     .map_err(|e| format!("paint_studio_load task failed: {e}"))?
+}
+
+/// Read one image at its full size, for the Designer to composite with.
+///
+/// Separate from `paint_studio_load` because that one answers "describe this file" with a
+/// thumbnail, and the editor needs the pixels themselves — see `paintstudio::pixels`.
+#[tauri::command]
+async fn paint_studio_pixels(path: String) -> Result<paint::PaintTexture, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paintstudio::pixels(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("paint_studio_pixels task failed: {e}"))?
+}
+
+/// Stage a composited sheet, returning the file `paint_studio_save` should pack.
+///
+/// Takes the PNG as a raw request body rather than an argument: a 4096² sheet is megabytes,
+/// and JSON would send it as a list of numbers. The sheet's texture name rides in a header
+/// for the same reason — the body has to be the bytes and nothing else.
+///
+/// One staging directory per call. The caller saves immediately after staging every sheet, so
+/// these are short-lived; they sit in the OS temp dir either way, which is where an editor
+/// that's closed mid-flight should leave its scratch files.
+#[tauri::command]
+async fn paint_studio_stage(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err("paint_studio_stage expects the sheet's PNG bytes as the request body".into());
+    };
+    let name = request
+        .headers()
+        .get("x-sheet-name")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let png = png.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = install::staging_dir("paint");
+        paintstudio::stage_sheet(&dir, &name, &png)
+            .map(|p| p.to_string_lossy().into_owned())
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("paint_studio_stage task failed: {e}"))?
 }
 
 /// The file a save would write, resolved but not written — so the UI can ask before
@@ -1039,7 +1216,6 @@ async fn load_bike_model(source: String) -> Result<BikeModel, String> {
 }
 
 fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
-    use rayon::prelude::*;
     let t0 = std::time::Instant::now();
     let key = bike_cache_key(&source);
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
@@ -1164,7 +1340,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
                 (
                     BikePaint {
                         name: name.clone(),
-                        textures: pnt.par_iter().map(paint::to_texture).collect(),
+                        textures: pnt.into_par_iter().map(paint::into_texture).collect(),
                         changes_preview: false, // resolved below, once bindings are known
                     },
                     *shipped,
@@ -1911,7 +2087,7 @@ async fn load_stock_gear_model(
             Some(p) => std::fs::read(&p)
                 .ok()
                 .and_then(|d| paint::decode_any(&d).ok())
-                .map(|pnt| pnt.iter().map(paint::to_texture).collect())
+                .map(|pnt| pnt.into_par_iter().map(paint::into_texture).collect())
                 .unwrap_or_default(),
             // Nothing to preview → the stock look, which is what the mesh carries. Not the
             // first `.pnt` in the folder: that's a paint like any other, and picking it here
@@ -2274,7 +2450,7 @@ fn load_gear_model_blocking(
     let mut main_side = GearSide::new(names_of(&main_pnt));
     let mut goggle_side = GearSide::new(names_of(&goggle_pnt));
     let mut out: Vec<paint::PaintTexture> =
-        main_pnt.iter().chain(goggle_pnt.iter()).map(paint::to_texture).collect();
+        main_pnt.into_par_iter().chain(goggle_pnt).map(paint::into_texture).collect();
     // The look the model ships with, before any paint: the textures embedded in the meshes.
     if stock || stock_goggles {
         let mut embedded: Vec<paint::PaintTexture> = Vec::new();
@@ -2925,7 +3101,7 @@ fn loose_paint_named(
     let hit = files.iter().find(|(n, _)| {
         gear_folder_paint_name(n, folder).is_some_and(|p| p.eq_ignore_ascii_case(want))
     })?;
-    Some(paint::decode_any(&hit.1).ok()?.iter().map(paint::to_texture).collect())
+    Some(paint::decode_any(&hit.1).ok()?.into_par_iter().map(paint::into_texture).collect())
 }
 
 /// A paint the game itself ships, from `<folder>/<sub>/<paint>.pnt` — `sub` being `paints`
@@ -2949,7 +3125,7 @@ fn load_pkz_paint(
     read_pkz_entry(pkz, &format!("{folder}/{sub}/{paint}.pnt"))
         .or_else(|| read_pkz_first(pkz, &format!("{folder}/{sub}/"), ".pnt"))
         .and_then(|d| paint::decode_any(&d).ok())
-        .map(|p| p.iter().map(paint::to_texture).collect())
+        .map(|p| p.into_par_iter().map(paint::into_texture).collect())
         .unwrap_or_default()
 }
 
@@ -2989,7 +3165,8 @@ fn load_rider_paint(
     // resolves instead of silently dropping off the preview.
     let profile = rider_profile_or_stock(profile);
     let data = read_rider_paint_file(cfg, base, profile, sub, paint)?;
-    let textures: Vec<_> = paint::decode_any(&data).ok()?.iter().map(paint::to_texture).collect();
+    let textures: Vec<_> =
+        paint::decode_any(&data).ok()?.into_par_iter().map(paint::into_texture).collect();
     if textures.is_empty() {
         return None;
     }
@@ -3147,32 +3324,42 @@ async fn commit_drop(
     plan_id: String,
     items: Vec<dropzone::CommitItem>,
 ) -> Result<dropzone::CommitOutcome, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        let outcome =
-            dropzone::commit(&cfg.mods_path, &plan_id, &items).map_err(|e| format!("{e:#}"))?;
+    tauri::async_runtime::spawn_blocking(move || commit_plan(&app, &plan_id, &items))
+        .await
+        .map_err(|e| format!("commit_drop task failed: {e}"))?
+}
 
-        // Record which bikes gained a sound set, so the Library can tell them from stock.
-        let ok: Vec<String> = outcome.installed.iter().map(|i| i.id.clone()).collect();
-        let bikes = dropzone::sound_bikes(&plan_id, &ok);
-        if !bikes.is_empty() {
-            if let Ok(dir) = app.path().app_local_data_dir() {
-                let _ = soundmods::record(&dir, &bikes, "drop");
-            }
+/// Place a staged plan and do everything that has to follow it.
+///
+/// Shared by the review sheet's `commit_drop` and the shop's one-click install, so the
+/// bookkeeping after a commit can't drift between them — a plan committed but never released
+/// leaks its staging directory for the life of the process.
+fn commit_plan(
+    app: &tauri::AppHandle,
+    plan_id: &str,
+    items: &[dropzone::CommitItem],
+) -> Result<dropzone::CommitOutcome, String> {
+    let cfg = config::load(app).map_err(|e| format!("{e:#}"))?;
+    let outcome = dropzone::commit(&cfg.mods_path, plan_id, items).map_err(|e| format!("{e:#}"))?;
+
+    // Record which bikes gained a sound set, so the Library can tell them from stock.
+    let ok: Vec<String> = outcome.installed.iter().map(|i| i.id.clone()).collect();
+    let bikes = dropzone::sound_bikes(plan_id, &ok);
+    if !bikes.is_empty() {
+        if let Ok(dir) = app.path().app_local_data_dir() {
+            let _ = soundmods::record(&dir, &bikes, "drop");
         }
+    }
 
-        dropzone::cancel(&plan_id);
+    dropzone::cancel(plan_id);
 
-        // One signal for the whole drop: `notify_frostmod` also emits `frostmod-reload`,
-        // which every library scanner listens to — firing it per item would re-run them all
-        // N times for a single user action.
-        if !outcome.installed.is_empty() {
-            install::notify_frostmod(&app, "drop");
-        }
-        Ok(outcome)
-    })
-    .await
-    .map_err(|e| format!("commit_drop task failed: {e}"))?
+    // One signal for the whole drop: `notify_frostmod` also emits `frostmod-reload`,
+    // which every library scanner listens to — firing it per item would re-run them all
+    // N times for a single user action.
+    if !outcome.installed.is_empty() {
+        install::notify_frostmod(app, "drop");
+    }
+    Ok(outcome)
 }
 
 /// Discard a plan the user dismissed, deleting anything staged for it.
@@ -3214,11 +3401,80 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
 }
 
+/// Where MXB App's own logs are, where the game's are, and what's currently in each.
+///
+/// Read fresh on every call rather than cached: the whole reason someone opens this is
+/// that something just went wrong, and a stale "no logs found" would send them looking in
+/// the wrong place.
+#[tauri::command]
+fn logs_info(app: tauri::AppHandle) -> logs::LogsInfo {
+    let cfg = config::load(&app).unwrap_or_default();
+    logs::info(&app_log_dir(&app), &frostmod_manage::frostmod_dir(&app), &cfg)
+}
+
+/// Open the folder one of the log sets lives in, newest file selected where the OS can do
+/// that. `which` is `"app"`, `"frostmod"` or `"game"`.
+#[tauri::command]
+fn open_logs_folder(app: tauri::AppHandle, which: String) -> Result<(), String> {
+    let info = logs_info(app);
+    let group = match which.as_str() {
+        "game" => &info.game,
+        "frostmod" => &info.frostmod,
+        _ => &info.app,
+    };
+    logs::open_location(group).map_err(|e| format!("{e:#}"))
+}
+
+/// Zip every set of logs to `dest` — a path the user just picked in a save dialog.
+///
+/// Blocking work (reads the whole of every log), so it goes off the UI thread: an app log
+/// that has been growing for a month would otherwise freeze Settings while it's read.
+#[tauri::command]
+async fn export_logs(app: tauri::AppHandle, dest: String) -> Result<logs::ExportResult, String> {
+    let version = app.package_info().version.to_string();
+    let log_dir = app_log_dir(&app);
+    let frostmod_dir = frostmod_manage::frostmod_dir(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).unwrap_or_default();
+        let info = logs::info(&log_dir, &frostmod_dir, &cfg);
+        let summary = logs::summary(&version, &cfg, &info);
+        logs::export(std::path::Path::new(&dest), &info, &summary).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("export_logs task failed: {e}"))?
+}
+
+/// Where `tauri_plugin_log`'s `LogDir` target writes. Empty when the path can't be
+/// resolved at all, which [`logs::info`] reports as a folder that isn't there — the same
+/// as any other missing folder, rather than a special failure mode of its own.
+fn app_log_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
+    app.path().app_log_dir().unwrap_or_default()
+}
+
 #[tauri::command]
 fn set_game_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.game_path = path;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// macOS: pick the Wine binary that starts the game. Blank hands it back to auto-detection.
+#[tauri::command]
+fn set_wine_runner(app: tauri::AppHandle, path: String) -> Result<winehost::HostInfo, String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.wine_runner = path;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    Ok(winehost::describe(&cfg.wine_runner))
+}
+
+/// macOS: what the app found to launch the game with, and which bottles it can see.
+///
+/// Reported rather than assumed — a player whose bottle we can't see needs to know that
+/// before they press Play, not after.
+#[tauri::command]
+fn wine_host_info(app: tauri::AppHandle) -> winehost::HostInfo {
+    let cfg = config::load(&app).unwrap_or_default();
+    winehost::describe(&cfg.wine_runner)
 }
 
 /// The titles this build can drive, with their per-game capabilities. Static data —
@@ -3458,6 +3714,7 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
         // Both directions, because Play is the last moment before either one matters: the
         // grid needs everyone else's paints on disk, and everyone else needs ours.
         publish_paints_soon(&app, &cfg, None);
+        live_sync_session(&app, None);
         // No address to aim at — they'll pick from the in-game browser — so this covers
         // the whole registry.
         sync_paints_soon(&app, None);
@@ -3524,7 +3781,24 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
 fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load_or_detect(&app).unwrap_or_default();
     cfg.experimental = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+
+    // Bring paint sync up — or take it down — with the switch that owns it.
+    //
+    // Both of these are otherwise only decided in `.setup`, so turning the feature on left
+    // the profile watcher stopped until the next restart: the app would keep publishing on
+    // an apply or a launch, but a look changed in the game's garage went unnoticed for the
+    // whole session. That is the session a player has just enrolled in, which makes it the
+    // worst one to be quietly missing.
+    let watcher = app.state::<ProfileWatcher>();
+    if cfg.experimental_enabled() {
+        profilewatch::start(&app, &watcher, &cfg.profiles_dir());
+        // And publish once now, since nothing has been watching until this moment.
+        publish_paints_soon(&app, &cfg, None);
+    } else {
+        profilewatch::stop(&watcher);
+    }
+    Ok(())
 }
 
 /// Trade an invite code for a control-plane account, and remember the token.
@@ -3891,6 +4165,62 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     });
 }
 
+/// How often to re-check the grid while a session is running.
+///
+/// A rider who joins after you did is invisible until the next pull, so this is the gap
+/// between someone arriving and their paint appearing. Short enough not to matter in a race,
+/// long enough that an unchanged roster — the overwhelmingly common answer — costs nothing.
+const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// How long to wait for the game to show up before giving up on a session.
+///
+/// MX Bikes takes a while to appear in the process list, and on a platform where we cannot
+/// see processes at all it never will. Either way, stopping is right: the launch pull has
+/// already run.
+const LIVE_SYNC_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// A session's worth of syncing, so a rider who arrives after you do still renders.
+///
+/// The pull used to happen once, at launch. That made the whole thing lopsided: whoever
+/// joined last saw everybody, and whoever was there first never saw anyone who turned up
+/// afterwards — they had pulled before those riders existed.
+///
+/// Runs until the game exits. Each pass also re-reports presence, which is what keeps this
+/// rider in other people's rosters; the control plane forgets anyone who goes quiet.
+fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        let mut seen_running = false;
+        loop {
+            tokio::time::sleep(LIVE_SYNC_EVERY).await;
+
+            let cfg = config::load_or_detect(&app).unwrap_or_default();
+            if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+                return;
+            }
+            // The game is the session. Once it has been seen and then gone, so are we.
+            if gameproc::is_game_running() {
+                seen_running = true;
+            } else if seen_running || started.elapsed() > LIVE_SYNC_STARTUP_GRACE {
+                log::info!("[sync] session over, stopping the live sync");
+                return;
+            }
+
+            match pull_rosters(&app, address.clone()).await {
+                // Only say so when something actually arrived: an unchanged grid is the
+                // common case and does not need announcing every 45 seconds.
+                Ok(o) if o.installed > 0 => {
+                    log::info!("[sync] {} new paints mid-session", o.installed);
+                    emit_sync(&app, SyncEvent::pulled(&o));
+                }
+                Ok(_) => {}
+                Err(e) => log::debug!("[sync] live pull failed: {e}"),
+            }
+        }
+    });
+}
+
 /// Pull the rosters for wherever the player is, or could be, riding.
 ///
 /// `address` narrows this to a single server when we know where they're headed. Without
@@ -3920,6 +4250,14 @@ async fn pull_rosters(
     };
     if keys.is_empty() {
         return Err("No servers to sync with yet.".into());
+    }
+
+    // Say where we are before asking who else is here: the roster is scoped by presence, so
+    // reporting first is what puts this rider into everyone else's grid too.
+    for key in &keys {
+        if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
+            log::debug!("[sync] couldn't report presence on {key}: {e:#}");
+        }
     }
 
     let outcome = paintsync::pull(&cfg, &cfg.cp_token, &keys)
@@ -4386,6 +4724,7 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
         publish_paints_soon(&app, &cfg, None);
+        live_sync_session(&app, Some(address.clone()));
         // We know exactly where they're going, so this syncs that server alone.
         sync_paints_soon(&app, Some(address));
     }
@@ -4533,6 +4872,102 @@ fn set_overlay_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Strin
     overlay::register(&app, &cfg)
 }
 
+/// Every microphone and speaker the machine currently offers.
+///
+/// Not cached: the point is to notice the headset plugged in after the app launched.
+#[tauri::command]
+fn voice_devices() -> voice::Devices {
+    voice::devices()
+}
+
+/// Turn voice chat on or off. Rebinds shortcuts, since push-to-talk only exists while it's on.
+#[tauri::command]
+fn set_voice_enabled(
+    app: tauri::AppHandle,
+    monitor: State<voice::Monitor>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Turning voice off must close the microphone, not just stop transmitting from it.
+    if !enabled {
+        monitor.stop();
+    }
+    overlay::register(&app, &cfg)
+}
+
+/// Pick the microphone. A blank name means "follow the system default".
+#[tauri::command]
+fn set_voice_input_device(app: tauri::AppHandle, device: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_input_device = device;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Pick where other riders come out. A blank name means "follow the system default".
+#[tauri::command]
+fn set_voice_output_device(app: tauri::AppHandle, device: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_output_device = device;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Rebind push-to-talk. Registers before saving, so a combo another app owns leaves the
+/// working one in place — same contract as the overlay hotkey.
+#[tauri::command]
+fn set_voice_ptt_hotkey(app: tauri::AppHandle, hotkey: String) -> Result<(), String> {
+    let previous = config::load(&app).unwrap_or_default();
+    let mut cfg = previous.clone();
+    cfg.voice_ptt_hotkey = hotkey;
+    if let Err(e) = overlay::register(&app, &cfg) {
+        let _ = overlay::register(&app, &previous);
+        return Err(e);
+    }
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Set mic gain and playback volume together — they're one slider pair in the UI, and
+/// saving them separately would write the config file twice for one drag.
+#[tauri::command]
+fn set_voice_levels(
+    app: tauri::AppHandle,
+    input_gain: f32,
+    output_volume: f32,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_input_gain = input_gain.clamp(0.0, 4.0);
+    cfg.voice_output_volume = output_volume.clamp(0.0, 1.0);
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Open the mic and start reporting its level as `voice-input-level`.
+///
+/// Returns a warning string when the saved device is gone and we fell back to the default
+/// — the unplugged-headset case, which must be visible rather than silently mute.
+#[tauri::command]
+fn voice_meter_start(
+    app: tauri::AppHandle,
+    monitor: State<voice::Monitor>,
+) -> Result<Option<String>, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    monitor.start(app.clone(), &cfg.voice_input_device, cfg.voice_input_gain)
+}
+
+/// Close the mic. Idempotent — the settings page calls it on unmount.
+#[tauri::command]
+fn voice_meter_stop(monitor: State<voice::Monitor>) {
+    monitor.stop();
+}
+
+/// Play a short tone on the configured output, so the player can confirm which headset
+/// voice will come out of before they're on a grid with twenty people.
+#[tauri::command]
+fn voice_test_output(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    voice::test_output(&cfg.voice_output_device, cfg.voice_output_volume)
+}
+
 /// Rebind the overlay hotkey. Validates and registers before saving, so a combo that
 /// another app already owns leaves the working one in place.
 #[tauri::command]
@@ -4574,17 +5009,38 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let url = tauri::WebviewUrl::External(
-        format!(
-            "{base}/wp-login.php?redirect_to={base}%2Fall-my-downloads%2F",
-            base = shop_session::SHOP_BASE
-        )
-        .parse()
-        .map_err(|e| format!("{e}"))?,
+    // Lands on `/robots.txt`, not `/all-my-downloads/`: every HTML path here is behind a
+    // managed challenge, so the old redirect walked straight into a second one the moment
+    // credentials were accepted. Static files aren't gated (measured: 200, no `cf-mitigated`).
+    let target = format!(
+        "{base}/wp-login.php?redirect_to={base}%2Frobots.txt",
+        base = shop_session::SHOP_BASE
     );
+    // A sign-in starts from a clean browser. An expired or mismatched `cf_clearance` is worse
+    // than none — it's presented, rejected, and the challenge re-served, which is the loop.
+    // Coarse on purpose: Tauri has no per-origin cookie delete, so mxb-mods.com re-clears its
+    // own check on next use.
+    let stale = shop_session::cookies_from_window_any(&app);
+    log::info!(
+        "opening the shop login window at {target} (clearing first; jar held: {})",
+        shop_session::cookie_names(&stale)
+    );
+    // The hidden purchases window goes first, for the same reason sign-*out* drops it: it is a
+    // browser parked on a page belonging to the session about to be thrown away. Clearing the
+    // cookies out from under a window that stays up leaves it displaying the old DOM, and that
+    // DOM is what the read straight after this sign-in would return — the login form, read back
+    // as "your session expired", which signs the user out a moment after signing them in.
+    shop_fetch::close(&app);
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW) {
+        if let Err(e) = main.clear_all_browsing_data() {
+            log::warn!("could not clear stale cookies before sign-in: {e}");
+        }
+    }
+    let url = tauri::WebviewUrl::External(target.parse().map_err(|e| format!("{e}"))?);
+    // No `.user_agent()` override: it claimed `Chrome/126.0` on Windows while actually being
+    // WKWebView on macOS. Left alone, the WebView introduces itself honestly.
     let window = tauri::WebviewWindowBuilder::new(&app, SHOP_LOGIN_WINDOW, url)
         .title("Sign in to MX Bikes Shop")
-        .user_agent(shop_session::UA)
         .inner_size(520.0, 760.0)
         .build()
         .map_err(|e| format!("{e:#}"))?;
@@ -4593,27 +5049,57 @@ async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         // ~5 minutes at 500ms intervals, then give up (user can retry).
+        let mut last_seen = Vec::new();
         for _ in 0..600u32 {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let Some(win) = app.get_webview_window(SHOP_LOGIN_WINDOW) else {
-                break; // user closed the window before finishing
+                // Closed by hand. That is a cancel rather than a failure, so it gets a log
+                // line and no error toast — but it does get a log line, because "the user gave
+                // up" and "the app stopped watching" are otherwise indistinguishable later.
+                log::info!(
+                    "the shop login window was closed before sign-in finished (cookies: {})",
+                    shop_session::cookie_names(&last_seen)
+                );
+                return;
             };
             let cookies = shop_session::cookies_from_window(&win);
-            if shop_session::is_authenticated(&cookies) {
-                let ok = match shop_session::set_session(&app, cookies) {
-                    Ok(()) => {
-                        log::info!("captured MX Bikes Shop session");
-                        true
-                    }
-                    Err(e) => {
-                        log::error!("failed to save shop session: {e:#}");
-                        false
-                    }
-                };
-                let _ = app.emit("shop-auth", ok);
-                let _ = win.close();
-                break;
+            if !shop_session::is_authenticated(&cookies) {
+                last_seen = cookies;
+                continue;
             }
+            let ok = match shop_session::set_session(&app, cookies) {
+                Ok(()) => {
+                    log::info!("captured MX Bikes Shop session");
+                    true
+                }
+                Err(e) => {
+                    log::error!("failed to save shop session: {e:#}");
+                    false
+                }
+            };
+            let _ = app.emit("shop-auth", ok);
+            let _ = win.close();
+            return;
+        }
+
+        // Five minutes on the page and never signed in.
+        //
+        // This used to end here in silence — no event, no log line — which is what makes a
+        // sign-in that cannot get past Cloudflare's challenge look like an app that has simply
+        // hung. The store fronts every path with a *managed* challenge, and an embedded WebView
+        // is exactly the visitor it is least willing to clear, so this is a real outcome and
+        // not a corner case. The cookie names say which it was: a `cf_clearance` means the
+        // challenge cleared and the sign-in itself never completed; no clearance means the
+        // window never got off the interstitial.
+        log::warn!(
+            "shop sign-in did not complete within 5 minutes (cookies: {})",
+            shop_session::cookie_names(&last_seen)
+        );
+        let _ = app.emit("shop-auth", false);
+        // Closed rather than left up: nothing is watching it any more, so a sign-in finished
+        // afterwards would go unnoticed. Retry reopens it.
+        if let Some(win) = app.get_webview_window(SHOP_LOGIN_WINDOW) {
+            let _ = win.close();
         }
     });
     Ok(())
@@ -4633,11 +5119,16 @@ fn shop_logout(app: tauri::AppHandle) {
 async fn shop_my_downloads(
     app: tauri::AppHandle,
     state: State<'_, shop_session::ShopSession>,
+    reload: Option<bool>,
 ) -> Result<Vec<mods::mxbshop::ShopItem>, String> {
-    let client = state
-        .client()
-        .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
-    mods::mxbshop::fetch_my_downloads(&app, &client)
+    // The captured cookies are what "signed in" means now; the `reqwest` client they also build
+    // is no longer what reads this page, because Cloudflare will not let it.
+    if !state.logged_in() {
+        return Err("Not signed in to MX Bikes Shop.".to_string());
+    }
+    // The hidden window keeps the page it loaded, so Refresh has to say so or it re-reads the
+    // same DOM. Absent (first load) means the window is being built and navigates anyway.
+    mods::mxbshop::fetch_my_downloads(&app, reload.unwrap_or(false))
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -4654,40 +5145,34 @@ async fn shop_match_catalog(
         .map_err(|e| format!("{e:#}"))
 }
 
-/// Download a purchased file and stage it for review. **Nothing is written under `mods/`.**
+/// Download a purchased file and install it, to a destination the caller already chose.
 ///
-/// The returned plan is an ordinary [`dropzone::DropPlan`], so the purchases grid hands it to
-/// the same review sheet a drag-and-drop produces and finishes through the existing
-/// `repreview_drop` / `commit_drop` / `cancel_drop` commands.
+/// The shop half of [`install::download_and_place`]: the bytes come through
+/// [`shop_fetch::download`] because the store's file URLs sit behind Cloudflare's managed
+/// challenge, and everything after that is the same extract-and-place every other install uses.
 ///
-/// That reuse is the point. The previous `shop_install` chose a `mods/` subfolder by matching
-/// keywords against the *product title* and always resolved the destination as if the purchase
-/// were a track — so a bought bike or gear set landed in a tracks-derived folder, silently and
-/// with no collision check. Routing by what the archive actually contains is the dropzone's job
-/// and it already does it well; this command's only work is getting the bytes to it.
+/// `subpath`/`dest_folder` arrive from the same dialog Browse uses, so nothing here guesses.
 #[tauri::command]
-async fn shop_stage(
+async fn shop_install(
     app: tauri::AppHandle,
     state: State<'_, shop_session::ShopSession>,
     item: mods::mxbshop::ShopItem,
-) -> Result<dropzone::DropPlan, String> {
-    let client = state
-        .client()
-        .ok_or_else(|| "Not signed in to MX Bikes Shop.".to_string())?;
+    subpath: String,
+    dest_folder: String,
+) -> Result<(), String> {
+    if !state.logged_in() {
+        return Err("Not signed in to MX Bikes Shop.".to_string());
+    }
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-    // Asked before the download, not after: `dropzone::plan` refuses an unconfigured folder
-    // too, but by then a track archive is several hundred megabytes already spent.
+    // Asked before the download: a track archive is several hundred megabytes to waste.
     if cfg.mods_path.trim().is_empty() {
         return Err("No MX Bikes folder is configured yet.".to_string());
     }
 
-    // Its own staging directory, separate from the one `dropzone::plan` will make: this holds
-    // the downloaded archive, and the plan gets its own extracted copy.
     let work = install::staging_dir("shop");
     std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
 
-    let archive = match install::download(&app, &client, &item.slug, &item.download_url, &work).await
-    {
+    let archive = match shop_fetch::download(&app, &item.slug, &item.download_url, &work).await {
         Ok(path) => path,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
@@ -4695,20 +5180,50 @@ async fn shop_stage(
         }
     };
 
-    let planned = tauri::async_runtime::spawn_blocking({
-        let mods_path = cfg.mods_path.clone();
-        let paths = vec![archive.to_string_lossy().into_owned()];
-        move || dropzone::plan(&mods_path, &paths)
+    // What identifies this purchase on disk afterwards. Both forms, because a `.pkz` is placed
+    // under its own file name while an archive that extracts lands in a folder named for its
+    // stem. Deliberately *not* the chosen destination folder: that is shared by everything
+    // filed there, so matching on it would badge every other mod in the same folder.
+    let names: Vec<String> = [archive.file_name(), archive.file_stem()]
+        .into_iter()
+        .flatten()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+
+    let placed = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        let cfg = cfg.clone();
+        let slug = item.slug.clone();
+        let work = work.clone();
+        move || install::extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder)
+            .map(|()| dest_folder)
     })
     .await
-    .map_err(|e| format!("shop_stage task failed: {e}"))?;
+    .map_err(|e| format!("shop_install task failed: {e}"))?;
 
-    // `plan` staged its own copy of everything it found, so the download has done its job
-    // either way — and leaving it behind would strand a whole archive in the temp directory
-    // for every purchase installed.
     let _ = std::fs::remove_dir_all(&work);
+    let dest_folder = placed.map_err(|e| format!("{e:#}"))?;
 
-    planned.map_err(|e| format!("{e:#}"))
+    // One place records what a purchase installed, so the badge is written on every path.
+    let _ = dest_folder;
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        if let Err(e) = shop_installed::record(&dir, &item.product, &names) {
+            log::warn!("could not record what {} installed: {e:#}", item.product);
+        }
+    }
+    Ok(())
+}
+
+/// Which purchased products have a recorded install, and the folders they claim.
+///
+/// The claim is not checked against disk here — the purchases grid already scans the library
+/// for its badges, so it does the intersecting and this stays a cheap read.
+#[tauri::command]
+fn shop_installed_map(
+    app: tauri::AppHandle,
+) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    Ok(shop_installed::recorded(&dir))
 }
 
 fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -4873,6 +5388,53 @@ async fn preset_bundle_import(
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let dir = presets_dir(&app)?;
     bundle::import(&app, &cfg, &dir, &text)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// What sharing these picked files would carry, and what it would leave out. Nothing is
+/// packed or uploaded — this is the dialog's preview.
+#[tauri::command]
+async fn file_share_plan(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<fileshare::SharePlan, String> {
+    // Off the UI thread: sizing a picked folder walks it, and a track folder is thousands
+    // of files.
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(fileshare::plan(&cfg, &paths))
+    })
+    .await
+    .map_err(|e| format!("file_share_plan task failed: {e}"))?
+}
+
+/// Pack the picked files, upload them, and hand back the `MXBS1-` code.
+#[tauri::command]
+async fn file_share_create(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    fileshare::create(&app, &cfg, &paths)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Read a share code without downloading anything — the import dialog's preview.
+#[tauri::command]
+fn file_share_preview(text: String) -> Result<fileshare::FileShare, String> {
+    fileshare::decode(&text).map_err(|e| format!("{e:#}"))
+}
+
+/// Download a share code's files and install them where they came from.
+#[tauri::command]
+async fn file_share_import(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<fileshare::FileShare, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    fileshare::import(&app, &cfg, &text)
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -5059,26 +5621,127 @@ fn log_level() -> log::LevelFilter {
     }
 }
 
-/// WebKitGTK renders through DMA-BUF by default, which asks the WebKit our AppImage carries
-/// from Ubuntu 22.04 to negotiate buffers with whatever Mesa/EGL the host happens to ship.
-/// On SteamOS that negotiation fails silently: the window appears, the web process never
-/// paints, and the user is left looking at a white rectangle with nothing on stdout to say
-/// why. The shared-memory fallback costs a copy per frame — imperceptible on a UI that is
-/// mostly static lists — and paints everywhere.
+/// What the session looks like, read once so the choice below is a pure function of it —
+/// the only way to test any of this from a machine that isn't the one it's for.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+struct GraphicsEnv {
+    /// Exported by the AppImage runtime. A `.deb`/`.rpm` install links the host's own
+    /// libraries, so the mismatch below can't reach it.
+    appimage: bool,
+    /// The compositor's socket — set on any Wayland session, gamescope included.
+    wayland: bool,
+    /// An X server is reachable, real or XWayland.
+    x_server: bool,
+    /// `MXB_SAFE_GRAPHICS=1`, for a white screen the defaults didn't cure.
+    safe_mode: bool,
+}
+
+impl GraphicsEnv {
+    fn read() -> Self {
+        let set = |key: &str| std::env::var_os(key).is_some_and(|v| !v.is_empty());
+        Self {
+            appimage: set("APPIMAGE"),
+            wayland: set("WAYLAND_DISPLAY"),
+            x_server: set("DISPLAY"),
+            safe_mode: std::env::var("MXB_SAFE_GRAPHICS").unwrap_or_default() == "1",
+        }
+    }
+}
+
+/// The environment WebKitGTK should start under. Two separate faults both end as a white
+/// window, and each has its own knob here.
+fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
+    // DMA-BUF asks the WebKit our AppImage carries from Ubuntu 22.04 to negotiate buffers
+    // with whatever Mesa the host ships; where that fails it fails silently, painting
+    // nothing. The shared-memory fallback costs a copy per frame — imperceptible on a UI
+    // of mostly static lists — and paints everywhere.
+    let mut vars = vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1")];
+
+    // WebKitGTK 2.46+ aborts outright when it can't create an EGL display, and our AppImage
+    // bundles Ubuntu 22.04's libwayland next to the host's Mesa — the pairing the AppImage
+    // excludelist warns about. XWayland never goes down that path. Guarded on there being
+    // an X server to land on: forcing the backend without one trades a white screen for no
+    // window at all.
+    if env.wayland && env.x_server && (env.appimage || env.safe_mode) {
+        vars.push(("GDK_BACKEND", "x11"));
+    }
+
+    // Asked for by hand, once the above wasn't enough: take the GPU out of it entirely.
+    if env.safe_mode {
+        vars.push(("WEBKIT_DISABLE_COMPOSITING_MODE", "1"));
+        vars.push(("LIBGL_ALWAYS_SOFTWARE", "1"));
+    }
+
+    vars
+}
+
+/// Defaults, not overrides — anything already set explicitly wins, so a machine whose driver
+/// stack handles the fast paths can ask for them back with `GDK_BACKEND=wayland`.
 ///
-/// A default, not an override: an explicit `WEBKIT_DISABLE_DMABUF_RENDERER=0` still wins, so
-/// a machine whose driver stack handles the fast path can ask for it back.
-///
-/// Has to run before the first window is built, since WebKit reads this when it spawns the
+/// Has to run before the first window is built, since WebKit reads these when it spawns the
 /// web process, and before any other thread exists — being `main`'s first statement gives
 /// both.
 fn prepare_webview_env() {
-    if cfg!(target_os = "linux") && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    for (key, value) in webview_env_defaults(GraphicsEnv::read()) {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+        }
+    }
+}
+
+/// Whether this process is running under Wine — CrossOver, Whisky, Kegworks or plain Wine.
+///
+/// `ntdll` exports `wine_get_version` under Wine and never on real Windows, which is the
+/// check Wine documents for programs that need to tell. It matters here because Wine's
+/// `ole32` faults inside `RegisterDragDrop`: the app came up as a transparent window and
+/// died in `ole32` from its own window procedure, with WebView2 already running.
+#[cfg(windows)]
+fn under_wine() -> bool {
+    use std::os::raw::{c_char, c_void};
+
+    extern "system" {
+        fn GetModuleHandleA(name: *const c_char) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *mut c_void;
+    }
+
+    // SAFETY: both take a NUL-terminated name and return null rather than failing. `ntdll`
+    // is always already loaded, so this never brings a library in.
+    unsafe {
+        let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr() as *const c_char);
+        !ntdll.is_null()
+            && !GetProcAddress(ntdll, b"wine_get_version\0".as_ptr() as *const c_char).is_null()
+    }
+}
+
+#[cfg(not(windows))]
+fn under_wine() -> bool {
+    false
+}
+
+/// Whether to register the OS drag-drop handler on the main window.
+///
+/// Under Wine it is what crashes the app, so it comes off there and stays on everywhere
+/// else — a Windows player keeps the dropzone. `MXB_DRAG_DROP` forces the answer either way
+/// (`0` off, `1` on) so one build can be tried both ways.
+fn drag_drop_enabled() -> bool {
+    match std::env::var("MXB_DRAG_DROP").ok().as_deref() {
+        Some("0") => false,
+        Some("1") => true,
+        _ => !under_wine(),
     }
 }
 
 fn main() {
+    // Before anything else: in a release build, refuse to run under a debugger. A live
+    // debugger attached to the process defeats the static hardening the release profile
+    // pays for (stripped symbols, fat LTO, no debug info), so this is the runtime half of
+    // it. No-op in debug builds, so `tauri dev` and the tests stay debuggable. See
+    // `antidebug`.
+    antidebug::guard();
+
     prepare_webview_env();
 
     let builder = tauri::Builder::default();
@@ -5152,17 +5815,50 @@ fn main() {
         .manage(ProfileWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
+        .manage(voice::Monitor::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
+
+            // The main window is `"create": false` in tauri.conf.json so it is built here
+            // rather than by Tauri's own startup loop, which is the only way to decide the
+            // drag-drop handler per run: it can only be turned off while the window is
+            // being built. Everything else about the window still comes from the config,
+            // the macOS overrides in `tauri.macos.conf.json` included — and that file
+            // replaces this array wholesale, so it has to repeat `"create": false` or
+            // Tauri opens `main` itself and the build below aborts on the duplicate.
+            let drag_drop = drag_drop_enabled();
+            log::info!("wine={} drag-drop-handler={}", under_wine(), drag_drop);
+            for window_config in app
+                .config()
+                .app
+                .windows
+                .iter()
+                .filter(|w| w.label == MAIN_WINDOW)
+            {
+                let mut builder =
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?;
+                if !drag_drop {
+                    builder = builder.disable_drag_drop_handler();
+                }
+                builder.build()?;
+            }
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
             log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
-            // A blank webview leaves nothing else behind to diagnose from, so record which
-            // renderer path this run took. See `prepare_webview_env`.
+            // A blank webview leaves nothing else behind to diagnose from, so record the
+            // session this run started under and every knob `prepare_webview_env` settled on.
             if cfg!(target_os = "linux") {
+                let on = |key: &str| std::env::var(key).unwrap_or_default() == "1";
                 log::info!(
-                    "webview dmabuf renderer disabled: {}",
-                    std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap_or_default() == "1"
+                    "webview env: appimage={} wayland={} x_server={} gdk_backend={} \
+                     dmabuf_disabled={} compositing_disabled={} software_gl={}",
+                    std::env::var_os("APPIMAGE").is_some(),
+                    std::env::var_os("WAYLAND_DISPLAY").is_some(),
+                    std::env::var_os("DISPLAY").is_some(),
+                    std::env::var("GDK_BACKEND").unwrap_or_else(|_| "default".into()),
+                    on("WEBKIT_DISABLE_DMABUF_RENDERER"),
+                    on("WEBKIT_DISABLE_COMPOSITING_MODE"),
+                    on("LIBGL_ALWAYS_SOFTWARE"),
                 );
             }
             if let Ok(dir) = app.path().app_local_data_dir() {
@@ -5278,6 +5974,9 @@ fn main() {
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
+            // Same again for the shop's signed-in half. Nothing opens until the purchases tab
+            // is actually used, so a user who never signs in never pays for the window.
+            shop_fetch::init(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -5333,6 +6032,10 @@ fn main() {
             get_pkz_meta_cached,
             get_pkz_meta,
             get_pkz_preview,
+            read_track_info,
+            load_track_terrain,
+            load_track_overview,
+            diagnose_track,
             unpack_paint,
             texture_bytes,
             unpack_pkz,
@@ -5344,6 +6047,8 @@ fn main() {
             list_gear_paints,
             list_installed_gear_paints,
             paint_studio_load,
+            paint_studio_pixels,
+            paint_studio_stage,
             paint_studio_target,
             paint_studio_save,
             paint_studio_extract,
@@ -5359,6 +6064,7 @@ fn main() {
             bind_sound,
             unbind_sound,
             reshade_status,
+            set_reshade_path,
             apply_reshade_preset,
             delete_reshade_preset,
             detect_loose_swaps,
@@ -5374,7 +6080,12 @@ fn main() {
             move_mod,
             uninstall_mod,
             reveal_in_explorer,
+            logs_info,
+            open_logs_folder,
+            export_logs,
             set_game_path,
+            set_wine_runner,
+            wine_host_info,
             set_mods_path,
             set_intro_seen,
             set_seen_version,
@@ -5392,6 +6103,15 @@ fn main() {
             overlay_state,
             set_overlay_enabled,
             set_overlay_hotkey,
+            voice_devices,
+            set_voice_enabled,
+            set_voice_input_device,
+            set_voice_output_device,
+            set_voice_ptt_hotkey,
+            set_voice_levels,
+            voice_meter_start,
+            voice_meter_stop,
+            voice_test_output,
             set_watch_mods_reload,
             frostmod_reload,
             frostmod_running,
@@ -5431,7 +6151,8 @@ fn main() {
             shop_logout,
             shop_my_downloads,
             shop_match_catalog,
-            shop_stage,
+            shop_install,
+            shop_installed_map,
             shop_catalog_available,
             shop_catalog_status,
             shop_catalog_categories,
@@ -5454,6 +6175,10 @@ fn main() {
             preset_bundle_stats,
             preset_bundle_create,
             preset_bundle_import,
+            file_share_plan,
+            file_share_create,
+            file_share_preview,
+            file_share_import,
             mods_state_scan,
             mods_state_plan,
             mods_state_set,
@@ -5476,6 +6201,101 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod webview_env_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn defaults(env: GraphicsEnv) -> HashMap<&'static str, &'static str> {
+        webview_env_defaults(env).into_iter().collect()
+    }
+
+    /// SteamOS, both modes: Desktop is Plasma Wayland and gamescope is a compositor of its
+    /// own, and each runs an XWayland the app can land on instead.
+    const STEAMOS: GraphicsEnv = GraphicsEnv {
+        appimage: true,
+        wayland: true,
+        x_server: true,
+        safe_mode: false,
+    };
+
+    /// The cheap fix for the silent no-paint fault, and it costs a machine nothing that
+    /// works already — so it goes on everywhere rather than being guessed at.
+    #[test]
+    fn the_shared_memory_renderer_is_always_the_default() {
+        for env in [
+            GraphicsEnv::default(),
+            STEAMOS,
+            GraphicsEnv { appimage: false, ..STEAMOS },
+            GraphicsEnv { safe_mode: true, ..STEAMOS },
+        ] {
+            assert_eq!(
+                defaults(env).get("WEBKIT_DISABLE_DMABUF_RENDERER"),
+                Some(&"1"),
+                "{env:?} should have fallen back to shared memory",
+            );
+        }
+    }
+
+    /// The bug this exists for: WebKitGTK aborts on EGL_BAD_PARAMETER and the window never
+    /// paints. XWayland sidesteps the EGL path the bundled libwayland breaks.
+    #[test]
+    fn an_appimage_on_wayland_goes_through_xwayland() {
+        assert_eq!(defaults(STEAMOS).get("GDK_BACKEND"), Some(&"x11"));
+    }
+
+    /// A `.deb`/`.rpm` links the host's libwayland, so it never hits the mismatch — and
+    /// XWayland would cost it sharpness under fractional scaling for nothing.
+    #[test]
+    fn an_installed_build_keeps_native_wayland() {
+        let installed = GraphicsEnv { appimage: false, ..STEAMOS };
+        assert_eq!(defaults(installed).get("GDK_BACKEND"), None);
+    }
+
+    /// Without an X server to fall back to, forcing the backend trades a white screen for
+    /// no window at all.
+    #[test]
+    fn wayland_with_no_x_server_is_left_alone() {
+        let no_xwayland = GraphicsEnv { x_server: false, ..STEAMOS };
+        assert_eq!(defaults(no_xwayland).get("GDK_BACKEND"), None);
+
+        let safe = GraphicsEnv { safe_mode: true, ..no_xwayland };
+        assert_eq!(defaults(safe).get("GDK_BACKEND"), None);
+    }
+
+    /// GTK already picks X11 there; saying so again would only be noise in the log.
+    #[test]
+    fn a_plain_x11_session_needs_no_override() {
+        let x11_only = GraphicsEnv { wayland: false, ..STEAMOS };
+        assert_eq!(defaults(x11_only).get("GDK_BACKEND"), None);
+    }
+
+    /// The escape hatch to hand someone whose screen is still white: every knob at once.
+    #[test]
+    fn safe_mode_takes_the_gpu_out_of_it() {
+        let vars = defaults(GraphicsEnv { safe_mode: true, ..STEAMOS });
+        assert_eq!(vars.get("GDK_BACKEND"), Some(&"x11"));
+        assert_eq!(vars.get("WEBKIT_DISABLE_COMPOSITING_MODE"), Some(&"1"));
+        assert_eq!(vars.get("LIBGL_ALWAYS_SOFTWARE"), Some(&"1"));
+    }
+
+    /// Asking for it by hand reaches an installed build too — the fault it cures needn't be
+    /// the bundled-library one.
+    #[test]
+    fn safe_mode_reaches_an_installed_build() {
+        let installed = GraphicsEnv { appimage: false, safe_mode: true, ..STEAMOS };
+        assert_eq!(defaults(installed).get("GDK_BACKEND"), Some(&"x11"));
+    }
+
+    /// Nothing is imposed on a desktop that was never broken.
+    #[test]
+    fn an_ordinary_session_gets_only_the_renderer_default() {
+        let vars = defaults(GraphicsEnv::default());
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains_key("WEBKIT_DISABLE_DMABUF_RENDERER"));
+    }
 }
 
 #[cfg(test)]
@@ -5535,6 +6355,7 @@ mod window_tests {
 
         for transient in [
             mxb_fetch::WINDOW,
+            shop_fetch::WINDOW,
             SHOP_LOGIN_WINDOW,
             overlay::LABEL, // handled earlier by its own branch, but never by this one
         ] {
@@ -5546,28 +6367,37 @@ mod window_tests {
         }
     }
 
-    /// The security boundary. The fetch window runs a *remote* origin — mxb-mods.com's own
-    /// page — and its capability grants IPC, which `generate_handler!` commands are not
-    /// gated by. So it gets exactly one call and nothing else; if this test ever goes green
-    /// on a second command, script on mxb-mods.com can drive that command.
+    /// The security boundary. Both fetch windows run a *remote* origin — mxb-mods.com's own
+    /// page in one, mxbikes-shop.com's signed-in page in the other — and their capabilities
+    /// grant IPC, which `generate_handler!` commands are not gated by. So each gets exactly one
+    /// call and nothing else; if this test ever goes green on a second command, script on those
+    /// sites can drive that command.
+    ///
+    /// The shop window is the sharper case of the two: it is signed in as the user, and
+    /// `shop_install` writes files.
     #[test]
-    fn the_remote_fetch_window_may_only_emit_its_result() {
-        assert!(ipc_allowed(mxb_fetch::WINDOW, "plugin:event|emit"));
+    fn the_remote_fetch_windows_may_only_emit_their_result() {
+        for remote in [mxb_fetch::WINDOW, shop_fetch::WINDOW] {
+            assert!(ipc_allowed(remote, "plugin:event|emit"), "{remote}");
 
-        for forbidden in [
-            "create_config",
-            "install_mod",
-            "mods_state_delete",
-            "get_config",
-            "plugin:shell|open",
-            "plugin:dialog|open",
-            "plugin:event|listen",
-            "plugin:process|restart",
-        ] {
-            assert!(
-                !ipc_allowed(mxb_fetch::WINDOW, forbidden),
-                "mxb-mods.com script must not be able to call {forbidden}"
-            );
+            for forbidden in [
+                "create_config",
+                "install_mod",
+                "mods_state_delete",
+                "get_config",
+                "shop_install",
+                "shop_logout",
+                "commit_drop",
+                "plugin:shell|open",
+                "plugin:dialog|open",
+                "plugin:event|listen",
+                "plugin:process|restart",
+            ] {
+                assert!(
+                    !ipc_allowed(remote, forbidden),
+                    "script on {remote}'s remote origin must not be able to call {forbidden}"
+                );
+            }
         }
     }
 

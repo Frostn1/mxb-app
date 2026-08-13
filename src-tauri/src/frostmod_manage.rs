@@ -49,7 +49,10 @@ pub struct FrostmodStatus {
     pub missing_runtimes: Vec<crate::vcruntime::Runtime>,
 }
 
-fn frostmod_dir(app: &AppHandle) -> PathBuf {
+/// The folder we install FrostMod into and run it from — so also where anything it
+/// writes relative to its working directory lands (see `start`, which sets `current_dir`
+/// to it). Public for `logs`, which offers that folder up when a report needs it.
+pub fn frostmod_dir(app: &AppHandle) -> PathBuf {
     // Local app-data dir (Windows: `%LOCALAPPDATA%\com.frost.mxbikes\frostmod`).
     app.path()
         .app_local_data_dir()
