@@ -154,10 +154,28 @@ if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) {
 #
 # Best-effort: a server with no mod bikes is still a working server for stock ones, and is a
 # far better outcome than destroying the instance over content that can be added later.
-Send-Stage -Stage "installing bikes"
 try {
-  $bikesDir = "${ROOT}\\game\\mods\\bikes"
+  # Where MX Bikes actually reads mods from.
+  #
+  # The client reads them from PiBoSo's user folder -- Documents\\PiBoSo\\MX Bikes\\mods -- not
+  # from beside the executable. The dedicated server is the same program, and running as
+  # SYSTEM its Documents folder is under systemprofile. Installing only into the game folder
+  # is why a server rejected riders on bikes it had supposedly been given: the files were on
+  # disk and the game was never looking there.
+  #
+  # Installed once into the user folder, with the game folder junctioned to it, so the
+  # agent's own track scan sees the same content without a second copy of two gigabytes.
+  $userMods = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "PiBoSo\\MX Bikes\\mods"
+  $bikesDir = Join-Path $userMods "bikes"
   New-Item -ItemType Directory -Force -Path $bikesDir | Out-Null
+  Send-Stage -Stage "installing bikes"
+  Write-Output "mods folder: $userMods"
+  $gameMods = "${ROOT}\\game\\mods"
+  if (-not (Test-Path $gameMods)) {
+    # A junction rather than a copy: same bytes, both paths, no second 2 GB.
+    cmd /c mklink /J "$gameMods" "$userMods" | Out-Null
+    Write-Output "linked $gameMods -> $userMods"
+  }
   $listing = Invoke-RestMethod -Uri "${input.controlPlaneUrl}/v1/content/bikes" -TimeoutSec 60
   $count = 0
   foreach ($bike in $listing.bikes) {
