@@ -889,6 +889,36 @@ export const es: Translation = {
   "library.bulkMoved_one": "{{count}} elemento movido a {{folder}}",
   "library.bulkMoved_other": "{{count}} elementos movidos a {{folder}}",
 
+  // ── Compartir archivos instalados (cualquier pista o pintura) ──────────────
+  "share.share": "Compartir",
+  "share.action": "Compartir…",
+  "share.title": "Comparte estos archivos",
+  "share.hint":
+    "Los empaqueta, los sube y te da un único código para pegar donde quieras. Quien lo pegue recibe los archivos en las mismas carpetas.",
+  "share.hintDone": "Envía este código: instala todo lo que aparece arriba.",
+  "share.nothingToShare":
+    "Aquí no hay nada que compartir: en un código solo caben archivos de tu carpeta mods.",
+  "share.skipped_one": "1 elemento excluido ({{reason}}).",
+  "share.skipped_other": "{{count}} elementos excluidos ({{reason}}).",
+  "share.createCode_one": "Compartir 1 archivo ({{size}})",
+  "share.createCode_other": "Compartir {{count}} archivos ({{size}})",
+  "share.copyCode": "Copiar código",
+  "share.copied": "Código de compartir copiado.",
+  "share.uploaded": "Subido: copia el código de abajo.",
+  "share.uploadedCopied": "Subido: el código está en el portapapeles.",
+  "share.importAction": "Pegar un código…",
+  "share.importTitle": "Importar archivos compartidos",
+  "share.importBody":
+    "Pega el código que te han enviado. Los archivos se instalan donde los tenía quien los compartió.",
+  "share.downloadNotice": "Descarga {{size}} desde {{host}}.",
+  "share.install": "Descargar e instalar",
+  "share.installed_one": "1 archivo instalado.",
+  "share.installed_other": "{{count}} archivos instalados.",
+  "share.phasePacking": "Empaquetando archivos…",
+  "share.phaseUploading": "Subiendo…",
+  "share.phaseDownloading": "Descargando…",
+  "share.phaseInstalling": "Instalando…",
+
   // ── Taquilla ───────────────────────────────────────────────────────────────
   "locker.help":
     "Cambia el modelo y el sonido del motor de cada moto entre los sets que tengas instalados.",

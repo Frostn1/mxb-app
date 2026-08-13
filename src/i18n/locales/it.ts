@@ -882,6 +882,36 @@ export const it: Translation = {
   "library.bulkMoved_one": "Spostato {{count}} elemento in {{folder}}",
   "library.bulkMoved_other": "Spostati {{count}} elementi in {{folder}}",
 
+  // ── Condivisione dei file installati (qualsiasi pista o vernice) ───────────
+  "share.share": "Condividi",
+  "share.action": "Condividi…",
+  "share.title": "Condividi questi file",
+  "share.hint":
+    "Li impacchetta, li carica e ti dà un unico codice da incollare dove vuoi. Chi lo incolla ottiene i file nelle stesse cartelle.",
+  "share.hintDone": "Invia questo codice: installa tutto quello che vedi sopra.",
+  "share.nothingToShare":
+    "Qui non c'è niente da condividere: in un codice possono finire solo i file dentro la tua cartella mods.",
+  "share.skipped_one": "1 elemento escluso ({{reason}}).",
+  "share.skipped_other": "{{count}} elementi esclusi ({{reason}}).",
+  "share.createCode_one": "Condividi 1 file ({{size}})",
+  "share.createCode_other": "Condividi {{count}} file ({{size}})",
+  "share.copyCode": "Copia codice",
+  "share.copied": "Codice di condivisione copiato.",
+  "share.uploaded": "Caricato: copia il codice qui sotto.",
+  "share.uploadedCopied": "Caricato: il codice è negli appunti.",
+  "share.importAction": "Incolla un codice…",
+  "share.importTitle": "Importa file condivisi",
+  "share.importBody":
+    "Incolla il codice che ti hanno mandato. I file si installano dove li teneva chi li ha condivisi.",
+  "share.downloadNotice": "Scarica {{size}} da {{host}}.",
+  "share.install": "Scarica e installa",
+  "share.installed_one": "Installato 1 file.",
+  "share.installed_other": "Installati {{count}} file.",
+  "share.phasePacking": "Preparazione dei file…",
+  "share.phaseUploading": "Caricamento…",
+  "share.phaseDownloading": "Download…",
+  "share.phaseInstalling": "Installazione…",
+
   // ── Armadietto ─────────────────────────────────────────────────────────────
   "locker.help":
     "Cambia il modello e il suono del motore di ogni moto tra i set che hai installato.",

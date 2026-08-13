@@ -18,6 +18,8 @@ import {
   FileArchive,
   Folder,
   Loader2,
+  Share2,
+  ClipboardPaste,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -42,6 +44,7 @@ import {
 } from "./categories";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import LibraryDetail from "./LibraryDetail";
+import { ShareDialog, ImportShareDialog } from "./ShareDialogs";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
 import { useConfig } from "../../Context/Config";
@@ -276,6 +279,9 @@ export default function Library({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [bulkUninstallOpen, setBulkUninstallOpen] = useState(false);
+  // Non-null while the share dialog is up: the absolute paths it's about to pack.
+  const [sharePaths, setSharePaths] = useState<string[] | null>(null);
+  const [importShareOpen, setImportShareOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -452,6 +458,12 @@ export default function Library({
         ]
       : []),
     {
+      key: "share",
+      icon: Share2,
+      label: t("share.action"),
+      onSelect: () => setSharePaths([item.path]),
+    },
+    {
       key: "reveal",
       icon: FolderOpen,
       label: t("library.showInExplorer"),
@@ -478,6 +490,7 @@ export default function Library({
           onReveal={reveal}
           onUninstall={setUninstallTarget}
           onMove={setMoveTarget}
+          onShare={(e) => setSharePaths([e.path])}
           onOpenEntry={setDetail}
         />
       ) : (
@@ -546,6 +559,12 @@ export default function Library({
             <DropdownMenuItem onSelect={() => void pickAndImport("folder")}>
               <Folder className="size-3.5" />
               {t("import.pickFolder")}
+            </DropdownMenuItem>
+            {/* The other end of the Share action below — someone pasted you a code. */}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setImportShareOpen(true)}>
+              <ClipboardPaste className="size-3.5" />
+              {t("share.importAction")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -696,6 +715,14 @@ export default function Library({
             <Button
               variant="outline"
               size="sm"
+              disabled={selected.size === 0 || busy}
+              onClick={() => setSharePaths(selectedEntries.map((e) => e.path))}
+            >
+              <Share2 className="size-3.5" /> {t("share.share")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               disabled={selectedMovable.length === 0 || busy}
               onClick={() => setBulkMoveOpen(true)}
             >
@@ -728,6 +755,18 @@ export default function Library({
         stockGearPart={view3dProps?.stockGearPart}
         initialPaint={view3dProps?.initialPaint}
         initialGoggles={view3dProps?.initialGoggles}
+      />
+
+      <ShareDialog paths={sharePaths} onClose={() => setSharePaths(null)} />
+
+      <ImportShareDialog
+        open={importShareOpen}
+        onClose={() => setImportShareOpen(false)}
+        onImported={() => {
+          setImportShareOpen(false);
+          void load();
+          onChanged();
+        }}
       />
 
       <MoveDialog

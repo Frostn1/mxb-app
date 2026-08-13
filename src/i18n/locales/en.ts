@@ -867,6 +867,36 @@ export const en = {
   "library.bulkMoved_one": "Moved {{count}} item to {{folder}}",
   "library.bulkMoved_other": "Moved {{count}} items to {{folder}}",
 
+  // ── Sharing installed files (any track or paint, not just presets) ─────────
+  "share.share": "Share",
+  "share.action": "Share…",
+  "share.title": "Share these files",
+  "share.hint":
+    "Packs them up, uploads them, and gives you one code to paste anywhere. Whoever pastes it back gets the files in the same folders.",
+  "share.hintDone": "Send this code — it installs everything listed above.",
+  "share.nothingToShare":
+    "Nothing here can be shared — only files inside your mods folder can go in a code.",
+  "share.skipped_one": "1 pick left out ({{reason}}).",
+  "share.skipped_other": "{{count}} picks left out ({{reason}}).",
+  "share.createCode_one": "Share 1 file ({{size}})",
+  "share.createCode_other": "Share {{count}} files ({{size}})",
+  "share.copyCode": "Copy code",
+  "share.copied": "Share code copied.",
+  "share.uploaded": "Uploaded — copy the code below.",
+  "share.uploadedCopied": "Uploaded — the code is on your clipboard.",
+  "share.importAction": "Paste a share code…",
+  "share.importTitle": "Import shared files",
+  "share.importBody":
+    "Paste a share code someone sent you. The files install where they had them.",
+  "share.downloadNotice": "Downloads {{size}} from {{host}}.",
+  "share.install": "Download & install",
+  "share.installed_one": "Installed 1 file.",
+  "share.installed_other": "Installed {{count}} files.",
+  "share.phasePacking": "Packing files…",
+  "share.phaseUploading": "Uploading…",
+  "share.phaseDownloading": "Downloading…",
+  "share.phaseInstalling": "Installing…",
+
   // ── Locker (per-bike model + sound swaps) ──────────────────────────────────
   "locker.help":
     "Swap each bike's model and engine sound between the sets you've installed.",

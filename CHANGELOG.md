@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — share any track or paint, not just a preset
+
+### Added
+- **Share installed files with a code.** Sharing was a preset's privilege: a code carried a
+  *look*, and the full bundle packed whatever its slots resolved to. Handing someone the track
+  you just rode, or the paint you just made, still meant uploading it somewhere and pasting a
+  link. Anything the Library lists can now go straight into a code — **Share** on any item, or
+  pick several with **Select** and share them together. It packs them, uploads them, and puts
+  one line on your clipboard.
+- **The other end: Import → Paste a share code…** Files land back in the folders the sender
+  had them in — a track filed under `tracks/EU/` arrives under `tracks/EU/`, a helmet paint
+  goes to the helmet it belongs to — so a share carries where things go, not just what they
+  are. The code is previewed before anything downloads: what it holds, how big it is, and
+  where it's hosted.
+- Sharing reuses the preset bundle's upload, so the same 2 GB ceiling and the same slicing
+  past one part apply, and a share whose parts have gone missing says which one.
+
 ## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
 
 On top of v0.9.1 — the Designer's painting tools, Play on macOS and the SteamOS white screen

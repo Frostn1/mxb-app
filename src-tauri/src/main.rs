@@ -10,6 +10,7 @@ mod config;
 mod cookie_session;
 mod dropzone;
 mod edf;
+mod fileshare;
 mod frostmod;
 mod frostmod_manage;
 mod game;
@@ -5384,6 +5385,53 @@ async fn preset_bundle_import(
         .map_err(|e| format!("{e:#}"))
 }
 
+/// What sharing these picked files would carry, and what it would leave out. Nothing is
+/// packed or uploaded — this is the dialog's preview.
+#[tauri::command]
+async fn file_share_plan(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<fileshare::SharePlan, String> {
+    // Off the UI thread: sizing a picked folder walks it, and a track folder is thousands
+    // of files.
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(fileshare::plan(&cfg, &paths))
+    })
+    .await
+    .map_err(|e| format!("file_share_plan task failed: {e}"))?
+}
+
+/// Pack the picked files, upload them, and hand back the `MXBS1-` code.
+#[tauri::command]
+async fn file_share_create(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    fileshare::create(&app, &cfg, &paths)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Read a share code without downloading anything — the import dialog's preview.
+#[tauri::command]
+fn file_share_preview(text: String) -> Result<fileshare::FileShare, String> {
+    fileshare::decode(&text).map_err(|e| format!("{e:#}"))
+}
+
+/// Download a share code's files and install them where they came from.
+#[tauri::command]
+async fn file_share_import(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<fileshare::FileShare, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    fileshare::import(&app, &cfg, &text)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// Every mod Manage can act on, enabled and disabled alike.
 #[tauri::command]
 async fn mods_state_scan(app: tauri::AppHandle) -> Result<Vec<modstate::ModEntry>, String> {
@@ -6120,6 +6168,10 @@ fn main() {
             preset_bundle_stats,
             preset_bundle_create,
             preset_bundle_import,
+            file_share_plan,
+            file_share_create,
+            file_share_preview,
+            file_share_import,
             mods_state_scan,
             mods_state_plan,
             mods_state_set,

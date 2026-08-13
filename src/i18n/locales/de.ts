@@ -898,6 +898,36 @@ export const de: Translation = {
   "library.bulkMoved_other":
     "{{count}} Elemente nach {{folder}} verschoben",
 
+  // ── Installierte Dateien teilen (jede Strecke, jede Lackierung) ────────────
+  "share.share": "Teilen",
+  "share.action": "Teilen…",
+  "share.title": "Diese Dateien teilen",
+  "share.hint":
+    "Wir packen sie ein, laden sie hoch und geben dir einen einzigen Code zum Einfügen. Wer ihn einfügt, bekommt die Dateien in denselben Ordnern.",
+  "share.hintDone": "Schick diesen Code weiter — er installiert alles von oben.",
+  "share.nothingToShare":
+    "Hier gibt es nichts zu teilen — in einen Code passen nur Dateien aus deinem mods-Ordner.",
+  "share.skipped_one": "1 Auswahl ausgelassen ({{reason}}).",
+  "share.skipped_other": "{{count}} Auswahlen ausgelassen ({{reason}}).",
+  "share.createCode_one": "1 Datei teilen ({{size}})",
+  "share.createCode_other": "{{count}} Dateien teilen ({{size}})",
+  "share.copyCode": "Code kopieren",
+  "share.copied": "Teilen-Code kopiert.",
+  "share.uploaded": "Hochgeladen — kopier den Code unten.",
+  "share.uploadedCopied": "Hochgeladen — der Code liegt in der Zwischenablage.",
+  "share.importAction": "Teilen-Code einfügen…",
+  "share.importTitle": "Geteilte Dateien importieren",
+  "share.importBody":
+    "Füg den Code ein, den du bekommen hast. Die Dateien landen dort, wo der Absender sie hatte.",
+  "share.downloadNotice": "Lädt {{size}} von {{host}}.",
+  "share.install": "Herunterladen & installieren",
+  "share.installed_one": "1 Datei installiert.",
+  "share.installed_other": "{{count}} Dateien installiert.",
+  "share.phasePacking": "Dateien werden gepackt…",
+  "share.phaseUploading": "Wird hochgeladen…",
+  "share.phaseDownloading": "Wird heruntergeladen…",
+  "share.phaseInstalling": "Wird installiert…",
+
   // ── Spind ──────────────────────────────────────────────────────────────────
   "locker.help":
     "Wechsle Modell und Motorsound jedes Motorrads zwischen den Sets, die du installiert hast.",

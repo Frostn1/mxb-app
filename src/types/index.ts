@@ -917,6 +917,36 @@ export interface BundleProgress {
   message?: string;
 }
 
+/** Where a shared file goes back on the importer's machine. */
+export interface ShareItem {
+  name: string;
+  /** Path under the mods root, forward-slashed (`tracks/EU/RedBud.pkz`). */
+  rel: string;
+  size: number;
+  isDir: boolean;
+}
+
+/** A picked path that can't be shared, and why. */
+export interface ShareSkipped {
+  path: string;
+  reason: string;
+}
+
+/** Preview of what sharing the current picks would carry — nothing is uploaded yet. */
+export interface SharePlan {
+  items: ShareItem[];
+  skipped: ShareSkipped[];
+  totalSize: number;
+}
+
+/** What a `MXBS1-` file-share code decodes to. */
+export interface FileShare {
+  items: ShareItem[];
+  /** Size of the hosted zip — what an import downloads. */
+  totalSize: number;
+  bundle: BundleRef;
+}
+
 export type SlotSource =
   | "bikePaint" // liveries for the selected bike
   | "helmet" // helmet models

@@ -886,6 +886,36 @@ export const ptBR: Translation = {
   "library.bulkMoved_one": "{{count}} item movido para {{folder}}",
   "library.bulkMoved_other": "{{count}} itens movidos para {{folder}}",
 
+  // ── Compartilhar arquivos instalados (qualquer pista ou pintura) ───────────
+  "share.share": "Compartilhar",
+  "share.action": "Compartilhar…",
+  "share.title": "Compartilhar estes arquivos",
+  "share.hint":
+    "A gente empacota, envia e te devolve um código só para colar onde quiser. Quem colar recebe os arquivos nas mesmas pastas.",
+  "share.hintDone": "Manda esse código — ele instala tudo que está listado acima.",
+  "share.nothingToShare":
+    "Não há nada para compartilhar aqui — só arquivos dentro da sua pasta mods cabem em um código.",
+  "share.skipped_one": "1 item de fora ({{reason}}).",
+  "share.skipped_other": "{{count}} itens de fora ({{reason}}).",
+  "share.createCode_one": "Compartilhar 1 arquivo ({{size}})",
+  "share.createCode_other": "Compartilhar {{count}} arquivos ({{size}})",
+  "share.copyCode": "Copiar código",
+  "share.copied": "Código de compartilhamento copiado.",
+  "share.uploaded": "Enviado — copie o código abaixo.",
+  "share.uploadedCopied": "Enviado — o código está na área de transferência.",
+  "share.importAction": "Colar um código…",
+  "share.importTitle": "Importar arquivos compartilhados",
+  "share.importBody":
+    "Cole o código que te mandaram. Os arquivos são instalados onde quem compartilhou os mantinha.",
+  "share.downloadNotice": "Baixa {{size}} de {{host}}.",
+  "share.install": "Baixar e instalar",
+  "share.installed_one": "1 arquivo instalado.",
+  "share.installed_other": "{{count}} arquivos instalados.",
+  "share.phasePacking": "Empacotando arquivos…",
+  "share.phaseUploading": "Enviando…",
+  "share.phaseDownloading": "Baixando…",
+  "share.phaseInstalling": "Instalando…",
+
   // ── Armário ────────────────────────────────────────────────────────────────
   "locker.help":
     "Troque o modelo e o som do motor de cada moto entre os sets que você instalou.",
