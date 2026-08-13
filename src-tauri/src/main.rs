@@ -5621,6 +5621,17 @@ fn log_level() -> log::LevelFilter {
     }
 }
 
+/// The values of `GDK_BACKEND` this code has to tell apart. Anything else — `broadway`, or a
+/// comma-separated list of fallbacks — is somebody being deliberate, and is left alone.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+enum Backend {
+    #[default]
+    Unset,
+    X11,
+    Wayland,
+    Other,
+}
+
 /// What the session looks like, read once so the choice below is a pure function of it —
 /// the only way to test any of this from a machine that isn't the one it's for.
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
@@ -5632,64 +5643,212 @@ struct GraphicsEnv {
     wayland: bool,
     /// An X server is reachable, real or XWayland.
     x_server: bool,
-    /// `MXB_SAFE_GRAPHICS=1`, for a white screen the defaults didn't cure.
+    /// What `GDK_BACKEND` already says, whether the session exported it or a player did.
+    /// The EGL correction below keys off the backend GTK will *actually* use, which is this
+    /// when it's set and our own choice when it isn't.
+    gdk_backend: Backend,
+    /// `EGL_PLATFORM=wayland`, which SteamOS exports and everything it launches inherits.
+    egl_wayland: bool,
+    /// `MXB_SAFE_GRAPHICS=1`, or a previous run that died before it painted anything.
     safe_mode: bool,
 }
 
 impl GraphicsEnv {
-    fn read() -> Self {
+    fn read(safe_mode: bool) -> Self {
         let set = |key: &str| std::env::var_os(key).is_some_and(|v| !v.is_empty());
+        let var = |key: &str| std::env::var(key).unwrap_or_default().trim().to_lowercase();
         Self {
             appimage: set("APPIMAGE"),
             wayland: set("WAYLAND_DISPLAY"),
             x_server: set("DISPLAY"),
-            safe_mode: std::env::var("MXB_SAFE_GRAPHICS").unwrap_or_default() == "1",
+            gdk_backend: match var("GDK_BACKEND").as_str() {
+                "" => Backend::Unset,
+                "x11" => Backend::X11,
+                "wayland" => Backend::Wayland,
+                _ => Backend::Other,
+            },
+            egl_wayland: var("EGL_PLATFORM") == "wayland",
+            safe_mode: safe_mode || std::env::var("MXB_SAFE_GRAPHICS").unwrap_or_default() == "1",
         }
     }
 }
 
-/// The environment WebKitGTK should start under. Two separate faults both end as a white
-/// window, and each has its own knob here.
-fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
+/// Whether a variable may overwrite one that is already set.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Force {
+    /// A default. An explicit choice already in the environment wins.
+    IfUnset,
+    /// A correction. Set even over an existing value, because what is there cannot work.
+    Always,
+}
+
+/// The environment WebKitGTK should start under. Several separate faults all end as a white
+/// window or an abort, and each has its own knob here.
+fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str, Force)> {
     // DMA-BUF asks the WebKit our AppImage carries from Ubuntu 22.04 to negotiate buffers
     // with whatever Mesa the host ships; where that fails it fails silently, painting
     // nothing. The shared-memory fallback costs a copy per frame — imperceptible on a UI
     // of mostly static lists — and paints everywhere.
-    let mut vars = vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1")];
+    let mut vars = vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1", Force::IfUnset)];
 
     // WebKitGTK 2.46+ aborts outright when it can't create an EGL display, and our AppImage
     // bundles Ubuntu 22.04's libwayland next to the host's Mesa — the pairing the AppImage
     // excludelist warns about. XWayland never goes down that path. Guarded on there being
     // an X server to land on: forcing the backend without one trades a white screen for no
-    // window at all.
-    if env.wayland && env.x_server && (env.appimage || env.safe_mode) {
-        vars.push(("GDK_BACKEND", "x11"));
+    // window at all. Skipped when the backend is already spoken for, so that an explicit
+    // `GDK_BACKEND=wayland` still wins.
+    let choose_x11 = env.gdk_backend == Backend::Unset
+        && env.wayland
+        && env.x_server
+        && (env.appimage || env.safe_mode);
+    if choose_x11 {
+        vars.push(("GDK_BACKEND", "x11", Force::IfUnset));
     }
 
-    // Asked for by hand, once the above wasn't enough: take the GPU out of it entirely.
+    // Putting GTK on X11 was supposed to be the end of that abort, and on a Steam Deck it
+    // wasn't: `GDK_BACKEND=x11` still died on `EGL_BAD_PARAMETER` before the window existed.
+    // The missing half is that SteamOS exports `EGL_PLATFORM=wayland`, and that variable —
+    // not the GDK backend — is what Mesa reads to decide which platform the *default* EGL
+    // display belongs to, the display named in the message WebKit aborts on. Left as it
+    // came, it hands an X11 session to the Wayland platform, the one pairing that cannot
+    // work. So the two are made to agree.
+    //
+    // Unsetting it isn't enough: with `WAYLAND_DISPLAY` still in the environment, Mesa's own
+    // detection picks Wayland straight back. And this one is set over whatever is there,
+    // rather than only when unset, because what's there *is* the fault — a value inherited
+    // from a session that knows nothing about which backend we went on to choose.
+    let on_x11 = choose_x11
+        || env.gdk_backend == Backend::X11
+        || (env.gdk_backend == Backend::Unset && !env.wayland && env.x_server);
+    if on_x11 && env.egl_wayland {
+        vars.push(("EGL_PLATFORM", "x11", Force::Always));
+    }
+
+    // Last resort, and where a run lands after one that aborted: take the GPU out of it
+    // entirely. Software rasterisation is also what gets past a host DRI driver too new for
+    // the Mesa loader we bundle, which is the other way that EGL display creation fails.
     if env.safe_mode {
-        vars.push(("WEBKIT_DISABLE_COMPOSITING_MODE", "1"));
-        vars.push(("LIBGL_ALWAYS_SOFTWARE", "1"));
+        vars.push(("WEBKIT_DISABLE_COMPOSITING_MODE", "1", Force::IfUnset));
+        vars.push(("LIBGL_ALWAYS_SOFTWARE", "1", Force::IfUnset));
     }
 
     vars
 }
 
 /// Defaults, not overrides — anything already set explicitly wins, so a machine whose driver
-/// stack handles the fast paths can ask for them back with `GDK_BACKEND=wayland`.
+/// stack handles the fast paths can ask for them back with `GDK_BACKEND=wayland`. The one
+/// exception is marked [`Force::Always`] above, and is there to resolve a contradiction
+/// rather than to express a preference.
 ///
 /// Has to run before the first window is built, since WebKit reads these when it spawns the
 /// web process, and before any other thread exists — being `main`'s first statement gives
 /// both.
-fn prepare_webview_env() {
+fn prepare_webview_env(safe_mode: bool) {
     if !cfg!(target_os = "linux") {
         return;
     }
-    for (key, value) in webview_env_defaults(GraphicsEnv::read()) {
-        if std::env::var_os(key).is_none() {
+    for (key, value, force) in webview_env_defaults(GraphicsEnv::read(safe_mode)) {
+        if force == Force::Always || std::env::var_os(key).is_none() {
             std::env::set_var(key, value);
         }
     }
+}
+
+/// Ordinary defaults: whatever [`webview_env_defaults`] settles on for the session.
+const TIER_DEFAULT: u8 = 0;
+/// Every knob at once, GPU included. The last thing there is to try, so nothing escalates
+/// past it.
+const TIER_SAFE: u8 = 1;
+
+/// The bundle identifier, from `tauri.conf.json`. Duplicated because the record below is
+/// read before Tauri exists to be asked.
+const APP_IDENTIFIER: &str = "com.frost.mxbikes";
+
+/// How far the last run got.
+///
+/// A failed EGL display is not an error anyone can catch: WebKitGTK prints one line and
+/// aborts the process, before the window is on screen and with nothing for the app to
+/// handle. So the tier is written down on the way in and marked again once the page has
+/// actually loaded, and a run that finds the previous attempt still unmarked knows it died
+/// getting there — and starts one tier safer.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct GraphicsAttempt {
+    tier: u8,
+    /// Set once the webview has loaded a page, which is proof the web process survived.
+    painted: bool,
+    /// The build that tried it. A new version gets to try the fast path again rather than
+    /// inheriting a verdict about libraries it may no longer be built against.
+    version: String,
+}
+
+/// Where to start, given what the last run left behind.
+fn next_graphics_tier(last: Option<&GraphicsAttempt>, version: &str) -> u8 {
+    match last {
+        // Nothing recorded, or a record from a build that isn't this one.
+        None => TIER_DEFAULT,
+        Some(a) if a.version != version => TIER_DEFAULT,
+        // It painted. Start where it worked — including at tier 0, which is the common case
+        // and costs the machine nothing.
+        Some(a) if a.painted => a.tier.min(TIER_SAFE),
+        // It didn't. Whatever we tried, try less of it.
+        Some(a) => a.tier.saturating_add(1).min(TIER_SAFE),
+    }
+}
+
+/// Rebuilds the `$XDG_DATA_HOME/<identifier>` that `app.path().app_local_data_dir()` returns
+/// on Linux, since the read happens before there is an app handle to ask.
+fn graphics_attempt_path() -> Option<std::path::PathBuf> {
+    dirs_next::data_local_dir().map(|d| d.join(APP_IDENTIFIER).join("graphics-attempt.json"))
+}
+
+fn read_graphics_attempt() -> Option<GraphicsAttempt> {
+    let raw = std::fs::read_to_string(graphics_attempt_path()?).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Best-effort throughout: a machine that can't write this file should still start, it just
+/// won't remember. Logged rather than surfaced — it changes nothing the player can act on.
+fn write_graphics_attempt(tier: u8, painted: bool) {
+    let Some(path) = graphics_attempt_path() else {
+        return;
+    };
+    let record = GraphicsAttempt {
+        tier,
+        painted,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    let written = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .transpose()
+        .and_then(|_| serde_json::to_string(&record).map_err(std::io::Error::other))
+        .and_then(|json| std::fs::write(&path, json));
+    if let Err(e) = written {
+        log::warn!("[graphics] couldn't record the launch attempt: {e}");
+    }
+}
+
+/// The tier this run started under, so the page-load hook can mark the right one good.
+static GRAPHICS_TIER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(TIER_DEFAULT);
+
+/// Decide the tier and apply it. Only the decision is remembered here — the record isn't
+/// written until the window is about to be built, because a second launch exits inside the
+/// single-instance guard before that point, and a marker it left behind would read as a
+/// crash and drop the *next* real launch into safe graphics for nothing.
+fn begin_graphics_attempt() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    // `MXB_SAFE_GRAPHICS=0` is the way back out: it ignores the record, so a machine pinned
+    // to software rendering by one bad launch — a kill during startup looks exactly like an
+    // abort from here — can be put back on the fast path without hunting for a file.
+    let tier = match std::env::var("MXB_SAFE_GRAPHICS").unwrap_or_default().as_str() {
+        "0" => TIER_DEFAULT,
+        "1" => TIER_SAFE,
+        _ => next_graphics_tier(read_graphics_attempt().as_ref(), env!("CARGO_PKG_VERSION")),
+    };
+    GRAPHICS_TIER.store(tier, std::sync::atomic::Ordering::Relaxed);
+    prepare_webview_env(tier >= TIER_SAFE);
 }
 
 /// Whether this process is running under Wine — CrossOver, Whisky, Kegworks or plain Wine.
@@ -5742,7 +5901,7 @@ fn main() {
     // `antidebug`.
     antidebug::guard();
 
-    prepare_webview_env();
+    begin_graphics_attempt();
 
     let builder = tauri::Builder::default();
 
@@ -5828,6 +5987,13 @@ fn main() {
             // Tauri opens `main` itself and the build below aborts on the duplicate.
             let drag_drop = drag_drop_enabled();
             log::info!("wine={} drag-drop-handler={}", under_wine(), drag_drop);
+            // The single-instance guard has had its say by now, so this process is the one
+            // that will actually build a window: safe to claim the attempt. On Linux the
+            // next statement is where a broken EGL stack takes the whole process down.
+            let tier = GRAPHICS_TIER.load(std::sync::atomic::Ordering::Relaxed);
+            if cfg!(target_os = "linux") {
+                write_graphics_attempt(tier, false);
+            }
             for window_config in app
                 .config()
                 .app
@@ -5840,6 +6006,19 @@ fn main() {
                 if !drag_drop {
                     builder = builder.disable_drag_drop_handler();
                 }
+                // Proof of life for the tier above. A load event can only come from a web
+                // process that started, and a broken EGL stack takes that process down
+                // before it ever reaches one — so the first event, rather than the finished
+                // one, is both enough to clear the tier and the harder of the two to miss.
+                // Fires again on every navigation, and only the first is news.
+                if cfg!(target_os = "linux") {
+                    let marked = std::sync::atomic::AtomicBool::new(false);
+                    builder = builder.on_page_load(move |_, _| {
+                        if !marked.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                            write_graphics_attempt(tier, true);
+                        }
+                    });
+                }
                 builder.build()?;
             }
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
@@ -5851,14 +6030,17 @@ fn main() {
                 let on = |key: &str| std::env::var(key).unwrap_or_default() == "1";
                 log::info!(
                     "webview env: appimage={} wayland={} x_server={} gdk_backend={} \
-                     dmabuf_disabled={} compositing_disabled={} software_gl={}",
+                     egl_platform={} dmabuf_disabled={} compositing_disabled={} \
+                     software_gl={} tier={}",
                     std::env::var_os("APPIMAGE").is_some(),
                     std::env::var_os("WAYLAND_DISPLAY").is_some(),
                     std::env::var_os("DISPLAY").is_some(),
                     std::env::var("GDK_BACKEND").unwrap_or_else(|_| "default".into()),
+                    std::env::var("EGL_PLATFORM").unwrap_or_else(|_| "default".into()),
                     on("WEBKIT_DISABLE_DMABUF_RENDERER"),
                     on("WEBKIT_DISABLE_COMPOSITING_MODE"),
                     on("LIBGL_ALWAYS_SOFTWARE"),
+                    tier,
                 );
             }
             if let Ok(dir) = app.path().app_local_data_dir() {
@@ -6209,7 +6391,15 @@ mod webview_env_tests {
     use std::collections::HashMap;
 
     fn defaults(env: GraphicsEnv) -> HashMap<&'static str, &'static str> {
-        webview_env_defaults(env).into_iter().collect()
+        webview_env_defaults(env).into_iter().map(|(k, v, _)| (k, v)).collect()
+    }
+
+    /// Whether a variable is set over one the session already exported, or only into a gap.
+    fn force(env: GraphicsEnv, key: &str) -> Option<Force> {
+        webview_env_defaults(env)
+            .into_iter()
+            .find(|(k, _, _)| *k == key)
+            .map(|(_, _, f)| f)
     }
 
     /// SteamOS, both modes: Desktop is Plasma Wayland and gamescope is a compositor of its
@@ -6218,6 +6408,8 @@ mod webview_env_tests {
         appimage: true,
         wayland: true,
         x_server: true,
+        gdk_backend: Backend::Unset,
+        egl_wayland: true,
         safe_mode: false,
     };
 
@@ -6295,6 +6487,140 @@ mod webview_env_tests {
         let vars = defaults(GraphicsEnv::default());
         assert_eq!(vars.len(), 1);
         assert!(vars.contains_key("WEBKIT_DISABLE_DMABUF_RENDERER"));
+    }
+
+    /// The bug the XWayland fix didn't reach: a Deck aborts on `EGL_BAD_PARAMETER` under
+    /// `GDK_BACKEND=x11` because the session's `EGL_PLATFORM=wayland` still points Mesa at
+    /// the wrong platform for the default display. The two have to name the same thing.
+    #[test]
+    fn egl_follows_the_backend_onto_xwayland() {
+        assert_eq!(defaults(STEAMOS).get("GDK_BACKEND"), Some(&"x11"));
+        assert_eq!(defaults(STEAMOS).get("EGL_PLATFORM"), Some(&"x11"));
+    }
+
+    /// The value came from a session that knew nothing about the backend we went on to pick,
+    /// so this is the one variable set over what's already there rather than into a gap.
+    #[test]
+    fn the_egl_platform_correction_overrides_the_session() {
+        assert_eq!(force(STEAMOS, "EGL_PLATFORM"), Some(Force::Always));
+        assert_eq!(force(STEAMOS, "GDK_BACKEND"), Some(Force::IfUnset));
+        assert_eq!(
+            force(STEAMOS, "WEBKIT_DISABLE_DMABUF_RENDERER"),
+            Some(Force::IfUnset),
+        );
+    }
+
+    /// How the Deck report arrived: the player had already exported `GDK_BACKEND=x11`, so we
+    /// added nothing and the contradiction went uncorrected. Their backend, our correction.
+    #[test]
+    fn a_hand_forced_x11_backend_still_gets_the_correction() {
+        let by_hand = GraphicsEnv { gdk_backend: Backend::X11, ..STEAMOS };
+        assert_eq!(defaults(by_hand).get("GDK_BACKEND"), None);
+        assert_eq!(defaults(by_hand).get("EGL_PLATFORM"), Some(&"x11"));
+    }
+
+    /// A stale `EGL_PLATFORM` breaks a session with no compositor at all just as thoroughly.
+    #[test]
+    fn a_plain_x11_session_gets_the_correction_too() {
+        let x11_only = GraphicsEnv { wayland: false, ..STEAMOS };
+        assert_eq!(defaults(x11_only).get("EGL_PLATFORM"), Some(&"x11"));
+    }
+
+    /// Staying on Wayland means `EGL_PLATFORM=wayland` is right, and an installed build has
+    /// no reason to leave. Correcting it here would break the machine instead of fixing it.
+    #[test]
+    fn a_session_left_on_wayland_keeps_its_egl_platform() {
+        let installed = GraphicsEnv { appimage: false, ..STEAMOS };
+        assert_eq!(defaults(installed).get("EGL_PLATFORM"), None);
+
+        let asked_for_wayland = GraphicsEnv { gdk_backend: Backend::Wayland, ..STEAMOS };
+        assert_eq!(defaults(asked_for_wayland).get("EGL_PLATFORM"), None);
+
+        let no_xwayland = GraphicsEnv { x_server: false, ..STEAMOS };
+        assert_eq!(defaults(no_xwayland).get("EGL_PLATFORM"), None);
+    }
+
+    /// Nothing to reconcile: a session that never named a platform leaves Mesa to work it
+    /// out from the display it's handed, which is what we'd be asking for anyway.
+    #[test]
+    fn an_unset_egl_platform_is_left_unset() {
+        let quiet = GraphicsEnv { egl_wayland: false, ..STEAMOS };
+        assert_eq!(quiet.gdk_backend, Backend::Unset);
+        assert_eq!(defaults(quiet).get("GDK_BACKEND"), Some(&"x11"));
+        assert_eq!(defaults(quiet).get("EGL_PLATFORM"), None);
+    }
+}
+
+#[cfg(test)]
+mod graphics_tier_tests {
+    use super::*;
+
+    fn attempt(tier: u8, painted: bool, version: &str) -> GraphicsAttempt {
+        GraphicsAttempt { tier, painted, version: version.into() }
+    }
+
+    /// The overwhelmingly common case, and it must not cost anything: no history, fast path.
+    #[test]
+    fn a_first_run_takes_the_ordinary_defaults() {
+        assert_eq!(next_graphics_tier(None, "0.9.2"), TIER_DEFAULT);
+    }
+
+    /// The bug this exists for. WebKitGTK prints one line and aborts before the window is on
+    /// screen — there is no error to catch, so the only evidence is an attempt never marked.
+    #[test]
+    fn a_launch_that_died_before_painting_escalates() {
+        let died = attempt(TIER_DEFAULT, false, "0.9.2");
+        assert_eq!(next_graphics_tier(Some(&died), "0.9.2"), TIER_SAFE);
+    }
+
+    /// Once it works, it keeps working the same way — otherwise every launch would abort
+    /// once on the way to the tier that paints.
+    #[test]
+    fn a_tier_that_painted_is_where_the_next_run_starts() {
+        for tier in [TIER_DEFAULT, TIER_SAFE] {
+            let good = attempt(tier, true, "0.9.2");
+            assert_eq!(next_graphics_tier(Some(&good), "0.9.2"), tier);
+        }
+    }
+
+    /// Safe graphics is the last thing there is to try. Aborting there too means the fault is
+    /// somewhere this can't reach, and climbing further would only invent tiers.
+    #[test]
+    fn nothing_escalates_past_safe_graphics() {
+        let died = attempt(TIER_SAFE, false, "0.9.2");
+        assert_eq!(next_graphics_tier(Some(&died), "0.9.2"), TIER_SAFE);
+    }
+
+    /// A verdict is about one build against one set of libraries. An update — of the app or,
+    /// by way of it, the WebKit an AppImage carries — earns a fresh try at the fast path.
+    #[test]
+    fn a_new_build_retries_the_fast_path() {
+        let pinned = attempt(TIER_SAFE, true, "0.9.1");
+        assert_eq!(next_graphics_tier(Some(&pinned), "0.9.2"), TIER_DEFAULT);
+
+        let died = attempt(TIER_DEFAULT, false, "0.9.1");
+        assert_eq!(next_graphics_tier(Some(&died), "0.9.2"), TIER_DEFAULT);
+    }
+
+    /// A record written by a build that knew of tiers this one doesn't shouldn't strand the
+    /// app above the top of its own ladder.
+    #[test]
+    fn a_tier_from_the_future_is_clamped() {
+        let ahead = attempt(9, true, "0.9.2");
+        assert_eq!(next_graphics_tier(Some(&ahead), "0.9.2"), TIER_SAFE);
+    }
+
+    /// It travels as JSON through the app-data folder, and a half-written or hand-edited file
+    /// has to read as "no history" rather than take the app down on the way past.
+    #[test]
+    fn a_record_survives_a_round_trip() {
+        let record = attempt(TIER_SAFE, true, "0.9.2");
+        let json = serde_json::to_string(&record).expect("serialises");
+        assert_eq!(
+            serde_json::from_str::<GraphicsAttempt>(&json).expect("parses"),
+            record,
+        );
+        assert!(serde_json::from_str::<GraphicsAttempt>("{ not json").is_err());
     }
 }
 
