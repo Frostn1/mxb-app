@@ -197,6 +197,41 @@ export async function startInstance(env: AwsEnv, instanceId: string): Promise<vo
 }
 
 /** Destroy it, disk included. The only action that stops every charge for a server. */
+/**
+ * Snapshot a built instance into an image later servers launch from.
+ *
+ * `NoReboot=false` on purpose: letting EC2 stop the machine first means the disk is
+ * consistent, which matters when the thing being captured is a half-gigabyte of freshly
+ * written game files. A crash-consistent image of a Windows box mid-write is not worth the
+ * two minutes it saves.
+ */
+export async function createImage(
+  env: AwsEnv,
+  instanceId: string,
+  name: string,
+): Promise<string> {
+  const xml = await ec2(env, "CreateImage", {
+    InstanceId: instanceId,
+    Name: name,
+    Description: "MXB dedicated server, game and bikes preinstalled",
+    NoReboot: "false",
+  });
+  const id = pluck(xml, "imageId")[0];
+  if (!id) throw new Error("CreateImage returned no image id");
+  return id;
+}
+
+/** `pending` while it bakes, `available` once it can be launched, `failed` if it cannot. */
+export async function imageState(env: AwsEnv, imageId: string): Promise<string | null> {
+  const xml = await ec2(env, "DescribeImages", { "ImageId.1": imageId });
+  return pluck(xml, "imageState")[0] ?? null;
+}
+
+/** Retire a superseded image. Its snapshot bills monthly until it goes. */
+export async function deregisterImage(env: AwsEnv, imageId: string): Promise<void> {
+  await ec2(env, "DeregisterImage", { ImageId: imageId });
+}
+
 export async function terminateInstance(env: AwsEnv, instanceId: string): Promise<void> {
   await ec2(env, "TerminateInstances", { "InstanceId.1": instanceId });
 }

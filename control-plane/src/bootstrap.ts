@@ -47,15 +47,124 @@ const ROOT = "C:\\mxb";
  * rather than as cmd, and `<persist>false</persist>` keeps it to first boot only — this
  * script is not idempotent and re-running it on every start would rewrite live config.
  */
-export function bootstrapScript(input: BootstrapInputs): string {
-  // Values are interpolated into a PowerShell string, so anything that could close a quote
-  // or start a new statement has to be refused rather than escaped. The callers validate
-  // too; this is the last line before it becomes code on someone's machine.
+/**
+ * What a server launched from a prebuilt image runs.
+ *
+ * Everything expensive — the game, the bikes, the agent binary — is already on the disk, so
+ * this only does the parts that differ per server: the name and track it advertises, and its
+ * own agent token, which cannot be baked into a shared image because every server has a
+ * different one.
+ *
+ * Seconds rather than the quarter of an hour a from-scratch install takes, and it stays that
+ * way as the bike pack grows.
+ */
+export function imageBootstrapScript(input: BootstrapInputs): string {
+  guardInputs(input);
+  return `<powershell>
+$ErrorActionPreference = "Stop"
+Start-Transcript -Path "C:\\mxb-bootstrap.log" -Append
+
+function Send-Stage {
+  param([string] $Stage, [bool] $Ok = $true, [string] $Log = "")
+  try {
+    $payload = @{ stage = $Stage; ok = $Ok; log = $Log } | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method POST -Uri "${input.controlPlaneUrl}/v1/servers/${input.serverId}/bootstrap" -Headers @{ "Authorization" = "Bearer ${input.agentToken}"; "Content-Type" = "application/json" } -Body $payload -TimeoutSec 15 | Out-Null
+  } catch {
+    Write-Output "couldn't report stage '$Stage': $_"
+  }
+}
+
+trap {
+  $reason = "$_"
+  Write-Output "bootstrap failed: $reason"
+  try { Stop-Transcript } catch {}
+  $tail = ""
+  try { $tail = (Get-Content -Path "C:\\mxb-bootstrap.log" -Tail 200 | Out-String) } catch {}
+  Send-Stage -Stage "failed" -Ok $false -Log "$reason\`n$tail"
+  Stop-Computer -Force
+  exit 1
+}
+
+Send-Stage -Stage "starting up"
+
+# The image carries the game and the bikes. If it does not, this is not the image we think it
+# is, and a server that comes up without them refuses every rider on a mod bike.
+if (-not (Test-Path "${ROOT}\\game\\mxbikes.exe")) { throw "this image has no game installed" }
+
+@"
+[connection]
+name = ${input.serverName}
+maxclient = 20
+
+[event]
+track = Victoria
+track_layout =
+"@ | Set-Content -Path "${ROOT}\\game\\dedicated.ini" -Encoding ASCII
+
+$imdsToken = Invoke-RestMethod -Method PUT -Uri "http://169.254.169.254/latest/api/token" -Headers @{ "X-aws-ec2-metadata-token-ttl-seconds" = "300" } -TimeoutSec 10
+$publicIp = Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/public-ipv4" -Headers @{ "X-aws-ec2-metadata-token" = $imdsToken } -TimeoutSec 10
+if (-not $publicIp) { throw "this instance has no public address" }
+
+# The one thing that cannot be baked in: every server has its own token.
+@{
+  token = "${input.agentToken}"
+  listen = "0.0.0.0:${input.agentPort}"
+  public_url = "http://$publicIp:${input.agentPort}"
+  game_dir = "${ROOT}\\game"
+  ini = "dedicated.ini"
+  game_port = ${input.gamePort}
+} | ConvertTo-Json | Set-Content -Path "${ROOT}\\agent.json" -Encoding ASCII
+try { Get-Content -Path "${ROOT}\\agent.json" -Raw | ConvertFrom-Json | Out-Null }
+catch { throw "the agent config we just wrote is not valid JSON: $_" }
+
+Start-ScheduledTask -TaskName "mxb-agent"
+Send-Stage -Stage "waiting for the agent"
+
+$ready = $false
+foreach ($attempt in 1..45) {
+  try {
+    Invoke-RestMethod -Uri "http://127.0.0.1:${input.agentPort}/health" -TimeoutSec 5 | Out-Null
+    $ready = $true
+    break
+  } catch { Start-Sleep -Seconds 2 }
+}
+if (-not $ready) { throw "the agent never answered on ${input.agentPort}" }
+
+$announced = $false
+foreach ($attempt in 1..5) {
+  try {
+    Invoke-RestMethod -Method POST -Uri "${input.controlPlaneUrl}/v1/servers/${input.serverId}/hello" -Headers @{ "Authorization" = "Bearer ${input.agentToken}"; "Content-Type" = "application/json" } -Body '{"agentPort":${input.agentPort},"gamePort":${input.gamePort}}' -TimeoutSec 15 | Out-Null
+    $announced = $true
+    break
+  } catch {
+    Write-Output "announce attempt $attempt failed: $_"
+    Start-Sleep -Seconds 5
+  }
+}
+if (-not $announced) { throw "couldn't tell the control plane this server is up" }
+
+Send-Stage -Stage "ready"
+Write-Output "bootstrap complete"
+Stop-Transcript
+</powershell>
+<persist>false</persist>`;
+}
+
+/**
+ * Values are interpolated into a PowerShell string, so anything that could close a quote or
+ * start a new statement is refused rather than escaped. The callers validate too; this is the
+ * last line before it becomes code on someone's machine.
+ */
+function guardInputs(input: BootstrapInputs): void {
   for (const [field, value] of Object.entries(input)) {
     if (typeof value === "string" && /["'`$\r\n]/.test(value)) {
       throw new Error(`${field} contains a character that can't go in the bootstrap script`);
     }
   }
+}
+
+export function bootstrapScript(input: BootstrapInputs): string {
+  guardInputs(input);
 
   return `<powershell>
 $ErrorActionPreference = "Stop"
