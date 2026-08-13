@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — the image builder survives long enough to build an image
+
+### Fixed
+- **The idle sweep destroyed the machine building the server image.** Builders were left out of
+  the query that lists known instances, which meant the very next check — the one that
+  terminates anything with no database row — saw them as untracked and killed them within five
+  minutes of launching. They are listed like everything else now and skipped at the idle check
+  instead, which is the only part that should ignore them. A build whose machine disappears
+  also clears itself, rather than blocking every later build as one already in progress.
+
 ## Unreleased — back to the game's own model, in one click
 
 ### Fixed
