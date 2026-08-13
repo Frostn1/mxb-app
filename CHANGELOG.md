@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Importing a full bundle no longer overwrites the mods you already have.** A bundle carries
+  whole asset folders — share a single helmet paint and the helmet's mesh and every other livery
+  on it travel too — so importing one quietly replaced your copy of a model with the sender's.
+  An import now writes only the files you're missing and leaves anything already on disk alone.
+  Downloading or dropping a mod still overwrites, which is how updating one works.
+
 ## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
 
 On top of v0.9.1 — the Designer's painting tools, Play on macOS and the SteamOS white screen
