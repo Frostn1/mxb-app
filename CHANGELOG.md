@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — a stalled download no longer hangs a server build
+
+### Fixed
+- **One stuck file could hang a build indefinitely.** Each bike is fetched with a time limit
+  and a stall detector now, so a transfer that stops sending costs that one bike rather than
+  the whole machine; `--retry` never helped, because a connection that stays open and goes
+  quiet is not a failure it can see.
+- **A build says how far through the bikes it is.** The step was announced once and then went
+  silent for the length of a four gigabyte download, which is indistinguishable from having
+  hung — and for three quarters of an hour, it was.
+
 ## 2026-08-20
 
 ### Added

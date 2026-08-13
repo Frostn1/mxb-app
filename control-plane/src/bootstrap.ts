@@ -286,15 +286,29 @@ try {
     Write-Output "linked $gameMods -> $userMods"
   }
   $listing = Invoke-RestMethod -Uri "${input.controlPlaneUrl}/v1/content/bikes" -TimeoutSec 60
+  $total = $listing.bikes.Count
   $count = 0
+  $i = 0
   foreach ($bike in $listing.bikes) {
+    $i = $i + 1
     $dest = Join-Path $bikesDir $bike.name
+    # A stalled transfer used to hang here for as long as the instance lived: --retry does
+    # nothing for a connection that stays open and stops sending. --max-time bounds each file
+    # so one bad download costs that bike rather than the whole build, and --speed-limit gives
+    # up on a transfer that has effectively died.
     & $curl -L --fail --silent --show-error --retry 3 --retry-delay 5 \`
+      --max-time 300 --speed-limit 10240 --speed-time 60 \`
       -o $dest "${input.controlPlaneUrl}/v1/content/bikes/$($bike.name)"
     if ($LASTEXITCODE -eq 0) { $count = $count + 1 }
     else { Write-Output "couldn't fetch $($bike.name) (curl $LASTEXITCODE)" }
+    # Say where we are. Reporting the step once and then going quiet for the length of a four
+    # gigabyte download is indistinguishable from having hung -- which is exactly how the
+    # first image build looked for three quarters of an hour.
+    if (($i % 5) -eq 0 -or $i -eq $total) {
+      Send-Stage -Stage "installing bikes $i of $total"
+    }
   }
-  Write-Output "installed $count of $($listing.bikes.Count) bikes"
+  Write-Output "installed $count of $total bikes"
 } catch {
   Write-Output "couldn't install the bike pack: $_"
 }
