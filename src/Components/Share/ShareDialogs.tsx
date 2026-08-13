@@ -212,27 +212,31 @@ export function ShareDialog({
 /** Paste a `MXBS1-` code and install what it carries. */
 export function ImportShareDialog({
   open,
+  initialCode = "",
   onClose,
   onImported,
 }: {
   open: boolean;
+  /** Prefilled when the code arrived on its own — pasted into the window, say — rather
+   *  than from someone opening this to type one in. */
+  initialCode?: string;
   onClose: () => void;
   onImported: () => void;
 }) {
   const t = useT();
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialCode);
   const [preview, setPreview] = useState<FileShare | null>(null);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<BundlePhase | null>(null);
 
+  // Each opening starts from whatever it was opened with — a pasted code, or nothing.
   useEffect(() => {
-    if (open) return;
-    setText("");
+    setText(open ? initialCode : "");
     setPreview(null);
     setPreviewErr(null);
     setPhase(null);
-  }, [open]);
+  }, [open, initialCode]);
 
   useEffect(() => {
     const code = text.trim();

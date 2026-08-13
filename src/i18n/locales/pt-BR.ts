@@ -889,6 +889,7 @@ export const ptBR: Translation = {
   // ── Compartilhar arquivos instalados (qualquer pista ou pintura) ───────────
   "share.share": "Compartilhar",
   "share.action": "Compartilhar…",
+  "share.rightClickHint": "Clique com o botão direito para compartilhar",
   "share.title": "Compartilhar estes arquivos",
   "share.hint":
     "A gente empacota, envia e te devolve um código só para colar onde quiser. Quem colar recebe os arquivos nas mesmas pastas.",

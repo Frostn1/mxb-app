@@ -895,6 +895,7 @@ export const fr: Translation = {
   // ── Partage des fichiers installés (n'importe quel circuit ou peinture) ────
   "share.share": "Partager",
   "share.action": "Partager…",
+  "share.rightClickHint": "Clic droit pour partager",
   "share.title": "Partager ces fichiers",
   "share.hint":
     "On les empaquette, on les envoie, et tu récupères un seul code à coller où tu veux. Celui qui le colle retrouve les fichiers dans les mêmes dossiers.",
