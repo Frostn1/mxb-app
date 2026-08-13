@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased — the msvcr90 box, actually closed
+
+### Fixed
+- **"MSVCR90.dll was not found" now gets the fix it was always missing.** Installing
+  Microsoft's 2008 redistributable registers a side-by-side assembly under `WinSxS` and puts
+  nothing on the ordinary DLL search path. The game reaches that assembly because its manifest
+  asks for it by name; a module with a plain `MSVCR90.dll` import and no VC90 manifest — most
+  things built with VS2008 — gets the ordinary search order instead, and never sees it. So the
+  install succeeded, the check went green, and the box kept appearing. The app now also places
+  a copy of `msvcr90.dll` beside the game executable, which is the one place that import will
+  look. Taken from the machine's own `WinSxS` (newest servicing build). This corrects the fix
+  described under v0.9.0, which addressed the wrong half of the problem.
+- **A game folder that carries its own copy of the CRT is no longer called broken.** The check
+  only ever looked in `WinSxS`, so an install keeping the runtime beside the executable — the
+  way PiBoSo's own installers have long shipped it — showed a warning bar it could never clear.
+- **The missing-runtime check now looks for `vcruntime140_1.dll`.** FrostMod imports it, but
+  only `vcruntime140.dll` and `msvcp140.dll` were probed. A machine still on the original 2015
+  redistributable has those two and not this one, so it read as perfectly healthy while
+  injection failed naming a file the app never checked for.
+
+### Known
+- The copy beside the executable is written without elevation, so it cannot land in a game
+  folder under `Program Files`. A Steam install there still needs the runtime repaired by
+  hand until the elevated fallback lands.
+
 ## Unreleased — share any track or paint, not just a preset
 
 ### Added

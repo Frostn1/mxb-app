@@ -7,16 +7,39 @@
 //!
 //! **VC90 (Visual C++ 2008).** `mxbikes.exe` and `gpbikes.exe` are x64 PiBoSo builds that
 //! import `MSVCR90.dll`. They don't import it by path: their manifest requests it as a
-//! side-by-side assembly (`Microsoft.VC90.CRT`, amd64, publicKeyToken `1fc8b3b9a1e18e3b`).
-//! That resolves either machine-wide out of `WinSxS`, *or* out of a private copy sitting
-//! in the game folder — and on a machine living on the second one, the game launches fine
-//! while nothing loaded from outside the game folder can resolve `MSVCR90`. Which is
-//! exactly what FrostMod is: an absolute path under `%LOCALAPPDATA%`, injected with
-//! `CreateRemoteThread` + `LoadLibraryA`. Game works, FrostMod doesn't, and the two look
-//! unrelated to the player.
+//! side-by-side assembly (`Microsoft.VC90.CRT`, amd64, publicKeyToken `1fc8b3b9a1e18e3b`,
+//! versions `9.0.21022.8` and `9.0.30729.1`). That resolves machine-wide out of `WinSxS`,
+//! or out of a private assembly folder sitting beside the exe.
 //!
-//! **VC140 (Visual C++ 2015–2022).** `frostmod.dll` is a modern MSVC build, so it needs
-//! `vcruntime140` / `msvcp140` / the UCRT. Same failure, different DLL in the dialog.
+//! The part that matters, and that an earlier version of this module got wrong: **the
+//! redistributable does not put `msvcr90.dll` anywhere on the ordinary DLL search path.**
+//! It registers the side-by-side assembly under `WinSxS`, and reaching that requires the
+//! loading module to *ask for it by manifest*. The game does. A module that doesn't —
+//! anything with a plain `MSVCR90.dll` import and no VC90 manifest, which is most
+//! community plugins built with VS2008 — gets the ordinary search order instead: the
+//! exe's own folder, `System32`, `PATH`. The redistributable touches none of those.
+//!
+//! So the two failures read differently, and the wording in the dialog tells them apart:
+//!
+//! * *"the side-by-side configuration is incorrect"* (error 14001) — the **game's**
+//!   manifested dependency is unsatisfiable. Installing the redistributable fixes it.
+//! * *"MSVCR90.dll was not found"* / *"is missing from your computer"* — a **plain
+//!   import** went unresolved. Installing the redistributable cannot fix this, because
+//!   nothing it installs lands on the search path. Only a copy of `msvcr90.dll` in the
+//!   game folder does.
+//!
+//! Hence [`ensure_app_local_msvcr90`]: the remedy places the DLL beside the exe, where
+//! both kinds of consumer can reach it. It is deliberately a *bare* copy and not a
+//! private assembly folder — a private assembly participates in side-by-side binding and
+//! a version-mismatched one could hijack a binding that currently works, whereas a bare
+//! DLL in the app directory is invisible to SxS and only ever serves plain imports.
+//!
+//! **VC140 (Visual C++ 2015–2022).** `frostmod.dll` and `frostmod.exe` are modern MSVC
+//! builds. Their import tables name `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`,
+//! `MSVCP140.dll` and the UCRT — and, notably, never `MSVCR90.dll`. Injection failing is
+//! therefore always a VC140 story, never a VC90 one. `VCRUNTIME140_1.dll` is the easy one
+//! to miss: it only ships from the 2019 redistributable onward, so a machine still on the
+//! original 2015 package has the other two and not it.
 //!
 //! We detect both, and can install either. Detection is deliberately conservative: when
 //! we can't tell, we report nothing missing. Telling a working player their PC is broken
@@ -60,8 +83,18 @@ pub enum InstallOutcome {
 /// redirection rules, not the CRT.
 const VC90_SXS_PREFIX: &str = "amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_";
 
-/// The DLLs the 2015–2022 redistributable puts in `System32`.
-const VC140_DLLS: [&str; 2] = ["vcruntime140.dll", "msvcp140.dll"];
+/// The DLLs the 2015–2022 redistributable puts in `System32`, as named by the import
+/// tables of `frostmod.dll` and `frostmod.exe`.
+///
+/// `vcruntime140_1.dll` is load-bearing and was missing here until a player hit exactly
+/// the gap it leaves: it carries the x64 exception-unwinding half of the runtime and only
+/// began shipping with the 2019 redistributable. A machine on the original 2015 package
+/// has the other two, so checking only those reports a clean bill of health while
+/// injection dies naming a DLL we never looked for.
+const VC140_DLLS: [&str; 3] = ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"];
+
+/// The file every one of these paths is ultimately about.
+const MSVCR90_DLL: &str = "msvcr90.dll";
 
 /// An installer under this is a captive-portal login page or a truncated download, not a
 /// redistributable. The real ones are ~5 MB (VC90) and ~25 MB (VC140).
@@ -99,18 +132,49 @@ impl Runtime {
     }
 }
 
-/// Does any of these WinSxS entry names name the amd64 VC90 CRT assembly?
+/// The four-part version embedded in a WinSxS entry name, as a sortable key.
+///
+/// `amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.30729.9635_none_08e793bfa83a89b5` carries
+/// it between the public key token and the `_none_` culture segment. An entry we can't
+/// parse sorts lowest rather than being discarded: it is still a real assembly, and having
+/// one we can't name the version of beats concluding we have none.
+fn entry_version(name: &str) -> [u32; 4] {
+    let lower = name.to_ascii_lowercase();
+    let mut out = [0u32; 4];
+    let Some(rest) = lower.strip_prefix(VC90_SXS_PREFIX) else {
+        return out;
+    };
+    for (slot, part) in out.iter_mut().zip(rest.split('_').next().unwrap_or_default().split('.')) {
+        *slot = part.parse().unwrap_or(0);
+    }
+    out
+}
+
+/// Pick the highest-versioned amd64 VC90 CRT assembly out of a set of WinSxS entry names.
 ///
 /// Split out from the directory walk so the matching rule — the part with the actual
-/// judgement in it — is testable on any platform.
-fn names_contain_vc90<I, S>(names: I) -> bool
+/// judgement in it — is testable on any platform. Version order is not cosmetic: the copy
+/// we lay down beside the exe should be the newest servicing build on the machine, not
+/// whichever one `read_dir` happened to hand us first.
+fn newest_vc90_entry<I, S>(names: I) -> Option<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
     names
         .into_iter()
-        .any(|n| n.as_ref().to_ascii_lowercase().starts_with(VC90_SXS_PREFIX))
+        .filter(|n| n.as_ref().to_ascii_lowercase().starts_with(VC90_SXS_PREFIX))
+        .max_by_key(|n| entry_version(n.as_ref()))
+        .map(|n| n.as_ref().to_owned())
+}
+
+/// Does any of these WinSxS entry names name the amd64 VC90 CRT assembly?
+fn names_contain_vc90<I, S>(names: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    newest_vc90_entry(names).is_some()
 }
 
 /// Is the payload we downloaded plausibly a Windows installer?
@@ -125,12 +189,56 @@ fn windir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
 }
 
-/// Walk `WinSxS` looking for the VC90 CRT.
+/// The newest amd64 VC90 CRT assembly folder in `WinSxS`, if the machine has one.
 ///
-/// Returns `true` ("present") when the directory can't be read at all. We'd rather miss a
-/// real problem than raise a false alarm on a machine we simply couldn't inspect.
+/// `None` covers both "no such assembly" and "couldn't read the directory"; callers that
+/// need to tell those apart check `WinSxS` readability themselves.
 #[cfg(windows)]
-fn vc90_present() -> bool {
+fn sxs_vc90_dir() -> Option<std::path::PathBuf> {
+    let sxs = windir().join("WinSxS");
+    let entries = std::fs::read_dir(&sxs).ok()?;
+    let newest = newest_vc90_entry(
+        entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned()),
+    )?;
+    Some(sxs.join(newest))
+}
+
+/// Where a copy of `msvcr90.dll` would sit to serve plain imports inside the game.
+///
+/// The exe's own directory is the first entry in the ordinary DLL search order, which is
+/// the whole point: it is the one place a module with no VC90 manifest will look.
+#[cfg(windows)]
+fn app_local_msvcr90(game_dir: &std::path::Path) -> std::path::PathBuf {
+    game_dir.join(MSVCR90_DLL)
+}
+
+/// Can anything in the game resolve `MSVCR90` at all?
+///
+/// This is the question the banner asks, so it stays broad on purpose: a copy beside the
+/// exe, a private assembly folder, or the machine-wide assembly each count. Any one of
+/// them means there is a working route to the CRT and nothing worth alarming about.
+///
+/// It deliberately does *not* try to answer the narrower "will a plain import resolve"
+/// question. That one is false on the overwhelming majority of perfectly healthy machines
+/// — almost nobody has a bare `msvcr90.dll` beside the exe — so asking it here would put
+/// an amber bar in front of everyone. The plain-import gap is closed by
+/// [`ensure_app_local_msvcr90`] doing the copy, not by nagging about it.
+///
+/// Returns `true` ("present") when `WinSxS` can't be read at all. We'd rather miss a real
+/// problem than raise a false alarm on a machine we simply couldn't inspect.
+#[cfg(windows)]
+fn vc90_present(game_dir: Option<&std::path::Path>) -> bool {
+    if let Some(dir) = game_dir {
+        // A bare copy beside the exe, or the private assembly folder PiBoSo installers
+        // have historically laid down next to it.
+        if app_local_msvcr90(dir).is_file()
+            || dir.join("Microsoft.VC90.CRT").join(MSVCR90_DLL).is_file()
+        {
+            return true;
+        }
+    }
     let sxs = windir().join("WinSxS");
     match std::fs::read_dir(&sxs) {
         Ok(entries) => names_contain_vc90(
@@ -145,6 +253,59 @@ fn vc90_present() -> bool {
     }
 }
 
+/// Put `msvcr90.dll` beside the game exe, so a plugin that imports it plainly can find it.
+///
+/// This is the half the redistributable can't do. Copied out of `WinSxS` — the assembly
+/// there is the same file, and taking it from the machine avoids shipping Microsoft's
+/// binary ourselves or unpacking an installer to get at it.
+///
+/// Best-effort by design, and every failure is a log line rather than an error: the game
+/// folder can sit under `Program Files` where we have no write access, and a player whose
+/// plugins all resolve fine loses nothing by the copy not happening. Returns whether the
+/// file is there when we're done.
+///
+/// Safe to call on a hot path. The settled case costs one `is_file()`, and a folder we
+/// failed on is remembered so a read-only install doesn't retry — and re-log — on every
+/// status poll. [`invalidate`] clears that memory, so an install gets a fresh attempt.
+#[cfg(windows)]
+pub fn ensure_app_local_msvcr90(game_dir: &std::path::Path) -> bool {
+    let dest = app_local_msvcr90(game_dir);
+    if dest.is_file() {
+        return true;
+    }
+    if let Ok(mut tried) = ATTEMPTED.lock() {
+        if !tried.insert(game_dir.to_path_buf()) {
+            return false;
+        }
+    }
+    let Some(src_dir) = sxs_vc90_dir() else {
+        log::info!("no VC90 assembly in WinSxS to copy to {}", game_dir.display());
+        return false;
+    };
+    let src = src_dir.join(MSVCR90_DLL);
+    match std::fs::copy(&src, &dest) {
+        Ok(_) => {
+            log::info!("placed {} from {}", dest.display(), src_dir.display());
+            true
+        }
+        Err(e) => {
+            log::warn!("could not place {} ({e})", dest.display());
+            false
+        }
+    }
+}
+
+/// Game folders we've already tried to lay a copy into, so a failure is attempted — and
+/// logged — once rather than on every poll.
+#[cfg(windows)]
+static ATTEMPTED: std::sync::Mutex<std::collections::BTreeSet<std::path::PathBuf>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+#[cfg(not(windows))]
+pub fn ensure_app_local_msvcr90(_game_dir: &std::path::Path) -> bool {
+    false
+}
+
 /// The 2015–2022 runtime installs into `System32` rather than WinSxS. This process is
 /// x64, so `System32` is the genuine 64-bit directory — no WOW64 redirection to unpick.
 #[cfg(windows)]
@@ -153,30 +314,46 @@ fn vc140_present() -> bool {
     VC140_DLLS.iter().all(|dll| sys32.join(dll).exists())
 }
 
-/// Cached detection result. Walking WinSxS means enumerating tens of thousands of entries,
-/// and the *absent* case — the one a player in trouble hits — is the one that walks all of
-/// them. The answer only changes when we install something, and `invalidate` covers that.
+/// Cached detection result, together with the game folder it was computed for.
+///
+/// Walking WinSxS means enumerating tens of thousands of entries, and the *absent* case —
+/// the one a player in trouble hits — is the one that walks all of them. The answer only
+/// changes when we install something (`invalidate` covers that) or when the player points
+/// the app at a different game folder, which is why the folder is part of the key rather
+/// than something a stale entry can outlive.
 #[cfg(windows)]
-static CACHE: std::sync::Mutex<Option<Vec<Runtime>>> = std::sync::Mutex::new(None);
+static CACHE: std::sync::Mutex<Option<(Option<std::path::PathBuf>, Vec<Runtime>)>> =
+    std::sync::Mutex::new(None);
 
-/// Drop the cached probe so the next `missing()` re-reads the disk.
+/// Drop the cached probe so the next `missing()` re-reads the disk, and let a game folder
+/// we previously failed to copy into be tried again — after an install there is a source
+/// in `WinSxS` that wasn't there before.
 #[cfg(windows)]
 fn invalidate() {
     if let Ok(mut c) = CACHE.lock() {
         *c = None;
     }
+    if let Ok(mut tried) = ATTEMPTED.lock() {
+        tried.clear();
+    }
 }
 
 /// Which runtimes the FrostMod chain needs and this machine doesn't have.
+///
+/// `game_dir` is where the active title is installed, when the app knows it. Without it
+/// the VC90 probe can only consult `WinSxS` and will call a game folder carrying its own
+/// copy of the CRT "missing" — so pass it wherever it is to hand.
 #[cfg(windows)]
-pub fn missing() -> Vec<Runtime> {
+pub fn missing(game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
     if let Ok(cache) = CACHE.lock() {
-        if let Some(hit) = cache.as_ref() {
-            return hit.clone();
+        if let Some((for_dir, hit)) = cache.as_ref() {
+            if for_dir.as_deref() == game_dir {
+                return hit.clone();
+            }
         }
     }
     let mut out = Vec::new();
-    if !vc90_present() {
+    if !vc90_present(game_dir) {
         out.push(Runtime::Vc90);
     }
     if !vc140_present() {
@@ -186,14 +363,14 @@ pub fn missing() -> Vec<Runtime> {
         log::info!("missing Visual C++ runtimes: {out:?}");
     }
     if let Ok(mut cache) = CACHE.lock() {
-        *cache = Some(out.clone());
+        *cache = Some((game_dir.map(|d| d.to_path_buf()), out.clone()));
     }
     out
 }
 
 /// Nothing to detect off Windows — FrostMod only runs there.
 #[cfg(not(windows))]
-pub fn missing() -> Vec<Runtime> {
+pub fn missing(_game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
     Vec::new()
 }
 
@@ -318,8 +495,17 @@ fn run_elevated(exe: &std::path::Path, args: &str) -> anyhow::Result<bool> {
 }
 
 /// Download Microsoft's redistributable and install it, then prove it worked.
+///
+/// For VC90 the redistributable is only half the job — it registers the side-by-side
+/// assembly and leaves the ordinary search path untouched — so this finishes by placing a
+/// copy beside the game exe. See the module docs for why that second half is the one that
+/// stops the "MSVCR90.dll was not found" box.
 #[cfg(windows)]
-pub async fn install(app: &tauri::AppHandle, runtime: Runtime) -> anyhow::Result<InstallOutcome> {
+pub async fn install(
+    app: &tauri::AppHandle,
+    runtime: Runtime,
+    game_dir: Option<&std::path::Path>,
+) -> anyhow::Result<InstallOutcome> {
     use tauri::Manager;
 
     let dir = app
@@ -362,9 +548,18 @@ pub async fn install(app: &tauri::AppHandle, runtime: Runtime) -> anyhow::Result
         return Ok(InstallOutcome::Cancelled);
     }
 
-    // Trust the disk, not the installer's exit code.
+    // Trust the disk, not the installer's exit code. Clearing first also re-arms the copy
+    // below on a folder an earlier attempt gave up on.
     invalidate();
-    if missing().contains(&runtime) {
+
+    // The assembly is registered now, so this is the first moment the copy beside the exe
+    // can be taken from WinSxS. Before the install there was nothing there to copy.
+    if runtime == Runtime::Vc90 {
+        if let Some(dir) = game_dir {
+            ensure_app_local_msvcr90(dir);
+        }
+    }
+    if missing(game_dir).contains(&runtime) {
         anyhow::bail!(
             "The installer ran but Windows still can't find the component. A restart usually finishes it off."
         );
@@ -377,6 +572,7 @@ pub async fn install(app: &tauri::AppHandle, runtime: Runtime) -> anyhow::Result
 pub async fn install(
     _app: &tauri::AppHandle,
     _runtime: Runtime,
+    _game_dir: Option<&std::path::Path>,
 ) -> anyhow::Result<InstallOutcome> {
     anyhow::bail!("Visual C++ runtimes only apply on Windows")
 }
@@ -427,6 +623,43 @@ mod tests {
             "amd64_microsoft.vc80.crt_1fc8b3b9a1e18e3b_8.0.50727.9585_none_88df89932faf0bf6",
             "msil_system.web_b03f5f7f11d50a3a_4.0.15805.0_none_b3a4e5c9",
         ]));
+    }
+
+    /// The copy we lay beside the exe should be the newest servicing build on the machine,
+    /// not whichever entry `read_dir` yielded first. `9635` beats `6161` beats `.1`, and
+    /// the ordering has to be numeric — lexically, "9.0.30729.6161" sorts above
+    /// "9.0.30729.9635" is false but "10.0" vs "9.0" is exactly where string order breaks.
+    #[test]
+    fn picks_the_newest_assembly() {
+        let newest = newest_vc90_entry([
+            "amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.30729.6161_none_08e7a8e6a52ec5b5",
+            "amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.30729.9635_none_08e793bfa83a89b5",
+            "amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.21022.8_none_750b37ff97f4f68b",
+        ]);
+        assert!(
+            newest.is_some_and(|n| n.contains("9.0.30729.9635")),
+            "the highest servicing build wins"
+        );
+    }
+
+    /// Version parsing is ordering, not validation: an entry whose version we can't read is
+    /// still a real assembly and must stay eligible rather than vanish.
+    #[test]
+    fn an_unparseable_version_still_counts_as_present() {
+        assert!(names_contain_vc90([
+            "amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_deadbeef_none_08e793bfa83a89b5",
+        ]));
+    }
+
+    /// The exception-unwinding half only ships from the 2019 redistributable onward, and
+    /// leaving it out is what let a machine on the original 2015 package read as healthy
+    /// while injection died naming it.
+    #[test]
+    fn vc140_probe_covers_the_unwinder() {
+        assert!(
+            VC140_DLLS.contains(&"vcruntime140_1.dll"),
+            "frostmod.dll imports vcruntime140_1.dll, so it has to be probed: {VC140_DLLS:?}"
+        );
     }
 
     /// The two packages take different switches; swapping them silently does nothing.

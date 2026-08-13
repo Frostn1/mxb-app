@@ -221,11 +221,26 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         _ => false,
     };
 
-    let active_game = crate::config::load(app)
-        .map(|c| c.active_game)
-        .unwrap_or_default();
+    let cfg = crate::config::load(app).ok();
+    let active_game = cfg.as_ref().map(|c| c.active_game).unwrap_or_default();
     let supported_for_game =
         crate::frostmod::supported_for_game(active_game, version.as_deref());
+
+    // The game folder is what makes the VC90 answer mean anything: it's both where a copy
+    // of the CRT may already sit and the only place we can put one. `install_dir` hands
+    // back an empty string for "don't know", which must not become the path `""`.
+    let game_dir = cfg
+        .as_ref()
+        .map(|c| c.install_dir())
+        .filter(|d| !d.trim().is_empty())
+        .map(PathBuf::from);
+
+    // Lay the CRT beside the exe if it isn't there yet. This is the half of the VC90 story
+    // the redistributable cannot do — see `crate::vcruntime` — and doing it here means a
+    // player never has to learn the difference between the two failures to be past them.
+    if let Some(dir) = game_dir.as_deref() {
+        crate::vcruntime::ensure_app_local_msvcr90(dir);
+    }
 
     FrostmodStatus {
         installed,
@@ -234,7 +249,7 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         needs_repair,
         running: crate::frostmod::is_running(),
         supported_for_game,
-        missing_runtimes: crate::vcruntime::missing(),
+        missing_runtimes: crate::vcruntime::missing(game_dir.as_deref()),
     }
 }
 
