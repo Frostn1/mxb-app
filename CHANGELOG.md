@@ -41,6 +41,14 @@
   where it's hosted.
 - Sharing reuses the preset bundle's upload, so the same 2 GB ceiling and the same slicing
   past one part apply, and a share whose parts have gone missing says which one.
+- **Share from wherever you're already looking.** Manage shares any mod in its list, switched
+  on or off — a mod it has parked is still a file, and the code says where it goes rather than
+  where it currently sits. The Locker shares a model or sound set: right-click the one you
+  want, including the one you're riding.
+- **Paste a code anywhere in the window.** A share arrives as text, so there is nothing to
+  drop — and hunting down the Import menu for something already on your clipboard was the step
+  worth removing. Ctrl+V over any screen opens the import with the code filled in. A paste into
+  a box you're typing in is left alone.
 
 ## Unreleased — a created server can see the bikes it installed
 
