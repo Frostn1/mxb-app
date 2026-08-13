@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased — the Steam Deck gets past its own EGL
+
+### Fixed
+- **The Linux app starts on a Steam Deck instead of aborting.** Last release moved AppImage
+  runs onto XWayland to get past WebKitGTK dying on `EGL_BAD_PARAMETER`, and on SteamOS that
+  wasn't enough — a Deck still aborted before the window existed, `GDK_BACKEND=x11` and all.
+  The half that was missing is that SteamOS exports `EGL_PLATFORM=wayland`, and it's that
+  variable, not the GDK backend, that Mesa reads to decide which platform the default EGL
+  display belongs to — the display WebKit names in the line it dies on. Moving GTK to X11
+  while leaving that behind hands an X11 session to the Wayland platform, which is the one
+  pairing that can't work. The two are now made to agree wherever the app ends up on X11,
+  including when the backend was forced by hand rather than by us. A session staying on
+  Wayland keeps its own value, since there it's correct.
+- **A launch that dies before painting comes back in safe graphics by itself.** There is no
+  error to catch when this goes wrong: WebKitGTK prints one line and aborts the process, with
+  no window on screen and nothing for the app to handle — so the only recourse was knowing
+  about `MXB_SAFE_GRAPHICS=1` and a terminal to set it in. The app now writes down which
+  graphics settings it's about to try and marks them once the interface has actually loaded,
+  and a run that finds the last attempt unmarked starts one step safer. Whatever paints is
+  where the next launch begins, so this costs a working machine nothing and a broken one a
+  single failed start. Updating re-tries the fast path rather than inheriting an old verdict,
+  and `MXB_SAFE_GRAPHICS=0` forces it back for a machine pinned by a launch that was merely
+  interrupted.
+- The startup log now records `EGL_PLATFORM` alongside the backend, and which tier the run
+  started at — the two things the last Deck report needed and didn't have.
+
 ## Unreleased — the image builder survives long enough to build an image
 
 ### Fixed
