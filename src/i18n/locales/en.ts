@@ -1652,4 +1652,47 @@ export const en = {
   "trackViewer.whyDetails": "Why?",
   "trackViewer.copyDetails": "Copy details",
   "trackViewer.copied": "Copied",
+  // Cheat detection — see `src-tauri/src/integrity.rs`. Wording matters more than usual
+  // here: three of the four verdicts must not read as an accusation, and the one that does
+  // is only ever shown for a rule match.
+  "settings.integrity": "Cheat detection",
+  "settings.integrityDesc":
+    "MX Bikes has no anti-cheat, so a hooked client looks exactly like an honest one. This checks whether anything is attached to your running game.",
+  "settings.integrityWatch": "Watch the running game",
+  "settings.integrityWatchDesc":
+    "Check what's loaded into MX Bikes while you play. Nothing leaves your machine.",
+  "settings.integrityReport": "Share the result with servers",
+  "settings.integrityReportDesc":
+    "Let the admin of a server you're on see your verdict. Known cheats are named; anything merely unrecognised is counted, never named.",
+  "integrity.clean": "Nothing unaccounted for",
+  "integrity.suspect": "Something unrecognised is loaded",
+  "integrity.flagged": "A known cheat is attached",
+  "integrity.unknown": "Not checked",
+  "integrity.cleanDetail_one": "{{count}} loaded file checked.",
+  "integrity.cleanDetail_other": "{{count}} loaded files checked.",
+  "integrity.foundDetail_one": "{{count}} thing worth a look.",
+  "integrity.foundDetail_other": "{{count}} things worth a look.",
+  "integrity.unknownRunning":
+    "The game is running but its loaded files couldn't be read — so this is not an all-clear.",
+  "integrity.unknownIdle": "Start MX Bikes and this will check it while you ride.",
+  "integrity.scanNow": "Check now",
+  "integrity.scanFailed": "Couldn't run the check",
+  "integrity.offNote": "Turn on watching above to see what's attached to your game.",
+  "integrity.limitNote":
+    "This can prove your own client is honest; it can't prove anyone else's is. A cheater who doesn't run MXB App is never scanned.",
+  "integrity.rulesVersion": "Signature list v{{version}}.",
+  "integrity.reasonRule": "Matches a known cheat.",
+  "integrity.reasonLoader":
+    "Sitting in the game's folder under a name the game loads automatically.",
+  "integrity.reasonForeign":
+    "Loaded into the game from outside the game, Windows, or anything MXB App installed.",
+  "integrity.reasonProcess": "A program on this PC that matches a known cheat.",
+  "integrity.gridTitle": "Client checks",
+  "integrity.gridLoading": "Reading…",
+  "integrity.gridEmpty": "Nobody on this server is reporting a check right now.",
+  "integrity.gridSuspect_one": "{{count}} unrecognised file",
+  "integrity.gridSuspect_other": "{{count}} unrecognised files",
+  "integrity.gridRecovered": "(earlier this session)",
+  "integrity.gridNote":
+    "Only riders running MXB App with sharing turned on appear here. Somebody missing from this list hasn't been cleared — they simply haven't reported.",
 } as const;
