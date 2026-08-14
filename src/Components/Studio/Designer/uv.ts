@@ -21,10 +21,36 @@ export type Flank = "left" | "right" | "centre";
 /** A flank a region covers, where `both` means the two flanks share it. */
 export type Side = Flank | "both";
 
+/**
+ * Which way a triangle faces — the other half of "where does this land on the bike".
+ *
+ * A rear fender's outer skin and its underside are one panel with one name, and they routinely
+ * unwrap onto one island. Knowing the part is `plastics` doesn't tell you which of the two you
+ * are about to paint, and painting the wrong one puts artwork where nobody will ever see it.
+ */
+export type Facing = "top" | "under" | "edge";
+
+/** A facing a region covers, where `both` means the outer skin and the underside share it. */
+export type Face = Facing | "both";
+
 /** Per-triangle flank codes, packed one byte each. */
 const CENTRE = 0;
 const LEFT = 1;
 const RIGHT = 2;
+
+/** Per-triangle facing codes, in their own numbering — see `EDGE`/`TOP`/`UNDER`. */
+const EDGE = 0;
+const TOP = 1;
+const UNDER = 2;
+
+/**
+ * How steeply a triangle has to lie before it counts as facing up or down.
+ *
+ * A normal's y of ±0.3 is about 17° off vertical. Below that the triangle is effectively a
+ * wall — the side of a shroud, the flank of a tank — and calling it a top or an underside
+ * would put a word on screen that changes as the pointer slides along a curve.
+ */
+const FACE_TOLERANCE = 0.3;
 
 /** One piece of bodywork: a mesh-group name, and where its triangles land on the sheet. */
 export interface UvPart {
@@ -42,6 +68,10 @@ export interface UvPart {
   flanks: Uint8Array | null;
   /** The flanks the part covers as a whole, for a one-word summary. Null when unknown. */
   side: Side | null;
+  /** Per-triangle facing codes, alongside `flanks` and null on the same terms. */
+  faces: Uint8Array | null;
+  /** The facings the part covers as a whole. Null when unknown. */
+  face: Face | null;
   /** uv-space bounds, for fitting an image to the part and for cheap hit rejection. */
   minU: number;
   minV: number;
@@ -81,31 +111,58 @@ function summarise(sides: number[]): Side {
   return left ? "left" : right ? "right" : "centre";
 }
 
+/** The same, for facing codes. */
+function summariseFaces(faces: number[]): Face {
+  let top = false;
+  let under = false;
+  for (const f of faces) {
+    if (f === TOP) top = true;
+    else if (f === UNDER) under = true;
+    if (top && under) return "both";
+  }
+  return top ? "top" : under ? "under" : "edge";
+}
+
 /**
- * The flank of `part` under a uv point — `both` when the two sides land on the same island.
+ * The per-triangle codes at a uv point, gathered across **every** part that covers it.
+ *
+ * Across every part, not the one that happened to win the pick, because a texel is worn by
+ * whatever binds it. A bracket and the panel it bolts to regularly overlap on the sheet, and
+ * answering from the bracket alone is how the editor came to name the far flank of a shroud:
+ * the small part wins the pick by area, and its side is not the side of the panel under the
+ * pointer. Painting there paints both, so both have to be in the answer.
+ */
+function codesAt(parts: UvPart[], u: number, v: number, field: "flanks" | "faces"): number[] {
+  const out: number[] = [];
+  for (const part of parts) {
+    const codes = part[field];
+    if (!codes) continue;
+    if (u < part.minU || u > part.maxU || v < part.minV || v > part.maxV) continue;
+    const { tris } = part;
+    for (let i = 0; i < tris.length; i += 6) {
+      if (inTriangle(u, v, tris[i], tris[i + 1], tris[i + 2], tris[i + 3], tris[i + 4], tris[i + 5]))
+        out.push(codes[i / 6]);
+    }
+  }
+  return out;
+}
+
+/**
+ * The flank worn at a uv point — `both` when the two sides land on the same spot.
  *
  * That last case is the one worth having: a bike's flanks routinely share one region of the
  * sheet, so a decal placed off-centre there comes out at the mirrored spot on the far side.
  * The editor can't change that, and it can say so.
  */
-export function flankAt(part: UvPart, u: number, v: number): Side | null {
-  const { tris, flanks } = part;
-  if (!flanks) return null;
-  let left = false;
-  let right = false;
-  let centre = false;
-  for (let i = 0; i < tris.length; i += 6) {
-    if (!inTriangle(u, v, tris[i], tris[i + 1], tris[i + 2], tris[i + 3], tris[i + 4], tris[i + 5]))
-      continue;
-    const s = flanks[i / 6];
-    if (s === LEFT) left = true;
-    else if (s === RIGHT) right = true;
-    else centre = true;
-    if (left && right) return "both";
-  }
-  if (left) return "left";
-  if (right) return "right";
-  return centre ? "centre" : null;
+export function sideAt(parts: UvPart[], u: number, v: number): Side | null {
+  const codes = codesAt(parts, u, v, "flanks");
+  return codes.length ? summarise(codes) : null;
+}
+
+/** Which way the surface at a uv point faces — `both` when a panel's two skins share it. */
+export function faceAt(parts: UvPart[], u: number, v: number): Face | null {
+  const codes = codesAt(parts, u, v, "faces");
+  return codes.length ? summariseFaces(codes) : null;
 }
 
 /** A stable hue per mesh-group name. */
@@ -131,24 +188,28 @@ function hueOf(label: string): number {
  * same way as a canvas row and no flip belongs here — the same reasoning that keeps the editor
  * from having an opinion about which way up a sheet is.
  *
- * `flanks` asks for the left/right answer as well, and is for bikes only: their positions arrive
- * assembled and centred on the mirror plane, which is what makes the sign of x mean a side.
+ * `assembled` asks for the left/right and top/underside answers as well. Both read a vertex's
+ * position or normal as a statement about where it sits on the bike, which is only true once
+ * the `.geom` has placed the parts into one frame about the mirror plane — an unassembled bike
+ * is a pile of parts each in its own, and the sign of x there is noise. The backend reports
+ * whether that happened; nothing here tries to guess it from the numbers.
  */
 export function uvParts(
   nodes: EdfNode[],
   sheetName: string,
-  opts?: { flanks?: boolean },
+  opts?: { assembled?: boolean },
 ): UvPart[] {
   const want = sheetName.trim().toLowerCase();
   if (!want) return [];
 
   // A fraction of the model's width, so the dead band around the mirror plane scales with the
   // bike rather than being a number of metres — a 65 and a 450 are one shape at two sizes.
-  const sided = !!opts?.flanks;
+  const sided = !!opts?.assembled;
   const tol = sided ? lateralTolerance(nodes) : 0;
 
   const byLabel = new Map<string, number[]>();
   const flanksByLabel = new Map<string, number[]>();
+  const facesByLabel = new Map<string, number[]>();
   for (const node of nodes) {
     if (!node.uvs.length || !node.indices.length) continue;
     const triCount = Math.floor(node.indices.length / 3);
@@ -171,17 +232,32 @@ export function uvParts(
         sides = [];
         flanksByLabel.set(label, sides);
       }
+      let faces = facesByLabel.get(label);
+      if (!faces && sided) {
+        faces = [];
+        facesByLabel.set(label, faces);
+      }
+      // Normals are what say which way a surface looks, and a mesh is free to ship without
+      // them. Without them the facing question goes unanswered rather than being answered from
+      // the winding order, which flips with the exporter.
+      const hasNormals = node.normals.length >= node.positions.length;
       const end = Math.min(start + count, triCount);
       for (let t = Math.max(0, start); t < end; t += 1) {
         let x = 0;
+        let ny = 0;
         for (let c = 0; c < 3; c += 1) {
           const v = node.indices[t * 3 + c];
           flat.push(node.uvs[v * 2], node.uvs[v * 2 + 1]);
           if (sides) x += node.positions[v * 3];
+          if (faces && hasNormals) ny += node.normals[v * 3 + 1];
         }
         // The centroid, not every corner: a triangle with one vertex over the line is still on
         // the side the rest of it is, and a panel's inner edge is full of them.
         if (sides) sides.push(x / 3 > tol ? LEFT : x / 3 < -tol ? RIGHT : CENTRE);
+        if (faces) {
+          const up = hasNormals ? ny / 3 : 0;
+          faces.push(up > FACE_TOLERANCE ? TOP : up < -FACE_TOLERANCE ? UNDER : EDGE);
+        }
       }
     }
   }
@@ -200,11 +276,14 @@ export function uvParts(
       if (flat[i + 1] > maxV) maxV = flat[i + 1];
     }
     const sides = flanksByLabel.get(label);
+    const faces = facesByLabel.get(label);
     parts.push({
       label,
       tris: new Float32Array(flat),
       flanks: sides ? new Uint8Array(sides) : null,
       side: sides ? summarise(sides) : null,
+      faces: faces ? new Uint8Array(faces) : null,
+      face: faces ? summariseFaces(faces) : null,
       minU,
       minV,
       maxU,
@@ -273,22 +352,33 @@ function inTriangle(
  * order so it cannot be silently undone by sorting the parts differently.
  */
 export function partAt(parts: UvPart[], u: number, v: number): UvPart | null {
-  let best: UvPart | null = null;
-  let bestArea = Infinity;
+  return partsAt(parts, u, v)[0] ?? null;
+}
+
+/**
+ * Every part covering a uv point, most specific first.
+ *
+ * Parts genuinely share regions of a sheet — a bracket bolted through a shroud, a badge on a
+ * tank — and one of them winning the pick silently is what makes the editor look like it is
+ * describing the wrong panel. The list keeps `partAt`'s order, so the smallest is still the
+ * one pointed at, while everything else it overlaps stays sayable.
+ */
+export function partsAt(parts: UvPart[], u: number, v: number): UvPart[] {
+  const hits: UvPart[] = [];
   for (const part of parts) {
     if (u < part.minU || u > part.maxU || v < part.minV || v > part.maxV) continue;
-    const area = (part.maxU - part.minU) * (part.maxV - part.minV);
-    if (area >= bestArea) continue;
     const { tris } = part;
     for (let i = 0; i < tris.length; i += 6) {
       if (inTriangle(u, v, tris[i], tris[i + 1], tris[i + 2], tris[i + 3], tris[i + 4], tris[i + 5])) {
-        best = part;
-        bestArea = area;
+        hits.push(part);
         break;
       }
     }
   }
-  return best;
+  return hits.sort(
+    (a, b) =>
+      (a.maxU - a.minU) * (a.maxV - a.minV) - (b.maxU - b.minU) * (b.maxV - b.minV),
+  );
 }
 
 /**

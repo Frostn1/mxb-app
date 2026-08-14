@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { useT } from "../../../i18n/context";
 import { layerCorners } from "./composite";
 import type { Ghost } from "./ghost";
-import { flankAt, partAt, partPath, type Side, type UvPart } from "./uv";
+import { faceAt, partAt, partPath, partsAt, sideAt, type Face, type Side, type UvPart } from "./uv";
 import { hitTest, type Layer, type Sheet } from "./layers";
 import { constrained, hasTip, isDragTool, type PaintTool, type Point } from "./paint";
 
@@ -130,9 +130,16 @@ export function CanvasStage({
   // being able to answer "what am I painting on" — an outline you have to interpret answers it
   // less well than a name does.
   const [overPart, setOverPart] = useState<UvPart | null>(null);
+  // The largest part sharing that point, when something else does. Two parts over one texel is
+  // ordinary — and it is also the whole reason a small bracket used to answer for the panel it
+  // sits on, so the overlap is named rather than resolved out of sight.
+  const [overAlso, setOverAlso] = useState<string | null>(null);
   // And which flank of the bike that piece is, at the point being pointed at rather than over
   // the part as a whole — the two are different answers wherever the flanks share an island.
   const [overSide, setOverSide] = useState<Side | null>(null);
+  // Which way the surface there faces. The answer that says a rear fender's island has its
+  // underside in it, which is otherwise only discoverable by painting and looking.
+  const [overFace, setOverFace] = useState<Face | null>(null);
   // The press and current point of a gradient or shape drag, so it can be shown while it's
   // being aimed. Only ever set between press and release.
   const [guide, setGuide] = useState<{ from: Point; to: Point } | null>(null);
@@ -499,9 +506,14 @@ export function CanvasStage({
           const at = toSheet(e.clientX, e.clientY);
           const u = at ? at.x / sheet.width : 0;
           const v = at ? at.y / sheet.height : 0;
-          const part = at ? partAt(parts, u, v) : null;
-          setOverPart(part);
-          setOverSide(part ? flankAt(part, u, v) : null);
+          // Everything under the pointer, not just the winner: the side and the facing are
+          // asked of all of it, so a bracket sharing the panel's island can't answer for the
+          // panel. `hits[0]` stays the most specific part, which is what gets outlined.
+          const hits = at ? partsAt(parts, u, v) : [];
+          setOverPart(hits[0] ?? null);
+          setOverAlso(hits.length > 1 ? hits[hits.length - 1].label : null);
+          setOverSide(hits.length ? sideAt(parts, u, v) : null);
+          setOverFace(hits.length ? faceAt(parts, u, v) : null);
         }
         return;
       }
@@ -555,6 +567,33 @@ export function CanvasStage({
     setPan({ x: 0, y: 0 });
   }, []);
 
+  /**
+   * Fill the view with one piece of bodywork.
+   *
+   * A shroud is a tenth of a 2048² sheet, and reaching it by wheel-and-drag means aiming at a
+   * shape whose edges are the thing you were trying to see. Double-click is the gesture because
+   * it costs no mode and no modifier: a paint tool still paints where you clicked, and the view
+   * arrives at the part you were already pointing at.
+   */
+  const focusPart = useCallback(
+    (part: UvPart) => {
+      if (!fit || !box.w || !box.h) return;
+      // A degenerate island — one point, or a sliver — would divide the view to infinity.
+      const pw = Math.max(1, (part.maxU - part.minU) * sheet.width);
+      const ph = Math.max(1, (part.maxV - part.minV) * sheet.height);
+      // 0.8 leaves the part's surroundings in frame. A panel cut exactly to the edges gives
+      // nothing to judge where a decal sits relative to the seam beside it.
+      const z = Math.min(8, Math.max(0.25, (Math.min(box.w / pw, box.h / ph) * 0.8) / fit));
+      const s = fit * z;
+      const cx = ((part.minU + part.maxU) / 2) * sheet.width;
+      const cy = ((part.minV + part.maxV) / 2) * sheet.height;
+      setZoom(z);
+      // Pan is measured from the sheet's centre, which is where the blit is anchored.
+      setPan({ x: -(cx - sheet.width / 2) * s, y: -(cy - sheet.height / 2) * s });
+    },
+    [box.w, box.h, fit, sheet.width, sheet.height],
+  );
+
   const ringed = paints && hasTip(tool);
   // Corners come out of `layerCorners` clockwise from the top left, so 0/2 are one diagonal
   // and 1/3 the other. A rotated layer makes this an approximation — the arrow can end up a
@@ -590,6 +629,16 @@ export function CanvasStage({
           if (cursorRef.current) cursorRef.current.style.opacity = "1";
         }}
         onWheel={onWheel}
+        // The part under the pointer, not the one the hover last recorded: a double-click can
+        // land before a hover has been reported on a touchpad, and framing the previous part
+        // would move the view away from what was just clicked.
+        onDoubleClick={(e) => {
+          if (!parts.length) return;
+          const at = toSheet(e.clientX, e.clientY);
+          if (!at) return;
+          const part = partAt(parts, at.x / sheet.width, at.y / sheet.height);
+          if (part) focusPart(part);
+        }}
         onContextMenu={(e) => e.preventDefault()}
       />
       <div
@@ -611,7 +660,9 @@ export function CanvasStage({
         {overPart && (
           <>
             <span>·</span>
-            <span className="max-w-[160px] truncate text-white/70">{overPart.label}</span>
+            <span className="max-w-[160px] truncate text-white/70" title={t("designer.focusHint")}>
+              {overAlso ? t("designer.partOver", { part: overPart.label, over: overAlso }) : overPart.label}
+            </span>
             {/* Which flank, when the model can say. `both` is the one that saves an
                 afternoon: it means this island is worn by each side of the bike. */}
             {overSide && overSide !== "centre" && (
@@ -620,6 +671,16 @@ export function CanvasStage({
                 title={overSide === "both" ? t("designer.flankSharedHint") : undefined}
               >
                 {t(`designer.flank.${overSide}` as "designer.flank.left")}
+              </span>
+            )}
+            {/* Only the answers worth acting on. "Top" is where a livery goes anyway, so
+                saying it every time would bury the one that means "nobody will see this". */}
+            {(overFace === "under" || overFace === "both") && (
+              <span
+                className="text-amber-300/70"
+                title={t(`designer.faceHint.${overFace}` as "designer.faceHint.under")}
+              >
+                {t(`designer.face.${overFace}` as "designer.face.under")}
               </span>
             )}
           </>

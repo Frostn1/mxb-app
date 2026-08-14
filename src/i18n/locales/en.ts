@@ -1531,6 +1531,14 @@ export const en = {
   "designer.flank.both": "both sides",
   "designer.flankSharedHint":
     "Both flanks are unwrapped onto this same area, so anything drawn here appears on each side of the bike — mirrored, and not where you would expect it on the far one.",
+  "designer.focusHint": "Double-click a part to fill the view with it.",
+  "designer.partOver": "{{part}} on {{over}}",
+  "designer.face.under": "underside",
+  "designer.face.both": "top + underside",
+  "designer.faceHint.under":
+    "This area is the underside of the panel — painted here, it faces the ground and is never seen from outside.",
+  "designer.faceHint.both":
+    "A panel's outer skin and its underside share this area, so anything drawn here lands on both.",
   "designer.opacity": "Opacity",
   "designer.blend": "Blend",
   "designer.blend.normal": "Normal",

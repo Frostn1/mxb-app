@@ -1577,6 +1577,14 @@ export const de: Translation = {
   "designer.flank.both": "beide Seiten",
   "designer.flankSharedHint":
     "Beide Flanken liegen auf derselben Fläche, deshalb erscheint alles hier Gezeichnete auf jeder Seite des Motorrads — gespiegelt, und nicht dort, wo man es auf der anderen Seite erwarten würde.",
+  "designer.focusHint": "Doppelklick auf ein Teil füllt die Ansicht damit.",
+  "designer.partOver": "{{part}} auf {{over}}",
+  "designer.face.under": "Unterseite",
+  "designer.face.both": "Ober- + Unterseite",
+  "designer.faceHint.under":
+    "Diese Fläche ist die Unterseite des Teils — hier Gemaltes zeigt zum Boden und ist von außen nie zu sehen.",
+  "designer.faceHint.both":
+    "Ober- und Unterseite des Teils liegen auf derselben Fläche, deshalb landet alles hier Gezeichnete auf beiden.",
   "designer.opacity": "Deckkraft",
   "designer.blend": "Modus",
   "designer.blend.normal": "Normal",

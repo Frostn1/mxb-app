@@ -1555,6 +1555,14 @@ export const it: Translation = {
   "designer.flank.both": "entrambi i lati",
   "designer.flankSharedHint":
     "I due fianchi sono mappati sulla stessa area, quindi ciò che disegni qui compare su entrambi i lati della moto: speculare, e non dove te lo aspetteresti sull'altro.",
+  "designer.focusHint": "Fai doppio clic su un pezzo per riempire la vista con esso.",
+  "designer.partOver": "{{part}} su {{over}}",
+  "designer.face.under": "lato interno",
+  "designer.face.both": "esterno + interno",
+  "designer.faceHint.under":
+    "Quest'area è il lato interno del pezzo: ciò che dipingi qui guarda a terra e non si vede mai da fuori.",
+  "designer.faceHint.both":
+    "Il lato esterno del pezzo e quello interno condividono quest'area, quindi ciò che disegni qui finisce su entrambi.",
   "designer.opacity": "Opacità",
   "designer.blend": "Fusione",
   "designer.blend.normal": "Normale",

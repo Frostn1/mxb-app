@@ -388,6 +388,14 @@ export interface BikeModel {
    * Designer's reference underlay is the one place that difference matters.
    */
   base: PaintTexture[];
+  /**
+   * Whether the bike's `.geom` placed the parts into one frame.
+   *
+   * False means each node is still in its own local frame, so a vertex's position and normal
+   * say nothing about where it sits on the bike. The Designer names a sheet region's flank and
+   * facing from exactly those, and stays quiet rather than guessing when this is false.
+   */
+  assembled: boolean;
 }
 
 export interface RiderPart {

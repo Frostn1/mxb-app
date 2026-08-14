@@ -1253,6 +1253,12 @@ struct BikeModel {
     /// Designer's reference underlay needs the distinction: an OEM bike's stock `.pnt`
     /// replaces the wheels and the chain, so `plastics` is only ever in here.
     base: Vec<paint::PaintTexture>,
+    /// Whether the parts were placed into one frame by the bike's `.geom`.
+    ///
+    /// False means every node still sits in its own local frame, so a vertex's position says
+    /// nothing about where it is on the bike. The Designer names the flank a sheet region
+    /// paints from the sign of x, and that answer is only worth giving once this is true.
+    assembled: bool,
 }
 
 impl BikeModel {
@@ -1465,14 +1471,34 @@ fn build_bike_model(
     for (fname, path, data) in &installed {
         pnt_jobs.push((paint_display_name(fname), data.as_slice(), false, Some(path)));
     }
-    if let Some(g) = geom {
-        if !edf::assemble_bike(&mut nodes, g) {
-            eprintln!("[viewer] .geom present but missing mount points — parts unassembled");
+    // Whether the parts ended up in one frame. Logged rather than printed: it decides what the
+    // Designer may say about a sheet's flanks, so "was this bike assembled?" has to be
+    // answerable from the log file after the fact, not only from a terminal nobody kept.
+    let assembled = match geom {
+        Some(g) => {
+            let ok = edf::assemble_bike(&mut nodes, g);
+            if !ok {
+                log::warn!("[viewer] {label}: .geom present but missing mount points — parts unassembled");
+            }
+            ok
         }
-    } else if !nodes.is_empty() {
-        eprintln!("[viewer] no .geom alongside the mesh — parts unassembled");
-    }
+        None => {
+            if !nodes.is_empty() {
+                log::warn!("[viewer] {label}: no .geom alongside the mesh — parts unassembled");
+            }
+            false
+        }
+    };
     edf::to_right_handed(&mut nodes);
+    // Nothing to draw. Returning a model with no nodes is worse than failing: the viewer reads
+    // it as a successful load and puts its stand-in bike on screen, which reads as "this is your
+    // bike" rather than "none of this bike arrived". A cloud-synced archive that hasn't been
+    // downloaded lands here — every entry reads short, so the `.edf` never appears.
+    if nodes.is_empty() {
+        return Err(format!(
+            "{label} holds no readable mesh — if the file is cloud-synced, it may not be fully downloaded yet"
+        ));
+    }
     let t_parse = t0.elapsed();
 
     let mut base: Vec<paint::PaintTexture> = tga_jobs
@@ -1595,7 +1621,7 @@ fn build_bike_model(
         log::info!("  node '{}' placed={} {}", n.name, n.placed, subs.join(", "));
     }
 
-    let model = BikeModel { nodes, paints, base: model_base };
+    let model = BikeModel { nodes, paints, base: model_base, assembled };
     if let Ok(mut c) = bike_cache().lock() {
         // The evicted bike's pixels go with it — nothing else references them.
         if let Some(dropped) = c.insert(key, model.clone()) {
@@ -7307,6 +7333,7 @@ mod viewer_tests {
                 changes_preview: true,
             }],
             base: vec![tex("plastics", "t-own"), tex("wheel", "t-shared")],
+            assembled: true,
         };
         let tokens = model.tokens();
         assert!(tokens.contains(&"t-own".to_string()), "the overridden one is still released");

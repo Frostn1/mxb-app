@@ -1568,6 +1568,14 @@ export const fr: Translation = {
   "designer.flank.both": "les deux côtés",
   "designer.flankSharedHint":
     "Les deux flancs sont dépliés sur cette même zone : ce que vous dessinez ici apparaît de chaque côté de la moto, en miroir, et pas là où vous l'attendriez de l'autre côté.",
+  "designer.focusHint": "Double-cliquez sur une pièce pour remplir la vue avec elle.",
+  "designer.partOver": "{{part}} sur {{over}}",
+  "designer.face.under": "face intérieure",
+  "designer.face.both": "extérieur + intérieur",
+  "designer.faceHint.under":
+    "Cette zone est la face intérieure de la pièce : ce que vous y peignez regarde le sol et ne se voit jamais de l'extérieur.",
+  "designer.faceHint.both":
+    "La face extérieure de la pièce et sa face intérieure partagent cette zone : ce que vous dessinez ici se retrouve sur les deux.",
   "designer.opacity": "Opacité",
   "designer.blend": "Fusion",
   "designer.blend.normal": "Normal",

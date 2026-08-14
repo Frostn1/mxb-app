@@ -1564,6 +1564,14 @@ export const es: Translation = {
   "designer.flank.both": "ambos lados",
   "designer.flankSharedHint":
     "Los dos flancos se despliegan sobre esta misma zona, así que lo que dibujes aquí aparece en ambos lados de la moto: reflejado, y no donde lo esperarías en el otro.",
+  "designer.focusHint": "Haz doble clic en una pieza para llenar la vista con ella.",
+  "designer.partOver": "{{part}} sobre {{over}}",
+  "designer.face.under": "cara interior",
+  "designer.face.both": "exterior + interior",
+  "designer.faceHint.under":
+    "Esta zona es la cara interior de la pieza: lo que pintes aquí mira al suelo y nunca se ve desde fuera.",
+  "designer.faceHint.both":
+    "La cara exterior de la pieza y su cara interior comparten esta zona, así que lo que dibujes aquí cae en las dos.",
   "designer.opacity": "Opacidad",
   "designer.blend": "Fusión",
   "designer.blend.normal": "Normal",
