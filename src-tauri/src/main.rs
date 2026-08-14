@@ -5897,9 +5897,6 @@ fn log_level() -> log::LevelFilter {
 /// the only way to test any of this from a machine that isn't the one it's for.
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 struct GraphicsEnv {
-    /// Exported by the AppImage runtime. A `.deb`/`.rpm` install links the host's own
-    /// libraries, so the mismatch below can't reach it.
-    appimage: bool,
     /// The compositor's socket — set on any Wayland session, gamescope included.
     wayland: bool,
     /// An X server is reachable, real or XWayland.
@@ -5912,7 +5909,6 @@ impl GraphicsEnv {
     fn read() -> Self {
         let set = |key: &str| std::env::var_os(key).is_some_and(|v| !v.is_empty());
         Self {
-            appimage: set("APPIMAGE"),
             wayland: set("WAYLAND_DISPLAY"),
             x_server: set("DISPLAY"),
             safe_mode: std::env::var("MXB_SAFE_GRAPHICS").unwrap_or_default() == "1",
@@ -5920,8 +5916,8 @@ impl GraphicsEnv {
     }
 }
 
-/// The environment WebKitGTK should start under. Two separate faults both end as a white
-/// window, and each has its own knob here.
+/// The environment WebKitGTK should start under: the renderer every session falls back to,
+/// and the knobs `MXB_SAFE_GRAPHICS` turns when a window still won't paint.
 fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
     // DMA-BUF asks the WebKit our AppImage carries from Ubuntu 22.04 to negotiate buffers
     // with whatever Mesa the host ships; where that fails it fails silently, painting
@@ -5929,12 +5925,17 @@ fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
     // of mostly static lists — and paints everywhere.
     let mut vars = vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1")];
 
-    // WebKitGTK 2.46+ aborts outright when it can't create an EGL display, and our AppImage
-    // bundles Ubuntu 22.04's libwayland next to the host's Mesa — the pairing the AppImage
-    // excludelist warns about. XWayland never goes down that path. Guarded on there being
-    // an X server to land on: forcing the backend without one trades a white screen for no
-    // window at all.
-    if env.wayland && env.x_server && (env.appimage || env.safe_mode) {
+    // The other fault — WebKitGTK 2.46+ aborting because it can't create an EGL display —
+    // was the bundled libwayland, and it is fixed where it was made: the AppImage no longer
+    // carries those libraries at all (scripts/appimage-drop-bundled-wayland.sh). Nothing
+    // here could have fixed it, and the version that tried never even ran: an AppImage's
+    // AppRun hook exports `GDK_BACKEND=x11` itself, before this process starts, so the
+    // default below was already set by the time we looked.
+    //
+    // What's left is the hand-operated fallback: an X server is a second graphics stack to
+    // land on when a machine still won't paint. Guarded on there being one — forcing the
+    // backend without it trades a white screen for no window at all.
+    if env.safe_mode && env.wayland && env.x_server {
         vars.push(("GDK_BACKEND", "x11"));
     }
 
@@ -6491,7 +6492,6 @@ mod webview_env_tests {
     /// SteamOS, both modes: Desktop is Plasma Wayland and gamescope is a compositor of its
     /// own, and each runs an XWayland the app can land on instead.
     const STEAMOS: GraphicsEnv = GraphicsEnv {
-        appimage: true,
         wayland: true,
         x_server: true,
         safe_mode: false,
@@ -6504,7 +6504,7 @@ mod webview_env_tests {
         for env in [
             GraphicsEnv::default(),
             STEAMOS,
-            GraphicsEnv { appimage: false, ..STEAMOS },
+            GraphicsEnv { wayland: false, ..STEAMOS },
             GraphicsEnv { safe_mode: true, ..STEAMOS },
         ] {
             assert_eq!(
@@ -6515,19 +6515,13 @@ mod webview_env_tests {
         }
     }
 
-    /// The bug this exists for: WebKitGTK aborts on EGL_BAD_PARAMETER and the window never
-    /// paints. XWayland sidesteps the EGL path the bundled libwayland breaks.
+    /// Nothing here forces a backend of its own accord any more. The EGL abort this used to
+    /// answer for was the AppImage's bundled libwayland, taken out of the bundle itself; an
+    /// AppImage is on XWayland regardless, because its AppRun hook says so before this
+    /// process starts.
     #[test]
-    fn an_appimage_on_wayland_goes_through_xwayland() {
-        assert_eq!(defaults(STEAMOS).get("GDK_BACKEND"), Some(&"x11"));
-    }
-
-    /// A `.deb`/`.rpm` links the host's libwayland, so it never hits the mismatch — and
-    /// XWayland would cost it sharpness under fractional scaling for nothing.
-    #[test]
-    fn an_installed_build_keeps_native_wayland() {
-        let installed = GraphicsEnv { appimage: false, ..STEAMOS };
-        assert_eq!(defaults(installed).get("GDK_BACKEND"), None);
+    fn a_wayland_session_is_left_on_its_own_backend() {
+        assert_eq!(defaults(STEAMOS).get("GDK_BACKEND"), None);
     }
 
     /// Without an X server to fall back to, forcing the backend trades a white screen for
@@ -6541,11 +6535,15 @@ mod webview_env_tests {
         assert_eq!(defaults(safe).get("GDK_BACKEND"), None);
     }
 
-    /// GTK already picks X11 there; saying so again would only be noise in the log.
+    /// GTK already picks X11 there; saying so again would only be noise in the log — and
+    /// safe mode has nothing to move the session *to*.
     #[test]
     fn a_plain_x11_session_needs_no_override() {
         let x11_only = GraphicsEnv { wayland: false, ..STEAMOS };
         assert_eq!(defaults(x11_only).get("GDK_BACKEND"), None);
+
+        let safe = GraphicsEnv { safe_mode: true, ..x11_only };
+        assert_eq!(defaults(safe).get("GDK_BACKEND"), None);
     }
 
     /// The escape hatch to hand someone whose screen is still white: every knob at once.
@@ -6555,14 +6553,6 @@ mod webview_env_tests {
         assert_eq!(vars.get("GDK_BACKEND"), Some(&"x11"));
         assert_eq!(vars.get("WEBKIT_DISABLE_COMPOSITING_MODE"), Some(&"1"));
         assert_eq!(vars.get("LIBGL_ALWAYS_SOFTWARE"), Some(&"1"));
-    }
-
-    /// Asking for it by hand reaches an installed build too — the fault it cures needn't be
-    /// the bundled-library one.
-    #[test]
-    fn safe_mode_reaches_an_installed_build() {
-        let installed = GraphicsEnv { appimage: false, safe_mode: true, ..STEAMOS };
-        assert_eq!(defaults(installed).get("GDK_BACKEND"), Some(&"x11"));
     }
 
     /// Nothing is imposed on a desktop that was never broken.

@@ -176,6 +176,17 @@ The workflow **publishes** the release with the installers attached
 (`releaseDraft: false`), renames the bundles to `MXB-App-<ver>-<arch>.<ext>` and
 patches `latest.json` so self-update keeps verifying.
 
+The Linux build takes one detour on the way: it goes through
+[`scripts/tauri-build.sh`](scripts/tauri-build.sh), which runs the same `tauri build` the
+other platforms do and then takes the bundled libwayland back out of the AppImage and signs
+it again — [`scripts/appimage-drop-bundled-wayland.sh`](scripts/appimage-drop-bundled-wayland.sh)
+says why, and needs only `squashfs-tools`. It works on an AppImage that has already been
+downloaded too, which is how to hand a Linux tester a fixed build without cutting a tag:
+
+```sh
+scripts/appimage-drop-bundled-wayland.sh MXB-App-0.9.2-amd64.AppImage
+```
+
 A tag can also be created from the GitHub web UI — **Releases → Draft a new
 release → Create new tag on publish** — which is the way to cut one without a
 terminal. **Actions → Release → Run workflow** is *not*: a `workflow_dispatch`

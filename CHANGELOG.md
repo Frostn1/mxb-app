@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — the Linux app stops carrying the library that blanked its window
+
+### Fixed
+- **The AppImage no longer ships its own libwayland.** linuxdeploy pulls libwayland-client,
+  -cursor, -egl and -server in as dependencies of GTK and WebKit, so our AppImage carried
+  Ubuntu 22.04's copies and put them ahead of the host's on the library path — where the
+  *host's* Mesa loaded them, and then couldn't create an EGL display. That is the window that
+  comes up and never paints. The AppImage excludelist names libwayland-client for exactly this
+  reason; the linuxdeploy build Tauri downloads carries an older copy of that list and bundles
+  it regardless. Release builds now take those four libraries back out of the image before it
+  is published, and sign it again over the bytes that ship, so the app uses the same libwayland
+  as every other program on the machine.
+- **The XWayland workaround from v0.9.1 turned out never to run, and has been dropped.** An
+  AppImage sets `GDK_BACKEND=x11` in its own startup hook, before a line of our code executes
+  — so the default the app set for the same thing could never apply, every AppImage was
+  already going through XWayland, and the white screen that release was meant to cure survived
+  it untouched. Nothing about how an AppImage runs changes here: the hook still says x11. The
+  app now only asks for a backend when `MXB_SAFE_GRAPHICS=1` does, which is the one case where
+  it's a knob somebody is deliberately turning.
+
 ## Unreleased — the sheet says which panel, which side, and which face
 
 ### Fixed
