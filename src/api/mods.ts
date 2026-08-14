@@ -427,6 +427,15 @@ export function applyModelSwap(bike: string, target: string): Promise<SwapApplyO
   return invoke<SwapApplyOutcome>("apply_model_swap", { bike, target });
 }
 
+/**
+ * The bike as a model swap would leave it, without applying it — the swap's file set is
+ * assembled in memory, so nothing moves on disk and the game can stay open. "Stock" shows
+ * the packed model the loose files are hiding.
+ */
+export function previewModelSwap(bike: string, variant: string): Promise<BikeModel> {
+  return invoke<BikeModel>("preview_model_swap", { bike, variant });
+}
+
 export function scanSoundSwaps(): Promise<BikeSounds[]> {
   return invoke<BikeSounds[]>("scan_sound_swaps");
 }

@@ -7,6 +7,7 @@ import {
   Loader2,
   AlertTriangle,
   Ban,
+  Box,
   FolderInput,
   Link2,
   Link2Off,
@@ -37,6 +38,8 @@ import type {
   SwapApplyOutcome,
 } from "../../types";
 import RegisterSwapsDialog from "./RegisterSwapsDialog";
+import { ViewerDialog } from "../Viewer/ViewerDialog";
+import { useConfig } from "../../Context/Config";
 import { Trans } from "../../i18n";
 import { useT, type TFunc } from "../../i18n/context";
 
@@ -96,6 +99,11 @@ function swapNote(
   }
 }
 
+/** The row standing for the game's own model/sound, which is never a folder in the library. */
+function isStockRow(v: { name: string }): boolean {
+  return v.name.toLowerCase() === "stock";
+}
+
 /** One bike's row: its models (null for sound-only bikes) and its sounds (always present). */
 interface Row {
   bike: string;
@@ -130,6 +138,10 @@ function mergeRows(models: BikeModels[], sounds: BikeSounds[]): Row[] {
 
 export default function Locker() {
   const t = useT();
+  // Bike geometry needs the optional local module — without it there's nothing to show.
+  const { bikePreview } = useConfig();
+  // The swap being previewed in 3D, if any. Nothing on disk moves to show it.
+  const [preview, setPreview] = useState<{ bike: string; variant: string } | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Bike name currently being mutated (disables its rows + spins the target).
@@ -362,6 +374,11 @@ export default function Locker() {
                 disabled={busy !== null}
                 onModelSwap={onModelSwap}
                 onSoundSwap={onSoundSwap}
+                onPreview={
+                  bikePreview
+                    ? (bike, variant) => setPreview({ bike, variant })
+                    : undefined
+                }
                 onBind={onBind}
                 onUnbind={onUnbind}
               />
@@ -376,6 +393,14 @@ export default function Locker() {
         bikes={loose}
         onDone={() => void load()}
       />
+
+      <ViewerDialog
+        open={preview !== null}
+        onOpenChange={(o) => !o && setPreview(null)}
+        title={preview ? `${preview.bike} · ${preview.variant}` : undefined}
+        initialMode="bike"
+        modelSwap={preview ?? undefined}
+      />
     </div>
   );
 }
@@ -386,6 +411,7 @@ function BikeCard({
   disabled,
   onModelSwap,
   onSoundSwap,
+  onPreview,
   onBind,
   onUnbind,
 }: {
@@ -394,6 +420,8 @@ function BikeCard({
   disabled: boolean;
   onModelSwap: (bike: string, target: string) => void;
   onSoundSwap: (bike: string, target: string) => void;
+  /** Undefined when this build can't draw bike geometry — then no row offers a preview. */
+  onPreview?: (bike: string, variant: string) => void;
   onBind: (bike: string, model: string, sound: string) => void;
   onUnbind: (bike: string, model: string, sound: string) => void;
 }) {
@@ -435,6 +463,13 @@ function BikeCard({
               busy={busy}
               disabled={disabled}
               onClick={() => onModelSwap(bike, v.name)}
+              // A set with a mesh can be drawn; so can Stock, which shows the packed model
+              // the loose files are covering. A "no model" set has nothing to show.
+              onPreview={
+                onPreview && (v.valid || isStockRow(v))
+                  ? () => onPreview(bike, v.name)
+                  : undefined
+              }
             />
           ))}
         </SwapSection>
@@ -512,6 +547,7 @@ function VariantButton({
   disabled,
   boundModels = [],
   onClick,
+  onPreview,
 }: {
   variant: ModelVariant | SoundVariant;
   kind: "model" | "sound";
@@ -519,12 +555,14 @@ function VariantButton({
   disabled: boolean;
   boundModels?: string[];
   onClick: () => void;
+  /** Show this set in 3D without switching to it. Models only. */
+  onPreview?: () => void;
 }) {
   const t = useT();
   // A model row named "Stock" is the game's own model, packed in the bike's `.pkz` —
   // reached by clearing the loose set, so it's empty like a "no model" row but means the
   // opposite. Only the wording differs.
-  const isStockModel = kind === "model" && v.name.toLowerCase() === "stock";
+  const isStockModel = kind === "model" && isStockRow(v);
   const emptyLabel = isStockModel
     ? t("locker.stockModel")
     : kind === "model"
@@ -540,74 +578,89 @@ function VariantButton({
   const applicable = v.valid || v.empty;
   const selectable = !v.active && applicable && !disabled;
   return (
-    <button
-      disabled={!selectable}
-      onClick={onClick}
-      title={
-        v.active
-          ? kind === "model"
-            ? t("locker.activeModel")
-            : t("locker.activeSound")
-          : v.empty
-            ? emptyTitle
-            : !v.valid
-              ? kind === "model"
-                ? t("locker.missingModelEdf")
-                : t("locker.missingSoundFiles")
-              : t("locker.switchTo", { name: v.name })
-      }
-      className={cn(
-        "flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
-        v.active
-          ? "border-primary/60 bg-primary/10"
-          : applicable
-            ? "cursor-pointer border-white/[0.07] hover:border-white/20"
-            : "border-white/[0.05] opacity-50",
-        disabled && !v.active && "pointer-events-none opacity-60",
-      )}
-    >
-      <span className="flex size-4 flex-none items-center justify-center">
-        {v.active ? (
-          busy ? (
-            <Loader2 className="size-3.5 animate-spin text-primary" />
-          ) : (
-            <Check className="size-4 text-primary" />
-          )
-        ) : v.empty ? (
-          <Ban className="size-3.5 text-muted-foreground" />
-        ) : !v.valid ? (
-          <AlertTriangle className="size-3.5 text-amber-500/80" />
-        ) : busy ? (
-          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-        ) : null}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "block truncate text-[12.5px] font-medium",
-            v.active ? "text-foreground" : "text-foreground/90",
-          )}
-        >
-          {v.name}
-        </span>
-        <span className="flex items-center gap-1 text-[10.5px] text-faint">
-          {v.active
-            ? t("common.active")
+    <div className="relative">
+      <button
+        disabled={!selectable}
+        onClick={onClick}
+        title={
+          v.active
+            ? kind === "model"
+              ? t("locker.activeModel")
+              : t("locker.activeSound")
             : v.empty
-              ? emptyLabel
-              : t("swaps.fileCount", { count: v.fileCount })}
-          {boundModels.length > 0 && (
-            <span
-              className="flex items-center gap-0.5 text-primary/70"
-              title={t("locker.tiedToModel", { models: boundModels.join(", ") })}
-            >
-              <Link2 className="size-3" />
-              {boundModels.join(", ")}
-            </span>
-          )}
+              ? emptyTitle
+              : !v.valid
+                ? kind === "model"
+                  ? t("locker.missingModelEdf")
+                  : t("locker.missingSoundFiles")
+                : t("locker.switchTo", { name: v.name })
+        }
+        className={cn(
+          "flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
+          onPreview && "pr-10",
+          v.active
+            ? "border-primary/60 bg-primary/10"
+            : applicable
+              ? "cursor-pointer border-white/[0.07] hover:border-white/20"
+              : "border-white/[0.05] opacity-50",
+          disabled && !v.active && "pointer-events-none opacity-60",
+        )}
+      >
+        <span className="flex size-4 flex-none items-center justify-center">
+          {v.active ? (
+            busy ? (
+              <Loader2 className="size-3.5 animate-spin text-primary" />
+            ) : (
+              <Check className="size-4 text-primary" />
+            )
+          ) : v.empty ? (
+            <Ban className="size-3.5 text-muted-foreground" />
+          ) : !v.valid ? (
+            <AlertTriangle className="size-3.5 text-amber-500/80" />
+          ) : busy ? (
+            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+          ) : null}
         </span>
-      </span>
-    </button>
+        <span className="min-w-0 flex-1">
+          <span
+            className={cn(
+              "block truncate text-[12.5px] font-medium",
+              v.active ? "text-foreground" : "text-foreground/90",
+            )}
+          >
+            {v.name}
+          </span>
+          <span className="flex items-center gap-1 text-[10.5px] text-faint">
+            {v.active
+              ? t("common.active")
+              : v.empty
+                ? emptyLabel
+                : t("swaps.fileCount", { count: v.fileCount })}
+            {boundModels.length > 0 && (
+              <span
+                className="flex items-center gap-0.5 text-primary/70"
+                title={t("locker.tiedToModel", { models: boundModels.join(", ") })}
+              >
+                <Link2 className="size-3" />
+                {boundModels.join(", ")}
+              </span>
+            )}
+          </span>
+        </span>
+      </button>
+      {/* Outside the swap button, not nested in it: previewing must never switch the
+          model by accident, and a button inside a button isn't valid markup either. */}
+      {onPreview && (
+        <button
+          onClick={onPreview}
+          title={t("locker.preview3d", { name: v.name })}
+          aria-label={t("locker.preview3d", { name: v.name })}
+          className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.07] hover:text-foreground"
+        >
+          <Box className="size-3.5" />
+        </button>
+      )}
+    </div>
   );
 }
 

@@ -979,6 +979,7 @@ export const de: Translation = {
   "locker.missingSoundFiles":
     "Diesem Set fehlt engine.scl oder sfx.cfg",
   "locker.switchTo": "Auf {{name}} wechseln",
+  "locker.preview3d": "{{name}} in 3D ansehen — es wird nichts gewechselt",
   "locker.tiedToModel": "Verknüpft mit Modell {{models}}",
   "locker.boundHint":
     "„{{sound}}“ ist mit Modell „{{model}}“ verknüpft — er wandert mit diesem Modell mit. Zum Lösen klicken.",

@@ -5,6 +5,7 @@ import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import {
   unpackPaint,
   loadBikeModel,
+  previewModelSwap,
   loadRiderBodyModel,
   loadGearModel,
   loadStockGearModel,
@@ -20,6 +21,9 @@ interface ViewerDialogProps {
   initialMode?: ViewerMode;
   paintPaths?: string[];
   modelSource?: string;
+  /** A bike shown as one of its model swaps would leave it, rather than as it is on disk.
+   *  Named by bike + variant because the swap is resolved backend-side, not by path. */
+  modelSwap?: { bike: string; variant: string };
   gearSource?: string;
   gearPart?: RiderPart["part"];
   stockGearPart?: RiderPart["part"];
@@ -60,6 +64,7 @@ export function ViewerDialog({
   title,
   paintPaths = [],
   modelSource,
+  modelSwap,
   gearSource,
   gearPart,
   stockGearPart,
@@ -68,7 +73,7 @@ export function ViewerDialog({
 }: ViewerDialogProps) {
   const t = useT();
   // A bike model → bike; gear/rider paint → rider. No user switch.
-  const isBike = !!modelSource;
+  const isBike = !!modelSource || !!modelSwap;
   const mode: ViewerMode = isBike ? "bike" : "rider";
   // Null until the player picks: the selection falls back to `initialPaint`, and the
   // names it matches against only arrive once the model (or its archive) has loaded.
@@ -85,6 +90,9 @@ export function ViewerDialog({
   const [gear, setGear] = useState<RiderPart | null>(null);
   const [gearPaints, setGearPaints] = useState<GearPaints>(EMPTY_GEAR_PAINTS);
   const [err, setErr] = useState<string | null>(null);
+  // Why the bike itself wouldn't load — a swap preview can be refused (an incomplete set,
+  // a bike with nothing behind it), and that reason is worth showing.
+  const [modelErr, setModelErr] = useState<string | null>(null);
 
   const nodes = model?.nodes ?? null;
   const paints = model?.paints ?? [];
@@ -102,22 +110,41 @@ export function ViewerDialog({
   const paintIdx = paintPick ?? indexOfName(paintNames, initialPaint);
   const gogglesIdx = gogglesPick ?? indexOfName(goggleNames, initialGoggles);
 
-  // Load the real bike geometry + its paints once per open (cached backend-side).
+  // Load the real bike geometry + its paints once per open (cached backend-side). A swap
+  // preview takes the same shape — it's the same bike, assembled from a different set.
+  const swapBike = modelSwap?.bike;
+  const swapVariant = modelSwap?.variant;
   useEffect(() => {
-    if (!open || !modelSource) {
+    if (!open) {
+      setModel(null);
+      return;
+    }
+    const load =
+      swapBike && swapVariant
+        ? previewModelSwap(swapBike, swapVariant)
+        : modelSource
+          ? loadBikeModel(modelSource)
+          : null;
+    if (!load) {
       setModel(null);
       return;
     }
     let alive = true;
     setLoadingModel(true);
-    loadBikeModel(modelSource)
+    setModelErr(null);
+    load
       .then((m) => alive && setModel(m))
-      .catch(() => alive && setModel(null))
+      .catch((e) => {
+        if (alive) {
+          setModelErr(String(e).replace(/^Error:\s*/, ""));
+          setModel(null);
+        }
+      })
       .finally(() => alive && setLoadingModel(false));
     return () => {
       alive = false;
     };
-  }, [open, modelSource]);
+  }, [open, modelSource, swapBike, swapVariant]);
 
   // Drop any pick each time it opens, so the next thing shown starts from its own paint
   // rather than the index left behind by the last one.
@@ -277,8 +304,10 @@ export function ViewerDialog({
   const paintNoChange = isBike && paints[paintIdx]?.changesPreview === false;
 
   const loading = loadingModel || loadingPaint;
-  // A bike that loaded but yielded no geometry (older split-`.edf` bikes) — show a message, not a fake.
-  const bikeFailed = isBike && !loadingModel && !!model && !model.nodes.length;
+  // A bike that loaded but yielded no geometry (older split-`.edf` bikes), or one that
+  // wouldn't load at all — show a message, not a fake.
+  const bikeFailed =
+    isBike && !loadingModel && (!!modelErr || (!!model && !model.nodes.length));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -363,8 +392,9 @@ export function ViewerDialog({
               <span className="text-sm font-medium text-foreground">
                 Can&apos;t load bike model
               </span>
-              <span className="text-xs text-muted-foreground">
-                This bike&apos;s 3D model isn&apos;t in a format the viewer supports yet.
+              <span className="max-w-md px-6 text-xs text-muted-foreground">
+                {modelErr ??
+                  "This bike's 3D model isn't in a format the viewer supports yet."}
               </span>
             </div>
           )}
