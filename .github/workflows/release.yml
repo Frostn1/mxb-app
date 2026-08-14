@@ -59,6 +59,8 @@ jobs:
       # Tauri links against the GTK/WebKit stack on Linux; `patchelf` is what the
       # AppImage bundler uses to rewrite the runtime paths. Mirrors ci.yml —
       # including `libasound2-dev`, which cpal's alsa-sys needs to build at all.
+      # `squashfs-tools` is ours: scripts/appimage-drop-bundled-wayland.sh rebuilds the
+      # AppImage's filesystem after taking the bundled libwayland out of it.
       - name: Install Linux system dependencies
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
@@ -70,7 +72,8 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libasound2-dev \
-            patchelf
+            patchelf \
+            squashfs-tools
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -133,6 +136,12 @@ jobs:
           # tags: a workflow_dispatch build's ref_name is a branch, not a version.
           MXB_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         with:
+          # Linux builds through our own wrapper: it runs the same `tauri build`, then takes
+          # the bundled libwayland out of the AppImage and signs it again before this step
+          # collects the bundles — so the image that gets uploaded is the one `latest.json`
+          # carries the signature for. Empty on Windows and macOS, which leaves the action
+          # to detect the package manager as it always has.
+          tauriScript: ${{ startsWith(matrix.platform, 'ubuntu') && 'bash scripts/tauri-build.sh' || '' }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.run_number) }}
           releaseName: "MXB App ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}"
           # What shipped, then which file to download — worded in scripts/release-notes.sh.

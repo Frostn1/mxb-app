@@ -50,6 +50,11 @@ hours), then downloads and installs them on restart.
   `.pkz` / `.pnt` files are placed as-is.
 - **Live reload**: a debounced watcher on `<modsPath>/mods` signals FrostMod to
   reload the game when mods are added — including ones installed outside the app.
+  On Linux that means the game's own Proton prefix: FrostMod is a Windows program
+  and so is the game it injects into, so the app starts it inside
+  `steamapps/compatdata/<appid>` rather than beside itself, and reaches it with a
+  command file instead of a Windows event (nothing outside a Wine prefix can pulse
+  one). Needs FrostMod v0.13.0 or newer, which is what reads that file.
 - **Paint studio**: builds a `.pnt` from `.tga`/`.png` sheets, and unpacks an
   existing paint back into editable sheets that keep the texture names the model
   binds — so a livery made anywhere can be packed, installed and previewed here.
@@ -175,6 +180,17 @@ so neither is set by hand.
 The workflow **publishes** the release with the installers attached
 (`releaseDraft: false`), renames the bundles to `MXB-App-<ver>-<arch>.<ext>` and
 patches `latest.json` so self-update keeps verifying.
+
+The Linux build takes one detour on the way: it goes through
+[`scripts/tauri-build.sh`](scripts/tauri-build.sh), which runs the same `tauri build` the
+other platforms do and then takes the bundled libwayland back out of the AppImage and signs
+it again — [`scripts/appimage-drop-bundled-wayland.sh`](scripts/appimage-drop-bundled-wayland.sh)
+says why, and needs only `squashfs-tools`. It works on an AppImage that has already been
+downloaded too, which is how to hand a Linux tester a fixed build without cutting a tag:
+
+```sh
+scripts/appimage-drop-bundled-wayland.sh MXB-App-0.9.2-amd64.AppImage
+```
 
 A tag can also be created from the GitHub web UI — **Releases → Draft a new
 release → Create new tag on publish** — which is the way to cut one without a

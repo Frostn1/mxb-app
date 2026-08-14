@@ -1341,11 +1341,17 @@ export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   return BLOCKED_HOST_PATTERNS.some((p) => s.includes(p));
 }
 
+/**
+ * Every download a mod offers, best first.
+ *
+ * Dedicated-server builds are sorted last rather than dropped. Hiding them read as "this
+ * mod has one file" while the flag was a guess — a mislabelled block took the only download
+ * off the page, and a server build the parser missed was silently preselected instead.
+ * Ranked below even a browser-only mirror, since that at least installs something playable.
+ */
 export function sortMirrors(detail: ModDetail): DownloadOption[] {
-  const all = detail.downloads ?? [];
-  const playable = all.filter((d) => !d.isServer);
-  const pool = playable.length ? playable : all;
-  return [...pool].sort((a, b) => {
+  return [...(detail.downloads ?? [])].sort((a, b) => {
+    if (a.isServer !== b.isServer) return Number(a.isServer) - Number(b.isServer);
     const ab = isBlockedDownload(a) ? 1 : 0;
     const bb = isBlockedDownload(b) ? 1 : 0;
     if (ab !== bb) return ab - bb;
@@ -1353,17 +1359,40 @@ export function sortMirrors(detail: ModDetail): DownloadOption[] {
   });
 }
 
+/** The downloads that install something playable — everything but the server builds. */
+export function playableMirrors(mirrors: DownloadOption[]): DownloadOption[] {
+  return mirrors.filter((m) => !m.isServer);
+}
+
+/**
+ * Which of `mirrors` (in {@link sortMirrors} order) a picker should start on: the best
+ * playable file, never a server build while anything else is on offer.
+ */
+export function defaultMirrorIndex(mirrors: DownloadOption[]): number {
+  const i = mirrors.findIndex((m) => !m.isServer);
+  return i >= 0 ? i : 0;
+}
+
+/** A mod whose every download is a dedicated-server build — nothing here is playable. */
+export function isServerOnly(mirrors: DownloadOption[]): boolean {
+  return mirrors.length > 0 && mirrors.every((m) => m.isServer);
+}
+
 export function pickDownloadForBike(
   mirrors: DownloadOption[],
   bikeName: string,
 ): DownloadOption | null {
   if (mirrors.length === 0) return null;
-  const fallback = () => mirrors.find((m) => m.isDefault) ?? mirrors[0];
+  // A sound pack's server build is named after the same bike as the file to play with, so
+  // it matches just as well — pick among the playable ones while there are any.
+  const playable = playableMirrors(mirrors);
+  const pool = playable.length ? playable : mirrors;
+  const fallback = () => pool.find((m) => m.isDefault) ?? pool[0];
   const want = tokens(bikeName);
   if (want.size === 0) return fallback();
 
   let best: { m: DownloadOption; score: number } | null = null;
-  for (const m of mirrors) {
+  for (const m of pool) {
     const fname = m.url.split(/[/\\]/).pop() ?? "";
     const hay = tokens(`${m.label} ${m.host} ${fname}`);
     let score = 0;
@@ -1436,7 +1465,13 @@ export interface QuickInstallParams {
 
 export type QuickInstallResult =
   | { ok: true; params: QuickInstallParams }
-  | { ok: false; reason: "blocked" | "none"; title: string; host?: string };
+  | {
+      ok: false;
+      /** `serverOnly` — every file the page offers is a dedicated-server build. */
+      reason: "blocked" | "none" | "serverOnly";
+      title: string;
+      host?: string;
+    };
 
 /**
  * The folder a one-click install from the Browse grid uses — the same answer the install
@@ -1454,8 +1489,12 @@ export async function resolveQuickInstall(
 ): Promise<QuickInstallResult> {
   const detail = await getModDetail(slug);
   const mirrors = sortMirrors(detail);
-  const primary = mirrors[0];
+  const primary = mirrors[defaultMirrorIndex(mirrors)];
   if (!primary) return { ok: false, reason: "none", title: detail.title };
+  // One click can't ask which build was meant, and a dedicated-server file installed by
+  // mistake looks installed while the game shows nothing. Send them to the mod's page,
+  // where every download is spelled out.
+  if (primary.isServer) return { ok: false, reason: "serverOnly", title: detail.title };
   if (isBlockedDownload(primary))
     return { ok: false, reason: "blocked", title: detail.title, host: primary.host };
 

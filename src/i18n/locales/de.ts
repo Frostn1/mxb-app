@@ -375,25 +375,29 @@ export const de: Translation = {
   "browse.queued": "„{{title}}“ eingereiht",
   "browse.queuedDesc": "Wird in {{folder}} installiert.",
   "browse.rootFolder": "Hauptordner",
+  "browse.byAuthor": "von {{author}}",
   "browse.needsBrowser":
     "„{{title}}“ muss über den Browser heruntergeladen werden",
   "browse.needsBrowserDesc":
     "{{host}} blockiert Downloads in der App — öffne die Seite, um fertigzustellen.",
   "browse.noDownload": "Kein Download für „{{title}}“ gefunden",
+  "browse.serverOnly": "„{{title}}“ bietet nur Server-Dateien",
+  "browse.serverOnlyDesc":
+    "Öffne die Mod, um ihre Downloads zu sehen — ein Build für dedizierte Server wird nicht für dich installiert.",
   "browse.quickInstallFailed":
     "„{{title}}“ konnte nicht schnell installiert werden",
   "browse.queuedBulk_one": "{{count}} Mod eingereiht",
   "browse.queuedBulk_other": "{{count}} Mods eingereiht",
   "browse.queuedBulkDesc": "Sie werden nacheinander installiert.",
   "browse.queuedBulkSkipped_one":
-    "{{count}} übersprungen — nur über den Browser verfügbar.",
+    "{{count}} übersprungen — öffne sie und wähle einen Download.",
   "browse.queuedBulkSkipped_other":
-    "{{count}} übersprungen — nur über den Browser verfügbar.",
+    "{{count}} übersprungen — öffne sie und wähle einen Download.",
   "browse.bulkFailed": "Die Auswahl konnte nicht schnell installiert werden",
   "browse.bulkFailedDesc_one":
-    "Er muss über den Browser heruntergeladen werden.",
+    "Öffne sie und wähle einen Download.",
   "browse.bulkFailedDesc_other":
-    "Alle {{count}} müssen über den Browser heruntergeladen werden.",
+    "Bei allen {{count}} muss der Download von Hand gewählt werden.",
 
   // ── Shop (MX Bikes Shop — gekaufte Downloads) ──────────────────────────────
   "shop.help":
@@ -490,6 +494,16 @@ export const de: Translation = {
   "installDialog.differentBike": "Anderes Motorrad / Paket",
   "installDialog.directFastest": "Direkt · am schnellsten",
   "installDialog.direct": "Direkt",
+  "installDialog.recommendedBadge": "Empfohlen",
+  "installDialog.browserBadge": "Browser",
+  "installDialog.serverBadge": "Server",
+  "installDialog.serverBuildNote": "Build für dedizierte Server — nicht zum Spielen",
+  "installDialog.serverFiles_one": "1 Datei für dedizierte Server",
+  "installDialog.serverFiles_other": "{{count}} Dateien für dedizierte Server",
+  "installDialog.serverOnlyNotice":
+    "Jeder Download hier ist ein Build für dedizierte Server. Installiere ihn nur, wenn du einen Server betreibst — zum Fahren kommt nichts dazu.",
+  "installDialog.moreMirrors_one": "1 weiterer Spiegelserver",
+  "installDialog.moreMirrors_other": "{{count}} weitere Spiegelserver",
   "installDialog.perBikeHint":
     "Jeder Download ist ein anderes Motorrad — automatisch passend zu deiner Auswahl. Wähle das Paket „all bikes“, um alle auf einmal zu bekommen.",
   "installDialog.mirrorsHint":
@@ -528,6 +542,8 @@ export const de: Translation = {
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installiert nach",
   "modDetail.noDownloadLink": "Auf dieser Seite wurde kein Download-Link gefunden — öffne sie auf {{site}}.",
+  "modDetail.serverOnlyNotice":
+    "Diese Seite bietet nur Dateien für dedizierte Server. Sie lassen sich installieren, aber im Spiel gibt es nichts zu fahren.",
   "modDetail.frostmodHint":
     "FrostMod lädt die Liste ({{kind}}) neu, sobald das fertig ist.",
   "modDetail.kindRider": "Fahrer",
@@ -582,7 +598,7 @@ export const de: Translation = {
   "settings.instantRefreshDesc":
     "Wenn du ein Preset anwendest, während {{game}} läuft, wird der Look sofort im Spiel aktualisiert — ohne Neustart und ohne das Profil neu auszuwählen. Falls das nicht klappt, wirst du gebeten, dein Profil neu auszuwählen.",
   "settings.instantRefreshWindowsOnly":
-    "Den Look ohne Neustart im Spiel zu aktualisieren erfordert FrostMod, und das gibt es nur für Windows — du wirst stattdessen gebeten, dein Profil neu auszuwählen.",
+    "Den Look ohne Neustart im Spiel zu aktualisieren heißt, in das laufende Spiel hineinzugreifen, und das kann nur die Windows-Version — du wirst stattdessen gebeten, dein Profil neu auszuwählen.",
   "settings.autoRunFrostmod": "FrostMod automatisch starten",
   "settings.autoRunFrostmodDesc":
     "FrostMod im Hintergrund starten, sobald MXB App geöffnet wird.",

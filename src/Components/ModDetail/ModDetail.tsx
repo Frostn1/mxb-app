@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   ExternalLink,
   Check,
@@ -13,11 +14,13 @@ import { useT, type TKey } from "../../i18n/context";
 import {
   buildDestinations,
   buildRiderDestinations,
+  defaultMirrorIndex,
   destStorageKey,
   getInstalledMods,
   getModDetail,
   isBlockedDownload,
   isLiveryContext,
+  isServerOnly,
   isSoundContext,
   riderTarget,
   resolveInitialFolder,
@@ -192,9 +195,15 @@ export default function ModDetail({
   // "Official" mirror + metadata for the collapsed install panel.
   const mirrors = useMemo(() => (detail ? sortMirrors(detail) : []), [detail]);
 
-  const primary = mirrors[0] ?? null;
+  // What the dialog would start on — the best playable file, so the panel below the button
+  // describes the download that's actually about to run.
+  const primary = mirrors[defaultMirrorIndex(mirrors)] ?? null;
   const format = primary ? fileFormat(primary.url) : null;
-  const mirrorNames = [...new Set(mirrors.map((m) => m.host))].join(" · ");
+  // Server builds aren't mirrors of the playable file, so they don't belong in this count.
+  const mirrorNames = [
+    ...new Set(mirrors.filter((m) => !m.isServer).map((m) => m.host)),
+  ].join(" · ");
+  const serverOnly = isServerOnly(mirrors);
 
   const destKey = destStorageKey(game, modType);
   const initialFolder = useMemo(
@@ -383,6 +392,17 @@ export default function ModDetail({
               />
             ) : primary ? (
               <>
+                {/* Every file this page offers is a dedicated-server build. Said before the
+                    button, not after the install: it lands in the library either way and
+                    then does nothing in-game, which reads as a broken mod. */}
+                {serverOnly && (
+                  <div className="flex items-start gap-2.5 rounded-[10px] border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
+                    <AlertTriangle className="mt-px size-3.5 flex-none text-warning" />
+                    <span className="text-[12px] text-warning/90">
+                      {t("modDetail.serverOnlyNotice")}
+                    </span>
+                  </div>
+                )}
                 <Button className="h-11 w-full text-[14px]" onClick={openInstall}>
                   {isInstalled ? t("browse.reinstall") : t("modDetail.addToLibrary")}
                 </Button>
