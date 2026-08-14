@@ -19,6 +19,8 @@ mod gearrepair;
 mod heightfield;
 mod imgcache;
 mod install;
+mod integrity;
+mod integritywatch;
 mod library;
 mod linkwalk;
 mod logs;
@@ -5277,6 +5279,74 @@ fn set_watch_mods_reload(
     Ok(())
 }
 
+/// The current cheat-scan verdict, without waiting for the next pass.
+///
+/// What the UI reads on open. Returns the standing [`integrity::Verdict::Unknown`] before the
+/// first scan of a session, which is the honest answer: nothing has been looked at yet.
+#[tauri::command]
+fn integrity_status() -> integrity::Report {
+    integritywatch::current()
+}
+
+/// Scan now, rather than at the next pass. The "check again" button.
+///
+/// Refreshes the rule list first: someone pressing this has usually just heard about a cheat,
+/// and matching it against a list fetched at app start would be the one moment it matters that
+/// the list is an hour old.
+#[tauri::command]
+async fn integrity_scan_now(app: tauri::AppHandle) -> integrity::Report {
+    integritywatch::refresh_rules(&app).await;
+    // A blocking scan: a module walk plus, at worst, a hash of the handful of files that
+    // didn't check out. Off the async worker so a slow disk can't stall the runtime.
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || integritywatch::scan_once(&handle))
+        .await
+        .unwrap_or_default()
+}
+
+/// Turn the watcher on or off.
+///
+/// No live start/stop needed — unlike the mods watcher, this one is a poll that re-reads the
+/// setting every pass, so it stands down on its own within [`IDLE_POLL`](integritywatch).
+#[tauri::command]
+fn set_integrity_watch(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.integrity_watch = enabled;
+    // Reporting a verdict this app is no longer producing would leave an admin looking at
+    // whatever the last scan said, indefinitely. Turning the scan off turns the sharing off.
+    if !enabled {
+        cfg.integrity_report = false;
+    }
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Share this client's verdict with the servers it joins.
+#[tauri::command]
+fn set_integrity_report(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.integrity_report = enabled;
+    // Sharing implies scanning; there is nothing to share otherwise.
+    if enabled {
+        cfg.integrity_watch = true;
+    }
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// What the riders on one server have attested, for the admin of that server.
+#[tauri::command]
+async fn integrity_server_reports(
+    app: tauri::AppHandle,
+    server_id: String,
+) -> Result<Vec<integritywatch::RiderIntegrity>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    integritywatch::server_reports(&cfg.cp_token, &server_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 async fn shop_login(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(SHOP_LOGIN_WINDOW) {
@@ -6249,6 +6319,12 @@ fn main() {
             } else {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
+            // Watch for a cheat attached to the game. Started unconditionally rather than
+            // from the Play button, and outside the `load_or_detect` arm above: the game is
+            // just as often launched from Steam, and a machine with no config yet still has
+            // a process list worth reading. The watcher re-reads the setting every pass, so
+            // it costs an idle poll and nothing else when it is turned off.
+            integritywatch::start(handle);
             shop_session::load_session(handle);
             shop_catalog_session::load(handle);
             mxb_session::load(handle);
@@ -6398,6 +6474,11 @@ fn main() {
             voice_meter_stop,
             voice_test_output,
             set_watch_mods_reload,
+            integrity_status,
+            integrity_scan_now,
+            set_integrity_watch,
+            set_integrity_report,
+            integrity_server_reports,
             frostmod_reload,
             frostmod_running,
             garage_scan_bikes,

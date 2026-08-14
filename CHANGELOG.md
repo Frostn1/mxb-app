@@ -63,6 +63,38 @@
 ## Unreleased — FrostMod runs on Linux, and the app can see the game there
 
 ### Added
+- **Cheat detection.** MX Bikes ships no anti-cheat, so a hooked client is
+  indistinguishable from an honest one — to the server, to the grid, and to the game. The
+  cheats going round are injected DLLs and external trainers, and an injected DLL has one
+  property worth building on: to hook the game it has to be *inside* the game, which puts it
+  in the process's module list. The app now reads that list while you ride (every 45s for as
+  long as the game is up, whether the app launched it or Steam did) and reports one of four
+  verdicts. Three of them are not accusations: **nothing unaccounted for**, **something
+  unrecognised is loaded** — an overlay or capture tool nobody has listed yet lands here —
+  and **not checked**, which is what a machine we could not read gets and is never a synonym
+  for clean. Only a match against the signature list is called a cheat. Findings name the
+  file, where it loaded from, and why it was reported; Settings → Cheat detection shows the
+  live answer and re-runs it on demand.
+- **Signatures update without a release.** They live in
+  [`integrity-rules.json`](integrity-rules.json) on `main`, fetched and cached at runtime
+  like `supporters.json` — a cheat that appears on a Tuesday cannot wait for a build. What
+  ships in the binary is the *allowlist* and no signatures at all, so an install that never
+  reaches the network is cautious rather than wrong; the allowlist is what stops an ordinary
+  gaming PC (Steam overlay, GPU driver, Discord, OBS, RivaTuner, ReShade) from lighting up
+  on first launch. A remote list can only add to that allowlist, and can never un-flag a
+  signature.
+- **Servers can see their grid's client checks.** With sharing turned on — its own switch,
+  off by default — a client publishes its verdict to the control plane, and the admin of the
+  server it is on sees it in the Servers tab, worst first, with a rider who was flagged
+  earlier in the session still shown as flagged rather than being cleared by unloading the
+  cheat for a lap. What is sent is the verdict and the names of *rule-matched* detections
+  only: an unrecognised-but-unnamed module is counted and never named, because on somebody's
+  machine that could be anything. Readable by the server's owner and by riders currently on
+  it, so you can see the grid you're riding with and can't go fishing for anyone else.
+  The list is honest about what it is: a rider appears only if their app is running,
+  watching and sharing, so somebody missing from it hasn't been cleared — and a cheater who
+  closes MXB App is never scanned at all. This proves an honest client is honest, which is
+  something a server currently has no way to ask for; it does not make cheating impossible.
 - **FrostMod installs and runs on Linux.** It used to refuse with *FrostMod runs on Windows
   only*, which was true of the binary and beside the point: on Linux the game is a Windows
   process too — Steam runs it under Proton — so FrostMod belongs in that same Proton prefix,
