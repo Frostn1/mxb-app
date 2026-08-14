@@ -1524,6 +1524,11 @@ export const en = {
   "designer.fitNotForPaint": "A paint layer is the sheet, so there is nothing to move or scale.",
   "designer.clipped": "Clipped",
   "designer.clippedHint": "This layer is trimmed to the part — nothing it holds spills past the seam.",
+  "designer.flank.left": "left side",
+  "designer.flank.right": "right side",
+  "designer.flank.both": "both sides",
+  "designer.flankSharedHint":
+    "Both flanks are unwrapped onto this same area, so anything drawn here appears on each side of the bike — mirrored, and not where you would expect it on the far one.",
   "designer.opacity": "Opacity",
   "designer.blend": "Blend",
   "designer.blend.normal": "Normal",

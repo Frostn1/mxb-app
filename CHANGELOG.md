@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — the UV map says which side of the bike it is
+
+### Added
+- **The sheet now says left or right.** Hovering a piece of bodywork named it; it now says which
+  flank of the bike that piece is, and the clip picker carries the same suffix. The model already
+  knew — the geometry arrives assembled about its mirror plane, so the sign of a triangle's x is
+  the answer — and not passing it on left the one question a flat square can't answer to guesswork.
+- **"Both sides" is said out loud.** Bikes routinely unwrap their two flanks onto *one* island, so
+  a decal placed off-centre there comes out at the mirrored spot on the far side — which reads as
+  the editor having painted the wrong side. Where that is what the model does, the sheet says so
+  and the tooltip says what it means. Rider gear is left unlabelled: a helmet's up-axis is worked
+  out per mod, and a side named from the wrong axis would be worse than no side at all.
+
 ## Unreleased — the Designer sets up its own sheets
 
 ### Added
