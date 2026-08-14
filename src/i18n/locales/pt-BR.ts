@@ -370,6 +370,7 @@ export const ptBR: Translation = {
   "browse.queued": "“{{title}}” na fila",
   "browse.queuedDesc": "Instalando em {{folder}}.",
   "browse.rootFolder": "raiz",
+  "browse.byAuthor": "por {{author}}",
   "browse.needsBrowser": "“{{title}}” precisa ser baixado pelo navegador",
   "browse.needsBrowserDesc":
     "O {{host}} bloqueia downloads dentro do app — abra a página dele para concluir.",

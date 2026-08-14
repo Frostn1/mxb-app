@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — a browse card says who made it
+
+### Added
+- **Mod cards carry a byline.** The catalog knows who posted each mod and the grid never
+  showed it, so telling two versions of the same track apart meant opening both. The name now
+  sits beside the date, the way a shop card already carries its author. It rides along with
+  the listing request rather than costing one of its own, and a mod the catalog names nobody
+  for simply keeps the date.
+
 ## Unreleased — the install picker says which file it's about to fetch
 
 ### Fixed

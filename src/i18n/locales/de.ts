@@ -375,6 +375,7 @@ export const de: Translation = {
   "browse.queued": "„{{title}}“ eingereiht",
   "browse.queuedDesc": "Wird in {{folder}} installiert.",
   "browse.rootFolder": "Hauptordner",
+  "browse.byAuthor": "von {{author}}",
   "browse.needsBrowser":
     "„{{title}}“ muss über den Browser heruntergeladen werden",
   "browse.needsBrowserDesc":

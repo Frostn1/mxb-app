@@ -368,6 +368,7 @@ export const es: Translation = {
   "browse.queued": "«{{title}}» en cola",
   "browse.queuedDesc": "Instalando en {{folder}}.",
   "browse.rootFolder": "raíz",
+  "browse.byAuthor": "por {{author}}",
   "browse.needsBrowser": "«{{title}}» requiere descarga desde el navegador",
   "browse.needsBrowserDesc":
     "{{host}} bloquea las descargas dentro de la app — abre su página para terminar.",

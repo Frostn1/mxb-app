@@ -363,6 +363,7 @@ export const en = {
   "browse.queued": "Queued “{{title}}”",
   "browse.queuedDesc": "Installing to {{folder}}.",
   "browse.rootFolder": "root",
+  "browse.byAuthor": "by {{author}}",
   "browse.needsBrowser": "“{{title}}” needs a browser download",
   "browse.needsBrowserDesc":
     "{{host}} blocks in-app downloads — open its page to finish.",
