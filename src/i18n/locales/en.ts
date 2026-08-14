@@ -300,6 +300,7 @@ export const en = {
   "viewer.dragToRotate": "Drag to rotate",
   "viewer.scrollToZoom": "Scroll to zoom",
   "viewer.rightDragToPan": "Right-drag to pan",
+  "viewer.paintReloaded": "Paint reloaded",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Search…",

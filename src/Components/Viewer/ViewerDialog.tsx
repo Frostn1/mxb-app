@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Box, Loader2, X } from "lucide-react";
+import { Box, Loader2, RefreshCw, X } from "lucide-react";
 import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
 import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import {
@@ -10,6 +10,8 @@ import {
   loadGearModel,
   loadStockGearModel,
   listGearPaints,
+  onPaintChanged,
+  watchPaintFiles,
 } from "../../api/mods";
 import type { PaintTexture, BikeModel, EdfNode, RiderPart, GearPaints } from "../../types";
 import { useT } from "../../i18n/context";
@@ -44,6 +46,18 @@ function paintLabel(path: string): string {
   const base = path.replace(/\\/g, "/").split("/").pop() ?? path;
   return base.replace(/\.pnt$/i, "");
 }
+
+/**
+ * How long to wait before a second try at a paint that wouldn't decode.
+ *
+ * The watcher's debounce normally outlasts writing the file, but a save it catches
+ * mid-flight decodes to an error — and a hot reload that silently does nothing is worse
+ * than a late one.
+ */
+const RETRY_MS = 700;
+
+/** How long the "reloaded" chip stays up. */
+const FLASH_MS = 2200;
 
 /** The model's own look leads the picker, ahead of the paints it packs. */
 function withStock(names: string[], hasStock: boolean): string[] {
@@ -93,6 +107,12 @@ export function ViewerDialog({
   // Why the bike itself wouldn't load — a swap preview can be refused (an incomplete set,
   // a bike with nothing behind it), and that reason is worth showing.
   const [modelErr, setModelErr] = useState<string | null>(null);
+  // A bike paint re-decoded after its file changed, and the file it came from — so a pick
+  // that moves on drops it rather than dressing the new paint in the old one's sheets.
+  const [hot, setHot] = useState<{ path: string; textures: PaintTexture[] } | null>(null);
+  // Ticks on each reload, to raise the chip below. A counter and not a boolean: two saves
+  // in a row have to raise it twice, and the second would find it already up.
+  const [reloads, setReloads] = useState(0);
 
   const nodes = model?.nodes ?? null;
   const paints = model?.paints ?? [];
@@ -199,11 +219,82 @@ export function ViewerDialog({
     };
   }, [open, isBike, riderProfile, gearSource, stockGearPart]);
 
+  // A loose gear paint previews the file itself. Installed gear doesn't: its paints come
+  // from inside its own archive, and `gearPath` there indexes loose siblings the picker
+  // isn't showing.
+  const loosePaintPath = gearSource ? undefined : gearPath;
+  // The `.pnt` behind what's on screen, when it's a file that can change. A paint packed
+  // inside an archive has no path, and nothing rewrites one of those in place anyway.
+  const livePath = isBike ? paints[paintIdx]?.path ?? undefined : loosePaintPath;
+
+  // Re-dress the model when that file is re-saved, so the draw/look/fix loop doesn't need
+  // the viewer closed and re-opened between passes. Only the *textures* are replaced —
+  // the geometry is untouched, so nothing re-uploads a bike's vertex buffers for a livery.
+  useEffect(() => {
+    // Whatever was reloaded belongs to the paint that was on screen, not this one.
+    setHot(null);
+    if (!open || !livePath) {
+      // Stop watching: the set is replaced wholesale, and these calls are serialised
+      // against the one below so the order they land in can't be the other way round.
+      void watchPaintFiles([]);
+      return;
+    }
+    let alive = true;
+
+    const reload = async () => {
+      for (const wait of [0, RETRY_MS]) {
+        if (wait) await new Promise((r) => setTimeout(r, wait));
+        if (!alive) return;
+        try {
+          const textures = await unpackPaint(livePath);
+          if (!alive) return;
+          // A gear paint's list *is* this file's textures, so it's replaced outright — a
+          // sheet dropped from the paint has to leave the model too. A bike's carries the
+          // model's own base textures as well, which is why that one is merged below.
+          if (isBike) setHot({ path: livePath, textures });
+          else setGearTextures(textures);
+          setErr(null);
+          setReloads((n) => n + 1);
+          return;
+        } catch (e) {
+          if (wait) console.warn(`[viewer] '${livePath}' changed but wouldn't decode:`, e);
+        }
+      }
+    };
+
+    void watchPaintFiles([livePath]);
+    const pending = onPaintChanged((p) => {
+      if (p === livePath) void reload();
+    });
+    return () => {
+      alive = false;
+      void pending.then((un) => un());
+      // Ordered against the next run's start by `watchPaintFiles` itself, so switching
+      // between two paints can never settle on watching neither.
+      void watchPaintFiles([]);
+    };
+  }, [open, isBike, livePath]);
+
   // The textures the mesh should wear: the selected bike paint, or the gear paint.
-  const activeTextures = useMemo<PaintTexture[]>(
-    () => (isBike ? paints[paintIdx]?.textures ?? [] : gearTextures ?? []),
-    [isBike, paints, paintIdx, gearTextures],
-  );
+  const activeTextures = useMemo<PaintTexture[]>(() => {
+    const base = isBike ? paints[paintIdx]?.textures ?? [] : gearTextures ?? [];
+    if (!hot || hot.path !== livePath) return base;
+    // Re-decoded sheets win by name; the model's own base textures, which the loader
+    // appends to every paint and the `.pnt` never carries, stay behind them.
+    const fresh = new Set(hot.textures.map((t) => t.name.toLowerCase()));
+    return [...hot.textures, ...base.filter((t) => !fresh.has(t.name.toLowerCase()))];
+  }, [isBike, paints, paintIdx, gearTextures, hot, livePath]);
+
+  // Say when a reload landed. Without it the model changing on its own reads as a glitch,
+  // and — worse — an edit that turned out to change nothing visible is indistinguishable
+  // from one the viewer never picked up.
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (!reloads) return;
+    setFlash(true);
+    const timer = setTimeout(() => setFlash(false), FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [reloads]);
 
   // Gear ships paints inside the archive — read them out for the picker.
   useEffect(() => {
@@ -417,6 +508,12 @@ export function ViewerDialog({
           {!loading && err && (
             <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/55 px-2 py-1 text-xs text-white/85">
               {t("viewer.noPaintPreview", { err })}
+            </div>
+          )}
+          {flash && (
+            <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/60 px-2 py-1 text-xs text-white/90">
+              <RefreshCw className="h-3.5 w-3.5" />
+              {t("viewer.paintReloaded")}
             </div>
           )}
         </div>

@@ -313,6 +313,7 @@ export const de: Translation = {
   "viewer.dragToRotate": "Ziehen zum Drehen",
   "viewer.scrollToZoom": "Scrollen zum Zoomen",
   "viewer.rightDragToPan": "Rechts ziehen zum Verschieben",
+  "viewer.paintReloaded": "Lackierung neu geladen",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Suchen…",

@@ -309,6 +309,7 @@ export const ptBR: Translation = {
   "viewer.dragToRotate": "Arraste para girar",
   "viewer.scrollToZoom": "Role para dar zoom",
   "viewer.rightDragToPan": "Arraste com o botão direito para mover",
+  "viewer.paintReloaded": "Pintura recarregada",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Pesquisar…",

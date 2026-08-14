@@ -366,6 +366,12 @@ export interface PaintTexture {
 /** One selectable paint (livery) for a bike: a name + its textures. */
 export interface BikePaint {
   name: string;
+  /**
+   * The `.pnt` on disk, for a paint installed loose in the bike's `paints` folder — the
+   * file the viewer watches so re-saving it re-dresses the model. `null` for a paint packed
+   * inside the archive, which nothing rewrites in place.
+   */
+  path: string | null;
   textures: PaintTexture[];
   changesPreview: boolean;
 }

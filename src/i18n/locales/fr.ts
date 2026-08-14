@@ -310,6 +310,7 @@ export const fr: Translation = {
   "viewer.dragToRotate": "Glisser pour pivoter",
   "viewer.scrollToZoom": "Molette pour zoomer",
   "viewer.rightDragToPan": "Clic droit glissé pour déplacer",
+  "viewer.paintReloaded": "Déco rechargée",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Rechercher…",

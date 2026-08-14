@@ -530,6 +530,35 @@ export function unpackPaint(path: string): Promise<PaintTexture[]> {
   return invoke<PaintTexture[]>("unpack_paint", { path });
 }
 
+/**
+ * Serialises the calls below, because they overwrite each other.
+ *
+ * `watch_paint_files` replaces the whole watch set, so two of them racing decides what is
+ * watched by whichever lands second — and a switch between paints issues exactly that pair
+ * (the old effect's stop, then the new effect's start) with nothing ordering them. A viewer
+ * that quietly stopped watching is the one failure this feature can't announce.
+ */
+let watchTurn: Promise<unknown> = Promise.resolve();
+
+/**
+ * Watch these paint files for edits, replacing whatever was being watched. `[]` stops.
+ *
+ * Changes arrive through {@link onPaintChanged}, carrying back the same path strings passed
+ * in here — never the OS's own spelling of them.
+ */
+export function watchPaintFiles(paths: string[]): Promise<void> {
+  // `.catch` first: one refused watch must not wedge every later call behind a rejection.
+  watchTurn = watchTurn
+    .catch(() => {})
+    .then(() => invoke<void>("watch_paint_files", { paths }));
+  return watchTurn as Promise<void>;
+}
+
+/** Fires when a watched paint is rewritten on disk — a repack, or a save from the studio. */
+export function onPaintChanged(cb: (path: string) => void): Promise<UnlistenFn> {
+  return listen<{ path: string }>("paint-changed", (e) => cb(e.payload.path));
+}
+
 /* ── Paint studio ──────────────────────────────────────────────────────────────────── */
 
 /** Read image files as textures — non-power-of-two sizes come back resized, flagged. */
