@@ -1586,6 +1586,13 @@ export const fr: Translation = {
   "designer.traceHint":
     "Sors de la planche la peinture dont tu es parti et affiche-la en transparence dessous, pour la décalquer. Elle cesse de faire partie de ce que tu enregistres.",
   "designer.noTemplate": "Cette planche n'a aucun modèle à décalquer : elle est partie vierge.",
+  "designer.stockTexture": "Texture d'origine",
+  "designer.stockHint":
+    "Affiche sous ta planche la texture livrée avec le modèle : les plastiques de la moto elle-même, avant qu'une peinture ne les remplace. Rien n'en est enregistré.",
+  "designer.noStock":
+    "Seules les motos savent dire quelles textures leur appartiennent. Un casque porte la peinture avec laquelle il est arrivé, et ce n'est pas un aspect d'origine à décalquer.",
+  "designer.stockNoMatch":
+    "Ce modèle n'embarque aucune texture à lui nommée « {{name}} », il n'y a donc rien de la moto à montrer sous cette planche.",
   "designer.uvMap": "Carte UV",
   "designer.uvHint":
     "Montre où tombent sur cette planche les carrosseries du modèle, chacune dans sa couleur.",

@@ -284,8 +284,13 @@ export function CanvasStage({
     if (ghost && ghost.opacity > 0) {
       ctx.save();
       ctx.globalAlpha = ghost.opacity;
-      // Template first, islands over it: the outlines have to stay readable against the paint
-      // being traced, and they are the thinner of the two marks.
+      // Artwork first, islands over it: the outlines have to stay readable against whatever
+      // is being traced, and they are the thinnest of the marks. The model's own texture goes
+      // under the template rather than over it — someone who lifted a paint out to trace it
+      // asked for *that* paint, and the stock plastics are the fallback beneath it.
+      if (ghost.showStock && ghost.stock) {
+        ctx.drawImage(ghost.stock, left, top, w, h);
+      }
       if (ghost.showTemplate && ghost.template) {
         ctx.drawImage(ghost.template, left, top, w, h);
       }

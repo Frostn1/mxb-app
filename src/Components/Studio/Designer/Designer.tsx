@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  Bike,
   Eye,
   EyeOff,
   FilePlus2,
@@ -60,7 +61,7 @@ import {
   type PaintTool,
   type Point,
 } from "./paint";
-import type { EdfNode } from "../../../types";
+import type { EdfNode, PaintTexture } from "../../../types";
 
 /**
  * The paint designer: layers on a sheet, the sheet on the model, and a `.pnt` at the end.
@@ -130,6 +131,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // The mesh the preview is showing, reported back by it. Null until one loads, and null again
   // if it fails — a UV map drawn from a model that isn't on screen would be a confident lie.
   const [geometry, setGeometry] = useState<EdfNode[] | null>(null);
+  // That same model's own textures — the look it ships with. Empty for anything that can't
+  // say which of its textures are its own, which is every model but a bike.
+  const [stockTextures, setStockTextures] = useState<PaintTexture[]>([]);
 
   const destState = usePaintDest();
   const { dest, hints } = destState;
@@ -823,6 +827,17 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     );
   }, []);
 
+  /** The same, for the model's own textures: a new bike, a new set of stock sheets. */
+  const stockRef = useRef<PaintTexture[]>([]);
+  const onStock = useCallback((textures: PaintTexture[]) => {
+    if (stockRef.current === textures) return;
+    stockRef.current = textures;
+    setStockTextures(textures);
+    setGhosts((gs) =>
+      gs.size ? new Map([...gs].map(([id, g]) => [id, { ...g, stock: null, stockFor: null }])) : gs,
+    );
+  }, []);
+
   /**
    * Move the template between the sheet and the ghost.
    *
@@ -874,6 +889,43 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     const wire = uvWireframe(parts, activeWidth, activeHeight);
     patchGhost(activeId, (g) => ({ ...g, wire, wireFor: activeName }));
   }, [activeId, activeName, activeWidth, activeHeight, geometry, ghosts, parts, patchGhost]);
+
+  /**
+   * Fetch the model's own texture for the active sheet, the same way and for the same reasons.
+   *
+   * Lazy and keyed on the name again — the name is what picks the texture out of the model,
+   * exactly as it picks the triangles — but this one crosses to the backend for pixels, so a
+   * 2048² sheet is a few megabytes over IPC. Only the sheet on screen pays for it, and only
+   * once: a paint with twenty sheets fetches the one being looked at.
+   */
+  const stockFetch = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeId || !activeName.trim() || !stockTextures.length) return;
+    const ghost = ghosts.get(activeId) ?? EMPTY_GHOST;
+    if (!ghost.showStock || ghost.stockFor === activeName) return;
+    // One request in the air per sheet-and-name. This effect re-runs on every change to any
+    // ghost — the opacity slider alone is dozens — and without this each of those would put
+    // another copy of the same megabyte read on the wire while the first was still coming.
+    const key = `${activeId}:${activeName}`;
+    if (stockFetch.current === key) return;
+    stockFetch.current = key;
+    const want = activeName.trim().toLowerCase();
+    const tex = stockTextures.find((t) => t.name.trim().toLowerCase() === want);
+    void (async () => {
+      // Null covers both "the model carries no such texture" and "the pixels are gone" — the
+      // store evicts, and a rejected read is the same nothing to draw as a name that missed.
+      const stock = tex
+        ? await textureBytes(tex.token)
+            .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
+            .catch(() => null)
+        : null;
+      // Written against the sheet it was asked *for*, not whichever is active now, and both
+      // halves land together. So the worst a slow answer can do is describe a name the sheet
+      // no longer has — which the guard above then notices, and asks again.
+      patchGhost(activeId, (g) => ({ ...g, stock, stockFor: activeName }));
+      if (stockFetch.current === key) stockFetch.current = null;
+    })();
+  }, [activeId, activeName, ghosts, patchGhost, stockTextures]);
 
   // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
   // sheet, so leaving them behind would keep a closed paint's pixels alive for the session.
@@ -1109,6 +1161,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               sheetName={active.name}
               hasBase={!!active.base}
               hasGeometry={!!geometry}
+              hasStock={!!stockTextures.length}
               onTrace={() => toggleTrace(active.id)}
               onChange={(fn) => patchGhost(active.id, fn)}
             />
@@ -1202,6 +1255,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           overrides={overrides}
           frameToken={version}
           onGeometry={onGeometry}
+          onStock={onStock}
           className="flex-1"
         />
       </section>
@@ -1372,6 +1426,7 @@ function GhostPanel({
   sheetName,
   hasBase,
   hasGeometry,
+  hasStock,
   onTrace,
   onChange,
 }: {
@@ -1380,6 +1435,8 @@ function GhostPanel({
   /** Whether the sheet still holds a template that tracing could lift out of it. */
   hasBase: boolean;
   hasGeometry: boolean;
+  /** Whether the model on screen can say which of its textures are its own — bikes can. */
+  hasStock: boolean;
   onTrace: () => void;
   onChange: (fn: (g: Ghost) => Ghost) => void;
 }) {
@@ -1388,6 +1445,8 @@ function GhostPanel({
   // A map was built for this name and came back with nothing on it. Distinct from "not built
   // yet" (`wireFor` still null), which is why both halves are checked.
   const noMatch = ghost.showWire && ghost.wireFor === sheetName && !ghost.wire;
+  // The same pair, asked of the model's textures rather than of its triangles.
+  const noStock = hasStock && ghost.showStock && ghost.stockFor === sheetName && !ghost.stock;
   // Nothing to trace: a blank sheet never had a template, and one that did has already had it
   // lifted. The UV map is the guide that still applies, so the button says so rather than
   // sitting there dead with no explanation.
@@ -1404,7 +1463,7 @@ function GhostPanel({
         <button
           type="button"
           className="ml-auto text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
-          disabled={!ghost.template && !ghost.wire}
+          disabled={!ghost.template && !ghost.stock && !ghost.wire}
           onClick={() =>
             onChange((g) => {
               // One eye over both, and it turns them off together rather than remembering
@@ -1414,6 +1473,10 @@ function GhostPanel({
               return {
                 ...g,
                 showTemplate: !off,
+                // Not gated on already having one, unlike the wire below: the stock texture is
+                // fetched *because* this is on, so requiring it first would be a switch that
+                // could never be turned back on.
+                showStock: !off,
                 showWire: !off && !!g.wire,
                 // Faded all the way out counts as hidden, so switching back on has to undo
                 // that too. Otherwise the eye says "showing" over a reference at zero.
@@ -1440,6 +1503,14 @@ function GhostPanel({
             if (!tracing || ghost.showTemplate) onTrace();
             else onChange((g) => ({ ...g, showTemplate: true }));
           }}
+        />
+        <GhostToggle
+          icon={<Bike className="size-3.5" />}
+          label={t("designer.stockTexture")}
+          title={t(hasStock ? "designer.stockHint" : "designer.noStock")}
+          on={ghost.showStock}
+          disabled={!hasStock}
+          onClick={() => onChange((g) => ({ ...g, showStock: !g.showStock }))}
         />
         <GhostToggle
           icon={<Grid3x3 className="size-3.5" />}
@@ -1476,6 +1547,16 @@ function GhostPanel({
       {noMatch && (
         <p className="mt-1.5 text-[11px] leading-snug text-destructive">
           {t("designer.uvNoMatch", { name: sheetName.trim() })}
+        </p>
+      )}
+
+      {/* Not the same miss as the one above, and worth saying separately: a model can draw a
+          texture without shipping one of its own, so a sheet every paint replaces has islands
+          to show and no stock artwork behind them. Said without claiming which of the two it
+          is — with the UV map off there is nothing here that knows. */}
+      {noStock && !noMatch && (
+        <p className="mt-1.5 text-[11px] leading-snug text-faint">
+          {t("designer.stockNoMatch", { name: sheetName.trim() })}
         </p>
       )}
     </div>

@@ -373,6 +373,15 @@ export interface BikePaint {
 export interface BikeModel {
   nodes: EdfNode[];
   paints: BikePaint[];
+  /**
+   * The model's own textures — the look it ships with, before any paint replaces one.
+   *
+   * The same pixels the paints already carry where they don't supply their own, listed
+   * once on their own so "the model's look" can be asked for by name. A paint's `livery`
+   * and the mesh's `livery` are the same field once they're folded together, and the
+   * Designer's reference underlay is the one place that difference matters.
+   */
+  base: PaintTexture[];
 }
 
 export interface RiderPart {

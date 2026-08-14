@@ -1230,14 +1230,27 @@ struct BikePaint {
 struct BikeModel {
     nodes: Vec<edf::EdfNode>,
     paints: Vec<BikePaint>,
+    /// The model's own textures — the look it ships with, before any paint replaces one.
+    ///
+    /// The same pixels the paints below already carry as fillers, said once on their own.
+    /// Folded into a paint they're indistinguishable from that paint's own sheets, and the
+    /// Designer's reference underlay needs the distinction: an OEM bike's stock `.pnt`
+    /// replaces the wheels and the chain, so `plastics` is only ever in here.
+    base: Vec<paint::PaintTexture>,
 }
 
 impl BikeModel {
     /// Every texture token the model holds, so evicting it can free the pixels too.
+    ///
+    /// `base` as well as the paints, and not only because it is a field now: a base texture
+    /// that *every* paint overrides is folded into none of them, and before this was dropped
+    /// without ever being released. Duplicates are free — `texstore::release` removes by key.
     fn tokens(&self) -> Vec<String> {
         self.paints
             .iter()
-            .flat_map(|p| p.textures.iter().map(|t| t.token.clone()))
+            .flat_map(|p| p.textures.iter())
+            .chain(self.base.iter())
+            .map(|t| t.token.clone())
             .collect()
     }
 }
@@ -1430,6 +1443,10 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     }
     let mut paints: Vec<BikePaint> = paints.into_iter().map(|(p, _)| p).collect();
 
+    // Kept before the folding below, which is where the model's own look stops being
+    // telling apart from a paint's. Names and tokens only — no pixels are copied.
+    let model_base = base.clone();
+
     for p in &mut paints {
         let own: std::collections::HashSet<String> =
             p.textures.iter().map(|t| t.name.to_ascii_lowercase()).collect();
@@ -1484,7 +1501,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
         log::info!("  node '{}' placed={} {}", n.name, n.placed, subs.join(", "));
     }
 
-    let model = BikeModel { nodes, paints };
+    let model = BikeModel { nodes, paints, base: model_base };
     if let Ok(mut c) = bike_cache().lock() {
         // The evicted bike's pixels go with it — nothing else references them.
         if let Some(dropped) = c.insert(key, model.clone()) {
@@ -6939,6 +6956,41 @@ mod deep_link_tests {
 
 #[cfg(test)]
 mod viewer_tests {
+    fn tex(name: &str, token: &str) -> crate::paint::PaintTexture {
+        crate::paint::PaintTexture {
+            name: name.into(),
+            width: 4,
+            height: 4,
+            token: token.into(),
+        }
+    }
+
+    /// Evicting a bike has to free every blob it put in the store.
+    ///
+    /// The one that gets away is a model texture every paint overrides: it is folded into
+    /// none of them, so walking the paints alone never names it and its pixels outlive the
+    /// bike by the whole session. Cheap to leak, since it's the biggest sheets — `plastics`
+    /// on a bike whose paints all replace it — that leak.
+    #[test]
+    fn eviction_frees_the_models_own_textures_too() {
+        let model = super::BikeModel {
+            nodes: Vec::new(),
+            paints: vec![super::BikePaint {
+                name: "Red".into(),
+                // Its own `plastics`, so the model's never reaches it.
+                textures: vec![tex("plastics", "t-paint"), tex("wheel", "t-shared")],
+                changes_preview: true,
+            }],
+            base: vec![tex("plastics", "t-own"), tex("wheel", "t-shared")],
+        };
+        let tokens = model.tokens();
+        assert!(tokens.contains(&"t-own".to_string()), "the overridden one is still released");
+        assert!(tokens.contains(&"t-paint".to_string()));
+        // Named twice over — the paints borrowed it — and that's fine: `release` removes by
+        // key, so the second pass over a token is a no-op rather than a double free.
+        assert_eq!(tokens.iter().filter(|t| *t == "t-shared").count(), 2);
+    }
+
     #[test]
     #[ignore]
     fn bike_model_from_pkz() {
@@ -6981,6 +7033,9 @@ mod viewer_tests {
                 names.join(", ")
             );
         }
+        let mut own: Vec<&str> = m.base.iter().map(|t| t.name.as_str()).collect();
+        own.sort_unstable();
+        eprintln!("the model's own textures: {}", own.join(", "));
         assert!(!m.nodes.is_empty(), "decoded the mesh");
         let have: std::collections::HashSet<String> = m.paints[0]
             .textures
@@ -6994,6 +7049,13 @@ mod viewer_tests {
                 }
             }
         }
+        // The Designer's stock underlay reads exactly this list, and it is wanted most where no
+        // `.pnt` can answer: an OEM bike's stock paint replaces the wheels and the chain, so its
+        // `plastics` is only ever embedded in the mesh. Not asserted by that name — a mod bike
+        // calls its sheets whatever it likes, and a bike whose paints supply everything has a
+        // shorter list than this one — only that the list survived being folded into the paints
+        // above, which is the way it would be lost.
+        assert!(!m.base.is_empty(), "the model's own textures outlive the fold into the paints");
     }
 
 

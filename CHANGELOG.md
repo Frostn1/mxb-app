@@ -3,6 +3,13 @@
 ## Unreleased — the Designer sets up its own sheets
 
 ### Added
+- **The bike's own plastics, under the UV map.** The reference underlay could show the paint you
+  started from — and on an OEM bike there isn't one: its stock `.pnt` replaces the wheels and the
+  chain, and the plastics are embedded in the model itself. So the one sheet anybody opens the
+  Designer for was the one sheet with nothing to trace, just bare islands. Reference now has a
+  **Stock texture** toggle that draws the model's own artwork beneath them, so you can see where
+  the vents and shut lines fall before drawing over them. Fetched only for the sheet you're
+  looking at, and no more part of what you save than the UV map is.
 - **Create the sheets a model asks for, in one click.** The Designer already listed the texture
   names a bike's paints use — and the name is the whole binding, so a sheet called anything else
   paints nothing — but getting them onto the list meant reading them off and typing each one
