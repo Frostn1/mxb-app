@@ -1482,6 +1482,12 @@ export const en = {
     "Nothing to draw on yet. Start from a paint installed for this model to get its real sheets and their names, or add a blank one.",
   "designer.startFromPaint": "Start from a paint…",
   "designer.blankSheet": "Blank sheet",
+  "designer.addSheet": "Add a sheet",
+  "designer.nothingToSave": "Every sheet is empty — draw something before saving.",
+  "designer.blankSheetsSkipped_one": "1 empty sheet was left out — an empty one would wipe the model's own texture.",
+  "designer.blankSheetsSkipped_other": "{{count}} empty sheets were left out — an empty one would wipe the model's own texture.",
+  "designer.createExpected_one": "Create 1 sheet",
+  "designer.createExpected_other": "Create {{count}} sheets",
   "designer.sheets": "Sheets",
   "designer.moveDown": "Move down",
   "designer.moveUp": "Move up",
@@ -1545,7 +1551,6 @@ export const en = {
     "Nothing on the model uses a texture called “{{name}}”, so there is no UV layout to show.",
   "designer.ghostBuried":
     "The reference sits under the sheet, and this sheet’s template is opaque — turn on Template to lift it out and see through.",
-  "designer.ghostNote": "A guide only â the reference is never saved into the paint.",
   "designer.resetView": "Reset view",
 
   // ── Designer › the paint tools ────────────────────────────────────────────────

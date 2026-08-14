@@ -1518,6 +1518,12 @@ export const fr: Translation = {
     "Rien sur quoi dessiner pour l'instant. Pars d'une déco installée pour ce modèle — tu récupères ses planches et leurs noms — ou ajoute une planche vierge.",
   "designer.startFromPaint": "Partir d'une déco…",
   "designer.blankSheet": "Planche vierge",
+  "designer.addSheet": "Ajouter une planche",
+  "designer.nothingToSave": "Toutes les planches sont vides : dessinez quelque chose avant d'enregistrer.",
+  "designer.blankSheetsSkipped_one": "1 planche vide a été écartée : une planche vide effacerait la texture du modèle.",
+  "designer.blankSheetsSkipped_other": "{{count}} planches vides ont été écartées : une planche vide effacerait la texture du modèle.",
+  "designer.createExpected_one": "Créer 1 planche",
+  "designer.createExpected_other": "Créer {{count}} planches",
   "designer.sheets": "Planches",
   "designer.moveDown": "Descendre",
   "designer.moveUp": "Monter",
@@ -1583,7 +1589,6 @@ export const fr: Translation = {
     "Rien sur le modèle n'utilise une texture nommée « {{name}} », il n'y a donc aucune disposition UV à montrer.",
   "designer.ghostBuried":
     "La référence est sous la planche, et le modèle de cette planche est opaque : active Modèle pour l'en sortir et voir au travers.",
-  "designer.ghostNote": "Un simple repère : la référence n'est jamais enregistrée dans la peinture.",
   "designer.resetView": "Réinitialiser la vue",
 
   // ── Designer › les outils de peinture ─────────────────────────────────────────

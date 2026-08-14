@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased — the Designer sets up its own sheets
+
+### Added
+- **Create the sheets a model asks for, in one click.** The Designer already listed the texture
+  names a bike's paints use — and the name is the whole binding, so a sheet called anything else
+  paints nothing — but getting them onto the list meant reading them off and typing each one
+  back in. There's now a button beside that list that makes the missing ones.
+- **A ＋ beside Sheets**, and another beside Layers, add one without hunting for a button.
+
+### Changed
+- **The UV map is on by default.** It answers the question a flat sheet always raises — which
+  rectangle of this ends up on the shroud — and having to know it existed before you could ask
+  for it was one step too many. It still only builds for the sheet you're looking at.
+- **"Start from a paint…" is offered only while there is nothing to draw on.** It *replaces*
+  every sheet, which is what makes it a template step, so sitting it beside work in progress was
+  offering to throw that work away.
+- The sheet list scrolls instead of growing: a bike's paint runs to two dozen sheets, and that
+  pushed the hint line and every button below the fold.
+- **Add image and Add text moved down beside the drawing tools**, which is the panel you are
+  already in while working on a sheet — the top bar is for naming and saving the paint. The
+  separate "Paint layer" button is gone with them; the ＋ beside Layers is that.
+
+### Fixed
+- **A paint no longer ships sheets you never drew on.** A `.pnt` replaces the model's textures
+  by name, so an empty sheet doesn't add a blank — it *removes* whatever the bike had there. A
+  paint saved with twenty untouched sheets wiped the bike's own normal and roughness maps, and
+  came to 350 MB of pixels, which is enough on its own to push the texture store past its
+  ceiling and leave the 3D preview grey. Empty sheets are left out, and the save says how many.
+- Offering to create every missing sheet no longer offers the companion maps (`_n`, `_r`). They
+  aren't drawn like a livery, and a blank one is the exact thing above: it throws away the real
+  one. The hint line still lists them, and one can still be added by hand.
+
 ## 2026-08-13
 
 ### Added

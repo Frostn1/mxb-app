@@ -1505,6 +1505,12 @@ export const it: Translation = {
     "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello — così ottieni i suoi fogli e i loro nomi — oppure aggiungine uno vuoto.",
   "designer.startFromPaint": "Parti da una livrea…",
   "designer.blankSheet": "Foglio vuoto",
+  "designer.addSheet": "Aggiungi un foglio",
+  "designer.nothingToSave": "Ogni foglio è vuoto: disegna qualcosa prima di salvare.",
+  "designer.blankSheetsSkipped_one": "1 foglio vuoto è stato escluso: un foglio vuoto cancellerebbe la texture del modello.",
+  "designer.blankSheetsSkipped_other": "{{count}} fogli vuoti sono stati esclusi: un foglio vuoto cancellerebbe la texture del modello.",
+  "designer.createExpected_one": "Crea 1 foglio",
+  "designer.createExpected_other": "Crea {{count}} fogli",
   "designer.sheets": "Fogli",
   "designer.moveDown": "Sposta giù",
   "designer.moveUp": "Sposta su",
@@ -1569,7 +1575,6 @@ export const it: Translation = {
     "Nessuna parte del modello usa una texture chiamata “{{name}}”, quindi non c'è un layout UV da mostrare.",
   "designer.ghostBuried":
     "Il riferimento sta sotto la planche, e il modello di questa planche è opaco: attiva Modello per toglierlo e vedere attraverso.",
-  "designer.ghostNote": "Solo una guida: il riferimento non viene mai salvato nella vernice.",
   "designer.resetView": "Reimposta vista",
 
   // ── Designer › gli strumenti di pittura ───────────────────────────────────────

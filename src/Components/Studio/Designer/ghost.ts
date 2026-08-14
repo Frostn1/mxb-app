@@ -38,11 +38,15 @@ export const EMPTY_GHOST: Ghost = {
   template: null,
   wire: null,
   wireFor: null,
-  // On by default so lifting a template into the ghost shows it immediately; the UV map is
-  // off because it has to be built, and building one for a sheet nobody asked about is work
-  // spent on a guide that was never going to be looked at.
+  // Both on. The template shows the moment it is lifted, and the UV map is the answer to the
+  // question a flat sheet always raises — which rectangle of this ends up on the shroud — so
+  // having to know it existed before asking for it was one step too many.
+  //
+  // It still costs a raster, but only for the sheet actually being looked at: the build is
+  // keyed on the *active* sheet's name, so opening a paint with twenty sheets rasterises the
+  // one on screen, not twenty.
   showTemplate: true,
-  showWire: false,
+  showWire: true,
   opacity: 0.35,
 };
 

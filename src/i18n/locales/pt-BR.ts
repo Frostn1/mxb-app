@@ -1506,6 +1506,12 @@ export const ptBR: Translation = {
     "Ainda não há nada para desenhar. Comece de uma pintura instalada para este modelo — assim você pega as folhas e os nomes delas — ou adicione uma em branco.",
   "designer.startFromPaint": "Começar de uma pintura…",
   "designer.blankSheet": "Folha em branco",
+  "designer.addSheet": "Adicionar uma folha",
+  "designer.nothingToSave": "Todas as folhas estão vazias — desenhe algo antes de salvar.",
+  "designer.blankSheetsSkipped_one": "1 folha vazia ficou de fora — uma vazia apagaria a textura do próprio modelo.",
+  "designer.blankSheetsSkipped_other": "{{count}} folhas vazias ficaram de fora — uma vazia apagaria a textura do próprio modelo.",
+  "designer.createExpected_one": "Criar 1 folha",
+  "designer.createExpected_other": "Criar {{count}} folhas",
   "designer.sheets": "Folhas",
   "designer.moveDown": "Mover para baixo",
   "designer.moveUp": "Mover para cima",
@@ -1568,7 +1574,6 @@ export const ptBR: Translation = {
     "Nada no modelo usa uma textura chamada “{{name}}”, então não há layout UV para mostrar.",
   "designer.ghostBuried":
     "A referência fica sob a folha, e o modelo desta folha é opaco — ative Modelo para tirá-lo e enxergar através.",
-  "designer.ghostNote": "Apenas um guia — a referência nunca é salva na pintura.",
   "designer.resetView": "Redefinir visualização",
 
   // ── Designer › as ferramentas de pintura ──────────────────────────────────────
