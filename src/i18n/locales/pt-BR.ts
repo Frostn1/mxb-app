@@ -1659,4 +1659,44 @@ export const ptBR: Translation = {
   "trackViewer.whyDetails": "Por quê?",
   "trackViewer.copyDetails": "Copiar detalhes",
   "trackViewer.copied": "Copiado",
+  "settings.integrity": "Detecção de cheats",
+  "settings.integrityDesc":
+    "MX Bikes não tem anti-cheat, então um cliente adulterado é idêntico a um honesto. Isto verifica se há algo acoplado ao seu jogo em execução.",
+  "settings.integrityWatch": "Monitorar o jogo em execução",
+  "settings.integrityWatchDesc":
+    "Verifica o que é carregado no MX Bikes enquanto você joga. Nada sai da sua máquina.",
+  "settings.integrityReport": "Compartilhar o resultado com os servidores",
+  "settings.integrityReportDesc":
+    "Deixa o admin do servidor em que você está ver seu veredito. Cheats conhecidos são nomeados; o que é apenas não reconhecido é contado, nunca nomeado.",
+  "integrity.clean": "Nada sem explicação",
+  "integrity.suspect": "Há algo não reconhecido carregado",
+  "integrity.flagged": "Há um cheat conhecido acoplado",
+  "integrity.unknown": "Não verificado",
+  "integrity.cleanDetail_one": "{{count}} arquivo carregado verificado.",
+  "integrity.cleanDetail_other": "{{count}} arquivos carregados verificados.",
+  "integrity.foundDetail_one": "{{count}} coisa que merece atenção.",
+  "integrity.foundDetail_other": "{{count}} coisas que merecem atenção.",
+  "integrity.unknownRunning":
+    "O jogo está rodando, mas os arquivos carregados não puderam ser lidos — então isto não é um sinal verde.",
+  "integrity.unknownIdle": "Abra o MX Bikes e a verificação acontecerá enquanto você pilota.",
+  "integrity.scanNow": "Verificar agora",
+  "integrity.scanFailed": "Não foi possível executar a verificação",
+  "integrity.offNote": "Ative o monitoramento acima para ver o que está acoplado ao seu jogo.",
+  "integrity.limitNote":
+    "Isto prova que o seu cliente é honesto, não o dos outros. Quem trapaceia sem usar o MXB App nunca é verificado.",
+  "integrity.rulesVersion": "Lista de assinaturas v{{version}}.",
+  "integrity.reasonRule": "Corresponde a um cheat conhecido.",
+  "integrity.reasonLoader":
+    "Está na pasta do jogo com um nome que o jogo carrega automaticamente.",
+  "integrity.reasonForeign":
+    "Carregado no jogo de fora — não é do jogo, nem do Windows, nem instalado pelo MXB App.",
+  "integrity.reasonProcess": "Um programa neste PC que corresponde a um cheat conhecido.",
+  "integrity.gridTitle": "Verificações dos clientes",
+  "integrity.gridLoading": "Lendo…",
+  "integrity.gridEmpty": "Ninguém neste servidor está reportando uma verificação agora.",
+  "integrity.gridSuspect_one": "{{count}} arquivo não reconhecido",
+  "integrity.gridSuspect_other": "{{count}} arquivos não reconhecidos",
+  "integrity.gridRecovered": "(antes, nesta sessão)",
+  "integrity.gridNote":
+    "Só aparecem aqui pilotos usando o MXB App com o compartilhamento ligado. Quem falta nesta lista não foi inocentado — apenas não reportou nada.",
 };

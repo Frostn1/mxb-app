@@ -1670,4 +1670,44 @@ export const es: Translation = {
   "trackViewer.whyDetails": "¿Por qué?",
   "trackViewer.copyDetails": "Copiar detalles",
   "trackViewer.copied": "Copiado",
+  "settings.integrity": "Detección de trucos",
+  "settings.integrityDesc":
+    "MX Bikes no tiene anti-cheat, así que un cliente manipulado es idéntico a uno honesto. Esto comprueba si hay algo enganchado a tu juego en ejecución.",
+  "settings.integrityWatch": "Vigilar el juego en ejecución",
+  "settings.integrityWatchDesc":
+    "Comprueba qué se carga en MX Bikes mientras juegas. Nada sale de tu equipo.",
+  "settings.integrityReport": "Compartir el resultado con los servidores",
+  "settings.integrityReportDesc":
+    "Deja que el administrador del servidor en el que estás vea tu veredicto. Los trucos conocidos se nombran; lo que solo es desconocido se cuenta, nunca se nombra.",
+  "integrity.clean": "Nada sin explicar",
+  "integrity.suspect": "Hay algo desconocido cargado",
+  "integrity.flagged": "Hay un truco conocido enganchado",
+  "integrity.unknown": "Sin comprobar",
+  "integrity.cleanDetail_one": "{{count}} archivo cargado comprobado.",
+  "integrity.cleanDetail_other": "{{count}} archivos cargados comprobados.",
+  "integrity.foundDetail_one": "{{count}} cosa que merece un vistazo.",
+  "integrity.foundDetail_other": "{{count}} cosas que merecen un vistazo.",
+  "integrity.unknownRunning":
+    "El juego está en marcha pero no se pudieron leer sus archivos cargados, así que esto no es un visto bueno.",
+  "integrity.unknownIdle": "Inicia MX Bikes y esto lo comprobará mientras ruedas.",
+  "integrity.scanNow": "Comprobar ahora",
+  "integrity.scanFailed": "No se pudo ejecutar la comprobación",
+  "integrity.offNote": "Activa la vigilancia arriba para ver qué hay enganchado a tu juego.",
+  "integrity.limitNote":
+    "Puede demostrar que tu cliente es honesto, no el de los demás. Quien hace trampas sin usar MXB App nunca se comprueba.",
+  "integrity.rulesVersion": "Lista de firmas v{{version}}.",
+  "integrity.reasonRule": "Coincide con un truco conocido.",
+  "integrity.reasonLoader":
+    "Está en la carpeta del juego con un nombre que el juego carga automáticamente.",
+  "integrity.reasonForeign":
+    "Cargado en el juego desde fuera: no es del juego, ni de Windows, ni instalado por MXB App.",
+  "integrity.reasonProcess": "Un programa de este PC que coincide con un truco conocido.",
+  "integrity.gridTitle": "Comprobaciones de clientes",
+  "integrity.gridLoading": "Leyendo…",
+  "integrity.gridEmpty": "Nadie en este servidor está informando de una comprobación ahora mismo.",
+  "integrity.gridSuspect_one": "{{count}} archivo desconocido",
+  "integrity.gridSuspect_other": "{{count}} archivos desconocidos",
+  "integrity.gridRecovered": "(antes en esta sesión)",
+  "integrity.gridNote":
+    "Aquí solo aparecen los pilotos que usan MXB App con el envío activado. Quien no esté en la lista no ha sido descartado: simplemente no ha informado.",
 };

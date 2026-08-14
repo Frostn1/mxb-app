@@ -1674,4 +1674,44 @@ export const fr: Translation = {
   "trackViewer.whyDetails": "Pourquoi ?",
   "trackViewer.copyDetails": "Copier les détails",
   "trackViewer.copied": "Copié",
+  "settings.integrity": "Détection de triche",
+  "settings.integrityDesc":
+    "MX Bikes n'a pas d'anti-triche, donc un client modifié ressemble exactement à un client honnête. Ceci vérifie si quelque chose est accroché à votre jeu en cours.",
+  "settings.integrityWatch": "Surveiller le jeu en cours",
+  "settings.integrityWatchDesc":
+    "Vérifie ce qui est chargé dans MX Bikes pendant que vous jouez. Rien ne quitte votre machine.",
+  "settings.integrityReport": "Partager le résultat avec les serveurs",
+  "settings.integrityReportDesc":
+    "Permet à l'admin du serveur où vous êtes de voir votre verdict. Les triches connues sont nommées ; ce qui est simplement non reconnu est compté, jamais nommé.",
+  "integrity.clean": "Rien d'inexpliqué",
+  "integrity.suspect": "Quelque chose de non reconnu est chargé",
+  "integrity.flagged": "Une triche connue est accrochée",
+  "integrity.unknown": "Non vérifié",
+  "integrity.cleanDetail_one": "{{count}} fichier chargé vérifié.",
+  "integrity.cleanDetail_other": "{{count}} fichiers chargés vérifiés.",
+  "integrity.foundDetail_one": "{{count}} chose à regarder.",
+  "integrity.foundDetail_other": "{{count}} choses à regarder.",
+  "integrity.unknownRunning":
+    "Le jeu tourne mais ses fichiers chargés n'ont pas pu être lus — ce n'est donc pas un feu vert.",
+  "integrity.unknownIdle": "Lancez MX Bikes et la vérification se fera pendant que vous roulez.",
+  "integrity.scanNow": "Vérifier",
+  "integrity.scanFailed": "Impossible de lancer la vérification",
+  "integrity.offNote": "Activez la surveillance ci-dessus pour voir ce qui est accroché au jeu.",
+  "integrity.limitNote":
+    "Ceci peut prouver que votre propre client est honnête, pas celui des autres. Un tricheur qui n'utilise pas MXB App n'est jamais analysé.",
+  "integrity.rulesVersion": "Liste de signatures v{{version}}.",
+  "integrity.reasonRule": "Correspond à une triche connue.",
+  "integrity.reasonLoader":
+    "Placé dans le dossier du jeu sous un nom que le jeu charge automatiquement.",
+  "integrity.reasonForeign":
+    "Chargé dans le jeu depuis l'extérieur : ni le jeu, ni Windows, ni rien installé par MXB App.",
+  "integrity.reasonProcess": "Un programme de ce PC qui correspond à une triche connue.",
+  "integrity.gridTitle": "Vérifications des clients",
+  "integrity.gridLoading": "Lecture…",
+  "integrity.gridEmpty": "Personne sur ce serveur ne signale de vérification pour le moment.",
+  "integrity.gridSuspect_one": "{{count}} fichier non reconnu",
+  "integrity.gridSuspect_other": "{{count}} fichiers non reconnus",
+  "integrity.gridRecovered": "(plus tôt dans la session)",
+  "integrity.gridNote":
+    "Seuls les pilotes utilisant MXB App avec le partage activé apparaissent ici. Quelqu'un absent de cette liste n'est pas innocenté : il n'a simplement rien signalé.",
 };

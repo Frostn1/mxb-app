@@ -23,6 +23,7 @@ import HelpHint from "@/Components/ui/help-hint";
 import { Button } from "@/Components/ui/button";
 import { Input } from "@/Components/ui/input";
 import { cn } from "@/lib/utils";
+import ServerIntegrity from "./ServerIntegrity";
 import {
   cloudServers,
   destroyCloudServer,
@@ -358,6 +359,11 @@ const ServerRow = ({ server, onRemove, onChanged }: RowProps) => {
           </>
         )}
       </div>
+
+      {/* What the grid's own clients report about themselves. Only for a listed server:
+          the control plane keys these on the registry id, so an unpublished server has no
+          key to ask about — and nobody joining it is reporting one either. */}
+      {listed && <ServerIntegrity serverId={server.registryId!} />}
     </div>
   );
 };
