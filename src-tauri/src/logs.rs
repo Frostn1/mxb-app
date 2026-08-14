@@ -111,6 +111,10 @@ fn is_frostmod_log(name: &str) -> bool {
         || lower.ends_with(".dll")
         || lower == "version.txt"
         || lower.ends_with(".yaml")
+        // The last command we left for FrostMod (Linux, where a file is the only way to
+        // reach it). Ours by the same rule as the binaries — and what FrostMod *did* with
+        // it is in its log, which is the half worth collecting.
+        || lower == "frostmod_cmd.json"
         // A binary moved aside mid-update because the game still had it mapped —
         // `frostmod.dll.in-use-1723…`, swept on the next start.
         || lower.contains(".in-use-");
@@ -353,6 +357,9 @@ mod tests {
         assert!(!is_frostmod_log("version.txt"));
         assert!(!is_frostmod_log("frostmod_serverfilter.yaml"));
         assert!(!is_frostmod_log("frostmod.dll.in-use-1723500000"));
+        // The command we last left for it. Ours, not a log — FrostMod's own log says what
+        // it made of it.
+        assert!(!is_frostmod_log("frostmod_cmd.json"));
     }
 
     #[test]

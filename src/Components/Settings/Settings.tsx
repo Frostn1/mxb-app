@@ -267,6 +267,11 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const platform = usePlatform();
   const isWindows = platform === "windows";
   const isMac = platform === "macos";
+  // FrostMod is a Win32 DLL injected into the game — which is exactly what the game is on
+  // Linux too, where Steam runs it under Proton and the app puts FrostMod in the same
+  // prefix. macOS is the odd one out: the app launches the bottle but doesn't inject
+  // into it.
+  const hasFrostmod = isWindows || platform === "linux";
   const { theme, setTheme } = useTheme();
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime } =
     useFrostmod();
@@ -286,7 +291,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     ...g,
     sections: g.sections.filter(
       (s) =>
-        (s.id !== "frostmod" || (isWindows && caps.frostmod)) &&
+        (s.id !== "frostmod" || (hasFrostmod && caps.frostmod)) &&
         (s.id !== "game" || multiGame),
     ),
   })).filter((g) => g.sections.length > 0);
@@ -1408,11 +1413,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           </Section>
           )}
 
-          {/* frostmod — a Win32 DLL injected into the game, so it has nothing to do
-              anywhere else. Hidden rather than shown-and-disabled: every control in it
-              would fail, including one that downloads two Windows binaries. The nav drops
-              its entry on the same condition. */}
-          {isWindows && caps.frostmod && active === "frostmod" && (
+          {/* frostmod — a Win32 DLL injected into the game, so it has nothing to do where
+              the game isn't a Windows process. That means Windows and Linux (Proton), and
+              not macOS. Hidden rather than shown-and-disabled: every control in it would
+              fail, including one that downloads two Windows binaries. The nav drops its
+              entry on the same condition. */}
+          {hasFrostmod && caps.frostmod && active === "frostmod" && (
           <Section
             title={t("settings.frostmod")}
             titleRight={
@@ -1641,7 +1647,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 FrostMod section above: a Win32 DLL injected into the game has no folder
                 to open anywhere else, and a permanently empty row would be the only
                 mention of it on the page. */}
-            {isWindows && caps.frostmod && (
+            {hasFrostmod && caps.frostmod && (
               <LogRow
                 label="FrostMod"
                 hint={t("logs.frostmodLogsDesc")}

@@ -586,7 +586,7 @@ export const it: Translation = {
   "settings.instantRefreshDesc":
     "Quando applichi un preset mentre {{game}} è in esecuzione, aggiorna il look in gioco all'istante — senza riavvio né riselezione del profilo. Se non ci riesce, ti verrà chiesto di riselezionare il profilo.",
   "settings.instantRefreshWindowsOnly":
-    "Aggiornare il look in gioco senza riavviare richiede FrostMod, che è solo per Windows — ti verrà invece chiesto di riselezionare il profilo.",
+    "Aggiornare il look in gioco senza riavviare significa intervenire nel gioco in esecuzione, e può farlo solo la versione Windows — ti verrà invece chiesto di riselezionare il profilo.",
   "settings.autoRunFrostmod": "Avvia FrostMod automaticamente",
   "settings.autoRunFrostmodDesc":
     "Avvia FrostMod in background ogni volta che apri MXB App.",
