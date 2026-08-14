@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — a helmet you installed is a helmet you can see
+
+### Fixed
+- **A packaged mod bought from the shop landed one folder too deep.** A helmet, boots or any
+  other rider mod that downloads as a finished `.pkz` was filed inside a folder named after the
+  download — `helmets/shop-44/` — and a package only loads from the area itself. Neither the
+  game nor this app could see it, and it showed in the pickers under that name rendering
+  nothing. New installs go straight into the area under the mod's own name.
+- **The Rider tab offers to move the ones already buried.** The same banner that gathers a mod
+  installed loose now spots a package a folder too deep and raises it, so a mod already on disk
+  doesn't have to be reinstalled to be found. It moves the package and nothing else, never
+  overwrites a name already in the area, and leaves any folder with files of its own alone.
+- **A one-piece helmet or boot rendered as nothing at all.** Gear whose mesh comes as a single
+  piece — the game's own stock helmet, and any mod that doesn't split the shell from the
+  goggles — was handed one material per piece for a mesh with no pieces to hand them to, and
+  drew not one triangle. Everything else about it arrived intact, which is why the paints were
+  listed for a helmet that never appeared.
+- **A one-piece helmet rendered on its side.** A mesh in that shape never had its placement
+  applied, so one authored in a rotated frame stayed rotated. Harmless where a model is
+  authored square, which is most of them — the game's own gear is unchanged — and every mod
+  now lands where its own file says the model sits.
+
 ## 2026-08-13
 
 ### Added

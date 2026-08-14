@@ -227,6 +227,11 @@ export const de: Translation = {
   "rider.repairDone_one": "{{count}} Datei in „{{model}}“ zusammengefasst.",
   "rider.repairDone_other": "{{count}} Dateien in „{{model}}“ zusammengefasst.",
   "rider.repairNothing": "Es gibt nichts mehr zusammenzufassen.",
+  "rider.unwrapTitle": "Ein {{area}}-Mod wurde einen Ordner zu tief installiert",
+  "rider.unwrapBody":
+    "„{{folder}}“ enthält nichts außer {{model}}, und ein gepacktes Mod lädt nur aus {{area}} selbst — weder das Spiel noch diese App sehen es dort. Nach oben verschieben?",
+  "rider.unwrapDone_one": "{{count}} Mod nach oben verschoben. Es steht jetzt als „{{model}}“ in der Liste.",
+  "rider.unwrapDone_other": "{{count}} Mods nach oben verschoben, beginnend mit „{{model}}“.",
 
   // ── Rundgang ───────────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Mach einen kurzen Rundgang",

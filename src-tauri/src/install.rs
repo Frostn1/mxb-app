@@ -1279,10 +1279,15 @@ pub(crate) fn plan_placement(
 /// Named as the mod named itself, because that name is what the pickers will show. A mod
 /// that ships its files bare has only the slug to go on.
 ///
-/// Two placements are deliberately left alone. A paint drop names the model it belongs to
-/// (`helmets/<Model>/paints`), so it is more than one segment and merges as before. And an
+/// Three placements are deliberately left alone. A paint drop names the model it belongs to
+/// (`helmets/<Model>/paints`), so it is more than one segment and merges as before. An
 /// archive packed area-first — a `helmets/` folder holding the models — is already in the
-/// shape the destination expects; wrapping it would bury the models a level down.
+/// shape the destination expects; wrapping it would bury the models a level down. And a
+/// packaged model is a single `.pkz` that belongs *directly* in the area, under its own file
+/// name: [`walk_plain`] already places it that way, and a folder around it puts the package
+/// one level below where the game and every picker look — `helmets/shop-44/<Helmet>.pkz`,
+/// which loads nowhere. A shop download is exactly that shape, and having no folder of its
+/// own it was named for the slug.
 fn gear_model_folder(
     type_folder: &str,
     segs: &[&str],
@@ -1295,6 +1300,10 @@ fn gear_model_folder(
     }
     let [area] = segs else { return None };
     if !crate::game::is_rider_model_area(area) {
+        return None;
+    }
+    // The same base and the same test `walk_plain` will apply, so the two can't drift.
+    if has_root_pkz(unwrapped) {
         return None;
     }
     let own = (unwrapped != extracted)
@@ -1722,6 +1731,22 @@ pub(crate) fn has_ext(p: &Path, ext: &str) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case(ext))
+        .unwrap_or(false)
+}
+
+/// Whether a `.pkz` sits at the top of `dir` — i.e. whether this placement is installing a
+/// finished package rather than a mod's loose files.
+///
+/// The planner's copy of the test [`walk_plain`] makes on the same base from the entries it
+/// has already read. Both must answer alike: one decides the package goes in under its own
+/// name, the other that no model folder is wrapped around it.
+fn has_root_pkz(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .any(|e| has_ext(&e.path(), "pkz"))
+        })
         .unwrap_or(false)
 }
 
@@ -2363,6 +2388,38 @@ mod tests {
         assert!(mods.join("rider/helmets/Fox V3/helmet.edf").exists());
         assert!(!mods.join("rider/helmets/helmets").exists(), "no doubled area folder");
         assert!(!mods.join("rider/helmets/fox-v3").exists(), "no slug folder over the models");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The shop's shape: the download *is* the model, so `extract_archive` carries the `.pkz`
+    /// through and there is no folder to take a name from. Wrapping it named the folder for
+    /// the slug and put the package a level below where anything looks — `helmets/shop-44/`,
+    /// which the game can't load and the rider viewer answers with "no gear mesh found".
+    #[test]
+    fn a_packaged_gear_model_goes_straight_into_its_area() {
+        let root = place_tmp("gear-packaged");
+        let ex = root.join("ex");
+        touch(&ex.join("B Helmet 100 Goggles.pkz"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "helmets", "shop-44").unwrap();
+        assert!(
+            mods.join("rider/helmets/B Helmet 100 Goggles.pkz").exists(),
+            "the package sits in the area under its own name"
+        );
+        assert!(!mods.join("rider/helmets/shop-44").exists(), "no slug folder around it");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Same for a packaged rider profile, which `riders/` takes as a `.pkz` too.
+    #[test]
+    fn a_packaged_rider_profile_goes_straight_into_riders() {
+        let root = place_tmp("rider-packaged");
+        let ex = root.join("ex");
+        touch(&ex.join("Suit 1.pkz"));
+        let mods = root.join("mods");
+        place_mod(&ex, &mods, "rider", "riders", "shop-91").unwrap();
+        assert!(mods.join("rider/riders/Suit 1.pkz").exists());
+        assert!(!mods.join("rider/riders/shop-91").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

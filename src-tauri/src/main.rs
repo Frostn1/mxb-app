@@ -368,8 +368,8 @@ fn scan_rider_targets_blocking(app: tauri::AppHandle) -> Result<library::RiderTa
     Ok(library::scan_rider_targets(&cfg.mods_path))
 }
 
-/// Gear areas holding a model the game can't reach, because its files sit loose in the area
-/// root instead of in a folder. See [`gearrepair`] for how that happened and what moves.
+/// Gear models the game can't reach where they are: files loose in an area root, or a package
+/// buried a folder deep. See [`gearrepair`] for how each happened and what moves.
 #[tauri::command]
 async fn scan_gear_repairs(app: tauri::AppHandle) -> Result<Vec<gearrepair::GearRepair>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -380,15 +380,15 @@ async fn scan_gear_repairs(app: tauri::AppHandle) -> Result<Vec<gearrepair::Gear
     .map_err(|e| format!("scan_gear_repairs task failed: {e}"))?
 }
 
-/// Gather one area's loose content into a folder of its own. Returns how many entries moved.
+/// Carry out one repair, by the `id` its plan carries. Returns how many entries moved.
 #[tauri::command]
-async fn repair_gear_area(app: tauri::AppHandle, area: String) -> Result<usize, String> {
+async fn repair_gear(app: tauri::AppHandle, id: String) -> Result<usize, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        gearrepair::apply_one(&cfg.mods_path, &area).map_err(|e| format!("{e:#}"))
+        gearrepair::apply_one(&cfg.mods_path, &id).map_err(|e| format!("{e:#}"))
     })
     .await
-    .map_err(|e| format!("repair_gear_area task failed: {e}"))?
+    .map_err(|e| format!("repair_gear task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -6065,7 +6065,7 @@ fn main() {
             paint_studio_hints,
             scan_rider_targets,
             scan_gear_repairs,
-            repair_gear_area,
+            repair_gear,
             scan_bike_targets,
             scan_model_swaps,
             apply_model_swap,
@@ -7096,14 +7096,22 @@ mod viewer_tests {
         );
         let mut bound = 0;
         for n in &stock.nodes {
-            for s in &n.submeshes {
-                let t = s.texture.as_ref().expect("stock submesh bound to a texture");
-                eprintln!("stock submesh {:<10} -> {t}", s.name);
+            // A one-piece item has no submesh table at all and wears its texture on the node
+            // — `bind_gear_submeshes` says so explicitly. Counting only submeshes read that
+            // as "nothing was bound" on exactly the meshes worth checking.
+            let pieces: Vec<(&str, Option<&String>)> = if n.submeshes.is_empty() {
+                vec![(n.name.as_str(), n.texture.as_ref())]
+            } else {
+                n.submeshes.iter().map(|s| (s.name.as_str(), s.texture.as_ref())).collect()
+            };
+            for (name, tex) in pieces {
+                let t = tex.expect("stock piece bound to a texture");
+                eprintln!("stock piece {name:<10} -> {t}");
                 assert!(embedded.contains(&t.to_ascii_lowercase()), "'{t}' is embedded in the mesh");
                 bound += 1;
             }
         }
-        assert!(bound > 0, "stock bound at least one submesh");
+        assert!(bound > 0, "stock bound at least one piece");
 
         // Mixed: stock shell, painted goggles. A paint reuses the mesh's texture names, so
         // this is where the two sets would collide and the viewer would pick at random.
@@ -7798,5 +7806,72 @@ mod viewer_tests {
             assert_eq!(empty, load(None, false), "kept the first-paint fallback");
         }
     }
+
+    /// The whole round trip for a package a shop install buried: unloadable where it sits,
+    /// loadable once the repair has raised it. Run against a real locked helmet, because the
+    /// point is that the file coming up is the same file the viewer then decodes.
+    ///
+    /// `MXB_REAL_GEAR` must name a `.pkz`. Linked rather than copied, so the player's own
+    /// 42 MB helmet is neither duplicated nor moved — the repair renames the link.
+    #[test]
+    #[ignore]
+    fn a_buried_package_loads_once_the_repair_has_raised_it() {
+        let Ok(path) = std::env::var("MXB_REAL_GEAR") else {
+            eprintln!("set MXB_REAL_GEAR to an installed gear .pkz to run");
+            return;
+        };
+        let src = std::path::Path::new(&path);
+        assert!(src.is_file(), "MXB_REAL_GEAR must be a .pkz file for this one");
+        let name = src.file_name().unwrap().to_string_lossy().into_owned();
+
+        let root = std::env::temp_dir().join(format!("frost-buried-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let helmets = root.join("mods/rider/helmets");
+        let buried = helmets.join("shop-44");
+        std::fs::create_dir_all(&buried).unwrap();
+        std::fs::hard_link(src, buried.join(&name))
+            .or_else(|_| std::fs::copy(src, buried.join(&name)).map(|_| ()))
+            .expect("stage the package");
+
+        // Where the install put it: the folder is what the picker offers, and it has no mesh.
+        let buried_load = super::load_gear_model_blocking(
+            buried.to_string_lossy().into_owned(),
+            "helmet".into(),
+            None,
+            None,
+            false,
+            false,
+            Vec::new(),
+        );
+        let err = buried_load.err().expect("a buried package must not load");
+        assert!(err.contains("no gear mesh found"), "unexpected error: {err}");
+
+        let plans = crate::gearrepair::plan(root.to_str().unwrap());
+        assert_eq!(plans.len(), 1, "the burial is found");
+        let moved = crate::gearrepair::apply_one(root.to_str().unwrap(), &plans[0].id).unwrap();
+        assert_eq!(moved, 1);
+
+        let raised = helmets.join(&name);
+        assert!(raised.is_file(), "the package is in the area root");
+        let part = super::load_gear_model_blocking(
+            raised.to_string_lossy().into_owned(),
+            "helmet".into(),
+            None,
+            None,
+            false,
+            false,
+            Vec::new(),
+        )
+        .expect("load the raised package");
+        eprintln!(
+            "{name} -> {} node(s), textures {:?}",
+            part.nodes.len(),
+            part.textures.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
+        assert!(!part.nodes.is_empty(), "it draws something");
+        assert!(!part.textures.is_empty(), "and it is textured");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
+
 

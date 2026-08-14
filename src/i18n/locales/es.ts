@@ -221,6 +221,11 @@ export const es: Translation = {
   "rider.repairDone_one": "Se recogió {{count}} archivo en “{{model}}”.",
   "rider.repairDone_other": "Se recogieron {{count}} archivos en “{{model}}”.",
   "rider.repairNothing": "No queda nada por recoger.",
+  "rider.unwrapTitle": "Un mod de {{area}} se instaló una carpeta más abajo de la cuenta",
+  "rider.unwrapBody":
+    "“{{folder}}” no contiene más que {{model}}, y un mod empaquetado solo carga desde {{area}} en sí — así que ni el juego ni esta app lo ven. ¿Subirlo?",
+  "rider.unwrapDone_one": "Se subió {{count}} mod. Ahora aparece como “{{model}}”.",
+  "rider.unwrapDone_other": "Se subieron {{count}} mods, empezando por “{{model}}”.",
 
   // ── Visita guiada ──────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Haz un recorrido rápido",
