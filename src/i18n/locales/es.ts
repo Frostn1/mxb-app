@@ -1498,7 +1498,7 @@ export const es: Translation = {
   "paints.sheetsTitle": "Texturas",
   "paints.reload": "Recargar del disco",
   "paints.addImages": "Añadir imágenes…",
-  "paints.expected": "Las pinturas de aquí usan:",
+  "paints.expected": "Hojas usadas aquí:",
   "paints.empty":
     "Añade un .tga o .png por cada textura. Importan los nombres, no los archivos: una textura llamada “livery” va a la pieza que pide “livery”. Desempaquetar una pintura existente te da los nombres correctos.",
   "paints.resized": "Redimensionada {{from}} → {{to}} — el juego necesita potencias de dos.",
@@ -1519,6 +1519,12 @@ export const es: Translation = {
     "Todavía no hay nada sobre lo que dibujar. Empieza desde una pintura instalada para este modelo — así obtienes sus hojas y sus nombres — o añade una en blanco.",
   "designer.startFromPaint": "Empezar desde una pintura…",
   "designer.blankSheet": "Hoja en blanco",
+  "designer.addSheet": "Añadir una hoja",
+  "designer.nothingToSave": "Todas las hojas están vacías: dibuja algo antes de guardar.",
+  "designer.blankSheetsSkipped_one": "Se dejó fuera 1 hoja vacía: una hoja vacía borraría la textura del modelo.",
+  "designer.blankSheetsSkipped_other": "Se dejaron fuera {{count}} hojas vacías: una hoja vacía borraría la textura del modelo.",
+  "designer.createExpected_one": "Crear 1 hoja",
+  "designer.createExpected_other": "Crear {{count}} hojas",
   "designer.sheets": "Hojas",
   "designer.moveDown": "Bajar",
   "designer.moveUp": "Subir",
@@ -1584,7 +1590,6 @@ export const es: Translation = {
     "Nada del modelo usa una textura llamada “{{name}}”, así que no hay distribución UV que mostrar.",
   "designer.ghostBuried":
     "La referencia va debajo de la hoja, y la plantilla de esta hoja es opaca: activa Plantilla para sacarla y poder ver a través.",
-  "designer.ghostNote": "Solo una guía: la referencia nunca se guarda en la pintura.",
   "designer.resetView": "Restablecer vista",
 
   // ── Designer › las herramientas de pintura ────────────────────────────────────

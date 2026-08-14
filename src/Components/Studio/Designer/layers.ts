@@ -312,3 +312,35 @@ export function paintLayer(name: string, sheet: Sheet): PaintLayer {
 export function blankSheet(name: string, size: number): Sheet {
   return { id: newId("sheet"), name, width: size, height: size, base: null, layers: [] };
 }
+
+/** Suffixes that mark a texture as a companion map rather than a colour sheet. Mirrors
+ *  `is_companion_map` / `is_exporter_companion` on the Rust side. */
+const COMPANION_SUFFIXES = [
+  "_n",
+  "_r",
+  "_normal",
+  "_nrm",
+  "_roughness",
+  "_metallic",
+  "_metalness",
+  "_specular",
+  "_glossiness",
+  "_ao",
+  "_ambientocclusion",
+  "_bump",
+  "_height",
+  "_displacement",
+];
+
+/**
+ * Whether a texture name is a companion map — a normal or roughness sheet, not a colour one.
+ *
+ * Worth telling apart when *offering* to make sheets. A companion map is derived from the
+ * shape of the surface, not drawn like a livery, and a blank one is actively destructive: the
+ * paint replaces the model's textures by name, so shipping an empty `plastics_n` throws away
+ * the bike's real normal map. Someone who wants to author one can still add it by hand.
+ */
+export function isCompanionMap(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  return COMPANION_SUFFIXES.some((s) => n.endsWith(s));
+}

@@ -131,6 +131,29 @@ export function layerCorners(layer: Layer): [number, number][] {
  * on the Rust side on its way into the `.pnt`, so the intermediate format only has to not
  * lose anything.
  */
+/**
+ * Whether a composited sheet has a single pixel on it.
+ *
+ * A `.pnt` replaces the model's textures *by name*, so an untouched sheet is not a harmless
+ * blank — saved, it wipes whatever the bike already had under that name. That bites hardest
+ * on the companion maps: a transparent `plastics_n` replaces the real normal map and flattens
+ * the lighting on the part.
+ *
+ * The pixels rather than the sheet's layer list, because picking up the brush *creates* a
+ * paint layer whether or not a stroke follows, so "has layers" and "has anything on it" are
+ * different questions. Reads the alpha channel and stops at the first mark, which is the
+ * common case; a genuinely empty 2048² sheet is the one that scans in full.
+ */
+export function hasInk(canvas: HTMLCanvasElement): boolean {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return true; // can't tell — saving too much beats silently dropping work
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] !== 0) return true;
+  }
+  return false;
+}
+
 export function toPng(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
   return new Promise<ArrayBuffer>((resolve, reject) => {
     canvas.toBlob((blob) => {

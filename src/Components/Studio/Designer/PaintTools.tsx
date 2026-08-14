@@ -4,14 +4,17 @@ import {
   Brush,
   Circle,
   Eraser,
+  ImagePlus,
   Minus,
   MousePointer2,
   PaintBucket,
   Redo2,
   Square,
+  Type as TypeIcon,
   Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "../../ui/button";
 import { useT } from "../../../i18n/context";
 import type { TKey } from "../../../i18n/core";
 import { Row, Slider } from "./controls";
@@ -47,6 +50,11 @@ interface PaintToolsProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  /** Put something on the sheet that isn't painted by hand. Here rather than in the header
+   *  bar because this is the panel you are already in while working on the sheet. */
+  onAddImage: () => void;
+  onAddText: () => void;
+  busy: boolean;
 }
 
 /**
@@ -64,6 +72,9 @@ export function PaintTools({
   canRedo,
   onUndo,
   onRedo,
+  onAddImage,
+  onAddText,
+  busy,
 }: PaintToolsProps) {
   const t = useT();
   const { tool } = settings;
@@ -121,6 +132,32 @@ export function PaintTools({
             </button>
           );
         })}
+      </div>
+
+      {/* Full width and truncating, like everything else in a 224px rail — a label is a
+          translation away from being too long for half of it. */}
+      <div className="grid grid-cols-2 gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full min-w-0 justify-start"
+          disabled={busy}
+          onClick={onAddImage}
+          title={t("designer.addImage")}
+        >
+          <ImagePlus className="size-3.5" />
+          <span className="truncate">{t("designer.addImage")}</span>
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full min-w-0 justify-start"
+          onClick={onAddText}
+          title={t("designer.addText")}
+        >
+          <TypeIcon className="size-3.5" />
+          <span className="truncate">{t("designer.addText")}</span>
+        </Button>
       </div>
 
       {tool === "move" ? (

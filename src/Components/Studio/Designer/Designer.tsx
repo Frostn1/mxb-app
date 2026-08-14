@@ -4,16 +4,14 @@ import {
   EyeOff,
   FilePlus2,
   Grid3x3,
-  ImagePlus,
   Layers as LayersIcon,
   Loader2,
   PackageOpen,
-  PaintRoller,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Save,
   Trash2,
-  Type as TypeIcon,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -36,12 +34,13 @@ import { Row, Slider } from "./controls";
 import { PreviewPanel } from "./PreviewPanel";
 import { LayerInspector } from "./LayerInspector";
 import { PaintTools } from "./PaintTools";
-import { bitmapFromRgba, composite, sheetTexture, toPng } from "./composite";
+import { bitmapFromRgba, composite, hasInk, sheetTexture, toPng } from "./composite";
 import { EMPTY_GHOST, ghostShows, type Ghost } from "./ghost";
 import { partPath, uvParts, uvWireframe, type UvPart } from "./uv";
 import {
   blankSheet,
   imageLayer,
+  isCompanionMap,
   layerExtent,
   newId,
   paintLayer,
@@ -622,17 +621,47 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       });
   }, [incoming, loadSheets, onIncomingLoaded]);
 
+  /**
+   * Texture names this model wants that have no sheet yet — what the create button offers,
+   * and the name a new blank sheet is given.
+   *
+   * Colour sheets only. The hint line lists the companion maps too, because knowing the bike
+   * has a `plastics_n` is worth knowing, but an *empty* one is worse than none: a paint
+   * replaces textures by name, so saving a blank normal map strips the bike's real one.
+   */
+  const missingHints = useMemo(() => {
+    const taken = new Set(sheets.map((s) => s.name.trim().toLowerCase()));
+    return hints.filter((h) => !taken.has(h.trim().toLowerCase()) && !isCompanionMap(h));
+  }, [hints, sheets]);
+
   const addBlankSheet = useCallback(() => {
     // Name it after a texture the chosen model actually asks for, when we know one — that's
     // the difference between a paint that shows and a paint that doesn't.
-    const taken = new Set(sheets.map((s) => s.name.toLowerCase()));
-    const suggested = hints.find((h) => !taken.has(h.toLowerCase())) ?? "";
+    const suggested = missingHints[0] ?? "";
     const sheet = blankSheet(suggested, BLANK_SIZE);
     setSheets((prev) => [...prev, sheet]);
     setActiveId(sheet.id);
     setSelectedId(null);
     bump();
-  }, [bump, hints, sheets]);
+  }, [bump, missingHints]);
+
+  /**
+   * One sheet per colour texture the model asks for that isn't on the list yet.
+   *
+   * The names are the whole binding — a sheet called anything else paints nothing — and until
+   * now the only way to get them right without an installed paint to start from was to read
+   * them off the hint line and type each one back in.
+   *
+   * Only the missing ones, so pressing it twice doesn't leave two sheets fighting over a name.
+   */
+  const addHintSheets = useCallback(() => {
+    const made = missingHints.map((h) => blankSheet(h, BLANK_SIZE));
+    if (!made.length) return;
+    setSheets((prev) => [...prev, ...made]);
+    setActiveId(made[0].id);
+    setSelectedId(null);
+    bump();
+  }, [bump, missingHints]);
 
   const addImage = useCallback(async () => {
     if (!active) return;
@@ -927,14 +956,27 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       if (!dest) return;
       setBusy(true);
       try {
-        // Stage every sheet first: `paint_studio_save` packs files, and these only exist as
-        // canvases until now. Composited once more on the way out so a save can't ship a
-        // frame older than the screen.
+        // Composite every sheet first: they only exist as canvases until now, and doing it on
+        // the way out is what stops a save shipping a frame older than the screen.
+        //
+        // Then drop the ones with nothing on them. A `.pnt` replaces the model's textures by
+        // name, so an empty sheet doesn't add a blank — it *removes* whatever the bike had
+        // there. Offering to create every missing sheet at once made that easy to do by
+        // accident: create twenty, paint two, and the other eighteen would have wiped the
+        // bike's normal and roughness maps.
+        const inked = sheets.filter((sheet) => {
+          const canvas = canvasFor(sheet);
+          composite(canvas, sheet);
+          return hasInk(canvas);
+        });
+        const blank = sheets.length - inked.length;
+        if (!inked.length) {
+          toast.error(t("designer.nothingToSave"));
+          return;
+        }
         const staged = await Promise.all(
-          sheets.map(async (sheet) => {
-            const canvas = canvasFor(sheet);
-            composite(canvas, sheet);
-            const path = await paintStudioStage(sheet.name.trim(), await toPng(canvas));
+          inked.map(async (sheet) => {
+            const path = await paintStudioStage(sheet.name.trim(), await toPng(canvasFor(sheet)));
             return { path, name: sheet.name.trim() };
           }),
         );
@@ -945,7 +987,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           dest,
           overwrite,
         });
-        toast.success(t("paints.saved", { path: outcome.path }));
+        // Said out loud, not silently: a sheet that doesn't get written is a sheet that
+        // won't be in the file, and finding that out later is worse than reading it now.
+        toast.success(t("paints.saved", { path: outcome.path }), {
+          description: blank ? t("designer.blankSheetsSkipped", { count: blank }) : undefined,
+        });
       } catch (e) {
         toast.error(String(e).replace(/^Error:\s*/, ""));
       } finally {
@@ -1019,16 +1065,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
           {t("paints.save")}
         </Button>
-        <span className="h-5 w-px flex-none bg-border" />
-        <Button variant="outline" size="sm" disabled={!active || busy} onClick={() => void addImage()}>
-          <ImagePlus className="size-3.5" /> {t("designer.addImage")}
-        </Button>
-        <Button variant="outline" size="sm" disabled={!active} onClick={addText}>
-          <TypeIcon className="size-3.5" /> {t("designer.addText")}
-        </Button>
-        <Button variant="outline" size="sm" disabled={!active} onClick={addPaintLayer}>
-          <PaintRoller className="size-3.5" /> {t("designer.addPaint")}
-        </Button>
         {blocked && (
           <span className="ml-auto max-w-[40%] truncate text-[11px] text-faint" title={blocked}>
             {blocked}
@@ -1060,7 +1096,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             }}
             onRemove={removeSheet}
             onReorder={reorderSheet}
+            missingHints={missingHints}
             onAddBlank={addBlankSheet}
+            onAddHintSheets={addHintSheets}
             onStartFromPaint={() => void startFromPaint()}
             busy={busy}
           />
@@ -1085,6 +1123,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               canRedo={canRedo}
               onUndo={undo}
               onRedo={redo}
+              onAddImage={() => void addImage()}
+              onAddText={addText}
+              busy={busy}
             />
           )}
 
@@ -1099,6 +1140,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               }}
               onRemove={removeLayer}
               onReorder={reorder}
+              onAdd={addPaintLayer}
             />
           )}
           {selected && (
@@ -1172,30 +1214,48 @@ function SheetList({
   sheets,
   activeId,
   hints,
+  missingHints,
   onPick,
   onRename,
   onRemove,
   onReorder,
   onAddBlank,
+  onAddHintSheets,
   onStartFromPaint,
   busy,
 }: {
   sheets: Sheet[];
   activeId: string | null;
+  /** Every texture name the model's paints use — shown in full, companion maps included. */
   hints: string[];
+  /** The colour sheets among them that don't exist yet: what the create button would make. */
+  missingHints: string[];
   onPick: (id: string) => void;
   onRename: (id: string, value: string) => void;
   onRemove: (id: string) => void;
   onReorder: (id: string, delta: number) => void;
   onAddBlank: () => void;
+  onAddHintSheets: () => void;
   onStartFromPaint: () => void;
   busy: boolean;
 }) {
   const t = useT();
   return (
     <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <h2 className="mb-2.5 text-[13px] font-semibold">{t("designer.sheets")}</h2>
-      <div className="flex flex-col gap-1.5">
+      <div className="mb-2.5 flex items-center gap-2">
+        <h2 className="text-[13px] font-semibold">{t("designer.sheets")}</h2>
+        <button
+          type="button"
+          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onAddBlank}
+          title={t("designer.addSheet")}
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
+      {/* Scrolls rather than growing: a bike's paint runs to two dozen sheets, and a list that
+          long pushed the hint line and every button below the fold of the rail. */}
+      <div className="flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto pr-0.5">
         {sheets.map((sheet, i) => (
           <div
             key={sheet.id}
@@ -1249,23 +1309,53 @@ function SheetList({
         ))}
       </div>
 
-      {/* The names the installed paints use. A sheet named anything else binds to nothing,
-          and this is the only place the right answer is visible. */}
+      {/* The names this model binds — what its mesh draws, plus whatever the paints already
+          installed replace. A sheet named anything else binds to nothing, and this is the only
+          place the right answer is visible — so it also offers to make them, rather than
+          leaving the list to be copied out by hand. */}
       {!!hints.length && (
-        <p className="mt-2 text-[11px] leading-snug text-faint">
-          {t("paints.expected")} {hints.join(", ")}
-        </p>
+        <div className="mt-2 flex flex-col items-start gap-1.5">
+          <p className="text-[11px] leading-snug text-faint">
+            {t("paints.expected")} {hints.join(", ")}
+          </p>
+          {/* Full width and clipping, not sized to its label: the rail is 224px, a bike can
+              want two dozen sheets, and `Button` is `whitespace-nowrap` — so a count in the
+              label, or a longer word for it in another language, ran straight out of the rail. */}
+          {!!missingHints.length && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full min-w-0 justify-start"
+              onClick={onAddHintSheets}
+              title={missingHints.join(", ")}
+            >
+              <FilePlus2 className="size-3.5" />
+              <span className="truncate">
+                {t("designer.createExpected", { count: missingHints.length })}
+              </span>
+            </Button>
+          )}
+        </div>
       )}
 
-      <div className="mt-2.5 flex flex-wrap gap-1.5">
-        <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPaint}>
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <PackageOpen className="size-3.5" />}
-          {t("designer.startFromPaint")}
-        </Button>
-        <Button variant="outline" size="sm" onClick={onAddBlank}>
-          <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
-        </Button>
-      </div>
+      {/* Only while there is nothing to draw on. Starting from a paint *replaces* every sheet
+          — that's what makes it a template step — so offering it beside work in progress is
+          offering to throw that work away. Adding another sheet is the ＋ above. */}
+      {!sheets.length && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPaint}>
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <PackageOpen className="size-3.5" />
+            )}
+            {t("designer.startFromPaint")}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onAddBlank}>
+            <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1388,8 +1478,6 @@ function GhostPanel({
           {t("designer.uvNoMatch", { name: sheetName.trim() })}
         </p>
       )}
-
-      <p className="mt-1.5 text-[11px] leading-snug text-faint">{t("designer.ghostNote")}</p>
     </div>
   );
 }
@@ -1433,6 +1521,7 @@ function LayerList({
   onToggle,
   onRemove,
   onReorder,
+  onAdd,
 }: {
   layers: Layer[];
   selectedId: string | null;
@@ -1440,11 +1529,22 @@ function LayerList({
   onToggle: (id: string, visible: boolean) => void;
   onRemove: (id: string) => void;
   onReorder: (id: string, delta: number) => void;
+  onAdd: () => void;
 }) {
   const t = useT();
   return (
     <div className="rounded-lg border border-border bg-card/40 p-3.5">
-      <h2 className="mb-2.5 text-[13px] font-semibold">{t("designer.layers")}</h2>
+      <div className="mb-2.5 flex items-center gap-2">
+        <h2 className="text-[13px] font-semibold">{t("designer.layers")}</h2>
+        <button
+          type="button"
+          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onAdd}
+          title={t("designer.addPaint")}
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
       {!layers.length ? (
         <p className="text-[11px] leading-snug text-faint">{t("designer.noLayers")}</p>
       ) : (

@@ -1075,70 +1075,123 @@ fn templates_root(app: &tauri::AppHandle) -> std::path::PathBuf {
         .join("Paint Templates")
 }
 
-/// The texture names a destination's existing paints supply.
+/// The texture names a destination can paint.
 ///
 /// A paint binds by name: call a sheet `livery` and it lands on the bodywork that asked for
-/// `livery`, call it `my_livery` and it lands nowhere. Nothing in a `.pnt` says which names
-/// a model wants, but the paints already installed for that model do — read from their
-/// headers, so this costs no pixels.
+/// `livery`, call it `my_livery` and it lands nowhere. Two sources answer it, and both are
+/// needed. The paints already installed name what *they* replace — read from their headers,
+/// so that half costs no pixels. The model's own mesh names everything it draws, which is
+/// the half a paint can't supply: the OEM bikes ship a stock paint that replaces the wheels
+/// and the chain and nothing else, so on a stock Husqvarna the sheets on offer were `chain`,
+/// `wheel`, `wheels` — and `plastics`, the one anybody opens the Designer for, was missing.
 #[tauri::command]
 async fn paint_studio_hints(app: tauri::AppHandle, rel: String) -> Result<Vec<String>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     tauri::async_runtime::spawn_blocking(move || {
         let rel = rel.replace('\\', "/").trim_matches('/').to_string();
-        let dir = library::mods_subdir(&cfg.mods_path, &format!("mods/{rel}"));
-        let mut names: Vec<String> = Vec::new();
-        fn add(names: &mut Vec<String>, bytes: &[u8]) {
-            let Ok(found) = paint::texture_names_any(bytes) else { return };
-            for n in found {
-                if !n.is_empty() && !names.iter().any(|s| s.eq_ignore_ascii_case(&n)) {
-                    names.push(n);
-                }
-            }
-        }
-
-        // A handful is plenty: paints for one model overwhelmingly supply the same names,
-        // and this runs every time the destination changes.
-        const SAMPLE: usize = 8;
-        let mut seen = 0usize;
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            for entry in rd.flatten() {
-                let p = entry.path();
-                if seen >= SAMPLE
-                    || !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pnt"))
-                {
-                    continue;
-                }
-                if let Ok(bytes) = std::fs::read(&p) {
-                    add(&mut names, &bytes);
-                    seen += 1;
-                }
-            }
-        }
-        // Nothing installed loose: the model may be packed, and its own paints are the
-        // same evidence. `<Model>.pkz` sits beside the `<Model>` folder this destination
-        // lives in — for a bike as much as for a helmet.
-        if names.is_empty() {
-            if let (Some(sub), Some(model_dir)) = (dir.file_name(), dir.parent()) {
-                let pkz = model_dir.with_extension("pkz");
-                let tail = format!("/{}/", sub.to_string_lossy().to_ascii_lowercase());
-                if pkz.is_file() {
-                    let want = |n: &str| {
-                        let n = n.replace('\\', "/").to_ascii_lowercase();
-                        n.contains(&tail) && n.ends_with(".pnt")
-                    };
-                    let packed = pkz::read_selected(&pkz, want).unwrap_or_default();
-                    for (_, bytes) in packed.iter().take(SAMPLE) {
-                        add(&mut names, bytes);
-                    }
-                }
-            }
-        }
-        names.sort_by_key(|n| n.to_lowercase());
-        Ok(names)
+        Ok(paint_hints(&library::mods_subdir(&cfg.mods_path, &format!("mods/{rel}"))))
     })
     .await
     .map_err(|e| format!("paint_studio_hints task failed: {e}"))?
+}
+
+/// [`paint_studio_hints`] for a destination folder that's already been resolved.
+fn paint_hints(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    fn add(names: &mut Vec<String>, found: Vec<String>) {
+        for n in found {
+            if !n.is_empty() && !names.iter().any(|s| s.eq_ignore_ascii_case(&n)) {
+                names.push(n);
+            }
+        }
+    }
+
+    // A handful is plenty: paints for one model overwhelmingly supply the same names,
+    // and this runs every time the destination changes.
+    const SAMPLE: usize = 8;
+    let mut seen = 0usize;
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if seen >= SAMPLE || !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pnt")) {
+                continue;
+            }
+            // Seeked, not read: a bike's paints are tens of megabytes each and the names are
+            // in their headers. Reading eight of them whole put nineteen seconds between
+            // picking a model and being told what it wants.
+            if let Ok(found) = paint::texture_names_at(&p) {
+                add(&mut names, found);
+                seen += 1;
+            }
+        }
+    }
+    // Nothing installed loose: the model may be packed, and its own paints are the
+    // same evidence. `<Model>.pkz` sits beside the `<Model>` folder this destination
+    // lives in — for a bike as much as for a helmet.
+    if names.is_empty() {
+        if let (Some(sub), Some(model_dir)) = (dir.file_name(), dir.parent()) {
+            let pkz = model_dir.with_extension("pkz");
+            let tail = format!("/{}/", sub.to_string_lossy().to_ascii_lowercase());
+            if pkz.is_file() {
+                let want = |n: &str| {
+                    let n = n.replace('\\', "/").to_ascii_lowercase();
+                    n.contains(&tail) && n.ends_with(".pnt")
+                };
+                let packed = pkz::read_selected(&pkz, want).unwrap_or_default();
+                for (_, bytes) in packed.iter().take(SAMPLE) {
+                    add(&mut names, paint::texture_names_any(bytes).unwrap_or_default());
+                }
+            }
+        }
+    }
+    // What the model itself draws, whether or not a paint has ever replaced it.
+    //
+    // Only for the model's own `paints` folder. A mesh names every texture on the item
+    // without saying which of them belong to the goggles hanging off it — the paints are
+    // the only thing that says that (see `on_goggle_side`) — and offering a helmet's shell
+    // sheet to somebody painting its goggles would put the shell in the wrong file.
+    let main_paints = dir.file_name().is_some_and(|s| s.eq_ignore_ascii_case("paints"));
+    if let (true, Some(model_dir)) = (main_paints, dir.parent()) {
+        add(&mut names, mesh_texture_names(model_dir));
+    }
+    names.sort_by_key(|n| n.to_lowercase());
+    names
+}
+
+/// Every texture a model's own mesh carries, by name.
+///
+/// Read from the mesh's texture records — names and dimensions, never the pixels beside
+/// them — so a 54 MB bike is answered by a walk over its bytes rather than by inflating it.
+/// A model that ships as a folder is read from there, and one that ships packed from the
+/// `<Model>.pkz` beside it; a sealed file is unwrapped the way the viewer unwraps it.
+fn mesh_texture_names(model_dir: &std::path::Path) -> Vec<String> {
+    let mut meshes: Vec<Vec<u8>> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(model_dir) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_file() && p.file_name().and_then(|n| n.to_str()).is_some_and(bikefiles::is_mesh)
+            {
+                meshes.extend(read_gear_file(&p));
+            }
+        }
+    }
+    if meshes.is_empty() {
+        let pkz = model_dir.with_extension("pkz");
+        if pkz.is_file() {
+            for (_, d) in pkz::read_selected(&pkz, bikefiles::is_mesh).unwrap_or_default() {
+                meshes.push(pkz::read_sidecar_blob(&d).unwrap_or(d));
+            }
+        }
+    }
+    let mut names: Vec<String> = Vec::new();
+    for mesh in &meshes {
+        for t in edf::embedded_textures(mesh) {
+            if !names.iter().any(|s| s.eq_ignore_ascii_case(&t.name)) {
+                names.push(t.name);
+            }
+        }
+    }
+    names
 }
 
 /// Raw RGBA for a texture the viewer was handed a token for.
@@ -6565,6 +6618,74 @@ mod gear_source_tests {
             );
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod mesh_texture_tests {
+    use super::{mesh_texture_names, paint_hints};
+
+    /// The smallest thing `edf::embedded_textures` reads as a texture record: a
+    /// null-terminated name, then the fields it validates by shape at a fixed offset.
+    fn mesh_naming(texture: &str) -> Vec<u8> {
+        const W_FROM_NAME: usize = 100;
+        let mut b = vec![0u8; W_FROM_NAME];
+        b[..texture.len()].copy_from_slice(texture.as_bytes());
+        b.extend_from_slice(&64u32.to_le_bytes()); // width, from the fixed size set
+        b.extend_from_slice(&64u32.to_le_bytes()); // height
+        b.extend_from_slice(&[0u8; 16]); // digest
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&12u32.to_le_bytes()); // payload, counting the pad
+        b.extend_from_slice(&[0u8; 8]); // pad
+        b.extend_from_slice(&[1u8; 4]); // payload
+        b
+    }
+
+    #[test]
+    fn a_models_own_textures_come_from_its_mesh() {
+        let root = std::env::temp_dir().join(format!("frost-mesh-tex-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("MyBike");
+        std::fs::create_dir_all(&dir).unwrap();
+        // No paint here at all — the mesh is the only thing that can name `plastics`.
+        std::fs::write(dir.join("model.edf"), mesh_naming("plastics")).unwrap();
+        assert_eq!(mesh_texture_names(&dir), vec!["plastics".to_string()]);
+
+        std::fs::create_dir_all(root.join("Bare")).unwrap();
+        assert!(mesh_texture_names(&root.join("Bare")).is_empty(), "no mesh, nothing to say");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A model's own textures are offered where a paint for it goes, and nowhere else: the
+    /// goggles beside it are a different file, painted from a different sheet.
+    #[test]
+    fn only_the_models_own_paints_folder_is_offered_the_mesh() {
+        let root = std::env::temp_dir().join(format!("frost-mesh-hints-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let helmet = root.join("Helmet");
+        std::fs::create_dir_all(helmet.join("paints")).unwrap();
+        std::fs::create_dir_all(helmet.join("goggles")).unwrap();
+        std::fs::write(helmet.join("helmet.edf"), mesh_naming("shell")).unwrap();
+
+        assert_eq!(paint_hints(&helmet.join("paints")), vec!["shell".to_string()]);
+        assert!(paint_hints(&helmet.join("goggles")).is_empty(), "the shell is not a goggle sheet");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The whole hint list for a real destination:
+    /// `MXB_PAINT_DEST='…/mods/bikes/MX1OEM_2023_Husqvarna_FC_450/paints' \
+    ///   cargo test paint_hints_from_env -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn paint_hints_from_env() {
+        let Ok(dir) = std::env::var("MXB_PAINT_DEST") else {
+            eprintln!("set MXB_PAINT_DEST to run");
+            return;
+        };
+        let t = std::time::Instant::now();
+        let names = paint_hints(std::path::Path::new(&dir));
+        eprintln!("{dir} expects {names:?} ({:?})", t.elapsed());
+        assert!(!names.is_empty(), "a destination with a model behind it expects something");
     }
 }
 

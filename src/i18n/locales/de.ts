@@ -1511,7 +1511,7 @@ export const de: Translation = {
   "paints.sheetsTitle": "Texturen",
   "paints.reload": "Neu von der Platte laden",
   "paints.addImages": "Bilder hinzufügen…",
-  "paints.expected": "Designs hier verwenden:",
+  "paints.expected": "Hier verwendete Bahnen:",
   "paints.empty":
     "Füge pro Textur eine .tga oder .png hinzu. Entscheidend sind die Namen, nicht die Dateien: eine Textur namens „livery“ landet auf dem Teil, das „livery“ verlangt. Ein entpacktes Design liefert die richtigen Namen.",
   "paints.resized": "Größe {{from}} → {{to}} geändert — das Spiel braucht Zweierpotenzen.",
@@ -1532,6 +1532,12 @@ export const de: Translation = {
     "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an — dann hast du seine Bahnen samt Namen — oder füge eine leere hinzu.",
   "designer.startFromPaint": "Von einem Design ausgehen…",
   "designer.blankSheet": "Leere Bahn",
+  "designer.addSheet": "Bahn hinzufügen",
+  "designer.nothingToSave": "Alle Bahnen sind leer — zeichne etwas, bevor du speicherst.",
+  "designer.blankSheetsSkipped_one": "1 leere Bahn wurde ausgelassen — eine leere würde die Textur des Modells löschen.",
+  "designer.blankSheetsSkipped_other": "{{count}} leere Bahnen wurden ausgelassen — eine leere würde die Textur des Modells löschen.",
+  "designer.createExpected_one": "1 Bahn anlegen",
+  "designer.createExpected_other": "{{count}} Bahnen anlegen",
   "designer.sheets": "Bahnen",
   "designer.moveDown": "Nach unten",
   "designer.moveUp": "Nach oben",
@@ -1597,7 +1603,6 @@ export const de: Translation = {
     "Nichts am Modell verwendet eine Textur namens „{{name}}“, also gibt es kein UV-Layout zu zeigen.",
   "designer.ghostBuried":
     "Die Referenz liegt unter dem Blatt, und die Vorlage dieses Blattes ist undurchsichtig — schalte Vorlage ein, um sie herauszuheben und hindurchzusehen.",
-  "designer.ghostNote": "Nur eine Hilfe — die Referenz wird nie in die Lackierung gespeichert.",
   "designer.resetView": "Ansicht zurücksetzen",
 
   // ── Designer › die Malwerkzeuge ───────────────────────────────────────────────
