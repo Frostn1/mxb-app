@@ -117,7 +117,7 @@ fn remember(app: &AppHandle, cfg: &AppConfig, report: Report) {
     }
     let _ = app.emit(EVENT, &report);
     if cfg.integrity_report {
-        publish_soon(app, cfg, &report);
+        publish_soon(cfg, &report);
     }
 }
 
@@ -151,7 +151,7 @@ struct FlaggedItem {
 
 /// Send an attestation to the control plane. Best-effort and fire-and-forget: a failed
 /// publish costs one missing row in an admin's list for a minute.
-fn publish_soon(app: &AppHandle, cfg: &AppConfig, report: &Report) {
+fn publish_soon(cfg: &AppConfig, report: &Report) {
     let token = cfg.cp_token.trim().to_string();
     if token.is_empty() {
         return;
@@ -171,7 +171,6 @@ fn publish_soon(app: &AppHandle, cfg: &AppConfig, report: &Report) {
             })
             .collect(),
     };
-    let _ = app;
     tauri::async_runtime::spawn(async move {
         if let Err(e) = publish(&token, &body).await {
             log::debug!("[integrity] couldn't publish the verdict: {e:#}");
