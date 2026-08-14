@@ -790,16 +790,34 @@ fn read_node(
     let mut placed_vert = vec![false; vc];
     let mut placed = false;
     let skip_place = std::env::var_os("MXB_NO_PLACE").is_some(); // dev: render raw authored space
-    if let (false, false, Some(node_mat)) = (
-        skip_place,
-        raw_subs.is_empty(),
-        read_mat4(b, iend + NODE_MAT_OFF),
-    ) {
+    if let (false, Some(node_mat)) = (skip_place, read_mat4(b, iend + NODE_MAT_OFF)) {
         placed = true;
-        for s in &raw_subs {
-            let chain = submesh_transform(b, iend, s.block_off, node_matrix_once);
-            let hi_v = (s.vert_start + s.vert_count).min(vc);
-            for i in s.vert_start..hi_v {
+        // A node with no submesh table is one piece in one frame, so the node matrix alone
+        // places it — over every vertex, there being no per-group ranges to walk.
+        //
+        // Skipping those used to be harmless-looking, because a one-piece mesh usually
+        // *is* authored where it belongs and its matrix is identity: the game's own helmet
+        // reads the same either way. It isn't always. A one-piece helmet authored in a
+        // rotated frame carries the rotation in that matrix, and left unapplied it renders
+        // lying on its side. The `.edf` header's own AABB is the check — see
+        // `placed_chassis_matches_header_aabb` and the gear diagnostic: placed geometry
+        // has to land where the file says the model sits.
+        let ranges: Vec<(std::ops::Range<usize>, Vec<Mat4>)> = if raw_subs.is_empty() {
+            vec![(0..vc, Vec::new())]
+        } else {
+            raw_subs
+                .iter()
+                .map(|s| {
+                    let hi_v = (s.vert_start + s.vert_count).min(vc);
+                    (
+                        s.vert_start..hi_v,
+                        submesh_transform(b, iend, s.block_off, node_matrix_once),
+                    )
+                })
+                .collect()
+        };
+        for (verts, chain) in ranges {
+            for i in verts {
                 placed_vert[i] = true;
                 let (p, n) = (i * 3, i * 3);
                 let mut pos = [positions[p], positions[p + 1], positions[p + 2]];

@@ -220,6 +220,11 @@ export const it: Translation = {
   "rider.repairDone_one": "Raccolto {{count}} file in “{{model}}”.",
   "rider.repairDone_other": "Raccolti {{count}} file in “{{model}}”.",
   "rider.repairNothing": "Non c'è più niente da raccogliere.",
+  "rider.unwrapTitle": "Un mod in {{area}} è stato installato una cartella troppo in basso",
+  "rider.unwrapBody":
+    "“{{folder}}” contiene solo {{model}}, e un mod pacchettizzato si carica solo da {{area}} stessa — quindi né il gioco né questa app lo vedono. Spostarlo su?",
+  "rider.unwrapDone_one": "Spostato {{count}} mod su. Ora è in elenco come “{{model}}”.",
+  "rider.unwrapDone_other": "Spostati {{count}} mod su, a partire da “{{model}}”.",
 
   // ── Tour guidato ───────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Fai un giro veloce",

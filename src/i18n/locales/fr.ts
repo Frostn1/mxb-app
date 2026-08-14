@@ -224,6 +224,11 @@ export const fr: Translation = {
   "rider.repairDone_one": "{{count}} fichier rassemblé dans « {{model}} ».",
   "rider.repairDone_other": "{{count}} fichiers rassemblés dans « {{model}} ».",
   "rider.repairNothing": "Plus rien à rassembler.",
+  "rider.unwrapTitle": "Un mod {{area}} a été installé un dossier trop bas",
+  "rider.unwrapBody":
+    "« {{folder}} » ne contient que {{model}}, et un mod packagé ne se charge que depuis {{area}} lui-même — ni le jeu ni cette app ne le voient. Le remonter ?",
+  "rider.unwrapDone_one": "{{count}} mod remonté. Il est listé comme « {{model}} » maintenant.",
+  "rider.unwrapDone_other": "{{count}} mods remontés, à commencer par « {{model}} ».",
 
   // ── Visite guidée ──────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Faites un tour rapide",

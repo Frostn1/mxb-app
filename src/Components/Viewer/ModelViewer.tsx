@@ -327,16 +327,30 @@ function makeGearMaterial(
   });
 }
 
-function useGearMaterials(part: RiderPart, tex: Map<string, THREE.Texture>) {
+/**
+ * One material per submesh, or a single material for a node with no submesh table.
+ *
+ * The shape has to match what `useNodeGeometries` builds: it adds a material group per
+ * submesh and none at all for a node without them, and three.js draws an *array* material
+ * strictly per group. So an array handed to a group-less node renders nothing whatever —
+ * geometry, textures and all present, and not one triangle on screen. That is a real shape:
+ * `bind_gear_submeshes` gives a single-piece helmet its texture on the node itself, which is
+ * how the game's own stock helmet and any one-piece mod arrive. `RiderBodyMesh` unwraps the
+ * same case at its call site; gear does it here, once, so both readers get it right.
+ */
+function useGearMaterials(
+  part: RiderPart,
+  tex: Map<string, THREE.Texture>,
+): (THREE.Material | THREE.Material[])[] {
   const mats = useMemo(() => {
     return part.nodes.map((n) =>
       n.submeshes.length
         ? n.submeshes.map((sm) => makeGearMaterial(sm.texture, tex))
-        : [makeGearMaterial(n.texture, tex)],
+        : makeGearMaterial(n.texture, tex),
     );
   }, [part, tex]);
   useEffect(
-    () => () => mats.forEach((a) => a.forEach((m) => m.dispose())),
+    () => () => mats.flat().forEach((m) => m.dispose()),
     [mats],
   );
   return mats;
