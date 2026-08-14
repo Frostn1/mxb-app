@@ -372,20 +372,23 @@ export const es: Translation = {
   "browse.needsBrowserDesc":
     "{{host}} bloquea las descargas dentro de la app — abre su página para terminar.",
   "browse.noDownload": "No se encontró descarga para «{{title}}»",
+  "browse.serverOnly": "«{{title}}» solo ofrece archivos de servidor",
+  "browse.serverOnlyDesc":
+    "Abre el mod para ver sus descargas: una compilación para servidor dedicado no se instala por ti.",
   "browse.quickInstallFailed":
     "No se pudo instalar rápido «{{title}}»",
   "browse.queuedBulk_one": "{{count}} mod en cola",
   "browse.queuedBulk_other": "{{count}} mods en cola",
   "browse.queuedBulkDesc": "Se instalarán uno tras otro.",
   "browse.queuedBulkSkipped_one":
-    "{{count}} omitido — host solo de navegador.",
+    "{{count}} omitido — ábrelo para elegir una descarga.",
   "browse.queuedBulkSkipped_other":
-    "{{count}} omitidos — host solo de navegador.",
+    "{{count}} omitidos — ábrelos para elegir una descarga.",
   "browse.bulkFailed": "No se pudo instalar rápido la selección",
   "browse.bulkFailedDesc_one":
-    "Requiere descarga desde el navegador.",
+    "Ábrelo para elegir una descarga.",
   "browse.bulkFailedDesc_other":
-    "Los {{count}} requieren descarga desde el navegador.",
+    "Los {{count}} necesitan que elijas la descarga a mano.",
 
   // ── Tienda (MX Bikes Shop — descargas compradas) ───────────────────────────
   "shop.help":
@@ -482,6 +485,16 @@ export const es: Translation = {
   "installDialog.differentBike": "Moto / pack distinto",
   "installDialog.directFastest": "Directo · el más rápido",
   "installDialog.direct": "Directo",
+  "installDialog.recommendedBadge": "Recomendado",
+  "installDialog.browserBadge": "Navegador",
+  "installDialog.serverBadge": "Servidor",
+  "installDialog.serverBuildNote": "Compilación para servidor dedicado — no sirve para jugar",
+  "installDialog.serverFiles_one": "1 archivo para servidor dedicado",
+  "installDialog.serverFiles_other": "{{count}} archivos para servidor dedicado",
+  "installDialog.serverOnlyNotice":
+    "Todas las descargas de aquí son compilaciones para servidor dedicado. Instala una solo si gestionas un servidor: no añade nada para rodar.",
+  "installDialog.moreMirrors_one": "1 espejo más",
+  "installDialog.moreMirrors_other": "{{count}} espejos más",
   "installDialog.perBikeHint":
     "Cada descarga es una moto distinta — se selecciona automáticamente según tu elección. Elige el pack «all bikes» para todas las motos de una vez.",
   "installDialog.mirrorsHint":
@@ -520,6 +533,8 @@ export const es: Translation = {
   "modDetail.host": "Host",
   "modDetail.installsTo": "Se instala en",
   "modDetail.noDownloadLink": "No se encontró ningún enlace de descarga en esta página — ábrela en {{site}}.",
+  "modDetail.serverOnlyNotice":
+    "Esta página solo ofrece archivos para servidor dedicado. Se instalan bien, pero en el juego no hay nada que rodar.",
   "modDetail.frostmodHint":
     "FrostMod recargará la lista de {{kind}} cuando esto termine.",
   "modDetail.kindRider": "piloto",
