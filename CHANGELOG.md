@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — the sheet says which panel, which side, and which face
+
+### Fixed
+- **A sheet region no longer names the wrong flank.** The hover asked whichever part won the
+  pick which side of the bike it was, and the winner is the *smallest* part covering the point —
+  so a bracket sharing the shroud's island answered for the shroud, and a region on the right of
+  the bike came up as the left. The side and the facing are now asked of every part covering the
+  point, and where two of them overlap the label names both (`plastics on metal.027`) instead of
+  quietly picking one.
+- **A bike that loaded without its `.geom` no longer gets sides invented for it.** Its parts are
+  never placed into one frame, so a vertex's position says nothing about where it sits on the
+  bike — the flanks were read off those numbers anyway. The model now reports whether it was
+  assembled, and the Designer says nothing about sides when it wasn't. The warning also goes to
+  the app log rather than only to a terminal.
+- **A bike archive with no mesh in it now fails instead of loading empty.** The viewer took the
+  empty result for a successful load and put its stand-in bike on screen, which reads as *this
+  is your bike* rather than *none of this bike arrived*. Cloud-synced archives that haven't been
+  downloaded yet land here, and now say so.
+
+### Added
+- **The sheet says when you're about to paint a panel's underside.** A rear fender's outer skin
+  and its underside are one part with one name and regularly share one island, so artwork could
+  land where nobody will ever see it. The hover now reads `underside` or `top + underside`
+  alongside the part and the flank.
+- **Double-click a part to fill the view with it.** A shroud is a tenth of a 2048² sheet, and
+  reaching it by wheel-and-drag meant aiming at the shape you were trying to see.
+
 ## Unreleased — an empty canvas stops asking for a sheet
 
 ### Changed

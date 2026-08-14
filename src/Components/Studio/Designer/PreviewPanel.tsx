@@ -57,7 +57,14 @@ export function PreviewPanel({
    * which destination" through the library, and a second loader would be a second answer to
    * that question — one that could quietly disagree about which bike is on screen.
    */
-  onGeometry?: (nodes: EdfNode[] | null) => void;
+  /**
+   * The mesh on screen, with whether its parts were assembled into one frame.
+   *
+   * The two travel together because the second qualifies the first: `assembled` is what makes a
+   * position mean "left of the bike" rather than "left of whatever this part's frame is", and
+   * handing over geometry without it invites reading the numbers as more than they say.
+   */
+  onGeometry?: (nodes: EdfNode[] | null, assembled: boolean) => void;
   /**
    * The model's own textures, handed back with the mesh so the editor can show what the
    * bike already looks like under a sheet being drawn from blank.
@@ -74,6 +81,8 @@ export function PreviewPanel({
   const { game } = useConfig();
   const { kind, model, bikePreview } = state;
   const [nodes, setNodes] = useState<EdfNode[] | null>(null);
+  // Reported by the backend with the mesh, never inferred here — see `BikeModel.assembled`.
+  const [assembled, setAssembled] = useState(false);
   const [textures, setTextures] = useState<PaintTexture[]>([]);
   // The model's own textures, kept apart from the ones it is currently wearing.
   const [stock, setStock] = useState<PaintTexture[]>([]);
@@ -124,6 +133,7 @@ export function PreviewPanel({
   useEffect(() => {
     if (!isBike || !model || !bikePreview) {
       setNodes(null);
+      setAssembled(false);
       setTextures([]);
       setStock([]);
       return;
@@ -150,6 +160,7 @@ export function PreviewPanel({
       .then((m) => {
         if (!alive) return;
         setNodes(m.nodes);
+        setAssembled(m.assembled);
         // The model's own look, under the drawing — so parts this paint doesn't cover still
         // read as the bike rather than as untextured grey.
         setTextures(m.paints[0]?.textures ?? []);
@@ -160,6 +171,7 @@ export function PreviewPanel({
       .catch((e) => {
         if (!alive) return;
         setNodes(null);
+        setAssembled(false);
         setTextures([]);
         setStock([]);
         setErr(String(e).replace(/^Error:\s*/, ""));
@@ -202,11 +214,16 @@ export function PreviewPanel({
    * came from would be a distinction the sheet itself doesn't make.
    */
   useEffect(() => {
-    onGeometry?.(nodes ?? (riderParts ? riderParts.flatMap((p) => p.nodes) : null));
+    // `assembled` only ever describes the bike branch: a rider's parts are posed by the rig
+    // rather than by a `.geom`, and sides are never asked of them.
+    onGeometry?.(
+      nodes ?? (riderParts ? riderParts.flatMap((p) => p.nodes) : null),
+      nodes ? assembled : false,
+    );
     // Through the same effect, so the mesh and the textures said to be its own can never
     // describe two different models. Gated on `nodes` because that is the bike branch.
     onStock?.(nodes ? stock : NO_STOCK);
-  }, [nodes, riderParts, stock, onGeometry, onStock]);
+  }, [nodes, assembled, riderParts, stock, onGeometry, onStock]);
 
   // Toggled-off gear is dropped before it reaches the viewer, which is what makes hiding it
   // reveal what's underneath rather than just dimming it.

@@ -131,6 +131,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // The mesh the preview is showing, reported back by it. Null until one loads, and null again
   // if it fails — a UV map drawn from a model that isn't on screen would be a confident lie.
   const [geometry, setGeometry] = useState<EdfNode[] | null>(null);
+  // Whether that mesh was assembled about the bike's mirror plane. Without it a position is a
+  // number in some part's own frame, and the sides and facings read off it would be invented.
+  const [assembled, setAssembled] = useState(false);
   // That same model's own textures — the look it ships with. Empty for anything that can't
   // say which of its textures are its own, which is every model but a bike.
   const [stockTextures, setStockTextures] = useState<PaintTexture[]>([]);
@@ -746,10 +749,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const activeHeight = active?.height ?? 0;
   // Left and right are asked for on bikes only: a bike arrives assembled about its mirror
   // plane, where gear is a single piece whose up-axis the viewer has to work out per mod.
+  // And only when it *did* arrive that way — a bike that loaded without its `.geom` is a heap
+  // of parts in their own frames, and a side named from that is worse than no side at all.
   const bike = isBikeKind(destState.kind);
   const parts = useMemo<UvPart[]>(
-    () => (geometry ? uvParts(geometry, activeName, { flanks: bike }) : []),
-    [geometry, activeName, bike],
+    () => (geometry ? uvParts(geometry, activeName, { assembled: bike && assembled }) : []),
+    [geometry, activeName, bike, assembled],
   );
 
   /** Pin the selected layer to a piece of bodywork, or let it cover the sheet again. */
@@ -819,12 +824,13 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * isn't there — the worst kind of wrong for a guide.
    */
   const geometryRef = useRef<EdfNode[] | null>(null);
-  const onGeometry = useCallback((nodes: EdfNode[] | null) => {
+  const onGeometry = useCallback((nodes: EdfNode[] | null, assembled: boolean) => {
     // Compared against a ref rather than inside a `setState` updater: an updater has to be
     // pure, and this has to invalidate the wires as well as record the mesh.
     if (geometryRef.current === nodes) return;
     geometryRef.current = nodes;
     setGeometry(nodes);
+    setAssembled(assembled);
     setGhosts((gs) =>
       gs.size ? new Map([...gs].map(([id, g]) => [id, { ...g, wire: null, wireFor: null }])) : gs,
     );

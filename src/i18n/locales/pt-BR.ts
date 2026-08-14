@@ -1555,6 +1555,14 @@ export const ptBR: Translation = {
   "designer.flank.both": "ambos os lados",
   "designer.flankSharedHint":
     "Os dois flancos são abertos sobre a mesma área, então o que você desenha aqui aparece nos dois lados da moto: espelhado, e não onde você esperaria no outro.",
+  "designer.focusHint": "Dê um duplo clique numa peça para preencher a vista com ela.",
+  "designer.partOver": "{{part}} sobre {{over}}",
+  "designer.face.under": "lado de baixo",
+  "designer.face.both": "de cima + de baixo",
+  "designer.faceHint.under":
+    "Esta área é o lado de baixo da peça: o que você pintar aqui fica virado para o chão e nunca é visto por fora.",
+  "designer.faceHint.both":
+    "O lado de cima da peça e o de baixo dividem esta área, então o que você desenha aqui cai nos dois.",
   "designer.opacity": "Opacidade",
   "designer.blend": "Mesclagem",
   "designer.blend.normal": "Normal",
