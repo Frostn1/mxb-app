@@ -295,6 +295,110 @@ pub fn is_game_running() -> bool {
     find_game_pid().is_some()
 }
 
+/// Read a fixed-size NUL-padded ANSI field as a `String`, stopping at the terminator.
+#[cfg(windows)]
+fn ansi_field(field: &[std::os::raw::c_char]) -> String {
+    let bytes: Vec<u8> = field.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Every DLL currently mapped into the running game, by full path.
+///
+/// This is the question [`crate::integrity`] is really asking. A cheat that hooks MX Bikes
+/// has to get its code into the game's address space, and a module that is *in* there is in
+/// this list no matter how it arrived — `LoadLibrary` from an injector, a proxy DLL the
+/// loader pulled in for the exe, or a manual map that bothered to register itself. (One that
+/// doesn't register is invisible here; see the module docs on what that costs.)
+///
+/// `None` means we could not look — the game isn't up, or the snapshot failed — which is
+/// deliberately different from `Some(vec![])`, "we looked and it is clean". The scanner must
+/// never report a clean bill of health for a machine it failed to read.
+#[cfg(windows)]
+pub fn game_module_paths() -> Option<Vec<String>> {
+    let pid = find_game_pid()?;
+    // A snapshot taken while the game is loading its own modules fails with
+    // ERROR_BAD_LENGTH; the documented remedy is simply to ask again.
+    for _ in 0..8 {
+        if let Some(paths) = module_paths(pid) {
+            return Some(paths);
+        }
+    }
+    None
+}
+
+/// One Toolhelp module walk over `pid`. `None` if the snapshot itself failed.
+#[cfg(windows)]
+fn module_paths(pid: u32) -> Option<Vec<String>> {
+    // SAFETY: module snapshot for a known pid; the handle is closed on every path out,
+    // and we only read fields the API filled in.
+    unsafe {
+        let snap =
+            ffi::CreateToolhelp32Snapshot(ffi::TH32CS_SNAPMODULE | ffi::TH32CS_SNAPMODULE32, pid);
+        if snap == ffi::INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut me: ffi::ModuleEntry32 = std::mem::zeroed();
+        me.dw_size = std::mem::size_of::<ffi::ModuleEntry32>() as u32;
+        let mut paths = Vec::new();
+        if ffi::Module32First(snap, &mut me) != 0 {
+            loop {
+                let path = ansi_field(&me.sz_exe_path);
+                if !path.is_empty() {
+                    paths.push(path);
+                }
+                if ffi::Module32Next(snap, &mut me) == 0 {
+                    break;
+                }
+            }
+        }
+        ffi::CloseHandle(snap);
+        // An empty walk means the snapshot gave us nothing usable, not that a live process
+        // has no modules — every process has at least its own exe. Treat it as a failure so
+        // the caller retries rather than reporting an empty machine.
+        if paths.is_empty() {
+            None
+        } else {
+            Some(paths)
+        }
+    }
+}
+
+/// Every process on the machine, by executable name.
+///
+/// Names only: `Process32Next` carries `szExeFile` and nothing else, and asking each pid for
+/// its full path means opening it, which fails on anything running as another user or at a
+/// higher integrity level. A name is what the rule list matches on anyway.
+#[cfg(windows)]
+pub fn running_process_names() -> Option<Vec<String>> {
+    // SAFETY: standard Toolhelp process walk; the snapshot handle is closed before return.
+    unsafe {
+        let snap = ffi::CreateToolhelp32Snapshot(ffi::TH32CS_SNAPPROCESS, 0);
+        if snap == ffi::INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: ffi::ProcessEntry32 = std::mem::zeroed();
+        entry.dw_size = std::mem::size_of::<ffi::ProcessEntry32>() as u32;
+        let mut names = Vec::new();
+        if ffi::Process32First(snap, &mut entry) != 0 {
+            loop {
+                let name = ansi_field(&entry.sz_exe_file);
+                if !name.is_empty() {
+                    names.push(name);
+                }
+                if ffi::Process32Next(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        ffi::CloseHandle(snap);
+        if names.is_empty() {
+            None
+        } else {
+            Some(names)
+        }
+    }
+}
+
 /// State threaded through the `EnumWindows` walk: the pid we want, the handle we found.
 #[cfg(windows)]
 struct WindowSearch {
@@ -473,6 +577,54 @@ pub fn is_game_running() -> bool {
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn is_game_running() -> bool {
     false
+}
+
+/// The game's mapped DLLs, read out of Proton's view of the process.
+///
+/// Wine maps a PE the same way the loader would, file-backed, so `/proc/<pid>/maps` names
+/// every DLL the game has loaded — including one an injector pushed in. More than one pid
+/// can name the exe (Proton leaves its wrapper around it), so the union across all of them
+/// is what we want rather than a guess at which is the real one.
+#[cfg(target_os = "linux")]
+pub fn game_module_paths() -> Option<Vec<String>> {
+    let pids = crate::proton::exe_pids(crate::game::active().exe);
+    if pids.is_empty() {
+        return None;
+    }
+    let mut paths: Vec<String> = Vec::new();
+    for pid in pids {
+        paths.extend(crate::proton::mapped_pe_files(pid));
+    }
+    if paths.is_empty() {
+        None
+    } else {
+        paths.sort();
+        paths.dedup();
+        Some(paths)
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn running_process_names() -> Option<Vec<String>> {
+    let names = crate::proton::process_names();
+    if names.is_empty() {
+        None
+    } else {
+        Some(names)
+    }
+}
+
+/// macOS runs the game through a Wine bottle we don't own the process tree of, and there is
+/// no `/proc` to read a mapping list out of. Rather than half-answer, say we couldn't look —
+/// the scanner reports "not supported here" instead of a clean bill of health.
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn game_module_paths() -> Option<Vec<String>> {
+    None
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn running_process_names() -> Option<Vec<String>> {
+    None
 }
 
 #[cfg(not(windows))]

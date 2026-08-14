@@ -39,6 +39,8 @@ import {
   setOverlayHotkey,
   setProfilesPath,
   setRunInBackground,
+  setIntegrityReport,
+  setIntegrityWatch,
   setWatchModsReload,
   setWineRunner,
   wineHostInfo,
@@ -67,6 +69,7 @@ import { useConfig } from "../../Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
 import ReshadeCard from "./ReshadeCard";
 import SupportersCard from "./SupportersCard";
+import IntegrityCard from "./IntegrityCard";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
 import { Trans } from "../../i18n";
 import { useI18n, type LocalePref, type TKey } from "../../i18n/context";
@@ -103,6 +106,7 @@ export type SectionId =
   | "frostmod"
   | "reshade"
   | "logs"
+  | "integrity"
   | "experimental"
   | "supporters"
   | "about";
@@ -141,6 +145,7 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
     label: "settings.groupAdvanced",
     sections: [
       { id: "logs", label: "settings.logs" },
+      { id: "integrity", label: "settings.integrity" },
       // Had no nav entry at all before this, and rendered in the middle of the scroll
       // with nothing pointing at it.
       { id: "experimental", label: "settings.experimental" },
@@ -391,6 +396,9 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
+  // Defaults mirror the backend's: scanning is on, sharing the result is not.
+  const integrityWatch = config.integrityWatch ?? true;
+  const integrityReport = config.integrityReport ?? false;
 
   const overlayEnabled = config.overlayEnabled ?? true;
   const overlayHotkey = config.overlayHotkey || FALLBACK_HOTKEY;
@@ -610,6 +618,24 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleWatchModsReload = async (v: boolean) => {
     try {
       await setWatchModsReload(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleIntegrityWatch = async (v: boolean) => {
+    try {
+      await setIntegrityWatch(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleIntegrityReport = async (v: boolean) => {
+    try {
+      await setIntegrityReport(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -1604,6 +1630,27 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           )}
 
           {/* experimental */}
+          {/* integrity — the cheat scan. Under Advanced rather than beside FrostMod: it is
+              about the game being honest, not about the app driving it, and the two toggles
+              here are the only ones on the page that decide what leaves the machine. */}
+          {active === "integrity" && (
+          <Section title={t("settings.integrity")} desc={t("settings.integrityDesc")}>
+            <ToggleRow
+              label={t("settings.integrityWatch")}
+              desc={t("settings.integrityWatchDesc")}
+              checked={integrityWatch}
+              onChange={toggleIntegrityWatch}
+            />
+            <ToggleRow
+              label={t("settings.integrityReport")}
+              desc={t("settings.integrityReportDesc")}
+              checked={integrityReport}
+              onChange={toggleIntegrityReport}
+            />
+            <IntegrityCard watching={integrityWatch} />
+          </Section>
+          )}
+
           {active === "experimental" && (
           <Section title={t("settings.experimental")}>
             <ToggleRow

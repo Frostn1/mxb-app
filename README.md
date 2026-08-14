@@ -66,6 +66,17 @@ hours), then downloads and installs them on restart.
   bodywork under the cursor, and a layer can be fitted to a part and clipped to its
   outline — so an image covers the shroud and stops at the seam. Save writes the
   packed `.pnt` the game reads.
+- **Cheat detection**: MX Bikes has no anti-cheat, so a hooked client looks exactly
+  like an honest one. The app reads what is loaded *into* the running game — the one
+  place an injected DLL has to be in order to hook it — and reports whether anything
+  is unaccounted for. Signatures live in
+  [`integrity-rules.json`](integrity-rules.json) on `main` and are fetched at runtime,
+  so a new cheat is detectable without a release; the binary itself ships only the
+  allowlist that keeps an ordinary machine's overlays and drivers from being reported.
+  A verdict can be shared with the server you're on, which is the only way a server
+  currently has of asking a client anything about itself. It proves an honest client
+  is honest — it can't prove anyone else's is, since a cheater who doesn't run MXB App
+  is never scanned.
 - **Self-update**: `tauri-plugin-updater` against the `latest.json` published with
   each release; signature-verified, installs on restart.
 - **Supporters**: Settings → Supporters credits the people who bought a coffee on

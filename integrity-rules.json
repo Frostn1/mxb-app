@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Cheat signatures for the in-app scanner. Read from `main` at runtime by every install",
+    "(src-tauri/src/integrity.rs), so adding a signature here reaches everyone within the",
+    "hour — no release needed. Bump `version` on every edit; it is what an admin sees",
+    "beside a verdict.",
+    "",
+    "`cheats` entries match a module or process by `contains` (a lowercase substring of the",
+    "file name) or by `sha256` (the whole file). One or the other, not both — an entry",
+    "needing each is two entries sharing a label. `label` is shown to the user verbatim.",
+    "",
+    "`allow` and `allowPaths` silence a false positive: the scanner reports any DLL loaded",
+    "into the game from outside the game, Windows, or the folders we installed, so a new",
+    "overlay or capture tool will land there until it is listed. These ADD to the allowlist",
+    "compiled into the app; they cannot remove from it, and they cannot un-flag a signature.",
+    "",
+    "Adding a name here accuses whoever is running that file of cheating. Be sure."
+  ],
+  "version": 1,
+  "cheats": [],
+  "allow": [],
+  "allowPaths": []
+}

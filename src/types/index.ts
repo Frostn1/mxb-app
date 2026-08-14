@@ -129,6 +129,78 @@ export interface Config {
   /** App version whose release showcase has been seen. Blank on an install that
    *  predates the showcase, which is what marks it as an upgrade worth telling. */
   seenVersion?: string;
+  /** Watch for cheats attached to the running game. Default true — the scan reads the
+   *  game's own module list and the answer goes no further than this window. */
+  integrityWatch?: boolean;
+  /** Publish the verdict so a server admin can see it. Default false: scanning your own
+   *  game and telling a server operator what it found are two different decisions. */
+  integrityReport?: boolean;
+}
+
+/**
+ * What a cheat scan concluded, worst last.
+ *
+ * `unknown` is a real answer and the important one: the game isn't running, or the platform
+ * can't be read, or the scan failed. It is never a synonym for clean — a scanner that
+ * reports a healthy machine when it simply didn't look is worse than none.
+ */
+export type IntegrityVerdict = "unknown" | "clean" | "suspect" | "flagged";
+
+/** `suspect` is "loaded and unrecognised"; `flagged` is "matched the rule list". */
+export type IntegritySeverity = "suspect" | "flagged";
+
+export type IntegrityKind = "module" | "process";
+
+/** Why something was reported — a key, so the line survives translation. */
+export type IntegrityReason =
+  | "ruleName"
+  | "ruleHash"
+  | "foreignModule"
+  | "loaderHijack";
+
+export interface IntegrityFinding {
+  kind: IntegrityKind;
+  /** File name, lowercased. */
+  name: string;
+  /** Full path, when there is one. Empty for a process. */
+  path: string;
+  reason: IntegrityReason;
+  severity: IntegritySeverity;
+  /** SHA-256, when the file could be read. What turns "some unknown DLL" into something
+   *  that can be added to the rule list. */
+  sha256?: string;
+  /** The rule's own label, when a rule matched. Never translated — a cheat's name is its
+   *  name. */
+  label?: string;
+}
+
+export interface IntegrityReport {
+  verdict: IntegrityVerdict;
+  findings: IntegrityFinding[];
+  /** Unix ms. Zero before the first scan of a session. */
+  scannedAt: number;
+  /** Which rule list produced it. */
+  rulesVersion: number;
+  /** How many modules were looked at — the difference between a thorough clean answer and
+   *  an empty one. */
+  modulesScanned: number;
+  gameRunning: boolean;
+}
+
+/** One rider's published verdict, as the admin of their server sees it. */
+export interface RiderIntegrity {
+  riderName: string;
+  guid: string;
+  verdict: IntegrityVerdict;
+  rulesVersion: number;
+  /** Unrecognised modules are counted, never named — see the control plane's migration. */
+  suspectCount: number;
+  flagged: { name: string; label: string; sha256: string }[];
+  /** The worst verdict seen recently, when it is worse than the current one. A cheat loaded
+   *  for one lap and then unloaded is the case this exists for. */
+  worstVerdict?: IntegrityVerdict;
+  /** Unix ms of their last report. */
+  reportedAt: number;
 }
 
 /** A track-mod as it appears in search results / browse grid. */
