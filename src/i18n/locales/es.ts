@@ -1583,6 +1583,8 @@ export const es: Translation = {
     "La vista 3D es solo para MX Bikes por ahora: los modelos de {{game}} necesitan sus propias asignaciones de piezas. Todo lo demás funciona igual y la pintura se guarda con normalidad.",
   "designer.gearNote":
     "Se muestra sobre el piloto de serie — tu propio equipo no está cargado aquí.",
+  "designer.gearOnly": "Solo la pieza",
+  "designer.gearOnlyHint": "Muestra solo la pieza que estás pintando, sin el piloto",
   "designer.reference": "Referencia",
   "designer.traceTemplate": "Plantilla",
   "designer.traceHint":

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Box, Loader2, TriangleAlert } from "lucide-react";
 import type * as THREE from "three";
 import { cn } from "@/lib/utils";
@@ -65,9 +65,12 @@ export function PreviewPanel({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
+  const [soloGear, setSoloGear] = useState(false);
 
   const isBike = isBikeKind(kind);
   const gearPart = gearPartOf(kind);
+  /** Gear-only, and something to actually show that way — no model means no piece. */
+  const solo = soloGear && !!gearPart && !!model;
 
   /**
    * Start with the pieces that cover what you're painting taken off.
@@ -78,6 +81,9 @@ export function PreviewPanel({
    */
   useEffect(() => {
     setHidden(HIDEABLE.filter((h) => h.part !== gearPart).map((h) => h.part));
+    // Back to the rider whenever what's being painted changes: kit and gloves have no piece
+    // to show on its own, so a toggle left on would be a control over nothing.
+    setSoloGear(false);
   }, [gearPart]);
 
   /** The rider slots to fill so the piece being painted is the piece on screen. */
@@ -181,9 +187,18 @@ export function PreviewPanel({
 
   // Toggled-off gear is dropped before it reaches the viewer, which is what makes hiding it
   // reveal what's underneath rather than just dimming it.
-  const shownParts = hidden.length
-    ? riderParts?.filter((p) => !hidden.includes(p.part)) ?? null
-    : riderParts;
+  //
+  // Gear-only drops the body along with it, and that alone is the whole view: the viewer reads
+  // "no body" as a solo piece and reframes to it — see `RiderGearSolo` and `CameraRig`.
+  const shownParts = solo
+    ? riderParts?.filter((p) => p.part === gearPart) ?? null
+    : hidden.length
+      ? riderParts?.filter((p) => !hidden.includes(p.part)) ?? null
+      : riderParts;
+
+  // Gear-only with nothing to show: the model didn't load. Say so rather than leave a black
+  // canvas — on the rider there'd at least have been a body to make the absence read.
+  const soloEmpty = solo && !shownParts?.length;
 
   // Two different ways there is nothing to stand a paint on, and they deserve different
   // sentences: this *title* has no part bindings (GP Bikes), or this *build* can't decode bike
@@ -201,30 +216,37 @@ export function PreviewPanel({
       <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
         <Box className="size-3.5 text-muted-foreground" />
         {t("viewer.preview3d")}
-        {/* Which pieces of the rider are in the way. A kit is worn under a chest protector,
-            and judging a jersey you can only see half of is judging the protector. */}
+        {/* What you're looking at, and what's in the way of it. A kit is worn under a chest
+            protector, and judging a jersey you can only see half of is judging the protector. */}
         {!isBike && (
           <div className="ml-auto flex items-center gap-1">
-            {HIDEABLE.map(({ part, label }) => (
-              <button
-                key={part}
-                type="button"
-                onClick={() =>
-                  setHidden((h) =>
-                    h.includes(part) ? h.filter((p) => p !== part) : [...h, part],
-                  )
-                }
-                title={t(label)}
-                className={cn(
-                  "rounded border px-1.5 py-0.5 text-[10.5px] font-medium transition-colors",
-                  hidden.includes(part)
-                    ? "border-border text-faint"
-                    : "border-primary/60 bg-primary/10 text-foreground",
-                )}
+            {/* A helmet on a rider is a small thing across the canvas with half of it turned
+                away. This takes it off and fills the frame with it. The hide toggles go while
+                it's on — they'd be controls over a rider that isn't on screen. */}
+            {!!gearPart && !!model && (
+              <Chip
+                on={solo}
+                onClick={() => setSoloGear((s) => !s)}
+                title={t("designer.gearOnlyHint")}
               >
-                {t(label)}
-              </button>
-            ))}
+                {t("designer.gearOnly")}
+              </Chip>
+            )}
+            {!solo &&
+              HIDEABLE.map(({ part, label }) => (
+                <Chip
+                  key={part}
+                  on={!hidden.includes(part)}
+                  onClick={() =>
+                    setHidden((h) =>
+                      h.includes(part) ? h.filter((p) => p !== part) : [...h, part],
+                    )
+                  }
+                  title={t(label)}
+                >
+                  {t(label)}
+                </Chip>
+              ))}
           </div>
         )}
         {loading && <Loader2 className="ml-1 size-3.5 animate-spin text-muted-foreground" />}
@@ -232,6 +254,8 @@ export function PreviewPanel({
       <div className="relative min-h-[240px] flex-1">
         {unavailable ? (
           <Message text={why} />
+        ) : soloEmpty && !loading ? (
+          <Message text={t("designer.noModelFound", { model })} />
         ) : (
           <>
             <ModelViewer
@@ -242,6 +266,9 @@ export function PreviewPanel({
               overrides={overrides}
               frameToken={frameToken}
               loading={loading}
+              // No stand-in body behind a solo piece: a rider that only appears when the gear
+              // fails to load reads as the gear, badly drawn.
+              noStandIn={solo}
               className="absolute inset-0"
             />
             {/* The model on screen is the last one that loaded, so a failure has to keep
@@ -258,12 +285,40 @@ export function PreviewPanel({
           </>
         )}
       </div>
-      {!!gearPart && (
+      {/* Only true of the rider view. */}
+      {!!gearPart && !solo && (
         <p className="border-t border-border px-3 py-1.5 text-[11px] leading-snug text-faint">
           {t("designer.gearNote")}
         </p>
       )}
     </div>
+  );
+}
+
+/** A header toggle: lit when what it names is on. */
+function Chip({
+  on,
+  onClick,
+  title,
+  children,
+}: {
+  on: boolean;
+  onClick: () => void;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={cn(
+        "rounded border px-1.5 py-0.5 text-[10.5px] font-medium transition-colors",
+        on ? "border-primary/60 bg-primary/10 text-foreground" : "border-border text-faint",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

@@ -26,6 +26,11 @@
   own archive, the one your loose files are covering. The bike is assembled in memory exactly
   as applying the swap would leave it (the set's mesh over the bike's own `.hrc`s, `.geom` and
   textures), so nothing moves on disk and you can look with the game open.
+- **See the helmet on its own, not on the rider.** Painting a helmet, boots or protection always
+  previewed the piece worn by the stock rider — a small thing across the canvas with half of it
+  turned away, next to a grey body you weren't painting. A **Gear only** toggle in the preview
+  header takes it off and fills the frame with it, the way the library's 3D view already shows
+  one, and puts it back on the rider in a click when you want to see how it sits.
 
 ### Changed
 - **The UV map is on by default.** It answers the question a flat sheet always raises — which

@@ -1596,6 +1596,8 @@ export const de: Translation = {
     "Die 3D-Vorschau gibt es vorerst nur für MX Bikes — die Modelle von {{game}} brauchen eigene Teil-Zuordnungen. Alles andere funktioniert gleich, und das Design wird ganz normal gespeichert.",
   "designer.gearNote":
     "Auf dem Standardfahrer gezeigt — deine eigene Ausrüstung ist hier nicht geladen.",
+  "designer.gearOnly": "Nur Teil",
+  "designer.gearOnlyHint": "Nur das Teil zeigen, das du bemalst — ohne Fahrer",
   "designer.reference": "Referenz",
   "designer.traceTemplate": "Vorlage",
   "designer.traceHint":

@@ -1587,6 +1587,8 @@ export const fr: Translation = {
     "L'aperçu 3D est réservé à MX Bikes pour l'instant : les modèles de {{game}} ont besoin de leurs propres liaisons de pièces. Tout le reste fonctionne pareil et la déco s'enregistre normalement.",
   "designer.gearNote":
     "Affiché sur le pilote d'origine — ta propre tenue n'est pas chargée ici.",
+  "designer.gearOnly": "Pièce seule",
+  "designer.gearOnlyHint": "Afficher seulement la pièce que tu peins, sans le pilote",
   "designer.reference": "Référence",
   "designer.traceTemplate": "Modèle",
   "designer.traceHint":

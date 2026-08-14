@@ -1572,6 +1572,8 @@ export const ptBR: Translation = {
   "designer.noPreviewForGame":
     "A prévia 3D é só do MX Bikes por enquanto — os modelos do {{game}} precisam dos próprios vínculos de peças. Todo o resto funciona igual e a pintura salva normalmente.",
   "designer.gearNote": "Mostrado no piloto padrão — o seu equipamento não está carregado aqui.",
+  "designer.gearOnly": "Só a peça",
+  "designer.gearOnlyHint": "Mostra só a peça que você está pintando, sem o piloto",
   "designer.reference": "Referência",
   "designer.traceTemplate": "Modelo",
   "designer.traceHint":
