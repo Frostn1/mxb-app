@@ -1568,6 +1568,8 @@ export const it: Translation = {
   "designer.noPreviewForGame":
     "L'anteprima 3D per ora è solo per MX Bikes: i modelli di {{game}} hanno bisogno delle proprie associazioni delle parti. Tutto il resto funziona uguale e la livrea si salva normalmente.",
   "designer.gearNote": "Mostrato sul pilota di serie — la tua tenuta non è caricata qui.",
+  "designer.gearOnly": "Solo il pezzo",
+  "designer.gearOnlyHint": "Mostra solo il pezzo che stai dipingendo, senza il pilota",
   "designer.reference": "Riferimento",
   "designer.traceTemplate": "Modello",
   "designer.traceHint":

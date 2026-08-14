@@ -1544,6 +1544,8 @@ export const en = {
   "designer.noPreviewForGame":
     "The 3D preview is MX Bikes only for now — the {{game}} models need their own part bindings. Everything else here works the same, and the paint saves normally.",
   "designer.gearNote": "Shown on the stock rider — your own kit isn't loaded here.",
+  "designer.gearOnly": "Gear only",
+  "designer.gearOnlyHint": "Show just the piece you're painting, off the rider",
   "designer.reference": "Reference",
   "designer.traceTemplate": "Template",
   "designer.traceHint":
