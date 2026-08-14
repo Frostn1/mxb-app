@@ -143,6 +143,14 @@ export interface ModSummary {
   /** Featured image URL, if any. */
   image: string | null;
   categoryId: number;
+  /**
+   * Who posted the mod, as the catalog names them. Null where the site didn't say.
+   *
+   * Optional rather than required because `ShopItem` extends this shape and a purchased
+   * download has no byline to carry — the store's "All My Downloads" page lists files, not
+   * authors.
+   */
+  author?: string | null;
 }
 
 /** A mod's community score on mxb-mods.com, as shown under the site's own thumbnails. */

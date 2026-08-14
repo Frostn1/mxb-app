@@ -118,6 +118,12 @@ export default function Browse({
           toast.error(t("browse.needsBrowser", { title: res.title }), {
             description: t("browse.needsBrowserDesc", { host: res.host ?? "" }),
           });
+        } else if (res.reason === "serverOnly") {
+          // Not installed on the user's behalf: one click can't ask which build was meant,
+          // and a server file installs cleanly while the game shows nothing.
+          toast.error(t("browse.serverOnly", { title: res.title }), {
+            description: t("browse.serverOnlyDesc"),
+          });
         } else {
           toast.error(t("browse.noDownload", { title: res.title }));
         }

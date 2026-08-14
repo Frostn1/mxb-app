@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Check, X, Search } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Check,
+  X,
+  Search,
+} from "lucide-react";
 import { Dialog, DialogContent } from "@/Components/ui/dialog";
 import { Button } from "@/Components/ui/button";
 import { useT } from "../../i18n/context";
@@ -7,9 +15,12 @@ import { labelOf } from "../../i18n/core";
 import { Badge } from "@/Components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
+  defaultMirrorIndex,
   installsOutsideMods,
   isBlockedDownload,
+  isServerOnly,
   pickDownloadForBike,
+  playableMirrors,
   sortMirrors,
   type DestOption,
   type ModType,
@@ -48,10 +59,19 @@ interface InstallDialogProps {
  *  game's install folder rather than the mods tree. */
 const RESHADE_DEST = "FrostMod ReShade";
 
-/** Ordered, de-duped playable mirrors with the "official" default first. */
+/** Every download the page offers, playable ones first and server builds last. */
 function useMirrors(detail: Detail | undefined): DownloadOption[] {
   return useMemo(() => (detail ? sortMirrors(detail) : []), [detail]);
 }
+
+/**
+ * How many mirrors are listed before the rest collapse behind "N more".
+ *
+ * More than one, deliberately: a single row reads as the only file there is, which is how
+ * someone ends up installing a mirror that turned out to be a server build without ever
+ * seeing there was a choice.
+ */
+const MIRRORS_SHOWN = 3;
 
 export default function InstallDialog({
   open,
@@ -77,6 +97,7 @@ export default function InstallDialog({
   const [newFolder, setNewFolder] = useState("");
   const [mirrorIdx, setMirrorIdx] = useState(0);
   const [mirrorsOpen, setMirrorsOpen] = useState(false);
+  const [serverOpen, setServerOpen] = useState(false);
 
   // Reset transient state each time the dialog opens.
   useEffect(() => {
@@ -86,10 +107,19 @@ export default function InstallDialog({
       setFolderSearch("");
       setCreating(false);
       setNewFolder("");
-      setMirrorIdx(0);
-      setMirrorsOpen(false);
     }
   }, [open, initialFolder]);
+
+  // The picked download resets with the dialog, and again if the page's downloads land
+  // after it opened. Never onto a server build while a playable file is on offer — that
+  // preselection is what quietly installed the wrong build.
+  useEffect(() => {
+    if (open) {
+      setMirrorIdx(defaultMirrorIndex(mirrors));
+      setMirrorsOpen(false);
+      setServerOpen(false);
+    }
+  }, [open, mirrors]);
 
   // Sound mods: the chosen bike (the folder value, minus any `/paints`) decides
   // which *download* to grab — the links are per-bike, not mirrors of one file.
@@ -182,9 +212,76 @@ export default function InstallDialog({
     onConfirm({ destFolder, mirror: selectedMirror });
   };
 
+  const serverBuilds = useMemo(() => mirrors.filter((m) => m.isServer), [mirrors]);
+  const playable = useMemo(() => playableMirrors(mirrors), [mirrors]);
+  // Nothing playable on the page means there is no "other" list to fold the server builds
+  // away behind: they are the downloads, shown as such and clearly marked.
+  const serverOnly = isServerOnly(mirrors);
+  const mainList = serverOnly ? mirrors : playable;
+
   // Show every option for sound mods (each is a different bike, not a mirror);
-  // otherwise collapse to the primary until expanded.
-  const shownMirrors = mirrorsOpen || sound ? mirrors : mirrors.slice(0, 1);
+  // otherwise list the first few and fold the rest away.
+  const shownMirrors = mirrorsOpen || sound ? mainList : mainList.slice(0, MIRRORS_SHOWN);
+  const hiddenCount = mainList.length - shownMirrors.length;
+
+  const renderMirror = (m: DownloadOption) => {
+    const idx = mirrors.indexOf(m);
+    const on = idx === mirrorIdx;
+    const blocked = isBlockedDownload(m);
+    // The author's own name for the file, where it says more than the host does. Two
+    // MediaFire rows are otherwise indistinguishable — and one of them may be the server
+    // build the parser had to guess at.
+    const fileLabel =
+      m.label && m.label.toLowerCase() !== m.host.toLowerCase() ? m.label : "";
+    const note = blocked
+      ? t("installDialog.opensInBrowser")
+      : m.isServer
+        ? t("installDialog.serverBuildNote")
+        : sound
+          ? on
+            ? t("installDialog.matchedBike")
+            : t("installDialog.differentBike")
+          : m.isDefault
+            ? t("installDialog.directFastest")
+            : t("installDialog.direct");
+    return (
+      <button
+        key={`${m.url}-${idx}`}
+        onClick={() => setMirrorIdx(idx)}
+        className={cn(
+          "flex cursor-default items-center gap-[11px] rounded-[9px] border bg-background px-3 py-2.5 text-left transition-colors",
+          on ? "border-primary/50" : "border-input hover:border-white/20",
+        )}
+      >
+        <span
+          className={cn(
+            "size-[15px] flex-none rounded-full",
+            on ? "border-4 border-primary" : "border-[1.5px] border-foreground/25",
+          )}
+        />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-[12.5px] font-semibold">{m.host}</span>
+          <span className="text-[11px] text-muted-foreground">{note}</span>
+          {fileLabel && (
+            <span className="truncate font-mono text-[10.5px] text-faint">{fileLabel}</span>
+          )}
+        </span>
+        {m.isServer ? (
+          <Badge variant="warning" className="flex-none">
+            {t("installDialog.serverBadge")}
+          </Badge>
+        ) : blocked ? (
+          <Badge variant="warning" className="flex-none">
+            {t("installDialog.browserBadge")}
+          </Badge>
+        ) : m.isDefault ? (
+          <Badge variant="success" className="flex-none border-primary/35 text-primary">
+            {t("installDialog.recommendedBadge")}
+          </Badge>
+        ) : null}
+      </button>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -336,64 +433,46 @@ export default function InstallDialog({
                   ? t("installDialog.downloadPerBike")
                   : t("installDialog.downloadFrom")}
               </span>
+              {/* A mod with nothing but server files is worth saying outright: it installs
+                  fine and then does nothing in-game, which reads as a broken install. */}
+              {serverOnly && (
+                <div className="flex items-start gap-2.5 rounded-[10px] border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
+                  <AlertTriangle className="mt-px size-3.5 flex-none text-warning" />
+                  <span className="text-[11.5px] text-warning/90">
+                    {t("installDialog.serverOnlyNotice")}
+                  </span>
+                </div>
+              )}
               <div className="flex flex-col gap-1.5">
-                {shownMirrors.map((m) => {
-                  const idx = mirrors.indexOf(m);
-                  const on = idx === mirrorIdx;
-                  const blocked = isBlockedDownload(m);
-                  return (
-                    <button
-                      key={`${m.url}-${idx}`}
-                      onClick={() => setMirrorIdx(idx)}
-                      className={cn(
-                        "flex cursor-default items-center gap-[11px] rounded-[9px] border bg-background px-3 py-2.5 text-left transition-colors",
-                        on ? "border-primary/50" : "border-input hover:border-white/20",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "size-[15px] flex-none rounded-full",
-                          on
-                            ? "border-4 border-primary"
-                            : "border-[1.5px] border-foreground/25",
-                        )}
-                      />
-                      <span className="flex flex-1 flex-col">
-                        <span className="text-[12.5px] font-semibold">{m.host}</span>
-                        <span className="text-[11px] text-muted-foreground">
-                          {blocked
-                            ? t("installDialog.opensInBrowser")
-                            : sound
-                              ? on
-                                ? t("installDialog.matchedBike")
-                                : t("installDialog.differentBike")
-                              : m.isDefault
-                                ? t("installDialog.directFastest")
-                                : t("installDialog.direct")}
-                        </span>
-                      </span>
-                      {blocked ? (
-                        <Badge variant="warning" className="flex-none">
-                          Browser
-                        </Badge>
-                      ) : m.isDefault ? (
-                        <Badge variant="success" className="flex-none border-primary/35 text-primary">
-                          Default
-                        </Badge>
-                      ) : null}
-                    </button>
-                  );
-                })}
-                {!sound && !mirrorsOpen && mirrors.length > 1 && (
+                {shownMirrors.map(renderMirror)}
+                {!sound && hiddenCount > 0 && (
                   <button
                     onClick={() => setMirrorsOpen(true)}
                     className="flex cursor-default items-center gap-1 self-start px-1 text-[11px] text-muted-foreground hover:text-foreground"
                   >
-                    {mirrors.length - 1} more mirror{mirrors.length - 1 > 1 ? "s" : ""}
+                    {t("installDialog.moreMirrors", { count: hiddenCount })}
                     <ChevronDown className="size-3" />
                   </button>
                 )}
               </div>
+
+              {/* Server builds are listed, not hidden — folded away by default, because
+                  they're rarely what's wanted, but reachable for whoever runs a server. */}
+              {!serverOnly && serverBuilds.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    onClick={() => setServerOpen((v) => !v)}
+                    className="flex cursor-default items-center gap-1 self-start px-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    {t("installDialog.serverFiles", { count: serverBuilds.length })}
+                    <ChevronDown
+                      className={cn("size-3 transition-transform", serverOpen && "rotate-180")}
+                    />
+                  </button>
+                  {serverOpen && serverBuilds.map(renderMirror)}
+                </div>
+              )}
+
               {mirrors.length > 1 && (
                 <span className="text-[11px] text-faint">
                   {sound
