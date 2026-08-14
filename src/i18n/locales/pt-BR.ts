@@ -964,6 +964,7 @@ export const ptBR: Translation = {
   "locker.missingModelEdf": "Este set não tem model.edf",
   "locker.missingSoundFiles": "Falta engine.scl ou sfx.cfg neste set",
   "locker.switchTo": "Mudar para {{name}}",
+  "locker.preview3d": "Ver {{name}} em 3D — nada é trocado",
   "locker.tiedToModel": "Vinculado ao modelo {{models}}",
   "locker.boundHint":
     "“{{sound}}” está vinculado ao modelo “{{model}}” — ele acompanha esse modelo. Clique para desvincular.",
@@ -1548,6 +1549,11 @@ export const ptBR: Translation = {
   "designer.fitNotForPaint": "Uma camada de pintura é a folha, então não há o que mover ou redimensionar.",
   "designer.clipped": "Recortada",
   "designer.clippedHint": "Esta camada está recortada na peça: nada passa da emenda.",
+  "designer.flank.left": "lado esquerdo",
+  "designer.flank.right": "lado direito",
+  "designer.flank.both": "ambos os lados",
+  "designer.flankSharedHint":
+    "Os dois flancos são abertos sobre a mesma área, então o que você desenha aqui aparece nos dois lados da moto: espelhado, e não onde você esperaria no outro.",
   "designer.opacity": "Opacidade",
   "designer.blend": "Mesclagem",
   "designer.blend.normal": "Normal",

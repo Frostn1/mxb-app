@@ -78,7 +78,11 @@ export function LayerInspector({
               <option value="">{t("designer.wholeSheet")}</option>
               {parts.map((p) => (
                 <option key={p.label} value={p.label}>
-                  {p.label}
+                  {/* The side is part of the name here rather than a column of its own: a
+                      picker of one-word options is read as a list of names. */}
+                  {p.side && p.side !== "centre"
+                    ? `${p.label} — ${t(`designer.flank.${p.side}` as "designer.flank.left")}`
+                    : p.label}
                 </option>
               ))}
             </select>

@@ -979,6 +979,7 @@ export const de: Translation = {
   "locker.missingSoundFiles":
     "Diesem Set fehlt engine.scl oder sfx.cfg",
   "locker.switchTo": "Auf {{name}} wechseln",
+  "locker.preview3d": "{{name}} in 3D ansehen — es wird nichts gewechselt",
   "locker.tiedToModel": "Verknüpft mit Modell {{models}}",
   "locker.boundHint":
     "„{{sound}}“ ist mit Modell „{{model}}“ verknüpft — er wandert mit diesem Modell mit. Zum Lösen klicken.",
@@ -1570,6 +1571,11 @@ export const de: Translation = {
   "designer.fitNotForPaint": "Eine Malebene ist das Blatt selbst — da gibt es nichts zu verschieben oder zu skalieren.",
   "designer.clipped": "Zugeschnitten",
   "designer.clippedHint": "Diese Ebene ist auf das Teil beschnitten — nichts ragt über die Naht hinaus.",
+  "designer.flank.left": "linke Seite",
+  "designer.flank.right": "rechte Seite",
+  "designer.flank.both": "beide Seiten",
+  "designer.flankSharedHint":
+    "Beide Flanken liegen auf derselben Fläche, deshalb erscheint alles hier Gezeichnete auf jeder Seite des Motorrads — gespiegelt, und nicht dort, wo man es auf der anderen Seite erwarten würde.",
   "designer.opacity": "Deckkraft",
   "designer.blend": "Modus",
   "designer.blend.normal": "Normal",

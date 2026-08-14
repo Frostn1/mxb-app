@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — the Designer sets up its own sheets
+## Unreleased — the bike's own plastics, under the UV map
 
 ### Added
 - **The bike's own plastics, under the UV map.** The reference underlay could show the paint you
@@ -10,11 +10,33 @@
   **Stock texture** toggle that draws the model's own artwork beneath them, so you can see where
   the vents and shut lines fall before drawing over them. Fetched only for the sheet you're
   looking at, and no more part of what you save than the UV map is.
+
+## Unreleased — the UV map says which side of the bike it is
+
+### Added
+- **The sheet now says left or right.** Hovering a piece of bodywork named it; it now says which
+  flank of the bike that piece is, and the clip picker carries the same suffix. The model already
+  knew — the geometry arrives assembled about its mirror plane, so the sign of a triangle's x is
+  the answer — and not passing it on left the one question a flat square can't answer to guesswork.
+- **"Both sides" is said out loud.** Bikes routinely unwrap their two flanks onto *one* island, so
+  a decal placed off-centre there comes out at the mirrored spot on the far side — which reads as
+  the editor having painted the wrong side. Where that is what the model does, the sheet says so
+  and the tooltip says what it means. Rider gear is left unlabelled: a helmet's up-axis is worked
+  out per mod, and a side named from the wrong axis would be worse than no side at all.
+
+## Unreleased — the Designer sets up its own sheets
+
+### Added
 - **Create the sheets a model asks for, in one click.** The Designer already listed the texture
   names a bike's paints use — and the name is the whole binding, so a sheet called anything else
   paints nothing — but getting them onto the list meant reading them off and typing each one
   back in. There's now a button beside that list that makes the missing ones.
 - **A ＋ beside Sheets**, and another beside Layers, add one without hunting for a button.
+- **See a model swap before you switch to it.** Every model set in the Locker now has a 3D
+  button beside it, and "Stock" has one too — that one shows the model packed in the bike's
+  own archive, the one your loose files are covering. The bike is assembled in memory exactly
+  as applying the swap would leave it (the set's mesh over the bike's own `.hrc`s, `.geom` and
+  textures), so nothing moves on disk and you can look with the game open.
 
 ### Changed
 - **The UV map is on by default.** It answers the question a flat sheet always raises — which

@@ -1264,14 +1264,29 @@ fn bike_cache() -> &'static std::sync::Mutex<lru::Lru<BikeModel>> {
     CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(BIKE_CACHE_CAP)))
 }
 
-fn bike_cache_key(source: &str) -> String {
-    let mtime = std::fs::metadata(source)
+fn mtime_nanos(path: &std::path::Path) -> u128 {
+    std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{source}:{mtime}")
+        .unwrap_or(0)
+}
+
+fn bike_cache_key(source: &str) -> String {
+    format!("{source}:{}", mtime_nanos(std::path::Path::new(source)))
+}
+
+/// A swap preview is keyed by both folders it's built from — the same bike renders
+/// differently per variant, and either side can change under us.
+fn swap_cache_key(set: &modelswap::PreviewSet) -> String {
+    format!(
+        "{}#{}:{}:{}",
+        set.bike_dir.display(),
+        set.variant_dir.display(),
+        mtime_nanos(&set.bike_dir),
+        mtime_nanos(&set.variant_dir),
+    )
 }
 
 #[tauri::command]
@@ -1279,6 +1294,41 @@ async fn load_bike_model(source: String) -> Result<BikeModel, String> {
     tauri::async_runtime::spawn_blocking(move || load_bike_model_blocking(source))
         .await
         .map_err(|e| format!("load_bike_model task failed: {e}"))?
+}
+
+/// Draw `bike` as the model-swap variant `variant` would leave it, without applying the
+/// swap. The file set is assembled in memory (see `gather_preview_files`) — nothing on
+/// disk moves, so this is safe to run with the game open.
+#[tauri::command]
+async fn preview_model_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    variant: String,
+) -> Result<BikeModel, String> {
+    tauri::async_runtime::spawn_blocking(move || preview_model_swap_blocking(app, bike, variant))
+        .await
+        .map_err(|e| format!("preview_model_swap task failed: {e}"))?
+}
+
+fn preview_model_swap_blocking(
+    app: tauri::AppHandle,
+    bike: String,
+    variant: String,
+) -> Result<BikeModel, String> {
+    let t0 = std::time::Instant::now();
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let set =
+        modelswap::preview_set(&cfg.mods_path, &bike, &variant).map_err(|e| format!("{e:#}"))?;
+    let label = format!("{bike} · {variant}");
+    let key = swap_cache_key(&set);
+    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+        log::info!("preview_model_swap {label}: cache hit ({:?})", t0.elapsed());
+        return Ok(m);
+    }
+
+    let files = gather_preview_files(&set).map_err(|e| format!("{e:#}"))?;
+    let installed = installed_paints(&set.bike_dir);
+    build_bike_model(&label, key, files, installed, t0)
 }
 
 fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
@@ -1291,6 +1341,19 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
 
     let files = gather_bike_files(std::path::Path::new(&source)).map_err(|e| format!("{e:#}"))?;
     let installed = installed_paints(std::path::Path::new(&source));
+    build_bike_model(&source, key, files, installed, t0)
+}
+
+/// Turn a bike's files into the viewer's model: resolve each part's mesh through the
+/// `.hrc`s, bind its textures, decode the paints. Shared by a bike loaded from disk and a
+/// model-swap preview assembled in memory — `label` only names it in the log.
+fn build_bike_model(
+    label: &str,
+    key: String,
+    files: Vec<(String, Vec<u8>)>,
+    installed: Vec<(String, Vec<u8>)>,
+    t0: std::time::Instant,
+) -> Result<BikeModel, String> {
     let t_read = t0.elapsed();
 
     let mut nodes = Vec::new();
@@ -1469,7 +1532,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
         .flat_map(|p| p.textures.iter().map(|t| t.token.as_str()))
         .collect();
     log::info!(
-        "load_bike_model {source}: {} paint(s) + {base_count} base tex | read {t_read:?}, parse {:?}, decode {:?}, total {:?} | {} distinct texture(s), {:.1} MB resident in the texture store",
+        "load_bike_model {label}: {} paint(s) + {base_count} base tex | read {t_read:?}, parse {:?}, decode {:?}, total {:?} | {} distinct texture(s), {:.1} MB resident in the texture store",
         paints.len(),
         t_parse - t_read,
         t_textures - t_parse,
@@ -1644,6 +1707,72 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
         bail!("no .edf mesh for bike folder {p:?}");
     }
     bail!("can't load a bike model from {p:?}")
+}
+
+/// Add `incoming` to `files`, replacing any entry of the same name — later wins, which is
+/// how the game reads a bike too: loose files layer over the packed archive, and a swap's
+/// files layer over the loose ones.
+fn overlay_files(files: &mut Vec<(String, Vec<u8>)>, incoming: Vec<(String, Vec<u8>)>) {
+    for (name, data) in incoming {
+        let bn = name.rsplit(['/', '\\']).next().unwrap_or(&name).to_ascii_lowercase();
+        match files
+            .iter_mut()
+            .find(|(n, _)| n.rsplit(['/', '\\']).next().unwrap_or(n).eq_ignore_ascii_case(&bn))
+        {
+            Some(slot) => *slot = (name, data),
+            None => files.push((name, data)),
+        }
+    }
+}
+
+/// Read the named files out of `dir`, keeping only what the viewer draws with.
+fn read_named(dir: &std::path::Path, names: &[String]) -> Vec<(String, Vec<u8>)> {
+    names
+        .iter()
+        .filter(|n| wanted_bike_file(n))
+        .filter_map(|n| std::fs::read(dir.join(n)).ok().map(|b| (n.clone(), b)))
+        .collect()
+}
+
+/// The bike's packed model, either inside the folder or as its `<Bike>.pkz` sibling —
+/// both layouts exist, and it's the fallback a Stock preview shows.
+fn packed_bike(bike_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    if let Ok(rd) = std::fs::read_dir(bike_dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("pkz")) {
+                return Some(p);
+            }
+        }
+    }
+    let sibling = bike_dir.with_extension("pkz");
+    sibling.exists().then_some(sibling)
+}
+
+/// The bytes behind a `PreviewSet`: the loose files that stay, with the variant's laid over
+/// them. Reverting to Stock parks every loose mesh, so the packed model goes underneath —
+/// otherwise there'd be nothing to draw, which is precisely what Stock means.
+fn gather_preview_files(
+    set: &modelswap::PreviewSet,
+) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    use anyhow::bail;
+    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    let loose_mesh = set
+        .root_keep
+        .iter()
+        .chain(set.variant_files.iter())
+        .any(|f| bikefiles::is_mesh(f));
+    if !loose_mesh {
+        if let Some(pkz) = packed_bike(&set.bike_dir) {
+            overlay_files(&mut out, pkz::read_selected(&pkz, wanted_bike_file)?);
+        }
+    }
+    overlay_files(&mut out, read_named(&set.bike_dir, &set.root_keep));
+    overlay_files(&mut out, read_named(&set.variant_dir, &set.variant_files));
+    if !out.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+        bail!("this model has no mesh to show — the bike would have no model at all");
+    }
+    Ok(out)
 }
 
 #[derive(serde::Serialize)]
@@ -6120,6 +6249,7 @@ fn main() {
             texture_bytes,
             unpack_pkz,
             load_bike_model,
+            preview_model_swap,
             load_rider_model,
             load_rider_body_model,
             load_gear_model,
@@ -6956,6 +7086,161 @@ mod deep_link_tests {
 
 #[cfg(test)]
 mod viewer_tests {
+    use std::path::{Path, PathBuf};
+
+    fn copy_tree(src: &Path, dst: &Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for e in std::fs::read_dir(src).unwrap().flatten() {
+            let (from, to) = (e.path(), dst.join(e.file_name()));
+            if from.is_dir() {
+                copy_tree(&from, &to);
+            } else {
+                std::fs::copy(&from, &to).unwrap();
+            }
+        }
+    }
+
+    /// How the viewer sees a bike, as a comparable shape: which parts resolved and what
+    /// each submesh is bound to. Node order is fixed by `GFX_PARTS`, so this is stable.
+    fn shape(m: &super::BikeModel) -> Vec<(String, Vec<(String, Option<String>)>)> {
+        m.nodes
+            .iter()
+            .map(|n| {
+                (
+                    n.name.clone(),
+                    n.submeshes.iter().map(|s| (s.name.clone(), s.texture.clone())).collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// The contract behind the Locker's 3D preview: what it shows is what applying the
+    /// swap would give you. Run against a **real** bike, because the in-memory overlay has
+    /// to pick up the `.hrc`s, `.geom` and textures the root keeps while the mesh comes
+    /// from the variant folder — a synthetic bike can't exercise that chain.
+    ///
+    /// MXB_REAL_BIKES=~/Projects/PiBoSo/"MX Bikes" \
+    ///   cargo test preview_matches_the_applied_swap -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn preview_matches_the_applied_swap() {
+        let Ok(src_root) = std::env::var("MXB_REAL_BIKES") else {
+            eprintln!("set MXB_REAL_BIKES to the MX Bikes folder to run");
+            return;
+        };
+        let src_bikes = Path::new(&src_root).join("mods").join("bikes");
+        let Some((bike, src_dir)) = std::fs::read_dir(&src_bikes)
+            .expect("read bikes")
+            .flatten()
+            .map(|e| (e.file_name().to_string_lossy().to_string(), e.path()))
+            .find(|(_, p)| p.is_dir() && crate::bikefiles::dir_has_mesh(p))
+        else {
+            eprintln!("no extracted bike with a mesh found");
+            return;
+        };
+        eprintln!("using real bike: {bike}");
+
+        let root: PathBuf =
+            std::env::temp_dir().join(format!("frost-preview-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mp = root.to_str().unwrap();
+        let dst = crate::library::mods_subdir(mp, "mods/bikes").join(&bike);
+        copy_tree(&src_dir, &dst);
+
+        // A realistic swap set: the bike's own mesh under a variant name, nothing else.
+        // The preview must find everything else at the root.
+        let mesh = std::fs::read_dir(&dst)
+            .unwrap()
+            .flatten()
+            .filter_map(|e| e.file_name().to_str().map(str::to_string))
+            .find(|f| crate::bikefiles::is_mesh(f))
+            .expect("mesh");
+        let variant = dst.join("FrostMod Models").join("Factory");
+        std::fs::create_dir_all(&variant).unwrap();
+        std::fs::copy(dst.join(&mesh), variant.join(&mesh)).unwrap();
+
+        let set = super::modelswap::preview_set(mp, &bike, "Factory").expect("preview set");
+        eprintln!("keeps {:?} + brings {:?}", set.root_keep, set.variant_files);
+        let files = super::gather_preview_files(&set).expect("preview files");
+        let previewed = super::build_bike_model(
+            "preview",
+            "preview-test".into(),
+            files,
+            super::installed_paints(&set.bike_dir),
+            std::time::Instant::now(),
+        )
+        .expect("preview builds");
+        assert!(!previewed.nodes.is_empty(), "the preview drew nothing");
+
+        super::modelswap::apply_model_swap(mp, &bike, "Factory").expect("swap applies");
+        let applied = super::load_bike_model_blocking(dst.to_string_lossy().to_string())
+            .expect("the swapped bike loads");
+
+        assert_eq!(shape(&previewed), shape(&applied), "preview differs from the real swap");
+        assert_eq!(
+            previewed.paints.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+            applied.paints.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+            "the preview offers different paints",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Stock parks every loose override, so there'd be nothing to draw if the packed model
+    /// didn't come through underneath. Needs a real `.pkz` — that's the whole mechanism.
+    ///
+    /// MXB_REAL_BIKES=~/Projects/PiBoSo/"MX Bikes" \
+    ///   cargo test preview_of_stock_shows_the_packed_model -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn preview_of_stock_shows_the_packed_model() {
+        let Ok(src_root) = std::env::var("MXB_REAL_BIKES") else {
+            eprintln!("set MXB_REAL_BIKES to the MX Bikes folder to run");
+            return;
+        };
+        let src_bikes = Path::new(&src_root).join("mods").join("bikes");
+        // A bike that is both extracted *and* packed — the loose files hide a packed model.
+        let Some((bike, src_dir)) = std::fs::read_dir(&src_bikes)
+            .expect("read bikes")
+            .flatten()
+            .map(|e| (e.file_name().to_string_lossy().to_string(), e.path()))
+            .find(|(_, p)| {
+                p.is_dir()
+                    && crate::bikefiles::dir_has_mesh(p)
+                    && p.with_extension("pkz").exists()
+            })
+        else {
+            eprintln!("no bike with both a loose mesh and a .pkz found");
+            return;
+        };
+        eprintln!("using real bike: {bike}");
+
+        let root: PathBuf =
+            std::env::temp_dir().join(format!("frost-preview-stock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mp = root.to_str().unwrap();
+        let bikes = crate::library::mods_subdir(mp, "mods/bikes");
+        copy_tree(&src_dir, &bikes.join(&bike));
+        std::fs::copy(src_dir.with_extension("pkz"), bikes.join(format!("{bike}.pkz"))).unwrap();
+
+        let set = super::modelswap::preview_set(mp, &bike, "Stock").expect("preview set");
+        eprintln!("keeps {:?}", set.root_keep);
+        assert!(
+            !set.root_keep.iter().any(|f| crate::bikefiles::is_mesh(f)),
+            "Stock must park every loose mesh",
+        );
+        let files = super::gather_preview_files(&set).expect("preview files");
+        let m = super::build_bike_model(
+            "stock preview",
+            "stock-preview-test".into(),
+            files,
+            super::installed_paints(&set.bike_dir),
+            std::time::Instant::now(),
+        )
+        .expect("stock preview builds");
+        assert!(!m.nodes.is_empty(), "the packed model didn't come through");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn tex(name: &str, token: &str) -> crate::paint::PaintTexture {
         crate::paint::PaintTexture {
             name: name.into(),

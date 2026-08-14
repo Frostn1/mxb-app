@@ -12,12 +12,36 @@ import type { EdfNode } from "../../../types";
  * the parts were read for.
  */
 
+/**
+ * Which flank of the bike a triangle sits on. `centre` straddles the mirror plane — a front
+ * fender, the seat's spine — and belongs to neither.
+ */
+export type Flank = "left" | "right" | "centre";
+
+/** A flank a region covers, where `both` means the two flanks share it. */
+export type Side = Flank | "both";
+
+/** Per-triangle flank codes, packed one byte each. */
+const CENTRE = 0;
+const LEFT = 1;
+const RIGHT = 2;
+
 /** One piece of bodywork: a mesh-group name, and where its triangles land on the sheet. */
 export interface UvPart {
   /** Mesh-group name from the `.edf` — `shroud`, `frame.005`, `chain`. */
   label: string;
   /** Triangle corners in uv space, six numbers per triangle: u0,v0,u1,v1,u2,v2. */
   tris: Float32Array;
+  /**
+   * One flank code per triangle, or null when the mesh's axes can't be trusted.
+   *
+   * Kept per triangle rather than per part because the question is asked about a *point*: the
+   * two flanks of a shroud regularly land on one island, and a part-wide answer would have to
+   * say "both" everywhere the precise answer is "here, both".
+   */
+  flanks: Uint8Array | null;
+  /** The flanks the part covers as a whole, for a one-word summary. Null when unknown. */
+  side: Side | null;
   /** uv-space bounds, for fitting an image to the part and for cheap hit rejection. */
   minU: number;
   minV: number;
@@ -25,6 +49,63 @@ export interface UvPart {
   maxV: number;
   /** Stable hue, so a shroud and a fender never read as one shape. */
   hue: number;
+}
+
+/**
+ * How far from the mirror plane a triangle has to sit before it counts as being on a side.
+ *
+ * 4% of the model's half-width. A bike is a symmetric object with a seam down the middle, and
+ * without a dead band that seam's triangles would be sorted left or right by rounding error and
+ * report a side each time the pointer crossed it.
+ */
+function lateralTolerance(nodes: EdfNode[]): number {
+  let maxAbs = 0;
+  for (const node of nodes) {
+    for (let i = 0; i < node.positions.length; i += 3) {
+      const x = Math.abs(node.positions[i]);
+      if (x > maxAbs) maxAbs = x;
+    }
+  }
+  return maxAbs * 0.04;
+}
+
+/** What a run of flank codes amounts to: one side, both of them, or neither. */
+function summarise(sides: number[]): Side {
+  let left = false;
+  let right = false;
+  for (const s of sides) {
+    if (s === LEFT) left = true;
+    else if (s === RIGHT) right = true;
+    if (left && right) return "both";
+  }
+  return left ? "left" : right ? "right" : "centre";
+}
+
+/**
+ * The flank of `part` under a uv point — `both` when the two sides land on the same island.
+ *
+ * That last case is the one worth having: a bike's flanks routinely share one region of the
+ * sheet, so a decal placed off-centre there comes out at the mirrored spot on the far side.
+ * The editor can't change that, and it can say so.
+ */
+export function flankAt(part: UvPart, u: number, v: number): Side | null {
+  const { tris, flanks } = part;
+  if (!flanks) return null;
+  let left = false;
+  let right = false;
+  let centre = false;
+  for (let i = 0; i < tris.length; i += 6) {
+    if (!inTriangle(u, v, tris[i], tris[i + 1], tris[i + 2], tris[i + 3], tris[i + 4], tris[i + 5]))
+      continue;
+    const s = flanks[i / 6];
+    if (s === LEFT) left = true;
+    else if (s === RIGHT) right = true;
+    else centre = true;
+    if (left && right) return "both";
+  }
+  if (left) return "left";
+  if (right) return "right";
+  return centre ? "centre" : null;
 }
 
 /** A stable hue per mesh-group name. */
@@ -49,12 +130,25 @@ function hueOf(label: string): number {
  * uv0 is taken as-is. The sheet uploads with `flipY = false` (see `sheetTexture`), so v runs the
  * same way as a canvas row and no flip belongs here — the same reasoning that keeps the editor
  * from having an opinion about which way up a sheet is.
+ *
+ * `flanks` asks for the left/right answer as well, and is for bikes only: their positions arrive
+ * assembled and centred on the mirror plane, which is what makes the sign of x mean a side.
  */
-export function uvParts(nodes: EdfNode[], sheetName: string): UvPart[] {
+export function uvParts(
+  nodes: EdfNode[],
+  sheetName: string,
+  opts?: { flanks?: boolean },
+): UvPart[] {
   const want = sheetName.trim().toLowerCase();
   if (!want) return [];
 
+  // A fraction of the model's width, so the dead band around the mirror plane scales with the
+  // bike rather than being a number of metres — a 65 and a 450 are one shape at two sizes.
+  const sided = !!opts?.flanks;
+  const tol = sided ? lateralTolerance(nodes) : 0;
+
   const byLabel = new Map<string, number[]>();
+  const flanksByLabel = new Map<string, number[]>();
   for (const node of nodes) {
     if (!node.uvs.length || !node.indices.length) continue;
     const triCount = Math.floor(node.indices.length / 3);
@@ -72,12 +166,22 @@ export function uvParts(nodes: EdfNode[], sheetName: string): UvPart[] {
         flat = [];
         byLabel.set(label, flat);
       }
+      let sides = flanksByLabel.get(label);
+      if (!sides && sided) {
+        sides = [];
+        flanksByLabel.set(label, sides);
+      }
       const end = Math.min(start + count, triCount);
       for (let t = Math.max(0, start); t < end; t += 1) {
+        let x = 0;
         for (let c = 0; c < 3; c += 1) {
           const v = node.indices[t * 3 + c];
           flat.push(node.uvs[v * 2], node.uvs[v * 2 + 1]);
+          if (sides) x += node.positions[v * 3];
         }
+        // The centroid, not every corner: a triangle with one vertex over the line is still on
+        // the side the rest of it is, and a panel's inner edge is full of them.
+        if (sides) sides.push(x / 3 > tol ? LEFT : x / 3 < -tol ? RIGHT : CENTRE);
       }
     }
   }
@@ -95,7 +199,18 @@ export function uvParts(nodes: EdfNode[], sheetName: string): UvPart[] {
       if (flat[i + 1] < minV) minV = flat[i + 1];
       if (flat[i + 1] > maxV) maxV = flat[i + 1];
     }
-    parts.push({ label, tris: new Float32Array(flat), minU, minV, maxU, maxV, hue: hueOf(label) });
+    const sides = flanksByLabel.get(label);
+    parts.push({
+      label,
+      tris: new Float32Array(flat),
+      flanks: sides ? new Uint8Array(sides) : null,
+      side: sides ? summarise(sides) : null,
+      minU,
+      minV,
+      maxU,
+      maxV,
+      hue: hueOf(label),
+    });
   }
   // Biggest first: the list is a menu, and the panel someone means when they say "the shroud"
   // is the one that takes up half the sheet, not the bracket bolted behind it.

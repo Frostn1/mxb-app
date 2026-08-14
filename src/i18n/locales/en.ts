@@ -943,6 +943,7 @@ export const en = {
   "locker.missingModelEdf": "This set has no model.edf",
   "locker.missingSoundFiles": "This set is missing engine.scl or sfx.cfg",
   "locker.switchTo": "Switch to {{name}}",
+  "locker.preview3d": "See {{name}} in 3D — nothing is switched",
   "locker.tiedToModel": "Tied to model {{models}}",
   "locker.boundHint":
     "“{{sound}}” is tied to model “{{model}}” — it travels with that model. Click to untie.",
@@ -1524,6 +1525,11 @@ export const en = {
   "designer.fitNotForPaint": "A paint layer is the sheet, so there is nothing to move or scale.",
   "designer.clipped": "Clipped",
   "designer.clippedHint": "This layer is trimmed to the part — nothing it holds spills past the seam.",
+  "designer.flank.left": "left side",
+  "designer.flank.right": "right side",
+  "designer.flank.both": "both sides",
+  "designer.flankSharedHint":
+    "Both flanks are unwrapped onto this same area, so anything drawn here appears on each side of the bike — mirrored, and not where you would expect it on the far one.",
   "designer.opacity": "Opacity",
   "designer.blend": "Blend",
   "designer.blend.normal": "Normal",
