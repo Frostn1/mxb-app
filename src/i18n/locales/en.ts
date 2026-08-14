@@ -943,6 +943,7 @@ export const en = {
   "locker.missingModelEdf": "This set has no model.edf",
   "locker.missingSoundFiles": "This set is missing engine.scl or sfx.cfg",
   "locker.switchTo": "Switch to {{name}}",
+  "locker.preview3d": "See {{name}} in 3D — nothing is switched",
   "locker.tiedToModel": "Tied to model {{models}}",
   "locker.boundHint":
     "“{{sound}}” is tied to model “{{model}}” — it travels with that model. Click to untie.",

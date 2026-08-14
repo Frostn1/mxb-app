@@ -433,6 +433,68 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
     Ok(())
 }
 
+/// What the bike's files would look like with `variant` active — filenames only, nothing
+/// read and nothing moved. Lets the viewer show a swap before it's applied.
+#[derive(Debug, Clone)]
+pub struct PreviewSet {
+    pub bike_dir: PathBuf,
+    /// Loose root files that stay put, i.e. the root minus the set the swap would park.
+    pub root_keep: Vec<String>,
+    /// The variant folder and the files it would bring in — empty for Stock, which brings
+    /// in nothing and lets the packed model show through.
+    pub variant_dir: PathBuf,
+    pub variant_files: Vec<String>,
+}
+
+/// The file accounting `apply_model_swap` would do, without doing it. Same rules on
+/// purpose: what the preview shows has to be what applying the swap gives you, so the two
+/// resolve the set through `active_set_files` and the same Stock special-case.
+pub fn preview_set(mods_path: &str, bike: &str, variant: &str) -> anyhow::Result<PreviewSet> {
+    if !is_simple_name(bike) || !is_simple_name(variant) {
+        anyhow::bail!("invalid bike or model name");
+    }
+    let root = bike_dir(mods_path, bike);
+    if !dir_exists(&root) {
+        anyhow::bail!("bike '{bike}' not found");
+    }
+    let active = current_active(mods_path, bike);
+    let target_dir = variant_dir(mods_path, bike, variant);
+
+    // The active set is already loose at the root — show the bike as it stands.
+    if variant.eq_ignore_ascii_case(&active) {
+        return Ok(PreviewSet {
+            root_keep: list_files(&root),
+            bike_dir: root,
+            variant_dir: target_dir,
+            variant_files: Vec::new(),
+        });
+    }
+
+    let is_stock = variant.eq_ignore_ascii_case(STOCK);
+    if !is_stock && !dir_exists(&target_dir) {
+        anyhow::bail!("model '{variant}' not found");
+    }
+    let variant_files = set_files(&target_dir);
+    if !variant_files.is_empty() && !crate::bikefiles::dir_has_mesh(&target_dir) {
+        anyhow::bail!("model '{variant}' has no mesh (.edf) — it looks like an incomplete set");
+    }
+
+    let mut parked = active_set_files(mods_path, bike, &active, &variant_files);
+    if is_stock && read_manifest(&variant_dir(mods_path, bike, &active)).is_none() {
+        for f in root_setup_files(mods_path, bike) {
+            if !contains_ci(&parked, &f) {
+                parked.push(f);
+            }
+        }
+    }
+
+    let root_keep = list_files(&root)
+        .into_iter()
+        .filter(|f| !contains_ci(&parked, f))
+        .collect();
+    Ok(PreviewSet { bike_dir: root, root_keep, variant_dir: target_dir, variant_files })
+}
+
 /// A bike whose setup files (`.hrc`/`.cfg`/`.geom`) were carried off into a swap folder
 /// by a version that treated the whole folder as the model set. The game can't see such
 /// a bike at all until they're back at the root.
@@ -878,6 +940,70 @@ mod tests {
             vec!["_files.txt", "factory.tga", "model.edf"],
             "the swap is parked whole again"
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The whole point of a preview: what it shows must be what applying the swap gives
+    /// you. Asserted against the real thing — predict the root, then apply and compare.
+    #[test]
+    fn preview_predicts_the_root_the_swap_would_leave() {
+        let root = tmp("preview-matches");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        touch(&bike_dir(mp, "KTM450").join("body.tga"));
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        touch(&variant_dir(mp, "KTM450", "Factory").join("factory.tga"));
+
+        let set = preview_set(mp, "KTM450", "Factory").unwrap();
+        let mut predicted: Vec<String> =
+            set.root_keep.iter().chain(set.variant_files.iter()).cloned().collect();
+        predicted.sort();
+
+        apply_model_swap(mp, "KTM450", "Factory").unwrap();
+        assert_eq!(predicted, names_at(&bike_dir(mp, "KTM450")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Stock brings in nothing, so the preview has to clear the loose overrides — meshes
+    /// *and* the setup naming them — leaving the packed model to show through.
+    #[test]
+    fn preview_of_stock_clears_every_loose_override() {
+        let root = tmp("preview-stock");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        touch(&bike_dir(mp, "KTM450").join("KTM450.pkz"));
+
+        let set = preview_set(mp, "KTM450", STOCK).unwrap();
+        assert_eq!(set.root_keep, vec!["KTM450.pkz"], "only the packed bike is left");
+        assert!(set.variant_files.is_empty(), "Stock is never a folder");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn preview_of_the_active_model_is_the_bike_as_it_stands() {
+        let root = tmp("preview-active");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+
+        let set = preview_set(mp, "KTM450", ORIGINAL).unwrap();
+        let mut keep = set.root_keep.clone();
+        keep.sort();
+        assert_eq!(keep, names_at(&bike_dir(mp, "KTM450")));
+        assert!(set.variant_files.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn preview_refuses_what_the_swap_would_refuse() {
+        let root = tmp("preview-refuse");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        // Files but no mesh — an incomplete set, rejected on apply and on preview alike.
+        touch(&variant_dir(mp, "KTM450", "Broken").join("body.tga"));
+
+        assert!(preview_set(mp, "KTM450", "Broken").is_err(), "incomplete set");
+        assert!(preview_set(mp, "KTM450", "Nope").is_err(), "no such variant");
+        assert!(preview_set(mp, "Ghost", "Factory").is_err(), "no such bike");
         let _ = fs::remove_dir_all(&root);
     }
 

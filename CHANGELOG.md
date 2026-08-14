@@ -8,6 +8,11 @@
   paints nothing — but getting them onto the list meant reading them off and typing each one
   back in. There's now a button beside that list that makes the missing ones.
 - **A ＋ beside Sheets**, and another beside Layers, add one without hunting for a button.
+- **See a model swap before you switch to it.** Every model set in the Locker now has a 3D
+  button beside it, and "Stock" has one too — that one shows the model packed in the bike's
+  own archive, the one your loose files are covering. The bike is assembled in memory exactly
+  as applying the swap would leave it (the set's mesh over the bike's own `.hrc`s, `.geom` and
+  textures), so nothing moves on disk and you can look with the game open.
 
 ### Changed
 - **The UV map is on by default.** It answers the question a flat sheet always raises — which
