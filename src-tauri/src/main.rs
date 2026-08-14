@@ -4927,6 +4927,16 @@ fn set_voice_ptt_hotkey(app: tauri::AppHandle, hotkey: String) -> Result<(), Str
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Switch between push-to-talk and toggle. Rebinds, since the two modes differ only in
+/// which key edges the handler acts on.
+#[tauri::command]
+fn set_voice_toggle_to_talk(app: tauri::AppHandle, toggle: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_toggle_to_talk = toggle;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    overlay::register(&app, &cfg)
+}
+
 /// Set mic gain and playback volume together — they're one slider pair in the UI, and
 /// saving them separately would write the config file twice for one drag.
 #[tauri::command]
@@ -6109,6 +6119,7 @@ fn main() {
             set_voice_output_device,
             set_voice_ptt_hotkey,
             set_voice_levels,
+            set_voice_toggle_to_talk,
             voice_meter_start,
             voice_meter_stop,
             voice_test_output,

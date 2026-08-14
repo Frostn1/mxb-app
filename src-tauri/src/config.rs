@@ -94,9 +94,16 @@ pub struct AppConfig {
     /// from game audio on purpose: voice on the headset with the game on speakers is a
     /// setup people actually run.
     pub voice_output_device: String,
-    /// Push-to-talk combo, Tauri accelerator syntax. Blank falls back to
+    /// Mic-key combo, Tauri accelerator syntax. Blank falls back to
     /// [`DEFAULT_PTT_HOTKEY`].
     pub voice_ptt_hotkey: String,
+    /// Latch the mic instead of holding it: press once to open, again to close.
+    ///
+    /// Off by default, and deliberately so. Push-to-talk cannot leave a microphone open
+    /// by accident; toggle can, and a rider who forgets is broadcasting their room to the
+    /// grid. It is offered because holding a key through a rough section is genuinely
+    /// awkward, but the safe mode is the one you get without choosing.
+    pub voice_toggle_to_talk: bool,
     /// Microphone gain, 1.0 = untouched. Clamped when applied.
     pub voice_input_gain: f32,
     /// Playback volume for other riders, 0..1.
@@ -219,6 +226,7 @@ impl Default for AppConfig {
             voice_input_device: String::new(),
             voice_output_device: String::new(),
             voice_ptt_hotkey: DEFAULT_PTT_HOTKEY.to_string(),
+            voice_toggle_to_talk: false,
             voice_input_gain: 1.0,
             voice_output_volume: 1.0,
             seen_version: String::new(),
