@@ -407,11 +407,15 @@ fn release_binaries(rel: &Release) -> anyhow::Result<Vec<(&'static str, &Asset)>
 /// Download `frostmod.exe` + `frostmod.dll` from the latest release and put them in
 /// place as one unit.
 ///
-/// Refused off Windows: FrostMod is a Win32 DLL injected into the game, so downloading it
-/// elsewhere just parks two unusable binaries in the app's data dir before `start()` bails.
+/// Windows and Linux. FrostMod is a Win32 DLL injected into the game, and on Linux the
+/// game is a Win32 process too — Steam runs it under Proton — so the same two binaries go
+/// into the same prefix and do the same job (see [`crate::proton`]). macOS is refused
+/// because nothing there starts them: the game lives in a CrossOver/Whisky bottle the app
+/// launches but doesn't inject into, and downloading anyway would park two unusable
+/// binaries in the data dir before `start()` bailed.
 pub async fn install(app: &AppHandle) -> anyhow::Result<InstallReport> {
-    if cfg!(not(windows)) {
-        anyhow::bail!("FrostMod runs on Windows only");
+    if cfg!(not(any(windows, target_os = "linux"))) {
+        anyhow::bail!("FrostMod runs on Windows and Linux (under Proton)");
     }
     let rel = latest_release().await?;
     let assets = release_binaries(&rel)?;
@@ -462,15 +466,25 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<InstallReport> {
     })
 }
 
-/// Launch `frostmod.exe` hidden as a managed child. Windows-only.
-#[cfg(windows)]
-pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
-    use std::os::windows::process::CommandExt;
-    /// Don't pop a console window for the headless reloader.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// What both platforms need settled before FrostMod can be started, and nothing about how
+/// it is started — that is where Windows and Linux part company.
+#[cfg(any(windows, target_os = "linux"))]
+struct StartPlan {
+    exe: PathBuf,
+    /// `mxb` / `gpb`, for `--game`.
+    game: &'static str,
+    /// The mods *tree*, when the player has a folder set. Still a host path: Linux has to
+    /// rewrite it as the prefix sees it before handing it over.
+    mods_root: Option<PathBuf>,
+}
 
+/// Check what has to be true before starting, and work out what to tell FrostMod.
+///
+/// `None` means FrostMod is already running and there is nothing to do.
+#[cfg(any(windows, target_os = "linux"))]
+fn plan_start(app: &AppHandle) -> anyhow::Result<Option<StartPlan>> {
     if crate::frostmod::is_running() {
-        return Ok(false);
+        return Ok(None);
     }
     let exe = exe_path(app);
     if !exe.exists() {
@@ -510,13 +524,24 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     // to whatever `--mods` gives it (its own default is `…\MX Bikes\mods`), so sending
     // `cfg.mods_path` pointed its track manager and model swap at folders that don't
     // exist — silently, since neither reports an empty root as an error.
-    let mods_root = crate::library::mods_root(&cfg.mods_path);
-    let mods_root = mods_root.to_string_lossy();
-    let mut args: Vec<&str> = vec!["--game", cfg.active_game.id()];
-    if !cfg.mods_path.trim().is_empty() {
-        args.extend(["--mods", mods_root.as_ref()]);
+    let mods_root = (!cfg.mods_path.trim().is_empty())
+        .then(|| crate::library::mods_root(&cfg.mods_path));
+    Ok(Some(StartPlan { exe, game: cfg.active_game.id(), mods_root }))
+}
+
+/// Launch `frostmod.exe` hidden as a managed child.
+#[cfg(windows)]
+pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
+    use std::os::windows::process::CommandExt;
+    /// Don't pop a console window for the headless reloader.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let Some(plan) = plan_start(app)? else { return Ok(false) };
+    let mut args: Vec<String> = vec!["--game".into(), plan.game.into()];
+    if let Some(mods) = &plan.mods_root {
+        args.extend(["--mods".into(), mods.to_string_lossy().into_owned()]);
     }
-    let child = std::process::Command::new(&exe)
+    let child = std::process::Command::new(&plan.exe)
         .current_dir(frostmod_dir(app))
         .args(&args)
         .creation_flags(CREATE_NO_WINDOW)
@@ -525,9 +550,88 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     Ok(true)
 }
 
-#[cfg(not(windows))]
+/// Where Proton's own output goes on Linux, appended to across a session so a start that
+/// worked and a later one that didn't are both in it. Falls back to discarding the output
+/// rather than failing a start over a log file.
+#[cfg(target_os = "linux")]
+fn proton_log(app: &AppHandle) -> std::process::Stdio {
+    /// Past this, the interesting part is the end anyway — and a log the player is asked
+    /// to attach to a report has to stay attachable.
+    const MAX_BYTES: u64 = 1024 * 1024;
+
+    let path = frostmod_dir(app).join("proton.log");
+    let overgrown = std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_BYTES);
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(!overgrown)
+        .write(overgrown)
+        .truncate(overgrown)
+        .open(&path)
+        .map(std::process::Stdio::from)
+        .unwrap_or_else(|_| std::process::Stdio::null())
+}
+
+/// Launch `frostmod.exe` inside the Proton prefix the game runs in.
+///
+/// Not "run the Windows binary somehow": FrostMod injects a DLL into `mxbikes.exe`, which
+/// only works from inside the same prefix — the same Wine session, sharing the same
+/// process namespace. [`crate::proton`] is what finds that prefix and the Proton build
+/// that owns it.
+#[cfg(target_os = "linux")]
+pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
+    let Some(plan) = plan_start(app)? else { return Ok(false) };
+
+    // A FrostMod that doesn't poll its command file can't be driven from here at all: it
+    // would inject and reload on F8, while every button in this app wrote a file nothing
+    // ever read. Better to say so than to hand over a half-working install.
+    if !crate::frostmod::reads_command_files(installed_version(app).as_deref()) {
+        anyhow::bail!(
+            "This FrostMod build can't be driven from Linux — update FrostMod to {} or \
+             newer. (Under Proton the app can only reach FrostMod through a file, which \
+             older builds don't read.)",
+            crate::frostmod::FILE_CHANNEL_MIN_VERSION,
+        );
+    }
+
+    let cfg = crate::config::load(app).unwrap_or_default();
+    let runner = crate::proton::find(cfg.game(), &cfg.wine_runner)?;
+
+    let mut args: Vec<String> = vec!["--game".into(), plan.game.into()];
+    if let Some(mods) = &plan.mods_root {
+        // FrostMod is a Windows program: it takes `C:\users\…`, not the `/home/…` this
+        // side of the wall calls the same folder.
+        args.extend(["--mods".into(), crate::proton::windows_path(&runner.prefix(), mods)]);
+    }
+
+    log::info!(
+        "starting FrostMod via {}: {} run {} {:?} (prefix {})",
+        runner.via(),
+        runner.program.display(),
+        plan.exe.display(),
+        args,
+        runner.prefix().display(),
+    );
+    let child = runner
+        .command(&plan.exe, &args)
+        .current_dir(frostmod_dir(app))
+        // FrostMod is a console program and Proton says a great deal on its way to
+        // starting one — none of which would otherwise be anywhere, since the app's own
+        // stdout goes nowhere a player can reach. It lands in FrostMod's folder, where
+        // the log collector already picks up everything that isn't one of our binaries:
+        // if injection under Proton ever fails, this is the file that says why.
+        .stdout(proton_log(app))
+        .stderr(proton_log(app))
+        .spawn()
+        .map_err(|e| {
+            anyhow::anyhow!("Couldn't start FrostMod through {}: {e}", runner.via())
+        })?;
+    *state.0.lock().unwrap() = Some(child);
+    Ok(true)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn start(_app: &AppHandle, _state: &FrostmodProcess) -> anyhow::Result<bool> {
-    anyhow::bail!("FrostMod runs on Windows only")
+    anyhow::bail!("FrostMod runs on Windows and Linux (under Proton)")
 }
 
 /// Kill the managed FrostMod child, if we started one.
@@ -549,7 +653,16 @@ pub fn force_stop_exe() {
         .output();
 }
 
-#[cfg(not(windows))]
+/// Linux: killing the managed child only reaches the Proton script we spawned, and the
+/// launcher it started inside the prefix outlives it — the status pill would keep saying
+/// "running" because, correctly, it still is. So the process table is asked for everything
+/// running `frostmod.exe`, which is that wrapper *and* the Wine process under it.
+#[cfg(target_os = "linux")]
+pub fn force_stop_exe() {
+    crate::proton::kill_exe("frostmod.exe");
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn force_stop_exe() {}
 
 /// How long to wait for a stopped FrostMod to actually go before calling it a failure.

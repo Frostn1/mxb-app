@@ -591,7 +591,7 @@ export const ptBR: Translation = {
   "settings.instantRefreshDesc":
     "Quando você aplica um preset com o {{game}} aberto, atualiza o visual no jogo na hora — sem reiniciar nem reselecionar o perfil. Se não der, você será avisado para selecionar o perfil de novo.",
   "settings.instantRefreshWindowsOnly":
-    "Atualizar o visual no jogo sem reiniciar precisa do FrostMod, que só existe no Windows — em vez disso você será avisado para selecionar o perfil de novo.",
+    "Atualizar o visual no jogo sem reiniciar significa mexer no jogo em execução, e só a versão de Windows consegue fazer isso — em vez disso você será avisado para selecionar o perfil de novo.",
   "settings.autoRunFrostmod": "Iniciar o FrostMod automaticamente",
   "settings.autoRunFrostmodDesc":
     "Iniciar o FrostMod em segundo plano sempre que o MXB App abrir.",

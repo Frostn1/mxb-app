@@ -580,7 +580,7 @@ export const en = {
   "settings.instantRefreshDesc":
     "When you apply a preset while {{game}} is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile.",
   "settings.instantRefreshWindowsOnly":
-    "Refreshing the look in-game without a restart needs FrostMod, which is Windows-only — you'll be told to reselect your profile instead.",
+    "Refreshing the look in-game without a restart means reaching into the running game, which only the Windows build can do — you'll be told to reselect your profile instead.",
   "settings.autoRunFrostmod": "Run FrostMod automatically",
   "settings.autoRunFrostmodDesc":
     "Start FrostMod in the background whenever MXB App opens.",
