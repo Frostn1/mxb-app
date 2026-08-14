@@ -972,6 +972,7 @@ export const fr: Translation = {
   "locker.missingModelEdf": "Ce set n'a pas de model.edf",
   "locker.missingSoundFiles": "Il manque engine.scl ou sfx.cfg à ce set",
   "locker.switchTo": "Passer à {{name}}",
+  "locker.preview3d": "Voir {{name}} en 3D — rien n’est changé",
   "locker.tiedToModel": "Lié au modèle {{models}}",
   "locker.boundHint":
     "« {{sound}} » est lié au modèle « {{model}} » — il suit ce modèle. Cliquez pour délier.",

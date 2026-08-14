@@ -964,6 +964,7 @@ export const ptBR: Translation = {
   "locker.missingModelEdf": "Este set não tem model.edf",
   "locker.missingSoundFiles": "Falta engine.scl ou sfx.cfg neste set",
   "locker.switchTo": "Mudar para {{name}}",
+  "locker.preview3d": "Ver {{name}} em 3D — nada é trocado",
   "locker.tiedToModel": "Vinculado ao modelo {{models}}",
   "locker.boundHint":
     "“{{sound}}” está vinculado ao modelo “{{model}}” — ele acompanha esse modelo. Clique para desvincular.",
