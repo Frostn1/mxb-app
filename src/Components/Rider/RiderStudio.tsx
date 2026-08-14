@@ -9,7 +9,7 @@ import type { Loadout, RiderPart } from "../../types";
 import {
   presetsSave,
   scanGearRepairs,
-  repairGearArea,
+  repairGear,
   type GearRepair,
 } from "../../api/mods";
 import { ViewerPanel } from "../Viewer/ViewerPanel";
@@ -47,9 +47,10 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   // reason to hide the slot the rider tab is most often opened for.
   const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
   const [error, setError] = useState<string | null>(null);
-  // Gear installed loose in an area root — see `gearrepair` on the Rust side. Surfaced here
-  // because this is the tab where the damage shows: the model is missing from its picker and
-  // `paints` is offered in its place.
+  // Gear the game can't reach where it was installed — loose in an area root, or packaged and
+  // buried a folder deep. See `gearrepair` on the Rust side. Surfaced here because this is the
+  // tab where the damage shows: the model is missing from its picker, or listed under the
+  // download's slug and rendering nothing.
   const [repairs, setRepairs] = useState<GearRepair[]>([]);
   const [repairing, setRepairing] = useState<string | null>(null);
   // Paints the chosen models carry, merged with the loose ones the scan found.
@@ -115,12 +116,13 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
 
   const onRepair = useCallback(
     async (r: GearRepair) => {
-      setRepairing(r.area);
+      setRepairing(r.id);
       try {
-        const moved = await repairGearArea(r.area);
+        const moved = await repairGear(r.id);
+        const done: TKey = r.kind === "unwrap" ? "rider.unwrapDone" : "rider.repairDone";
         toast.success(
           moved
-            ? t("rider.repairDone", { count: moved, model: r.model })
+            ? t(done, { count: moved, model: r.model })
             : t("rider.repairNothing"),
         );
         // Re-scan rather than dropping the banner locally: gathering changes what the
@@ -172,16 +174,26 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
 
       {repairs.map((r) => (
         <div
-          key={r.area}
+          key={r.id}
           className="mx-7 mb-3 flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[12.5px]"
         >
           <FolderInput className="mt-0.5 size-4 flex-none text-amber-500" />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="font-semibold">
-              {t("rider.repairTitle", { area: r.area })}
+              {t(r.kind === "unwrap" ? "rider.unwrapTitle" : "rider.repairTitle", {
+                area: r.area,
+              })}
             </span>
             <span className="text-muted-foreground">
-              {t("rider.repairBody", { area: r.area, model: r.model })}
+              {r.kind === "unwrap"
+                ? t("rider.unwrapBody", {
+                    area: r.area,
+                    model: r.model,
+                    // The id carries where it's buried; the folder is the part the person
+                    // clicking recognises, since it's what the picker has been showing them.
+                    folder: r.id.slice(r.area.length + 1),
+                  })
+                : t("rider.repairBody", { area: r.area, model: r.model })}
             </span>
             {/* The exact list, because this moves files on disk and the person clicking
                 should be able to see what it will touch before it does. */}
@@ -196,7 +208,7 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
             disabled={repairing !== null}
             onClick={() => void onRepair(r)}
           >
-            {repairing === r.area ? (
+            {repairing === r.id ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
               <FolderInput className="size-3.5" />

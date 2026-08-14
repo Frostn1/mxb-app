@@ -217,6 +217,11 @@ export const en = {
   "rider.repairDone_one": "Gathered {{count}} file into “{{model}}”.",
   "rider.repairDone_other": "Gathered {{count}} files into “{{model}}”.",
   "rider.repairNothing": "Nothing left to gather.",
+  "rider.unwrapTitle": "A {{area}} mod was installed one folder too deep",
+  "rider.unwrapBody":
+    "“{{folder}}” holds nothing but {{model}}, and a packaged mod only loads from {{area}} itself — so neither the game nor this app can see it. Move it up?",
+  "rider.unwrapDone_one": "Moved {{count}} mod up. It's listed as “{{model}}” now.",
+  "rider.unwrapDone_other": "Moved {{count}} mods up, starting with “{{model}}”.",
 
   // ── Guided tour ────────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Take a quick tour",

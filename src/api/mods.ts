@@ -375,11 +375,16 @@ export function scanRiderTargets(): Promise<RiderTargets> {
   return invoke<RiderTargets>("scan_rider_targets");
 }
 
-/** A gear area whose model was installed loose in the area root instead of in a folder. */
+/** A gear model the game can't reach where it was installed.
+ *  `gather` — its files sit loose in the area root instead of in a folder of their own.
+ *  `unwrap` — its `.pkz` is buried in a folder, a level below where anything looks. */
 export interface GearRepair {
+  kind: "gather" | "unwrap";
+  /** What `repairGear` is asked for: the area, or `<area>/<folder>` for a buried package. */
+  id: string;
   /** The area folder under `mods/rider` — `helmets`, `boots`, … */
   area: string;
-  /** The folder the loose content will be gathered into. */
+  /** The model: the folder loose files gather into, or the name a raised package will show as. */
   model: string;
   dest: string;
   /** What moves, by name. */
@@ -390,9 +395,9 @@ export function scanGearRepairs(): Promise<GearRepair[]> {
   return invoke<GearRepair[]>("scan_gear_repairs");
 }
 
-/** Gather one area's loose content into its own folder; resolves with the entries moved. */
-export function repairGearArea(area: string): Promise<number> {
-  return invoke<number>("repair_gear_area", { area });
+/** Carry out one repair by its `id`; resolves with the entries moved. */
+export function repairGear(id: string): Promise<number> {
+  return invoke<number>("repair_gear", { id });
 }
 
 /** What a failed scan stands in for: nothing installed, which every picker handles. */

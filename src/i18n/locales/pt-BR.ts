@@ -223,6 +223,11 @@ export const ptBR: Translation = {
   "rider.repairDone_one": "{{count}} arquivo juntado em “{{model}}”.",
   "rider.repairDone_other": "{{count}} arquivos juntados em “{{model}}”.",
   "rider.repairNothing": "Não sobrou nada para juntar.",
+  "rider.unwrapTitle": "Um mod de {{area}} foi instalado uma pasta abaixo demais",
+  "rider.unwrapBody":
+    "“{{folder}}” não tem nada além de {{model}}, e um mod empacotado só carrega da própria {{area}} — então nem o jogo nem este app enxergam ele. Subir?",
+  "rider.unwrapDone_one": "{{count}} mod subiu. Agora aparece como “{{model}}”.",
+  "rider.unwrapDone_other": "{{count}} mods subiram, começando por “{{model}}”.",
 
   // ── Tour guiado ────────────────────────────────────────────────────────────
   "tour.welcomeTour.title": "Faça um tour rápido",
