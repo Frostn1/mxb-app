@@ -197,7 +197,15 @@ fn probe_dll(path: &Path) -> Option<Option<String>> {
     contains(&narrowed, RESHADE_MARKER).then(|| version_near_marker(&narrowed))
 }
 
-fn is_reshade_dll(path: &Path) -> bool {
+/// Is the file at `path` ReShade's own DLL?
+///
+/// Public because [`crate::integrity`] needs it too, and for the opposite reason: there, a
+/// DLL sitting in the game folder under a name the loader preloads is the shape of an
+/// injected cheat, and ReShade is the one legitimate thing that looks exactly like that.
+/// Asking the file rather than trusting its name is what keeps a working ReShade install
+/// from being reported as a cheat — and what stops a cheat from getting a free pass by
+/// being called `opengl32.dll`.
+pub fn is_reshade_dll(path: &Path) -> bool {
     probe_dll(path).is_some()
 }
 

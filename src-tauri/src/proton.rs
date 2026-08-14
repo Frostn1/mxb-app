@@ -328,6 +328,71 @@ pub fn kill_exe(exe: &str) {
     }
 }
 
+/// Every PE file mapped into `pid`, by path.
+///
+/// Wine loads a DLL by mapping the file itself, so the kernel's own mapping list is a
+/// faithful account of what is inside the game — which is what makes cheat detection
+/// possible at all on a platform with no `CreateToolhelp32Snapshot`.
+pub fn mapped_pe_files(pid: u32) -> Vec<String> {
+    std::fs::read_to_string(format!("/proc/{pid}/maps"))
+        .map(|maps| pe_files_in_maps(&maps))
+        .unwrap_or_default()
+}
+
+/// Every process on the machine, by executable name — the Linux half of
+/// [`crate::gameproc::running_process_names`].
+///
+/// `comm` rather than `cmdline`: it is the short name, which is what the rule list matches,
+/// and it is there for kernel threads and short-lived processes whose `cmdline` is empty.
+pub fn process_names() -> Vec<String> {
+    let mut names = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else { return names };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
+            continue;
+        }
+        // Unreadable is normal — another user's process, or one that exited mid-walk.
+        if let Ok(comm) = std::fs::read_to_string(entry.path().join("comm")) {
+            let name = comm.trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Pull the distinct `.dll`/`.exe` paths out of a `/proc/<pid>/maps` body.
+///
+/// Split out from the read so it can be tested on any OS. Three things the format makes us
+/// careful about:
+///
+///   - a mapping is six fields and the sixth is the path, which **may contain spaces** —
+///     `steamapps/common/MX Bikes/mxbikes.exe` is the ordinary case here, so the path is
+///     everything after the fifth field rather than the sixth token;
+///   - anonymous mappings (heap, stack, `[vvar]`) have no path at all, and every file is
+///     mapped several times over as the loader lays out its sections, so the answer is a
+///     de-duplicated set;
+///   - a file replaced while mapped keeps its old mapping with a ` (deleted)` marker glued
+///     to the path. Stripping it matters: a cheat that unlinks itself after loading is
+///     exactly the case we want to still name.
+fn pe_files_in_maps(maps: &str) -> Vec<String> {
+    let mut files: Vec<String> = maps
+        .lines()
+        .filter_map(|line| {
+            let path = line.splitn(6, char::is_whitespace).nth(5)?.trim();
+            let path = path.strip_suffix(" (deleted)").unwrap_or(path);
+            let lower = path.to_ascii_lowercase();
+            (lower.ends_with(".dll") || lower.ends_with(".exe")).then(|| path.to_string())
+        })
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
 /// Does one `/proc/<pid>/cmdline` name `exe`?
 ///
 /// The arguments are NUL-separated and the exe may appear as any of them, in either slash
@@ -408,6 +473,38 @@ mod tests {
         let frostmod = "…/proton\0run\0Z:\\home\\rider\\.local\\share\\com.frost.mxbikes\\frostmod\\FrostMod.exe\0--game\0mxb\0";
         assert!(cmdline_names_exe(frostmod, "frostmod.exe"));
         assert!(!cmdline_names_exe("", "frostmod.exe"));
+    }
+
+    /// The mapping list is how Linux answers "what is loaded into the game". Spaces in the
+    /// path, repeated section mappings and anonymous regions all have to come out right, or
+    /// the scanner either misses a DLL or invents one.
+    #[test]
+    fn a_mapping_list_yields_each_mapped_pe_once() {
+        let maps = "\
+00400000-00452000 r-xp 00000000 08:02 173521     /home/rider/.steam/steamapps/common/MX Bikes/mxbikes.exe
+00452000-00453000 r--p 00052000 08:02 173521     /home/rider/.steam/steamapps/common/MX Bikes/mxbikes.exe
+7f0000000000-7f0000021000 rw-p 00000000 00:00 0
+7f1111111000-7f1111120000 r-xp 00000000 08:02 99 /usr/lib/wine/x86_64-windows/kernel32.dll
+7f2222222000-7f2222230000 r-xp 00000000 08:02 42 /home/rider/Downloads/kaizo hack.dll (deleted)
+7f3333333000-7f3333340000 r-xp 00000000 08:02 43 /usr/lib/x86_64-linux-gnu/libc.so.6
+00e2f000-00e50000 rw-p 00000000 00:00 0          [heap]
+";
+        assert_eq!(
+            pe_files_in_maps(maps),
+            [
+                "/home/rider/.steam/steamapps/common/MX Bikes/mxbikes.exe",
+                "/home/rider/Downloads/kaizo hack.dll",
+                "/usr/lib/wine/x86_64-windows/kernel32.dll",
+            ]
+        );
+    }
+
+    /// Nothing readable is an empty answer, never a panic — an unreadable `/proc` entry is
+    /// the ordinary outcome for a process that exited mid-walk.
+    #[test]
+    fn an_empty_or_pathless_mapping_list_yields_nothing() {
+        assert!(pe_files_in_maps("").is_empty());
+        assert!(pe_files_in_maps("7f00-7f01 rw-p 0 00:00 0 \n").is_empty());
     }
 
     #[test]
