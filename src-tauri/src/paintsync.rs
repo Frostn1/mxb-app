@@ -493,6 +493,131 @@ pub async fn registry(token: Option<&str>) -> anyhow::Result<Vec<RegisteredServe
     Ok(resp.servers)
 }
 
+/// A registry server with whatever its host could be asked about itself.
+///
+/// Every live field is optional and `live` says which way it went, because "the agent did
+/// not answer" and "the agent answered with nothing" mean opposite things to the caller: an
+/// empty `bikes` from a real answer means the host accepts nothing, while an empty one from
+/// a failed probe means we simply do not know — and gating a player's preset on the second
+/// would refuse a join for no reason.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowsedServer {
+    pub id: String,
+    pub name: String,
+    pub region: String,
+    pub address: String,
+    #[serde(default)]
+    pub track: Option<String>,
+    #[serde(default)]
+    pub track_layout: Option<String>,
+    #[serde(default)]
+    pub max_clients: Option<u32>,
+    #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub running: Option<bool>,
+    #[serde(default)]
+    pub player_count: Option<u32>,
+    #[serde(default)]
+    pub players: Vec<String>,
+    #[serde(default)]
+    pub tracks: Vec<String>,
+    /// The bikes the host has, and therefore the only ones it will let a rider on.
+    #[serde(default)]
+    pub bikes: Vec<String>,
+    /// Whether the live fields above came from the server or are simply unknown.
+    #[serde(default)]
+    pub live: bool,
+}
+
+/// The joinable servers, with what each host is doing right now.
+///
+/// Public like [`registry`], and for the same reason — the player who most needs to see
+/// what is running is the one who has not enrolled yet.
+pub async fn browse(token: Option<&str>) -> anyhow::Result<Vec<BrowsedServer>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        servers: Vec<BrowsedServer>,
+    }
+    let mut req = client()?.get(format!("{}/v1/servers/browse", control_plane()));
+    if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
+        req = req.bearer_auth(token);
+    }
+    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    Ok(resp.servers)
+}
+
+/// The id shapes the control plane's own route accepts. Checked here rather than escaped,
+/// because the id goes into a URL *path*: anything outside this set is not an id we could
+/// have been given, and refusing it is the only way a `../` never becomes a request to some
+/// other endpoint.
+fn is_registry_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// One server's live detail.
+pub async fn server_info(token: Option<&str>, id: &str) -> anyhow::Result<BrowsedServer> {
+    #[derive(Deserialize)]
+    struct Resp {
+        server: BrowsedServer,
+    }
+    if !is_registry_id(id) {
+        anyhow::bail!("\"{id}\" isn't a server id");
+    }
+    let mut req = client()?.get(format!("{}/v1/servers/{id}/info", control_plane()));
+    if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
+        req = req.bearer_auth(token);
+    }
+    let resp: Resp = req.send().await?.error_for_status()?.json().await?;
+    Ok(resp.server)
+}
+
+/// A rider the search found, and the server they are on.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerHit {
+    pub name: String,
+    #[serde(default)]
+    pub guid: Option<String>,
+    #[serde(default)]
+    pub server_id: Option<String>,
+    #[serde(default)]
+    pub server_name: Option<String>,
+    /// `host:port` — present whenever the hit is joinable, which is what the UI acts on.
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    /// `live` = the server itself reports them on the grid; `presence` = their app said so.
+    pub source: String,
+}
+
+/// Which server a rider is on, by name or GUID.
+///
+/// Authenticated, unlike the browse: a grid is public to everyone on it, but "where is this
+/// person" is a question about a person, and the control plane gates it behind an account
+/// for that reason. An install that has not enrolled gets a straight answer here rather than
+/// a 401 it would have to interpret.
+pub async fn find_players(token: &str, query: &str) -> anyhow::Result<Vec<PlayerHit>> {
+    #[derive(Deserialize)]
+    struct Resp {
+        players: Vec<PlayerHit>,
+    }
+    let resp: Resp = client()?
+        .get(format!("{}/v1/players", control_plane()))
+        .query(&[("q", query)])
+        .bearer_auth(token)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(resp.players)
+}
+
 /// The roster key for the server at `address`.
 ///
 /// A registered server is keyed by its registry id. Anything else is keyed by its own

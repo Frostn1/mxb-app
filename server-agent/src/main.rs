@@ -4,6 +4,7 @@
 //! to the cloud provider, which is the point: managing a server from the app must never
 //! require provider credentials to be shipped inside the app.
 
+mod bikes;
 mod config;
 mod ini;
 mod pairing;
@@ -90,6 +91,22 @@ fn handle(mut request: Request, shared: &Shared) {
         return;
     }
 
+    // The server-browser view, and the other endpoint that cannot require a token.
+    //
+    // What it answers — who is on, what is being ridden, what the host will accept — is the
+    // question a player asks *before* they have anything to do with this box, so a
+    // credential they could only get from its operator is the wrong gate. It is also
+    // already public in every meaningful sense: the game advertises the same server in its
+    // own in-game list, and anyone can join and read the grid.
+    //
+    // What is *not* here is the point. GUIDs are a stable identity and stay behind the token
+    // on `/players`; so does everything that changes the box. This is a read of facts a
+    // player standing on the server would see anyway.
+    if method == "GET" && path == "/info" {
+        let _ = request.respond(info(shared));
+        return;
+    }
+
     if !authorized(&request, shared) {
         let _ = request.respond(json(401, &serde_json::json!({ "error": "unauthorized" })));
         return;
@@ -146,6 +163,58 @@ fn status(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
                 "track": ini::get(&text, ini::TRACK),
                 "maxClients": ini::get(&text, ini::MAX_CLIENT),
             }
+        }),
+    )
+}
+
+/// Everything a server browser shows, in one unauthenticated read.
+///
+/// One call rather than four (`/status` + `/players` + `/tracks` + a bike list) because the
+/// caller is a list of servers being refreshed, not an operator inspecting one: four
+/// round-trips per row over a link that may be transatlantic is what makes a browser feel
+/// broken.
+///
+/// Players are reported by name only. The roster this reads carries GUIDs — that is the
+/// whole reason it parses the log — and a GUID is a stable per-install identity, so it stays
+/// behind the token on `/players`. A name is what the grid already shows to everyone on it.
+fn info(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let mut guard = shared.lock().unwrap();
+    let game = guard.status();
+    let port = guard.config().game_port;
+    let game_dir = guard.config().game_dir.clone();
+    // Best-effort, exactly as in `status`: a server whose `.ini` we cannot read is still
+    // worth listing, and answering with an error would drop it out of the browser entirely.
+    let text = guard.read_ini().unwrap_or_default();
+    let name = ini::get(&text, ini::NAME);
+    let track = ini::get(&text, ini::TRACK);
+    let track_layout = ini::get(&text, ini::TRACK_LAYOUT);
+    let max_clients = ini::get(&text, ini::MAX_CLIENT);
+    // Whether joining needs a password. The password itself is never reported — only that
+    // there is one, which is what a browser has to show and a player has to know.
+    let locked = ini::get(&text, ini::PASSWORD).is_some_and(|p| !p.trim().is_empty());
+    drop(guard);
+
+    let players: Vec<String> = std::fs::read_to_string(game_dir.join("log.txt"))
+        .map(|log| roster::connected(&log).into_iter().map(|p| p.name).collect())
+        // No log yet is a server nobody has connected to, not a failure.
+        .unwrap_or_default();
+
+    json(
+        200,
+        &serde_json::json!({
+            "name": name,
+            "track": track,
+            "trackLayout": track_layout,
+            "maxClients": max_clients,
+            "locked": locked,
+            "port": port,
+            "running": game.running,
+            "uptimeSecs": game.uptime_secs,
+            "playerCount": players.len(),
+            "players": players,
+            "tracks": tracks::installed(&game_dir),
+            // The list that decides whether a player is turned away at the gate.
+            "bikes": bikes::installed(&game_dir),
         }),
     )
 }

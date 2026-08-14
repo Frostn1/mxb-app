@@ -411,6 +411,22 @@ pub fn active_bike(profiles_dir: &Path, profile: &str) -> Option<String> {
         .filter(|b| !b.is_empty())
 }
 
+/// Put the rider back on a bike, without touching what any bike is wearing.
+///
+/// The narrow counterpart to [`apply_loadout`]'s `make_active`: undoing a join that switched
+/// bikes to clear a server's gate has to restore `[info] bikeid` alone, because the loadout
+/// being restored belongs to the bike that was *written*, which is a different one.
+pub fn set_active_bike(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow::Result<()> {
+    let path = profile_ini_path(profiles_dir, profile);
+    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    let (text, was_utf8) = decode_ini(&bytes);
+    let mut doc = IniDoc::parse(&text);
+    doc.set("info", "bikeid", bikeid);
+    fs::write(&path, encode_ini(&doc.render(), was_utf8))
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
 fn loadout_in(doc: &IniDoc, bikeid: &str) -> Loadout {
     let mut lo = Loadout::default();
     for section in SLOT_SECTIONS {

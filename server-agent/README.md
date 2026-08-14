@@ -45,11 +45,12 @@ again. It carries the token, so treat it like the token.
 
 ## API
 
-Every endpoint except `/health` requires `Authorization: Bearer <token>`.
+Every endpoint except `/health` and `/info` requires `Authorization: Bearer <token>`.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Liveness. Unauthenticated, reveals nothing. |
+| GET | `/info` | The server-browser view — name, track, player **names**, and the tracks and bikes this host has. Unauthenticated: see below. |
 | GET | `/status` | Game process state plus name/track/maxClients from the `.ini`. |
 | GET | `/players` | Who is connected, with the GUID that identifies them, read from the server's log. |
 | GET | `/tracks` | Track names this host has installed — the only values `PUT /config` will usefully accept. |
@@ -73,5 +74,11 @@ cargo build --release --target x86_64-pc-windows-gnu   # from macOS/Linux
 - `PUT /config` accepts only three keys. It is an API for running a server, not for
   rewriting arbitrary game config, and values containing newlines are rejected so a caller
   can't inject unrelated `.ini` keys.
+- `/info` is deliberately unauthenticated. It answers what a player asks *before* they have
+  anything to do with this box — who is on it, what is being ridden, what it will accept —
+  so a credential only its operator could hand out is the wrong gate, and the game already
+  advertises the same server in its own in-game list. It reports player *names* and never
+  GUIDs: a GUID is a stable per-install identity and stays behind the token on `/players`.
+  The password is reported only as `locked: true`, never as its value.
 - Nothing here is transport-encrypted. Terminate TLS in front of it, or keep the listener
   on a private network, before pointing anything at it over the open internet.

@@ -338,6 +338,17 @@ pub fn scan_rider_targets(mods_path: &str) -> RiderTargets {
     }
 }
 
+/// Only the bikes that came from a mod — what is actually in `mods/bikes`.
+///
+/// Deliberately *not* [`scan_bike_targets`], which folds in every id a profile mentions so
+/// that stock bikes can be painted. The difference is the whole basis of the server-gate
+/// check in [`crate::joinprep`]: a bike the host is missing only turns a rider away if it is
+/// a mod, because stock bikes live inside the game's locked archive and are on both machines
+/// without appearing in either folder.
+pub fn mod_bikes(mods_path: &str) -> Vec<String> {
+    models_in(&mods_subdir(mods_path, "mods/bikes"))
+}
+
 /// Every bike a paint could be installed for.
 ///
 /// Two sources, because neither is complete on its own. `mods/bikes` has the mod bikes —

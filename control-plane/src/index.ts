@@ -111,6 +111,15 @@ async function route(request: Request, env: Env): Promise<Response> {
   // deliberately not selected, so the admin API's location stays private.
   if (method === "GET" && path === "/v1/servers") return listServers(env);
 
+  // The browser, and one server's detail. Both public for the same reason `/v1/servers`
+  // is: what they answer is what someone with no account is asking, and the agent they
+  // read from serves the same payload to anyone who can reach it. They must stay *above*
+  // the `:id` patterns below — `browse` is a valid id shape and would otherwise be
+  // swallowed by them.
+  if (method === "GET" && path === "/v1/servers/browse") return browseServers(env);
+  const detail = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/info$/.exec(path);
+  if (detail && method === "GET") return serverInfo(detail[1], env);
+
   // A provisioned box announcing itself. Authenticated by the agent token in its own row,
   // not by an account bearer — the machine holds no account and has no way to be given one.
   const hello = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/hello$/.exec(path);
@@ -127,6 +136,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
+  if (method === "GET" && path === "/v1/players") return findPlayers(url, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
@@ -522,6 +532,253 @@ async function listServers(env: Env): Promise<Response> {
     "SELECT id, name, region, address FROM servers WHERE published = 1 ORDER BY region, name",
   ).all<{ id: string; name: string; region: string; address: string }>();
   return json(200, { servers: servers.results });
+}
+
+/** A published server, as the browser and the player search both need it. */
+interface ServerRow {
+  id: string;
+  name: string;
+  region: string;
+  address: string;
+  agent_url: string | null;
+}
+
+/** What an agent's `/info` reports. Every field is optional: it is another program on
+ *  somebody else's box, and a browser that a stale agent can 500 is worse than one that
+ *  shows a row with less on it. */
+interface AgentInfo {
+  name?: string | null;
+  track?: string | null;
+  trackLayout?: string | null;
+  maxClients?: string | null;
+  locked?: boolean;
+  running?: boolean;
+  playerCount?: number;
+  players?: string[];
+  tracks?: string[];
+  bikes?: string[];
+}
+
+/**
+ * Long enough for an agent on the other side of an ocean, short enough that one unreachable
+ * host cannot make the browser feel broken. Shorter than the registration probe's budget on
+ * purpose: this runs against every server at once, on a request a player is waiting on.
+ */
+const INFO_TIMEOUT_MS = 4000;
+
+/** How long an agent's answer is reused. A grid changes on the scale of a race, not a
+ *  keystroke, and this is what keeps a browser someone is scrolling from hammering every
+ *  host in the registry. */
+const INFO_CACHE_SECONDS = 15;
+
+/**
+ * One server's live detail, straight from its agent, cached briefly.
+ *
+ * Proxied rather than fetched by the app directly, because `agent_url` is the location of
+ * that box's admin API and is deliberately never published — see `listServers`. Going
+ * through here is what lets the app show a rich server list without every client learning
+ * where every agent lives.
+ *
+ * Failure is `null`, never a throw: a server whose agent is down, old, or behind a firewall
+ * still belongs in the list as a row we know the address of.
+ */
+async function agentInfo(id: string, agentUrl: string | null): Promise<AgentInfo | null> {
+  if (!agentUrl) return null;
+  const base = agentUrl.replace(/\/+$/, "");
+  // A synthetic key: `caches.default` is keyed by URL, and this one is never fetched. The
+  // registry id — not the agent URL — keeps the key out of the cache's own logging.
+  const key = new Request(`https://agent-info.invalid/${encodeURIComponent(id)}`);
+  const cache = caches.default;
+  const hit = await cache.match(key);
+  if (hit) return (await hit.json()) as AgentInfo;
+
+  try {
+    const resp = await fetch(`${base}/info`, { signal: AbortSignal.timeout(INFO_TIMEOUT_MS) });
+    if (!resp.ok) return null;
+    const info = (await resp.json()) as AgentInfo;
+    await cache.put(
+      key,
+      new Response(JSON.stringify(info), {
+        headers: {
+          "content-type": "application/json",
+          "cache-control": `max-age=${INFO_CACHE_SECONDS}`,
+        },
+      }),
+    );
+    return info;
+  } catch {
+    // Timed out, refused, or answered with something that isn't JSON. All the same thing
+    // from here: no live detail for this row.
+    return null;
+  }
+}
+
+/** Published servers, with the agent URL the proxy needs and the response never shows. */
+async function publishedServers(env: Env): Promise<ServerRow[]> {
+  const rows = await env.DB.prepare(
+    "SELECT id, name, region, address, agent_url FROM servers WHERE published = 1" +
+      " ORDER BY region, name",
+  ).all<ServerRow>();
+  return rows.results;
+}
+
+/** The public shape of a server row — `agent_url` dropped, live detail folded in. */
+function browsable(row: ServerRow, info: AgentInfo | null) {
+  return {
+    id: row.id,
+    name: row.name,
+    region: row.region,
+    address: row.address,
+    // The `.ini` is the operator's own naming and can drift from the registry row; the
+    // registry name is what people picked this server by, so it stays the label and the
+    // live one is not carried at all.
+    track: info?.track ?? null,
+    trackLayout: info?.trackLayout ?? null,
+    maxClients: info?.maxClients ? Number(info.maxClients) || null : null,
+    locked: info?.locked ?? false,
+    running: info?.running ?? null,
+    playerCount: info?.playerCount ?? null,
+    players: info?.players ?? [],
+    tracks: info?.tracks ?? [],
+    bikes: info?.bikes ?? [],
+    // Says "we could not ask", which the app has to distinguish from "we asked and it is
+    // empty" — an empty bike list would otherwise gate every preset as ineligible.
+    live: info !== null,
+  };
+}
+
+/**
+ * The server browser: every published server, with whatever its agent can tell us.
+ *
+ * Separate from `/v1/servers` rather than a flag on it, because the two have different
+ * costs and different failure modes — the plain list is one D1 read that cannot fail, and
+ * this fans out to every agent in the registry. Old clients keep the cheap one.
+ *
+ * Unauthenticated, like the list it extends: a player choosing where to ride most often has
+ * no account yet, and everything here is what a server browser has always shown.
+ */
+async function browseServers(env: Env): Promise<Response> {
+  const rows = await publishedServers(env);
+  // All at once: the fan-out is bounded by the size of the registry, and doing it in
+  // sequence would make the browser as slow as the sum of every host's latency.
+  const infos = await Promise.all(rows.map((r) => agentInfo(r.id, r.agent_url)));
+  return json(200, { servers: rows.map((r, i) => browsable(r, infos[i])) });
+}
+
+/** One server's detail, for the panel the app opens when a row is picked. */
+async function serverInfo(id: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare(
+    "SELECT id, name, region, address, agent_url FROM servers WHERE id = ? AND published = 1",
+  )
+    .bind(id)
+    .first<ServerRow>();
+  if (!row) return json(404, { error: "no such server" });
+  return json(200, { server: browsable(row, await agentInfo(row.id, row.agent_url)) });
+}
+
+/** Bounds on a search term. Two characters is the shortest that narrows anything; the
+ *  ceiling is only there so a pathological term never reaches the database. */
+const MIN_QUERY = 2;
+const MAX_QUERY = 100;
+
+/** A rider the search found, and where they are. */
+interface PlayerHit {
+  name: string;
+  /** Only ever set from presence — a GUID is never in the public roster. */
+  guid: string | null;
+  serverId: string | null;
+  serverName: string | null;
+  address: string | null;
+  region: string | null;
+  /** `live` means the server itself reports them on the grid right now; `presence` means
+   *  their own app said so within the TTL. Live is the stronger claim, and the UI says so. */
+  source: "live" | "presence";
+}
+
+/**
+ * Find which server a player is on, by rider name or GUID.
+ *
+ * Two sources, because neither is complete. The server's own roster is authoritative and
+ * covers everyone on the grid, app or no app — but it is names only, and only for servers
+ * whose agent we can reach. Presence covers riders whose app has reported in, reaches
+ * servers with no agent, and is the only one that can answer a GUID at all, since a GUID
+ * never appears in the public roster.
+ *
+ * Authenticated, unlike the server list. A server is a place and its grid is on show to
+ * everyone standing on it; "where is this person right now" is a question about a person,
+ * and answering it for anyone who can reach the worker turns the registry into a tracker.
+ * An enrolled account is the smallest gate that keeps it a feature of the platform rather
+ * than a public lookup.
+ */
+async function findPlayers(url: URL, env: Env): Promise<Response> {
+  const q = (url.searchParams.get("q") ?? "").trim();
+  if (q.length < MIN_QUERY) return json(400, { error: `search for at least ${MIN_QUERY} characters` });
+  if (q.length > MAX_QUERY) return json(400, { error: "that search is too long" });
+
+  const rows = await publishedServers(env);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const needle = q.toLowerCase();
+  // `LIKE` treats these as wildcards, so a search for `100%` would otherwise match
+  // everything starting `100`. Escaped rather than stripped: they are legal in a name.
+  const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+  const presence = await env.DB.prepare(
+    "SELECT a.rider_name, a.guid, pr.server_id" +
+      " FROM accounts a JOIN presence pr ON pr.account_id = a.id" +
+      " WHERE pr.updated_at > ? AND (lower(a.rider_name) LIKE ? ESCAPE '\\' OR lower(a.guid) = ?)" +
+      " LIMIT 50",
+  )
+    .bind(Date.now() - PRESENCE_TTL_MS, `%${escaped}%`, needle)
+    .all<{ rider_name: string; guid: string | null; server_id: string }>();
+
+  const hits: PlayerHit[] = [];
+  for (const r of presence.results) {
+    const server = byId.get(r.server_id);
+    hits.push({
+      name: r.rider_name,
+      guid: r.guid,
+      serverId: server?.id ?? null,
+      serverName: server?.name ?? null,
+      // A presence row for a server we do not list is keyed by its own `host:port`, which
+      // is exactly the address needed to join it — so an unlisted server still answers the
+      // question rather than dropping out of the results.
+      address: server?.address ?? (isPublicGameAddress(r.server_id) ? r.server_id : null),
+      region: server?.region ?? null,
+      source: "presence",
+    });
+  }
+
+  // The live grids. Cached per server, so a search costs nothing that the browser has not
+  // already paid for in the last few seconds.
+  const infos = await Promise.all(rows.map((r) => agentInfo(r.id, r.agent_url)));
+  rows.forEach((row, i) => {
+    for (const name of infos[i]?.players ?? []) {
+      if (!name.toLowerCase().includes(needle)) continue;
+      // A rider found on the grid *and* in presence is one rider. The live sighting wins:
+      // it is the server saying so rather than the player's own app.
+      const already = hits.findIndex(
+        (h) => h.name.toLowerCase() === name.toLowerCase() && h.serverId === row.id,
+      );
+      const hit: PlayerHit = {
+        name,
+        guid: already >= 0 ? hits[already].guid : null,
+        serverId: row.id,
+        serverName: row.name,
+        address: row.address,
+        region: row.region,
+        source: "live",
+      };
+      if (already >= 0) hits[already] = hit;
+      else hits.push(hit);
+    }
+  });
+
+  // Live sightings first, then alphabetically — a list that reorders itself between
+  // keystrokes is unusable, and D1 gives no order worth keeping.
+  hits.sort((a, b) =>
+    a.source === b.source ? a.name.localeCompare(b.name) : a.source === "live" ? -1 : 1,
+  );
+  return json(200, { players: hits });
 }
 
 /** How many servers one account may register. Enough for a small league, not a botnet. */

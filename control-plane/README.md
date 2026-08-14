@@ -27,6 +27,9 @@ consequences fall out of that, and they're baked into the schema:
 | GET | `/v1/agent.exe` | — | The agent binary. Unauthenticated by necessity: a booting instance fetches it before it holds any credential. |
 | POST | `/v1/enroll` | invite code | Trade an invite for an account and a bearer token |
 | GET | `/v1/servers` | — | Server registry. Public: it is the app's join picker, and the people who most need it are the ones with no account yet. `agent_url` is not returned. |
+| GET | `/v1/servers/browse` | — | The same list with each server's live detail folded in — track, who is on it, and the tracks and bikes the host has. Proxied from each agent's `/info` and cached briefly, so `agent_url` stays private. |
+| GET | `/v1/servers/:id/info` | — | One server's live detail, for the panel behind a row. |
+| GET | `/v1/players?q=` | bearer | Which server a rider is on, by name or GUID. Authenticated on purpose — see below. |
 | POST | `/v1/servers/:id/hello` | agent token | A provisioned box announcing that it is up. Its address is taken from `cf-connecting-ip`, never from the body, so a box cannot register somebody else's. |
 | GET | `/v1/me` | bearer | Account, and a per-bike summary of what is stored for it |
 | PUT | `/v1/me/guid` | bearer | Claim a GUID. First-come. |
@@ -43,6 +46,18 @@ consequences fall out of that, and they're baked into the schema:
 Enrollment by invite code stands in for Steam sign-in until there's an API key. `accounts`
 already carries a nullable `steam_id`, so adding Steam is a backfill rather than a rewrite
 of every account's identity.
+
+### Why the player search needs a token when the server list does not
+
+A server is a place, and its grid is on show to everyone standing on it — so listing servers,
+and what is being ridden on them, is public. "Where is this person right now" is a question
+about a person, and answering it for anyone who can reach the worker would make the registry
+a tracker. Requiring an enrolled account is the smallest gate that keeps it a feature for
+players rather than a public lookup.
+
+The same line runs through what the agent reports. `/info` is unauthenticated and carries
+player *names* — what you would see by joining — while GUIDs, which identify an install
+across name changes, stay behind the agent's token on `/players`.
 
 ### Why loadouts are per bike
 

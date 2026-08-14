@@ -18,12 +18,11 @@ pub const TRACK: Key = Key { section: "event", name: "track" };
 pub const NAME: Key = Key { section: "connection", name: "name" };
 pub const MAX_CLIENT: Key = Key { section: "connection", name: "maxclient" };
 
-// Not reachable from the API yet — they're here as the vocabulary of keys this module is
-// known to handle correctly, and the tests exercise them as the two awkward cases: a key
-// whose value is legitimately empty, and one that is absent from a section that exists.
-#[allow(dead_code)]
+// Read by `/info` and never written. They are also the two awkward cases the tests
+// exercise: a key whose value is legitimately empty, and one absent from a section that
+// exists. `PASSWORD` is read only to report *whether* there is one — the value itself never
+// leaves the box.
 pub const TRACK_LAYOUT: Key = Key { section: "event", name: "track_layout" };
-#[allow(dead_code)]
 pub const PASSWORD: Key = Key { section: "connection", name: "password" };
 
 /// The value of `key`, or `None` when the section or the key is absent.

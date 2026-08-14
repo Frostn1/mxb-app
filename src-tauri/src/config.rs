@@ -129,6 +129,13 @@ pub struct AppConfig {
     /// What paint sync last did, so the UI can say so instead of the player having to guess
     /// from an empty grid. Written by the background tasks; never edited by hand.
     pub sync: SyncState,
+    /// The setup a join temporarily overwrote, and everything needed to put it back.
+    ///
+    /// Here rather than in memory because the point of it outlives the app: a player
+    /// switches bikes to get onto a server, rides, quits the game, closes the app — and
+    /// still has to find their own bike where they left it. Default is the empty one,
+    /// which [`crate::joinprep::PendingRestore::is_set`] reads as "nothing to undo".
+    pub pending_restore: crate::joinprep::PendingRestore,
 }
 
 /// The record of the last publish and the last pull.
@@ -228,6 +235,7 @@ impl Default for AppConfig {
             cp_rider_name: String::new(),
             cp_guid: String::new(),
             sync: SyncState::default(),
+            pending_restore: crate::joinprep::PendingRestore::default(),
         }
     }
 }

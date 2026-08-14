@@ -18,6 +18,7 @@ mod gearrepair;
 mod heightfield;
 mod imgcache;
 mod install;
+mod joinprep;
 mod library;
 mod linkwalk;
 mod logs;
@@ -4730,6 +4731,203 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     Ok(outcome)
 }
 
+/// The joinable servers, with what each host is doing right now.
+#[tauri::command]
+async fn server_browse(app: tauri::AppHandle) -> Result<Vec<paintsync::BrowsedServer>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let token = Some(cfg.cp_token.as_str()).filter(|t| !t.trim().is_empty());
+    paintsync::browse(token).await.map_err(|e| format!("{e:#}"))
+}
+
+/// One server's live detail, for the panel behind a row.
+#[tauri::command]
+async fn server_detail(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<paintsync::BrowsedServer, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let token = Some(cfg.cp_token.as_str()).filter(|t| !t.trim().is_empty());
+    paintsync::server_info(token, &id).await.map_err(|e| format!("{e:#}"))
+}
+
+/// Which server a rider is on, by name or GUID.
+#[tauri::command]
+async fn player_search(
+    app: tauri::AppHandle,
+    query: String,
+) -> Result<Vec<paintsync::PlayerHit>, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        // The control plane would answer 401, which reaches the player as a number. Say
+        // what it actually takes instead — the search is gated on having an account
+        // because it answers a question about a person, not about a server.
+        return Err("Enroll with an invite code to search for players.".into());
+    }
+    paintsync::find_players(&cfg.cp_token, query.trim())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Whether a bike gets this rider onto a server, and what else they could ride if not.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JoinCheck {
+    verdict: joinprep::Verdict,
+    /// The rider's own bikes this server would take, so a refusal comes with a way out.
+    eligible_bikes: Vec<String>,
+    /// Every installed bike with its class, so the UI can label the picker with the class
+    /// the server is asking for rather than with bare ids.
+    bikes: Vec<bikeswap::BikeIdentity>,
+    /// `[info] bikeid` — the bike the game will start on if nothing is changed.
+    active_bike: String,
+}
+
+/// Check a bike against a server's gate.
+///
+/// The gate is passed in rather than fetched here: the browser already holds it from the
+/// listing, and re-asking would put a network round-trip behind every change of the bike
+/// dropdown.
+///
+/// Bikes come from the installed scan rather than from `profile.ini`, because the class is
+/// half the question and only the bike's own files carry it. A profile lists ids and nothing
+/// else, so it cannot say whether a bike is MX1.
+#[tauri::command]
+async fn join_check(
+    app: tauri::AppHandle,
+    profile: String,
+    bikeid: String,
+    gate: joinprep::Gate,
+) -> Result<JoinCheck, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let mods = library::mod_bikes(&cfg.mods_path);
+        let bikes = bikeswap::scan_installed_bikes(&cfg.mods_path);
+        let candidates: Vec<joinprep::Candidate> = bikes
+            .iter()
+            .map(|b| joinprep::Candidate { id: b.id.clone(), class: b.class.clone() })
+            .collect();
+        // The class of the bike being asked about. A bike the scan cannot see is one whose
+        // files are inside the game's archive — stock — and stock bikes carry a class the
+        // scan has no way to read, so an unknown one is left unclassified rather than
+        // guessed at.
+        let class = bikes
+            .iter()
+            .find(|b| b.id.eq_ignore_ascii_case(bikeid.trim()))
+            .map(|b| b.class.clone())
+            .unwrap_or_default();
+        Ok(JoinCheck {
+            verdict: joinprep::verdict(&gate, &mods, &bikeid, &class),
+            eligible_bikes: joinprep::eligible_bikes(&gate, &mods, &candidates),
+            bikes,
+            active_bike: presets::active_bike(&cfg.profiles_dir(), &profile).unwrap_or_default(),
+        })
+    })
+    .await
+    .map_err(|e| format!("join_check task failed: {e}"))?
+}
+
+/// Apply a preset and join a server with it, keeping what it overwrote.
+///
+/// The two halves are one command on purpose. Applying a preset in order to get onto a
+/// server is a *temporary* change — often a bike the player does not otherwise ride — and
+/// splitting apply from join would leave the snapshot to a caller that might not take it,
+/// which is exactly how a player ends up with someone else's bike selected and no idea why.
+///
+/// A failed launch still leaves the snapshot in place: the profile was already written by
+/// then, so the undo has to survive the thing that went wrong after it.
+#[tauri::command]
+fn join_with_preset(
+    app: tauri::AppHandle,
+    address: String,
+    profile: String,
+    bikeid: String,
+    loadout: presets::Loadout,
+    preset: String,
+    server: String,
+) -> Result<gameproc::LaunchOutcome, String> {
+    let mut cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    // Refuse before writing anything: the game reads its connect flag only at startup, so
+    // a running copy would take the profile change and none of the joining.
+    if gameproc::is_game_running() {
+        return Ok(gameproc::LaunchOutcome::AlreadyRunning);
+    }
+
+    let previous = presets::read_loadout(&cfg.profiles_dir(), &profile, &bikeid)
+        .map_err(|e| format!("{e:#}"))?;
+    let restore = joinprep::PendingRestore {
+        profile: profile.clone(),
+        bikeid: bikeid.clone(),
+        // The model swap is a filesystem state, not a `profile.ini` value, so `read_loadout`
+        // cannot see it. Recorded here or a preset that swaps the model leaves the rider
+        // with someone else's bodywork after the undo.
+        loadout: presets::Loadout {
+            model_swap: modelswap::current_active(&cfg.mods_path, &bikeid),
+            ..previous
+        },
+        active_bike: presets::active_bike(&cfg.profiles_dir(), &profile).unwrap_or_default(),
+        server: server.clone(),
+        preset: preset.clone(),
+        at: (now_ms() / 1000) as i64,
+    };
+
+    apply_loadout_now(&app, &cfg, &profile, &bikeid, &loadout, true)?;
+    cfg.pending_restore = restore;
+    if let Err(e) = config::save(&app, &cfg) {
+        // The profile is already changed, so this is the undo being lost — worth saying,
+        // not worth undoing the apply the player asked for.
+        eprintln!("couldn't record what to restore after joining: {e:#}");
+    }
+
+    let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
+    if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        publish_paints_soon(&app, &cfg, Some(profile.as_str()));
+        live_sync_session(&app, Some(address.clone()));
+        sync_paints_soon(&app, Some(address));
+    }
+    Ok(outcome)
+}
+
+/// What a join overwrote, or the empty one when there is nothing to put back.
+#[tauri::command]
+fn pending_restore(app: tauri::AppHandle) -> joinprep::PendingRestore {
+    config::load_or_detect(&app).unwrap_or_default().pending_restore
+}
+
+/// Put back the setup the last join overwrote.
+#[tauri::command]
+fn restore_loadout(app: tauri::AppHandle) -> Result<PresetApplyOutcome, String> {
+    let mut cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let pending = cfg.pending_restore.clone();
+    if !pending.is_set() {
+        return Err("There's nothing to put back.".into());
+    }
+    // `make_active` is false because the bike to end up on is the one that was active
+    // *before* the join, which is not necessarily the one the preset was written onto.
+    let outcome = apply_loadout_now(
+        &app,
+        &cfg,
+        &pending.profile,
+        &pending.bikeid,
+        &pending.loadout,
+        false,
+    )?;
+    if !pending.active_bike.trim().is_empty() {
+        presets::set_active_bike(&cfg.profiles_dir(), &pending.profile, &pending.active_bike)
+            .map_err(|e| format!("{e:#}"))?;
+    }
+    cfg.pending_restore = joinprep::PendingRestore::default();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    Ok(outcome)
+}
+
+/// Keep the change the join made — drop the undo without performing it.
+#[tauri::command]
+fn discard_restore(app: tauri::AppHandle) -> Result<(), String> {
+    let mut cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    cfg.pending_restore = joinprep::PendingRestore::default();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Is MX Bikes running? Polled by the sidebar so Play can show the live state.
 #[tauri::command]
 fn game_running() -> bool {
@@ -6069,6 +6267,14 @@ fn main() {
             frostmod_stop,
             launch_game,
             join_server,
+            server_browse,
+            server_detail,
+            player_search,
+            join_check,
+            join_with_preset,
+            pending_restore,
+            restore_loadout,
+            discard_restore,
             experimental_state,
             set_experimental,
             enroll_account,
