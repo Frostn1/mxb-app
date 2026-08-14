@@ -31,11 +31,16 @@ import {
   isPublicGameAddress,
   isRegion,
   isRelDest,
+  isReportCount,
   isServerKey,
   isRiderName,
   isServerName,
   isSha256,
   isSlot,
+  isVerdict,
+  parseFlagged,
+  verdictRank,
+  type Verdict,
   MAX_BOOTSTRAP_LOG,
   MAX_PAINT_BYTES,
 } from "./validate";
@@ -132,6 +137,8 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
+  if (method === "PUT" && path === "/v1/integrity") return putIntegrity(request, account, env);
+  if (method === "GET" && path === "/v1/integrity") return serverIntegrity(url, account, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
   if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
@@ -1372,6 +1379,138 @@ async function roster(url: URL, env: Env): Promise<Response> {
     });
   }
   return json(200, { server: serverId, riders: [...riders.values()] });
+}
+
+/**
+ * A client publishing what its own cheat scan found.
+ *
+ * The client decides what to send and could send anything, which is the honest limit of the
+ * whole feature — see `migrations/0010_integrity.sql`. Nothing here tries to work around
+ * that; it validates the shape, keeps the worst verdict of the recent past alongside the
+ * current one, and stores it.
+ */
+async function putIntegrity(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { verdict, rulesVersion, suspectCount, flagged } = body as Record<string, unknown>;
+  if (!isVerdict(verdict)) return json(400, { error: "that isn't a verdict" });
+  if (!isReportCount(rulesVersion)) return json(400, { error: "that isn't a rules version" });
+  if (!isReportCount(suspectCount)) return json(400, { error: "that isn't a suspect count" });
+
+  const now = Date.now();
+  // The worst verdict only carries forward while it is still about this session. Past the
+  // freshness window it is history, and history is not what this table is for.
+  const prev = await env.DB.prepare(
+    "SELECT worst_verdict, worst_at FROM integrity WHERE account_id = ?",
+  )
+    .bind(account.id)
+    .first<{ worst_verdict: string; worst_at: number }>();
+  const stillCurrent = prev && prev.worst_at > now - PRESENCE_TTL_MS && isVerdict(prev.worst_verdict);
+  const keepWorst = stillCurrent && verdictRank(prev.worst_verdict as Verdict) > verdictRank(verdict);
+
+  await env.DB.prepare(
+    "INSERT INTO integrity (account_id, verdict, rules_version, suspect_count, flagged," +
+      " worst_verdict, worst_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)" +
+      " ON CONFLICT(account_id) DO UPDATE SET verdict = excluded.verdict," +
+      " rules_version = excluded.rules_version, suspect_count = excluded.suspect_count," +
+      " flagged = excluded.flagged, worst_verdict = excluded.worst_verdict," +
+      " worst_at = excluded.worst_at, updated_at = excluded.updated_at",
+  )
+    .bind(
+      account.id,
+      verdict,
+      rulesVersion,
+      suspectCount,
+      JSON.stringify(parseFlagged(flagged)),
+      keepWorst ? prev!.worst_verdict : verdict,
+      keepWorst ? prev!.worst_at : now,
+      now,
+    )
+    .run();
+  return json(200, { ok: true });
+}
+
+/**
+ * What the riders on one server have attested.
+ *
+ * Readable by the server's owner, and by anyone currently on it — you can see the grid you
+ * are actually riding with, and you cannot go fishing for somebody who isn't near you. A
+ * verdict is about a person, so it is not public the way the server list is.
+ *
+ * The response deliberately reads as "who has attested", not "who is clean". A rider whose
+ * app isn't running, isn't scanning, or isn't reporting simply isn't here, and that is the
+ * ordinary case rather than a suspicious one — the client that matters most is exactly the
+ * one that will never appear.
+ */
+async function serverIntegrity(url: URL, account: Account, env: Env): Promise<Response> {
+  const serverId = url.searchParams.get("server");
+  if (!isServerKey(serverId)) return json(400, { error: "a server id is required" });
+
+  const fresh = Date.now() - PRESENCE_TTL_MS;
+  const owns = await env.DB.prepare(
+    "SELECT 1 FROM servers WHERE id = ? AND owner_account_id = ?",
+  )
+    .bind(serverId, account.id)
+    .first();
+  if (!owns) {
+    const present = await env.DB.prepare(
+      "SELECT 1 FROM presence WHERE account_id = ? AND server_id = ? AND updated_at > ?",
+    )
+      .bind(account.id, serverId, fresh)
+      .first();
+    if (!present) return json(403, { error: "that isn't your server, and you aren't on it" });
+  }
+
+  const rows = await env.DB.prepare(
+    "SELECT a.rider_name, a.guid, i.verdict, i.rules_version, i.suspect_count, i.flagged," +
+      " i.worst_verdict, i.worst_at, i.updated_at" +
+      " FROM accounts a" +
+      " JOIN presence pr ON pr.account_id = a.id" +
+      " JOIN integrity i ON i.account_id = a.id" +
+      " WHERE pr.server_id = ? AND pr.updated_at > ? AND i.updated_at > ?",
+  )
+    .bind(serverId, fresh, fresh)
+    .all<{
+      rider_name: string;
+      guid: string | null;
+      verdict: string;
+      rules_version: number;
+      suspect_count: number;
+      flagged: string;
+      worst_verdict: string;
+      worst_at: number;
+      updated_at: number;
+    }>();
+
+  const riders = rows.results.map((r) => ({
+    riderName: r.rider_name,
+    guid: r.guid ?? "",
+    verdict: isVerdict(r.verdict) ? r.verdict : "unknown",
+    rulesVersion: r.rules_version,
+    suspectCount: r.suspect_count,
+    flagged: parseFlagged(safeParse(r.flagged)),
+    // Only while it still describes this session — see the migration.
+    worstVerdict:
+      r.worst_at > fresh && isVerdict(r.worst_verdict) ? r.worst_verdict : undefined,
+    reportedAt: r.updated_at,
+  }));
+  // Worst first: an admin opening this is looking for the one row that isn't clean.
+  riders.sort(
+    (a, b) =>
+      verdictRank(b.worstVerdict ?? b.verdict) - verdictRank(a.worstVerdict ?? a.verdict) ||
+      a.riderName.localeCompare(b.riderName),
+  );
+  return json(200, { server: serverId, riders });
+}
+
+/** Read a column we wrote as JSON. A row that somehow isn't parseable is an empty list, not
+ *  a 500 — one bad row must not take out an admin's whole view. */
+function safeParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return [];
+  }
 }
 
 async function readJson(request: Request): Promise<unknown | null> {
