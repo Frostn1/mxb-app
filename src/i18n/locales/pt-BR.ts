@@ -1579,6 +1579,13 @@ export const ptBR: Translation = {
   "designer.traceHint":
     "Tira da folha a pintura da qual você partiu e a mostra apagada por baixo, para decalcar. Ela deixa de fazer parte do que você salva.",
   "designer.noTemplate": "Esta folha não tem modelo para decalcar — ela nasceu em branco.",
+  "designer.stockTexture": "Textura de fábrica",
+  "designer.stockHint":
+    "Mostra sob a sua folha a textura com que o modelo vem — os plásticos da própria moto, antes de qualquer pintura substituí-los. Nada disso é salvo.",
+  "designer.noStock":
+    "Só motos conseguem dizer quais texturas são delas. Um capacete usa a pintura com que veio, e isso não é um visual de fábrica para decalcar.",
+  "designer.stockNoMatch":
+    "Este modelo não traz nenhuma textura própria chamada “{{name}}”, então não há nada da moto para mostrar sob esta folha.",
   "designer.uvMap": "Mapa UV",
   "designer.uvHint":
     "Mostra onde as carenagens do modelo caem nesta folha, cada peça com sua cor.",

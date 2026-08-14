@@ -30,6 +30,9 @@ import { gearPartOf, isBikeKind, type PaintDestState } from "../paintDest";
  * hides the collar. Boots and gloves cover nothing else, so hiding them would be a control with
  * nothing behind it.
  */
+/** "This model can't name its own textures" — one array, so reporting it twice is one value. */
+const NO_STOCK: PaintTexture[] = [];
+
 const HIDEABLE: { part: RiderPart["part"]; label: TKey }[] = [
   { part: "protection", label: "paints.kind.protection" },
   { part: "helmet", label: "paints.kind.helmet" },
@@ -40,6 +43,7 @@ export function PreviewPanel({
   overrides,
   frameToken,
   onGeometry,
+  onStock,
   className,
 }: {
   state: PaintDestState;
@@ -54,6 +58,16 @@ export function PreviewPanel({
    * that question — one that could quietly disagree about which bike is on screen.
    */
   onGeometry?: (nodes: EdfNode[] | null) => void;
+  /**
+   * The model's own textures, handed back with the mesh so the editor can show what the
+   * bike already looks like under a sheet being drawn from blank.
+   *
+   * Bikes only, and empty for anything else. A rider part's textures are whatever dressed
+   * it — often the mesh's own, but a helmet that ships paints and embeds no shell wears a
+   * `.pnt` here, and offering that as "stock" would be a confident lie about somebody
+   * else's paint.
+   */
+  onStock?: (textures: PaintTexture[]) => void;
   className?: string;
 }) {
   const t = useT();
@@ -61,6 +75,8 @@ export function PreviewPanel({
   const { kind, model, bikePreview } = state;
   const [nodes, setNodes] = useState<EdfNode[] | null>(null);
   const [textures, setTextures] = useState<PaintTexture[]>([]);
+  // The model's own textures, kept apart from the ones it is currently wearing.
+  const [stock, setStock] = useState<PaintTexture[]>([]);
   const [riderParts, setRiderParts] = useState<RiderPart[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -109,6 +125,7 @@ export function PreviewPanel({
     if (!isBike || !model || !bikePreview) {
       setNodes(null);
       setTextures([]);
+      setStock([]);
       return;
     }
     let alive = true;
@@ -136,11 +153,15 @@ export function PreviewPanel({
         // The model's own look, under the drawing — so parts this paint doesn't cover still
         // read as the bike rather than as untextured grey.
         setTextures(m.paints[0]?.textures ?? []);
+        // Not `paints[0]`: that's whichever livery happened to sort first, and on a bike
+        // with an installed paint it is somebody's artwork rather than the bike's own.
+        setStock(m.base ?? []);
       })
       .catch((e) => {
         if (!alive) return;
         setNodes(null);
         setTextures([]);
+        setStock([]);
         setErr(String(e).replace(/^Error:\s*/, ""));
       })
       .finally(() => alive && setLoading(false));
@@ -181,9 +202,11 @@ export function PreviewPanel({
    * came from would be a distinction the sheet itself doesn't make.
    */
   useEffect(() => {
-    if (!onGeometry) return;
-    onGeometry(nodes ?? (riderParts ? riderParts.flatMap((p) => p.nodes) : null));
-  }, [nodes, riderParts, onGeometry]);
+    onGeometry?.(nodes ?? (riderParts ? riderParts.flatMap((p) => p.nodes) : null));
+    // Through the same effect, so the mesh and the textures said to be its own can never
+    // describe two different models. Gated on `nodes` because that is the bike branch.
+    onStock?.(nodes ? stock : NO_STOCK);
+  }, [nodes, riderParts, stock, onGeometry, onStock]);
 
   // Toggled-off gear is dropped before it reaches the viewer, which is what makes hiding it
   // reveal what's underneath rather than just dimming it.

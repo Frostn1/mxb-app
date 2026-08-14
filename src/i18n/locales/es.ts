@@ -1590,6 +1590,13 @@ export const es: Translation = {
   "designer.traceHint":
     "Saca de la hoja la pintura de la que partiste y muéstrala tenue por debajo, para calcarla. Deja de formar parte de lo que guardas.",
   "designer.noTemplate": "Esta hoja no tiene plantilla que calcar: nació en blanco.",
+  "designer.stockTexture": "Textura de fábrica",
+  "designer.stockHint":
+    "Muestra bajo tu hoja la textura con la que viene el modelo: los plásticos propios de la moto, antes de que ninguna pintura los reemplazara. Nada de ella se guarda.",
+  "designer.noStock":
+    "Solo las motos pueden decir qué texturas son suyas. Un casco lleva la pintura con la que vino, y eso no es un aspecto de fábrica que calcar.",
+  "designer.stockNoMatch":
+    "Este modelo no trae ninguna textura propia llamada “{{name}}”, así que no hay nada de la moto que mostrar bajo esta hoja.",
   "designer.uvMap": "Mapa UV",
   "designer.uvHint":
     "Muestra dónde cae en esta hoja cada pieza del carenado del modelo, cada una con su color.",

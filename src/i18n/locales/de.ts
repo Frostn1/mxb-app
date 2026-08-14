@@ -1603,6 +1603,13 @@ export const de: Translation = {
   "designer.traceHint":
     "Hebt die Lackierung, mit der du angefangen hast, aus dem Blatt heraus und zeigt sie schwach darunter zum Abpausen. Sie ist dann nicht mehr Teil dessen, was du speicherst.",
   "designer.noTemplate": "Dieses Blatt hat keine Vorlage zum Abpausen — es war von Anfang an leer.",
+  "designer.stockTexture": "Originaltextur",
+  "designer.stockHint":
+    "Zeigt unter deinem Blatt die Textur, mit der das Modell ausgeliefert wird — das eigene Plastik des Bikes, bevor eine Lackierung es ersetzt hat. Nichts davon wird gespeichert.",
+  "designer.noStock":
+    "Nur Bikes können sagen, welche Texturen ihre eigenen sind. Ein Helm trägt die Lackierung, mit der er kam, und die ist kein Originallook zum Abpausen.",
+  "designer.stockNoMatch":
+    "Dieses Modell bringt keine eigene Textur namens „{{name}}“ mit, also gibt es vom Bike nichts unter diesem Blatt zu zeigen.",
   "designer.uvMap": "UV-Karte",
   "designer.uvHint":
     "Zeigt, wo die Verkleidungsteile des Modells auf diesem Blatt landen, jedes in eigener Farbe.",

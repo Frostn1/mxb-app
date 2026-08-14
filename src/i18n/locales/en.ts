@@ -1556,6 +1556,13 @@ export const en = {
   "designer.traceHint":
     "Lift the paint you started from out of the sheet and show it faintly underneath, to trace over. It stops being part of what you save.",
   "designer.noTemplate": "This sheet has no template to trace â it started blank.",
+  "designer.stockTexture": "Stock texture",
+  "designer.stockHint":
+    "Show the texture the model ships with under your sheet — the bike's own plastics, before any paint replaced them. Nothing of it is saved.",
+  "designer.noStock":
+    "Only bikes can say which textures are their own. A helmet wears whichever paint it shipped with, and that isn't a stock look to trace.",
+  "designer.stockNoMatch":
+    "This model carries no texture of its own called “{{name}}”, so there's nothing of the bike's to show under this sheet.",
   "designer.uvMap": "UV map",
   "designer.uvHint":
     "Show where the model's bodywork lands on this sheet, each piece in its own colour.",

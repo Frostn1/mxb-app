@@ -1580,6 +1580,13 @@ export const it: Translation = {
   "designer.traceHint":
     "Togli dalla planche la vernice di partenza e mostrala in trasparenza sotto, per ricalcarla. Smette di far parte di ciò che salvi.",
   "designer.noTemplate": "Questa planche non ha un modello da ricalcare: è nata vuota.",
+  "designer.stockTexture": "Texture originale",
+  "designer.stockHint":
+    "Mostra sotto la tua planche la texture con cui esce il modello: le plastiche della moto stessa, prima che una vernice le sostituisse. Non ne viene salvato nulla.",
+  "designer.noStock":
+    "Solo le moto sanno dire quali texture sono le loro. Un casco indossa la vernice con cui è arrivato, e quella non è un aspetto originale da ricalcare.",
+  "designer.stockNoMatch":
+    "Questo modello non porta una texture sua chiamata “{{name}}”, quindi non c'è nulla della moto da mostrare sotto questa planche.",
   "designer.uvMap": "Mappa UV",
   "designer.uvHint":
     "Mostra dove finiscono su questa planche le carene del modello, ognuna con il suo colore.",
