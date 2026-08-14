@@ -1575,7 +1575,6 @@ export const es: Translation = {
   "designer.size": "Tamaño del texto",
   "designer.colour": "Color",
   "designer.outline": "Contorno",
-  "designer.needSheets": "Añade una hoja sobre la que dibujar.",
   "designer.noModelFound":
     "“{{model}}” no está en tu biblioteca, así que no hay nada donde mostrarla.",
   "designer.noBikePreview":

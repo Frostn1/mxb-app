@@ -991,9 +991,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [bump],
   );
 
-  /** Why saving isn't possible yet, as a translated message — or null when it is. */
+  /** Why saving isn't possible yet, as a translated message — or null when it is, and on an
+   *  empty canvas, where there is nothing to fix yet and Save is simply off. */
   const blocked = useMemo<string | null>(() => {
-    if (!sheets.length) return t("designer.needSheets");
+    if (!sheets.length) return null;
     if (!name.trim()) return t("paints.needName");
     if (sheets.some((s) => !s.name.trim())) return t("paints.needTextureNames");
     const seen = new Set<string>();
@@ -1005,6 +1006,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     if (!dest) return t("paints.needTarget");
     return null;
   }, [sheets, name, dest, t]);
+
+  const canSave = sheets.length > 0 && !blocked;
 
   const write = useCallback(
     async (overwrite: boolean) => {
@@ -1057,7 +1060,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   );
 
   const save = useCallback(async () => {
-    if (blocked || !dest) {
+    if (!canSave || !dest) {
       if (blocked) toast.error(blocked);
       return;
     }
@@ -1077,7 +1080,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       return;
     }
     await write(false);
-  }, [blocked, dest, name, t, write]);
+  }, [blocked, canSave, dest, name, t, write]);
 
   const selected = active?.layers.find((l) => l.id === selectedId) ?? null;
 
@@ -1113,7 +1116,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         />
         <Button
           size="sm"
-          disabled={busy || !!blocked}
+          disabled={busy || !canSave}
           title={blocked ?? undefined}
           onClick={() => void save()}
         >

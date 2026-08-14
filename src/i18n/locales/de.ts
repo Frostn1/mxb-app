@@ -1588,7 +1588,6 @@ export const de: Translation = {
   "designer.size": "Textgröße",
   "designer.colour": "Farbe",
   "designer.outline": "Kontur",
-  "designer.needSheets": "Füge eine Bahn zum Zeichnen hinzu.",
   "designer.noModelFound":
     "„{{model}}“ ist nicht in deiner Bibliothek, also gibt es nichts, worauf es gezeigt werden könnte.",
   "designer.noBikePreview":
