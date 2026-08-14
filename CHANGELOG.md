@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased — FrostMod runs on Linux, and the app can see the game there
+
+### Added
+- **FrostMod installs and runs on Linux.** It used to refuse with *FrostMod runs on Windows
+  only*, which was true of the binary and beside the point: on Linux the game is a Windows
+  process too — Steam runs it under Proton — so FrostMod belongs in that same Proton prefix,
+  where the process it injects into lives. The app now finds the prefix
+  (`steamapps/compatdata/655500`), finds the Proton build that made it (from the prefix's own
+  `config_info`, so it uses the build Steam used rather than the newest one installed), and
+  starts `frostmod.exe` in it. `--mods` is handed over as the prefix sees the folder —
+  `C:\users\steamuser\…` rather than `/home/…`, which is the same path and not a name FrostMod
+  could have made sense of.
+- **The Reload button works from outside the prefix.** The app is a native Linux process and
+  FrostMod's reload event is a Wine kernel object: nothing this side of the wall can pulse it.
+  So a reload goes as a file instead — FrostMod v0.13.0 reads its command file on a poll — and
+  the status pill reads the process table rather than asking for an event it can't open.
+  Anything older than v0.13.0 is refused with a version to update to, rather than started into
+  a state where the in-game `F8` works and every button here quietly doesn't.
+- **The FrostMod section of Settings, and its log row, appear on Linux** on the same terms as
+  Windows. macOS still hides them: the app launches a CrossOver/Whisky bottle there but does
+  not inject into it.
+
+### Fixed
+- **The app knows when the game is running on Linux.** It answered *no* unconditionally —
+  macOS got a process-table check when Play landed there and Linux was never given one. So Play
+  never greyed out mid-session, and every question that turns on it ("will this paint show now
+  or at the next launch?", "is it safe to move this file?") was answered for a machine where the
+  game supposedly never runs. Under Proton the game is an ordinary Linux process whose command
+  line still names `mxbikes.exe`, so `/proc` finds it — no `ps` needed, which the AppImage
+  doesn't carry.
+
 ## Unreleased — the Linux app stops carrying the library that blanked its window
 
 ### Fixed

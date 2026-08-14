@@ -50,6 +50,11 @@ hours), then downloads and installs them on restart.
   `.pkz` / `.pnt` files are placed as-is.
 - **Live reload**: a debounced watcher on `<modsPath>/mods` signals FrostMod to
   reload the game when mods are added — including ones installed outside the app.
+  On Linux that means the game's own Proton prefix: FrostMod is a Windows program
+  and so is the game it injects into, so the app starts it inside
+  `steamapps/compatdata/<appid>` rather than beside itself, and reaches it with a
+  command file instead of a Windows event (nothing outside a Wine prefix can pulse
+  one). Needs FrostMod v0.13.0 or newer, which is what reads that file.
 - **Paint studio**: builds a `.pnt` from `.tga`/`.png` sheets, and unpacks an
   existing paint back into editable sheets that keep the texture names the model
   binds — so a livery made anywhere can be packed, installed and previewed here.

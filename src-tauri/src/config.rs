@@ -810,7 +810,10 @@ pub fn detect_game_path(game: &GameProfile) -> Option<String> {
 
 /// Candidate Steam library roots: the default install locations plus any extra
 /// libraries registered in `steamapps/libraryfolders.vdf`.
-fn steam_libraries() -> Vec<PathBuf> {
+///
+/// Also used by [`crate::proton`] on Linux, where a game's Proton prefix sits under the
+/// same `steamapps` as the game itself — including on a second drive.
+pub(crate) fn steam_libraries() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     let mut push = |roots: &mut Vec<PathBuf>, p: PathBuf| {
         if !roots.contains(&p) {
