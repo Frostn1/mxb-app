@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased — a browse card says who made it
+
+### Added
+- **Mod cards carry a byline.** The catalog knows who posted each mod and the grid never
+  showed it, so telling two versions of the same track apart meant opening both. The name now
+  sits beside the date, the way a shop card already carries its author. It rides along with
+  the listing request rather than costing one of its own, and a mod the catalog names nobody
+  for simply keeps the date.
+
+## Unreleased — the install picker says which file it's about to fetch
+
+### Fixed
+- **A dedicated-server build is no longer installed as if it were the mod.** Server files were
+  detected by looking for the word "server" anywhere in a download block, which missed the
+  authors who only say it in the file's name (`Ironman_2024_Server.pkz`) — an undetected one
+  carrying the page's "Default" flag was preselected and installed without ever being named.
+  The link itself is read now as well, and the same check no longer mistakes a track called
+  *Observer Hill* for a server build, which used to hide the only download it had.
+- **Quick install stops guessing on a mod that offers nothing but server files.** One click
+  can't ask which build was meant, and the wrong one installs cleanly and then does nothing
+  in-game. Those mods now say so and send you to the page, where every file is listed.
+
+### Changed
+- **Every download is shown, with the recommended one picked.** Server builds used to be
+  dropped from the list, so a mod read as having one file while the flag behind that was a
+  guess. They're listed last instead, badged *Server*, folded under a *dedicated server files*
+  disclosure, and never preselected while anything playable is on offer.
+- **The mirror list opens on more than one row.** A single row read as the only file there
+  was; the first few are listed now, each with the author's own name for the file, so two
+  MediaFire links are told apart before one of them is downloaded.
+
 ## Unreleased — FrostMod runs on Linux, and the app can see the game there
 
 ### Added

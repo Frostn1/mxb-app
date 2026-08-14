@@ -363,19 +363,23 @@ export const en = {
   "browse.queued": "Queued “{{title}}”",
   "browse.queuedDesc": "Installing to {{folder}}.",
   "browse.rootFolder": "root",
+  "browse.byAuthor": "by {{author}}",
   "browse.needsBrowser": "“{{title}}” needs a browser download",
   "browse.needsBrowserDesc":
     "{{host}} blocks in-app downloads — open its page to finish.",
   "browse.noDownload": "No download found for “{{title}}”",
+  "browse.serverOnly": "“{{title}}” only offers server files",
+  "browse.serverOnlyDesc":
+    "Open the mod to see its downloads — a dedicated-server build isn't installed for you.",
   "browse.quickInstallFailed": "Couldn't quick-install “{{title}}”",
   "browse.queuedBulk_one": "Queued {{count}} mod",
   "browse.queuedBulk_other": "Queued {{count}} mods",
   "browse.queuedBulkDesc": "They'll install one after another.",
-  "browse.queuedBulkSkipped_one": "{{count}} skipped — browser-only host.",
-  "browse.queuedBulkSkipped_other": "{{count}} skipped — browser-only host.",
+  "browse.queuedBulkSkipped_one": "{{count}} skipped — open it to pick a download.",
+  "browse.queuedBulkSkipped_other": "{{count}} skipped — open them to pick a download.",
   "browse.bulkFailed": "Couldn't quick-install the selection",
-  "browse.bulkFailedDesc_one": "It needs a browser download.",
-  "browse.bulkFailedDesc_other": "All {{count}} need a browser download.",
+  "browse.bulkFailedDesc_one": "Open it to pick a download.",
+  "browse.bulkFailedDesc_other": "All {{count}} need a download picked by hand.",
 
   // ── Shop (MX Bikes Shop — purchased downloads) ─────────────────────────────
   "shop.help":
@@ -472,6 +476,16 @@ export const en = {
   "installDialog.differentBike": "Different bike / pack",
   "installDialog.directFastest": "Direct · fastest",
   "installDialog.direct": "Direct",
+  "installDialog.recommendedBadge": "Recommended",
+  "installDialog.browserBadge": "Browser",
+  "installDialog.serverBadge": "Server",
+  "installDialog.serverBuildNote": "Dedicated server build — not for playing",
+  "installDialog.serverFiles_one": "1 dedicated server file",
+  "installDialog.serverFiles_other": "{{count}} dedicated server files",
+  "installDialog.serverOnlyNotice":
+    "Every download here is a dedicated-server build. Install one only if you're running a server — it adds nothing to ride.",
+  "installDialog.moreMirrors_one": "1 more mirror",
+  "installDialog.moreMirrors_other": "{{count}} more mirrors",
   "installDialog.perBikeHint":
     "Each download is a different bike — auto-selected to match your pick. Choose the “all bikes” pack for every bike at once.",
   "installDialog.mirrorsHint":
@@ -510,6 +524,8 @@ export const en = {
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installs to",
   "modDetail.noDownloadLink": "No download link was found on this page — open it on {{site}}.",
+  "modDetail.serverOnlyNotice":
+    "This page only offers dedicated-server files. They install fine, but there's nothing to ride in-game.",
   "modDetail.frostmodHint":
     "FrostMod will hot-reload the {{kind}} list when this finishes.",
   "modDetail.kindRider": "rider",
