@@ -1716,6 +1716,11 @@ export function setVoicePttHotkey(hotkey: string): Promise<void> {
   return invoke<void>("set_voice_ptt_hotkey", { hotkey });
 }
 
+/** Switch between push-to-talk (hold) and toggle (latch). Rebinds the mic key. */
+export function setVoiceToggleToTalk(toggle: boolean): Promise<void> {
+  return invoke<void>("set_voice_toggle_to_talk", { toggle });
+}
+
 export function setVoiceLevels(inputGain: number, outputVolume: number): Promise<void> {
   return invoke<void>("set_voice_levels", { inputGain, outputVolume });
 }

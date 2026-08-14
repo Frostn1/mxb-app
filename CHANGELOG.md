@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-13
+
+### Added
+- **Toggle to talk, as an alternative to holding the key.** Press once to open the mic,
+  press again to close it. Push-to-talk stays the default: it cannot leave a microphone
+  open by accident, and toggle can. Because a latched mic has nothing physical to remind
+  you it is open, the Voice section now shows a live **Mic open** indicator whenever it is.
+- The mic key is rebound whenever the mode changes, and always starts closed — a rebind, or
+  switching voice off and on, must never leave someone transmitting with no key press
+  behind it.
+- Auto-repeat is ignored in toggle mode. The OS repeats a held key, and acting on each
+  repeat would open and close the mic dozens of times a second for as long as someone
+  leant on it.
+
 ## Unreleased — the image builder survives long enough to build an image
 
 ### Fixed

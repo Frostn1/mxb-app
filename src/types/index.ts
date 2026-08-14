@@ -117,8 +117,11 @@ export interface Config {
   voiceInputDevice?: string;
   /** Where other riders come out. Blank means the system default, as above. */
   voiceOutputDevice?: string;
-  /** Push-to-talk combo in Tauri accelerator syntax. */
+  /** Mic-key combo in Tauri accelerator syntax. */
   voicePttHotkey?: string;
+  /** Latch the mic (press to open, press to close) instead of holding the key.
+   *  Off by default: push-to-talk can't leave a microphone open by accident. */
+  voiceToggleToTalk?: boolean;
   /** Microphone gain, 1 = untouched. */
   voiceInputGain?: number;
   /** Playback volume for other riders, 0..1. */

@@ -57,6 +57,8 @@ import {
   voiceMeterStop,
   voiceTestOutput,
   onVoiceInputLevel,
+  onVoicePtt,
+  setVoiceToggleToTalk,
   type VoiceDevices,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
@@ -394,6 +396,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
   const voiceGain = config.voiceInputGain ?? 1;
+  const voiceToggle = config.voiceToggleToTalk ?? false;
   const voiceVolume = config.voiceOutputVolume ?? 1;
 
   // What the overlay is doing right now: is the game up, does something else own the
@@ -453,6 +456,9 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const [devices, setDevices] = useState<VoiceDevices | null>(null);
   const [micTesting, setMicTesting] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
+  // Whether the mic key currently has the mic open. Shown because in toggle mode there is
+  // nothing physical to tell you — you can walk away from a latched-open microphone.
+  const [micOpen, setMicOpen] = useState(false);
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -485,6 +491,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     };
   }, []);
 
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void onVoicePtt(setMicOpen).then((f) => (un = f));
+    return () => un?.();
+  }, []);
+
   // Navigating to another section closes the meter with it. The state that drives it lives
   // up here rather than in the section, so without this a mic left testing would keep
   // recording behind a pane that isn't even on screen.
@@ -500,6 +512,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     } catch (e) {
       toast.error(t("voice.registerFailed"), { description: String(e) });
       await reloadConfig();
+    }
+  };
+
+  const changeMicMode = async (mode: string) => {
+    try {
+      await setVoiceToggleToTalk(mode === "toggle");
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
     }
   };
 
@@ -1292,8 +1313,39 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
             <div className="h-px bg-border" />
 
+            {/* Hold or latch. Push-to-talk is the default because it cannot leave a
+                microphone open by accident; toggle can, which is why the live indicator
+                below exists. */}
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col gap-1">
+                <span className="text-[12.5px] text-foreground/85">{t("voice.micMode")}</span>
+                <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  {voiceToggle ? t("voice.toggleDesc") : t("voice.pttDesc")}
+                </span>
+              </div>
+              <Segmented
+                size="sm"
+                value={voiceToggle ? "toggle" : "ptt"}
+                onChange={changeMicMode}
+                options={[
+                  { value: "ptt", label: t("voice.modePush") },
+                  { value: "toggle", label: t("voice.modeToggle") },
+                ]}
+              />
+            </div>
+
             <div className="flex items-center justify-between gap-6">
-              <span className="text-[12.5px] text-foreground/85">{t("voice.ptt")}</span>
+              <span className="flex items-center gap-2 text-[12.5px] text-foreground/85">
+                {t("voice.micKey")}
+                {/* Live, and deliberately loud in toggle mode: a latched mic has nothing
+                    physical to remind you it is open. */}
+                {voiceEnabled && micOpen && (
+                  <span className="flex items-center gap-1.5 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-semibold text-success">
+                    <span className="size-[6px] rounded-full bg-success" />
+                    {t("voice.micOpen")}
+                  </span>
+                )}
+              </span>
               <HotkeyField
                 value={voicePtt}
                 onCapture={rebindPtt}
