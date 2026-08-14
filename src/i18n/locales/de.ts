@@ -582,7 +582,7 @@ export const de: Translation = {
   "settings.instantRefreshDesc":
     "Wenn du ein Preset anwendest, während {{game}} läuft, wird der Look sofort im Spiel aktualisiert — ohne Neustart und ohne das Profil neu auszuwählen. Falls das nicht klappt, wirst du gebeten, dein Profil neu auszuwählen.",
   "settings.instantRefreshWindowsOnly":
-    "Den Look ohne Neustart im Spiel zu aktualisieren erfordert FrostMod, und das gibt es nur für Windows — du wirst stattdessen gebeten, dein Profil neu auszuwählen.",
+    "Den Look ohne Neustart im Spiel zu aktualisieren heißt, in das laufende Spiel hineinzugreifen, und das kann nur die Windows-Version — du wirst stattdessen gebeten, dein Profil neu auszuwählen.",
   "settings.autoRunFrostmod": "FrostMod automatisch starten",
   "settings.autoRunFrostmodDesc":
     "FrostMod im Hintergrund starten, sobald MXB App geöffnet wird.",
