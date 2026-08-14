@@ -823,6 +823,34 @@ fn strip_images(html: &str) -> String {
     img.replace_all(&s, "").into_owned()
 }
 
+/// The file name a download URL ends in — where an author who didn't label the block
+/// often still says what the file is (`…/Track_Server.zip`).
+///
+/// MediaFire and Google Drive hang a routing segment off the end of the path
+/// (`…/track.zip/file`, `…/view`), so those are stepped over to reach the real name.
+fn url_file_name(url: &str) -> &str {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let mut segs = path.trim_end_matches('/').rsplit('/').filter(|s| !s.is_empty());
+    let last = segs.next().unwrap_or("");
+    if ["file", "view", "download"].iter().any(|s| last.eq_ignore_ascii_case(s)) {
+        segs.next().unwrap_or(last)
+    } else {
+        last
+    }
+}
+
+/// Does this text call something a server build?
+///
+/// The word has to stand on its own: a track named "Observer Hill" contains the letters
+/// but isn't a server file, and mistaking one for the other hides the only download a mod
+/// has. Letters are what separate them rather than `\b`, because `_` is a word character
+/// to a regex and `Ironman_2024_Server.pkz` is how these files are actually named.
+fn mentions_server(text: &str) -> bool {
+    Regex::new(r"(?i)(?:^|[^a-z])servers?(?:[^a-z]|$)")
+        .unwrap()
+        .is_match(text)
+}
+
 /// Parse the theme's `div.download-container` blocks into download options.
 fn parse_downloads(html: &str) -> Vec<DownloadOption> {
     let doc = Html::parse_document(html);
@@ -836,10 +864,14 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
             .value()
             .classes()
             .any(|c| c.eq_ignore_ascii_case("container-default"));
-        // Dedicated-server builds are labelled "server" somewhere in the block.
-        let is_server = el.text().collect::<String>().to_lowercase().contains("server");
         let href = el.select(&a_sel).next().and_then(|a| a.value().attr("href"));
         let Some(url) = href else { continue };
+
+        // Dedicated-server builds are labelled "server" in the block — or, when the author
+        // only said it in the file's name, nowhere but the link. Both are read, because a
+        // server build that reaches the app unflagged is one the picker can preselect.
+        let is_server =
+            mentions_server(&el.text().collect::<String>()) || mentions_server(url_file_name(url));
 
         // The shown origin must reflect the ACTUAL link — authors often type a
         // mirror nickname (e.g. "GoWithTheFlow") in `div.filename`, which is not
@@ -862,8 +894,10 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
         });
     }
 
-    // Show the author's default file first.
-    out.sort_by_key(|d| !d.is_default);
+    // The author's default file first, and dedicated-server builds after everything else —
+    // whatever the page's own order was, a server build is never the file someone browsing
+    // for something to ride is after.
+    out.sort_by_key(|d| (d.is_server, !d.is_default));
     out
 }
 
@@ -993,6 +1027,65 @@ mod tests {
         assert_eq!(downloads.len(), 1);
         assert_eq!(downloads[0].host, "MediaFire");
         assert_eq!(downloads[0].label, "GoWithTheFlow");
+    }
+
+    #[test]
+    fn flags_server_builds_and_sorts_them_last() {
+        // The author marked the server build in the block's text, and made it the page's
+        // default — which is exactly how a server file used to end up preselected.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">Dedicated Server files</div>
+              <a href="https://www.mediafire.com/file/abc/track_srv.zip/file">Download</a>
+            </div>
+            <div class="download-container container-mirror">
+              <div class="filename">mediafire.com</div>
+              <a href="https://www.mediafire.com/file/xyz/track.zip/file">Download</a>
+            </div>
+        "#;
+        let downloads = parse_downloads(html);
+        assert_eq!(downloads.len(), 2);
+        // Playable first, despite the server build carrying the page's "default" flag.
+        assert!(!downloads[0].is_server);
+        assert!(downloads[1].is_server);
+        assert!(downloads[1].is_default);
+    }
+
+    #[test]
+    fn reads_the_server_label_out_of_the_link() {
+        // Nothing in the block says "server"; only the file it points at does.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">MediaFire</div>
+              <a href="https://www.mediafire.com/file/abc/Ironman_2024_Server.pkz/file">Download</a>
+            </div>
+        "#;
+        assert!(parse_downloads(html)[0].is_server);
+    }
+
+    #[test]
+    fn a_track_named_observer_is_not_a_server_build() {
+        // Substring matching flagged this one, which left the mod looking undownloadable.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">Observer Hill</div>
+              <a href="https://www.mediafire.com/file/abc/ObserverHill.zip/file">Download</a>
+            </div>
+        "#;
+        assert!(!parse_downloads(html)[0].is_server);
+    }
+
+    #[test]
+    fn file_name_skips_the_hosts_routing_segment() {
+        assert_eq!(
+            url_file_name("https://www.mediafire.com/file/abc/track_server.zip/file"),
+            "track_server.zip",
+        );
+        assert_eq!(
+            url_file_name("https://drive.google.com/file/d/ABC123/view?usp=sharing"),
+            "ABC123",
+        );
+        assert_eq!(url_file_name("https://x.com/downloads/pack.7z"), "pack.7z");
     }
 
     #[test]
