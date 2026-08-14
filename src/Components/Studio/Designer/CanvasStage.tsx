@@ -44,6 +44,12 @@ function checkerTile(): HTMLCanvasElement {
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 4;
 
+/** How long after a press a second one still counts as a double-click, and how far it may move.
+ *  The platform's own thresholds aren't readable from a webview; these are the usual ones, and
+ *  the slop matters more than the interval on a touchpad, where a "stationary" finger drifts. */
+const DOUBLE_MS = 400;
+const DOUBLE_SLOP = 6;
+
 interface CanvasStageProps {
   sheet: Sheet;
   /** The sheet's composite, already drawn. Blitted here rather than redrawn. */
@@ -124,6 +130,10 @@ export function CanvasStage({
     null,
   );
   const painting = useRef(false);
+  // The last left press, for recognising a double-click ourselves. Null once one has been
+  // recognised, so a run of fast clicks pairs up rather than firing on every press after the
+  // second. See `onPointerDown` for why the DOM's own `dblclick` can't be used here.
+  const lastPress = useRef<{ t: number; x: number; y: number } | null>(null);
   // Which corner the pointer is over, purely so the cursor can say the layer is resizable.
   const [overHandle, setOverHandle] = useState(-1);
   // The piece of bodywork under the pointer. The whole reason the UV map is worth having is
@@ -411,10 +421,57 @@ export function CanvasStage({
     [brushSize, scale],
   );
 
+  /**
+   * Fill the view with one piece of bodywork.
+   *
+   * A shroud is a tenth of a 2048² sheet, and reaching it by wheel-and-drag means aiming at a
+   * shape whose edges are the thing you were trying to see. Double-click is the gesture because
+   * it costs no mode and no modifier: a paint tool lays its first dab where you clicked, and
+   * the view arrives at the part you were already pointing at.
+   */
+  const focusPart = useCallback(
+    (part: UvPart) => {
+      if (!fit || !box.w || !box.h) return;
+      // A degenerate island — one point, or a sliver — would divide the view to infinity.
+      const pw = Math.max(1, (part.maxU - part.minU) * sheet.width);
+      const ph = Math.max(1, (part.maxV - part.minV) * sheet.height);
+      // 0.8 leaves the part's surroundings in frame. A panel cut exactly to the edges gives
+      // nothing to judge where a decal sits relative to the seam beside it.
+      const z = Math.min(8, Math.max(0.25, (Math.min(box.w / pw, box.h / ph) * 0.8) / fit));
+      const s = fit * z;
+      const cx = ((part.minU + part.maxU) / 2) * sheet.width;
+      const cy = ((part.minV + part.maxV) / 2) * sheet.height;
+      setZoom(z);
+      // Pan is measured from the sheet's centre, which is where the blit is anchored.
+      setPan({ x: -(cx - sheet.width / 2) * s, y: -(cy - sheet.height / 2) * s });
+    },
+    [box.w, box.h, fit, sheet.width, sheet.height],
+  );
+
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const at = toSheet(e.clientX, e.clientY);
       if (!at) return;
+      // The second press of a double-click, timed here rather than taken from the DOM's own
+      // `dblclick`. The canvas captures the pointer on every press so a stroke survives leaving
+      // the element, and a captured pointer is exactly the case where WebKit stops delivering
+      // `dblclick` — so the gesture has to be recognised from the presses we already get.
+      if (e.button === 0) {
+        const prev = lastPress.current;
+        const near = prev && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_SLOP;
+        const quick = prev && e.timeStamp - prev.t < DOUBLE_MS;
+        lastPress.current = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+        if (near && quick && parts.length) {
+          const part = partAt(parts, at.x / sheet.width, at.y / sheet.height);
+          if (part) {
+            // Forget the pair, so a third press starts a new one rather than focusing again
+            // on every press of a rapid series.
+            lastPress.current = null;
+            focusPart(part);
+            return;
+          }
+        }
+      }
       e.currentTarget.setPointerCapture(e.pointerId);
       // Middle and right drag pan, whatever the tool — panning while painting matters more
       // than it does while dragging a logo, because a stroke needs the part you can't see.
@@ -454,7 +511,20 @@ export function CanvasStage({
       onSelect(hit?.id ?? null);
       drag.current = { id: hit?.id ?? null, x: e.clientX, y: e.clientY };
     },
-    [handleAt, onPaintStart, onSelect, paints, selectedId, sheet.layers, toSheet, tool],
+    [
+      focusPart,
+      handleAt,
+      onPaintStart,
+      onSelect,
+      paints,
+      parts,
+      selectedId,
+      sheet.layers,
+      sheet.width,
+      sheet.height,
+      toSheet,
+      tool,
+    ],
   );
 
   const onPointerMove = useCallback(
@@ -567,32 +637,6 @@ export function CanvasStage({
     setPan({ x: 0, y: 0 });
   }, []);
 
-  /**
-   * Fill the view with one piece of bodywork.
-   *
-   * A shroud is a tenth of a 2048² sheet, and reaching it by wheel-and-drag means aiming at a
-   * shape whose edges are the thing you were trying to see. Double-click is the gesture because
-   * it costs no mode and no modifier: a paint tool still paints where you clicked, and the view
-   * arrives at the part you were already pointing at.
-   */
-  const focusPart = useCallback(
-    (part: UvPart) => {
-      if (!fit || !box.w || !box.h) return;
-      // A degenerate island — one point, or a sliver — would divide the view to infinity.
-      const pw = Math.max(1, (part.maxU - part.minU) * sheet.width);
-      const ph = Math.max(1, (part.maxV - part.minV) * sheet.height);
-      // 0.8 leaves the part's surroundings in frame. A panel cut exactly to the edges gives
-      // nothing to judge where a decal sits relative to the seam beside it.
-      const z = Math.min(8, Math.max(0.25, (Math.min(box.w / pw, box.h / ph) * 0.8) / fit));
-      const s = fit * z;
-      const cx = ((part.minU + part.maxU) / 2) * sheet.width;
-      const cy = ((part.minV + part.maxV) / 2) * sheet.height;
-      setZoom(z);
-      // Pan is measured from the sheet's centre, which is where the blit is anchored.
-      setPan({ x: -(cx - sheet.width / 2) * s, y: -(cy - sheet.height / 2) * s });
-    },
-    [box.w, box.h, fit, sheet.width, sheet.height],
-  );
 
   const ringed = paints && hasTip(tool);
   // Corners come out of `layerCorners` clockwise from the top left, so 0/2 are one diagonal
@@ -629,16 +673,6 @@ export function CanvasStage({
           if (cursorRef.current) cursorRef.current.style.opacity = "1";
         }}
         onWheel={onWheel}
-        // The part under the pointer, not the one the hover last recorded: a double-click can
-        // land before a hover has been reported on a touchpad, and framing the previous part
-        // would move the view away from what was just clicked.
-        onDoubleClick={(e) => {
-          if (!parts.length) return;
-          const at = toSheet(e.clientX, e.clientY);
-          if (!at) return;
-          const part = partAt(parts, at.x / sheet.width, at.y / sheet.height);
-          if (part) focusPart(part);
-        }}
         onContextMenu={(e) => e.preventDefault()}
       />
       <div
@@ -660,7 +694,11 @@ export function CanvasStage({
         {overPart && (
           <>
             <span>·</span>
-            <span className="max-w-[160px] truncate text-white/70" title={t("designer.focusHint")}>
+            {/* The node first, because a group's name is whatever its author typed and the node
+                is the bike's own part — `chassis` still means the shrouds on a pack that calls
+                them `Metal.027`. */}
+            {overPart.owner && <span className="text-white/70">{overPart.owner}</span>}
+            <span className="max-w-[190px] truncate" title={t("designer.focusHint")}>
               {overAlso ? t("designer.partOver", { part: overPart.label, over: overAlso }) : overPart.label}
             </span>
             {/* Which flank, when the model can say. `both` is the one that saves an

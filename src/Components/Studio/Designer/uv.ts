@@ -56,6 +56,16 @@ const FACE_TOLERANCE = 0.3;
 export interface UvPart {
   /** Mesh-group name from the `.edf` — `shroud`, `frame.005`, `chain`. */
   label: string;
+  /**
+   * The mesh node the group sits on — `chassis`, `steer`, `fsusp`, `rsusp` — or null when the
+   * group is spread over several.
+   *
+   * Worth carrying because a group name is whatever the author typed, and authors type
+   * anything: the TM pack calls its plastic panels `Metal.NNN` and its metal ones
+   * `Plastics.NNN`. The node is the bike's own part, so it still says *where* — a shroud is on
+   * the chassis and a rear fender is on the rear suspension, however the group is named.
+   */
+  owner: string | null;
   /** Triangle corners in uv space, six numbers per triangle: u0,v0,u1,v1,u2,v2. */
   tris: Float32Array;
   /**
@@ -210,6 +220,7 @@ export function uvParts(
   const byLabel = new Map<string, number[]>();
   const flanksByLabel = new Map<string, number[]>();
   const facesByLabel = new Map<string, number[]>();
+  const nodesByLabel = new Map<string, Set<string>>();
   for (const node of nodes) {
     if (!node.uvs.length || !node.indices.length) continue;
     const triCount = Math.floor(node.indices.length / 3);
@@ -227,6 +238,12 @@ export function uvParts(
         flat = [];
         byLabel.set(label, flat);
       }
+      let owners = nodesByLabel.get(label);
+      if (!owners) {
+        owners = new Set();
+        nodesByLabel.set(label, owners);
+      }
+      owners.add(node.name);
       let sides = flanksByLabel.get(label);
       if (!sides && sided) {
         sides = [];
@@ -277,8 +294,12 @@ export function uvParts(
     }
     const sides = flanksByLabel.get(label);
     const faces = facesByLabel.get(label);
+    const owners = nodesByLabel.get(label);
     parts.push({
       label,
+      // Only when it's the one answer. A group spread over three nodes has no single place to
+      // point at, and naming the first would be picking one arbitrarily.
+      owner: owners?.size === 1 ? [...owners][0] : null,
       tris: new Float32Array(flat),
       flanks: sides ? new Uint8Array(sides) : null,
       side: sides ? summarise(sides) : null,
@@ -314,6 +335,27 @@ export function partPath(part: UvPart, width: number, height: number): Path2D {
     path.closePath();
   }
   return path;
+}
+
+/**
+ * A part's bounds in sheet pixels, rounded outwards.
+ *
+ * Outwards because this is what a redraw is told to catch up with: a box rounded inwards leaves
+ * the half-pixel at the edge of a fill on the layer and missing from the composite.
+ */
+export function partBox(
+  part: UvPart,
+  width: number,
+  height: number,
+): { x: number; y: number; w: number; h: number } {
+  const x = Math.max(0, Math.floor(part.minU * width));
+  const y = Math.max(0, Math.floor(part.minV * height));
+  return {
+    x,
+    y,
+    w: Math.min(width, Math.ceil(part.maxU * width)) - x,
+    h: Math.min(height, Math.ceil(part.maxV * height)) - y,
+  };
 }
 
 /** Whether (u,v) is inside a triangle, by the sign of the three edge cross-products. */

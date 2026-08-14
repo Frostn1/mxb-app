@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased — undo covers the whole editor, and the bucket stays on its panel
+
+### Added
+- **Undo covers everything now, not just brush strokes.** Adding, moving, scaling, rotating,
+  clipping and deleting layers, and adding, renaming, reordering and deleting sheets, all go on
+  the same timeline as the painting — so Ctrl+Z takes back whatever you actually did last,
+  rather than the last stroke and nothing else. A drag or a slider scrub is one step, not the
+  two hundred events it was made of.
+- **The bucket fills the panel you clicked, not the whole sheet.** A bike sheet is a dozen
+  panels side by side, and flooding the layer buried the eleven you weren't pointing at. Click
+  outside every island — on the sheet's background — and it still floods the layer, since
+  that's the only thing it could mean there.
+
+## Unreleased — double-click actually focuses, and the label says where on the bike
+
+### Fixed
+- **Double-click to focus a part now works.** The canvas takes pointer capture on every press so
+  a stroke survives leaving the element, and a captured pointer is exactly the case where WebKit
+  stops delivering `dblclick` — so the gesture was never seen. It's recognised from the presses
+  themselves now, which also makes it work under a pen or a touchpad.
+
+### Changed
+- **The hover names the mesh node as well as the group** — `chassis250 Metal.027`. A group's name
+  is whatever its author typed, and authors type anything: the TM pack calls its plastic panels
+  `Metal.NNN` and its metal ones `Plastics.NNN`, so the name alone reads as a contradiction of
+  the panel you're pointing at. The node is the bike's own part, so it still says *where*: a
+  shroud is on the chassis and a rear fender is on the rear suspension, whatever the group
+  is called.
+
 ## Unreleased — a browse card says who made it
 
 ### Added
