@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — the paint changes on disk, the model changes with it
+
+### Added
+- **The 3D viewer reloads a paint that changes on disk.** Leave the bike open in the viewer,
+  re-save the paint, and the model re-dresses itself — the draw, look, fix, look loop no
+  longer needs the dialog closed and re-opened between passes. Only the textures are
+  replaced, so nothing rebuilds the bike's geometry for a livery, and a brief **Paint
+  reloaded** chip says when one landed (an edit that turned out to change nothing visible
+  otherwise looks identical to one the viewer missed).
+- The watched paint is whichever one is showing — a bike's installed livery, a model-swap
+  preview's, or a loose gear paint. The paint's *folder* is watched rather than the file,
+  because saving one usually means writing a temp file and renaming it over the target, and
+  a watch on the file itself would go silent after exactly the first save.
+
 ## Unreleased — the bike's own plastics, under the UV map
 
 ### Added

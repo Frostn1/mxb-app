@@ -307,6 +307,7 @@ export const es: Translation = {
   "viewer.dragToRotate": "Arrastra para rotar",
   "viewer.scrollToZoom": "Desplaza para hacer zoom",
   "viewer.rightDragToPan": "Arrastra con el botón derecho para mover",
+  "viewer.paintReloaded": "Pintura recargada",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Buscar…",

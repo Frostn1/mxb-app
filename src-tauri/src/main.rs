@@ -33,6 +33,7 @@ mod mxb_session;
 mod overlay;
 mod paint;
 mod paintstudio;
+mod paintwatch;
 mod pkz;
 #[cfg(sidecar)]
 mod sidecar;
@@ -58,6 +59,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
+use paintwatch::PaintWatcher;
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
 // that does it wants the same treatment — so this sits here rather than in one function.
 use rayon::prelude::*;
@@ -1205,6 +1207,16 @@ async fn texture_bytes(token: String) -> tauri::ipc::Response {
     tauri::ipc::Response::new(texstore::bytes_or_missing(&token))
 }
 
+/// Watch the paint files the 3D viewer is currently showing, replacing whatever it was
+/// watching before. An empty list stops.
+///
+/// There is one viewer showing one paint, so this is a set-the-whole-thing call rather than
+/// an add/remove pair: nothing can then leak a watch by forgetting to take one back.
+#[tauri::command]
+fn watch_paint_files(app: tauri::AppHandle, watcher: State<PaintWatcher>, paths: Vec<String>) {
+    paintwatch::start(&app, &watcher, &paths);
+}
+
 #[tauri::command]
 async fn unpack_pkz(path: String, out_dir: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || unpack_pkz_blocking(path, out_dir))
@@ -1221,6 +1233,10 @@ fn unpack_pkz_blocking(path: String, out_dir: String) -> Result<Vec<String>, Str
 #[serde(rename_all = "camelCase")]
 struct BikePaint {
     name: String,
+    /// Where the `.pnt` sits on disk, for a paint installed loose in the bike's `paints`
+    /// folder — the file the viewer watches so an edit re-dresses the model. `None` for a
+    /// paint packed inside the archive: nothing rewrites one of those in place.
+    path: Option<String>,
     textures: Vec<paint::PaintTexture>,
     changes_preview: bool,
 }
@@ -1273,8 +1289,18 @@ fn mtime_nanos(path: &std::path::Path) -> u128 {
         .unwrap_or(0)
 }
 
+/// Cache key for whatever lives at `source`: its path, when it was last written, and how
+/// big it is.
+///
+/// Size is in there for the viewer's live reload. A paint being re-saved every few seconds
+/// is the one caller that rewrites a file under the cache, and mtime alone would serve it
+/// stale pixels on any filesystem whose timestamps are coarser than the gap between two
+/// saves — FAT32 rounds to two seconds. A recompressed `.pnt` almost never comes back the
+/// same length.
 fn bike_cache_key(source: &str) -> String {
-    format!("{source}:{}", mtime_nanos(std::path::Path::new(source)))
+    let path = std::path::Path::new(source);
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    format!("{source}:{}:{size}", mtime_nanos(path))
 }
 
 /// A swap preview is keyed by both folders it's built from — the same bike renders
@@ -1351,7 +1377,8 @@ fn build_bike_model(
     label: &str,
     key: String,
     files: Vec<(String, Vec<u8>)>,
-    installed: Vec<(String, Vec<u8>)>,
+    // The loose paints beside the bike, as `installed_paints` answers them.
+    installed: Vec<(String, String, Vec<u8>)>,
     t0: std::time::Instant,
 ) -> Result<BikeModel, String> {
     let t_read = t0.elapsed();
@@ -1364,7 +1391,8 @@ fn build_bike_model(
     let mut gfx_bytes: Option<&Vec<u8>> = None;
     let mut hrcs: std::collections::HashMap<String, &Vec<u8>> = std::collections::HashMap::new();
     let mut tga_jobs: Vec<(String, &[u8])> = Vec::new();
-    let mut pnt_jobs: Vec<(String, &[u8], bool)> = Vec::new();
+    // (display name, bytes, shipped-in-the-archive, path on disk if it has one)
+    let mut pnt_jobs: Vec<(String, &[u8], bool, Option<&str>)> = Vec::new();
     for (name, data) in &files {
         let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
         if bn.ends_with(".edf") {
@@ -1380,7 +1408,7 @@ fn build_bike_model(
             // Lowercased stem — the frontend matches textures case-insensitively.
             tga_jobs.push((stem.to_string(), data.as_slice()));
         } else if bn.ends_with(".pnt") {
-            pnt_jobs.push((paint_display_name(&bn), data.as_slice(), true));
+            pnt_jobs.push((paint_display_name(&bn), data.as_slice(), true, None));
         }
     }
 
@@ -1434,8 +1462,8 @@ fn build_bike_model(
             used.push(data);
         }
     }
-    for (fname, data) in &installed {
-        pnt_jobs.push((paint_display_name(fname), data.as_slice(), false));
+    for (fname, path, data) in &installed {
+        pnt_jobs.push((paint_display_name(fname), data.as_slice(), false, Some(path)));
     }
     if let Some(g) = geom {
         if !edf::assemble_bike(&mut nodes, g) {
@@ -1464,11 +1492,12 @@ fn build_bike_model(
     }
     let mut paints: Vec<(BikePaint, bool)> = pnt_jobs
         .par_iter()
-        .filter_map(|(name, data, shipped)| {
+        .filter_map(|(name, data, shipped, path)| {
             paint::decode_any(data).ok().map(|pnt| {
                 (
                     BikePaint {
                         name: name.clone(),
+                        path: path.map(str::to_string),
                         textures: pnt.into_par_iter().map(paint::into_texture).collect(),
                         changes_preview: false, // resolved below, once bindings are known
                     },
@@ -1522,6 +1551,8 @@ fn build_bike_model(
     if paints.is_empty() {
         paints.push(BikePaint {
             name: "Stock".into(),
+            // The mesh's own textures, which live inside it rather than in a `.pnt`.
+            path: None,
             textures: base,
             changes_preview: true, // the model's own textures, by definition
         });
@@ -1632,7 +1663,11 @@ fn paint_display_name(file_name: &str) -> String {
     }
 }
 
-fn installed_paints(source: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+/// The loose `.pnt`s installed beside a bike, as (file name, full path, bytes).
+///
+/// The path rides along because these are the only paints that can change under the viewer:
+/// they are ordinary files a painter re-saves, where the ones inside the archive are not.
+fn installed_paints(source: &std::path::Path) -> Vec<(String, String, Vec<u8>)> {
     let folder = if source.is_dir() {
         source.to_path_buf()
     } else {
@@ -1644,10 +1679,12 @@ fn installed_paints(source: &std::path::Path) -> Vec<(String, Vec<u8>)> {
         for e in entries.flatten() {
             let p = e.path();
             if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("pnt")) {
-                if let (Some(name), Ok(bytes)) =
-                    (p.file_name().and_then(|n| n.to_str()), std::fs::read(&p))
-                {
-                    out.push((name.to_string(), bytes));
+                if let (Some(name), Some(full), Ok(bytes)) = (
+                    p.file_name().and_then(|n| n.to_str()),
+                    p.to_str(),
+                    std::fs::read(&p),
+                ) {
+                    out.push((name.to_string(), full.to_string(), bytes));
                 }
             }
         }
@@ -6022,6 +6059,7 @@ fn main() {
         .manage(FrostmodProcess::default())
         .manage(ModWatcher::default())
         .manage(ProfileWatcher::default())
+        .manage(PaintWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
         .manage(voice::Monitor::default())
@@ -6247,6 +6285,7 @@ fn main() {
             diagnose_track,
             unpack_paint,
             texture_bytes,
+            watch_paint_files,
             unpack_pkz,
             load_bike_model,
             preview_model_swap,
@@ -7262,6 +7301,7 @@ mod viewer_tests {
             nodes: Vec::new(),
             paints: vec![super::BikePaint {
                 name: "Red".into(),
+                path: None,
                 // Its own `plastics`, so the model's never reaches it.
                 textures: vec![tex("plastics", "t-paint"), tex("wheel", "t-shared")],
                 changes_preview: true,
@@ -7274,6 +7314,74 @@ mod viewer_tests {
         // Named twice over — the paints borrowed it — and that's fine: `release` removes by
         // key, so the second pass over a token is a no-op rather than a double free.
         assert_eq!(tokens.iter().filter(|t| *t == "t-shared").count(), 2);
+    }
+
+    /// A paint installed loose beside a bike has to come back with the file it lives in —
+    /// that path is the only thing the viewer can watch, and without it a re-saved livery
+    /// goes unnoticed until the dialog is closed and re-opened.
+    #[test]
+    fn an_installed_paint_names_the_file_it_came_from() {
+        let root = std::env::temp_dir().join(format!("frost-installed-paints-{}", std::process::id()));
+        let paints = root.join("KTM 450").join("paints");
+        std::fs::create_dir_all(&paints).expect("make the bike's paints folder");
+        std::fs::write(paints.join("Frost.pnt"), b"not really a paint").expect("write a paint");
+        // Whatever else is parked in there is not a paint and must not be offered as one.
+        std::fs::write(paints.join("notes.txt"), b"x").expect("write the noise");
+
+        let found = super::installed_paints(&root.join("KTM 450"));
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(found.len(), 1, "only the .pnt counts");
+        let (name, path, bytes) = &found[0];
+        assert_eq!(name, "Frost.pnt");
+        assert_eq!(std::path::Path::new(path), paints.join("Frost.pnt"));
+        assert_eq!(bytes, b"not really a paint");
+    }
+
+    /// A paint re-saved inside one timestamp tick still misses the cache.
+    ///
+    /// The viewer's live reload re-decodes a file the moment it changes, which can be twice
+    /// in the same second — and a filesystem with coarse timestamps (FAT32 rounds to two)
+    /// would hand back the previous decode, i.e. the painter's *last* attempt. The mtime is
+    /// pinned here so the size is the only thing left to tell the two apart.
+    #[test]
+    fn a_paint_resaved_within_a_timestamp_tick_is_not_served_stale() {
+        let dir = std::env::temp_dir().join(format!("frost-cache-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("make the folder");
+        let paint = dir.join("Frost.pnt");
+        let pinned = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let stamp = |bytes: &[u8]| {
+            std::fs::write(&paint, bytes).expect("save the paint");
+            let f = std::fs::File::options().write(true).open(&paint).expect("reopen");
+            f.set_times(std::fs::FileTimes::new().set_modified(pinned))
+                .expect("pin the mtime");
+            super::bike_cache_key(&paint.to_string_lossy())
+        };
+
+        let first = stamp(b"the first attempt");
+        let second = stamp(b"the second attempt, recompressed");
+        let identical = stamp(b"the second attempt, recompressed");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_ne!(first, second, "a re-saved paint must miss its cached decode");
+        assert_eq!(identical, second, "and an unchanged one must still hit it");
+    }
+
+    /// The same, reached through the `.pkz` beside the folder — how a packaged bike is
+    /// installed, and the path a painter's own liveries actually sit next to.
+    #[test]
+    fn paints_are_found_beside_a_packaged_bike_too() {
+        let root = std::env::temp_dir().join(format!("frost-packaged-paints-{}", std::process::id()));
+        let paints = root.join("KTM 450").join("paints");
+        std::fs::create_dir_all(&paints).expect("make the bike's paints folder");
+        std::fs::write(paints.join("Frost.pnt"), b"paint").expect("write a paint");
+
+        // The source the viewer is given is the archive, not the folder next to it.
+        let found = super::installed_paints(&root.join("KTM 450.pkz"));
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(std::path::Path::new(&found[0].1), paints.join("Frost.pnt"));
     }
 
     #[test]
