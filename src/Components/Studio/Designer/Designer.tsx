@@ -1309,9 +1309,10 @@ function SheetList({
         ))}
       </div>
 
-      {/* The names the installed paints use. A sheet named anything else binds to nothing,
-          and this is the only place the right answer is visible — so it also offers to make
-          them, rather than leaving the list to be copied out by hand. */}
+      {/* The names this model binds — what its mesh draws, plus whatever the paints already
+          installed replace. A sheet named anything else binds to nothing, and this is the only
+          place the right answer is visible — so it also offers to make them, rather than
+          leaving the list to be copied out by hand. */}
       {!!hints.length && (
         <div className="mt-2 flex flex-col items-start gap-1.5">
           <p className="text-[11px] leading-snug text-faint">

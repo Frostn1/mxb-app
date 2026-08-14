@@ -1493,7 +1493,7 @@ export const es: Translation = {
   "paints.sheetsTitle": "Texturas",
   "paints.reload": "Recargar del disco",
   "paints.addImages": "Añadir imágenes…",
-  "paints.expected": "Las pinturas de aquí usan:",
+  "paints.expected": "Hojas usadas aquí:",
   "paints.empty":
     "Añade un .tga o .png por cada textura. Importan los nombres, no los archivos: una textura llamada “livery” va a la pieza que pide “livery”. Desempaquetar una pintura existente te da los nombres correctos.",
   "paints.resized": "Redimensionada {{from}} → {{to}} — el juego necesita potencias de dos.",

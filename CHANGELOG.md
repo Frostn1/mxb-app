@@ -31,6 +31,15 @@
 - Offering to create every missing sheet no longer offers the companion maps (`_n`, `_r`). They
   aren't drawn like a livery, and a blank one is the exact thing above: it throws away the real
   one. The hint line still lists them, and one can still be added by hand.
+- **The plastics are on the list.** The sheet names came from the paints already installed for a
+  model, and the OEM bikes ship one paint that replaces the wheels and the chain — so a stock
+  Husqvarna offered `chain`, `wheel`, `wheels`, and not the bodywork anyone opened the Designer
+  for. The model's own mesh is now asked what it draws, which is the half no paint can answer.
+  A helmet's goggles still go on their paints alone: a mesh can't say which of its textures
+  belong to the goggles beside it.
+- **Picking a model no longer takes twenty seconds.** Working out what it expects read every
+  installed paint whole — tens of megabytes each — for the few hundred bytes of header that
+  hold the names. It seeks to them instead: 19s down to 0.6s on a bike with paints installed.
 
 ## 2026-08-13
 

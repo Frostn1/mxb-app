@@ -1485,7 +1485,7 @@ export const ptBR: Translation = {
   "paints.sheetsTitle": "Texturas",
   "paints.reload": "Recarregar do disco",
   "paints.addImages": "Adicionar imagens…",
-  "paints.expected": "As pinturas daqui usam:",
+  "paints.expected": "Folhas usadas aqui:",
   "paints.empty":
     "Adicione um .tga ou .png para cada textura. O que importa são os nomes, não os arquivos: uma textura chamada “livery” vai para a peça que pede “livery”. Descompactar uma pintura existente dá os nomes certos.",
   "paints.resized": "Redimensionada {{from}} → {{to}} — o jogo exige potências de dois.",

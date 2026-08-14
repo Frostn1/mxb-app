@@ -1506,7 +1506,7 @@ export const de: Translation = {
   "paints.sheetsTitle": "Texturen",
   "paints.reload": "Neu von der Platte laden",
   "paints.addImages": "Bilder hinzufügen…",
-  "paints.expected": "Designs hier verwenden:",
+  "paints.expected": "Hier verwendete Bahnen:",
   "paints.empty":
     "Füge pro Textur eine .tga oder .png hinzu. Entscheidend sind die Namen, nicht die Dateien: eine Textur namens „livery“ landet auf dem Teil, das „livery“ verlangt. Ein entpacktes Design liefert die richtigen Namen.",
   "paints.resized": "Größe {{from}} → {{to}} geändert — das Spiel braucht Zweierpotenzen.",

@@ -1484,7 +1484,7 @@ export const it: Translation = {
   "paints.sheetsTitle": "Texture",
   "paints.reload": "Ricarica dal disco",
   "paints.addImages": "Aggiungi immagini…",
-  "paints.expected": "Le livree qui usano:",
+  "paints.expected": "Fogli usati qui:",
   "paints.empty":
     "Aggiungi un .tga o .png per ogni texture. Contano i nomi, non i file: una texture chiamata “livery” finisce sulla parte che chiede “livery”. Scompattando una livrea esistente ottieni i nomi giusti.",
   "paints.resized": "Ridimensionata {{from}} → {{to}} — il gioco richiede potenze di due.",

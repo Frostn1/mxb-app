@@ -1461,7 +1461,7 @@ export const en = {
   "paints.sheetsTitle": "Texture sheets",
   "paints.reload": "Reload from disk",
   "paints.addImages": "Add images…",
-  "paints.expected": "Paints here use:",
+  "paints.expected": "Sheets used here:",
   "paints.empty":
     "Add a .tga or .png for each texture. Names matter more than file names: a sheet called “livery” lands on the part that asked for “livery”. Unpacking an existing paint gets you the right names.",
   "paints.resized": "Resized {{from}} → {{to}} — the game needs power-of-two sheets.",

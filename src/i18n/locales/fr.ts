@@ -1497,7 +1497,7 @@ export const fr: Translation = {
   "paints.sheetsTitle": "Textures",
   "paints.reload": "Recharger depuis le disque",
   "paints.addImages": "Ajouter des images…",
-  "paints.expected": "Les décos ici utilisent :",
+  "paints.expected": "Planches utilisées ici :",
   "paints.empty":
     "Ajoutez un .tga ou .png par texture. Ce sont les noms qui comptent, pas les fichiers : une texture nommée « livery » se pose sur la pièce qui demande « livery ». Décompresser une déco existante donne les bons noms.",
   "paints.resized": "Redimensionnée {{from}} → {{to}} — le jeu exige des puissances de deux.",

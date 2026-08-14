@@ -178,7 +178,7 @@ export interface PaintDestState {
   clearFolder: () => void;
   /** Resolved destination, or null while nothing can be aimed at yet. */
   dest: PaintDest | null;
-  /** What the paints already installed for this model call their sheets. */
+  /** The sheet names this model binds — from its own mesh and from the paints installed for it. */
   hints: string[];
   /** This build can decode bike geometry — false on public builds, which have no bike mesh. */
   bikePreview: boolean;
