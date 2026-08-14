@@ -54,6 +54,9 @@ pub struct ModSummary {
     pub date: String,
     pub image: Option<String>,
     pub category_id: u32,
+    /// Who posted it, as the site's own account name. `None` where the catalog didn't say —
+    /// the display name rides in the embedded author, which a site can withhold.
+    pub author: Option<String>,
 }
 
 /// The order a browse listing comes back in.

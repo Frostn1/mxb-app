@@ -29,6 +29,88 @@
   shroud is on the chassis and a rear fender is on the rear suspension, whatever the group
   is called.
 
+## Unreleased — a browse card says who made it
+
+### Added
+- **Mod cards carry a byline.** The catalog knows who posted each mod and the grid never
+  showed it, so telling two versions of the same track apart meant opening both. The name now
+  sits beside the date, the way a shop card already carries its author. It rides along with
+  the listing request rather than costing one of its own, and a mod the catalog names nobody
+  for simply keeps the date.
+
+## Unreleased — the install picker says which file it's about to fetch
+
+### Fixed
+- **A dedicated-server build is no longer installed as if it were the mod.** Server files were
+  detected by looking for the word "server" anywhere in a download block, which missed the
+  authors who only say it in the file's name (`Ironman_2024_Server.pkz`) — an undetected one
+  carrying the page's "Default" flag was preselected and installed without ever being named.
+  The link itself is read now as well, and the same check no longer mistakes a track called
+  *Observer Hill* for a server build, which used to hide the only download it had.
+- **Quick install stops guessing on a mod that offers nothing but server files.** One click
+  can't ask which build was meant, and the wrong one installs cleanly and then does nothing
+  in-game. Those mods now say so and send you to the page, where every file is listed.
+
+### Changed
+- **Every download is shown, with the recommended one picked.** Server builds used to be
+  dropped from the list, so a mod read as having one file while the flag behind that was a
+  guess. They're listed last instead, badged *Server*, folded under a *dedicated server files*
+  disclosure, and never preselected while anything playable is on offer.
+- **The mirror list opens on more than one row.** A single row read as the only file there
+  was; the first few are listed now, each with the author's own name for the file, so two
+  MediaFire links are told apart before one of them is downloaded.
+
+## Unreleased — FrostMod runs on Linux, and the app can see the game there
+
+### Added
+- **FrostMod installs and runs on Linux.** It used to refuse with *FrostMod runs on Windows
+  only*, which was true of the binary and beside the point: on Linux the game is a Windows
+  process too — Steam runs it under Proton — so FrostMod belongs in that same Proton prefix,
+  where the process it injects into lives. The app now finds the prefix
+  (`steamapps/compatdata/655500`), finds the Proton build that made it (from the prefix's own
+  `config_info`, so it uses the build Steam used rather than the newest one installed), and
+  starts `frostmod.exe` in it. `--mods` is handed over as the prefix sees the folder —
+  `C:\users\steamuser\…` rather than `/home/…`, which is the same path and not a name FrostMod
+  could have made sense of.
+- **The Reload button works from outside the prefix.** The app is a native Linux process and
+  FrostMod's reload event is a Wine kernel object: nothing this side of the wall can pulse it.
+  So a reload goes as a file instead — FrostMod v0.13.0 reads its command file on a poll — and
+  the status pill reads the process table rather than asking for an event it can't open.
+  Anything older than v0.13.0 is refused with a version to update to, rather than started into
+  a state where the in-game `F8` works and every button here quietly doesn't.
+- **The FrostMod section of Settings, and its log row, appear on Linux** on the same terms as
+  Windows. macOS still hides them: the app launches a CrossOver/Whisky bottle there but does
+  not inject into it.
+
+### Fixed
+- **The app knows when the game is running on Linux.** It answered *no* unconditionally —
+  macOS got a process-table check when Play landed there and Linux was never given one. So Play
+  never greyed out mid-session, and every question that turns on it ("will this paint show now
+  or at the next launch?", "is it safe to move this file?") was answered for a machine where the
+  game supposedly never runs. Under Proton the game is an ordinary Linux process whose command
+  line still names `mxbikes.exe`, so `/proc` finds it — no `ps` needed, which the AppImage
+  doesn't carry.
+
+## Unreleased — the Linux app stops carrying the library that blanked its window
+
+### Fixed
+- **The AppImage no longer ships its own libwayland.** linuxdeploy pulls libwayland-client,
+  -cursor, -egl and -server in as dependencies of GTK and WebKit, so our AppImage carried
+  Ubuntu 22.04's copies and put them ahead of the host's on the library path — where the
+  *host's* Mesa loaded them, and then couldn't create an EGL display. That is the window that
+  comes up and never paints. The AppImage excludelist names libwayland-client for exactly this
+  reason; the linuxdeploy build Tauri downloads carries an older copy of that list and bundles
+  it regardless. Release builds now take those four libraries back out of the image before it
+  is published, and sign it again over the bytes that ship, so the app uses the same libwayland
+  as every other program on the machine.
+- **The XWayland workaround from v0.9.1 turned out never to run, and has been dropped.** An
+  AppImage sets `GDK_BACKEND=x11` in its own startup hook, before a line of our code executes
+  — so the default the app set for the same thing could never apply, every AppImage was
+  already going through XWayland, and the white screen that release was meant to cure survived
+  it untouched. Nothing about how an AppImage runs changes here: the hook still says x11. The
+  app now only asks for a backend when `MXB_SAFE_GRAPHICS=1` does, which is the one case where
+  it's a knob somebody is deliberately turning.
+
 ## Unreleased — the sheet says which panel, which side, and which face
 
 ### Fixed

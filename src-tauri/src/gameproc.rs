@@ -460,7 +460,17 @@ pub fn is_game_running() -> bool {
     )
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+/// Under Proton the game is an ordinary Linux process whose command line still names
+/// `mxbikes.exe`, wrappers and all, so `/proc` finds it. Without this the app believes the
+/// game is never running: Play never greys out, and everything that asks "is it up?" —
+/// whether a paint will show now or next launch, whether it's safe to move files — has
+/// been answering for a machine where the game can't run at all.
+#[cfg(target_os = "linux")]
+pub fn is_game_running() -> bool {
+    crate::proton::running_exe(crate::game::active().exe)
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn is_game_running() -> bool {
     false
 }

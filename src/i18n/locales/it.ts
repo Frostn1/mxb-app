@@ -367,21 +367,25 @@ export const it: Translation = {
   "browse.queued": "“{{title}}” in coda",
   "browse.queuedDesc": "Installazione in {{folder}}.",
   "browse.rootFolder": "principale",
+  "browse.byAuthor": "di {{author}}",
   "browse.needsBrowser": "“{{title}}” va scaricata dal browser",
   "browse.needsBrowserDesc":
     "{{host}} blocca i download nell'app — apri la sua pagina per completare.",
   "browse.noDownload": "Nessun download trovato per “{{title}}”",
+  "browse.serverOnly": "“{{title}}” offre solo file per server",
+  "browse.serverOnlyDesc":
+    "Apri la mod per vedere i suoi download — una build per server dedicato non viene installata al posto tuo.",
   "browse.quickInstallFailed":
     "Impossibile installare rapidamente “{{title}}”",
   "browse.queuedBulk_one": "{{count}} mod in coda",
   "browse.queuedBulk_other": "{{count}} mod in coda",
   "browse.queuedBulkDesc": "Verranno installate una dopo l'altra.",
-  "browse.queuedBulkSkipped_one": "{{count}} saltata — host solo browser.",
-  "browse.queuedBulkSkipped_other": "{{count}} saltate — host solo browser.",
+  "browse.queuedBulkSkipped_one": "{{count}} saltata — aprila per scegliere un download.",
+  "browse.queuedBulkSkipped_other": "{{count}} saltate — aprile per scegliere un download.",
   "browse.bulkFailed": "Impossibile installare rapidamente la selezione",
-  "browse.bulkFailedDesc_one": "Va scaricata dal browser.",
+  "browse.bulkFailedDesc_one": "Aprila per scegliere un download.",
   "browse.bulkFailedDesc_other":
-    "Tutte e {{count}} vanno scaricate dal browser.",
+    "Per tutte e {{count}} il download va scelto a mano.",
 
   // ── Negozio (MX Bikes Shop — download acquistati) ──────────────────────────
   "shop.help":
@@ -478,6 +482,16 @@ export const it: Translation = {
   "installDialog.differentBike": "Moto / pacchetto diverso",
   "installDialog.directFastest": "Diretto · il più veloce",
   "installDialog.direct": "Diretto",
+  "installDialog.recommendedBadge": "Consigliato",
+  "installDialog.browserBadge": "Browser",
+  "installDialog.serverBadge": "Server",
+  "installDialog.serverBuildNote": "Build per server dedicato — non per giocare",
+  "installDialog.serverFiles_one": "1 file per server dedicato",
+  "installDialog.serverFiles_other": "{{count}} file per server dedicato",
+  "installDialog.serverOnlyNotice":
+    "Qui ogni download è una build per server dedicato. Installane una solo se gestisci un server — non aggiunge nulla da guidare.",
+  "installDialog.moreMirrors_one": "1 altro mirror",
+  "installDialog.moreMirrors_other": "Altri {{count}} mirror",
   "installDialog.perBikeHint":
     "Ogni download è una moto diversa — selezionato automaticamente in base alla tua scelta. Scegli il pacchetto “all bikes” per averle tutte in una volta.",
   "installDialog.mirrorsHint":
@@ -516,6 +530,8 @@ export const it: Translation = {
   "modDetail.host": "Host",
   "modDetail.installsTo": "Installa in",
   "modDetail.noDownloadLink": "Nessun link di download trovato in questa pagina — aprila su {{site}}.",
+  "modDetail.serverOnlyNotice":
+    "Questa pagina offre solo file per server dedicato. Si installano senza problemi, ma in gioco non c’è nulla da guidare.",
   "modDetail.frostmodHint":
     "FrostMod ricaricherà l'elenco {{kind}} al termine.",
   "modDetail.kindRider": "pilota",
@@ -570,7 +586,7 @@ export const it: Translation = {
   "settings.instantRefreshDesc":
     "Quando applichi un preset mentre {{game}} è in esecuzione, aggiorna il look in gioco all'istante — senza riavvio né riselezione del profilo. Se non ci riesce, ti verrà chiesto di riselezionare il profilo.",
   "settings.instantRefreshWindowsOnly":
-    "Aggiornare il look in gioco senza riavviare richiede FrostMod, che è solo per Windows — ti verrà invece chiesto di riselezionare il profilo.",
+    "Aggiornare il look in gioco senza riavviare significa intervenire nel gioco in esecuzione, e può farlo solo la versione Windows — ti verrà invece chiesto di riselezionare il profilo.",
   "settings.autoRunFrostmod": "Avvia FrostMod automaticamente",
   "settings.autoRunFrostmodDesc":
     "Avvia FrostMod in background ogni volta che apri MXB App.",
