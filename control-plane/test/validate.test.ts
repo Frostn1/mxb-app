@@ -16,7 +16,12 @@ import {
   isServerName,
   isSha256,
   isSlot,
+  isReportCount,
+  isVerdict,
+  MAX_FLAGGED,
   MAX_PAINT_BYTES,
+  parseFlagged,
+  verdictRank,
 } from "../src/validate";
 
 describe("paint filenames", () => {
@@ -342,5 +347,68 @@ describe("server keys", () => {
     for (const bad of ["", "   ", "a".repeat(129), withNewline, 5, null]) {
       expect(isServerKey(bad), JSON.stringify(bad)).toBe(false);
     }
+  });
+});
+
+describe("integrity reports", () => {
+  it("accepts the four verdicts and nothing else", () => {
+    for (const v of ["unknown", "clean", "suspect", "flagged"]) expect(isVerdict(v)).toBe(true);
+    expect(isVerdict("CLEAN")).toBe(false);
+    expect(isVerdict("cheating")).toBe(false);
+    expect(isVerdict(2)).toBe(false);
+    expect(isVerdict(undefined)).toBe(false);
+  });
+
+  // The ordering the "worst so far" logic rests on: a client that loads a cheat for one lap
+  // and unloads it must not be able to overwrite `flagged` with `clean`.
+  it("ranks verdicts worst-last", () => {
+    expect(verdictRank("flagged")).toBeGreaterThan(verdictRank("suspect"));
+    expect(verdictRank("suspect")).toBeGreaterThan(verdictRank("clean"));
+    // Unknown is the *lowest*, not a middle ground: it means nobody looked, so it can never
+    // be the worst thing seen and can never displace a real finding.
+    expect(verdictRank("clean")).toBeGreaterThan(verdictRank("unknown"));
+  });
+
+  it("keeps a well-formed detection", () => {
+    expect(
+      parseFlagged([{ name: "kaizo.dll", label: "Kaizo trainer", sha256: "a".repeat(64) }]),
+    ).toEqual([{ name: "kaizo.dll", label: "Kaizo trainer", sha256: "a".repeat(64) }]);
+  });
+
+  // Everything in a report is chosen by the machine being reported on, and all of it is
+  // echoed back into an admin's UI.
+  it("bounds and strips whatever a client sends", () => {
+    const escape = String.fromCharCode(27);
+    const [item] = parseFlagged([
+      { name: `  kaizo${escape}[31m.dll  `, label: "x".repeat(500), sha256: "nonsense" },
+    ]);
+    expect(item.name).toBe("kaizo[31m.dll");
+    expect(item.label.length).toBeLessThanOrEqual(120);
+    // A digest that isn't one is dropped, not stored: its only use is being pasted into the
+    // rule list, where a malformed entry is a dead rule.
+    expect(item.sha256).toBe("");
+  });
+
+  it("drops entries it cannot use rather than failing the whole report", () => {
+    expect(parseFlagged([null, 7, {}, { label: "no name" }, { name: "real.dll" }])).toEqual([
+      { name: "real.dll", label: "", sha256: "" },
+    ]);
+    expect(parseFlagged("not an array")).toEqual([]);
+    expect(parseFlagged(undefined)).toEqual([]);
+  });
+
+  it("caps how many detections one report may carry", () => {
+    const many = Array.from({ length: MAX_FLAGGED + 20 }, (_, i) => ({ name: `c${i}.dll` }));
+    expect(parseFlagged(many)).toHaveLength(MAX_FLAGGED);
+  });
+
+  it("only accepts counts it can render", () => {
+    expect(isReportCount(0)).toBe(true);
+    expect(isReportCount(12)).toBe(true);
+    expect(isReportCount(-1)).toBe(false);
+    expect(isReportCount(1.5)).toBe(false);
+    expect(isReportCount(10_001)).toBe(false);
+    expect(isReportCount("3")).toBe(false);
+    expect(isReportCount(Number.NaN)).toBe(false);
   });
 });

@@ -299,3 +299,76 @@ export function isServerKey(value: unknown): value is string {
   return !/[\u0000-\u001f\u007f]/.test(key);
 }
 
+
+/**
+ * Verdicts a client may report, worst last.
+ *
+ * `unknown` is a real answer and not an error: it is what a client says when it could not
+ * read the game's module list at all. Storing it matters — an admin needs to tell "scanned,
+ * found nothing" from "could not scan", and collapsing the two into a missing row would lose
+ * exactly that distinction.
+ */
+export const VERDICTS = ["unknown", "clean", "suspect", "flagged"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+
+export function isVerdict(value: unknown): value is Verdict {
+  return typeof value === "string" && (VERDICTS as readonly string[]).includes(value);
+}
+
+/** Rank a verdict for comparison, so "worst so far" is a `max` rather than a lookup table. */
+export function verdictRank(value: Verdict): number {
+  return VERDICTS.indexOf(value);
+}
+
+/** One named detection, as the client reports it. */
+export interface FlaggedItem {
+  name: string;
+  label: string;
+  sha256: string;
+}
+
+/** How many detections one report may carry. A client with more than this is malfunctioning,
+ *  not unusually infected, and the array is stored as JSON in a single column. */
+export const MAX_FLAGGED = 32;
+const MAX_FLAGGED_CHARS = 120;
+
+/**
+ * Clean one client's list of named detections into something storable.
+ *
+ * Every field here is attacker-controlled in the one sense that matters: a client reports on
+ * *itself*, so anything in here is whatever that machine chose to send. It is echoed back to
+ * an admin's UI, so it is bounded and stripped of control characters rather than trusted —
+ * and anything unparseable is dropped rather than rejecting the whole report, since the
+ * verdict is the part worth keeping.
+ */
+export function parseFlagged(value: unknown): FlaggedItem[] {
+  if (!Array.isArray(value)) return [];
+  const out: FlaggedItem[] = [];
+  for (const entry of value.slice(0, MAX_FLAGGED)) {
+    if (!entry || typeof entry !== "object") continue;
+    const raw = entry as Record<string, unknown>;
+    const name = text(raw.name);
+    if (!name) continue;
+    out.push({
+      name,
+      label: text(raw.label) ?? "",
+      // Anything that isn't a real digest is dropped rather than stored as junk: its only
+      // use is being pasted into the rule list, and a malformed one there is a dead rule.
+      sha256: isSha256(raw.sha256) ? raw.sha256 : "",
+    });
+  }
+  return out;
+}
+
+function text(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  // eslint-disable-next-line no-control-regex
+  const s = value.trim().replace(/[\x00-\x1f\x7f]/g, "").slice(0, MAX_FLAGGED_CHARS);
+  return s.length ? s : null;
+}
+
+/** A count a client reports about itself. Bounded so a malformed or hostile client can't
+ *  store a number the UI then has to render. */
+export function isReportCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 10_000;
+}

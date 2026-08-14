@@ -136,6 +136,21 @@ pub struct AppConfig {
     /// What paint sync last did, so the UI can say so instead of the player having to guess
     /// from an empty grid. Written by the background tasks; never edited by hand.
     pub sync: SyncState,
+    /// Watch for cheats attached to the running game — see [`crate::integrity`].
+    ///
+    /// On by default, unlike the other things that talk to a server, because the local half
+    /// costs nothing and talks to nobody: it reads the game's own module list and shows the
+    /// answer here. The half that leaves the machine is gated separately on
+    /// [`AppConfig::integrity_report`], which is off until it's chosen.
+    pub integrity_watch: bool,
+    /// Publish this client's verdict to the control plane, so a server admin can see it.
+    ///
+    /// Off by default and deliberately its own switch. Scanning your own game is one thing;
+    /// telling a server operator what a scan found is another, and a player should choose it
+    /// rather than discover it. What gets sent is spelled out in
+    /// [`crate::integritywatch::publish`] — the verdict and the names of *rule-matched*
+    /// detections, never the list of everything loaded on the machine.
+    pub integrity_report: bool,
 }
 
 /// The record of the last publish and the last pull.
@@ -236,6 +251,8 @@ impl Default for AppConfig {
             cp_rider_name: String::new(),
             cp_guid: String::new(),
             sync: SyncState::default(),
+            integrity_watch: true,
+            integrity_report: false,
         }
     }
 }
