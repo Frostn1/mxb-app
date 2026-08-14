@@ -1549,6 +1549,11 @@ export const it: Translation = {
   "designer.fitNotForPaint": "Un livello pittura è la planche stessa: non c'è nulla da spostare o ridimensionare.",
   "designer.clipped": "Ritagliato",
   "designer.clippedHint": "Questo livello è tagliato sul pezzo: niente esce oltre la giunzione.",
+  "designer.flank.left": "lato sinistro",
+  "designer.flank.right": "lato destro",
+  "designer.flank.both": "entrambi i lati",
+  "designer.flankSharedHint":
+    "I due fianchi sono mappati sulla stessa area, quindi ciò che disegni qui compare su entrambi i lati della moto: speculare, e non dove te lo aspetteresti sull'altro.",
   "designer.opacity": "Opacità",
   "designer.blend": "Fusione",
   "designer.blend.normal": "Normale",

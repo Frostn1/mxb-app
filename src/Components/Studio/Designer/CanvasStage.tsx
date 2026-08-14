@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { useT } from "../../../i18n/context";
 import { layerCorners } from "./composite";
 import type { Ghost } from "./ghost";
-import { partAt, partPath, type UvPart } from "./uv";
+import { flankAt, partAt, partPath, type Side, type UvPart } from "./uv";
 import { hitTest, type Layer, type Sheet } from "./layers";
 import { constrained, hasTip, isDragTool, type PaintTool, type Point } from "./paint";
 
@@ -130,6 +130,9 @@ export function CanvasStage({
   // being able to answer "what am I painting on" — an outline you have to interpret answers it
   // less well than a name does.
   const [overPart, setOverPart] = useState<UvPart | null>(null);
+  // And which flank of the bike that piece is, at the point being pointed at rather than over
+  // the part as a whole — the two are different answers wherever the flanks share an island.
+  const [overSide, setOverSide] = useState<Side | null>(null);
   // The press and current point of a gradient or shape drag, so it can be shown while it's
   // being aimed. Only ever set between press and release.
   const [guide, setGuide] = useState<{ from: Point; to: Point } | null>(null);
@@ -489,9 +492,11 @@ export function CanvasStage({
         setOverHandle(paints ? -1 : handleAt(e.clientX, e.clientY));
         if (parts.length) {
           const at = toSheet(e.clientX, e.clientY);
-          setOverPart(
-            at ? partAt(parts, at.x / sheet.width, at.y / sheet.height) : null,
-          );
+          const u = at ? at.x / sheet.width : 0;
+          const v = at ? at.y / sheet.height : 0;
+          const part = at ? partAt(parts, u, v) : null;
+          setOverPart(part);
+          setOverSide(part ? flankAt(part, u, v) : null);
         }
         return;
       }
@@ -602,6 +607,16 @@ export function CanvasStage({
           <>
             <span>·</span>
             <span className="max-w-[160px] truncate text-white/70">{overPart.label}</span>
+            {/* Which flank, when the model can say. `both` is the one that saves an
+                afternoon: it means this island is worn by each side of the bike. */}
+            {overSide && overSide !== "centre" && (
+              <span
+                className="text-white/45"
+                title={overSide === "both" ? t("designer.flankSharedHint") : undefined}
+              >
+                {t(`designer.flank.${overSide}` as "designer.flank.left")}
+              </span>
+            )}
           </>
         )}
       </div>

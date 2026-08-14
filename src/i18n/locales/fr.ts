@@ -1562,6 +1562,11 @@ export const fr: Translation = {
   "designer.fitNotForPaint": "Un calque de peinture est la planche : il n'y a rien à déplacer ni à redimensionner.",
   "designer.clipped": "Découpé",
   "designer.clippedHint": "Ce calque est rogné sur la pièce : rien ne dépasse la jointure.",
+  "designer.flank.left": "côté gauche",
+  "designer.flank.right": "côté droit",
+  "designer.flank.both": "les deux côtés",
+  "designer.flankSharedHint":
+    "Les deux flancs sont dépliés sur cette même zone : ce que vous dessinez ici apparaît de chaque côté de la moto, en miroir, et pas là où vous l'attendriez de l'autre côté.",
   "designer.opacity": "Opacité",
   "designer.blend": "Fusion",
   "designer.blend.normal": "Normal",

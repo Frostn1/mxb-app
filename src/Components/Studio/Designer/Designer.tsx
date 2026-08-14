@@ -28,7 +28,7 @@ import {
   textureBytes,
 } from "../../../api/mods";
 import { useT } from "../../../i18n/context";
-import { IMAGE_EXTS, PaintDestBar, usePaintDest } from "../paintDest";
+import { IMAGE_EXTS, PaintDestBar, isBikeKind, usePaintDest } from "../paintDest";
 import { CanvasStage } from "./CanvasStage";
 import { Row, Slider } from "./controls";
 import { PreviewPanel } from "./PreviewPanel";
@@ -740,9 +740,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // replaces the sheet object without changing any of these.
   const activeWidth = active?.width ?? 0;
   const activeHeight = active?.height ?? 0;
+  // Left and right are asked for on bikes only: a bike arrives assembled about its mirror
+  // plane, where gear is a single piece whose up-axis the viewer has to work out per mod.
+  const bike = isBikeKind(destState.kind);
   const parts = useMemo<UvPart[]>(
-    () => (geometry ? uvParts(geometry, activeName) : []),
-    [geometry, activeName],
+    () => (geometry ? uvParts(geometry, activeName, { flanks: bike }) : []),
+    [geometry, activeName, bike],
   );
 
   /** Pin the selected layer to a piece of bodywork, or let it cover the sheet again. */
