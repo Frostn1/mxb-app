@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — an empty canvas stops asking for a sheet
+
+### Changed
+- **The Designer no longer nags about an empty canvas.** Opening it with nothing drawn yet put
+  *Add a sheet to draw on.* next to a greyed-out Save, which stated the obvious about a canvas
+  you had only just opened. Save is still off until there's a sheet to save — it just stays
+  quiet about it, and the hints worth acting on (a missing name, a duplicate texture name, no
+  target picked) read exactly as before.
+
 ## Unreleased — the paint changes on disk, the model changes with it
 
 ### Added

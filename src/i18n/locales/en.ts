@@ -1542,7 +1542,6 @@ export const en = {
   "designer.size": "Text size",
   "designer.colour": "Colour",
   "designer.outline": "Outline",
-  "designer.needSheets": "Add a sheet to draw on.",
   "designer.noModelFound":
     "“{{model}}” isn't in your library, so there's nothing to show it on.",
   "designer.noBikePreview":

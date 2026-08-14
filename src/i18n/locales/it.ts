@@ -1566,7 +1566,6 @@ export const it: Translation = {
   "designer.size": "Dimensione testo",
   "designer.colour": "Colore",
   "designer.outline": "Contorno",
-  "designer.needSheets": "Aggiungi un foglio su cui disegnare.",
   "designer.noModelFound":
     "“{{model}}” non è nella tua libreria, quindi non c'è niente su cui mostrarla.",
   "designer.noBikePreview":

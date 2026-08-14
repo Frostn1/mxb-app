@@ -1566,7 +1566,6 @@ export const ptBR: Translation = {
   "designer.size": "Tamanho do texto",
   "designer.colour": "Cor",
   "designer.outline": "Contorno",
-  "designer.needSheets": "Adicione uma folha para desenhar.",
   "designer.noModelFound": "“{{model}}” não está na sua biblioteca, então não há onde mostrar.",
   "designer.noBikePreview":
     "Esta build não lê a geometria das motos, então uma pintura não tem modelo onde ficar. Todo o resto salva normalmente.",
