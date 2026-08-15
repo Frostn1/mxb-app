@@ -14,6 +14,48 @@
 - **"Recently added" sort in the library.** The history only knows about downloads from this
   version on, so the library sorts by file time too — which covers everything already on disk.
 
+## Unreleased — the download queue opens, and a download can be called off
+
+### Added
+- **You can see what you're downloading.** Installs have always queued up one behind the
+  other, but the only sign of it was a "+2 queued" line in the sidebar — you couldn't see
+  what was in there, or in what order. That card is now a button: it opens a panel listing
+  the transfer in progress, with its size and percentage, and every mod waiting behind it.
+  Collapse the sidebar and it becomes a download icon with a count, where before there was
+  nothing to see at all.
+- **A download can be cancelled.** Queue up a 400 MB track by mistake and, until now, the
+  only way to stop it was to quit the app. Every row in the panel has an X. One that hasn't
+  started yet simply leaves the queue; the one in flight is stopped mid-transfer, its
+  half-downloaded file cleaned up, and the next mod in the queue starts straight away. It
+  isn't treated as a failure — no error, no retry prompt, just gone.
+
+### Fixed
+- **An install that fails no longer leaves its download behind.** Every abandoned attempt
+  used to leave the partial archive sitting in the temp folder until the system got around
+  to clearing it, which for a large track meant hundreds of megabytes per failed try.
+
+## Unreleased — MediaFire links stop needing a manual download
+
+### Fixed
+- **MediaFire downloads no longer depend on the shape of MediaFire's page.** Resolving a
+  share meant fetching the file page and hunting for the download button in it, so every
+  time MediaFire moved that button — and it has moved repeatedly — installs broke the same
+  way: *"couldn't find the MediaFire download link — open the mod page to download it
+  manually"*, on links that worked fine in a browser. The link is now looked up through
+  MediaFire's own API, from the key in the share URL, which doesn't care what this month's
+  page looks like. Scraping is still there behind it, for links whose key can't be read and
+  for the day the API stops answering — and it has learned two more places the button has
+  been hiding.
+- **MediaFire folder links install.** A folder share has no download button on it at all, so
+  the old resolver went looking for one, found nothing, and reported the mod as broken. The
+  folder's contents are read instead and the archive picked out of them, the same way a
+  Google Drive folder already worked.
+- **A MediaFire file that is gone, locked or blocked says so.** All four outcomes used to
+  arrive as the same "download it manually" — advice that is simply wrong when a browser hits
+  the identical wall. A removed file, a password-protected one, one MediaFire has taken down,
+  and one that has burned through its bandwidth are now each named, with what to actually do
+  about it.
+
 ## Unreleased — undo covers the whole editor, and the bucket stays on its panel
 
 ### Added

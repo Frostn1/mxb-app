@@ -1062,6 +1062,18 @@ export const es: Translation = {
   "install.failed": "Fallo en la instalación — {{title}}",
   "install.openModPage": "Abrir la página del mod",
   "install.clickToOpen": "Haz clic para abrir la página del mod",
+  "install.cancelled": "{{title}} cancelado",
+
+  "downloads.title": "Descargas",
+  "downloads.open": "Mostrar la cola de descargas",
+  "downloads.waiting": "En espera",
+  "downloads.cancel": "Cancelar esta descarga",
+  "downloads.remove": "Quitar de la cola",
+  "downloads.cancelling": "Cancelando…",
+  "downloads.stageResolving": "Buscando el archivo…",
+  "downloads.stageDownloading": "Descargando",
+  "downloads.stageExtracting": "Extrayendo",
+  "downloads.stagePlacing": "Instalando",
 
   // ── Descargas (historial) ──────────────────────────────────────────────────
   "downloads.help":

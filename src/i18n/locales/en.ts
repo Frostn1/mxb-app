@@ -1032,6 +1032,18 @@ export const en = {
   "install.failed": "Install failed — {{title}}",
   "install.openModPage": "Open the mod's page",
   "install.clickToOpen": "Click to open the mod's page",
+  "install.cancelled": "Cancelled {{title}}",
+
+  "downloads.title": "Downloads",
+  "downloads.open": "Show the download queue",
+  "downloads.waiting": "Waiting",
+  "downloads.cancel": "Cancel this download",
+  "downloads.remove": "Remove from the queue",
+  "downloads.cancelling": "Cancelling…",
+  "downloads.stageResolving": "Finding the file…",
+  "downloads.stageDownloading": "Downloading",
+  "downloads.stageExtracting": "Extracting",
+  "downloads.stagePlacing": "Installing",
 
   // ── Downloads (history) ────────────────────────────────────────────────────
   "downloads.help":
