@@ -1062,6 +1062,18 @@ export const fr: Translation = {
   "install.failed": "Échec de l'installation — {{title}}",
   "install.openModPage": "Ouvrir la page du mod",
   "install.clickToOpen": "Cliquez pour ouvrir la page du mod",
+  "install.cancelled": "{{title}} annulé",
+
+  "downloads.title": "Téléchargements",
+  "downloads.open": "Afficher la file de téléchargement",
+  "downloads.waiting": "En attente",
+  "downloads.cancel": "Annuler ce téléchargement",
+  "downloads.remove": "Retirer de la file",
+  "downloads.cancelling": "Annulation…",
+  "downloads.stageResolving": "Recherche du fichier…",
+  "downloads.stageDownloading": "Téléchargement",
+  "downloads.stageExtracting": "Extraction",
+  "downloads.stagePlacing": "Installation",
 
   // ── Catégories (singulier) ─────────────────────────────────────────────────
   "category.track": "Circuit",

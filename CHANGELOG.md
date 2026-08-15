@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — the download queue opens, and a download can be called off
+
+### Added
+- **You can see what you're downloading.** Installs have always queued up one behind the
+  other, but the only sign of it was a "+2 queued" line in the sidebar — you couldn't see
+  what was in there, or in what order. That card is now a button: it opens a panel listing
+  the transfer in progress, with its size and percentage, and every mod waiting behind it.
+  Collapse the sidebar and it becomes a download icon with a count, where before there was
+  nothing to see at all.
+- **A download can be cancelled.** Queue up a 400 MB track by mistake and, until now, the
+  only way to stop it was to quit the app. Every row in the panel has an X. One that hasn't
+  started yet simply leaves the queue; the one in flight is stopped mid-transfer, its
+  half-downloaded file cleaned up, and the next mod in the queue starts straight away. It
+  isn't treated as a failure — no error, no retry prompt, just gone.
+
+### Fixed
+- **An install that fails no longer leaves its download behind.** Every abandoned attempt
+  used to leave the partial archive sitting in the temp folder until the system got around
+  to clearing it, which for a large track meant hundreds of megabytes per failed try.
+
 ## Unreleased — MediaFire links stop needing a manual download
 
 ### Fixed
