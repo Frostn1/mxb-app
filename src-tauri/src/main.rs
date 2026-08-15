@@ -42,6 +42,8 @@ mod pkz;
 mod proton;
 #[cfg(sidecar)]
 mod sidecar;
+#[cfg(worldnet)]
+mod worldnet;
 mod presets;
 mod paintsync;
 mod reshade;

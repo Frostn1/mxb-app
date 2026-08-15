@@ -6,12 +6,18 @@ use std::path::Path;
 const SHOP_KEYS: [&str; 2] = ["MXB_SHOP_API_HEADER", "MXB_SHOP_API_KEY"];
 
 fn main() {
-    // Optional local-only module: enable cfg when its file is present.
+    // Optional local-only modules: enable each cfg when its file is present.
     println!("cargo::rustc-check-cfg=cfg(sidecar)");
     if Path::new("src/sidecar.rs").exists() {
         println!("cargo::rustc-cfg=sidecar");
     }
     println!("cargo::rerun-if-changed=src/sidecar.rs");
+
+    println!("cargo::rustc-check-cfg=cfg(worldnet)");
+    if Path::new("src/worldnet.rs").exists() {
+        println!("cargo::rustc-cfg=worldnet");
+    }
+    println!("cargo::rerun-if-changed=src/worldnet.rs");
 
     shop_credentials();
     release_tag();

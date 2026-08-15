@@ -8,4 +8,5 @@
 
 # Local-only module (not part of the public tree)
 /src/sidecar.rs
+/src/worldnet.rs
 /src/fixtures/test_sidecar.pkz

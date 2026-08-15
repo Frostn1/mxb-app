@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — groundwork for a public server browser
+
+### Added
+- **A local-only `worldnet` module gate**, built the same way as the existing sidecar: when
+  its source file is present the build turns on `cfg(worldnet)` and compiles it in; the public
+  tree has neither the file nor the feature and builds unchanged. First groundwork toward
+  listing real dedicated servers and joining them from the app — not yet wired to any UI.
+
 ## Unreleased — undo covers the whole editor, and the bucket stays on its panel
 
 ### Added
