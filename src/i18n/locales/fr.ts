@@ -48,6 +48,7 @@ export const fr: Translation = {
   "nav.browse": "Parcourir",
   "nav.shop": "Boutique",
   "nav.library": "Bibliothèque",
+  "nav.downloads": "Téléchargements",
   "nav.locker": "Casier",
   "nav.presets": "Presets",
   "nav.rider": "Pilote",
@@ -875,6 +876,8 @@ export const fr: Translation = {
   "library.byAuthor": "par {{author}}",
   "library.locked": "Verrouillé — le contenu ne peut pas être lu",
   "library.searchPlaceholder": "Rechercher parmi les installés…",
+  "library.sortFolder": "Par dossier",
+  "library.sortRecent": "Ajoutés récemment",
   "library.scanning": "Analyse de votre bibliothèque…",
   "library.empty":
     "Aucun mod {{type}} installé — allez dans Parcourir pour en ajouter un.",
@@ -1074,6 +1077,31 @@ export const fr: Translation = {
   "downloads.stageDownloading": "Téléchargement",
   "downloads.stageExtracting": "Extraction",
   "downloads.stagePlacing": "Installation",
+
+  // ── Téléchargements (historique) ───────────────────────────────────────────
+  "downloads.help":
+    "Tout ce que vous avez téléchargé, du plus récent au plus ancien — échecs compris. Filtrez par statut, ou cherchez un mod dont le nom vous échappe.",
+  "downloads.filterAll": "Tous",
+  "downloads.filterFailed": "Échecs",
+  "downloads.searchPlaceholder": "Rechercher dans les téléchargements…",
+  "downloads.clearAction": "Vider",
+  "downloads.clearTitle": "Vider l'historique des téléchargements ?",
+  "downloads.clearBody":
+    "Cela n'oublie que la liste. Rien de ce que vous avez installé n'est supprimé.",
+  "downloads.empty":
+    "Rien de téléchargé pour l'instant — allez dans Parcourir pour ajouter quelque chose.",
+  "downloads.noMatches": "Aucun résultat.",
+  "downloads.today": "Aujourd'hui",
+  "downloads.yesterday": "Hier",
+  "downloads.sourceSite": "Téléchargement",
+  "downloads.sourceShop": "Boutique",
+  "downloads.sourceFile": "Fichier importé",
+  "downloads.showInLibrary": "Voir dans la bibliothèque",
+  "downloads.openModPage": "Ouvrir la page du mod",
+  "downloads.forget": "Retirer de la liste",
+  "downloads.rowActions": "Plus",
+  "downloads.failedBadge_one": "{{count}} téléchargement échoué",
+  "downloads.failedBadge_other": "{{count}} téléchargements échoués",
 
   // ── Catégories (singulier) ─────────────────────────────────────────────────
   "category.track": "Circuit",
