@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — a Downloads page, so you can see what you just grabbed
+
+### Added
+- **Downloads — everything you've installed, newest first.** Grab eight tracks in an evening
+  and there was no way to see which eight: the library scans your mods folder, which knows what
+  is there but not when it arrived. The new page groups by day, says where each one landed and
+  which mirror served it, and searches by name, destination or host.
+- **Failed downloads are kept instead of vanishing.** A failure used to live only in a toast —
+  dismiss it and there was no record the download had ever been tried, just a mod that silently
+  wasn't there. Failures now stay on the page with their error, retry in place through the same
+  install queue, and put a count on the sidebar so one is noticeable at all.
+- **"Recently added" sort in the library.** The history only knows about downloads from this
+  version on, so the library sorts by file time too — which covers everything already on disk.
+
 ## Unreleased — undo covers the whole editor, and the bucket stays on its panel
 
 ### Added

@@ -12,6 +12,8 @@ import type {
   RegisterReport,
   Config,
   DownloadOption,
+  DownloadRecord,
+  NewDownload,
   FrostmodInstallReport,
   FrostmodReload,
   FrostmodStatus,
@@ -1631,6 +1633,29 @@ export function shopInstall(
  */
 export function shopInstalledMap(): Promise<Record<string, string[]>> {
   return invoke<Record<string, string[]>>("shop_installed_map");
+}
+
+/**
+ * The download history — everything the app installed, newest first, failures included.
+ *
+ * Kept in Rust rather than derived from the library scan because a scan can only see what is
+ * on disk: it has no idea when a mod arrived, and a download that failed left nothing to find.
+ */
+export function downloadHistory(): Promise<DownloadRecord[]> {
+  return invoke<DownloadRecord[]>("download_history");
+}
+
+/** Note a finished download. Resolves to `null` if there was nothing worth recording. */
+export function recordDownload(entry: NewDownload): Promise<DownloadRecord | null> {
+  return invoke<DownloadRecord | null>("record_download", { entry });
+}
+
+export function forgetDownload(id: string): Promise<void> {
+  return invoke<void>("forget_download", { id });
+}
+
+export function clearDownloadHistory(): Promise<void> {
+  return invoke<void>("clear_download_history");
 }
 
 /** Fires after a WebView sign-in completes; payload is whether it succeeded. */

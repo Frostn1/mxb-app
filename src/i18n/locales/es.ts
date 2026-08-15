@@ -46,6 +46,7 @@ export const es: Translation = {
   "nav.browse": "Explorar",
   "nav.shop": "Tienda",
   "nav.library": "Biblioteca",
+  "nav.downloads": "Descargas",
   "nav.locker": "Taquilla",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
@@ -870,6 +871,8 @@ export const es: Translation = {
   "library.byAuthor": "de {{author}}",
   "library.locked": "Bloqueado — no se puede leer el contenido",
   "library.searchPlaceholder": "Buscar entre los instalados…",
+  "library.sortFolder": "Por carpeta",
+  "library.sortRecent": "Añadidas recientemente",
   "library.scanning": "Analizando tu biblioteca…",
   "library.empty":
     "Aún no hay {{type}} instaladas — ve a Explorar y añade alguna.",
@@ -1059,6 +1062,30 @@ export const es: Translation = {
   "install.failed": "Fallo en la instalación — {{title}}",
   "install.openModPage": "Abrir la página del mod",
   "install.clickToOpen": "Haz clic para abrir la página del mod",
+
+  // ── Descargas (historial) ──────────────────────────────────────────────────
+  "downloads.help":
+    "Todo lo que has descargado, lo más reciente primero — incluidas las que fallaron. Filtra por estado o busca una mod cuyo nombre no recuerdes del todo.",
+  "downloads.filterAll": "Todas",
+  "downloads.filterFailed": "Fallidas",
+  "downloads.searchPlaceholder": "Buscar descargas…",
+  "downloads.clearAction": "Vaciar",
+  "downloads.clearTitle": "¿Vaciar el historial de descargas?",
+  "downloads.clearBody":
+    "Esto solo olvida la lista. No se elimina nada de lo que has instalado.",
+  "downloads.empty": "Aún no has descargado nada — ve a Explorar y añade algo.",
+  "downloads.noMatches": "Sin resultados.",
+  "downloads.today": "Hoy",
+  "downloads.yesterday": "Ayer",
+  "downloads.sourceSite": "Descarga",
+  "downloads.sourceShop": "Tienda",
+  "downloads.sourceFile": "Archivo importado",
+  "downloads.showInLibrary": "Ver en la biblioteca",
+  "downloads.openModPage": "Abrir la página del mod",
+  "downloads.forget": "Quitar de la lista",
+  "downloads.rowActions": "Más",
+  "downloads.failedBadge_one": "{{count}} descarga fallida",
+  "downloads.failedBadge_other": "{{count}} descargas fallidas",
 
   // ── Categorías (singular) ──────────────────────────────────────────────────
   "category.track": "Pista",
