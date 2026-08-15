@@ -19,7 +19,8 @@ import {
   shopInstall,
   type ShopItem,
 } from "../api/mods";
-import type { InstallStage, ReloadOutcome } from "../types";
+import type { DownloadSource, InstallStage, ReloadOutcome } from "../types";
+import { useDownloads } from "./Downloads";
 import { useT } from "../i18n/context";
 
 /** Where the bytes come from — a resolvable host, a file the user picked, or a shop purchase
@@ -45,6 +46,12 @@ interface StartParams {
  *  the one already running; the same paint sent to a second bike does not. */
 function installKey({ slug, subpath, destFolder }: StartParams): string {
   return JSON.stringify([slug, subpath, destFolder]);
+}
+
+/** How the download history names this source. */
+function historySource(source: InstallSource): DownloadSource {
+  if (source.kind === "shop") return "shop";
+  return source.kind === "download" ? "site" : "file";
 }
 
 /** Where a failed install can send the user back to. */
@@ -121,6 +128,10 @@ export function InstallProvider({
   const t = useT();
   const tRef = useRef(t);
   tRef.current = t;
+  // Same reason: the history is written from inside `run`, which must not be rebuilt.
+  const { note } = useDownloads();
+  const noteRef = useRef(note);
+  noteRef.current = note;
   const clearTimer = useRef<number | null>(null);
   // Installs run one at a time (the engine handles a single transfer); extra
   // requests wait in this queue and are drained sequentially.
@@ -166,9 +177,13 @@ export function InstallProvider({
     // FrostMod's reload event can land just before the install call resolves;
     // stash the outcome so the success toast can mention it.
     let frostOutcome: ReloadOutcome | null = null;
+    // The only place the transfer size is known — nothing on disk afterwards tells you how
+    // big the download was, and a failed one leaves nothing at all.
+    let bytes: number | null = null;
 
     const unlisten = await onInstallProgress((p) => {
       if (p.slug !== slug) return;
+      if (p.total) bytes = p.total;
       setActive((cur) =>
         cur && cur.slug === slug
           ? {
@@ -189,6 +204,22 @@ export function InstallProvider({
       );
     });
 
+    /** One record per finished attempt, whichever way it went. */
+    const remember = (status: "installed" | "failed", error: string | null) =>
+      noteRef.current({
+        title,
+        slug,
+        subpath,
+        destFolder,
+        categoryId: params.categoryId ?? null,
+        source: historySource(source),
+        host: source.kind === "download" ? source.host : null,
+        url: source.kind === "download" ? source.url : null,
+        bytes,
+        status,
+        error,
+      });
+
     try {
       if (source.kind === "download") {
         await addToLibrary(slug, source.url, source.host, subpath, destFolder);
@@ -200,6 +231,7 @@ export function InstallProvider({
       setActive((cur) =>
         cur && cur.slug === slug ? { ...cur, stage: "done" } : cur,
       );
+      remember("installed", null);
       onInstalledRef.current?.();
       toast.success(tRef.current("install.installed", { title }), {
         description:
@@ -227,6 +259,7 @@ export function InstallProvider({
       setActive((cur) =>
         cur && cur.slug === slug ? { ...cur, stage: "error", message } : cur,
       );
+      remember("failed", message);
       // Retry goes through `enqueue`, never straight to `run`: a second impatient click used
       // to start a *parallel* run of the same job.
       const target: ModTarget = { slug, subpath, categoryId: params.categoryId };

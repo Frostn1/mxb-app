@@ -17,10 +17,12 @@ import {
   PanelLeftOpen,
   Server as ServerIcon,
   Plug,
+  Download as DownloadIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useFrostmod } from "../../Context/FrostmodContext";
+import { useDownloads } from "../../Context/Downloads";
 import { useT, type TKey } from "../../i18n/context";
 import {
   experimentalState,
@@ -39,6 +41,7 @@ export type DashboardView =
   | "browse"
   | "shop"
   | "library"
+  | "downloads"
   | "locker"
   | "presets"
   | "studio"
@@ -66,6 +69,9 @@ type NavEntry = {
 const NAV: NavEntry[] = [
   { id: "browse", label: "nav.browse", icon: Home },
   { id: "library", label: "nav.library", icon: LibraryIcon },
+  // Right after the library, because it answers the question the library can't: which of
+  // these arrived today, and what didn't arrive at all.
+  { id: "downloads", label: "nav.downloads", icon: DownloadIcon },
   // The Locker and Rider views are the 3D preview; GP Bikes' meshes need their own
   // part bindings before they can be shown.
   { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
@@ -108,6 +114,7 @@ const STARTING_TIMEOUT_MS = 15000;
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const t = useT();
   const { running, reload, status, start, stop } = useFrostmod();
+  const { unseenFailures } = useDownloads();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const { game } = useConfig();
   const caps = game.caps;
@@ -246,7 +253,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
               title={collapsed ? t(label) : undefined}
               aria-label={collapsed ? t(label) : undefined}
               className={cn(
-                "flex cursor-default items-center gap-2.5 rounded-lg py-2.5 text-[13.5px] transition-colors",
+                "relative flex cursor-default items-center gap-2.5 rounded-lg py-2.5 text-[13.5px] transition-colors",
                 collapsed ? "justify-center px-0" : "px-3",
                 activeNav
                   ? "bg-accent font-semibold text-accent-foreground"
@@ -255,6 +262,21 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
             >
               <Icon className="size-4 flex-none" />
               {!collapsed && <span>{t(label)}</span>}
+              {/* A failed download used to exist only as a toast, so one dismissed in passing
+                  left no sign anything had gone wrong. This is that sign. */}
+              {id === "downloads" && unseenFailures > 0 && (
+                <span
+                  title={t("downloads.failedBadge", { count: unseenFailures })}
+                  className={cn(
+                    "flex-none rounded-full bg-destructive text-center text-[10px] font-bold leading-[16px] text-destructive-foreground",
+                    collapsed
+                      ? "absolute right-1.5 top-1.5 size-2 p-0"
+                      : "ml-auto min-w-[18px] px-1",
+                  )}
+                >
+                  {!collapsed && unseenFailures}
+                </span>
+              )}
             </button>
           );
         })}

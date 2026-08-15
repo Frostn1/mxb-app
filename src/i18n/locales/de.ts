@@ -51,6 +51,7 @@ export const de: Translation = {
   "nav.browse": "Entdecken",
   "nav.shop": "Shop",
   "nav.library": "Bibliothek",
+  "nav.downloads": "Downloads",
   "nav.locker": "Spind",
   "nav.presets": "Presets",
   "nav.rider": "Fahrer",
@@ -877,6 +878,8 @@ export const de: Translation = {
   "library.byAuthor": "von {{author}}",
   "library.locked": "Gesperrt — Inhalt kann nicht gelesen werden",
   "library.searchPlaceholder": "Installierte durchsuchen…",
+  "library.sortFolder": "Nach Ordner",
+  "library.sortRecent": "Zuletzt hinzugefügt",
   "library.scanning": "Deine Bibliothek wird gescannt…",
   "library.empty":
     "Noch keine {{type}} installiert — geh zu Entdecken und füge etwas hinzu.",
@@ -1083,6 +1086,31 @@ export const de: Translation = {
   "downloads.stageDownloading": "Wird heruntergeladen",
   "downloads.stageExtracting": "Wird entpackt",
   "downloads.stagePlacing": "Wird installiert",
+
+  // ── Downloads (Verlauf) ────────────────────────────────────────────────────
+  "downloads.help":
+    "Alles, was du heruntergeladen hast, das Neueste zuerst — auch die fehlgeschlagenen. Filtere nach Status oder such nach einer Mod, deren Namen du nicht mehr genau weißt.",
+  "downloads.filterAll": "Alle",
+  "downloads.filterFailed": "Fehlgeschlagen",
+  "downloads.searchPlaceholder": "Downloads durchsuchen…",
+  "downloads.clearAction": "Leeren",
+  "downloads.clearTitle": "Download-Verlauf leeren?",
+  "downloads.clearBody":
+    "Das vergisst nur die Liste. Nichts Installiertes wird entfernt.",
+  "downloads.empty":
+    "Noch nichts heruntergeladen — geh zu Entdecken und füge etwas hinzu.",
+  "downloads.noMatches": "Keine Treffer.",
+  "downloads.today": "Heute",
+  "downloads.yesterday": "Gestern",
+  "downloads.sourceSite": "Download",
+  "downloads.sourceShop": "Shop",
+  "downloads.sourceFile": "Importierte Datei",
+  "downloads.showInLibrary": "In der Bibliothek zeigen",
+  "downloads.openModPage": "Mod-Seite öffnen",
+  "downloads.forget": "Aus der Liste entfernen",
+  "downloads.rowActions": "Mehr",
+  "downloads.failedBadge_one": "{{count}} Download fehlgeschlagen",
+  "downloads.failedBadge_other": "{{count}} Downloads fehlgeschlagen",
 
   // ── Kategorien (Singular) ──────────────────────────────────────────────────
   "category.track": "Strecke",

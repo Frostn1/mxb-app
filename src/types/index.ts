@@ -304,6 +304,9 @@ export interface LibraryEntry {
   path: string;
   folder: string;
   size: number;
+  /** Unix milliseconds the files were last written — what "Recently added" sorts on. 0 when
+   *  the filesystem wouldn't say. */
+  modified: number;
   kind: LibraryKind;
   category: LibraryCategory;
   /** For paints / model-swaps: the owning bike / gear model / rider profile. */
@@ -730,6 +733,36 @@ export interface DropOutcome {
   installed: DropInstalled[];
   failed: DropFailed[];
 }
+
+/** Where a download's bytes came from: the mod site, a shop purchase, or a local file the
+ *  user imported or dragged in. */
+export type DownloadSource = "site" | "shop" | "file";
+
+export type DownloadStatus = "installed" | "failed";
+
+/** One finished download, as kept in `download-history.json`. */
+export interface DownloadRecord {
+  id: string;
+  /** Unix milliseconds, stamped by the backend. */
+  at: number;
+  title: string;
+  /** Empty for a dragged-in file — it has no mod page to go back to. */
+  slug: string;
+  subpath: string;
+  destFolder: string;
+  categoryId: number | null;
+  source: DownloadSource;
+  /** Which mirror served it — MediaFire, Google Drive, MEGA… */
+  host: string | null;
+  /** The link it came from, so a failed row can be retried in place. Null for shop and file. */
+  url: string | null;
+  bytes: number | null;
+  status: DownloadStatus;
+  error: string | null;
+}
+
+/** What a caller supplies; `id` and `at` are the backend's to assign. */
+export type NewDownload = Omit<DownloadRecord, "id" | "at">;
 
 export type InstallStage =
   | "resolving"

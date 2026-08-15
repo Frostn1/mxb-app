@@ -9,6 +9,7 @@ mod cancel;
 mod cfg;
 mod config;
 mod cookie_session;
+mod downloads;
 mod dropzone;
 mod edf;
 mod fileshare;
@@ -350,6 +351,9 @@ fn scan_library_blocking(
             .presets
             .into_iter()
             .map(|p| library::LibraryEntry {
+                modified: std::fs::metadata(&p.path)
+                    .map(|m| library::mtime_ms(&m))
+                    .unwrap_or(0),
                 name: p.name,
                 path: p.path,
                 folder: String::new(),
@@ -5584,6 +5588,37 @@ fn shop_installed_map(
     Ok(shop_installed::recorded(&dir))
 }
 
+/// Note a finished download — installed or failed. Called from the two places every install
+/// passes through (`Context/Install` and `Context/DropReview`), which is why nothing in the
+/// download paths themselves has to know history exists.
+#[tauri::command]
+fn record_download(
+    app: tauri::AppHandle,
+    entry: downloads::NewDownload,
+) -> Result<Option<downloads::DownloadRecord>, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    downloads::record(&dir, entry).map_err(|e| format!("{e:#}"))
+}
+
+/// Everything downloaded, newest first.
+#[tauri::command]
+fn download_history(app: tauri::AppHandle) -> Result<Vec<downloads::DownloadRecord>, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    Ok(downloads::history(&dir))
+}
+
+#[tauri::command]
+fn forget_download(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    downloads::forget(&dir, &id).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn clear_download_history(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    downloads::clear(&dir).map_err(|e| format!("{e:#}"))
+}
+
 fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()
         .app_local_data_dir()
@@ -6533,6 +6568,10 @@ fn main() {
             shop_match_catalog,
             shop_install,
             shop_installed_map,
+            record_download,
+            download_history,
+            forget_download,
+            clear_download_history,
             shop_catalog_available,
             shop_catalog_status,
             shop_catalog_categories,
@@ -6757,6 +6796,8 @@ mod window_tests {
                 "shop_install",
                 "shop_logout",
                 "commit_drop",
+                "record_download",
+                "clear_download_history",
                 "plugin:shell|open",
                 "plugin:dialog|open",
                 "plugin:event|listen",
