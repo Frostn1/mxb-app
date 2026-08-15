@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Sidebar, { type DashboardView } from "../Shell/Sidebar";
 import Library from "../Library/Library";
+import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
@@ -15,11 +16,13 @@ import Tour, { TourContext, TOUR_DONE_KEY } from "../Tour/Tour";
 import ReleaseShowcase from "../Showcase/ReleaseShowcase";
 import { useReleaseShowcase } from "../Showcase/useReleaseShowcase";
 import { InstallProvider } from "../../Context/Install";
+import { DownloadsProvider } from "../../Context/Downloads";
 import { DropReviewProvider } from "../../Context/DropReview";
 import { useConfig } from "../../Context/Config";
-import { setIntroSeen } from "../../api/mods";
+import { modTypesFor, setIntroSeen } from "../../api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
-import type { Loadout } from "../../types";
+import { displayName } from "../../lib/mods";
+import type { DownloadRecord, Loadout } from "../../types";
 
 interface DashboardProps {
   /** True while the Welcome slideshow is still up. The tour waits for it to close
@@ -108,6 +111,22 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     startTour();
   }, [welcomeActive, startTour, config.tourDone]);
 
+  // Jump from a download row to the mod it installed: the right library tab, searched for
+  // by name. A fresh object each time so repeating the same jump still re-applies it.
+  const [libraryFocus, setLibraryFocus] = useState<{ name: string } | null>(null);
+  const showInLibrary = useCallback(
+    (record: DownloadRecord) => {
+      const target = modTypesFor(game.id).find(
+        (mt) => mt.installSubpath === record.subpath,
+      );
+      if (target) changeType(target);
+      setLibraryFocus({ name: displayName(record.title) });
+      navigate("library");
+    },
+    [game.id, changeType, navigate],
+  );
+  const clearLibraryFocus = useCallback(() => setLibraryFocus(null), []);
+
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
   const openInRider = useCallback((lo: Loadout) => {
     setRiderPreset(lo);
@@ -117,6 +136,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
 
   return (
     <TourContext.Provider value={{ startTour }}>
+    {/* Outside the installers: both of them write to the history, and the sidebar reads it. */}
+    <DownloadsProvider>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
       {/* Wraps the views because two of them stage plans: a drop anywhere in the window, and
           the Shop's purchases grid. Both finish in the one review sheet this renders. */}
@@ -153,6 +174,14 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onChangeType={changeType}
               refreshKey={libraryVersion}
               onChanged={onInstalled}
+              focus={libraryFocus}
+              onFocusApplied={clearLibraryFocus}
+            />
+          ) : view === "downloads" ? (
+            <Downloads
+              onOpenMod={openModTarget}
+              onShowInLibrary={showInLibrary}
+              onOpenShop={() => navigate("shop")}
             />
           ) : view === "locker" ? (
             <Locker />
@@ -193,6 +222,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
       )}
       </DropReviewProvider>
     </InstallProvider>
+    </DownloadsProvider>
     </TourContext.Provider>
   );
 };

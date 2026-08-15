@@ -20,6 +20,8 @@ import {
   Loader2,
   Share2,
   ClipboardPaste,
+  ArrowUpDown,
+  Clock,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -198,10 +200,15 @@ interface Section {
   items: LibraryEntry[];
 }
 
+/** Folder grouping is the default; "Recently added" answers "which of these did I just get",
+ *  for mods that predate the download history as well as ones that don't. */
+export type LibrarySort = "folder" | "recent";
+
 function buildSections(
   modType: ModType,
   entries: LibraryEntry[],
   search: string,
+  sort: LibrarySort,
   t: TFunc,
 ): Section[] {
   const q = search.trim().toLowerCase();
@@ -213,6 +220,15 @@ function buildSections(
           (e.parent ?? "").toLowerCase().includes(q),
       )
     : entries;
+
+  // One flat list, newest first — grouping by folder would scatter the very thing being
+  // looked for across half a dozen sections.
+  if (sort === "recent") {
+    const recent = [...filtered].sort((a, b) => b.modified - a.modified);
+    return recent.length
+      ? [{ key: "__recent__", label: t("library.sortRecent"), items: recent }]
+      : [];
+  }
 
   if (modType.id === "rider") {
     const byCat = new Map<string, LibraryEntry[]>();
@@ -255,6 +271,11 @@ interface LibraryProps {
   onChangeType: (type: ModType) => void;
   refreshKey: number;
   onChanged: () => void;
+  /** Something sent the user here to look at one mod — seeds the search box with its name.
+   *  A new object per jump, so repeating the same jump re-applies it. */
+  focus?: { name: string } | null;
+  /** Consumed: the jump has been applied, and must not be re-applied on the next visit. */
+  onFocusApplied?: () => void;
 }
 
 export default function Library({
@@ -262,6 +283,8 @@ export default function Library({
   onChangeType,
   refreshKey,
   onChanged,
+  focus,
+  onFocusApplied,
 }: LibraryProps) {
   const t = useT();
   const { pickAndImport, staging } = useImport();
@@ -269,6 +292,7 @@ export default function Library({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<LibrarySort>("folder");
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<LibraryEntry | null>(null);
   const [view3d, setView3d] = useState<LibraryEntry | null>(null);
@@ -304,6 +328,13 @@ export default function Library({
   }, [load, refreshKey]);
 
   useEffect(() => setDetail(null), [modType]);
+  // Arriving from a download row: search for that mod so the jump lands on it, not just on
+  // the right tab. Consumed on arrival — a later visit is not still about that one mod.
+  useEffect(() => {
+    if (!focus) return;
+    setSearch(focus.name);
+    onFocusApplied?.();
+  }, [focus, onFocusApplied]);
   // Leaving a type (or a rescan removing items) should never carry a stale selection.
   const exitSelect = useCallback(() => {
     setSelectMode(false);
@@ -317,8 +348,8 @@ export default function Library({
   );
 
   const sections = useMemo(
-    () => buildSections(modType, entries, search, t),
-    [modType, entries, search, t],
+    () => buildSections(modType, entries, search, sort, t),
+    [modType, entries, search, sort, t],
   );
 
   const visibleItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
@@ -529,6 +560,24 @@ export default function Library({
             className="w-full bg-transparent text-[12.5px] placeholder:text-faint focus:outline-none"
           />
         </div>
+        {/* Sorting by arrival is the only way to find a mod whose name you never read —
+            and it works for everything on disk, not just what the history remembers. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <ArrowUpDown className="size-3.5" />{" "}
+              {t(sort === "recent" ? "library.sortRecent" : "library.sortFolder")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setSort("folder")}>
+              <Folder className="size-3.5" /> {t("library.sortFolder")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setSort("recent")}>
+              <Clock className="size-3.5" /> {t("library.sortRecent")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           variant={selectMode ? "default" : "outline"}
           size="sm"

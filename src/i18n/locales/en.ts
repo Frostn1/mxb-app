@@ -45,6 +45,7 @@ export const en = {
   "nav.browse": "Browse",
   "nav.shop": "Shop",
   "nav.library": "Library",
+  "nav.downloads": "Downloads",
   "nav.locker": "Locker",
   "nav.presets": "Presets",
   "nav.rider": "Rider",
@@ -850,6 +851,8 @@ export const en = {
   "library.byAuthor": "by {{author}}",
   "library.locked": "Locked — contents can't be read",
   "library.searchPlaceholder": "Search installed…",
+  "library.sortFolder": "By folder",
+  "library.sortRecent": "Recently added",
   "library.scanning": "Scanning your library…",
   "library.empty": "No {{type}} installed yet — head to Browse and add one.",
   "library.noMatches": "No matches.",
@@ -1029,6 +1032,30 @@ export const en = {
   "install.failed": "Install failed — {{title}}",
   "install.openModPage": "Open the mod's page",
   "install.clickToOpen": "Click to open the mod's page",
+
+  // ── Downloads (history) ────────────────────────────────────────────────────
+  "downloads.help":
+    "Everything you've downloaded, newest first — the ones that failed included. Filter by status, or search for a mod whose name you can't quite remember.",
+  "downloads.filterAll": "All",
+  "downloads.filterFailed": "Failed",
+  "downloads.searchPlaceholder": "Search downloads…",
+  "downloads.clearAction": "Clear",
+  "downloads.clearTitle": "Clear download history?",
+  "downloads.clearBody":
+    "This only forgets the list. Nothing you've installed is removed.",
+  "downloads.empty": "Nothing downloaded yet — head to Browse and add something.",
+  "downloads.noMatches": "No matches.",
+  "downloads.today": "Today",
+  "downloads.yesterday": "Yesterday",
+  "downloads.sourceSite": "Download",
+  "downloads.sourceShop": "Shop",
+  "downloads.sourceFile": "Imported file",
+  "downloads.showInLibrary": "Show in library",
+  "downloads.openModPage": "Open the mod's page",
+  "downloads.forget": "Remove from list",
+  "downloads.rowActions": "More",
+  "downloads.failedBadge_one": "{{count}} download failed",
+  "downloads.failedBadge_other": "{{count}} downloads failed",
 
   // ── Library categories (singular — item "Type" label) ──────────────────────
   "category.track": "Track",
