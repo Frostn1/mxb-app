@@ -377,20 +377,237 @@ pub(crate) async fn resolve_direct_url(
     }
 }
 
+/// MediaFire's versioned API. Reached from the share's quick key, so it doesn't care what
+/// the file page looks like this month.
+fn mediafire_api(path: &str, query: &str) -> String {
+    format!(
+        "{}/{path}?{query}&response_format=json",
+        obfstr!("https://www.mediafire.com/api/1.5")
+    )
+}
+
+/// Resolve a MediaFire share to something [`download`] can stream.
+///
+/// The file page is a moving target — MediaFire has reshaped it repeatedly, and every
+/// reshape broke installs the same way, with "couldn't find the MediaFire download link"
+/// on links that were perfectly fine in a browser. So the page is no longer the first
+/// thing we ask. MediaFire's own API answers the same question from the share's quick key
+/// under a versioned contract; scraping stays behind it, for links whose key we can't read
+/// and for the day the API stops answering.
 async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String> {
+    // Already a CDN link — mod pages do occasionally list one. Nothing to resolve.
+    if is_mediafire_direct(url) {
+        return Ok(url.to_string());
+    }
+
+    // A folder share has no download button at all: the old resolver fetched one, found
+    // nothing, and reported the link as broken.
+    if let Some(folder) = mediafire_folder_key(url) {
+        return resolve_mediafire_folder(client, &folder).await;
+    }
+
+    if let Some(key) = mediafire_quick_key(url) {
+        if let Some(direct) = mediafire_api_link(client, &key).await? {
+            return Ok(direct);
+        }
+    }
+
     let html = client
         .get(url)
+        // MediaFire varies what it serves by how browser-like the request looks, and a
+        // bare `reqwest` GET is on the wrong side of that line.
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
         .send()
         .await?
         .error_for_status()?
         .text()
         .await?;
 
+    // The refusal check runs only once parsing has come up empty, never ahead of it: it
+    // matches on the page's raw source, and an error string sitting in a *working* page's
+    // JavaScript would otherwise condemn a file that was about to download fine.
     parse_mediafire_link(&html).ok_or_else(|| {
+        anyhow::anyhow!(mediafire_page_error(&html).unwrap_or_else(|| {
+            "Couldn't find the MediaFire download link — open the mod page to download it \
+             manually."
+                .to_string()
+        }))
+    })
+}
+
+/// Ask the API for a share's direct link.
+///
+/// `Ok(None)` means the API didn't answer usefully — unreachable, unparseable, or an error
+/// we have no advice for — and the caller should fall back to the page. `Err` is a refusal
+/// the user needs to read: the file is gone, or locked, and no amount of scraping will
+/// turn it into bytes.
+async fn mediafire_api_link(client: &Client, quick_key: &str) -> anyhow::Result<Option<String>> {
+    let url = mediafire_api(
+        "file/get_links.php",
+        &format!("quick_key={quick_key}&link_type=direct_download"),
+    );
+    let Some(response) = mediafire_api_get(client, &url).await else {
+        return Ok(None);
+    };
+    if let Some(msg) = mediafire_api_error(&response) {
+        anyhow::bail!(msg);
+    }
+
+    Ok(response["links"]
+        .as_array()
+        .and_then(|links| links.first())
+        .and_then(|link| link["direct_download"].as_str())
+        .and_then(usable_link)
+        // Guard against the API handing back the share page instead of a CDN link — that
+        // would just walk us back into the scraping we came here to avoid.
+        .filter(|u| is_mediafire_direct(u)))
+}
+
+/// GET one API call and hand back its `response` object. `None` for anything that didn't
+/// come back as JSON — the callers all treat that as "ask the page instead".
+async fn mediafire_api_get(client: &Client, url: &str) -> Option<serde_json::Value> {
+    let body = client.get(url).send().await.ok()?.text().await.ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    Some(json.get("response")?.clone())
+}
+
+/// Resolve a MediaFire *folder* share to a single downloadable file.
+///
+/// Mod folders bundle the archive alongside extras (server files, a readme), so this picks
+/// the archive the same way the Drive folder resolver does.
+async fn resolve_mediafire_folder(client: &Client, folder_key: &str) -> anyhow::Result<String> {
+    let url = mediafire_api(
+        "folder/get_content.php",
+        &format!("folder_key={folder_key}&content_type=files&chunk=1&chunk_size=100"),
+    );
+    let response = mediafire_api_get(client, &url).await.ok_or_else(|| {
         anyhow::anyhow!(
-            "Couldn't find the MediaFire download link — open the mod page to download it manually."
+            "Couldn't read this MediaFire folder — open the mod page to download it manually."
+        )
+    })?;
+    if let Some(msg) = mediafire_api_error(&response) {
+        anyhow::bail!(msg);
+    }
+
+    let empty = Vec::new();
+    let files = response["folder_content"]["files"]
+        .as_array()
+        .unwrap_or(&empty);
+    let names: Vec<&str> = files
+        .iter()
+        .map(|f| f["filename"].as_str().unwrap_or_default())
+        .collect();
+    if names.is_empty() {
+        anyhow::bail!(
+            "This MediaFire folder has no files in it — open the mod page to download it manually."
+        );
+    }
+
+    let chosen = pick_archive(&names).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Couldn't tell which file in the MediaFire folder is the mod — open the mod page to \
+             download it manually."
+        )
+    })?;
+    let key = files[chosen]["quickkey"].as_str().unwrap_or_default();
+    mediafire_api_link(client, key).await?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Couldn't get a download link for \"{}\" out of the MediaFire folder — open the mod \
+             page to download it manually.",
+            names[chosen]
         )
     })
+}
+
+/// Pull the quick key out of a MediaFire share link. Keys are 11 or 15 characters, and
+/// every shape MediaFire has shipped puts them in the same two places.
+fn mediafire_quick_key(url: &str) -> Option<String> {
+    // …/file/<key>/<name>/file, plus the /file_premium, /download and /view variants.
+    let by_path =
+        Regex::new(r"(?i)/(?:file|file_premium|download|view)/([a-z0-9]{11}(?:[a-z0-9]{4})?)")
+            .unwrap();
+    // The legacy bare forms: …/?<key> and …/download.php?<key>.
+    let by_query = Regex::new(r"(?i)[?&]([a-z0-9]{11}(?:[a-z0-9]{4})?)(?:[&#]|$)").unwrap();
+    by_path
+        .captures(url)
+        .or_else(|| by_query.captures(url))
+        .map(|c| c[1].to_string())
+}
+
+/// The folder equivalent: …/folder/<key>/<name>, or the `?sharekey=` form.
+fn mediafire_folder_key(url: &str) -> Option<String> {
+    let by_path = Regex::new(r"(?i)/folder/([a-z0-9]+)").unwrap();
+    let by_query = Regex::new(r"(?i)[?&]sharekey=([a-z0-9]+)").unwrap();
+    by_path
+        .captures(url)
+        .or_else(|| by_query.captures(url))
+        .map(|c| c[1].to_string())
+}
+
+/// True for a CDN link that already serves bytes, as opposed to a share page.
+fn is_mediafire_direct(url: &str) -> bool {
+    Regex::new(r"(?i)^https?://download[0-9]*\.mediafire\.com/")
+        .unwrap()
+        .is_match(url)
+}
+
+/// Translate the API's refusals into advice. These are the cases where a browser hits the
+/// same wall, so the catch-all "open the mod page and download it manually" is wrong.
+fn mediafire_api_error(response: &serde_json::Value) -> Option<String> {
+    if !response["result"]
+        .as_str()
+        .is_some_and(|r| r.eq_ignore_ascii_case("error"))
+    {
+        return None;
+    }
+    let message = response["message"].as_str().unwrap_or_default();
+    // An error we have no advice for still has to reach the user *as* an error, carrying
+    // whatever MediaFire said. Falling through to the scraper instead would bury it under
+    // "couldn't find the download link" — which is how these went unexplained before.
+    Some(mediafire_refusal(&message.to_lowercase()).unwrap_or_else(|| match message {
+        "" => "MediaFire refused this download — open the mod page to download it manually."
+            .to_string(),
+        m => format!(
+            "MediaFire refused this download ({m}) — open the mod page to download it manually."
+        ),
+    }))
+}
+
+/// MediaFire serves its refusals as ordinary 200 pages too, so the scraping path has to
+/// recognise the same conditions from prose rather than from a `result` field.
+fn mediafire_page_error(html: &str) -> Option<String> {
+    mediafire_refusal(&html.to_lowercase())
+}
+
+/// The shared vocabulary: phrases that mean this file is never going to download, whether
+/// they arrive in an API `message` or in the page's own copy.
+fn mediafire_refusal(text: &str) -> Option<String> {
+    let msg = if text.contains("invalid or deleted file")
+        || text.contains("has been removed")
+        || text.contains("has been deleted")
+        || text.contains("unknown or invalid quickkey")
+        || text.contains("file not found")
+    {
+        "This MediaFire file no longer exists — the uploader probably removed it. Check the mod \
+         page for an updated link."
+    } else if text.contains("enter password") || text.contains("password to access") {
+        "This MediaFire file is password-protected, so it can't be downloaded automatically — \
+         open the mod page, get the file from MediaFire with its password, then use \"Choose \
+         file\" to install it."
+    } else if text.contains("violation of our terms") || text.contains("dangerous file") {
+        "MediaFire has blocked this file, so nobody can download it — the uploader needs to \
+         re-upload it. Check the mod page for an updated link."
+    } else if text.contains("bandwidth limit") || text.contains("daily download limit") {
+        "This MediaFire file has hit its download limit — too many people grabbed it recently. \
+         A browser will fail the same way; try again later."
+    } else {
+        return None;
+    };
+    Some(msg.to_string())
 }
 
 /// Pull the direct CDN link out of a MediaFire file page.
@@ -414,6 +631,15 @@ fn parse_mediafire_link(html: &str) -> Option<String> {
         }
     }
 
+    // 1b. The same base64, but assigned in a script rather than hung on an element. Same
+    //     payload, different hiding place — and the hiding place is what keeps moving.
+    let scrambled_js = Regex::new(r#"(?i)scrambled[_-]?url["'\s:=]+([A-Za-z0-9+/=]{24,})"#).unwrap();
+    for c in scrambled_js.captures_iter(html) {
+        if let Some(u) = decode_scrambled(&c[1]) {
+            return Some(u);
+        }
+    }
+
     // 2. The download button's own href. Matched through the parser rather than a regex
     //    so attribute order can't hide it — `href` before `aria-label` used to.
     for css in ["a#downloadButton[href]", "a[aria-label='Download file'][href]"] {
@@ -429,8 +655,9 @@ fn parse_mediafire_link(html: &str) -> Option<String> {
     // 3. Anywhere in the page source, including inside scripts: the CDN host is
     //    distinctive enough to match on its own. Un-escape the JSON slashes the scripts
     //    write (`https:\/\/download7…\/file.zip`) first, so one pattern covers both forms.
+    //    The digits are optional — the numbered hosts are the common case, not the rule.
     let flat = html.replace("\\/", "/");
-    let direct = Regex::new(r#"(?:https?:)?//download[0-9]+\.mediafire\.com/[^"'<>\\ ]+"#).unwrap();
+    let direct = Regex::new(r#"(?:https?:)?//download[0-9]*\.mediafire\.com/[^"'<>\\ ]+"#).unwrap();
     direct.find(&flat).and_then(|m| usable_link(m.as_str()))
 }
 
@@ -562,23 +789,31 @@ fn parse_gdrive_folder(html: &str, folder_id: &str) -> Vec<GDriveFile> {
     out
 }
 
-/// Choose the mod archive from a folder's files: skip sub-folders, prefer a known
-/// archive extension, and fall back to the sole remaining file when unambiguous.
-fn pick_folder_archive(files: &[GDriveFile]) -> Option<&GDriveFile> {
+/// Choose the mod archive out of a folder listing, by file name: prefer a known archive
+/// extension, and fall back to the sole entry when there is nothing to choose between.
+///
+/// Shared with the MediaFire folder resolver, which reaches a list of names through the
+/// API rather than through a scrape but then faces exactly this question.
+fn pick_archive(names: &[&str]) -> Option<usize> {
     const ARCHIVE_EXT: [&str; 5] = [".pkz", ".zip", ".rar", ".7z", ".pnt"];
+    let is_archive = |n: &&str| {
+        let n = n.to_lowercase();
+        ARCHIVE_EXT.iter().any(|ext| n.ends_with(ext))
+    };
+    names
+        .iter()
+        .position(is_archive)
+        .or_else(|| (names.len() == 1).then_some(0))
+}
+
+/// [`pick_archive`] over a Drive listing, minus the sub-folders it also carries.
+fn pick_folder_archive(files: &[GDriveFile]) -> Option<&GDriveFile> {
     let candidates: Vec<&GDriveFile> = files
         .iter()
         .filter(|f| f.mime != "application/vnd.google-apps.folder")
         .collect();
-    let is_archive = |f: &GDriveFile| {
-        let n = f.name.to_lowercase();
-        ARCHIVE_EXT.iter().any(|ext| n.ends_with(ext))
-    };
-    candidates
-        .iter()
-        .find(|f| is_archive(f))
-        .or_else(|| (candidates.len() == 1).then(|| &candidates[0]))
-        .copied()
+    let names: Vec<&str> = candidates.iter().map(|f| f.name.as_str()).collect();
+    pick_archive(&names).map(|i| candidates[i])
 }
 
 async fn get_with_retry(client: &Client, url: &str) -> anyhow::Result<reqwest::Response> {
@@ -633,6 +868,13 @@ pub(crate) async fn download(
         if is_gdrive {
             let html = resp.text().await.unwrap_or_default();
             if let Some(msg) = gdrive_page_error(&html) {
+                anyhow::bail!(msg);
+            }
+        } else if url.contains("mediafire") {
+            // A CDN link that has expired, or a file pulled since we resolved it, bounces
+            // back to a share page whose copy says which of the two happened.
+            let html = resp.text().await.unwrap_or_default();
+            if let Some(msg) = mediafire_page_error(&html) {
                 anyhow::bail!(msg);
             }
         }
@@ -1821,6 +2063,118 @@ mod tests {
     fn mediafire_placeholder_href_is_not_a_link() {
         let html = r##"<a id="downloadButton" href="#">Download</a>"##;
         assert!(parse_mediafire_link(html).is_none());
+    }
+
+    /// The scramble moved off the element and into a script variable; same payload.
+    #[test]
+    fn mediafire_link_from_scrambled_script_variable() {
+        let html = r#"<script>var scrambledUrl = "aHR0cHM6Ly9kb3dubG9hZDIyMDIubWVkaWFmaXJlLmNvbS9hYmMvdHJhY2sucGt6";</script>"#;
+        assert_eq!(
+            parse_mediafire_link(html).as_deref(),
+            Some("https://download2202.mediafire.com/abc/track.pkz")
+        );
+    }
+
+    /// The CDN host isn't always numbered — the pattern used to require digits.
+    #[test]
+    fn mediafire_link_from_unnumbered_cdn_host() {
+        let html = r#"<script>u="https://download.mediafire.com/ab/cd/bike.zip"</script>"#;
+        assert_eq!(
+            parse_mediafire_link(html).as_deref(),
+            Some("https://download.mediafire.com/ab/cd/bike.zip")
+        );
+    }
+
+    /// Every share shape MediaFire has shipped has to yield the same key, because the API
+    /// lookup that replaced page-scraping is reached by key and nothing else.
+    #[test]
+    fn mediafire_quick_key_from_every_share_shape() {
+        for url in [
+            "https://www.mediafire.com/file/bqmw1tdd7yq3qzr/I40_MX.pkz/file",
+            "https://www.mediafire.com/file/bqmw1tdd7yq3qzr/I40_MX.pkz",
+            "https://www.mediafire.com/file_premium/bqmw1tdd7yq3qzr/I40_MX.pkz/file",
+            "https://www.mediafire.com/download/bqmw1tdd7yq3qzr/I40_MX.pkz",
+            "https://www.mediafire.com/view/bqmw1tdd7yq3qzr/I40_MX.pkz/file",
+            "http://www.mediafire.com/?bqmw1tdd7yq3qzr",
+        ] {
+            assert_eq!(
+                mediafire_quick_key(url).as_deref(),
+                Some("bqmw1tdd7yq3qzr"),
+                "{url}"
+            );
+        }
+        // The older 11-character keys are still in circulation on old mod posts.
+        assert_eq!(
+            mediafire_quick_key("https://www.mediafire.com/file/a1b2c3d4e5f/track.rar").as_deref(),
+            Some("a1b2c3d4e5f")
+        );
+    }
+
+    /// A folder share has no download button, so it must route to the folder resolver
+    /// rather than being scraped for one that was never there.
+    #[test]
+    fn mediafire_folder_links_are_recognised() {
+        assert_eq!(
+            mediafire_folder_key("https://www.mediafire.com/folder/9dhrz4bkzcnzo/I40").as_deref(),
+            Some("9dhrz4bkzcnzo")
+        );
+        assert!(
+            mediafire_folder_key("https://www.mediafire.com/file/bqmw1tdd7yq3qzr/I40.pkz/file")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn mediafire_direct_links_need_no_resolving() {
+        assert!(is_mediafire_direct(
+            "https://download2202.mediafire.com/abc/track.pkz"
+        ));
+        assert!(is_mediafire_direct(
+            "https://download.mediafire.com/abc/track.pkz"
+        ));
+        assert!(!is_mediafire_direct(
+            "https://www.mediafire.com/file/bqmw1tdd7yq3qzr/I40.pkz/file"
+        ));
+    }
+
+    /// A removed file gets advice that is actually true. "Download it manually" isn't:
+    /// a browser finds the same empty page.
+    #[test]
+    fn mediafire_refusals_become_advice() {
+        let gone = serde_json::json!({
+            "result": "Error",
+            "message": "Unknown or Invalid QuickKey",
+        });
+        assert!(mediafire_api_error(&gone)
+            .expect("a removed file should be recognised")
+            .contains("no longer exists"));
+
+        let ok = serde_json::json!({ "result": "Success", "links": [] });
+        assert!(mediafire_api_error(&ok).is_none());
+
+        // An error we have no specific advice for still has to surface as an error,
+        // carrying whatever MediaFire said, rather than looking like a parse failure.
+        let odd = serde_json::json!({ "result": "Error", "message": "Rate limit exceeded" });
+        assert!(mediafire_api_error(&odd)
+            .expect("an unknown error is still an error")
+            .contains("Rate limit exceeded"));
+
+        assert!(
+            mediafire_page_error("<html><body><p>Invalid or Deleted File.</p></body></html>")
+                .expect("the deleted-file page should be recognised")
+                .contains("no longer exists")
+        );
+        assert!(mediafire_page_error("<html><body>Download this file</body></html>").is_none());
+    }
+
+    /// The folder picker is shared with Drive; it has to choose on name alone.
+    #[test]
+    fn picks_the_archive_out_of_a_folder_listing() {
+        assert_eq!(pick_archive(&["readme.txt", "I40 MX.pkz"]), Some(1));
+        // Nothing archive-shaped, but only one candidate — take it.
+        assert_eq!(pick_archive(&["I40 MX.pnt.part"]), Some(0));
+        assert_eq!(pick_archive(&["a.txt", "b.txt"]), None);
+        assert_eq!(pick_archive(&[]), None);
     }
 
     /// Answer one request with a canned response, then drop the connection.
