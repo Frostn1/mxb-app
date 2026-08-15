@@ -238,17 +238,24 @@ pub async fn download(app: &AppHandle, slug: &str, url: &str, dir: &Path) -> any
     crate::install::emit_progress(app, slug, "downloading", Some(0), None);
     window.navigate(url.parse()?)?;
 
-    let path = wait_for_start(app, slug).await?;
-    wait_for_finish(app, slug, &path).await?;
+    let outcome = async {
+        let path = wait_for_start(app, slug).await?;
+        wait_for_finish(app, slug, &path).await?;
+        anyhow::Ok(path)
+    }
+    .await;
 
     // Put the window back where it belongs, so the next read finds the purchases page rather
-    // than whatever the download navigation left behind.
+    // than whatever the download navigation left behind. On the way out of a *cancel* this is
+    // also the only lever we have on the transfer itself: `DownloadEvent` carries no abort
+    // handle, so navigating away is as close to stopping it as the WebView gets — and the
+    // caller's `remove_dir_all` over the staging directory has always been best-effort.
     let back = format!("{SHOP_BASE}{DOWNLOADS_PATH}");
     if let Ok(url) = back.parse() {
         let _ = window.navigate(url);
     }
 
-    Ok(path)
+    outcome
 }
 
 /// Wait for `on_download` to fire.
@@ -257,8 +264,10 @@ pub async fn download(app: &AppHandle, slug: &str, url: &str, dir: &Path) -> any
 /// the file, the window quietly renders an interstitial and no download is ever requested. That
 /// has to become a real error rather than a hang.
 async fn wait_for_start(app: &AppHandle, slug: &str) -> anyhow::Result<PathBuf> {
+    let cancel = crate::cancel::token(slug);
     let deadline = std::time::Instant::now() + DOWNLOAD_START_TIMEOUT;
     while std::time::Instant::now() < deadline {
+        cancel.check()?;
         if let Some(path) = lock(download_state()).path.clone() {
             return Ok(path);
         }
@@ -278,8 +287,10 @@ async fn wait_for_start(app: &AppHandle, slug: &str) -> anyhow::Result<PathBuf> 
 /// count rather than a percentage — worse than the streaming path, and much better than a bar
 /// that sits still for several hundred megabytes.
 async fn wait_for_finish(app: &AppHandle, slug: &str, path: &Path) -> anyhow::Result<()> {
+    let cancel = crate::cancel::token(slug);
     let deadline = std::time::Instant::now() + DOWNLOAD_TIMEOUT;
     while std::time::Instant::now() < deadline {
+        cancel.check()?;
         if let Some(success) = lock(download_state()).outcome {
             if !success {
                 anyhow::bail!("the download failed — the store or the connection ended it early");

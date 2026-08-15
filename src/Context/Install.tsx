@@ -12,6 +12,7 @@ import { AlertTriangle, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   addToLibrary,
+  cancelInstall,
   importFile,
   onFrostmodReload,
   onInstallProgress,
@@ -61,18 +62,36 @@ export interface ModTarget {
 }
 
 export interface ActiveInstall extends StartParams {
+  /** Identity in the queue panel — the same key `enqueue` dedupes on. */
+  key: string;
   stage: InstallStage;
   received?: number;
   total?: number;
   message?: string;
   frostmod: ReloadOutcome | null;
+  /** The user asked to stop this one and the backend hasn't unwound yet. Deliberately not an
+   *  `InstallStage`: that union mirrors the stages Rust actually emits. */
+  cancelling?: boolean;
+}
+
+/** One install waiting its turn, as the queue panel needs to show it. */
+export interface QueuedInstall {
+  key: string;
+  slug: string;
+  title: string;
+  kind: InstallSource["kind"];
 }
 
 interface InstallContextValue {
   /** The single in-flight (or just-finished) install, or `null`. */
   active: ActiveInstall | null;
+  /** Everything waiting behind the active one, in the order it will run. */
+  queued: QueuedInstall[];
   /** Number of installs waiting behind the active one (bulk quick-install). */
   queueLength: number;
+  /** Drop an install by `key`: a queued one never starts, the active one is stopped mid-transfer.
+   *  A no-op once the bytes are down — extraction and placement can't be interrupted safely. */
+  cancel: (key: string) => void;
   startInstall: (
     p: Omit<StartParams, "source"> & { url: string; host: string },
   ) => void;
@@ -97,7 +116,9 @@ export function InstallProvider({
   children: ReactNode;
 }) {
   const [active, setActive] = useState<ActiveInstall | null>(null);
-  const [queueLength, setQueueLength] = useState(0);
+  // Mirrors `queueRef` for rendering. The ref stays the source of truth — `pump` shifts off it
+  // synchronously — but a ref is invisible to React, so the panel reads this copy.
+  const [queued, setQueued] = useState<QueuedInstall[]>([]);
   const onInstalledRef = useRef(onInstalled);
   onInstalledRef.current = onInstalled;
   const onOpenModRef = useRef(onOpenMod);
@@ -118,6 +139,11 @@ export function InstallProvider({
   const runningRef = useRef(false);
   // What the queue is draining right now, so `enqueue` can turn a repeat request away.
   const activeKeyRef = useRef<string | null>(null);
+  // The same job in full, so `cancel` has its slug without depending on `active` state.
+  const runningParamsRef = useRef<StartParams | null>(null);
+  // The key the user asked to cancel, so `run` can tell a stop it was asked for from a genuine
+  // failure and skip the red toast.
+  const cancelledKeyRef = useRef<string | null>(null);
   // `run`'s retry buttons enqueue rather than re-run, but `enqueue` is defined further
   // down (it needs `pump`, which needs `run`). A ref breaks the cycle without costing
   // `run` its empty dep list.
@@ -130,10 +156,23 @@ export function InstallProvider({
     [],
   );
 
+  /** Republish the pending queue for rendering. Called wherever `queueRef` moves. */
+  const syncQueue = useCallback(() => {
+    setQueued(
+      queueRef.current.map((p) => ({
+        key: installKey(p),
+        slug: p.slug,
+        title: p.title,
+        kind: p.source.kind,
+      })),
+    );
+  }, []);
+
   const run = useCallback(async (params: StartParams) => {
     const { slug, title, subpath, destFolder, source } = params;
+    const key = installKey(params);
     if (clearTimer.current) window.clearTimeout(clearTimer.current);
-    setActive({ ...params, stage: "resolving", frostmod: null });
+    setActive({ ...params, key, stage: "resolving", frostmod: null });
 
     // FrostMod's reload event can land just before the install call resolves;
     // stash the outcome so the success toast can mention it.
@@ -207,6 +246,15 @@ export function InstallProvider({
         );
       }, 5000);
     } catch (e) {
+      // A stop the user asked for isn't a failure: retire the card quietly rather than leaving
+      // a red error and a Retry button behind. Note this only runs when the backend actually
+      // unwound — an install that finished before the cancel landed took the success path above,
+      // which is the honest outcome, since the mod really is installed.
+      if (cancelledKeyRef.current === key) {
+        setActive((cur) => (cur && cur.key === key ? null : cur));
+        toast.info(tRef.current("install.cancelled", { title }));
+        return;
+      }
       const message = String(e);
       setActive((cur) =>
         cur && cur.slug === slug ? { ...cur, stage: "error", message } : cur,
@@ -234,6 +282,7 @@ export function InstallProvider({
         { duration: Infinity },
       );
     } finally {
+      if (cancelledKeyRef.current === key) cancelledKeyRef.current = null;
       unlisten();
       unlistenFrost();
     }
@@ -247,18 +296,20 @@ export function InstallProvider({
     try {
       while (queueRef.current.length) {
         const next = queueRef.current.shift()!;
-        setQueueLength(queueRef.current.length);
+        syncQueue();
         activeKeyRef.current = installKey(next);
+        runningParamsRef.current = next;
         try {
           await run(next);
         } finally {
           activeKeyRef.current = null;
+          runningParamsRef.current = null;
         }
       }
     } finally {
       runningRef.current = false;
     }
-  }, [run]);
+  }, [run, syncQueue]);
 
   const enqueue = useCallback(
     (params: StartParams) => {
@@ -273,12 +324,34 @@ export function InstallProvider({
       if (activeKeyRef.current === key) return;
       if (queueRef.current.some((q) => installKey(q) === key)) return;
       queueRef.current.push(params);
-      setQueueLength(queueRef.current.length);
+      syncQueue();
       void pump();
     },
-    [pump],
+    [pump, syncQueue],
   );
   enqueueRef.current = enqueue;
+
+  const cancel = useCallback(
+    (key: string) => {
+      // Still waiting its turn: drop it here and the backend never hears about it at all.
+      const at = queueRef.current.findIndex((q) => installKey(q) === key);
+      if (at >= 0) {
+        queueRef.current.splice(at, 1);
+        syncQueue();
+        return;
+      }
+      const running = runningParamsRef.current;
+      if (!running || installKey(running) !== key) return;
+      cancelledKeyRef.current = key;
+      setActive((cur) => (cur && cur.key === key ? { ...cur, cancelling: true } : cur));
+      // The install command rejects once the transfer loop notices, and `run`'s catch takes it
+      // from there. Nothing to await: a failure here just means it stops the ordinary way.
+      // Read off the ref rather than `active` so this callback doesn't churn on every progress
+      // tick — the panel's buttons would rebuild 60 times a download.
+      void cancelInstall(running.slug).catch(() => {});
+    },
+    [syncQueue],
+  );
 
   const startInstall: InstallContextValue["startInstall"] = useCallback(
     ({ url, host, ...rest }) =>
@@ -302,13 +375,15 @@ export function InstallProvider({
   const value = useMemo(
     () => ({
       active,
-      queueLength,
+      queued,
+      queueLength: queued.length,
+      cancel,
       startInstall,
       startImport,
       startShopInstall,
       clear,
     }),
-    [active, queueLength, startInstall, startImport, startShopInstall, clear],
+    [active, queued, cancel, startInstall, startImport, startShopInstall, clear],
   );
 
   return (

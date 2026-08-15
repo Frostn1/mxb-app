@@ -1054,6 +1054,18 @@ export const ptBR: Translation = {
   "install.failed": "Falha na instalação — {{title}}",
   "install.openModPage": "Abrir a página do mod",
   "install.clickToOpen": "Clique para abrir a página do mod",
+  "install.cancelled": "{{title}} cancelado",
+
+  "downloads.title": "Downloads",
+  "downloads.open": "Mostrar a fila de downloads",
+  "downloads.waiting": "Aguardando",
+  "downloads.cancel": "Cancelar este download",
+  "downloads.remove": "Remover da fila",
+  "downloads.cancelling": "Cancelando…",
+  "downloads.stageResolving": "Localizando o arquivo…",
+  "downloads.stageDownloading": "Baixando",
+  "downloads.stageExtracting": "Extraindo",
+  "downloads.stagePlacing": "Instalando",
 
   // ── Downloads (histórico) ──────────────────────────────────────────────────
   "downloads.help":
