@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — MediaFire links stop needing a manual download
+
+### Fixed
+- **MediaFire downloads no longer depend on the shape of MediaFire's page.** Resolving a
+  share meant fetching the file page and hunting for the download button in it, so every
+  time MediaFire moved that button — and it has moved repeatedly — installs broke the same
+  way: *"couldn't find the MediaFire download link — open the mod page to download it
+  manually"*, on links that worked fine in a browser. The link is now looked up through
+  MediaFire's own API, from the key in the share URL, which doesn't care what this month's
+  page looks like. Scraping is still there behind it, for links whose key can't be read and
+  for the day the API stops answering — and it has learned two more places the button has
+  been hiding.
+- **MediaFire folder links install.** A folder share has no download button on it at all, so
+  the old resolver went looking for one, found nothing, and reported the mod as broken. The
+  folder's contents are read instead and the archive picked out of them, the same way a
+  Google Drive folder already worked.
+- **A MediaFire file that is gone, locked or blocked says so.** All four outcomes used to
+  arrive as the same "download it manually" — advice that is simply wrong when a browser hits
+  the identical wall. A removed file, a password-protected one, one MediaFire has taken down,
+  and one that has burned through its bandwidth are now each named, with what to actually do
+  about it.
+
 ## Unreleased — undo covers the whole editor, and the bucket stays on its panel
 
 ### Added
