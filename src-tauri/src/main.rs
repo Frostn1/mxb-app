@@ -5,6 +5,7 @@ mod antidebug;
 mod bikefiles;
 mod bikeswap;
 mod bundle;
+mod cancel;
 mod cfg;
 mod config;
 mod cookie_session;
@@ -3518,9 +3519,20 @@ async fn add_to_library(
     dest_folder: String,
 ) -> Result<(), String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let _cancel = cancel::begin(&slug);
     install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+/// Stop the install running under `slug`. `false` when nothing is running under it — the
+/// frontend drops queued items itself and only reaches for this on the one in flight.
+///
+/// Only the transfer is interruptible: once the bytes are down and extraction has started
+/// there is nothing safe to stop, so the flag is polled by the download loops alone.
+#[tauri::command]
+fn cancel_install(slug: String) -> bool {
+    cancel::request(&slug)
 }
 
 #[tauri::command]
@@ -5517,6 +5529,7 @@ async fn shop_install(
     let work = install::staging_dir("shop");
     std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
 
+    let _cancel = cancel::begin(&item.slug);
     let archive = match shop_fetch::download(&app, &item.slug, &item.download_url, &work).await {
         Ok(path) => path,
         Err(e) => {
@@ -6432,6 +6445,7 @@ fn main() {
             detect_orphaned_setup,
             repair_orphaned_setup,
             add_to_library,
+            cancel_install,
             import_file,
             plan_drop,
             repreview_drop,

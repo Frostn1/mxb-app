@@ -837,6 +837,12 @@ export function addToLibrary(
   return invoke<void>("add_to_library", { slug, url, host, subpath, destFolder });
 }
 
+/** Stop the install in flight for `slug`. `false` when nothing is running under it — only the
+ *  transfer is interruptible, so this does nothing once extraction has begun. */
+export function cancelInstall(slug: string): Promise<boolean> {
+  return invoke<boolean>("cancel_install", { slug });
+}
+
 /** Import a file the user downloaded manually (extract + place into `subpath`). */
 export function importFile(
   path: string,

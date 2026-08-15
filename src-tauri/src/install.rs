@@ -144,7 +144,15 @@ pub async fn download_and_place(
     let work = staging_dir("dl");
     std::fs::create_dir_all(&work)?;
 
-    let archive = download(app, client, slug, direct_url, &work).await?;
+    // A failed or cancelled download used to leave its staging directory behind — every
+    // abandoned attempt at a 400 MB track sat in the temp dir until the OS got around to it.
+    let archive = match download(app, client, slug, direct_url, &work).await {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(e);
+        }
+    };
     extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
 }
 
@@ -208,7 +216,13 @@ async fn download_mega_and_place(
     let work = staging_dir("dl");
     std::fs::create_dir_all(&work)?;
 
-    let archive = download_mega(app, client, slug, url, &work).await?;
+    let archive = match download_mega(app, client, slug, url, &work).await {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(e);
+        }
+    };
     extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
 }
 
@@ -242,6 +256,7 @@ pub(crate) async fn download_mega(
     let file = File::create(&path)?;
 
     emit(app, slug, "downloading", Some(0), total);
+    let cancel = crate::cancel::token(slug);
     let writer = MegaProgressWriter {
         file,
         app,
@@ -249,10 +264,15 @@ pub(crate) async fn download_mega(
         total,
         received: 0,
         last_emit: 0,
+        cancel: cancel.clone(),
     };
-    mega.download_node(node, writer)
-        .await
-        .map_err(|e| anyhow::anyhow!("MEGA download failed: {e}"))?;
+    if let Err(e) = mega.download_node(node, writer).await {
+        // The writer refuses the next buffer to stop the transfer, so the crate reports this
+        // as a write failure. Asking the flag first keeps "cancelled" from being dressed up
+        // as "MEGA download failed".
+        cancel.check()?;
+        return Err(anyhow::anyhow!("MEGA download failed: {e}"));
+    }
     emit(app, slug, "downloading", total, total);
 
     Ok(path)
@@ -265,6 +285,7 @@ struct MegaProgressWriter<'a> {
     total: Option<u64>,
     received: u64,
     last_emit: u64,
+    cancel: crate::cancel::Token,
 }
 
 impl futures_util::io::AsyncWrite for MegaProgressWriter<'_> {
@@ -274,6 +295,14 @@ impl futures_util::io::AsyncWrite for MegaProgressWriter<'_> {
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
         let this = self.get_mut();
+        // The `mega` crate drives the transfer itself; refusing the write is the only way in
+        // to stop it.
+        if this.cancel.cancelled() {
+            return std::task::Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "cancelled",
+            )));
+        }
         let n = this.file.write(buf)?;
         this.received += n as u64;
         if this.received - this.last_emit >= EMIT_EVERY_BYTES {
@@ -841,6 +870,9 @@ pub(crate) async fn download(
     url: &str,
     dir: &Path,
 ) -> anyhow::Result<PathBuf> {
+    // Grabbed once: the chunk loop below polls this per chunk, and that has to be an atomic
+    // load rather than a lock on the registry.
+    let cancel = crate::cancel::token(slug);
     let mut resp = get_with_retry(client, url).await?;
     let is_gdrive = url.contains("google");
 
@@ -900,6 +932,7 @@ pub(crate) async fn download(
     let mut last_err: Option<String>;
 
     loop {
+        cancel.check()?;
         let resp = match next.take() {
             Some(r) => r,
             // Without a `Content-Length` there is nothing to resume *against*: reqwest
@@ -930,8 +963,10 @@ pub(crate) async fn download(
             },
         };
 
-        let end = stream_to_file(app, slug, resp, &mut file, &mut received, &mut last_emit, total)
-            .await?;
+        let end = stream_to_file(
+            app, slug, &cancel, resp, &mut file, &mut received, &mut last_emit, total,
+        )
+        .await?;
         // A body can come up short without erroring — some hosts just close the socket
         // cleanly mid-file. Content-Length is what says whether we actually have it all.
         let short = total.is_some_and(|t| received < t);
@@ -976,9 +1011,11 @@ enum BodyEnd {
 /// waited for, so this is deliberately more patient than [`get_with_retry`].
 const RESUME_ATTEMPTS: u32 = 5;
 
+#[allow(clippy::too_many_arguments)]
 async fn stream_to_file(
     app: &AppHandle,
     slug: &str,
+    cancel: &crate::cancel::Token,
     resp: reqwest::Response,
     file: &mut File,
     received: &mut u64,
@@ -987,6 +1024,9 @@ async fn stream_to_file(
 ) -> anyhow::Result<BodyEnd> {
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
+        // Per chunk, so cancelling a stalled 400 MB track stops within a buffer rather than
+        // at the end of the file.
+        cancel.check()?;
         match chunk {
             Ok(chunk) => {
                 file.write_all(&chunk)?;

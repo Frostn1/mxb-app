@@ -1071,6 +1071,18 @@ export const de: Translation = {
   "install.failed": "Installation fehlgeschlagen — {{title}}",
   "install.openModPage": "Die Mod-Seite öffnen",
   "install.clickToOpen": "Klicken, um die Mod-Seite zu öffnen",
+  "install.cancelled": "{{title}} abgebrochen",
+
+  "downloads.title": "Downloads",
+  "downloads.open": "Download-Warteschlange anzeigen",
+  "downloads.waiting": "Wartet",
+  "downloads.cancel": "Diesen Download abbrechen",
+  "downloads.remove": "Aus der Warteschlange entfernen",
+  "downloads.cancelling": "Wird abgebrochen…",
+  "downloads.stageResolving": "Datei wird gesucht…",
+  "downloads.stageDownloading": "Wird heruntergeladen",
+  "downloads.stageExtracting": "Wird entpackt",
+  "downloads.stagePlacing": "Wird installiert",
 
   // ── Kategorien (Singular) ──────────────────────────────────────────────────
   "category.track": "Strecke",

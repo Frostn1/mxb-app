@@ -21,8 +21,6 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useFrostmod } from "../../Context/FrostmodContext";
-import { useInstall } from "../../Context/Install";
-import { displayName } from "../../lib/mods";
 import { useT, type TKey } from "../../i18n/context";
 import {
   experimentalState,
@@ -35,6 +33,7 @@ import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
 import JoinServerDialog from "./JoinServerDialog";
+import DownloadQueue from "./DownloadQueue";
 
 export type DashboardView =
   | "browse"
@@ -103,15 +102,12 @@ const EXPERIMENTAL_NAV: NavEntry = {
 /** Remembered across launches: a collapsed sidebar is a preference, not a mode. */
 const COLLAPSED_KEY = "mxb:sidebarCollapsed:v1";
 
-const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
-
 /** MX Bikes takes a while to show up in the process list; stop saying "Starting…" after this. */
 const STARTING_TIMEOUT_MS = 15000;
 
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const t = useT();
   const { running, reload, status, start, stop } = useFrostmod();
-  const { active, queueLength } = useInstall();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const { game } = useConfig();
   const caps = game.caps;
@@ -196,12 +192,6 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
     refreshGame();
   };
 
-  const installing = active && IN_PROGRESS.has(active.stage);
-  const pct =
-    active?.total && active.received
-      ? Math.round((active.received / active.total) * 100)
-      : undefined;
-
   const onReload = async () => {
     const outcome = await reload();
     if (outcome === "signaled") toast.success(t("frostmod.reloadedGame"));
@@ -271,35 +261,8 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       </nav>
 
       <div className="mt-auto flex flex-col gap-2">
-        {!collapsed && installing && (
-          <div className="flex flex-col gap-[7px] rounded-[10px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate text-[11.5px] font-semibold text-foreground/85">
-                {t("sidebar.installing", { name: displayName(active.title) })}
-              </span>
-              {pct !== undefined && (
-                <span className="flex-none text-[10.5px] text-muted-foreground">
-                  {pct}%
-                </span>
-              )}
-            </div>
-            {queueLength > 0 && (
-              <span className="text-[10.5px] text-muted-foreground">
-                {t("sidebar.queued", { count: queueLength })}
-              </span>
-            )}
-            <div className="h-[3px] overflow-hidden rounded-full bg-foreground/[0.08]">
-              <div
-                className={cn(
-                  "h-full rounded-full bg-primary transition-[width]",
-                  pct === undefined &&
-                    "w-1/3 animate-[frost-indeterminate_1.2s_ease-in-out_infinite]",
-                )}
-                style={pct !== undefined ? { width: `${pct}%` } : undefined}
-              />
-            </div>
-          </div>
-        )}
+        {/* The install card is the queue's trigger now — same look, opens the panel. */}
+        <DownloadQueue collapsed={collapsed} />
 
         <button
           data-tour="play"
