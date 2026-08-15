@@ -1051,6 +1051,18 @@ export const it: Translation = {
   "install.failed": "Installazione fallita — {{title}}",
   "install.openModPage": "Apri la pagina della mod",
   "install.clickToOpen": "Clicca per aprire la pagina della mod",
+  "install.cancelled": "{{title}} annullato",
+
+  "downloads.title": "Download",
+  "downloads.open": "Mostra la coda dei download",
+  "downloads.waiting": "In attesa",
+  "downloads.cancel": "Annulla questo download",
+  "downloads.remove": "Rimuovi dalla coda",
+  "downloads.cancelling": "Annullamento…",
+  "downloads.stageResolving": "Ricerca del file…",
+  "downloads.stageDownloading": "Download in corso",
+  "downloads.stageExtracting": "Estrazione",
+  "downloads.stagePlacing": "Installazione",
 
   // ── Categorie (singolare) ──────────────────────────────────────────────────
   "category.track": "Pista",
