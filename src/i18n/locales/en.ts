@@ -60,6 +60,8 @@ export const en = {
   "sidebar.queued": "+{{count}} queued",
   "sidebar.expand": "Expand the sidebar",
   "sidebar.collapse": "Collapse the sidebar",
+  "sidebar.showGroup": "Show what's under {{name}}",
+  "sidebar.hideGroup": "Hide what's under {{name}}",
 
   // ── FrostMod status + actions ──────────────────────────────────────────────
   "frostmod.checking": "Checking FrostMod…",

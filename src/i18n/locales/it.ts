@@ -61,6 +61,8 @@ export const it: Translation = {
   "sidebar.queued": "+{{count}} in coda",
   "sidebar.expand": "Espandi la barra laterale",
   "sidebar.collapse": "Riduci la barra laterale",
+  "sidebar.showGroup": "Mostra cosa c'è sotto {{name}}",
+  "sidebar.hideGroup": "Nascondi cosa c'è sotto {{name}}",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "Controllo di FrostMod…",
