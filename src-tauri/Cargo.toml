@@ -41,6 +41,9 @@ walkdir = "2"
 percent-encoding = "2"
 # The custom URI scheme handler builds its own responses. Same crate Tauri re-exports.
 http = "1"
+# How much memory this process is holding, for `memwatch`. A few lines of platform FFI
+# behind one call; not worth hand-rolling three times over.
+memory-stats = "1"
 # rustls: consistent modern TLS across platforms (native SChannel failed on
 # Windows). MediaFire downloads work directly with this client — its CDN no
 # longer blocks the rustls fingerprint (verified against a live 427 MB .pkz).
