@@ -64,6 +64,8 @@ export const ptBR: Translation = {
   "sidebar.queued": "+{{count}} na fila",
   "sidebar.expand": "Expandir a barra lateral",
   "sidebar.collapse": "Recolher a barra lateral",
+  "sidebar.showGroup": "Mostrar o que está em {{name}}",
+  "sidebar.hideGroup": "Ocultar o que está em {{name}}",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "Verificando o FrostMod…",

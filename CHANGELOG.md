@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Downloads moves in under the Library
+
+### Changed
+- **Downloads is now part of the Library rather than a tab beside it.** It answers the question
+  the library can't — which of these arrived today, and what didn't arrive at all — so it belongs
+  inside that place instead of competing with it for a row in the sidebar. Library carries a
+  chevron; the group opens when you go there, stays as you left it between launches, and opens by
+  itself whenever the Downloads page is the one on screen. A failed download still shows its
+  count on the Library row while the group is shut, so closing it can't hide the failure with it.
+  Collapse the sidebar to icons and nothing changes — there is no indent to nest into, so both
+  stay side by side as before.
+
 ## Unreleased — the queue shows every mod you asked for
 
 ### Fixed
