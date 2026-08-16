@@ -355,7 +355,6 @@ export const ptBR: Translation = {
   "browse.empty": "Nenhum resultado em {{type}}.",
   "browse.loadMore": "Carregar mais",
   "browse.selectedCount": "{{count}} selecionados",
-  "browse.queuing": "Colocando na fila…",
   "browse.quickInstallCount": "Instalar {{count}} rapidamente",
   "browse.quickInstall": "Instalação rápida",
   "browse.quickReinstall": "Reinstalação rápida",
@@ -369,8 +368,7 @@ export const ptBR: Translation = {
   "browse.reinstall": "Reinstalar",
   "browse.reinstallAll": "Reinstalar tudo",
   "browse.queued": "“{{title}}” na fila",
-  "browse.queuedDesc": "Instalando em {{folder}}.",
-  "browse.rootFolder": "raiz",
+  "browse.queuedDesc": "Será instalado assim que chegar a vez dele.",
   "browse.byAuthor": "por {{author}}",
   "browse.needsBrowser": "“{{title}}” precisa ser baixado pelo navegador",
   "browse.needsBrowserDesc":
@@ -384,14 +382,6 @@ export const ptBR: Translation = {
   "browse.queuedBulk_one": "{{count}} mod na fila",
   "browse.queuedBulk_other": "{{count}} mods na fila",
   "browse.queuedBulkDesc": "Eles serão instalados um depois do outro.",
-  "browse.queuedBulkSkipped_one":
-    "{{count}} ignorado — abra-o para escolher um download.",
-  "browse.queuedBulkSkipped_other":
-    "{{count}} ignorados — abra-os para escolher um download.",
-  "browse.bulkFailed": "Não foi possível instalar a seleção rapidamente",
-  "browse.bulkFailedDesc_one": "Abra-o para escolher um download.",
-  "browse.bulkFailedDesc_other":
-    "Nos {{count}} o download precisa ser escolhido à mão.",
 
   // ── Loja (MX Bikes Shop — downloads comprados) ─────────────────────────────
   "shop.help":
@@ -1058,6 +1048,7 @@ export const ptBR: Translation = {
 
   "downloads.title": "Downloads",
   "downloads.open": "Mostrar a fila de downloads",
+  "downloads.preparing": "Preparando…",
   "downloads.waiting": "Aguardando",
   "downloads.cancel": "Cancelar este download",
   "downloads.remove": "Remover da fila",

@@ -356,7 +356,6 @@ export const fr: Translation = {
   "browse.empty": "Aucun résultat pour {{type}}.",
   "browse.loadMore": "Charger plus",
   "browse.selectedCount": "{{count}} sélectionné(s)",
-  "browse.queuing": "Mise en file…",
   "browse.quickInstallCount": "Installation rapide de {{count}}",
   "browse.quickInstall": "Installation rapide",
   "browse.quickReinstall": "Réinstallation rapide",
@@ -370,8 +369,7 @@ export const fr: Translation = {
   "browse.reinstall": "Réinstaller",
   "browse.reinstallAll": "Tout réinstaller",
   "browse.queued": "« {{title}} » en file d'attente",
-  "browse.queuedDesc": "Installation dans {{folder}}.",
-  "browse.rootFolder": "racine",
+  "browse.queuedDesc": "Il s'installera dès que son tour arrivera.",
   "browse.byAuthor": "par {{author}}",
   "browse.needsBrowser":
     "« {{title}} » doit être téléchargé depuis le navigateur",
@@ -386,15 +384,6 @@ export const fr: Translation = {
   "browse.queuedBulk_one": "{{count}} mod en file d'attente",
   "browse.queuedBulk_other": "{{count}} mods en file d'attente",
   "browse.queuedBulkDesc": "Ils s'installeront l'un après l'autre.",
-  "browse.queuedBulkSkipped_one":
-    "{{count}} ignoré — ouvrez-le pour choisir un téléchargement.",
-  "browse.queuedBulkSkipped_other":
-    "{{count}} ignorés — ouvrez-les pour choisir un téléchargement.",
-  "browse.bulkFailed": "Impossible d'installer rapidement la sélection",
-  "browse.bulkFailedDesc_one":
-    "Ouvrez-le pour choisir un téléchargement.",
-  "browse.bulkFailedDesc_other":
-    "Pour les {{count}}, le téléchargement doit être choisi à la main.",
 
   // ── Boutique (MX Bikes Shop — téléchargements achetés) ─────────────────────
   "shop.help":
@@ -1069,6 +1058,7 @@ export const fr: Translation = {
 
   "downloads.title": "Téléchargements",
   "downloads.open": "Afficher la file de téléchargement",
+  "downloads.preparing": "Préparation…",
   "downloads.waiting": "En attente",
   "downloads.cancel": "Annuler ce téléchargement",
   "downloads.remove": "Retirer de la file",
