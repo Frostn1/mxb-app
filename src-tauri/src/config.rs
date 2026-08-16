@@ -63,6 +63,8 @@ pub struct AppConfig {
     pub run_in_background: bool,
     /// Start MXB App automatically on login.
     pub launch_at_startup: bool,
+    /// Which [`AUTOSTART_BINDING_REV`] the login item was last written for.
+    pub autostart_binding_rev: u32,
     /// Launch FrostMod automatically when the app opens.
     pub auto_run_frostmod: bool,
     /// Re-run the game's profile loader in place after applying a preset (Windows-only).
@@ -201,6 +203,12 @@ impl AppConfig {
 /// Steam (Shift+Tab) and GeForce Experience (Alt+Z, Alt+F*).
 pub const DEFAULT_OVERLAY_HOTKEY: &str = "CommandOrControl+Shift+X";
 
+/// Bumped whenever the executable's path changes, so a login item written for the old one is
+/// re-registered rather than left pointing at a file that no longer exists.
+///
+/// v1: the binary is `MXB App`, not `frost`.
+pub const AUTOSTART_BINDING_REV: u32 = 1;
+
 /// Push-to-talk combo used until the player picks another one.
 ///
 /// A modifier chord rather than a bare key, and not one MX Bikes binds: the game has
@@ -230,6 +238,9 @@ impl Default for AppConfig {
             wine_runner: String::new(),
             run_in_background: true,
             launch_at_startup: true,
+            // Zero, not the current rev: a config without the field predates the rename and
+            // its login item still names the old binary.
+            autostart_binding_rev: 0,
             auto_run_frostmod: true,
             instant_refresh: true,
             watch_mods_reload: true,
