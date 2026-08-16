@@ -3968,6 +3968,31 @@ fn set_launch_at_startup(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     .map_err(|e| e.to_string())
 }
 
+/// What to do with the login item at startup.
+#[derive(Debug, PartialEq, Eq)]
+enum Autostart {
+    Leave,
+    Enable,
+    /// It is there, but it was written for a binary this build no longer has.
+    Rebind,
+    Disable,
+}
+
+/// Reconcile the login item with the setting.
+///
+/// `stale` is the case that isn't obvious: the entry holds the executable's absolute path, so
+/// renaming the binary leaves every existing one pointing at a file that is gone — while
+/// `is_enabled` still answers yes, because all it looks for is the entry. Left alone, the app
+/// simply stops starting at login and nothing ever says why.
+fn autostart_action(wanted: bool, enabled: bool, stale: bool) -> Autostart {
+    match (wanted, enabled) {
+        (true, false) => Autostart::Enable,
+        (true, true) if stale => Autostart::Rebind,
+        (false, true) => Autostart::Disable,
+        _ => Autostart::Leave,
+    }
+}
+
 fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -6335,11 +6360,28 @@ fn main() {
                     }
                 }
                 let manager = handle.autolaunch();
-                let enabled = manager.is_enabled().unwrap_or(false);
-                if cfg.launch_at_startup && !enabled {
-                    let _ = manager.enable();
-                } else if !cfg.launch_at_startup && enabled {
-                    let _ = manager.disable();
+                let stale = cfg.autostart_binding_rev < config::AUTOSTART_BINDING_REV;
+                match autostart_action(
+                    cfg.launch_at_startup,
+                    manager.is_enabled().unwrap_or(false),
+                    stale,
+                ) {
+                    Autostart::Enable => {
+                        let _ = manager.enable();
+                    }
+                    Autostart::Rebind => {
+                        log::info!("re-binding the login item to this build's binary");
+                        let _ = manager.disable();
+                        let _ = manager.enable();
+                    }
+                    Autostart::Disable => {
+                        let _ = manager.disable();
+                    }
+                    Autostart::Leave => {}
+                }
+                if stale {
+                    cfg.autostart_binding_rev = config::AUTOSTART_BINDING_REV;
+                    let _ = config::save(handle, &cfg);
                 }
                 if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
                     let state = handle.state::<FrostmodProcess>();
@@ -6745,6 +6787,34 @@ mod release_version_tests {
     fn the_tags_v_prefix_is_optional() {
         assert_eq!(pick_release_version(Some("0.9.0"), "0.8.0".into()), "0.9.0");
         assert_eq!(pick_release_version(Some("v0.9.0"), "0.8.0".into()), "0.9.0");
+    }
+}
+
+#[cfg(test)]
+mod autostart_tests {
+    use super::*;
+
+    #[test]
+    fn the_setting_is_honoured_when_the_binding_is_current() {
+        assert_eq!(autostart_action(true, false, false), Autostart::Enable);
+        assert_eq!(autostart_action(true, true, false), Autostart::Leave);
+        assert_eq!(autostart_action(false, true, false), Autostart::Disable);
+        assert_eq!(autostart_action(false, false, false), Autostart::Leave);
+    }
+
+    /// The rename bug: the entry exists, so nothing looks wrong, but it names a binary that
+    /// is gone. Without this the app quietly stops starting at login for everyone upgrading.
+    #[test]
+    fn an_entry_written_for_the_old_binary_is_rewritten() {
+        assert_eq!(autostart_action(true, true, true), Autostart::Rebind);
+    }
+
+    /// Whoever turned it off gets it off, however old their entry is — a stale binding is a
+    /// reason to rewrite the entry, never to bring one back.
+    #[test]
+    fn a_stale_binding_never_revives_a_disabled_login_item() {
+        assert_eq!(autostart_action(false, true, true), Autostart::Disable);
+        assert_eq!(autostart_action(false, false, true), Autostart::Leave);
     }
 }
 
