@@ -27,6 +27,7 @@ mod library;
 mod linkwalk;
 mod logs;
 mod lru;
+mod memwatch;
 mod modelswap;
 mod mods;
 mod modstate;
@@ -6419,6 +6420,7 @@ fn main() {
             shop_catalog_session::load(handle);
             mxb_session::load(handle);
             imgcache::start_maintenance(handle);
+            memwatch::start();
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
