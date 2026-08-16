@@ -66,6 +66,8 @@ export const de: Translation = {
   "sidebar.queued": "+{{count}} in der Warteschlange",
   "sidebar.expand": "Seitenleiste ausklappen",
   "sidebar.collapse": "Seitenleiste einklappen",
+  "sidebar.showGroup": "Zeigen, was unter {{name}} liegt",
+  "sidebar.hideGroup": "Ausblenden, was unter {{name}} liegt",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "FrostMod wird geprüft…",
