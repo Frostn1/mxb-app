@@ -348,7 +348,6 @@ export const en = {
   "browse.empty": "No {{type}} found.",
   "browse.loadMore": "Load more",
   "browse.selectedCount": "{{count}} selected",
-  "browse.queuing": "Queuing…",
   "browse.quickInstallCount": "Quick install {{count}}",
   "browse.quickInstall": "Quick install",
   "browse.quickReinstall": "Quick reinstall",
@@ -362,8 +361,7 @@ export const en = {
   "browse.reinstall": "Reinstall",
   "browse.reinstallAll": "Reinstall all",
   "browse.queued": "Queued “{{title}}”",
-  "browse.queuedDesc": "Installing to {{folder}}.",
-  "browse.rootFolder": "root",
+  "browse.queuedDesc": "It'll install as soon as the queue reaches it.",
   "browse.byAuthor": "by {{author}}",
   "browse.needsBrowser": "“{{title}}” needs a browser download",
   "browse.needsBrowserDesc":
@@ -376,11 +374,6 @@ export const en = {
   "browse.queuedBulk_one": "Queued {{count}} mod",
   "browse.queuedBulk_other": "Queued {{count}} mods",
   "browse.queuedBulkDesc": "They'll install one after another.",
-  "browse.queuedBulkSkipped_one": "{{count}} skipped — open it to pick a download.",
-  "browse.queuedBulkSkipped_other": "{{count}} skipped — open them to pick a download.",
-  "browse.bulkFailed": "Couldn't quick-install the selection",
-  "browse.bulkFailedDesc_one": "Open it to pick a download.",
-  "browse.bulkFailedDesc_other": "All {{count}} need a download picked by hand.",
 
   // ── Shop (MX Bikes Shop — purchased downloads) ─────────────────────────────
   "shop.help":
@@ -1036,6 +1029,7 @@ export const en = {
 
   "downloads.title": "Downloads",
   "downloads.open": "Show the download queue",
+  "downloads.preparing": "Preparing…",
   "downloads.waiting": "Waiting",
   "downloads.cancel": "Cancel this download",
   "downloads.remove": "Remove from the queue",
