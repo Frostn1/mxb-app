@@ -48,6 +48,36 @@ function installKey({ slug, subpath, destFolder }: StartParams): string {
   return JSON.stringify([slug, subpath, destFolder]);
 }
 
+/** The same identity for a job whose destination isn't known yet. Enough to turn away a second
+ *  click on the same card; the real key takes over once it resolves. */
+function pendingKey({ slug, subpath }: PendingInstall): string {
+  return JSON.stringify([slug, subpath, null]);
+}
+
+/** What a pending install comes back with: an ordinary download, worked out late. */
+export type ResolvedInstall = Omit<StartParams, "source"> & {
+  url: string;
+  host: string;
+};
+
+/**
+ * An install the user has asked for whose download link and destination aren't known yet.
+ *
+ * The Browse grid's quick install has to fetch the mod's page to work both out, and that used
+ * to happen before the queue heard about the mod at all — so a bulk selection trickled into the
+ * panel one page-fetch at a time, with the rest of it nowhere on screen. Resolving is a stage of
+ * the queue instead: the row appears on click, and the page is fetched when its turn comes.
+ */
+export interface PendingInstall {
+  slug: string;
+  title: string;
+  /** The mod type's install subpath — known on click, and all `pendingKey` needs. */
+  subpath: string;
+  /** `null` when there is nothing installable. The caller reports that itself: only it knows
+   *  whether the host is blocked, the build is server-only, or the page offers no file. */
+  resolve: () => Promise<ResolvedInstall | null>;
+}
+
 /** How the download history names this source. */
 function historySource(source: InstallSource): DownloadSource {
   if (source.kind === "shop") return "shop";
@@ -80,6 +110,21 @@ export interface QueuedInstall {
   slug: string;
   title: string;
   kind: InstallSource["kind"];
+  /** Its download link and destination are being looked up right now: it's next up, but there
+   *  is nothing to transfer yet. */
+  preparing?: boolean;
+}
+
+/** A slot in the queue — a job ready to run, or one still to be resolved. */
+interface QueueItem {
+  key: string;
+  slug: string;
+  title: string;
+  kind: InstallSource["kind"];
+  /** `null` until `resolve` has answered. */
+  params: StartParams | null;
+  resolve?: PendingInstall["resolve"];
+  preparing?: boolean;
 }
 
 interface InstallContextValue {
@@ -96,6 +141,9 @@ interface InstallContextValue {
     p: Omit<StartParams, "source"> & { url: string; host: string },
   ) => void;
   startImport: (p: Omit<StartParams, "source"> & { path: string }) => void;
+  /** Queue a mod whose download link and destination still have to be looked up — it takes its
+   *  place in the panel straight away and resolves when the queue reaches it. */
+  startPendingInstall: (p: PendingInstall) => void;
   /** A purchase from the shop, queued exactly like any other install. */
   startShopInstall: (p: Omit<StartParams, "source"> & { item: ShopItem }) => void;
   /** Clear a finished (done/error) install card. */
@@ -135,7 +183,7 @@ export function InstallProvider({
   const clearTimer = useRef<number | null>(null);
   // Installs run one at a time (the engine handles a single transfer); extra
   // requests wait in this queue and are drained sequentially.
-  const queueRef = useRef<StartParams[]>([]);
+  const queueRef = useRef<QueueItem[]>([]);
   const runningRef = useRef(false);
   // What the queue is draining right now, so `enqueue` can turn a repeat request away.
   const activeKeyRef = useRef<string | null>(null);
@@ -159,11 +207,12 @@ export function InstallProvider({
   /** Republish the pending queue for rendering. Called wherever `queueRef` moves. */
   const syncQueue = useCallback(() => {
     setQueued(
-      queueRef.current.map((p) => ({
-        key: installKey(p),
-        slug: p.slug,
-        title: p.title,
-        kind: p.source.kind,
+      queueRef.current.map((it) => ({
+        key: it.key,
+        slug: it.slug,
+        title: it.title,
+        kind: it.kind,
+        preparing: it.preparing,
       })),
     );
   }, []);
@@ -295,12 +344,40 @@ export function InstallProvider({
     runningRef.current = true;
     try {
       while (queueRef.current.length) {
-        const next = queueRef.current.shift()!;
+        // The head is read, not shifted: a job still being resolved stays in the queue, so it
+        // keeps its row in the panel — and its X — while its page is fetched.
+        const head = queueRef.current[0];
+        let params = head.params;
+        if (!params) {
+          head.preparing = true;
+          syncQueue();
+          try {
+            const resolved = await head.resolve!();
+            if (resolved) {
+              const { url, host, ...rest } = resolved;
+              params = { ...rest, source: { kind: "download", url, host } };
+            }
+          } catch {
+            // The caller reports its own failures; there's simply nothing to install.
+            params = null;
+          }
+          head.preparing = false;
+        }
+        // Gone from the queue means cancelled while it resolved — drop it on the way back.
+        const at = queueRef.current.indexOf(head);
+        if (at < 0) continue;
+        queueRef.current.splice(at, 1);
         syncQueue();
-        activeKeyRef.current = installKey(next);
-        runningParamsRef.current = next;
+        if (!params) continue;
+        const key = installKey(params);
+        // A pending job only learns its destination here, so this is the first moment its real
+        // key exists — and the first chance to see it's the same job as something already
+        // queued. (Nothing can be *running*: this loop is the only thing that runs installs.)
+        if (key !== head.key && queueRef.current.some((q) => q.key === key)) continue;
+        activeKeyRef.current = key;
+        runningParamsRef.current = params;
         try {
-          await run(next);
+          await run(params);
         } finally {
           activeKeyRef.current = null;
           runningParamsRef.current = null;
@@ -322,8 +399,14 @@ export function InstallProvider({
       // different bikes is two real installs and both belong in the queue.
       const key = installKey(params);
       if (activeKeyRef.current === key) return;
-      if (queueRef.current.some((q) => installKey(q) === key)) return;
-      queueRef.current.push(params);
+      if (queueRef.current.some((q) => q.key === key)) return;
+      queueRef.current.push({
+        key,
+        slug: params.slug,
+        title: params.title,
+        kind: params.source.kind,
+        params,
+      });
       syncQueue();
       void pump();
     },
@@ -331,10 +414,30 @@ export function InstallProvider({
   );
   enqueueRef.current = enqueue;
 
+  const startPendingInstall = useCallback(
+    (p: PendingInstall) => {
+      const key = pendingKey(p);
+      if (queueRef.current.some((q) => q.key === key)) return;
+      // Always a site download: a purchase and a local file both know their source already.
+      queueRef.current.push({
+        key,
+        slug: p.slug,
+        title: p.title,
+        kind: "download",
+        params: null,
+        resolve: p.resolve,
+      });
+      syncQueue();
+      void pump();
+    },
+    [pump, syncQueue],
+  );
+
   const cancel = useCallback(
     (key: string) => {
-      // Still waiting its turn: drop it here and the backend never hears about it at all.
-      const at = queueRef.current.findIndex((q) => installKey(q) === key);
+      // Still waiting its turn: drop it here and the backend never hears about it at all. That
+      // covers a row still being resolved — `pump` finds it missing and skips it.
+      const at = queueRef.current.findIndex((q) => q.key === key);
       if (at >= 0) {
         queueRef.current.splice(at, 1);
         syncQueue();
@@ -380,10 +483,20 @@ export function InstallProvider({
       cancel,
       startInstall,
       startImport,
+      startPendingInstall,
       startShopInstall,
       clear,
     }),
-    [active, queued, cancel, startInstall, startImport, startShopInstall, clear],
+    [
+      active,
+      queued,
+      cancel,
+      startInstall,
+      startImport,
+      startPendingInstall,
+      startShopInstall,
+      clear,
+    ],
   );
 
   return (

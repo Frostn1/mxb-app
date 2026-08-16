@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — the queue shows every mod you asked for
+
+### Fixed
+- **Mods join the download queue the moment you click, not when their page comes back.** A quick
+  install had to fetch the mod's page — its mirrors, and where the file should land — before the
+  queue heard about it at all. Select twenty and hit install and the panel filled one mod at a
+  time over a minute or more, with the rest of the selection nowhere on screen and nothing to say
+  the click had registered. The whole selection now takes its place in the queue straight away,
+  each row marked "Preparing" while its turn comes round, and any of them can be cancelled before
+  it ever starts downloading. Working the destination out late also means it is decided against
+  the library as it stands when the mod is about to install, not as it stood twenty mods ago.
+
+### Changed
+- **A mod with no usable download now says which one it is.** Quick-installing a selection used
+  to end with a count of how many had been skipped; each one is now reported by name as the queue
+  reaches it, so it's clear which mod needs opening by hand.
+
 ## Unreleased — a Downloads page, so you can see what you just grabbed
 
 ### Added

@@ -169,7 +169,9 @@ function QueuedRow({ item, onCancel }: { item: QueuedInstall; onCancel: () => vo
     <div className="group flex items-center gap-2 px-3.5 py-2">
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[12px] font-medium">{displayName(item.title)}</span>
-        <span className="text-[10.5px] text-muted-foreground">{t("downloads.waiting")}</span>
+        <span className="text-[10.5px] text-muted-foreground">
+          {t(item.preparing ? "downloads.preparing" : "downloads.waiting")}
+        </span>
       </div>
       <CancelButton label={t("downloads.remove")} onClick={onCancel} />
     </div>
