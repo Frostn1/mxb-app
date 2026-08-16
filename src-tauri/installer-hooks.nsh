@@ -2,7 +2,7 @@
 ;
 ; MXB App hides to the tray when its window is closed and launches at login, so an
 ; installer a user started by hand nearly always finds it running; the in-app updater
-; launches the installer from inside the app itself. Either way `$INSTDIR\frost.exe` — the
+; launches the installer from inside the app itself. Either way `$INSTDIR\MXB App.exe` — the
 ; app's own image — can still be held when the copy starts, and NSIS answers that with a
 ; blunt "error opening file for writing", reported against v0.8.1.
 ;
@@ -36,6 +36,20 @@
   ; the app's own image.
   nsExec::Exec 'taskkill /F /IM "${MAINBINARYNAME}.exe"'
   Pop $0 ; 0 = closed it, 128 = wasn't running. Either is the state we want.
+!macroend
+
+; Up to v0.9.2 the app shipped as `frost.exe`. `${MAINBINARYNAME}` no longer names it, so
+; everything above walks straight past the build being replaced: an upgrade a user starts by
+; hand leaves the old app running in the tray, and its image sits in `$INSTDIR` forever
+; because `DropMovedBinaries` only sweeps the current name.
+!macro CloseLegacyApp
+  nsExec::Exec 'taskkill /F /IM "frost.exe"'
+  Pop $0 ; 0 = closed it, 128 = wasn't running. Either is the state we want.
+!macroend
+
+!macro DropLegacyBinaries
+  Delete "$INSTDIR\frost.exe"
+  Delete "$INSTDIR\frost.exe.old*"
 !macroend
 
 ; Drop the images past installs moved aside. Plain `Delete`, not `/REBOOTOK`: a leftover
@@ -90,6 +104,7 @@
 
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro CloseRunningApp
+  !insertmacro CloseLegacyApp
   !insertmacro FreeMainBinary
 !macroend
 
@@ -97,11 +112,14 @@
 ; leaves the install folder with nothing but the build that was just written.
 !macro NSIS_HOOK_POSTINSTALL
   !insertmacro DropMovedBinaries
+  !insertmacro DropLegacyBinaries
 !macroend
 
 ; The uninstaller's own `RMDir "$INSTDIR"` runs before its POSTUNINSTALL hook, so the
 ; leftovers have to go here for the folder to come out with them.
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro CloseRunningApp
+  !insertmacro CloseLegacyApp
   !insertmacro FreeMainBinary
+  !insertmacro DropLegacyBinaries
 !macroend

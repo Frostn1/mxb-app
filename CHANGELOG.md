@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — the app runs under its own name
+
+### Changed
+- **The process is called "MXB App" rather than "frost".** Activity Monitor and Task Manager
+  listed it under the name of the Rust crate behind it, which matches nothing anyone installed —
+  so working out what a process was doing meant first working out that it was this app at all.
+  Both the shipped build and a dev run carry the product name now. Two things ride along with the
+  rename: the login item is written again on the first launch after updating, because it stores
+  the path of the executable it was created for and would otherwise quietly stop starting the app;
+  and the Windows installer closes and clears away the `frost.exe` it finds from earlier versions
+  instead of leaving it parked in the install folder.
+
 ## Unreleased — Downloads moves in under the Library
 
 ### Changed
