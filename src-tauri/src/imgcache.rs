@@ -61,6 +61,16 @@ const PRUNE_TO: f64 = 0.8;
 /// sockets — the same reasoning as `mods::mxb`'s rating concurrency.
 const MAX_CONCURRENT_FETCHES: usize = 8;
 
+/// Ceiling on a single download.
+///
+/// The whole body is held in memory to be sniffed and downscaled, and being on the allowlist
+/// says only where a URL points, never how big what it points at is: an `<img>` on a mod page
+/// can name whatever its author uploaded. Uncapped, one such link costs however large that
+/// file happens to be — and [`MAX_CONCURRENT_FETCHES`] of them can be in flight at once, so
+/// the grid decides how many times over. Generous for a card rendered around 300px wide: the
+/// store's own product images, the largest thing normally seen here, are ~0.5 MB.
+const MAX_FETCH_BYTES: usize = 32 * 1024 * 1024;
+
 /// How long a failed URL is remembered, so a dead thumbnail isn't refetched on every pass.
 const NEGATIVE_TTL: Duration = Duration::from_secs(5 * 60);
 
@@ -80,6 +90,17 @@ pub fn handle(
     tauri::async_runtime::spawn(async move {
         responder.respond(serve(&app, request.uri().to_string()).await);
     });
+}
+
+/// Images handed to the webview this session, and how many bytes that came to. Read by
+/// [`crate::memwatch`], which is trying to answer "what was the app doing when it grew?" —
+/// a grid being scrolled looks very different here from an app nobody is touching.
+static SERVED: AtomicU64 = AtomicU64::new(0);
+static SERVED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// `(images, bytes)` served since launch.
+pub fn traffic() -> (u64, u64) {
+    (SERVED.load(Ordering::Relaxed), SERVED_BYTES.load(Ordering::Relaxed))
 }
 
 /// Drop superseded cache generations, and bring the current one under its size cap. Spawned
@@ -107,7 +128,11 @@ async fn serve(app: &AppHandle, uri: String) -> http::Response<Vec<u8>> {
     let width = requested_width(&uri);
 
     match load(app, &url, width).await {
-        Some((bytes, mime)) => reply(200, mime, bytes),
+        Some((bytes, mime)) => {
+            SERVED.fetch_add(1, Ordering::Relaxed);
+            SERVED_BYTES.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            reply(200, mime, bytes)
+        }
         // `ModCard`'s existing `onError` fallback fires on this, exactly as it does for a
         // dead remote URL — so a miss degrades to the placeholder icon, not a broken image.
         None => reply(404, "text/plain", b"not cached".to_vec()),
@@ -383,6 +408,8 @@ fn client_for(url: &str) -> Option<&'static reqwest::Client> {
 }
 
 async fn fetch(url: &str) -> Option<Vec<u8>> {
+    use futures_util::StreamExt;
+
     let resp = client_for(url)?
         .get(url)
         .header("accept", "image/avif,image/webp,image/*,*/*;q=0.8")
@@ -392,7 +419,39 @@ async fn fetch(url: &str) -> Option<Vec<u8>> {
     if !resp.status().is_success() {
         return None;
     }
-    Some(resp.bytes().await.ok()?.to_vec())
+
+    // Refuse an oversized body before a byte of it is read, when the origin says how big it
+    // is...
+    if let Some(len) = resp.content_length() {
+        if len > MAX_FETCH_BYTES as u64 {
+            log::warn!("imgcache: {url} declares {len} bytes, past the cap — not fetching it");
+            return None;
+        }
+    }
+    // ...and again as it arrives, because that header is optional and can be wrong. Streaming
+    // rather than `bytes()` also stops the body being held twice over: once whole, once copied
+    // into a `Vec`.
+    let mut body: Vec<u8> = Vec::new();
+    let mut chunks = resp.bytes_stream();
+    while let Some(chunk) = chunks.next().await {
+        if !push_capped(&mut body, &chunk.ok()?) {
+            log::warn!("imgcache: {url} went past the cap mid-download — dropped");
+            return None;
+        }
+    }
+    Some(body)
+}
+
+/// Append `chunk`, unless doing so would take `body` past [`MAX_FETCH_BYTES`].
+///
+/// Returns whether it was appended. The check is against the total rather than the chunk, so
+/// a body arriving in small pieces can't walk past the ceiling one piece at a time.
+fn push_capped(body: &mut Vec<u8>, chunk: &[u8]) -> bool {
+    if body.len().saturating_add(chunk.len()) > MAX_FETCH_BYTES {
+        return false;
+    }
+    body.extend_from_slice(chunk);
+    true
 }
 
 fn fetch_semaphore() -> &'static tokio::sync::Semaphore {
@@ -537,6 +596,33 @@ mod tests {
             "imgcache://localhost/{}",
             percent_encoding::utf8_percent_encode(url, percent_encoding::NON_ALPHANUMERIC)
         )
+    }
+
+    #[test]
+    fn a_body_within_the_cap_is_kept() {
+        let mut body = Vec::new();
+        assert!(push_capped(&mut body, &[1, 2, 3]));
+        assert!(push_capped(&mut body, &[4, 5]));
+        assert_eq!(body, [1, 2, 3, 4, 5]);
+    }
+
+    /// The bug: the cap has to be on the running total. Checking each chunk on its own lets a
+    /// body of any size through as long as it arrives in small enough pieces — which is how
+    /// bodies arrive.
+    #[test]
+    fn small_chunks_cannot_walk_past_the_cap() {
+        let mut body = vec![0u8; MAX_FETCH_BYTES - 1];
+        assert!(push_capped(&mut body, &[1]), "the last byte that fits");
+        assert_eq!(body.len(), MAX_FETCH_BYTES);
+        assert!(!push_capped(&mut body, &[1]), "one past the cap");
+        assert_eq!(body.len(), MAX_FETCH_BYTES, "a refused chunk leaves nothing behind");
+    }
+
+    #[test]
+    fn a_single_oversized_chunk_is_refused_whole() {
+        let mut body = Vec::new();
+        assert!(!push_capped(&mut body, &vec![0u8; MAX_FETCH_BYTES + 1]));
+        assert!(body.is_empty());
     }
 
     #[test]

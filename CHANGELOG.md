@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — nothing downloads without a ceiling
+
+### Fixed
+- **A thumbnail can no longer pull an unlimited amount into memory.** Browsing mods fetches the
+  picture on each card, and the whole response was held in memory to be checked and resized —
+  with nothing saying how large it was allowed to be. Being on the allowlist only says where a
+  URL points, never how big what it points at is, and an `<img>` on a mod page can name whatever
+  its author uploaded. One such link cost however large that file happened to be, twice over,
+  and eight can be in flight at once. Downloads are now refused above 32 MB — before they start
+  when the site says how big the file is, and mid-download when it doesn't — which is many times
+  more than any real thumbnail and no longer unbounded.
+- **A model's embedded texture is only decompressed as far as it claims to go.** The pixels past
+  the texture's own size were always discarded, but not before being unpacked, so a payload that
+  expanded to gigabytes did exactly that first. These records are found by scanning for a byte
+  pattern, so this needed no ill intent — an ordinary false match was enough.
+
+### Added
+- **The log now writes down how much memory the app is holding.** Quiet by default — a line every
+  quarter of an hour, and one straight away if the figure climbs sharply — with what the caches
+  and the thumbnail loader are holding beside it. After an evening spent idle at tens of
+  gigabytes, the log for those hours was empty, and there was no way to tell afterwards what had
+  grown.
+
 ## Unreleased — the app runs under its own name
 
 ### Changed
