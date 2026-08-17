@@ -6312,10 +6312,11 @@ fn main() {
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
-            // Linux drives FrostMod by leaving a file in its folder — the one thing this
-            // side of the Wine prefix can reach. Told once here, because the senders are
-            // called from watchers that hold no handle to resolve a data dir with.
-            #[cfg(target_os = "linux")]
+            // Linux and macOS drive FrostMod by leaving a file in its folder — the one
+            // thing this side of the Wine prefix can reach. Told once here, because the
+            // senders are called from watchers that hold no handle to resolve a data dir
+            // with.
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             frostmod::set_command_dir(frostmod_manage::frostmod_dir(app.handle()));
             if let Ok(dir) = app.path().app_log_dir() {
                 log::info!("log dir: {}", dir.display());
