@@ -887,13 +887,70 @@ function useEdfMeshes(
   return { geoms, materials };
 }
 
+/**
+ * The piece of bodywork the pointer is over in the 2D editor, lit up on the bike.
+ *
+ * Triangles rather than a whole mesh group: a bike's bodywork is regularly one group with
+ * both flanks in it, and highlighting the group would answer "which side is this" with the
+ * whole bike. `tris` names the triangles of one uv island — node index, then triangle index.
+ *
+ * Drawn as its own geometry over the model with the depth test still on, so it is occluded by
+ * the parts in front of it: a panel glowing *through* the bike would read as being on the near
+ * side whichever flank it is actually on, which is the confusion this exists to settle.
+ */
+function HighlightMesh({ nodes, tris }: { nodes: EdfNode[]; tris: Int32Array }) {
+  const geom = useMemo(() => {
+    const pos = new Float32Array((tris.length / 2) * 9);
+    let o = 0;
+    for (let i = 0; i < tris.length; i += 2) {
+      const node = nodes[tris[i]];
+      if (!node) continue;
+      const t = tris[i + 1];
+      for (let c = 0; c < 3; c += 1) {
+        const v = node.indices[t * 3 + c];
+        pos[o] = node.positions[v * 3];
+        pos[o + 1] = node.positions[v * 3 + 1];
+        pos[o + 2] = node.positions[v * 3 + 2];
+        o += 3;
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos.subarray(0, o), 3));
+    g.computeBoundingSphere();
+    return g;
+  }, [nodes, tris]);
+  useEffect(() => () => geom.dispose(), [geom]);
+
+  const mat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: "#22d3ee",
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        // Pulled towards the camera so it wins against the surface it is sitting on, which
+        // is the same surface — without it the two z-fight and the highlight speckles.
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
+      }),
+    [],
+  );
+  useEffect(() => () => mat.dispose(), [mat]);
+
+  return <mesh geometry={geom} material={mat} renderOrder={2} />;
+}
+
 // MX Bikes meshes are authored Y-up, +Z forward (three.js' convention) — no rotation.
 function EdfMesh({
   nodes,
   textures,
+  highlight,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
+  highlight?: Int32Array | null;
 }) {
   const { geoms, materials } = useEdfMeshes(nodes, textures);
   return (
@@ -907,6 +964,7 @@ function EdfMesh({
           receiveShadow
         />
       ))}
+      {!!highlight?.length && <HighlightMesh nodes={nodes} tris={highlight} />}
     </group>
   );
 }
@@ -992,6 +1050,14 @@ export interface ModelViewerProps {
    */
   frameToken?: number;
   nodes?: EdfNode[] | null;
+  /**
+   * Triangles to light up on the model — node index and triangle index, two per triangle.
+   *
+   * The Designer's answer to "which panel is this region of the sheet": it hands over what
+   * the pointer is on and the model shows where that lands, instead of naming a flank and
+   * leaving the reader to work out whose left it meant.
+   */
+  highlight?: Int32Array | null;
   riderParts?: RiderPart[] | null;
   loading?: boolean;
   noStandIn?: boolean;
@@ -1005,6 +1071,7 @@ export function ModelViewer({
   overrides,
   frameToken,
   nodes,
+  highlight,
   riderParts,
   loading = false,
   noStandIn = false,
@@ -1063,7 +1130,7 @@ export function ModelViewer({
           <directionalLight position={[0, 1.5, 5]} intensity={0.5} />
           <Center>
             {hasReal ? (
-              <EdfMesh nodes={nodes!} textures={texMap} />
+              <EdfMesh nodes={nodes!} textures={texMap} highlight={highlight} />
             ) : hasRider ? (
               <RiderComposite parts={riderParts!} overrides={overrides} />
             ) : loading || noStandIn ? null : mode === "bike" ? (

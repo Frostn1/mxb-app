@@ -803,6 +803,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // And only when it *did* arrive that way — a bike that loaded without its `.geom` is a heap
   // of parts in their own frames, and a side named from that is worse than no side at all.
   const bike = isBikeKind(destState.kind);
+  // The island the pointer is over, for the 3D view to light up. Held here rather than in the
+  // stage because it crosses from the 2D half of the editor to the 3D one, and this is the
+  // only thing that owns both.
+  const [hoverIsland, setHoverIsland] = useState<Int32Array | null>(null);
   const parts = useMemo<UvPart[]>(
     () => (geometry ? uvParts(geometry, activeName, { assembled: bike && assembled }) : []),
     [geometry, activeName, bike, assembled],
@@ -1318,6 +1322,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               version={version}
               ghost={ghostOf(active.id)}
               parts={parts}
+              onHoverSpot={setHoverIsland}
               selectedId={selectedId}
               onSelect={setSelectedId}
               onMove={moveLayer}
@@ -1354,6 +1359,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           frameToken={version}
           onGeometry={onGeometry}
           onStock={onStock}
+          highlight={hoverIsland}
           className="flex-1"
         />
       </section>
