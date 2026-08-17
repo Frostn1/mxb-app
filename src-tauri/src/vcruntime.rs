@@ -479,7 +479,9 @@ pub fn missing(game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
     out
 }
 
-/// Nothing to detect off Windows — FrostMod only runs there.
+/// Nothing to detect off Windows. FrostMod runs under Proton and in a Wine bottle too, but
+/// what it needs there is the prefix's own runtime, installed by the wrapper (`winetricks`,
+/// CrossOver's own installers) and not by anything we could reach from out here.
 #[cfg(not(windows))]
 pub fn missing(_game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
     Vec::new()

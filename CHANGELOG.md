@@ -26,6 +26,36 @@
 - **A repair no longer stops at the first thing that goes wrong.** One runtime failing says
   nothing about the next two, so it works through all of them and reports the rest.
 
+## Unreleased — FrostMod runs on macOS
+
+### Added
+- **FrostMod installs, starts, reloads and stops on macOS.** It used to be hidden there
+  entirely — Settings had no FrostMod section and no FrostMod log row — on the grounds that
+  the app launches a CrossOver/Whisky bottle but doesn't inject into it. The first half of
+  that is true and the second was a decision, not a fact: FrostMod is a Windows program and
+  so is the game it attaches to, so it belongs in the same bottle, started through whichever
+  wrapper owns it. The app now finds that bottle the same way Play already does (whatever
+  sits above `drive_c` in the game's path), starts `frostmod.exe` in it, and hands over
+  `--mods` as the bottle names the folder — `C:\users\crossover\Documents\…`, not the
+  `/Users/…` this side calls the same place.
+- **The Reload button works from outside the bottle**, on the same terms as Linux: the app
+  is a native macOS process and FrostMod's reload event is a Wine kernel object nothing out
+  here can pulse, so a reload travels as a file FrostMod polls for. That needs FrostMod
+  v0.13.0 or newer; anything older is refused with a version to update to, rather than
+  started into a state where the in-game `F8` works and every button here quietly doesn't.
+  Stopping reaches both processes that carry the name — the wrapper and the Wine process
+  under it — so the status pill can't be left insisting FrostMod is running.
+- **A bottle with no `Z:` drive is named as the problem before anything starts.** FrostMod
+  lives beside the app's own data rather than inside the bottle, and `Z:` is what makes that
+  folder reachable from in there. Without it FrostMod would inject, reload on `F8`, and
+  ignore the app forever — the one failure worth catching early, because nothing about it is
+  visible in game.
+
+### Fixed
+- **Whatever the wrapper says on its way to starting FrostMod is now kept**, in `wine.log`
+  beside FrostMod, and collected with the other logs. It is the only account of a failed
+  injection a player can send us — the same reason Proton's output is kept on Linux.
+
 ## Unreleased — nothing downloads without a ceiling
 
 ### Fixed

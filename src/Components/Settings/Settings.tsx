@@ -272,11 +272,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const platform = usePlatform();
   const isWindows = platform === "windows";
   const isMac = platform === "macos";
-  // FrostMod is a Win32 DLL injected into the game — which is exactly what the game is on
-  // Linux too, where Steam runs it under Proton and the app puts FrostMod in the same
-  // prefix. macOS is the odd one out: the app launches the bottle but doesn't inject
-  // into it.
-  const hasFrostmod = isWindows || platform === "linux";
+  // FrostMod is a Win32 DLL injected into the game — which is exactly what the game is
+  // everywhere it runs: natively on Windows, under Proton on Linux, in a CrossOver/Whisky
+  // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
+  const hasFrostmod = isWindows || platform === "linux" || isMac;
   const { theme, setTheme } = useTheme();
   const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes } =
     useFrostmod();
@@ -1440,10 +1439,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           )}
 
           {/* frostmod — a Win32 DLL injected into the game, so it has nothing to do where
-              the game isn't a Windows process. That means Windows and Linux (Proton), and
-              not macOS. Hidden rather than shown-and-disabled: every control in it would
-              fail, including one that downloads two Windows binaries. The nav drops its
-              entry on the same condition. */}
+              the game isn't a Windows process. It is one on all three platforms (Proton on
+              Linux, a Wine bottle on macOS), and hidden anywhere else rather than
+              shown-and-disabled: every control would fail, including one that downloads two
+              Windows binaries. The nav drops its entry on the same condition. */}
           {hasFrostmod && caps.frostmod && active === "frostmod" && (
           <Section
             title={t("settings.frostmod")}
