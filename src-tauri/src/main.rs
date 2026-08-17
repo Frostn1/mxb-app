@@ -5095,6 +5095,33 @@ async fn frostmod_install(
 /// Raises a UAC prompt — Microsoft's redistributables require admin, and only the shell
 /// can ask. A declined prompt comes back as `cancelled`, not an error, so the UI can fall
 /// back to handing over the download link instead of reading as broken.
+/// Install every Visual C++ runtime this machine is short of, and finish the VC90 job by
+/// placing `msvcr90.dll` beside the game exe.
+///
+/// Deliberately not gated on `frostmod_status` having reported anything missing. The
+/// machine this exists for reported everything present and still couldn't start the game,
+/// so a repair reachable only from the warning bar would never have run there.
+#[tauri::command]
+async fn frostmod_repair_runtimes(app: tauri::AppHandle) -> vcruntime::RepairReport {
+    let game_dir = config::load(&app)
+        .ok()
+        .map(|c| c.install_dir())
+        .filter(|d| !d.trim().is_empty())
+        .map(std::path::PathBuf::from);
+    vcruntime::repair(&app, game_dir.as_deref()).await
+}
+
+/// Microsoft's download page links for every runtime, so the UI can always offer the
+/// manual route — the backstop for a declined UAC prompt or a PC that can't reach
+/// `aka.ms`.
+#[tauri::command]
+fn runtime_downloads() -> Vec<(vcruntime::Runtime, &'static str, &'static str)> {
+    vcruntime::Runtime::ALL
+        .into_iter()
+        .map(|r| (r, r.label(), r.url()))
+        .collect()
+}
+
 #[tauri::command]
 async fn frostmod_install_runtime(
     app: tauri::AppHandle,
@@ -6580,6 +6607,8 @@ fn main() {
             frostmod_status,
             frostmod_install,
             frostmod_install_runtime,
+            frostmod_repair_runtimes,
+            runtime_downloads,
             frostmod_start,
             frostmod_stop,
             launch_game,

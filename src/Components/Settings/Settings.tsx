@@ -277,7 +277,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime } =
+  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
@@ -1513,13 +1513,30 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                   <Button
                     size="sm"
                     onClick={() => void installRuntime(missingRuntime)}
-                    disabled={installingRuntime}
+                    disabled={installingRuntime || repairingRuntimes}
                   >
                     {installingRuntime
                       ? t("runtime.installing")
                       : t("runtime.fixIt")}
                   </Button>
                 )}
+                {/* Always offered, never gated on `missingRuntime`. Detection can say a PC
+                    has everything and be right about that while the game still won't
+                    start: the redistributable registers a side-by-side assembly and leaves
+                    the plain DLL search path alone. A repair reachable only when we'd
+                    already spotted a problem would never run on the machines that need it
+                    most — the ones where we spotted nothing. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void repairRuntimes()}
+                  disabled={repairingRuntimes || installingRuntime}
+                  title={t("settings.repairRuntimesHint")}
+                >
+                  {repairingRuntimes
+                    ? t("runtime.repairing")
+                    : t("settings.repairRuntimes")}
+                </Button>
                 {status?.installed && (
                   <Button
                     variant="ghost"
