@@ -72,12 +72,13 @@ pub fn is_running() -> bool {
     true
 }
 
-/// Linux: FrostMod runs under Proton and its reload event is a Wine kernel object we have
-/// no way to open from out here — this app is a native Linux process outside the prefix.
+/// Linux and macOS: FrostMod runs inside a Wine prefix — Proton's on Linux, a
+/// CrossOver/Whisky bottle on macOS — and its reload event is a Wine kernel object we have
+/// no way to open from out here, where this app is a native process outside that prefix.
 /// The command file is the way in instead (see `send_command`), and `reload_mods` is the
 /// verb FrostMod v0.13.0 added for exactly this. A FrostMod too old to read that file is
 /// refused a start at all ([`reads_command_files`]), so anything running here can hear us.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn signal_reload() -> ReloadOutcome {
     match send_command(command_json("reload_mods", "")) {
         CommandOutcome::Signaled => ReloadOutcome::Signaled,
@@ -97,12 +98,23 @@ pub fn is_running() -> bool {
     crate::proton::running_exe("frostmod.exe")
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+/// macOS: the same answer from the same place, asked of `ps` rather than `/proc`. Under
+/// Wine the launcher is a real macOS process whose argv still names `frostmod.exe`.
+#[cfg(target_os = "macos")]
+pub fn is_running() -> bool {
+    crate::winehost::running_exe(
+        &crate::winehost::process_table(),
+        "frostmod.exe",
+        std::process::id(),
+    )
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn signal_reload() -> ReloadOutcome {
     ReloadOutcome::Unsupported
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn is_running() -> bool {
     false
 }
@@ -132,18 +144,18 @@ pub fn is_running() -> bool {
 #[cfg(windows)]
 const COMMAND_EVENT_NAME: &[u8] = b"Local\\FrostModCommand\0";
 
-/// Where a Linux build leaves commands: FrostMod's own folder, which this app owns and
-/// which FrostMod (v0.13.0+) reads as well as `%TEMP%`.
+/// Where a build outside the Wine prefix leaves commands: FrostMod's own folder, which
+/// this app owns and which FrostMod (v0.13.0+) reads as well as `%TEMP%`.
 ///
 /// Set once at startup rather than passed in, because the senders below are called from
 /// folder watchers and install jobs that hold no Tauri handle to resolve a data dir with,
 /// and threading one through every caller would buy nothing: there is only ever one
 /// FrostMod folder per run.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 static COMMAND_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 /// Tell the sender where FrostMod is installed. Called once, from setup.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn set_command_dir(dir: std::path::PathBuf) {
     let _ = COMMAND_DIR.set(dir);
 }
@@ -151,14 +163,15 @@ pub fn set_command_dir(dir: std::path::PathBuf) {
 /// Command file FrostMod reads when the command event fires. Same temp dir the
 /// DLL uses — `std::env::temp_dir()` resolves to the `%TEMP%` that FrostMod's
 /// `GetTempPathA` returns.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn command_file_path() -> std::path::PathBuf {
     std::env::temp_dir().join("frostmod_cmd.json")
 }
 
-/// Linux: FrostMod's folder, not `/tmp`. Our `/tmp` is not the `%TEMP%` a program inside
-/// the Wine prefix resolves, and FrostMod's folder is one directory both sides can name.
-#[cfg(target_os = "linux")]
+/// Outside the prefix: FrostMod's folder, not our temp dir. `/tmp` here is not the `%TEMP%`
+/// a program inside the Wine prefix resolves, and FrostMod's folder is one directory both
+/// sides can name — it reads the file beside its own module, which is `Z:\…` from in there.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn command_file_path() -> std::path::PathBuf {
     COMMAND_DIR
         .get()
@@ -171,7 +184,7 @@ fn command_file_path() -> std::path::PathBuf {
 /// on-disk contract with frostmod.cpp is exercised without a game.
 ///
 /// `at` is what makes two identical commands two different documents. It costs nothing on
-/// Windows, where an event says "read this now" — but on Linux the file *is* the signal,
+/// Windows, where an event says "read this now" — but off it the file *is* the signal,
 /// and FrostMod decides a command is new by comparing what it last acted on with what is
 /// on disk now. Without a stamp, pressing Reload twice would write the same bytes twice
 /// and the second press would be indistinguishable from no press at all.
@@ -236,12 +249,13 @@ fn send_command(json: String) -> CommandOutcome {
     }
 }
 
-/// Linux: the file is the whole signal. There is no event to pulse — `Local\FrostModCommand`
-/// belongs to the Wine prefix FrostMod runs in, and this process is outside it — so the
-/// write lands in FrostMod's folder and its poll picks it up within about a fifth of a
-/// second. Whether it's running is asked of the process table first, so a command isn't
-/// left on disk for a FrostMod that will read it at some unrelated future start-up.
-#[cfg(target_os = "linux")]
+/// Linux and macOS: the file is the whole signal. There is no event to pulse —
+/// `Local\FrostModCommand` belongs to the Wine prefix FrostMod runs in, and this process is
+/// outside it — so the write lands in FrostMod's folder and its poll picks it up within
+/// about a fifth of a second. Whether it's running is asked of the process table first, so
+/// a command isn't left on disk for a FrostMod that will read it at some unrelated future
+/// start-up.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn send_command(json: String) -> CommandOutcome {
     if !is_running() {
         return CommandOutcome::NotRunning;
@@ -256,7 +270,7 @@ fn send_command(json: String) -> CommandOutcome {
     }
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn send_command(json: String) -> CommandOutcome {
     // Still write the command file on dev builds so the contract can be inspected.
     let _ = std::fs::write(command_file_path(), json);
@@ -324,14 +338,14 @@ pub fn model_refresh_is_safe(tag: Option<&str>) -> bool {
     }
 }
 
-/// The oldest FrostMod that can be driven from Linux.
+/// The oldest FrostMod that can be driven from outside a Wine prefix — Linux and macOS.
 ///
 /// Not a safety floor like the two around it — a capability one. Every FrostMod before
 /// v0.13.0 reads its command file only when the command *event* fires, and that event is a
-/// Wine kernel object: a native Linux app can't pulse it, so an older build under Proton
-/// would take every write and never look. It would inject fine and reload on `F8`, and
-/// every button in this app would quietly do nothing. v0.13.0 is the release that polls
-/// the file, so on Linux it is the floor for starting FrostMod at all.
+/// Wine kernel object: a native app out here can't pulse it, so an older build under Proton
+/// or in a bottle would take every write and never look. It would inject fine and reload on
+/// `F8`, and every button in this app would quietly do nothing. v0.13.0 is the release that
+/// polls the file, so off Windows it is the floor for starting FrostMod at all.
 pub const FILE_CHANNEL_MIN_VERSION: &str = "v0.13.0";
 
 /// Does the installed FrostMod, tagged `tag`, read commands from a file?
@@ -402,10 +416,10 @@ mod tests {
         );
     }
 
-    /// The floor exists because an older FrostMod fails *silently* on Linux: it takes the
-    /// write, never polls, and every button in the app looks like it worked.
+    /// The floor exists because an older FrostMod fails *silently* off Windows: it takes
+    /// the write, never polls, and every button in the app looks like it worked.
     #[test]
-    fn only_a_frostmod_that_polls_is_driven_from_linux() {
+    fn only_a_frostmod_that_polls_is_driven_from_outside_the_prefix() {
         assert!(reads_command_files(Some("v0.13.0")));
         assert!(reads_command_files(Some("v0.13.1")));
         assert!(reads_command_files(Some("v1.0.0")));

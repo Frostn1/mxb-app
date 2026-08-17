@@ -554,11 +554,8 @@ pub fn refresh_look() -> LiveRefresh {
 /// `ps` finds it. Without this Play would cheerfully start a second copy.
 #[cfg(target_os = "macos")]
 pub fn is_game_running() -> bool {
-    let Ok(out) = std::process::Command::new("ps").args(["-Ao", "pid=,args="]).output() else {
-        return false;
-    };
     crate::winehost::running_exe(
-        &String::from_utf8_lossy(&out.stdout),
+        &crate::winehost::process_table(),
         crate::game::active().exe,
         std::process::id(),
     )
@@ -696,6 +693,43 @@ fn resolve_exe(cfg: &AppConfig) -> anyhow::Result<(std::path::PathBuf, std::path
         );
     }
     Ok((dir, exe))
+}
+
+/// The Wine prefix `exe` lives in, and the runner that should drive it (macOS).
+///
+/// The game is a Windows binary here, so it runs inside a prefix, and the prefix is
+/// whatever sits above `drive_c` in the exe's own path — see [`crate::winehost`]. Shared
+/// with FrostMod's start, which has to land in that same prefix to inject into the game:
+/// both fail with the same words, because it is the same thing missing.
+#[cfg(target_os = "macos")]
+pub fn prefix_and_runner(
+    cfg: &AppConfig,
+    exe: &std::path::Path,
+) -> anyhow::Result<(std::path::PathBuf, crate::winehost::Runner)> {
+    let game = cfg.game().display;
+    let (prefix, _) = crate::winehost::split_prefix(exe).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{game} is a Windows game — on macOS the install folder has to be the copy \
+             inside your CrossOver, Whisky or Wine bottle (a path with drive_c in it). \
+             Set it in Settings, under {game} install folder."
+        )
+    })?;
+    let runner = crate::winehost::resolve(&cfg.wine_runner, Some(&prefix)).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No Wine runner found — install CrossOver, Whisky or Wine to run {game} on \
+             macOS, or point Settings at one you already have."
+        )
+    })?;
+    Ok((prefix, runner))
+}
+
+/// The same pair for a caller that doesn't already have the exe in hand.
+#[cfg(target_os = "macos")]
+pub fn game_prefix_and_runner(
+    cfg: &AppConfig,
+) -> anyhow::Result<(std::path::PathBuf, crate::winehost::Runner)> {
+    let (_, exe) = resolve_exe(cfg)?;
+    prefix_and_runner(cfg, &exe)
 }
 
 /// The Steam client's own executable.
@@ -1003,21 +1037,7 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
 
     #[cfg(target_os = "macos")]
     {
-        // The game is a Windows binary here, so it runs inside a Wine prefix. The prefix
-        // is whatever sits above `drive_c` in the exe's own path — see `winehost`.
-        let (prefix, _) = crate::winehost::split_prefix(&exe).ok_or_else(|| {
-            anyhow::anyhow!(
-                "{game} is a Windows game — on macOS the install folder has to be the copy \
-                 inside your CrossOver, Whisky or Wine bottle (a path with drive_c in it). \
-                 Set it in Settings, under {game} install folder."
-            )
-        })?;
-        let runner = crate::winehost::resolve(&cfg.wine_runner, Some(&prefix)).ok_or_else(|| {
-            anyhow::anyhow!(
-                "No Wine runner found — install CrossOver, Whisky or Wine to run {game} on \
-                 macOS, or point Settings at one you already have."
-            )
-        })?;
+        let (prefix, runner) = prefix_and_runner(cfg, &exe)?;
 
         let extra: Vec<String> = address.map(|a| connect_args(a).to_vec()).unwrap_or_default();
         let plan = crate::winehost::plan(&runner, &prefix, &exe, &extra);
