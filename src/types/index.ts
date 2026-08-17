@@ -906,11 +906,37 @@ export interface FrostmodStatus {
   missingRuntimes: VcRuntime[];
 }
 
-/** A Visual C++ runtime the FrostMod chain needs. Matches `vcruntime::Runtime`. */
-export type VcRuntime = "vc90" | "vc140";
+/**
+ * A Visual C++ runtime the FrostMod chain needs. Matches `vcruntime::Runtime`.
+ *
+ * `vc140_x86` never appears in {@link FrostmodStatus.missingRuntimes} — nothing we ship is
+ * 32-bit, so its absence proves nothing is wrong and it would only ever be a false alarm.
+ * It exists for the repair, which installs the pair Microsoft's own downloads page hands
+ * out, and for the manual download links.
+ */
+export type VcRuntime = "vc90" | "vc140" | "vc140_x86";
 
 /** What a runtime install did. `cancelled` is the user dismissing the UAC prompt. */
 export type RuntimeInstallOutcome = "installed" | "cancelled";
+
+/**
+ * What a repair run did. Mirrors `vcruntime::RepairReport`.
+ *
+ * Nothing here is an error: a repair does what it can and reports the rest, so
+ * `stillMissing` is a list to hand download links for rather than a failure.
+ */
+export interface RuntimeRepairReport {
+  /** Runtimes that went on during this run. */
+  installed: VcRuntime[];
+  /** Runtimes that were already there — "nothing to do" is a real answer worth saying. */
+  alreadyPresent: VcRuntime[];
+  /** Still absent afterwards: a declined UAC prompt, a failed download, a pending reboot. */
+  stillMissing: VcRuntime[];
+  /** Whether `msvcr90.dll` now sits beside the game executable. */
+  msvcr90Placed: boolean;
+  /** False when no game folder is configured, so there was nowhere to place it. */
+  gameDirKnown: boolean;
+}
 
 /** What an install landed, beyond succeeding. */
 export interface FrostmodInstallReport {
