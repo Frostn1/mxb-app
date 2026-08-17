@@ -11,6 +11,7 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import {
   frostmodInstall,
   frostmodInstallRuntime,
+  frostmodRepairRuntimes,
   frostmodStart,
   frostmodStatus,
   frostmodStop,
@@ -19,6 +20,8 @@ import {
   onFrostmodReload,
   reloadFrostmod,
   RUNTIME_DOWNLOAD_URL,
+  RUNTIME_DOWNLOADS_PAGE,
+  RUNTIME_NAME_KEY,
 } from "../api/mods";
 import type { FrostmodStatus, VcRuntime } from "../types";
 import { displayName } from "../lib/mods";
@@ -53,6 +56,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const [checking, setChecking] = useState(false);
   const [statusError, setStatusError] = useState(false);
   const [installingRuntime, setInstallingRuntime] = useState(false);
+  const [repairingRuntimes, setRepairingRuntimes] = useState(false);
   const [runtimeDismissed, setRuntimeDismissed] = useState(false);
   const mounted = useRef(true);
 
@@ -215,6 +219,66 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     [refreshStatus, t],
   );
 
+  /**
+   * Install everything the PC is short of, then put `msvcr90.dll` beside the game exe.
+   *
+   * The one path that doesn't ask detection for permission first. A PC can report every
+   * runtime present and still stop the game dead — the redistributable registers a
+   * side-by-side assembly and leaves the plain DLL search path alone — so this always does
+   * the work and reports what it found rather than deciding there was nothing to do.
+   *
+   * Never throws: the backend returns a report instead, so a UAC prompt declined on one
+   * installer doesn't cost the player the other two.
+   */
+  const repairRuntimes = useCallback(async () => {
+    setRepairingRuntimes(true);
+    try {
+      const report = await frostmodRepairRuntimes();
+      await refreshStatus();
+
+      const fixed = report.installed.length > 0 || report.msvcr90Placed;
+      if (report.stillMissing.length > 0) {
+        // Partly done at best, and every remaining item has a link. Offer the first —
+        // opening three tabs at once would be its own kind of unhelpful.
+        const first = report.stillMissing[0];
+        toast.warning(t("runtime.repairPartial"), {
+          description: t("runtime.repairPartialDesc", {
+            what: report.stillMissing.map((r) => t(RUNTIME_NAME_KEY[r])).join(", "),
+          }),
+          action: {
+            label: t("runtime.downloadManually"),
+            onClick: () => void openUrl(RUNTIME_DOWNLOAD_URL[first]),
+          },
+          duration: 12000,
+        });
+      } else if (fixed) {
+        toast.success(t("runtime.repairDone"), {
+          description: t("runtime.repairDoneDesc"),
+        });
+      } else if (!report.gameDirKnown) {
+        // Everything was already installed, but we had nowhere to put the copy that
+        // actually stops the "not found" box. Saying "all good" here would be a lie.
+        toast.info(t("runtime.repairNoGameFolder"), {
+          description: t("runtime.repairNoGameFolderDesc"),
+        });
+      } else {
+        toast.info(t("runtime.repairNothingToDo"), {
+          description: t("runtime.repairNothingToDoDesc"),
+        });
+      }
+    } catch (e) {
+      toast.error(t("runtime.repairFailed"), {
+        description: String(e),
+        action: {
+          label: t("runtime.downloadManually"),
+          onClick: () => void openUrl(RUNTIME_DOWNLOADS_PAGE),
+        },
+      });
+    } finally {
+      setRepairingRuntimes(false);
+    }
+  }, [refreshStatus, t]);
+
   // Only ever surface one at a time: two banners stacked over the app is noise, and the
   // game's own runtime (vc90) is the one that produces the error people actually report,
   // so `missingRuntimes` order (vc90 first) decides.
@@ -274,11 +338,13 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       stop,
       installingRuntime,
       installRuntime,
+      repairingRuntimes,
+      repairRuntimes,
       dismissRuntimeWarning,
       runtimeWarning,
       missingRuntime,
     }),
-    [running, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, dismissRuntimeWarning, runtimeWarning, missingRuntime],
+    [running, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, repairingRuntimes, repairRuntimes, dismissRuntimeWarning, runtimeWarning, missingRuntime],
   );
 
   return (

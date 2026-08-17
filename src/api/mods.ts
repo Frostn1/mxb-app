@@ -20,6 +20,7 @@ import type {
   IntegrityReport,
   RiderIntegrity,
   RuntimeInstallOutcome,
+  RuntimeRepairReport,
   VcRuntime,
   InstalledMod,
   InstallProgress,
@@ -1721,13 +1722,41 @@ export function frostmodInstallRuntime(
   return invoke<RuntimeInstallOutcome>("frostmod_install_runtime", { runtime });
 }
 
+/** Install everything this PC is short of, and put `msvcr90.dll` beside the game exe.
+ *
+ *  The repair the warning bar can't reach: it runs whatever detection said, because a
+ *  machine can report every runtime present and still fail to start the game. Raises UAC
+ *  once per installer, and never rejects — what it couldn't do comes back in
+ *  `stillMissing` for the caller to offer links for. */
+export function frostmodRepairRuntimes(): Promise<RuntimeRepairReport> {
+  return invoke<RuntimeRepairReport>("frostmod_repair_runtimes");
+}
+
 /** Where to send someone whose UAC prompt we can't raise (or who declined it).
  *
  *  Microsoft's own direct downloads, the same ones the backend fetches — a download page
- *  would make them pick an architecture, and picking x86 here fixes nothing. */
+ *  would make them pick an architecture, and picking the wrong one fixes nothing. Both
+ *  2015–2022 builds are here because that is what Microsoft's "Latest Supported Visual C++
+ *  Downloads" page hands out, and a 32-bit plugin or the dedicated-server build needs the
+ *  x86 one no matter how many x64 packages are already installed. */
 export const RUNTIME_DOWNLOAD_URL: Record<VcRuntime, string> = {
   vc90: "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x64.exe",
   vc140: "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+  vc140_x86: "https://aka.ms/vs/17/release/vc_redist.x86.exe",
+};
+
+/** Microsoft's index page for the pair above, for a player who'd rather see the source. */
+export const RUNTIME_DOWNLOADS_PAGE =
+  "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist";
+
+/** Translation key naming each runtime the way Microsoft's installer does.
+ *
+ *  The architecture is part of the name on purpose: someone told to install "Visual C++"
+ *  who already has the x64 package needs to see that it's the other one being asked for. */
+export const RUNTIME_NAME_KEY: Record<VcRuntime, TKey> = {
+  vc90: "runtime.componentVc90",
+  vc140: "runtime.componentVc140",
+  vc140_x86: "runtime.componentVc140X86",
 };
 
 /** Launch the managed FrostMod process if it isn't already running. */

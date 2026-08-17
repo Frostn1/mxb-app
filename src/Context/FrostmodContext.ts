@@ -27,6 +27,20 @@ export interface FrostmodContextValue {
    * way, and opens Microsoft's download page if the prompt was declined.
    */
   installRuntime: (runtime: VcRuntime) => Promise<void>;
+  /** True while a full runtime repair is in flight. */
+  repairingRuntimes: boolean;
+  /**
+   * Install every Visual C++ runtime this PC is short of, then place `msvcr90.dll` beside
+   * the game executable.
+   *
+   * Unlike {@link installRuntime} this isn't gated on anything having been detected as
+   * missing, which is the point of it: a PC can report every runtime present and still
+   * stop the game with "MSVCR90.dll was not found", because the redistributable registers
+   * a side-by-side assembly and never touches the plain DLL search path. Prompts for admin
+   * once per installer and resolves either way, handing over download links for whatever
+   * it couldn't do.
+   */
+  repairRuntimes: () => Promise<void>;
   /** Hide the runtime banner for this session (the Settings panel keeps showing it). */
   dismissRuntimeWarning: () => void;
   /** What the banner should warn about — `null` once dismissed this session. */
