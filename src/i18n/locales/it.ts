@@ -295,6 +295,21 @@ export const it: Translation = {
     "Windows ha bisogno del tuo permesso. Apro invece il download di Microsoft.",
   "runtime.installFailed": "Impossibile installare il componente",
   "runtime.downloadManually": "Scaricalo da solo",
+  "runtime.componentVc140X86": "Microsoft Visual C++ 2015–2022 (x86)",
+  "runtime.repairing": "Riparazione…",
+  "runtime.repairDone": "Componenti riparati",
+  "runtime.repairDoneDesc":
+    "Riavvia MX Bikes se è già aperto, poi riprova.",
+  "runtime.repairNothingToDo": "Era già tutto a posto",
+  "runtime.repairNothingToDoDesc":
+    "Tutti i componenti Visual C++ sono installati e la cartella del gioco ha quello che le serve. Se il gioco non parte lo stesso, mandaci il tuo log.",
+  "runtime.repairPartial": "Una parte ha ancora bisogno di te",
+  "runtime.repairPartialDesc":
+    "Non è stato possibile completare: {{what}}. Windows chiede il tuo permesso, oppure il download non è arrivato — puoi installarlo a mano.",
+  "runtime.repairNoGameFolder": "Nessuna cartella di gioco impostata",
+  "runtime.repairNoGameFolderDesc":
+    "I componenti sono installati, ma senza la cartella di installazione non c'è dove mettere la copia che il gioco cerca. Impostala qui sopra, poi ripara di nuovo.",
+  "runtime.repairFailed": "Impossibile riparare i componenti",
   "update.checkFailed": "Impossibile controllare gli aggiornamenti",
   "update.failed": "Aggiornamento non riuscito",
 
@@ -599,6 +614,9 @@ export const it: Translation = {
   "settings.latestVersion": "Ultima: {{version}}",
   "settings.frostmodRuntimeMissing":
     "A Windows manca un componente Visual C++ che serve a FrostMod — installalo per togliere l'errore «dll was not found».",
+  "settings.repairRuntimes": "Ripara i componenti",
+  "settings.repairRuntimesHint":
+    "Installa tutti i componenti Visual C++ che mancano a questo PC (32 e 64 bit) e mette msvcr90.dll dove il gioco la cerca. Vale la pena anche se qui sopra non sembra esserci nulla di sbagliato.",
   "settings.frostmodNeedsRepair":
     "I file installati non corrispondono a questa versione — reinstallando si risolve.",
   "settings.frostmodRepair": "Ripara installazione",

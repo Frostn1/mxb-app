@@ -1,5 +1,6 @@
 import { AlertTriangle, Download, Loader2, X } from "lucide-react";
 import { Button } from "@/Components/ui/button";
+import { RUNTIME_NAME_KEY } from "@/api/mods";
 import { useFrostmod } from "@/Context/FrostmodContext";
 import { Trans } from "@/i18n";
 import { useT } from "@/i18n/context";
@@ -26,9 +27,10 @@ export default function RuntimeBanner() {
   // when one of the two is visibly working.
   const isGameRuntime = runtimeWarning === "vc90";
   const bodyKey = isGameRuntime ? "runtime.bannerGame" : "runtime.bannerFrostmod";
-  const nameKey = isGameRuntime
-    ? "runtime.componentVc90"
-    : "runtime.componentVc140";
+  // `vc140_x86` never reaches here — the backend keeps it out of `missingRuntimes` because
+  // nothing we ship is 32-bit — but the lookup covers it rather than leaving a hole that
+  // would render an empty name if that ever changed.
+  const nameKey = RUNTIME_NAME_KEY[runtimeWarning];
 
   return (
     <div className="flex items-center gap-3 border-b border-amber-500/25 bg-amber-500/10 px-4 py-2 text-sm text-foreground">

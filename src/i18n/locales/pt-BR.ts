@@ -298,6 +298,21 @@ export const ptBR: Translation = {
     "O Windows precisa da sua permissão. Abrindo o download da Microsoft no lugar.",
   "runtime.installFailed": "Não foi possível instalar o componente",
   "runtime.downloadManually": "Baixar por conta própria",
+  "runtime.componentVc140X86": "Microsoft Visual C++ 2015–2022 (x86)",
+  "runtime.repairing": "Reparando…",
+  "runtime.repairDone": "Componentes reparados",
+  "runtime.repairDoneDesc":
+    "Reinicie o MX Bikes se ele já estiver aberto e tente de novo.",
+  "runtime.repairNothingToDo": "Já estava tudo no lugar",
+  "runtime.repairNothingToDoDesc":
+    "Todos os componentes do Visual C++ estão instalados e a pasta do jogo tem o que precisa. Se mesmo assim o jogo não abrir, mande seu log para a gente.",
+  "runtime.repairPartial": "Uma parte ainda depende de você",
+  "runtime.repairPartialDesc":
+    "Não deu para concluir: {{what}}. O Windows precisa da sua permissão, ou o download não chegou — você pode instalar na mão.",
+  "runtime.repairNoGameFolder": "Nenhuma pasta do jogo definida",
+  "runtime.repairNoGameFolderDesc":
+    "Os componentes estão instalados, mas sem a pasta de instalação não há onde deixar a cópia que o jogo procura. Defina-a acima e repare de novo.",
+  "runtime.repairFailed": "Não foi possível reparar os componentes",
   "update.checkFailed": "Não foi possível verificar as atualizações",
   "update.failed": "A atualização falhou",
 
@@ -602,6 +617,9 @@ export const ptBR: Translation = {
   "settings.latestVersion": "Última: {{version}}",
   "settings.frostmodRuntimeMissing":
     "Falta ao Windows um componente do Visual C++ que o FrostMod precisa — instale-o para acabar com o erro \"dll was not found\".",
+  "settings.repairRuntimes": "Reparar componentes",
+  "settings.repairRuntimesHint":
+    "Instala todos os componentes do Visual C++ que faltam neste PC (32 e 64 bits) e coloca a msvcr90.dll onde o jogo a procura. Vale a pena mesmo que nada acima pareça errado.",
   "settings.frostmodNeedsRepair":
     "Os arquivos instalados não batem com esta versão — reinstalar resolve.",
   "settings.frostmodRepair": "Reparar instalação",

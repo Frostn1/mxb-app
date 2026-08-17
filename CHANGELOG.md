@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased — a repair button that doesn't wait to be asked
+
+### Added
+- **"Repair runtimes" in Settings, next to FrostMod.** It installs every Visual C++ runtime
+  this PC is short of and puts `msvcr90.dll` where the game looks for it. Deliberately not
+  gated on anything having been detected as missing — the machine this was built for reported
+  every runtime present and still couldn't start the game, so a repair reachable only from the
+  warning bar would never have run there. Worth pressing even when nothing looks wrong.
+- **Both 32- and 64-bit 2015–2022 runtimes**, from Microsoft's own *Latest Supported Visual
+  C++ Downloads* page. Installing the x64 package does nothing for a 32-bit consumer — a
+  plugin, a tool, or the dedicated-server build, which really is a 32-bit binary — so offering
+  only one left half the cases unfixable. The x86 package is offered by the repair and never
+  raises a warning of its own: nothing the app ships is 32-bit, so its absence proves nothing
+  is wrong.
+- **Every runtime's download link, always available**, so a declined admin prompt or a PC that
+  can't reach Microsoft still has somewhere to go. The repair hands over links for whatever it
+  couldn't finish rather than reporting a flat failure.
+
+### Fixed
+- **The copy beside the game executable now lands in `Program Files` too.** It was a plain
+  unelevated write, so on a Steam install — where the game folder needs admin rights — it
+  failed silently and the fix never arrived on exactly the machines reporting the problem. The
+  repair now asks for permission and copies with it.
+- **A repair no longer stops at the first thing that goes wrong.** One runtime failing says
+  nothing about the next two, so it works through all of them and reports the rest.
+
 ## Unreleased — nothing downloads without a ceiling
 
 ### Fixed

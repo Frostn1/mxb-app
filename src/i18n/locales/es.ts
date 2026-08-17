@@ -296,6 +296,21 @@ export const es: Translation = {
     "Windows necesita tu permiso para instalarlo. Abriendo la descarga de Microsoft.",
   "runtime.installFailed": "No se pudo instalar el componente",
   "runtime.downloadManually": "Descargarlo tú mismo",
+  "runtime.componentVc140X86": "Microsoft Visual C++ 2015–2022 (x86)",
+  "runtime.repairing": "Reparando…",
+  "runtime.repairDone": "Componentes reparados",
+  "runtime.repairDoneDesc":
+    "Reinicia MX Bikes si ya está abierto y vuelve a intentarlo.",
+  "runtime.repairNothingToDo": "Ya estaba todo en su sitio",
+  "runtime.repairNothingToDoDesc":
+    "Todos los componentes de Visual C++ están instalados y la carpeta del juego tiene lo que necesita. Si aun así no arranca, mándanos tu registro.",
+  "runtime.repairPartial": "Una parte todavía te necesita",
+  "runtime.repairPartialDesc":
+    "No se pudo terminar: {{what}}. Windows necesita tu permiso, o la descarga no llegó — puedes instalarlo a mano.",
+  "runtime.repairNoGameFolder": "No hay carpeta del juego",
+  "runtime.repairNoGameFolderDesc":
+    "Los componentes están instalados, pero sin la carpeta de instalación no hay dónde dejar la copia que el juego busca. Indícala arriba y repara otra vez.",
+  "runtime.repairFailed": "No se pudieron reparar los componentes",
   "update.checkFailed": "No se pudieron comprobar las actualizaciones",
   "update.failed": "La actualización falló",
 
@@ -601,6 +616,9 @@ export const es: Translation = {
   "settings.latestVersion": "Última: {{version}}",
   "settings.frostmodRuntimeMissing":
     "A Windows le falta un componente de Visual C++ que FrostMod necesita — instálalo para quitar el error «dll was not found».",
+  "settings.repairRuntimes": "Reparar componentes",
+  "settings.repairRuntimesHint":
+    "Instala todos los componentes de Visual C++ que le falten a este PC (32 y 64 bits) y deja msvcr90.dll donde el juego la busca. Vale la pena aunque arriba no se vea nada mal.",
   "settings.frostmodNeedsRepair":
     "Los archivos instalados no coinciden con esta versión — reinstalar lo arregla.",
   "settings.frostmodRepair": "Reparar instalación",

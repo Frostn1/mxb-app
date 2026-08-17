@@ -60,8 +60,17 @@ use serde::{Deserialize, Serialize};
 pub enum Runtime {
     /// Visual C++ 2008 (`MSVCR90`) — what the *game* imports.
     Vc90,
-    /// Visual C++ 2015–2022 (`vcruntime140` / `msvcp140`) — what `frostmod.dll` imports.
+    /// Visual C++ 2015–2022, x64 (`vcruntime140` / `msvcp140`) — what `frostmod.dll` imports.
     Vc140,
+    /// Visual C++ 2015–2022, x86.
+    ///
+    /// Nothing in our own chain needs this one: the app, FrostMod and the modern game
+    /// builds are all x64. It is here because plenty of what players run alongside the
+    /// game isn't — 32-bit plugins, tools, and the dedicated-server build, which really is
+    /// a 32-bit binary — and because the pair is what Microsoft's own "Latest Supported
+    /// Visual C++ Downloads" page hands out. Offered by the repair, never a banner: see
+    /// [`missing`] for why an unprompted alarm about it would be wrong.
+    Vc140X86,
 }
 
 /// What an install attempt actually did.
@@ -93,11 +102,21 @@ const VC90_SXS_PREFIX: &str = "amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_";
 /// injection dies naming a DLL we never looked for.
 const VC140_DLLS: [&str; 3] = ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"];
 
+/// The x86 probe, deliberately shorter than [`VC140_DLLS`].
+///
+/// `vcruntime140_1.dll` is left out because we could not confirm the 32-bit package ships
+/// it — the redistributable is a Burn bundle with its payload compressed, so the honest
+/// answer from here is "unknown". Probing for a file that may never exist on x86 would
+/// mark every machine permanently short of a runtime it already has, and a false alarm we
+/// can't clear is worse than a gap we don't report. The two below are certain.
+const VC140_X86_DLLS: [&str; 2] = ["vcruntime140.dll", "msvcp140.dll"];
+
 /// The file every one of these paths is ultimately about.
 const MSVCR90_DLL: &str = "msvcr90.dll";
 
 /// An installer under this is a captive-portal login page or a truncated download, not a
-/// redistributable. The real ones are ~5 MB (VC90) and ~25 MB (VC140).
+/// redistributable. The real ones are ~5 MB (VC90), ~25.6 MB (VC140 x64) and ~14 MB
+/// (VC140 x86), so a megabyte clears all three with room to spare.
 const MIN_INSTALLER_BYTES: usize = 1024 * 1024;
 
 impl Runtime {
@@ -107,8 +126,22 @@ impl Runtime {
         match self {
             // Visual C++ 2008 SP1 redistributable, x64.
             Runtime::Vc90 => "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x64.exe",
-            // Evergreen "latest supported x64" link — always the current 2015–2022 build.
+            // Evergreen "latest supported" links off Microsoft's own downloads page —
+            // always the current 2015–2022 build, so they don't rot the way a versioned
+            // link does. HEAD-checked when this landed: 25.6 MB x64, 14.0 MB x86.
             Runtime::Vc140 => "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+            Runtime::Vc140X86 => "https://aka.ms/vs/17/release/vc_redist.x86.exe",
+        }
+    }
+
+    /// What to call this in a sentence to the player. The architecture is part of the
+    /// name: someone told to install "Visual C++" who already has the x64 package needs to
+    /// know it's the other one being asked for.
+    pub fn label(self) -> &'static str {
+        match self {
+            Runtime::Vc90 => "Microsoft Visual C++ 2008 (x64)",
+            Runtime::Vc140 => "Microsoft Visual C++ 2015–2022 (x64)",
+            Runtime::Vc140X86 => "Microsoft Visual C++ 2015–2022 (x86)",
         }
     }
 
@@ -119,17 +152,23 @@ impl Runtime {
     pub fn installer_args(self) -> &'static str {
         match self {
             Runtime::Vc90 => "/q /norestart",
-            Runtime::Vc140 => "/install /quiet /norestart",
+            Runtime::Vc140 | Runtime::Vc140X86 => "/install /quiet /norestart",
         }
     }
 
-    /// Filename to stage the download under.
+    /// Filename to stage the download under. Distinct per runtime so two staged installers
+    /// can never overwrite one another mid-repair.
     fn installer_name(self) -> &'static str {
         match self {
             Runtime::Vc90 => "vcredist_x64_2008.exe",
             Runtime::Vc140 => "vc_redist.x64.exe",
+            Runtime::Vc140X86 => "vc_redist.x86.exe",
         }
     }
+
+    /// Every runtime the repair knows how to fetch, in the order it works through them:
+    /// the game's own CRT first, since that is the one whose absence stops the game dead.
+    pub const ALL: [Runtime; 3] = [Runtime::Vc90, Runtime::Vc140, Runtime::Vc140X86];
 }
 
 /// The four-part version embedded in a WinSxS entry name, as a sortable key.
@@ -306,12 +345,79 @@ pub fn ensure_app_local_msvcr90(_game_dir: &std::path::Path) -> bool {
     false
 }
 
+/// Place `msvcr90.dll` beside the exe, raising UAC if the folder needs it.
+///
+/// The unelevated copy above is silent and gives up on `Program Files` — which is exactly
+/// where a Steam install lives, so on the machines that reported this it never lands. This
+/// is the same job with the shell's `runas` behind it, and it is deliberately **not** on
+/// the status path: it can put a UAC dialog on screen, so it only ever runs from a repair
+/// the player pressed.
+///
+/// `cmd.exe /c copy` rather than an elevated helper of our own — copying one file is not
+/// worth a second binary in the bundle, and `copy` is present on every Windows that can
+/// run the game.
+#[cfg(windows)]
+pub fn place_msvcr90_elevated(game_dir: &std::path::Path) -> anyhow::Result<bool> {
+    let dest = app_local_msvcr90(game_dir);
+    if dest.is_file() {
+        return Ok(true);
+    }
+    // Clear the "already tried" mark first: the unelevated attempt almost certainly failed
+    // on this folder, and that must not stop the elevated one.
+    if let Ok(mut tried) = ATTEMPTED.lock() {
+        tried.remove(game_dir);
+    }
+    if ensure_app_local_msvcr90(game_dir) {
+        return Ok(true);
+    }
+    let Some(src_dir) = sxs_vc90_dir() else {
+        anyhow::bail!(
+            "There's no Visual C++ 2008 runtime on this PC to copy from. Install {} first.",
+            Runtime::Vc90.label()
+        );
+    };
+    let src = src_dir.join(MSVCR90_DLL);
+    let cmd = windir().join("System32").join("cmd.exe");
+    // Quoted because both paths routinely contain spaces — `Program Files`, `MX Bikes`.
+    let args = format!("/c copy /y \"{}\" \"{}\"", src.display(), dest.display());
+    if !run_elevated(&cmd, &args)? {
+        // Declined UAC. Not an error: the caller offers the manual route instead.
+        return Ok(false);
+    }
+    // `copy`'s exit code doesn't travel back through ShellExecuteExW usefully, so the disk
+    // is what settles it.
+    let placed = dest.is_file();
+    if placed {
+        log::info!("placed {} (elevated) from {}", dest.display(), src_dir.display());
+    } else {
+        log::warn!("elevated copy of {} reported no error but nothing landed", dest.display());
+    }
+    Ok(placed)
+}
+
+#[cfg(not(windows))]
+pub fn place_msvcr90_elevated(_game_dir: &std::path::Path) -> anyhow::Result<bool> {
+    anyhow::bail!("Visual C++ runtimes only apply on Windows")
+}
+
 /// The 2015–2022 runtime installs into `System32` rather than WinSxS. This process is
 /// x64, so `System32` is the genuine 64-bit directory — no WOW64 redirection to unpick.
 #[cfg(windows)]
 fn vc140_present() -> bool {
     let sys32 = windir().join("System32");
     VC140_DLLS.iter().all(|dll| sys32.join(dll).exists())
+}
+
+/// The 32-bit runtime lands in `SysWOW64` — the 64-bit-Windows home for 32-bit system
+/// DLLs, despite a name that reads the other way round.
+///
+/// Naming the path literally is what makes this correct from here: WOW64 file-system
+/// redirection rewrites `System32` for 32-bit processes, and this process is 64-bit, so
+/// nothing is rewritten in either direction and `SysWOW64` means exactly what it says.
+#[cfg(windows)]
+fn vc140_x86_present() -> bool {
+    let syswow = windir().join("SysWOW64");
+    VC140_X86_DLLS.iter().all(|dll| syswow.join(dll).exists())
 }
 
 /// Cached detection result, together with the game folder it was computed for.
@@ -343,6 +449,11 @@ fn invalidate() {
 /// `game_dir` is where the active title is installed, when the app knows it. Without it
 /// the VC90 probe can only consult `WinSxS` and will call a game folder carrying its own
 /// copy of the CRT "missing" — so pass it wherever it is to hand.
+///
+/// [`Runtime::Vc140X86`] is deliberately absent from this list. It drives a banner, and
+/// nothing we ship is 32-bit, so its absence proves nothing is broken — raising an amber
+/// bar over it would be telling a working player their PC is wrong. The repair installs it
+/// on request; see [`short_of`], which is the same question asked without that restraint.
 #[cfg(windows)]
 pub fn missing(game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
     if let Ok(cache) = CACHE.lock() {
@@ -372,6 +483,116 @@ pub fn missing(game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
 #[cfg(not(windows))]
 pub fn missing(_game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
     Vec::new()
+}
+
+/// Every runtime this machine is short of, including the ones we'd never raise a banner
+/// about. This is what the repair works from: the player asked, so the restraint that
+/// governs [`missing`] doesn't apply.
+///
+/// Uncached on purpose — it runs once per button press, and it must see the disk as it is
+/// now rather than as some earlier poll found it.
+#[cfg(windows)]
+pub fn short_of(game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
+    Runtime::ALL
+        .into_iter()
+        .filter(|r| match r {
+            Runtime::Vc90 => !vc90_present(game_dir),
+            Runtime::Vc140 => !vc140_present(),
+            Runtime::Vc140X86 => !vc140_x86_present(),
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+pub fn short_of(_game_dir: Option<&std::path::Path>) -> Vec<Runtime> {
+    Vec::new()
+}
+
+/// What a repair run did, in the terms the player needs to hear it.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairReport {
+    /// Runtimes that went on during this run.
+    pub installed: Vec<Runtime>,
+    /// Runtimes that were already there. Worth saying: "nothing to do" is a real answer
+    /// and reads as a broken button when it's silent.
+    pub already_present: Vec<Runtime>,
+    /// Still absent afterwards — a declined UAC prompt, a failed download, an install that
+    /// needs a reboot to finish. Each one is a link the UI hands over.
+    pub still_missing: Vec<Runtime>,
+    /// Whether `msvcr90.dll` now sits beside the game exe.
+    pub msvcr90_placed: bool,
+    /// Set when we had nowhere to place it — no game folder configured.
+    pub game_dir_known: bool,
+}
+
+/// Install whatever this machine is short of, then finish the VC90 job by hand.
+///
+/// The one entry point that doesn't depend on detection having raised a flag. That matters
+/// more than it sounds: the machine this was written for reported every runtime present
+/// and still couldn't start the game, so anything reachable only through the banner would
+/// never have run there.
+///
+/// Never bails part-way. One runtime failing says nothing about the next, and a repair that
+/// stops at the first problem leaves the player worse off than one that does what it can
+/// and reports the rest — which the UI turns into download links.
+#[cfg(windows)]
+pub async fn repair(
+    app: &tauri::AppHandle,
+    game_dir: Option<&std::path::Path>,
+) -> RepairReport {
+    let mut report = RepairReport {
+        game_dir_known: game_dir.is_some(),
+        ..Default::default()
+    };
+    let short = short_of(game_dir);
+    for runtime in Runtime::ALL {
+        if !short.contains(&runtime) {
+            report.already_present.push(runtime);
+            continue;
+        }
+        match install(app, runtime, game_dir).await {
+            Ok(InstallOutcome::Installed) => report.installed.push(runtime),
+            Ok(InstallOutcome::Cancelled) => {
+                log::info!("repair: {runtime:?} declined at the UAC prompt");
+                report.still_missing.push(runtime);
+            }
+            Err(e) => {
+                log::warn!("repair: {runtime:?} failed: {e:#}");
+                report.still_missing.push(runtime);
+            }
+        }
+    }
+
+    // The copy beside the exe, elevating if the folder needs it. Runs even when VC90 was
+    // already "present" — present in WinSxS is not the same as reachable by a plain
+    // import, and that gap is the whole reason this function exists.
+    if let Some(dir) = game_dir {
+        report.msvcr90_placed = match place_msvcr90_elevated(dir) {
+            Ok(placed) => placed,
+            Err(e) => {
+                log::warn!("repair: could not place {MSVCR90_DLL}: {e:#}");
+                false
+            }
+        };
+    }
+
+    invalidate();
+    log::info!(
+        "repair: installed {:?}, still missing {:?}, msvcr90 beside exe: {}",
+        report.installed,
+        report.still_missing,
+        report.msvcr90_placed
+    );
+    report
+}
+
+#[cfg(not(windows))]
+pub async fn repair(
+    _app: &tauri::AppHandle,
+    _game_dir: Option<&std::path::Path>,
+) -> RepairReport {
+    RepairReport::default()
 }
 
 // ===========================================================================
@@ -660,6 +881,49 @@ mod tests {
             VC140_DLLS.contains(&"vcruntime140_1.dll"),
             "frostmod.dll imports vcruntime140_1.dll, so it has to be probed: {VC140_DLLS:?}"
         );
+    }
+
+    /// Both 2015–2022 builds are offered, off Microsoft's "Latest Supported Visual C++
+    /// Downloads" page. Installing x64 does nothing for a 32-bit consumer and vice versa,
+    /// so a single link would leave half the cases unfixable.
+    #[test]
+    fn offers_both_architectures_of_the_modern_runtime() {
+        assert!(Runtime::ALL.contains(&Runtime::Vc140));
+        assert!(Runtime::ALL.contains(&Runtime::Vc140X86));
+        assert!(Runtime::Vc140.url().ends_with("vc_redist.x64.exe"));
+        assert!(Runtime::Vc140X86.url().ends_with("vc_redist.x86.exe"));
+    }
+
+    /// Every runtime needs its own staging filename and its own URL — two sharing either
+    /// would have one silently overwrite or stand in for the other mid-repair.
+    #[test]
+    fn every_runtime_is_distinct_on_disk_and_on_the_wire() {
+        for (i, a) in Runtime::ALL.iter().enumerate() {
+            for b in &Runtime::ALL[i + 1..] {
+                assert_ne!(a.installer_name(), b.installer_name(), "{a:?} vs {b:?}");
+                assert_ne!(a.url(), b.url(), "{a:?} vs {b:?}");
+                assert_ne!(a.label(), b.label(), "{a:?} vs {b:?}");
+            }
+        }
+    }
+
+    /// The architecture belongs in the name. Someone who already has the x64 package and is
+    /// told to install "Visual C++" will reasonably conclude they already did.
+    #[test]
+    fn labels_name_the_architecture() {
+        assert!(Runtime::Vc140.label().contains("x64"));
+        assert!(Runtime::Vc140X86.label().contains("x86"));
+    }
+
+    /// The x86 probe stays off `vcruntime140_1.dll` on purpose — we could not confirm the
+    /// 32-bit package ships it, and probing for a file that may never exist would mark
+    /// every machine permanently short of a runtime it already has.
+    #[test]
+    fn the_x86_probe_stays_conservative() {
+        assert!(!VC140_X86_DLLS.contains(&"vcruntime140_1.dll"));
+        for dll in VC140_X86_DLLS {
+            assert!(VC140_DLLS.contains(&dll), "{dll} should be in both probes");
+        }
     }
 
     /// The two packages take different switches; swapping them silently does nothing.
