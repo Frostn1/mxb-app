@@ -69,6 +69,15 @@ export interface UvPart {
   /** Triangle corners in uv space, six numbers per triangle: u0,v0,u1,v1,u2,v2. */
   tris: Float32Array;
   /**
+   * Where each triangle came from — two numbers each: the node's index in the array the
+   * part was read from, and the triangle's index within that node.
+   *
+   * Carried so a region of the sheet can be pointed at on the *model*. Everything else here
+   * describes the flat square, and the one question a flat square keeps failing to answer —
+   * "which panel is this, really" — is answered by lighting the panel up on the bike.
+   */
+  src: Int32Array;
+  /**
    * One flank code per triangle, or null when the mesh's axes can't be trusted.
    *
    * Kept per triangle rather than per part because the question is asked about a *point*: the
@@ -218,10 +227,12 @@ export function uvParts(
   const tol = sided ? lateralTolerance(nodes) : 0;
 
   const byLabel = new Map<string, number[]>();
+  const srcByLabel = new Map<string, number[]>();
   const flanksByLabel = new Map<string, number[]>();
   const facesByLabel = new Map<string, number[]>();
   const nodesByLabel = new Map<string, Set<string>>();
-  for (const node of nodes) {
+  for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
+    const node = nodes[nodeIndex];
     if (!node.uvs.length || !node.indices.length) continue;
     const triCount = Math.floor(node.indices.length / 3);
     const groups = node.submeshes.length
@@ -237,6 +248,11 @@ export function uvParts(
       if (!flat) {
         flat = [];
         byLabel.set(label, flat);
+      }
+      let src = srcByLabel.get(label);
+      if (!src) {
+        src = [];
+        srcByLabel.set(label, src);
       }
       let owners = nodesByLabel.get(label);
       if (!owners) {
@@ -260,6 +276,7 @@ export function uvParts(
       const hasNormals = node.normals.length >= node.positions.length;
       const end = Math.min(start + count, triCount);
       for (let t = Math.max(0, start); t < end; t += 1) {
+        src.push(nodeIndex, t);
         let x = 0;
         let ny = 0;
         for (let c = 0; c < 3; c += 1) {
@@ -301,6 +318,7 @@ export function uvParts(
       // point at, and naming the first would be picking one arbitrarily.
       owner: owners?.size === 1 ? [...owners][0] : null,
       tris: new Float32Array(flat),
+      src: new Int32Array(srcByLabel.get(label) ?? []),
       flanks: sides ? new Uint8Array(sides) : null,
       side: sides ? summarise(sides) : null,
       faces: faces ? new Uint8Array(faces) : null,
@@ -316,6 +334,51 @@ export function uvParts(
   // is the one that takes up half the sheet, not the bracket bolted behind it.
   parts.sort((a, b) => (b.maxU - b.minU) * (b.maxV - b.minV) - (a.maxU - a.minU) * (a.maxV - a.minV));
   return parts;
+}
+
+/**
+ * How much of the sheet a hover lights up on the model, as a fraction of it.
+ *
+ * Small enough to sit inside a shroud rather than swallow it, big enough to find on the bike
+ * without hunting: about 40px of a 2048² sheet.
+ */
+const SPOT_RADIUS = 0.02;
+
+/**
+ * The triangles a hover lands on, as references into the nodes the parts were read from —
+ * two numbers each, node index then triangle index.
+ *
+ * A patch around the point rather than the island it sits in. An island is the tempting
+ * answer and the wrong one: uv islands routinely bridge the mirror plane — a seat and a front
+ * fender are each one panel with both flanks in them — so lighting the island up would answer
+ * "which side does this paint" with most of the bike. The patch is the honest version of the
+ * question, and it moves as the pointer moves, which is what makes it readable as *here*.
+ */
+export function spotAt(parts: UvPart[], u: number, v: number): Int32Array | null {
+  const out: number[] = [];
+  const r2 = SPOT_RADIUS * SPOT_RADIUS;
+  for (const part of parts) {
+    if (
+      u < part.minU - SPOT_RADIUS ||
+      u > part.maxU + SPOT_RADIUS ||
+      v < part.minV - SPOT_RADIUS ||
+      v > part.maxV + SPOT_RADIUS
+    )
+      continue;
+    const { tris, src } = part;
+    for (let i = 0; i < tris.length; i += 6) {
+      // Any corner inside the disc, or the point inside the triangle — the second case is what
+      // keeps a triangle bigger than the spot from dropping out of its own highlight.
+      let hit = inTriangle(u, v, tris[i], tris[i + 1], tris[i + 2], tris[i + 3], tris[i + 4], tris[i + 5]);
+      for (let c = 0; !hit && c < 3; c += 1) {
+        const du = tris[i + c * 2] - u;
+        const dv = tris[i + c * 2 + 1] - v;
+        hit = du * du + dv * dv <= r2;
+      }
+      if (hit) out.push(src[(i / 6) * 2], src[(i / 6) * 2 + 1]);
+    }
+  }
+  return out.length ? new Int32Array(out) : null;
 }
 
 /**

@@ -3,9 +3,22 @@ import { cn } from "@/lib/utils";
 import { useT } from "../../../i18n/context";
 import { layerCorners } from "./composite";
 import type { Ghost } from "./ghost";
-import { faceAt, partAt, partPath, partsAt, sideAt, type Face, type Side, type UvPart } from "./uv";
+import {
+  faceAt,
+  partAt,
+  partPath,
+  partsAt,
+  sideAt,
+  spotAt,
+  type Face,
+  type Side,
+  type UvPart,
+} from "./uv";
 import { hitTest, type Layer, type Sheet } from "./layers";
 import { constrained, hasTip, isDragTool, type PaintTool, type Point } from "./paint";
+
+/** How far the pointer must travel across the sheet, in uv, before the 3D spot is redrawn. */
+const SPOT_STEP = 0.004;
 
 /** Half-edge of a drawn corner handle, and how far off one a press still counts, in view px. */
 const HANDLE = 3.5;
@@ -60,6 +73,15 @@ interface CanvasStageProps {
   ghost: Ghost | null;
   /** The model's bodywork for this sheet, for naming what the pointer is over. */
   parts: UvPart[];
+  /**
+   * What the pointer is on, as triangle references into the model — null off the sheet.
+   *
+   * Reported so the 3D view can light the piece up. Which flank a region paints is the one
+   * thing a word has never settled on its own: "left" means the bike's left, the preview
+   * opens looking at that flank from the front, and the two readings of the sentence differ
+   * by exactly the mistake this is here to end.
+   */
+  onHoverSpot?: (tris: Int32Array | null) => void;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   /** Drag, in sheet pixels. */
@@ -97,6 +119,7 @@ export function CanvasStage({
   version,
   ghost,
   parts,
+  onHoverSpot,
   selectedId,
   onSelect,
   onMove,
@@ -134,6 +157,9 @@ export function CanvasStage({
   // recognised, so a run of fast clicks pairs up rather than firing on every press after the
   // second. See `onPointerDown` for why the DOM's own `dblclick` can't be used here.
   const lastPress = useRef<{ t: number; x: number; y: number } | null>(null);
+  // Where the 3D highlight was last asked for, so it is only asked again once the pointer
+  // has moved far enough for the answer to look different.
+  const spotFrom = useRef<{ u: number; v: number } | null>(null);
   // Which corner the pointer is over, purely so the cursor can say the layer is resizable.
   const [overHandle, setOverHandle] = useState(-1);
   // The piece of bodywork under the pointer. The whole reason the UV map is worth having is
@@ -584,6 +610,17 @@ export function CanvasStage({
           setOverAlso(hits.length > 1 ? hits[hits.length - 1].label : null);
           setOverSide(hits.length ? sideAt(parts, u, v) : null);
           setOverFace(hits.length ? faceAt(parts, u, v) : null);
+          // Every move the pointer has actually travelled on, rather than every event: the
+          // spot is meant to track the pointer, but each one re-renders the 3D view, and a
+          // trackpad emits them far faster than the picture can say anything new.
+          if (onHoverSpot) {
+            const last = spotFrom.current;
+            const far = !last || Math.hypot(u - last.u, v - last.v) > SPOT_STEP;
+            if (far) {
+              spotFrom.current = at ? { u, v } : null;
+              onHoverSpot(at ? spotAt(parts, u, v) : null);
+            }
+          }
         }
         return;
       }
@@ -599,6 +636,7 @@ export function CanvasStage({
     [
       handleAt,
       moveCursor,
+      onHoverSpot,
       onMove,
       onPaintMove,
       onScale,
@@ -668,6 +706,8 @@ export function CanvasStage({
           if (cursorRef.current) cursorRef.current.style.opacity = "0";
           setOverHandle(-1);
           setOverPart(null);
+          spotFrom.current = null;
+          onHoverSpot?.(null);
         }}
         onPointerEnter={() => {
           if (cursorRef.current) cursorRef.current.style.opacity = "1";

@@ -44,6 +44,7 @@ export function PreviewPanel({
   frameToken,
   onGeometry,
   onStock,
+  highlight,
   className,
 }: {
   state: PaintDestState;
@@ -65,6 +66,8 @@ export function PreviewPanel({
    * handing over geometry without it invites reading the numbers as more than they say.
    */
   onGeometry?: (nodes: EdfNode[] | null, assembled: boolean) => void;
+  /** Triangles to light up — what the pointer is over in the 2D editor. */
+  highlight?: Int32Array | null;
   /**
    * The model's own textures, handed back with the mesh so the editor can show what the
    * bike already looks like under a sheet being drawn from blank.
@@ -301,6 +304,7 @@ export function PreviewPanel({
             <ModelViewer
               mode={isBike ? "bike" : "rider"}
               nodes={nodes}
+              highlight={highlight}
               textures={textures}
               riderParts={shownParts}
               overrides={overrides}

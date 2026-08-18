@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — the sheet says where it lands on the bike
+
+### Added
+- **Hovering the sheet lights that spot up on the 3D model.** A patch follows the pointer
+  across the bike, so "which panel is this region of the square" is answered by the picture
+  instead of by a word. The editor already named the flank in the corner, and a name is the
+  one thing this question can't be settled with: "left" means the bike's own left, the preview
+  opens looking at that flank from the front, and a livery's two shroud islands are mirror
+  images of each other on the sheet — so a region that paints the left panel can look, read
+  and feel like the right one until you watch it light up.
+- Deliberately a patch rather than the whole island under the pointer. UV islands routinely
+  bridge the mirror plane — a seat and a front fender are each one panel with both flanks in
+  them — so highlighting the island would answer "which side does this paint" by lighting most
+  of the bike. The patch is small enough to sit inside a shroud and moves as the pointer does,
+  which is what makes it read as *here*.
+
 ## Unreleased — a repair button that doesn't wait to be asked
 
 ### Added
