@@ -509,8 +509,6 @@ export const fr: Translation = {
   "installDialog.moreMirrors_other": "{{count}} autres miroirs",
   "installDialog.perBikeHint":
     "Chaque téléchargement correspond à une moto différente — sélectionné automatiquement selon votre choix. Choisissez le pack « all bikes » pour toutes les motos d'un coup.",
-  "installDialog.mirrorsHint":
-    "Tous les miroirs contiennent le même fichier. Si l'un échoue, essayez le suivant.",
 
   // ── Détails de bibliothèque ────────────────────────────────────────────────
   "libraryDetail.author": "Auteur",

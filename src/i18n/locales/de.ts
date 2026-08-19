@@ -513,8 +513,6 @@ export const de: Translation = {
   "installDialog.moreMirrors_other": "{{count}} weitere Spiegelserver",
   "installDialog.perBikeHint":
     "Jeder Download ist ein anderes Motorrad — automatisch passend zu deiner Auswahl. Wähle das Paket „all bikes“, um alle auf einmal zu bekommen.",
-  "installDialog.mirrorsHint":
-    "Alle Spiegelserver enthalten dieselbe Datei. Wenn einer fehlschlägt, probiere den nächsten.",
 
   // ── Bibliotheksdetails ─────────────────────────────────────────────────────
   "libraryDetail.author": "Autor",
