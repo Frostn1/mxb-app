@@ -7,6 +7,62 @@
   list. The list already reads as a list of the same thing, and a sentence explaining it was
   taking a row of the dialog to say nothing. The per-bike note, which really does change what
   you pick, stays.
+## Unreleased — the sheet says which side of the bike it paints
+
+### Fixed
+- **Left and right were the wrong way round.** The side of the mirror plane a triangle sits on
+  was read with the sign inverted, so every flank the editor named was the far one.
+- **A paint you just saved didn't show up on the bike.** The viewer caches a loaded bike
+  against the path, mtime and size of the bike's own file — and a `.pnt` is written into
+  `<bike>/paints/`, which moves none of the three. So every load after a save was a cache hit
+  on the model read before the paint existed. The key now carries a stamp over the paints
+  folder as well, so a paint added, removed or re-saved in place misses the cache.
+- **A panel with a collapsed UV triangle answered for the whole sheet.** Three corners of a
+  triangle landing on one point or one line is a zero-area triangle, and the point-in-triangle
+  test counted every point on the sheet as inside it. One is enough: the part it belongs to
+  then wins the pick everywhere, so the corner named the wrong panel, the flank read as the
+  wrong side, the 3D highlight lit up somewhere else entirely, and a bucket fill was clipped to
+  a panel on the far side of the bike. Meshes are full of them — the 2007 H85R's chassis
+  carries 327, the TM MX 530's `HJ` node 105 — which is why hovering the right shroud could
+  insist, over and over, that it was the left one.
+- **One junk vertex could switch left/right off for a whole bike.** The dead band around the
+  mirror plane was 4% of the widest vertex in the model, and the TM MX 530 ships a node with
+  six vertices at the largest number a float can hold. That made the band wider than the solar
+  system, so every triangle on the bike read as sitting on the centreline and the editor had
+  nothing to say about any of it. It now measures the widest 99% of the sheet's own triangles,
+  so a handful of garbage coordinates — and any node the sheet doesn't bind at all — can't
+  speak for how wide a motorcycle is.
+
+### Added
+- **The islands overlay is now washed warm for the bike's left and cool for its right.** The
+  one thing a livery can never tell you: a bike's two sides routinely unwrap as two
+  near-identical copies of the same panel, same way up, same graphics — the shroud, side panel
+  and airbox of a 2023 YZ450F come out as a single island whose top half is the left of the
+  bike and whose bottom half is the right, with nothing in the artwork marking where one becomes
+  the other. Picking the wrong copy was a coin flip you lost an hour after the fact. The fill
+  says which side, the outline still says which part, and the flank named in the corner is
+  tinted to match.
+## Unreleased — a coffee shows up in Discord
+
+### Added
+- **Buy Me a Coffee donations are announced in the Discord channel.** BMAC posts to a new
+  `POST /v1/bmac/webhook` on the control plane, which turns the event into an embed. Nothing
+  told you a coffee had been bought until you went and looked at the dashboard, which is also
+  why somebody could sit unthanked in `supporters.json` for a week — the post is the prompt to
+  add them.
+- Announced for money-in events only — a coffee, a membership started, a recurring donation, an
+  extra, a commission, a wishlist payment. Refunds, cancellations and pauses are accepted and
+  dropped: a public channel is the wrong place to narrate a withdrawal, and answering with an
+  error would only make BMAC retry an event we mean to ignore.
+- **The embed carries a name and their note, and nothing else** — no amount, no coffee count,
+  and the supporter's email is never read out of the payload. Notes are escaped, clipped and
+  posted with mentions disabled, so somebody else's words can't restyle the embed or ping the
+  server.
+- The route holds no bearer token, because BMAC has no account here; its credential is an
+  HMAC-SHA256 signature over the raw body, checked before the body is parsed. A `bmac_events`
+  table records what has already gone out — BMAC retries a delivery up to four more times, and
+  a reply it never received is indistinguishable from a failure, so without it one coffee
+  arrives five times.
 
 ## Unreleased — the sheet says where it lands on the bike
 

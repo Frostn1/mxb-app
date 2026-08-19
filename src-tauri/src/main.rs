@@ -1363,7 +1363,7 @@ fn preview_model_swap_blocking(
     let set =
         modelswap::preview_set(&cfg.mods_path, &bike, &variant).map_err(|e| format!("{e:#}"))?;
     let label = format!("{bike} · {variant}");
-    let key = swap_cache_key(&set);
+    let key = format!("{}#p{:x}", swap_cache_key(&set), paints_stamp(&set.bike_dir));
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         log::info!("preview_model_swap {label}: cache hit ({:?})", t0.elapsed());
         return Ok(m);
@@ -1374,9 +1374,56 @@ fn preview_model_swap_blocking(
     build_bike_model(&label, key, files, installed, t0)
 }
 
+/// A stamp over the loose paints beside a bike, for the cache key to carry.
+///
+/// The bike's own file can't see them. A `.pnt` is written into `<bike>/paints/`, which
+/// leaves the `.pkz`'s mtime and size exactly as they were — and on a bike loaded from its
+/// folder, writing a file inside `paints/` doesn't touch the folder above it either. So the
+/// key matched, the cache answered, and the model handed back was the one read before the
+/// paint existed: you saved, the bike didn't change, and nothing in the log looked wrong.
+///
+/// Name, length and mtime per `.pnt`, sorted so `read_dir` order can't shuffle the answer.
+/// Covers all three ways the set can move — a paint added, removed, or re-saved in place.
+fn paints_stamp(source: &std::path::Path) -> u64 {
+    let folder = if source.is_dir() {
+        source.to_path_buf()
+    } else {
+        source.with_extension("")
+    };
+    let mut rows: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(folder.join("paints")) {
+        for e in entries.flatten() {
+            let path = e.path();
+            if !path.extension().is_some_and(|x| x.eq_ignore_ascii_case("pnt")) {
+                continue;
+            }
+            let len = e.metadata().map(|m| m.len()).unwrap_or(0);
+            rows.push(format!(
+                "{}:{len}:{}",
+                path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                mtime_nanos(&path),
+            ));
+        }
+    }
+    rows.sort_unstable();
+    // FNV-1a. Not a security question — this only has to change when the folder does.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for row in &rows {
+        for b in row.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x1000_0000_01b3);
+        }
+    }
+    h
+}
+
 fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     let t0 = std::time::Instant::now();
-    let key = bike_cache_key(&source);
+    let key = format!(
+        "{}#p{:x}",
+        bike_cache_key(&source),
+        paints_stamp(std::path::Path::new(&source)),
+    );
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         log::info!("load_bike_model {source}: cache hit ({:?})", t0.elapsed());
         return Ok(m);
