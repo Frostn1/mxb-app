@@ -18,6 +18,7 @@ import {
   runInstance,
   terminateInstance,
 } from "./aws";
+import { bmacWebhook } from "./bmac";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
@@ -127,6 +128,11 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   const boot = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})\/bootstrap$/.exec(path);
   if (boot && method === "POST") return serverBootstrap(request, boot[1], env);
+
+  // Buy Me a Coffee announcing a supporter, for the Discord channel. Unauthenticated in the
+  // same sense as the two above: the caller is not a player and holds no bearer token. Its
+  // credential is the HMAC signature over the body, checked before the body is parsed.
+  if (method === "POST" && path === "/v1/bmac/webhook") return bmacWebhook(request, env);
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
