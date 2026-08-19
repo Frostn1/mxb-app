@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — a quieter download dialog
+
+### Removed
+- The "All mirrors contain the same file. If one fails, try the next." line under the mirror
+  list. The list already reads as a list of the same thing, and a sentence explaining it was
+  taking a row of the dialog to say nothing. The per-bike note, which really does change what
+  you pick, stays.
 ## Unreleased — the sheet says which side of the bike it paints
 
 ### Fixed

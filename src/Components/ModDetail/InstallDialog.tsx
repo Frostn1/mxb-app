@@ -473,11 +473,9 @@ export default function InstallDialog({
                 </div>
               )}
 
-              {mirrors.length > 1 && (
+              {mirrors.length > 1 && sound && (
                 <span className="text-[11px] text-faint">
-                  {sound
-                    ? t("installDialog.perBikeHint")
-                    : t("installDialog.mirrorsHint")}
+                  {t("installDialog.perBikeHint")}
                 </span>
               )}
             </section>

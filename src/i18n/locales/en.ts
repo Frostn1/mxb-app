@@ -499,8 +499,6 @@ export const en = {
   "installDialog.moreMirrors_other": "{{count}} more mirrors",
   "installDialog.perBikeHint":
     "Each download is a different bike — auto-selected to match your pick. Choose the “all bikes” pack for every bike at once.",
-  "installDialog.mirrorsHint":
-    "All mirrors contain the same file. If one fails, try the next.",
 
   // ── Library detail panel ───────────────────────────────────────────────────
   "libraryDetail.author": "Author",
