@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased — the sheet the right way up
+
+### Fixed
+- **The sheet was shown upside down.** A `.pnt` stores its rows in the order the mesh samples
+  them, which is inverted from the template painters work in — the forks land top-left where
+  the template has them bottom-left. Confirmed on the OEM KTM's `plastics` sheet, where the
+  Renthal bar pads read "brembo", "RENTHAL" and "REGINA" inverted as stored and upright once
+  flipped; bar pads carry no mirrored twin, so they answer it where a number plate can't. The
+  flip is the view's alone: the sheet, the composite, the saved file and the 3D preview all
+  stay in the file's own row order, so loading a paint and saving it back is byte-identical.
+- **Decals came out upside down on the bike.** Following from the same thing — a logo or a line
+  of type placed upright in the editor was written into the sheet upright, and the sheet is
+  inverted, so it wore inverted. Both now go in mirrored and land the right way up.
+- **Left and right were the wrong way round.** Again: positive x is the bike's left, which is
+  what the mesh's own group names have said all along — `clutch` and `gear` sit at positive x
+  on a 2023 YZ450F and both are left-hand controls. Read off the sheet with the stage the right
+  way up, the group names are what agrees with it. This inverts the previous release's fix.
+
+### Changed
+- **The bucket fills one UV triangle, not the whole mesh group.** A group like `shroud` is both
+  flanks and often several scattered islands, so confining a fill to it still flooded panels
+  the press never pointed at. Right-click fills the whole island instead, for when a triangle
+  is too fine — which costs the bucket its right-drag pan; the middle button still pans.
+
+### Added
+- **Rectangles, ellipses and lines are layers you can still resize.** They used to rasterise on
+  release, so nudging one meant undoing it and drawing again. Now the drag builds the object
+  itself — it lands selected, with corner handles — and its colour, fill-or-outline and pen
+  width stay editable for as long as the paint is open. The gradient stays a stroke: it is a
+  wash with no edge to take hold of.
+
 ## Unreleased — a quieter download dialog
 
 ### Removed
