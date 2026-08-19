@@ -1220,6 +1220,19 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0100.hero.title": "O Designer prepara as próprias folhas",
+  "showcase.v0100.hero.body":
+    "Agora ele cria as folhas que um modelo pede, coloca embaixo os plásticos da própria moto para decalcar e abre um modelo em cerca de um segundo em vez de quase vinte.",
+  "showcase.v0100.location":
+    "Passe o cursor pela folha e ela te diz o que está embaixo dele: a peça, o lado da moto em que ela fica, e se é uma face que você vai ver ou uma parte de baixo que não.",
+  "showcase.v0100.downloads":
+    "A página de Downloads lista o que você baixou: por dia, o mais novo no topo, com onde cada arquivo foi parar e de qual mirror veio.",
+  "showcase.v0100.terrain":
+    "Uma pista agora abre em 3D direto da biblioteca, com seus saltos e sulcos desenhados a partir do próprio mapa de alturas do jogo.",
+  "showcase.v0100.sharing":
+    "Agora qualquer coisa na sua Biblioteca pode virar um código que você passa para alguém, e volta para as mesmas pastas em que você a guarda.",
+  "showcase.v0100.linux":
+    "No Linux, o FrostMod agora roda no mesmo prefix do Proton sob o qual o jogo já roda.",
   "showcase.v092.hero.title": "Veja o terreno de uma pista em 3D",
   "showcase.v092.hero.body":
     "Pistas eram a única coisa que a biblioteca não conseguia te mostrar: um nome, uma imagem e um tamanho. O visualizador agora lê o mapa de alturas de uma pista e desenha o próprio terreno, então os saltos, os sulcos e o formato de uma curva estão ali para olhar antes mesmo de carregar. Abre a partir de uma pista na biblioteca, ao lado de Ver em 3D.",
