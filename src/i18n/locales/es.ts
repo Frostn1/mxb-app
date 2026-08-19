@@ -1625,6 +1625,8 @@ export const es: Translation = {
   "designer.flank.left": "lado izquierdo",
   "designer.flank.right": "lado derecho",
   "designer.flank.both": "ambos lados",
+  "designer.flankWashHint":
+    "El cálido es el lado izquierdo de la moto; el frío, el derecho. Los dos lados suelen desplegarse como dos copias casi idénticas del mismo panel, así que esto es lo único en la textura que los distingue.",
   "designer.flankSharedHint":
     "Los dos flancos se despliegan sobre esta misma zona, así que lo que dibujes aquí aparece en ambos lados de la moto: reflejado, y no donde lo esperarías en el otro.",
   "designer.focusHint": "Haz doble clic en una pieza para llenar la vista con ella.",

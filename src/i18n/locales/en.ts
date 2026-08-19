@@ -1596,6 +1596,8 @@ export const en = {
   "designer.flank.left": "left side",
   "designer.flank.right": "right side",
   "designer.flank.both": "both sides",
+  "designer.flankWashHint":
+    "Warm is the bike's left, cool is its right. A bike's two sides often unwrap as two near-identical copies of the same panel, so this is the only thing on the sheet that tells them apart.",
   "designer.flankSharedHint":
     "Both flanks are unwrapped onto this same area, so anything drawn here appears on each side of the bike — mirrored, and not where you would expect it on the far one.",
   "designer.focusHint": "Double-click a part to fill the view with it.",

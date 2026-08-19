@@ -1617,6 +1617,8 @@ export const ptBR: Translation = {
   "designer.flank.left": "lado esquerdo",
   "designer.flank.right": "lado direito",
   "designer.flank.both": "ambos os lados",
+  "designer.flankWashHint":
+    "O quente é o lado esquerdo da moto; o frio, o direito. Os dois lados costumam ser desdobrados como duas cópias quase idênticas do mesmo painel — é a única coisa na textura que os diferencia.",
   "designer.flankSharedHint":
     "Os dois flancos são abertos sobre a mesma área, então o que você desenha aqui aparece nos dois lados da moto: espelhado, e não onde você esperaria no outro.",
   "designer.focusHint": "Dê um duplo clique numa peça para preencher a vista com ela.",
