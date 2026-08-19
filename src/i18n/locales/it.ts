@@ -1222,6 +1222,19 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0100.hero.title": "Il Designer prepara i fogli da solo",
+  "showcase.v0100.hero.body":
+    "Ora crea i fogli che un modello chiede, mette sotto le plastiche della moto stessa da ricalcare e apre un modello in circa un secondo invece che in quasi venti.",
+  "showcase.v0100.location":
+    "Passa sul foglio e ti dice cosa c'è sotto il cursore: il pezzo, il lato della moto su cui sta, e se è una faccia che vedrai o un rovescio che non vedrai.",
+  "showcase.v0100.downloads":
+    "La pagina Download elenca ciò che hai scaricato: per giorno, il più recente in cima, con dove è finito ogni file e da quale mirror è arrivato.",
+  "showcase.v0100.terrain":
+    "Una pista si apre ora in 3D direttamente dalla libreria, con i suoi salti e solchi disegnati dalla mappa delle altezze del gioco stesso.",
+  "showcase.v0100.sharing":
+    "Ora qualsiasi cosa nella tua Libreria può diventare un codice che passi a qualcuno, e torna nelle stesse cartelle in cui la tieni.",
+  "showcase.v0100.linux":
+    "Su Linux, FrostMod ora gira nello stesso prefix Proton sotto cui gira già il gioco.",
   "showcase.v092.hero.title": "Guarda il terreno di una pista in 3D",
   "showcase.v092.hero.body":
     "Le piste erano l'unica cosa che la libreria non sapeva mostrarti: un nome, un'immagine e una dimensione. Il visualizzatore ora legge la mappa delle altezze di una pista e disegna il terreno vero e proprio, così i salti, i solchi e la forma di una curva ci sono da guardare prima ancora di caricarla. Si apre da una pista nella libreria, accanto a Vedi in 3D.",
