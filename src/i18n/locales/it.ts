@@ -504,8 +504,6 @@ export const it: Translation = {
   "installDialog.moreMirrors_other": "Altri {{count}} mirror",
   "installDialog.perBikeHint":
     "Ogni download è una moto diversa — selezionato automaticamente in base alla tua scelta. Scegli il pacchetto “all bikes” per averle tutte in una volta.",
-  "installDialog.mirrorsHint":
-    "Tutti i mirror contengono lo stesso file. Se uno non funziona, prova il successivo.",
 
   // ── Dettagli libreria ──────────────────────────────────────────────────────
   "libraryDetail.author": "Autore",
