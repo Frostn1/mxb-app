@@ -1632,6 +1632,8 @@ export const fr: Translation = {
   "designer.flank.left": "côté gauche",
   "designer.flank.right": "côté droit",
   "designer.flank.both": "les deux côtés",
+  "designer.flankWashHint":
+    "Le chaud, c'est le côté gauche de la moto ; le froid, le côté droit. Les deux côtés sont souvent dépliés en deux copies presque identiques du même panneau — c'est la seule chose sur la texture qui les distingue.",
   "designer.flankSharedHint":
     "Les deux flancs sont dépliés sur cette même zone : ce que vous dessinez ici apparaît de chaque côté de la moto, en miroir, et pas là où vous l'attendriez de l'autre côté.",
   "designer.focusHint": "Double-cliquez sur une pièce pour remplir la vue avec elle.",

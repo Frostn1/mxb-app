@@ -1641,6 +1641,8 @@ export const de: Translation = {
   "designer.flank.left": "linke Seite",
   "designer.flank.right": "rechte Seite",
   "designer.flank.both": "beide Seiten",
+  "designer.flankWashHint":
+    "Warm ist die linke Seite des Motorrads, kühl die rechte. Die beiden Seiten werden oft als zwei fast identische Kopien desselben Teils abgewickelt — nur hieran lassen sie sich auf der Textur unterscheiden.",
   "designer.flankSharedHint":
     "Beide Flanken liegen auf derselben Fläche, deshalb erscheint alles hier Gezeichnete auf jeder Seite des Motorrads — gespiegelt, und nicht dort, wo man es auf der anderen Seite erwarten würde.",
   "designer.focusHint": "Doppelklick auf ein Teil füllt die Ansicht damit.",
