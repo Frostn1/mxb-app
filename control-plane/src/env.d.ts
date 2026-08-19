@@ -15,6 +15,11 @@ declare global {
     /** IAM key scoped to launching and managing `mxb:managed` instances in one region. */
     AWS_ACCESS_KEY_ID?: string;
     AWS_SECRET_ACCESS_KEY?: string;
+    /** Buy Me a Coffee's webhook signing secret. Without it `/v1/bmac/webhook` answers 503. */
+    BMAC_WEBHOOK_SECRET?: string;
+    /** Discord webhook the supporter announcements are posted to. A credential in itself:
+     *  anyone holding the URL can post to that channel. */
+    DISCORD_DONATION_WEBHOOK_URL?: string;
   }
 }
 
