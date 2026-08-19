@@ -1231,6 +1231,19 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0100.hero.title": "Le Designer prépare ses planches tout seul",
+  "showcase.v0100.hero.body":
+    "Il crée maintenant les planches qu'un modèle demande, glisse en dessous les plastiques de la moto elle-même pour décalquer et ouvre un modèle en une seconde environ au lieu de près de vingt.",
+  "showcase.v0100.location":
+    "Survole la planche et elle te dit ce qu'il y a sous le curseur : la pièce, le côté de la moto où elle se trouve, et si c'est une face que tu verras ou un dessous que tu ne verras pas.",
+  "showcase.v0100.downloads":
+    "La page Téléchargements liste ce que tu as récupéré : par jour, le plus récent en haut, avec l'endroit où chaque fichier a atterri et le miroir d'où il vient.",
+  "showcase.v0100.terrain":
+    "Un circuit s'ouvre maintenant en 3D directement depuis la bibliothèque, ses sauts et ses ornières dessinés à partir du propre champ de hauteurs du jeu.",
+  "showcase.v0100.sharing":
+    "Maintenant tout ce qui se trouve dans ta Bibliothèque peut devenir un code que tu donnes à quelqu'un, et il repart dans les mêmes dossiers que chez toi.",
+  "showcase.v0100.linux":
+    "Sur Linux, FrostMod tourne maintenant dans le même prefix Proton que celui sous lequel tourne déjà le jeu.",
   "showcase.v092.hero.title": "Regarde le terrain d'un circuit en 3D",
   "showcase.v092.hero.body":
     "Les circuits étaient la seule chose que la bibliothèque ne savait pas montrer : un nom, une image et une taille. Le visualiseur lit maintenant le champ de hauteurs d'un circuit et dessine le sol lui-même, donc les sauts, les ornières et la forme d'un virage sont là à regarder avant même de le charger. Il s'ouvre depuis un circuit dans la bibliothèque, à côté de Voir en 3D.",
