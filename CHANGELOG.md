@@ -24,9 +24,9 @@ out looking nothing like the track you ride, name it in the report.
   lights up on the 3D model. Where a bike unwraps both flanks onto one island it says so, with
   the left washed warm and the right cool.
 - **Double-click a part to fill the view with it**, rather than aiming at it by wheel and drag.
+- **Rectangles, ellipses and lines are editable layers** now, not flattened pixels — each lands selected with handles and stays resizable, its colour, fill-or-outline and pen width still editable.
 - **Undo covers the whole editor** — adding, moving, scaling, rotating and deleting layers and
-  sheets are all on one timeline, not just the last brush stroke — and **the bucket fills the
-  panel you clicked**, not the whole sheet.
+  sheets are all on one timeline, not just the last brush stroke — and **the bucket fills the UV triangle under the press** rather than the whole mesh group, which was flooding panels the press never pointed at. Right-click fills the whole island.
 - **The 3D viewer reloads a paint that changes on disk**: re-save, and the model re-dresses
   itself without closing the dialog. Preview a model swap before you switch to it, and take a
   helmet off the rider to fill the frame with a **Gear only** toggle.
@@ -92,6 +92,7 @@ out looking nothing like the track you ride, name it in the report.
   `dblclick` WebKit won't deliver under pointer capture.
 - A dedicated-server build is no longer installed as if it were the mod, and quick install stops
   guessing on a mod that offers nothing but server files.
+- **The 2D sheet is shown the right way up.** It was displayed upside down against the template painters work from — the forks landing top-left where the template has them bottom-left. The flip is the view's alone, so a paint loaded and saved back is byte-identical, and a decal placed upright now lands upright on the bike.
 - **Designer:** a paint no longer ships blank sheets — which removed the bike's own normal and
   roughness maps and ran to 350 MB — and blank companion maps aren't offered for creation; a
   collapsed UV triangle no longer answers for the whole sheet; one junk vertex can't switch
