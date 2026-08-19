@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased — the sheet says which side of the bike it paints
+
+### Fixed
+- **Left and right were the wrong way round.** The side of the mirror plane a triangle sits on
+  was read with the sign inverted, so every flank the editor named was the far one.
+- **A paint you just saved didn't show up on the bike.** The viewer caches a loaded bike
+  against the path, mtime and size of the bike's own file — and a `.pnt` is written into
+  `<bike>/paints/`, which moves none of the three. So every load after a save was a cache hit
+  on the model read before the paint existed. The key now carries a stamp over the paints
+  folder as well, so a paint added, removed or re-saved in place misses the cache.
+- **A panel with a collapsed UV triangle answered for the whole sheet.** Three corners of a
+  triangle landing on one point or one line is a zero-area triangle, and the point-in-triangle
+  test counted every point on the sheet as inside it. One is enough: the part it belongs to
+  then wins the pick everywhere, so the corner named the wrong panel, the flank read as the
+  wrong side, the 3D highlight lit up somewhere else entirely, and a bucket fill was clipped to
+  a panel on the far side of the bike. Meshes are full of them — the 2007 H85R's chassis
+  carries 327, the TM MX 530's `HJ` node 105 — which is why hovering the right shroud could
+  insist, over and over, that it was the left one.
+- **One junk vertex could switch left/right off for a whole bike.** The dead band around the
+  mirror plane was 4% of the widest vertex in the model, and the TM MX 530 ships a node with
+  six vertices at the largest number a float can hold. That made the band wider than the solar
+  system, so every triangle on the bike read as sitting on the centreline and the editor had
+  nothing to say about any of it. It now measures the widest 99% of the sheet's own triangles,
+  so a handful of garbage coordinates — and any node the sheet doesn't bind at all — can't
+  speak for how wide a motorcycle is.
+
+### Added
+- **The islands overlay is now washed warm for the bike's left and cool for its right.** The
+  one thing a livery can never tell you: a bike's two sides routinely unwrap as two
+  near-identical copies of the same panel, same way up, same graphics — the shroud, side panel
+  and airbox of a 2023 YZ450F come out as a single island whose top half is the left of the
+  bike and whose bottom half is the right, with nothing in the artwork marking where one becomes
+  the other. Picking the wrong copy was a coin flip you lost an hour after the fact. The fill
+  says which side, the outline still says which part, and the flank named in the corner is
+  tinted to match.
 ## Unreleased — a coffee shows up in Discord
 
 ### Added

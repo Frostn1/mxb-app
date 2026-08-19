@@ -1621,6 +1621,8 @@ export const it: Translation = {
   "designer.flank.left": "lato sinistro",
   "designer.flank.right": "lato destro",
   "designer.flank.both": "entrambi i lati",
+  "designer.flankWashHint":
+    "Il caldo è il lato sinistro della moto, il freddo il destro. I due lati vengono spesso srotolati come due copie quasi identiche dello stesso pannello: è l'unica cosa sulla texture che li distingue.",
   "designer.flankSharedHint":
     "I due fianchi sono mappati sulla stessa area, quindi ciò che disegni qui compare su entrambi i lati della moto: speculare, e non dove te lo aspetteresti sull'altro.",
   "designer.focusHint": "Fai doppio clic su un pezzo per riempire la vista con esso.",
