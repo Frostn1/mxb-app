@@ -218,8 +218,9 @@ function hueOf(label: string): number {
  * answer would be a worse list than no list.
  *
  * uv0 is taken as-is. The sheet uploads with `flipY = false` (see `sheetTexture`), so v runs the
- * same way as a canvas row and no flip belongs here — the same reasoning that keeps the editor
- * from having an opinion about which way up a sheet is.
+ * same way as a canvas row and no flip belongs here. The 2D stage does show the sheet flipped,
+ * but it flips these islands along with the pixels they describe, so both stay in texture
+ * space and the parts named here are the parts the pointer is actually over.
  *
  * `assembled` asks for the left/right and top/underside answers as well. Both read a vertex's
  * position or normal as a statement about where it sits on the bike, which is only true once
@@ -314,17 +315,23 @@ export function uvParts(
 
   // Now that the whole sheet has been read, the band is known — and with it, each side.
   //
-  // Positive x is the bike's RIGHT — the answer that matches where a region of the sheet
-  // actually comes out on the model. It reads the other way round from the mesh's own group
-  // names: `clutch` and `gear` sit at positive x on a 2023 YZ450F and those are left-hand
-  // controls, so anyone checking it that way will conclude this line is inverted. It has been
-  // flipped on that reasoning before and had to be put back. Leave it.
+  // Positive x is the bike's LEFT.
+  //
+  // This line has now been flipped twice, so the history is worth keeping. It read RIGHT on the
+  // grounds that that was where a region of the sheet came out on the model, and the check
+  // against the mesh's own group names — `clutch` and `gear` sit at positive x on a 2023
+  // YZ450F and both are left-hand controls — was dismissed as the misleading one. Read off the
+  // 2D sheet with the stage the right way up, the group names are what agrees: the side a part
+  // is labelled is the side it is on. Changed on that reading (2026-08-18).
+  //
+  // Whichever way it ends up, it is one line, and the hover label and the flank wash both come
+  // off it — so they can disagree with the bike, but never with each other.
   const tol = sided ? lateralTolerance(lateralByLabel.values()) : 0;
   const flanksByLabel = new Map<string, number[]>();
   for (const [label, xs] of lateralByLabel) {
     flanksByLabel.set(
       label,
-      xs.map((x) => (x > tol ? RIGHT : x < -tol ? LEFT : CENTRE)),
+      xs.map((x) => (x > tol ? LEFT : x < -tol ? RIGHT : CENTRE)),
     );
   }
 
@@ -430,6 +437,146 @@ export function partPath(part: UvPart, width: number, height: number): Path2D {
     path.closePath();
   }
   return path;
+}
+
+/**
+ * The single triangle under a uv point, as a part in its own right.
+ *
+ * What the bucket fills. A mesh group is not one shape on the sheet — `shroud` is both flanks
+ * and often several scattered islands — so a fill confined to the group floods panels the
+ * press never pointed at. One triangle is the finest the model can describe, and it is the
+ * unit the unwrapper actually laid down.
+ *
+ * Null when the point lands on no triangle of the part: between its islands, or in the slack
+ * of its bounding box. The caller falls back to the whole part there, because a bucket that
+ * silently does nothing reads as a broken tool.
+ */
+export function triangleAt(part: UvPart, u: number, v: number): UvPart | null {
+  const { tris } = part;
+  const count = Math.floor(tris.length / 6);
+  for (let t = 0; t < count; t += 1) {
+    const i = t * 6;
+    if (!inTriangle(u, v, tris[i], tris[i + 1], tris[i + 2], tris[i + 3], tris[i + 4], tris[i + 5])) {
+      continue;
+    }
+    const flanks = part.flanks ? Uint8Array.of(part.flanks[t]) : null;
+    const faces = part.faces ? Uint8Array.of(part.faces[t]) : null;
+    return {
+      ...part,
+      tris: tris.slice(i, i + 6),
+      src: part.src.slice(t * 2, t * 2 + 2),
+      flanks,
+      faces,
+      // One triangle sits on one side and faces one way, whatever the group as a whole does.
+      side: flanks ? summarise([flanks[0]]) : part.side,
+      face: faces ? summariseFaces([faces[0]]) : part.face,
+      minU: Math.min(tris[i], tris[i + 2], tris[i + 4]),
+      minV: Math.min(tris[i + 1], tris[i + 3], tris[i + 5]),
+      maxU: Math.max(tris[i], tris[i + 2], tris[i + 4]),
+      maxV: Math.max(tris[i + 1], tris[i + 3], tris[i + 5]),
+    };
+  }
+  return null;
+}
+
+/**
+ * The connected run of triangles containing a uv point, as a part in its own right.
+ *
+ * What a right-click with the bucket fills. An island is what the eye reads as "this panel":
+ * exactly the triangles reachable through shared uv vertices, which is the same cut the
+ * unwrapper made — a seam is a duplicated vertex. Filling one triangle at a time is right for
+ * a decal edge and hopeless for a whole shroud, so both are offered.
+ *
+ * Null on the same terms as {@link triangleAt}, and for the same reason.
+ */
+export function islandAt(part: UvPart, u: number, v: number): UvPart | null {
+  const { tris } = part;
+  const count = Math.floor(tris.length / 6);
+  let seed = -1;
+  for (let t = 0; t < count && seed < 0; t += 1) {
+    const i = t * 6;
+    if (inTriangle(u, v, tris[i], tris[i + 1], tris[i + 2], tris[i + 3], tris[i + 4], tris[i + 5])) {
+      seed = t;
+    }
+  }
+  if (seed < 0) return null;
+
+  // Quantised, because two nodes merged under one label hold their own copies of a shared edge
+  // and those need not be bit-identical. 1e-5 of uv is a fiftieth of a texel on a 2048 sheet —
+  // far below anything an unwrapper would call two places.
+  const key = (i: number) => `${Math.round(tris[i] * 1e5)},${Math.round(tris[i + 1] * 1e5)}`;
+  const byVertex = new Map<string, number[]>();
+  for (let t = 0; t < count; t += 1) {
+    for (let c = 0; c < 3; c += 1) {
+      const k = key(t * 6 + c * 2);
+      const run = byVertex.get(k);
+      if (run) run.push(t);
+      else byVertex.set(k, [t]);
+    }
+  }
+
+  const taken = new Uint8Array(count);
+  const queue = [seed];
+  taken[seed] = 1;
+  const picked: number[] = [];
+  while (queue.length) {
+    const t = queue.pop() as number;
+    picked.push(t);
+    for (let c = 0; c < 3; c += 1) {
+      for (const n of byVertex.get(key(t * 6 + c * 2)) ?? []) {
+        if (!taken[n]) {
+          taken[n] = 1;
+          queue.push(n);
+        }
+      }
+    }
+  }
+  // The whole part is one island: hand it straight back rather than rebuilding a copy of it.
+  if (picked.length === count) return part;
+  picked.sort((a, b) => a - b);
+
+  const out = new Float32Array(picked.length * 6);
+  const src = new Int32Array(picked.length * 2);
+  const flanks = part.flanks ? new Uint8Array(picked.length) : null;
+  const faces = part.faces ? new Uint8Array(picked.length) : null;
+  let minU = Infinity;
+  let minV = Infinity;
+  let maxU = -Infinity;
+  let maxV = -Infinity;
+  for (let n = 0; n < picked.length; n += 1) {
+    const t = picked[n];
+    for (let j = 0; j < 6; j += 1) {
+      const value = tris[t * 6 + j];
+      out[n * 6 + j] = value;
+      if (j % 2 === 0) {
+        if (value < minU) minU = value;
+        if (value > maxU) maxU = value;
+      } else {
+        if (value < minV) minV = value;
+        if (value > maxV) maxV = value;
+      }
+    }
+    src[n * 2] = part.src[t * 2];
+    src[n * 2 + 1] = part.src[t * 2 + 1];
+    if (flanks && part.flanks) flanks[n] = part.flanks[t];
+    if (faces && part.faces) faces[n] = part.faces[t];
+  }
+
+  return {
+    ...part,
+    tris: out,
+    src,
+    flanks,
+    faces,
+    // Summarised over the island, not inherited: half a shroud is one flank where the group
+    // was "both", and what gets said should describe what was filled.
+    side: flanks ? summarise(Array.from(flanks)) : part.side,
+    face: faces ? summariseFaces(Array.from(faces)) : part.face,
+    minU,
+    minV,
+    maxU,
+    maxV,
+  };
 }
 
 /**
