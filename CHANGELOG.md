@@ -35,6 +35,27 @@
   the other. Picking the wrong copy was a coin flip you lost an hour after the fact. The fill
   says which side, the outline still says which part, and the flank named in the corner is
   tinted to match.
+## Unreleased — a coffee shows up in Discord
+
+### Added
+- **Buy Me a Coffee donations are announced in the Discord channel.** BMAC posts to a new
+  `POST /v1/bmac/webhook` on the control plane, which turns the event into an embed. Nothing
+  told you a coffee had been bought until you went and looked at the dashboard, which is also
+  why somebody could sit unthanked in `supporters.json` for a week — the post is the prompt to
+  add them.
+- Announced for money-in events only — a coffee, a membership started, a recurring donation, an
+  extra, a commission, a wishlist payment. Refunds, cancellations and pauses are accepted and
+  dropped: a public channel is the wrong place to narrate a withdrawal, and answering with an
+  error would only make BMAC retry an event we mean to ignore.
+- **The embed carries a name and their note, and nothing else** — no amount, no coffee count,
+  and the supporter's email is never read out of the payload. Notes are escaped, clipped and
+  posted with mentions disabled, so somebody else's words can't restyle the embed or ping the
+  server.
+- The route holds no bearer token, because BMAC has no account here; its credential is an
+  HMAC-SHA256 signature over the raw body, checked before the body is parsed. A `bmac_events`
+  table records what has already gone out — BMAC retries a delivery up to four more times, and
+  a reply it never received is indistinguishable from a failure, so without it one coffee
+  arrives five times.
 
 ## Unreleased — the sheet says where it lands on the bike
 
