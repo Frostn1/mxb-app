@@ -1227,6 +1227,19 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0100.hero.title": "El Designer prepara sus propias hojas",
+  "showcase.v0100.hero.body":
+    "Ahora crea las hojas que pide un modelo, coloca debajo los plásticos de la propia moto para calcar y abre un modelo en cerca de un segundo en vez de casi veinte.",
+  "showcase.v0100.location":
+    "Pasa por encima de la hoja y te dice qué hay bajo el cursor: la pieza, el lado de la moto en el que está, y si es una cara que vas a ver o una parte de abajo que no.",
+  "showcase.v0100.downloads":
+    "La página de Descargas lista lo que te has bajado: por día, lo más nuevo arriba, con dónde acabó cada archivo y de qué mirror vino.",
+  "showcase.v0100.terrain":
+    "Un circuito se abre ahora en 3D directamente desde la biblioteca, con sus saltos y roderas dibujados a partir del propio mapa de alturas del juego.",
+  "showcase.v0100.sharing":
+    "Ahora cualquier cosa de tu Biblioteca puede convertirse en un código que le pasas a alguien, y vuelve a las mismas carpetas en las que lo tienes.",
+  "showcase.v0100.linux":
+    "En Linux, FrostMod ahora corre en el mismo prefix de Proton bajo el que ya corre el juego.",
   "showcase.v092.hero.title": "Mira el terreno de un circuito en 3D",
   "showcase.v092.hero.body":
     "Los circuitos eran lo único que la biblioteca no sabía enseñarte: un nombre, una imagen y un tamaño. El visor ahora lee el mapa de alturas de un circuito y dibuja el propio terreno, así que los saltos, las roderas y la forma de una curva están ahí para mirarlos antes incluso de cargarlo. Se abre desde un circuito en la biblioteca, junto a Ver en 3D.",

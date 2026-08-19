@@ -1201,6 +1201,19 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0100.hero.title": "The Designer sets up its own sheets",
+  "showcase.v0100.hero.body":
+    "It now builds the sheets a model needs, lays the bike's own plastics underneath to trace over, and opens a model in about a second instead of nearly twenty.",
+  "showcase.v0100.location":
+    "Hover the sheet and it tells you what's under the cursor: the part, the side of the bike it's on, and whether it's a face you'll see or an underside you won't.",
+  "showcase.v0100.downloads":
+    "The Downloads page lists what you've grabbed: by day, newest first, with where each file landed and which mirror it came from.",
+  "showcase.v0100.terrain":
+    "A track now opens in 3D straight from the library, its jumps and ruts drawn from the game's own heightfield.",
+  "showcase.v0100.sharing":
+    "Now anything in your Library can become a code you hand to someone, and it lands back in the same folders you keep it in.",
+  "showcase.v0100.linux":
+    "On Linux, FrostMod now runs in the same Proton prefix the game already runs under.",
   "showcase.v092.hero.title": "See a track's terrain in 3D",
   "showcase.v092.hero.body":
     "Tracks were the one thing the library couldn't show you — a name, a picture and a size. The viewer now reads the heightfield out of a track and draws the ground itself, so the jumps, the ruts and the shape of a turn are there to look at before you ever load it. It opens from a track in the library, next to View in 3D.",

@@ -1240,6 +1240,19 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0100.hero.title": "Der Designer richtet seine Blätter selbst ein",
+  "showcase.v0100.hero.body":
+    "Er legt jetzt die Blätter an, die ein Modell braucht, legt die eigenen Plastikteile des Bikes darunter zum Abpausen und öffnet ein Modell in etwa einer Sekunde statt in fast zwanzig.",
+  "showcase.v0100.location":
+    "Fahr mit der Maus über das Blatt, und es sagt dir, was unter dem Cursor liegt: das Teil, die Seite des Bikes, auf der es sitzt, und ob es eine Fläche ist, die du siehst, oder eine Unterseite, die du nicht siehst.",
+  "showcase.v0100.downloads":
+    "Die Downloads-Seite listet auf, was du geholt hast: nach Tag, das Neueste oben, mit dem Ort, an dem jede Datei gelandet ist, und dem Mirror, von dem sie kam.",
+  "showcase.v0100.terrain":
+    "Eine Strecke öffnet sich jetzt direkt aus der Bibliothek in 3D, mit ihren Sprüngen und Rillen, gezeichnet aus dem eigenen Höhenfeld des Spiels.",
+  "showcase.v0100.sharing":
+    "Jetzt kann alles in deiner Bibliothek zu einem Code werden, den du jemandem gibst, und es landet wieder in denselben Ordnern, in denen du es hast.",
+  "showcase.v0100.linux":
+    "Unter Linux läuft FrostMod jetzt in genau dem Proton-Prefix, unter dem auch das Spiel läuft.",
   "showcase.v092.hero.title": "Sieh dir das Gelände einer Strecke in 3D an",
   "showcase.v092.hero.body":
     "Strecken waren das Einzige, was die Bibliothek nicht zeigen konnte — ein Name, ein Bild und eine Größe. Der Viewer liest jetzt das Höhenfeld aus einer Strecke und zeichnet den Boden selbst, sodass Sprünge, Rillen und die Form einer Kurve zu sehen sind, bevor du sie überhaupt lädst. Er öffnet sich bei einer Strecke in der Bibliothek, neben In 3D ansehen.",
