@@ -92,7 +92,32 @@ export interface PaintLayer extends LayerCommon {
   rev: number;
 }
 
-export type Layer = ImageLayer | TextLayer | PaintLayer;
+/**
+ * A rectangle, ellipse or line kept as geometry rather than as pixels.
+ *
+ * The shape tools used to rasterise on release, which made a square something you could only
+ * undo — nudging one a few pixels meant redrawing it, and by then whatever it overlapped had
+ * been painted over. Held as a layer it keeps handles for as long as the paint is open, and is
+ * flattened where every other layer is: at the composite, on the way to the file.
+ *
+ * `w`/`h` are the box the drag described, *signed*, before `scale` — so a line knows which of
+ * the box's two diagonals it runs along, which is the one thing a rectangle can't say. Both
+ * are in the layer's own upright frame, the same frame an image or a line of type is in; see
+ * `mirrored` for why that is not the sheet's frame.
+ */
+export interface ShapeLayer extends LayerCommon {
+  kind: "shape";
+  shape: "rect" | "ellipse" | "line";
+  w: number;
+  h: number;
+  /** Filled, or drawn as an outline. A line is always stroked, whatever this says. */
+  style: "fill" | "outline";
+  color: string;
+  /** Outline and line width in sheet pixels, before `scale`. */
+  strokeWidth: number;
+}
+
+export type Layer = ImageLayer | TextLayer | PaintLayer | ShapeLayer;
 
 /**
  * A rectangle of a sheet, in the sheet's own pixels.
@@ -202,6 +227,12 @@ export function layerExtent(layer: Layer): { w: number; h: number } {
   if (layer.kind === "paint") {
     return { w: layer.canvas.width, h: layer.canvas.height };
   }
+  if (layer.kind === "shape") {
+    // The pen is centred on the path, so half of it hangs outside the box on each side. A
+    // hairline shape would otherwise get a selection box narrower than the mark it describes.
+    const pen = layer.style === "outline" || layer.shape === "line" ? layer.strokeWidth : 0;
+    return { w: Math.abs(layer.w) + pen, h: Math.abs(layer.h) + pen };
+  }
   const ctx = measurer();
   if (!ctx) return { w: layer.text.length * layer.size * 0.6, h: layer.size };
   ctx.font = fontSpec(layer);
@@ -215,6 +246,63 @@ export function layerExtent(layer: Layer): { w: number; h: number } {
 export function layerHalfSize(layer: Layer): { hw: number; hh: number } {
   const { w, h } = layerExtent(layer);
   return { hw: (w * layer.scale) / 2, hh: (h * layer.scale) / 2 };
+}
+
+/**
+ * Whether a layer's content goes into the sheet mirrored.
+ *
+ * The 2D stage shows the sheet flipped top-to-bottom (see `CanvasStage`), so anything authored
+ * the right way up — a logo file, a line of type — has to be laid in upside down to come out
+ * upright on screen. A paint layer is the exception: its pixels were put down through that
+ * same flipped view, so they are in sheet space already and mirroring them would undo them.
+ */
+export function mirrored(layer: Layer): boolean {
+  return layer.kind !== "paint";
+}
+
+/** A layer built from a press-drag-release across the stage — see `shapeLayer`. */
+export function shapeLayer(
+  name: string,
+  shape: ShapeLayer["shape"],
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  style: ShapeLayer["style"],
+  color: string,
+  strokeWidth: number,
+): ShapeLayer {
+  return {
+    id: newId("shape"),
+    kind: "shape",
+    name,
+    visible: true,
+    opacity: 1,
+    blend: "normal",
+    x: (from.x + to.x) / 2,
+    y: (from.y + to.y) / 2,
+    scale: 1,
+    rotation: 0,
+    clip: null,
+    shape,
+    w: to.x - from.x,
+    // Negated on the way in: the drag is in sheet coordinates and the layer's own frame is the
+    // upright one, which runs the other way up. Only a line can tell the difference, and it
+    // would come out along the wrong diagonal.
+    h: -(to.y - from.y),
+    style,
+    color,
+    strokeWidth,
+  };
+}
+
+/**
+ * How far a layer is turned in *sheet* space, which is not what the rotation slider says.
+ *
+ * A mirrored thing turns the other way, so {@link mirrored} layers rotate against the stored
+ * angle. Everything that has to agree about where a layer's corners are — the composite, the
+ * selection box, the hit test — asks here rather than reading `layer.rotation` directly.
+ */
+export function sheetRotation(layer: Layer): number {
+  return mirrored(layer) ? -layer.rotation : layer.rotation;
 }
 
 /**
@@ -233,8 +321,8 @@ export function hitTest(layers: Layer[], px: number, py: number): Layer | null {
     // Into the layer's own frame: translate to its centre, then undo its rotation.
     const dx = px - layer.x;
     const dy = py - layer.y;
-    const cos = Math.cos(-layer.rotation);
-    const sin = Math.sin(-layer.rotation);
+    const cos = Math.cos(-sheetRotation(layer));
+    const sin = Math.sin(-sheetRotation(layer));
     const lx = dx * cos - dy * sin;
     const ly = dx * sin + dy * cos;
     const { hw, hh } = layerHalfSize(layer);

@@ -50,8 +50,22 @@ export const PAINT_TOOLS: PaintTool[] = [
   "line",
 ];
 
-/** Tools whose result is defined by a press-drag-release, rather than by the path dragged. */
-const DRAG_TOOLS = new Set<PaintTool>(["gradient", "rect", "ellipse", "line"]);
+/**
+ * Tools whose result is defined by a press-drag-release, rather than by the path dragged.
+ *
+ * Only the gradient, now that the shapes are layers. A gradient is a wash across whatever it
+ * is dragged over, with no edge to take hold of afterwards, so there is nothing a handle could
+ * grab and nothing gained by keeping it as geometry.
+ */
+const DRAG_TOOLS = new Set<PaintTool>(["gradient"]);
+
+/**
+ * The drag tools that produce a *layer* rather than pixels — see `shapeLayer`.
+ *
+ * They never reach `Stroke` at all: the Designer makes the layer on the press and rewrites its
+ * box as the drag goes, so what is being dragged out is the finished object.
+ */
+export const SHAPE_TOOLS = new Set<PaintTool>(["rect", "ellipse", "line"]);
 
 /**
  * One key per tool, the way every editor of this kind does it.
@@ -241,61 +255,12 @@ function gradientFill(
   ctx.fillRect(0, 0, w, h);
 }
 
-function drawShape(
-  ctx: CanvasRenderingContext2D,
-  tool: PaintTool,
-  from: Point,
-  to: Point,
-  s: PaintSettings,
-) {
-  ctx.strokeStyle = withAlpha(s.colorA, 1);
-  ctx.fillStyle = withAlpha(s.colorA, 1);
-  ctx.lineWidth = Math.max(1, s.strokeWidth);
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-
-  if (tool === "line") {
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    return;
-  }
-
-  const x = Math.min(from.x, to.x);
-  const y = Math.min(from.y, to.y);
-  const w = Math.abs(to.x - from.x);
-  const h = Math.abs(to.y - from.y);
-
-  ctx.beginPath();
-  if (tool === "ellipse") ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-  else ctx.rect(x, y, w, h);
-  if (s.shape === "fill") ctx.fill();
-  else ctx.stroke();
-}
-
-/**
- * Where a shape drawn between two points lands, with room for the pen that draws it.
- *
- * Padded by half the stroke width because a line is centred on its path, and by a couple of
- * pixels beyond that for the round cap and for the antialiasing at its edge — a region that
- * stopped at the geometry would leave the outer fringe of a thick outline unrestored.
- */
-function shapeRegion(from: Point, to: Point, s: PaintSettings): Region {
-  const pad = Math.max(1, s.strokeWidth) / 2 + 2;
-  return {
-    x: Math.min(from.x, to.x) - pad,
-    y: Math.min(from.y, to.y) - pad,
-    w: Math.abs(to.x - from.x) + pad * 2,
-    h: Math.abs(to.y - from.y) + pad * 2,
-  };
-}
-
 /**
  * Hold Shift: squares, circles, and axes that snap to 45°.
  *
- * Exported because the stage draws the guide you aim with and this draws what lands, and the
- * two have to agree — a dashed box in one place and a square in another is worse than no guide.
+ * Exported because the shape tools no longer land here — the Designer rewrites a shape layer's
+ * box as the drag goes and applies this to the corner first, so the square you are dragging out
+ * and the square you end up with are the same one.
  */
 export function constrained(from: Point, to: Point, tool: PaintTool): Point {
   const dx = to.x - from.x;
@@ -436,15 +401,10 @@ export class Stroke {
       // Redrawn from scratch each time, not added to: dragging a gradient back and forth
       // should show the gradient it would leave, not every one it passed through.
       ctx.clearRect(0, 0, this.scratch.width, this.scratch.height);
-      if (tool === "gradient") {
-        gradientFill(ctx, this.scratch.width, this.scratch.height, this.start, to, this.settings);
-      } else {
-        drawShape(ctx, tool, this.start, to, this.settings);
-      }
-      // Both boxes, because the scratch was wiped: the new shape has to be laid down and the
-      // old one has to be taken back off. A gradient covers the sheet, so for that one they
-      // are the same box and it is the whole thing.
-      const next = tool === "gradient" ? this.whole() : shapeRegion(this.start, to, this.settings);
+      gradientFill(ctx, this.scratch.width, this.scratch.height, this.start, to, this.settings);
+      // The whole sheet, twice over: a gradient covers it, and the scratch was just wiped, so
+      // the new wash has to be laid down and the old one taken back off.
+      const next = this.whole();
       this.mark(next);
       if (this.shape) this.mark(this.shape);
       this.shape = next;

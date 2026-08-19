@@ -137,6 +137,58 @@ export function LayerInspector({
         </select>
       </Row>
 
+      {/* A shape is geometry, so it keeps its colour and its pen editable for as long as the
+          paint is open — which is the whole point of it not being pixels. Size and angle are
+          the shared controls above; only what it is drawn *with* is particular to it. */}
+      {layer.kind === "shape" && (
+        <>
+          <Row label={t("designer.colour")}>
+            <input
+              type="color"
+              value={layer.color}
+              onChange={(e) =>
+                patch((l) => (l.kind === "shape" ? { ...l, color: e.target.value } : l))
+              }
+              className="h-7 w-full cursor-pointer rounded-md border border-input bg-background"
+            />
+          </Row>
+
+          {layer.shape !== "line" && (
+            <Row label={t("designer.shape")}>
+              <select
+                value={layer.style}
+                onChange={(e) =>
+                  patch((l) =>
+                    l.kind === "shape"
+                      ? { ...l, style: e.target.value as "fill" | "outline" }
+                      : l,
+                  )
+                }
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-[11.5px]"
+              >
+                <option value="fill">{t("designer.shape.fill")}</option>
+                <option value="outline">{t("designer.shape.outline")}</option>
+              </select>
+            </Row>
+          )}
+
+          {(layer.style === "outline" || layer.shape === "line") && (
+            <Row label={t("designer.lineWidth")}>
+              <Slider
+                value={layer.strokeWidth}
+                min={1}
+                max={128}
+                step={1}
+                onChange={(v) =>
+                  patch((l) => (l.kind === "shape" ? { ...l, strokeWidth: v } : l))
+                }
+                format={(v) => `${v}px`}
+              />
+            </Row>
+          )}
+        </>
+      )}
+
       {layer.kind === "text" && (
         <>
           <Row label={t("designer.text")}>
