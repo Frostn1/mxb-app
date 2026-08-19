@@ -94,7 +94,11 @@ interface CanvasStageProps {
   brushSize: number;
   /** True when there is a paint layer for a stroke to land on. */
   canPaint: boolean;
-  onPaintStart: (at: Point) => void;
+  /**
+   * `whole` is a right-click with the bucket: fill the island rather than the one triangle
+   * under the pointer. Meaningless to every other tool, which ignore it.
+   */
+  onPaintStart: (at: Point, whole: boolean) => void;
   onPaintMove: (points: Point[], constrain: boolean) => void;
   onPaintEnd: () => void;
   className?: string;
@@ -112,6 +116,13 @@ interface CanvasStageProps {
  *
  * The ghost is drawn here for the same reason, read backwards: a guide that never enters the
  * composite cannot reach the file, whatever anyone later does to the save path.
+ *
+ * The sheet is shown flipped top-to-bottom. A `.pnt` stores its rows in the order the mesh
+ * samples them, which is upside down from the template painters work in — open one flat and
+ * the forks land top-left where the template has them bottom-left. The flip lives here and
+ * only here: the composite, the saved file and the 3D preview all stay in the sheet's own row
+ * order, so no amount of work on the view can change what a paint contains. Everything
+ * crossing between the two spaces goes through `toSheet`, `toView` or `sheetSpace`.
  */
 export function CanvasStage({
   sheet,
@@ -223,7 +234,7 @@ export function CanvasStage({
       if (!rect || !scale) return null;
       const vx = clientX - rect.left - originX;
       const vy = clientY - rect.top - originY;
-      return { x: vx / scale + sheet.width / 2, y: vy / scale + sheet.height / 2 };
+      return { x: vx / scale + sheet.width / 2, y: sheet.height / 2 - vy / scale };
     },
     [originX, originY, scale, sheet.width, sheet.height],
   );
@@ -232,7 +243,7 @@ export function CanvasStage({
   const toView = useCallback(
     (p: Point): [number, number] => [
       originX + (p.x - sheet.width / 2) * scale,
-      originY + (p.y - sheet.height / 2) * scale,
+      originY - (p.y - sheet.height / 2) * scale,
     ],
     [originX, originY, scale, sheet.width, sheet.height],
   );
@@ -322,6 +333,21 @@ export function CanvasStage({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
+    /**
+     * Draw in sheet pixels, flipped: anchored at the bottom edge with y running back up.
+     *
+     * Every picture of the sheet goes through this — the composite and all three ghosts — so
+     * they cannot come out a row apart from each other, which is the one way an underlay is
+     * worse than no underlay. The overlays below are in view pixels already and don't.
+     */
+    const sheetSpace = (draw: () => void) => {
+      ctx.save();
+      ctx.translate(left, top + h);
+      ctx.scale(1, -1);
+      draw();
+      ctx.restore();
+    };
+
     // The whole reference goes *under* the drawing — that is what makes it a ghost rather than
     // an overlay. Both halves show through wherever the sheet is still transparent, which is
     // exactly where there is nothing drawn yet and exactly where you need to know which piece
@@ -338,19 +364,21 @@ export function CanvasStage({
       // is being traced, and they are the thinnest of the marks. The model's own texture goes
       // under the template rather than over it — someone who lifted a paint out to trace it
       // asked for *that* paint, and the stock plastics are the fallback beneath it.
-      if (ghost.showStock && ghost.stock) {
-        ctx.drawImage(ghost.stock, left, top, w, h);
-      }
-      if (ghost.showTemplate && ghost.template) {
-        ctx.drawImage(ghost.template, left, top, w, h);
-      }
-      if (ghost.showWire && ghost.wire) {
-        ctx.drawImage(ghost.wire, left, top, w, h);
-      }
+      sheetSpace(() => {
+        if (ghost.showStock && ghost.stock) {
+          ctx.drawImage(ghost.stock, 0, 0, w, h);
+        }
+        if (ghost.showTemplate && ghost.template) {
+          ctx.drawImage(ghost.template, 0, 0, w, h);
+        }
+        if (ghost.showWire && ghost.wire) {
+          ctx.drawImage(ghost.wire, 0, 0, w, h);
+        }
+      });
       ctx.restore();
     }
 
-    ctx.drawImage(source, left, top, w, h);
+    sheetSpace(() => ctx.drawImage(source, 0, 0, w, h));
 
     // Sheet edge, so you can see where the texture stops.
     ctx.strokeStyle = "rgba(255,255,255,0.18)";
@@ -383,12 +411,11 @@ export function CanvasStage({
     // The piece under the pointer, picked out of the map. Only while the map is on: a highlight
     // that appeared over a livery with no islands showing would be an outline from nowhere.
     if (overPart && overPath && ghost?.showWire && ghost.wire) {
-      ctx.save();
-      ctx.translate(left, top);
-      ctx.scale(w / sheet.width, h / sheet.height);
-      ctx.fillStyle = `hsla(${overPart.hue}, 85%, 65%, 0.18)`;
-      ctx.fill(overPath, "nonzero");
-      ctx.restore();
+      sheetSpace(() => {
+        ctx.scale(w / sheet.width, h / sheet.height);
+        ctx.fillStyle = `hsla(${overPart.hue}, 85%, 65%, 0.18)`;
+        ctx.fill(overPath, "nonzero");
+      });
     }
 
     // Where a gradient runs, or what a shape will cover. The stroke itself is already visible
@@ -472,8 +499,9 @@ export function CanvasStage({
       const cx = ((part.minU + part.maxU) / 2) * sheet.width;
       const cy = ((part.minV + part.maxV) / 2) * sheet.height;
       setZoom(z);
-      // Pan is measured from the sheet's centre, which is where the blit is anchored.
-      setPan({ x: -(cx - sheet.width / 2) * s, y: -(cy - sheet.height / 2) * s });
+      // Pan is measured from the sheet's centre, which is where the blit is anchored. The y
+      // term doesn't take the minus the x one does: the view runs the other way up.
+      setPan({ x: -(cx - sheet.width / 2) * s, y: (cy - sheet.height / 2) * s });
     },
     [box.w, box.h, fit, sheet.width, sheet.height],
   );
@@ -503,6 +531,15 @@ export function CanvasStage({
         }
       }
       e.currentTarget.setPointerCapture(e.pointerId);
+      // Right-click with the bucket fills the whole island. The left button takes the single
+      // triangle under the pointer, which is right for trimming an edge and hopeless for
+      // covering a shroud — so the coarse answer gets the other button rather than a mode.
+      // It costs the bucket its right-drag pan; the middle button still pans for every tool.
+      if (e.button === 2 && paints && tool === "fill") {
+        painting.current = true;
+        onPaintStart(at, true);
+        return;
+      }
       // Middle and right drag pan, whatever the tool — panning while painting matters more
       // than it does while dragging a logo, because a stroke needs the part you can't see.
       // Not mid-stroke, though: the view moving under a brush that is still down would drag
@@ -514,7 +551,7 @@ export function CanvasStage({
       if (paints) {
         painting.current = true;
         if (isDragTool(tool)) setGuide({ from: at, to: at });
-        onPaintStart(at);
+        onPaintStart(at, false);
         return;
       }
       // Corners before contents. A handle sits on the layer's own edge, so hit-testing first
@@ -634,7 +671,7 @@ export function CanvasStage({
       if (!dx && !dy) return;
       d.x = e.clientX;
       d.y = e.clientY;
-      if (d.id) onMove(d.id, dx / scale, dy / scale);
+      if (d.id) onMove(d.id, dx / scale, -dy / scale);
       else setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
     },
     [

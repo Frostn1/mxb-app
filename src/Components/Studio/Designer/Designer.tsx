@@ -37,7 +37,16 @@ import { LayerInspector } from "./LayerInspector";
 import { PaintTools } from "./PaintTools";
 import { bitmapFromRgba, composite, hasInk, sheetTexture, toPng } from "./composite";
 import { EMPTY_GHOST, ghostShows, type Ghost } from "./ghost";
-import { partAt, partBox, partPath, uvParts, uvWireframe, type UvPart } from "./uv";
+import {
+  islandAt,
+  partAt,
+  partBox,
+  partPath,
+  triangleAt,
+  uvParts,
+  uvWireframe,
+  type UvPart,
+} from "./uv";
 import {
   blankSheet,
   imageLayer,
@@ -45,18 +54,22 @@ import {
   layerExtent,
   newId,
   paintLayer,
+  shapeLayer,
   textLayer,
   unionRegion,
   type Layer,
   type PaintLayer,
+  type ShapeLayer,
   type Region,
   type Sheet,
 } from "./layers";
 import {
   DEFAULT_PAINT,
   PaintHistory,
+  SHAPE_TOOLS,
   Stroke,
   TOOL_KEYS,
+  constrained,
   type PaintSettings,
   type PaintTool,
   type Point,
@@ -381,6 +394,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * the moment it arrives, because that is what the mark is made of; only the telling-everyone
    * waits, and it waits at most until the next frame, which is the soonest anyone could see it.
    */
+  // The shape layer a drag is currently rewriting, and where the press landed. Null except
+  // between the press and the release of a shape tool — the stroke ref's opposite number.
+  const shaping = useRef<{ id: string; from: Point } | null>(null);
+
   const queued = useRef<{ sheetId: string; layerId: string } | null>(null);
   const frame = useRef(0);
 
@@ -435,7 +452,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const pickTool = useCallback(
     (tool: PaintTool) => {
       setPaint((p) => ({ ...p, tool }));
-      if (tool === "move" || !active) return;
+      // A shape makes its own layer on the press, so it needs nothing selected to land on.
+      if (tool === "move" || SHAPE_TOOLS.has(tool) || !active) return;
       const selected = active.layers.find((l) => l.id === selectedId);
       if (selected?.kind === "paint") return;
       const existing = [...active.layers].reverse().find((l) => l.kind === "paint");
@@ -448,6 +466,31 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
 
   const movePaint = useCallback(
     (points: Point[], constrain: boolean) => {
+      // A shape in progress is a layer, not a stroke: the drag rewrites its box and the
+      // composite redraws it, so what is on screen mid-drag is the shape itself rather than a
+      // preview of one. See `startPaint`.
+      const drawing = shaping.current;
+      if (drawing) {
+        const raw = points[points.length - 1];
+        if (!raw) return;
+        const to = constrain ? constrained(drawing.from, raw, paint.tool) : raw;
+        patchLayer(
+          drawing.id,
+          (l) =>
+            l.kind === "shape"
+              ? {
+                  ...l,
+                  x: (drawing.from.x + to.x) / 2,
+                  y: (drawing.from.y + to.y) / 2,
+                  w: to.x - drawing.from.x,
+                  h: -(to.y - drawing.from.y),
+                }
+              : l,
+          `shape:${drawing.id}`,
+        );
+        bump();
+        return;
+      }
       const live = stroke.current;
       if (!live || !target || !activeId) return;
       live.move(points, constrain);
@@ -455,10 +498,28 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       markPaint(activeId, live.dirty);
       schedulePaint(activeId, target.id);
     },
-    [activeId, markPaint, schedulePaint, target],
+    [activeId, bump, markPaint, paint.tool, patchLayer, schedulePaint, target],
   );
 
   const endPaint = useCallback(() => {
+    const drawing = shaping.current;
+    if (drawing) {
+      shaping.current = null;
+      // A click with a shape tool selected is not a shape. Left in, it would be an invisible
+      // layer in the list with handles too small to grab and nothing to see.
+      if (active) {
+        const made = active.layers.find((l) => l.id === drawing.id);
+        if (made?.kind === "shape" && Math.abs(made.w) < 2 && Math.abs(made.h) < 2) {
+          patchSheet(active.id, (sh) => ({
+            ...sh,
+            layers: sh.layers.filter((l) => l.id !== drawing.id),
+          }));
+          setSelectedId(null);
+          bump();
+        }
+      }
+      return;
+    }
     const done = stroke.current;
     stroke.current = null;
     // Whatever the last frame didn't get to, now — a stroke that ended between two frames would
@@ -469,7 +530,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     if (!done?.end() || !target || !activeId) return;
     history.current.push(activeId, target.id, done.before);
     setHistoryRev((v) => v + 1);
-  }, [activeId, flushPaint, target]);
+  }, [active, activeId, bump, flushPaint, patchSheet, target]);
 
   /** The live canvas behind a layer id, wherever it lives — history spans every sheet. */
   const paintCanvas = useCallback(
@@ -592,10 +653,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   /**
    * Pixels for a file the user picked, at the sheet's own resolution.
    *
-   * No orientation is imposed. A `.pnt` doesn't record which way up its rows are and paints in
-   * the wild are stored both ways, so the editor shows exactly what the file holds — the same
-   * rows the viewer renders and the game reads. A sheet that looks upside down here is upside
-   * down in the file, and guessing otherwise would flip every correctly-made paint.
+   * The rows arrive in the order the file holds them, which is the order the mesh samples
+   * them — and that is upside down from the template a painter works in. Nothing is flipped
+   * here: the sheet, the composite and the save all stay in the file's own row order, and the
+   * 2D stage turns it the right way up for display alone (see `CanvasStage`). Flipping the
+   * pixels instead would put the editor's opinion about orientation inside the saved paint.
    */
   const readImage = useCallback(async (path: string) => {
     const tex = await paintStudioPixels(path);
@@ -813,18 +875,49 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   );
 
   const startPaint = useCallback(
-    (at: Point) => {
+    (at: Point, whole: boolean) => {
+      // A rectangle, ellipse or line becomes a layer, not pixels. Made on the press and
+      // rewritten as the drag goes, so the thing being dragged out *is* the finished object —
+      // there is no separate preview to disagree with the result, and on release it is
+      // already selected with handles on it.
+      if (SHAPE_TOOLS.has(paint.tool) && active) {
+        const shape = paint.tool as ShapeLayer["shape"];
+        const layer = shapeLayer(
+          t(`designer.tool.${shape}`),
+          shape,
+          at,
+          at,
+          paint.shape,
+          paint.colorA,
+          paint.strokeWidth,
+        );
+        remember();
+        patchSheet(active.id, (sh) => ({ ...sh, layers: [...sh.layers, layer] }));
+        setSelectedId(layer.id);
+        shaping.current = { id: layer.id, from: at };
+        bump();
+        return;
+      }
       if (!target || !activeId) return;
-      // The bucket fills the panel under the press, not the sheet. Worked out here rather than
-      // inside `Stroke`, because the parts are the editor's knowledge of the model and paint.ts
-      // is deliberately ignorant of it — it puts pixels down, wherever it is told to.
+      // The bucket fills the uv triangle under the press, not the sheet and not the whole mesh
+      // group. Worked out here rather than inside `Stroke`, because the parts are the editor's
+      // knowledge of the model and paint.ts is deliberately ignorant of it — it puts pixels
+      // down, wherever it is told to.
+      //
+      // The group is only the first cut: `shroud` is both flanks and often several islands, so
+      // stopping there floods panels the press never pointed at. Left button takes the one
+      // triangle under the pointer; right button takes the island it belongs to.
       let fillTo: { path: Path2D; box: Region } | null = null;
       if (paint.tool === "fill" && active && parts.length) {
-        const under = partAt(parts, at.x / active.width, at.y / active.height);
-        if (under) {
+        const u = at.x / active.width;
+        const v = at.y / active.height;
+        const under = partAt(parts, u, v);
+        const pick = whole ? islandAt : triangleAt;
+        const region = under ? (pick(under, u, v) ?? under) : null;
+        if (region) {
           fillTo = {
-            path: partPath(under, active.width, active.height),
-            box: partBox(under, active.width, active.height),
+            path: partPath(region, active.width, active.height),
+            box: partBox(region, active.width, active.height),
           };
         }
       }
@@ -834,7 +927,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       // frame's wait on, and a tool that puts nothing down on the press has nothing to show.
       if (next.dirty) touchPaint(activeId, target.id, next.dirty);
     },
-    [active, activeId, paint, parts, target, touchPaint],
+    [active, activeId, bump, paint, parts, patchSheet, remember, t, target, touchPaint],
   );
 
   /** Pin the selected layer to a piece of bodywork, or let it cover the sheet again. */
@@ -1329,7 +1422,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onScale={scaleLayer}
               tool={paint.tool}
               brushSize={paint.size}
-              canPaint={!!target}
+              canPaint={!!target || SHAPE_TOOLS.has(paint.tool)}
               onPaintStart={startPaint}
               onPaintMove={movePaint}
               onPaintEnd={endPaint}
