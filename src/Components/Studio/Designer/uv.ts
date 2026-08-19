@@ -103,19 +103,33 @@ export interface UvPart {
 /**
  * How far from the mirror plane a triangle has to sit before it counts as being on a side.
  *
- * 4% of the model's half-width. A bike is a symmetric object with a seam down the middle, and
- * without a dead band that seam's triangles would be sorted left or right by rounding error and
- * report a side each time the pointer crossed it.
+ * 4% of the widest of the sheet's own triangles. A bike is a symmetric object with a seam down
+ * the middle, and without a dead band that seam's triangles would be sorted left or right by
+ * rounding error and report a side each time the pointer crossed it.
+ *
+ * The widest 99%, and of the sheet rather than of the model. Both halves of that are scars:
+ *
+ * - The TM MX 530 ships an `HJ` node whose 32768 vertices include six at `f32::MAX`. Taking
+ *   the plain maximum made the dead band 1.4e37 wide, so every triangle on the bike read
+ *   `centre` and the left/right answer was silently gone for the whole model. Six vertices out
+ *   of thirty thousand are not how wide a motorcycle is; a high percentile says so and a
+ *   maximum can't.
+ * - Measuring the sheet rather than the model keeps a junk node the sheet never binds from
+ *   being heard from at all.
+ *
+ * Still a fraction rather than a length in metres, so a 65 and a 450 are one shape at two sizes.
  */
-function lateralTolerance(nodes: EdfNode[]): number {
-  let maxAbs = 0;
-  for (const node of nodes) {
-    for (let i = 0; i < node.positions.length; i += 3) {
-      const x = Math.abs(node.positions[i]);
-      if (x > maxAbs) maxAbs = x;
+function lateralTolerance(xs: Iterable<number[]>): number {
+  const all: number[] = [];
+  for (const run of xs) {
+    for (const x of run) {
+      // NaN would sort unpredictably and can't be a width; drop it rather than rank it.
+      if (Number.isFinite(x)) all.push(Math.abs(x));
     }
   }
-  return maxAbs * 0.04;
+  if (!all.length) return 0;
+  all.sort((a, b) => a - b);
+  return all[Math.floor((all.length - 1) * 0.99)] * 0.04;
 }
 
 /** What a run of flank codes amounts to: one side, both of them, or neither. */
@@ -224,11 +238,13 @@ export function uvParts(
   // A fraction of the model's width, so the dead band around the mirror plane scales with the
   // bike rather than being a number of metres — a 65 and a 450 are one shape at two sizes.
   const sided = !!opts?.assembled;
-  const tol = sided ? lateralTolerance(nodes) : 0;
 
   const byLabel = new Map<string, number[]>();
   const srcByLabel = new Map<string, number[]>();
-  const flanksByLabel = new Map<string, number[]>();
+  // Triangle centroids on the x axis, held raw until every group has been read: the dead band
+  // they are judged against is a fraction of the widest of them, so none can be judged until
+  // all of them are in.
+  const lateralByLabel = new Map<string, number[]>();
   const facesByLabel = new Map<string, number[]>();
   const nodesByLabel = new Map<string, Set<string>>();
   for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
@@ -260,10 +276,10 @@ export function uvParts(
         nodesByLabel.set(label, owners);
       }
       owners.add(node.name);
-      let sides = flanksByLabel.get(label);
+      let sides = lateralByLabel.get(label);
       if (!sides && sided) {
         sides = [];
-        flanksByLabel.set(label, sides);
+        lateralByLabel.set(label, sides);
       }
       let faces = facesByLabel.get(label);
       if (!faces && sided) {
@@ -287,13 +303,29 @@ export function uvParts(
         }
         // The centroid, not every corner: a triangle with one vertex over the line is still on
         // the side the rest of it is, and a panel's inner edge is full of them.
-        if (sides) sides.push(x / 3 > tol ? LEFT : x / 3 < -tol ? RIGHT : CENTRE);
+        if (sides) sides.push(x / 3);
         if (faces) {
           const up = hasNormals ? ny / 3 : 0;
           faces.push(up > FACE_TOLERANCE ? TOP : up < -FACE_TOLERANCE ? UNDER : EDGE);
         }
       }
     }
+  }
+
+  // Now that the whole sheet has been read, the band is known — and with it, each side.
+  //
+  // Positive x is the bike's RIGHT — the answer that matches where a region of the sheet
+  // actually comes out on the model. It reads the other way round from the mesh's own group
+  // names: `clutch` and `gear` sit at positive x on a 2023 YZ450F and those are left-hand
+  // controls, so anyone checking it that way will conclude this line is inverted. It has been
+  // flipped on that reasoning before and had to be put back. Leave it.
+  const tol = sided ? lateralTolerance(lateralByLabel.values()) : 0;
+  const flanksByLabel = new Map<string, number[]>();
+  for (const [label, xs] of lateralByLabel) {
+    flanksByLabel.set(
+      label,
+      xs.map((x) => (x > tol ? RIGHT : x < -tol ? LEFT : CENTRE)),
+    );
   }
 
   const parts: UvPart[] = [];
@@ -439,6 +471,14 @@ function inTriangle(
   // the seam between two triangles of one part hit rather than fall through.
   const neg = d1 < 0 || d2 < 0 || d3 < 0;
   const pos = d1 > 0 || d2 > 0 || d3 > 0;
+  // All three zero is not "on every edge at once", it is a triangle with no area — three uv
+  // corners collapsed onto a point or a line. Left as inside, such a triangle answers yes to
+  // *every* point on the sheet, and meshes are full of them: the 2007 H85R's chassis carries
+  // 327, the TM MX 530's `HJ` node 105. One is enough to make its part the answer everywhere —
+  // the wrong panel named in the corner, the wrong flank, the wrong place lit up on the bike,
+  // and a bucket fill clipped to a panel on the far side. A real triangle can put the point on
+  // one of its edges, never on all three, so nothing legitimate is turned away here.
+  if (!neg && !pos) return false;
   return !(neg && pos);
 }
 
@@ -495,10 +535,33 @@ export function partsAt(parts: UvPart[], u: number, v: number): UvPart[] {
 const MAX_WIRE = 1024;
 
 /**
+ * Warm for the bike's left, cool for its right — the flank wash the islands are filled with.
+ *
+ * The one thing the sheet itself will never tell you. A bike's two flanks routinely unwrap as
+ * two copies of the same panel, same way up, same graphics, stacked one above the other: the
+ * shroud, side panel and airbox of a 2023 YZ450F come out as one island whose top half is the
+ * left of the bike and whose bottom half is the right, with nothing in the artwork marking
+ * where one becomes the other. Picking the wrong copy is a coin flip, and the way you find out
+ * is that the decal you spent an hour on is on the far side. So the answer goes on the sheet,
+ * not into a word in the corner that has to be hunted for one texel at a time.
+ *
+ * Amber and blue rather than a red/green pair, so the two stay apart for the ~8% of riders who
+ * can't tell those two colours from each other. Kept faint: this washes over somebody's
+ * livery, and a guide that drowns the artwork is one they turn off.
+ */
+const FLANK_WASH: Record<number, string> = {
+  [LEFT]: "hsla(28, 95%, 55%, 0.17)",
+  [RIGHT]: "hsla(205, 95%, 60%, 0.17)",
+  [CENTRE]: "hsla(0, 0%, 78%, 0.08)",
+};
+
+/**
  * The parts drawn as filled, outlined islands.
  *
  * This is the part an image editor cannot tell you: which region of a 2048² square is the
- * airbox and which is the rear fender.
+ * airbox and which is the rear fender. The fill says which *side* it is (see `FLANK_WASH`) and
+ * the outline says which part, so the two questions are answered by one overlay rather than by
+ * a toggle each.
  *
  * Coordinates outside 0–1 are drawn and clipped rather than wrapped: the tiled case is rare on
  * bodywork, and a guide that silently folded a decal back over itself would be worse than one
@@ -524,12 +587,35 @@ export function uvWireframe(
   ctx.lineWidth = Math.max(1, Math.round(Math.max(sx, sy) / 512));
 
   for (const part of parts) {
-    // One path for the whole part, filled with the nonzero rule: triangles that share an edge
-    // stop being separate shapes, so the fill comes out flat instead of banded along every seam
-    // the way a per-triangle fill would.
-    const fill = partPath(part, sx, sy);
-    ctx.fillStyle = `hsla(${part.hue}, 70%, 60%, 0.13)`;
-    ctx.fill(fill, "nonzero");
+    // One path per flank, filled with the nonzero rule: triangles that share an edge stop being
+    // separate shapes, so the fill comes out flat instead of banded along every seam the way a
+    // per-triangle fill would. Three paths rather than one leaves exactly one seam — the line
+    // where the bike's left meets its right, which is the line this is drawn to show.
+    if (part.flanks) {
+      const paths = new Map<number, Path2D>();
+      const { tris, flanks } = part;
+      for (let i = 0; i < tris.length; i += 6) {
+        const code = flanks[i / 6];
+        let path = paths.get(code);
+        if (!path) {
+          path = new Path2D();
+          paths.set(code, path);
+        }
+        path.moveTo(tris[i] * sx, tris[i + 1] * sy);
+        path.lineTo(tris[i + 2] * sx, tris[i + 3] * sy);
+        path.lineTo(tris[i + 4] * sx, tris[i + 5] * sy);
+        path.closePath();
+      }
+      for (const [code, path] of paths) {
+        ctx.fillStyle = FLANK_WASH[code] ?? FLANK_WASH[CENTRE];
+        ctx.fill(path, "nonzero");
+      }
+    } else {
+      // No sides to tell apart — an unassembled bike, or a piece of gear. The part's own hue
+      // still separates it from its neighbours, which is what the fill was for before.
+      ctx.fillStyle = `hsla(${part.hue}, 70%, 60%, 0.13)`;
+      ctx.fill(partPath(part, sx, sy), "nonzero");
+    }
 
     // Edges once each. A closed mesh shares almost every edge between two triangles, and
     // drawing both makes the interior twice as bright as the outline that matters.

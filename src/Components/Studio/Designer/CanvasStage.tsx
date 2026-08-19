@@ -176,6 +176,10 @@ export function CanvasStage({
   // Which way the surface there faces. The answer that says a rear fender's island has its
   // underside in it, which is otherwise only discoverable by painting and looking.
   const [overFace, setOverFace] = useState<Face | null>(null);
+  // Whether the sheet is currently washed left/right — the islands are up, they are visible,
+  // and this model was assembled well enough to have sides at all.
+  const washed =
+    !!ghost?.showWire && !!ghost.wire && ghost.opacity > 0 && parts.some((part) => part.flanks);
   // The press and current point of a gradient or shape drag, so it can be shown while it's
   // being aimed. Only ever set between press and release.
   const [guide, setGuide] = useState<{ from: Point; to: Point } | null>(null);
@@ -723,6 +727,25 @@ export function CanvasStage({
           ringed ? "block" : "hidden",
         )}
       />
+      {/* What the wash over the islands means. Only while the islands are showing, and only on
+          a model that can say — a legend for a colour nobody can see is furniture. It sits
+          here rather than in the readout below because the wash is on screen whether or not
+          the pointer is over anything, and that is exactly when it needs explaining. */}
+      {washed && (
+        <div
+          className="pointer-events-auto absolute left-2 top-2 flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45"
+          title={t("designer.flankWashHint")}
+        >
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-[2px] bg-[hsl(28_95%_55%)]" />
+            {t("designer.flank.left")}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-2 rounded-[2px] bg-[hsl(205_95%_60%)]" />
+            {t("designer.flank.right")}
+          </span>
+        </div>
+      )}
       <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45">
         <span>
           {sheet.width}×{sheet.height}
@@ -745,7 +768,13 @@ export function CanvasStage({
                 afternoon: it means this island is worn by each side of the bike. */}
             {overSide && overSide !== "centre" && (
               <span
-                className="text-white/45"
+                // The same colours the sheet is washed with, so the word and the region under
+                // the pointer are recognisably the same answer.
+                className={cn(
+                  overSide === "left" && "text-[hsl(28_95%_62%)]",
+                  overSide === "right" && "text-[hsl(205_95%_66%)]",
+                  overSide === "both" && "text-white/45",
+                )}
                 title={overSide === "both" ? t("designer.flankSharedHint") : undefined}
               >
                 {t(`designer.flank.${overSide}` as "designer.flank.left")}
