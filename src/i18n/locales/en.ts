@@ -1441,7 +1441,7 @@ export const en = {
   // ── Logs ───────────────────────────────────────────────────────────────────
   "settings.logs": "Logs",
   "logs.desc":
-    "The files to send when something goes wrong. MXB App, FrostMod and {{game}} each keep their own — open any of them, or save the lot as one zip to attach to a bug report.",
+    "The files to send when something goes wrong. MXB App, FrostMod and {{game}} each keep their own — open any of them, save the lot as one zip, or share it as a link to paste into a bug report.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "What the app itself recorded",
   "logs.frostmodLogsDesc": "Whatever the loader wrote in its own folder",
@@ -1460,6 +1460,20 @@ export const en = {
   "logs.savedDesc_one": "{{count}} log file, {{size}}",
   "logs.savedDesc_other": "{{count}} log files, {{size}}",
   "logs.saveFailed": "Couldn't save the logs",
+  "logs.share": "Share logs",
+  "logs.sharePacking": "Packing…",
+  "logs.sharing": "Uploading…",
+  "logs.shared": "Logs uploaded",
+  "logs.sharedCopied": "{{size}} — the link is on your clipboard.",
+  "logs.sharedDesc": "{{size}} — the link is below.",
+  "logs.sharedSummary_one": "{{count}} log file, {{size}} uploaded.",
+  "logs.sharedSummary_other": "{{count}} log files, {{size}} uploaded.",
+  "logs.shareFailed": "Couldn't share the logs",
+  "logs.copyLink": "Copy link",
+  "logs.linkCopiedShort": "Copied",
+  "logs.linkCopied": "Link copied",
+  "logs.shareWarning":
+    "The zip sits on a public file host — anyone with the link can download it, so only hand it to whoever asked for it.",
   "logs.privacy":
     "Logs hold folder paths and what the app was doing — never your passwords or session cookies, and no settings file is included.",
 

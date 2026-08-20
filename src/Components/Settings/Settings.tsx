@@ -12,6 +12,9 @@ import {
   Sparkles,
   FolderOpen,
   Download,
+  Share2,
+  Copy,
+  Loader2,
 } from "lucide-react";
 import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
@@ -24,10 +27,13 @@ import {
   getModsRoot,
   getOverlayState,
   logsInfo,
+  onLogsShareProgress,
   openLogsFolder,
+  shareLogs,
   type LogGroup,
   type LogsInfo,
   type LogsKind,
+  type LogsShare,
   overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
@@ -77,6 +83,7 @@ import { getLocale, LOCALE_OPTIONS } from "../../i18n/core";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { prettyHotkey } from "../../lib/hotkey";
 import { formatBytes, formatDateShort } from "../../lib/mods";
+import { copyText } from "../../lib/clipboard";
 import { useTour } from "../Tour/Tour";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
@@ -343,6 +350,12 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // something just went wrong, and a count from ten minutes ago answers the wrong question.
   const [logs, setLogs] = useState<LogsInfo | null>(null);
   const [exportingLogs, setExportingLogs] = useState(false);
+  // The link the last share came back with, kept on screen for the rest of the session:
+  // it lands on the clipboard by itself, and a clipboard that has since been used for
+  // something else is the one way an uploaded bundle is lost for good.
+  const [sharedLogs, setSharedLogs] = useState<LogsShare | null>(null);
+  const [sharingLogs, setSharingLogs] = useState<string | null>(null);
+  const [copiedLogsLink, setCopiedLogsLink] = useState(false);
   const refreshLogs = useCallback(() => {
     logsInfo()
       .then(setLogs)
@@ -380,6 +393,54 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       toast.error(t("logs.saveFailed"), { description: String(e) });
     } finally {
       setExportingLogs(false);
+    }
+  };
+
+  /** Zip the same logs and put them on the file host, handing back one link.
+   *
+   * Saving to disk is only half of "send me your logs" — the file still has to get to
+   * whoever asked, and that is where a bug report usually stalls. This ends with a link
+   * on the clipboard. It goes to a public host, hence the warning that sits under it. */
+  const shareLogsNow = async () => {
+    setSharingLogs(t("logs.sharePacking"));
+    setSharedLogs(null);
+    setCopiedLogsLink(false);
+    const unlisten = await onLogsShareProgress((p) => {
+      // "done" arrives just before the call returns; letting it through would flash the
+      // button back to "Packing…" for a frame on the way out.
+      if (p.phase === "done") return;
+      setSharingLogs(
+        p.phase === "uploading" ? p.message || t("logs.sharing") : t("logs.sharePacking"),
+      );
+    });
+    try {
+      const share = await shareLogs();
+      setSharedLogs(share);
+      // Straight to the clipboard: the link exists to be pasted somewhere, and someone
+      // who has just waited out an upload shouldn't have to click again to collect it.
+      const copied = await copyText(shareLinkText(share));
+      setCopiedLogsLink(copied);
+      toast.success(t("logs.shared"), {
+        description: copied
+          ? t("logs.sharedCopied", { size: formatBytes(share.size) })
+          : t("logs.sharedDesc", { size: formatBytes(share.size) }),
+      });
+      refreshLogs();
+    } catch (e) {
+      toast.error(t("logs.shareFailed"), {
+        description: String(e).replace(/^Error:\s*/, ""),
+      });
+    } finally {
+      unlisten();
+      setSharingLogs(null);
+    }
+  };
+
+  const copyLogsLink = async () => {
+    if (!sharedLogs) return;
+    if (await copyText(shareLinkText(sharedLogs))) {
+      setCopiedLogsLink(true);
+      toast.success(t("logs.linkCopied"));
     }
   };
 
@@ -1724,15 +1785,80 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               group={logs?.game}
               onOpen={() => openLogs("game")}
             />
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={saveLogs} disabled={exportingLogs}>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={saveLogs}
+                disabled={exportingLogs || !!sharingLogs}
+              >
                 <Download className="size-3.5" />
                 {exportingLogs ? t("logs.saving") : t("logs.save")}
               </Button>
-              <Button variant="outline" size="sm" onClick={refreshLogs} disabled={exportingLogs}>
+              {/* The same zip, uploaded — for the far more common case where the logs are
+                  wanted by someone who isn't sitting at this machine. */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={shareLogsNow}
+                disabled={exportingLogs || !!sharingLogs}
+              >
+                {sharingLogs ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Share2 className="size-3.5" />
+                )}
+                {sharingLogs || t("logs.share")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshLogs}
+                disabled={exportingLogs || !!sharingLogs}
+              >
                 <RefreshCw className="size-3.5" /> {t("logs.refresh")}
               </Button>
             </div>
+            {sharedLogs && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-2">
+                  {/* One link is a field; a sliced bundle is a numbered list, and an
+                      `input` would eat the newlines that keep the parts apart. */}
+                  {sharedLogs.parts.length > 1 ? (
+                    <textarea
+                      readOnly
+                      value={shareLinkText(sharedLogs)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="h-20 min-w-0 flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] leading-snug text-muted-foreground"
+                    />
+                  ) : (
+                    <input
+                      readOnly
+                      value={sharedLogs.url}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground"
+                    />
+                  )}
+                  <Button variant="outline" size="sm" onClick={copyLogsLink}>
+                    {copiedLogsLink ? (
+                      <Check className="size-3.5" />
+                    ) : (
+                      <Copy className="size-3.5" />
+                    )}
+                    {copiedLogsLink ? t("logs.linkCopiedShort") : t("logs.copyLink")}
+                  </Button>
+                </div>
+                <span className="text-[11.5px] text-muted-foreground">
+                  {t("logs.sharedSummary", {
+                    count: sharedLogs.files,
+                    size: formatBytes(sharedLogs.size),
+                  })}
+                </span>
+                {/* Anonymous public host, no expiry — the one thing worth saying out loud
+                    before a link goes into a Discord thread. */}
+                <span className="text-[11.5px] text-warning">{t("logs.shareWarning")}</span>
+              </div>
+            )}
             <p className="text-[11.5px] leading-relaxed text-faint">
               {t("logs.privacy")}
             </p>
@@ -1941,6 +2067,16 @@ function LogRow({
       </span>
     </div>
   );
+}
+
+/** The link text a share is copied and shown as.
+ *
+ * One line for the single upload a log bundle almost always is. A bundle big enough to
+ * have been sliced needs every part, in order, or it can't be put back together — so
+ * they go out as a numbered list rather than a first link that quietly loses the rest. */
+function shareLinkText(share: LogsShare): string {
+  if (share.parts.length < 2) return share.url;
+  return share.parts.map((url, i) => `${i + 1}/${share.parts.length} ${url}`).join("\n");
 }
 
 /** "today at 14:32" / "Aug 11 at 14:32" for a log's mtime — the age is what matters,

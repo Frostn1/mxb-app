@@ -753,6 +753,34 @@ export function exportLogs(dest: string): Promise<LogsExport> {
   return invoke<LogsExport>("export_logs", { dest });
 }
 
+/** A shared log bundle: what went up, and the link that came back. */
+export interface LogsShare {
+  /** Direct download link — what gets pasted into a bug report. */
+  url: string;
+  /** Every slice's link, in order, when the zip was too big to go up in one piece.
+   *  Empty for the single-part upload a log bundle almost always is. */
+  parts: string[];
+  files: number;
+  /** Bytes of log collected, before compression. */
+  bytes: number;
+  /** Bytes uploaded — the zip, a fraction of `bytes` for plain text. */
+  size: number;
+}
+
+/** Zip every log set, upload it, and hand back the direct link. Same archive as
+ *  {@link exportLogs}, and the same upload the Library's file share goes out on. */
+export function shareLogs(): Promise<LogsShare> {
+  return invoke<LogsShare>("share_logs");
+}
+
+/** Subscribe to log-share pack/upload phase updates. Same payload as the file share's,
+ *  on its own event so Settings never hears the Library's upload. */
+export function onLogsShareProgress(
+  cb: (p: BundleProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<BundleProgress>("logs-share-progress", (event) => cb(event.payload));
+}
+
 /** Hide-to-tray + keep-running toggle. */
 export function setRunInBackground(enabled: boolean): Promise<void> {
   return invoke<void>("set_run_in_background", { enabled });
