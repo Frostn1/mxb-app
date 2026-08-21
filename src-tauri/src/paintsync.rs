@@ -52,6 +52,14 @@ pub fn control_plane() -> String {
 /// non-paint slots carry a file a receiver could use.
 const PAINT_EXT: &str = "pnt";
 
+/// Does this path name a paint? Extension only — the bytes are the decoder's business.
+pub fn is_paint(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case(PAINT_EXT))
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaintEntry {
@@ -304,12 +312,7 @@ fn paints_of(
             continue;
         }
         let path = Path::new(&asset.abs_path);
-        let is_paint = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case(PAINT_EXT))
-            .unwrap_or(false);
-        if !is_paint {
+        if !is_paint(path) {
             continue;
         }
         // A slot the control plane does not store is not worth failing a publish over.

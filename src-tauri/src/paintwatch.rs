@@ -1,9 +1,18 @@
-//! Notice when a paint the 3D viewer is showing gets rewritten on disk.
+//! Notice when a paint gets rewritten on disk, and tell whoever is wearing it.
 //!
 //! A painter's loop is draw, look at it on the model, fix, look again. The "look" step used
 //! to mean closing the viewer and opening it again, because the app read the `.pnt` once and
-//! never asked after it. This watches the file the viewer is currently dressed in and says
-//! when it changes; the frontend re-decodes it and re-dresses the model.
+//! never asked after it. This watches the files it is pointed at and says when they change.
+//!
+//! There are two things that can be dressed in a paint, so there are two watch sets:
+//!
+//! * [`PaintWatcher`] — the paint the 3D viewer is showing. The frontend re-decodes it and
+//!   re-dresses the model.
+//! * [`LookWatcher`] — the paints the *game* is wearing. `main` pushes those into the
+//!   running game by re-running its own look loader.
+//!
+//! Both are the same machinery over a different question, which is why [`start_with`] takes
+//! what to do rather than doing it.
 //!
 //! Two decisions worth keeping:
 //!
@@ -17,10 +26,10 @@
 //!   name is enough. Comparing whole paths would mean out-guessing whatever the OS
 //!   canonicalises them to (`/private/var` on macOS, 8.3 names on Windows) for nothing.
 //!
-//! Scope is deliberately narrow — [`start`] replaces the whole watch set each time, because
-//! there is one viewer and it shows one paint. Unlike `modwatch` there is no settling: a
-//! paint is a single file, the debounce below outlasts writing one, and the caller re-tries
-//! a decode that lands mid-write anyway.
+//! Each set is replace-the-whole-thing rather than add/remove: a viewer shows one paint and
+//! a rider wears one look, so nothing can leak a watch by forgetting to take one back.
+//! Unlike `modwatch` there is no settling: a paint is a single file, the debounce below
+//! outlasts writing one, and the caller re-tries a decode that lands mid-write anyway.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,8 +50,9 @@ const DEBOUNCE: Duration = Duration::from_millis(400);
 /// compare it against the one it asked to watch.
 pub const EVENT: &str = "paint-changed";
 
-/// Upper bound on watched files. The viewer shows one paint; this only exists so a caller
-/// that goes wrong can't turn into a fistful of OS watch handles.
+/// Upper bound on watched files per set. The viewer shows one paint and a look is a bike
+/// paint plus its gear — well inside this. It exists so a caller that goes wrong can't turn
+/// into a fistful of OS watch handles.
 const MAX_WATCHED: usize = 16;
 
 #[derive(Clone, serde::Serialize)]
@@ -59,9 +69,19 @@ pub struct Running {
     live: Arc<AtomicBool>,
 }
 
-/// Tauri-managed handle. `None` when nothing is being previewed.
+/// One replaceable set of folder watches. `None` when the set is empty.
 #[derive(Default)]
-pub struct PaintWatcher(pub Mutex<Option<Running>>);
+pub struct WatchSet(pub Mutex<Option<Running>>);
+
+/// Tauri-managed handle for the viewer's paint. `None` when nothing is being previewed.
+#[derive(Default)]
+pub struct PaintWatcher(pub WatchSet);
+
+/// Tauri-managed handle for the paints the game is wearing. A separate set because the two
+/// answer different questions and change at different times — the viewer's on every preview,
+/// this one only when the loadout does.
+#[derive(Default)]
+pub struct LookWatcher(pub WatchSet);
 
 /// The file name a path ends in, lowercased — what an event is matched on.
 fn file_key(path: &Path) -> Option<String> {
@@ -113,15 +133,20 @@ fn changed_paints(watched: &[String], events: &[PathBuf]) -> Vec<String> {
     out
 }
 
-/// Watch `paths`, replacing whatever was being watched before. An empty list just stops.
+/// Watch `paths`, replacing whatever `set` was watching before. An empty list just stops.
+///
+/// `on_change` is handed every watched path a debounced batch named, at most once each.
+/// Taking it as an argument is what lets one piece of machinery serve both the viewer and
+/// the game — the watching is identical, only the answer differs.
 ///
 /// Best-effort throughout, as the other watchers are: a folder that isn't there or refuses
-/// a watch costs the live reload for that paint, not the viewer.
-/// Generic over the runtime so the tests below can drive it with Tauri's mock one — the
-/// thing worth proving here is that a real save on a real folder comes back out as an
-/// event, and that needs a genuine watcher and a handle to emit through.
-pub fn start<R: Runtime>(app: &AppHandle<R>, state: &PaintWatcher, paths: &[String]) {
-    stop(state);
+/// a watch costs the live reload for that paint, not the caller.
+/// `label` prefixes the log lines, so two sets running at once stay tellable apart.
+pub fn start_with<F>(set: &WatchSet, label: &'static str, paths: &[String], on_change: F)
+where
+    F: Fn(Vec<String>) + Send + 'static,
+{
+    stop(set);
     let folders = by_folder(paths);
     if folders.is_empty() {
         return;
@@ -132,7 +157,6 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, state: &PaintWatcher, paths: &[Stri
     let watched: Vec<String> = folders.values().flatten().cloned().collect();
     let live = Arc::new(AtomicBool::new(true));
     let alive = live.clone();
-    let handle = app.clone();
 
     let mut debouncer = match new_debouncer(DEBOUNCE, move |res: DebounceEventResult| {
         if !alive.load(Ordering::SeqCst) {
@@ -140,14 +164,18 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, state: &PaintWatcher, paths: &[Stri
         }
         let Ok(events) = res else { return };
         let seen: Vec<PathBuf> = events.into_iter().map(|e| e.path).collect();
-        for path in changed_paints(&watched, &seen) {
-            log::info!("paint watcher: {path} changed on disk");
-            let _ = handle.emit(EVENT, Changed { path });
+        let changed = changed_paints(&watched, &seen);
+        if changed.is_empty() {
+            return;
         }
+        for path in &changed {
+            log::info!("{label}: {path} changed on disk");
+        }
+        on_change(changed);
     }) {
         Ok(d) => d,
         Err(e) => {
-            log::warn!("paint watcher: couldn't start: {e}");
+            log::warn!("{label}: couldn't start: {e}");
             return;
         }
     };
@@ -159,22 +187,36 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, state: &PaintWatcher, paths: &[Stri
         match debouncer.watcher().watch(dir, RecursiveMode::NonRecursive) {
             Ok(()) => {
                 any = true;
-                log::info!("paint watcher: watching {}", dir.display());
+                log::info!("{label}: watching {}", dir.display());
             }
-            Err(e) => log::warn!("paint watcher: couldn't watch {}: {e}", dir.display()),
+            Err(e) => log::warn!("{label}: couldn't watch {}: {e}", dir.display()),
         }
     }
     if !any {
         return;
     }
-    *state.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(Running {
+    *set.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(Running {
         _debouncer: debouncer,
         live,
     });
 }
 
-pub fn stop(state: &PaintWatcher) {
-    if let Some(running) = state.0.lock().unwrap_or_else(|e| e.into_inner()).take() {
+/// Watch the paints the 3D viewer is showing, announcing each change to the frontend.
+///
+/// Generic over the runtime so the tests below can drive it with Tauri's mock one — the
+/// thing worth proving here is that a real save on a real folder comes back out as an
+/// event, and that needs a genuine watcher and a handle to emit through.
+pub fn start<R: Runtime>(app: &AppHandle<R>, state: &PaintWatcher, paths: &[String]) {
+    let handle = app.clone();
+    start_with(&state.0, "paint watcher", paths, move |changed| {
+        for path in changed {
+            let _ = handle.emit(EVENT, Changed { path });
+        }
+    });
+}
+
+pub fn stop(set: &WatchSet) {
+    if let Some(running) = set.0.lock().unwrap_or_else(|e| e.into_inner()).take() {
         running.live.store(false, Ordering::SeqCst);
     }
 }
@@ -247,6 +289,47 @@ mod tests {
         assert_eq!(changed_paints(&watched, &burst), owned(&["/mx/paints/Frost.pnt"]));
     }
 
+    /// The two sets are genuinely separate. `start_with` replaces the set it is given and
+    /// nothing else — if it reached the other one, opening the viewer would quietly stop the
+    /// game's paints being watched, and the feature would work until the moment a painter
+    /// looked at what they were painting.
+    #[test]
+    fn one_set_does_not_stop_the_other() {
+        let dir = std::env::temp_dir().join(format!("frost-two-sets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("make the paints folder");
+        let paint = dir.join("Frost.pnt");
+        std::fs::write(&paint, b"first").expect("install a paint");
+        let watched = paint.to_string_lossy().to_string();
+
+        let viewer = WatchSet::default();
+        let look = WatchSet::default();
+        start_with(&viewer, "viewer", std::slice::from_ref(&watched), |_| {});
+
+        let fired: Arc<Mutex<usize>> = Arc::default();
+        let counter = Arc::clone(&fired);
+        start_with(&look, "look", std::slice::from_ref(&watched), move |changed| {
+            *counter.lock().unwrap() += changed.len();
+        });
+
+        // Both sets hold a live watch on the same folder; neither took the other's away.
+        assert!(viewer.0.lock().unwrap().is_some(), "the viewer's set is still watching");
+        assert!(look.0.lock().unwrap().is_some(), "the look set is watching");
+
+        std::thread::sleep(Duration::from_millis(300));
+        std::fs::write(&paint, b"second").expect("save over it");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while *fired.lock().unwrap() == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let hits = *fired.lock().unwrap();
+        stop(&viewer);
+        stop(&look);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(hits > 0, "a save must reach the callback the caller supplied");
+    }
+
     fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
         tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -297,7 +380,7 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(50));
         };
-        stop(&state);
+        stop(&state.0);
         let payloads = seen.lock().unwrap().clone();
         let _ = std::fs::remove_dir_all(&dir);
 
