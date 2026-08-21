@@ -1758,7 +1758,7 @@ export function frostmodInstallRuntime(
   return invoke<RuntimeInstallOutcome>("frostmod_install_runtime", { runtime });
 }
 
-/** Install everything this PC is short of, and put `msvcr90.dll` beside the game exe.
+/** Install everything this PC is short of, and clear a stray `msvcr90.dll` beside the exe.
  *
  *  The repair the warning bar can't reach: it runs whatever detection said, because a
  *  machine can report every runtime present and still fail to start the game. Raises UAC

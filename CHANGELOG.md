@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased — taking back the DLL we planted
+
+### Fixed
+- **MX Bikes crashed with "R6034 — An application has made an attempt to load the C runtime
+  library incorrectly", and this app was the cause.** Since v0.9.2 the FrostMod status poll
+  copied `msvcr90.dll` out of `WinSxS` into the game folder on every start, meaning to serve
+  the plugins with a plain `MSVCR90.dll` import that the redistributable strands. The
+  reasoning was that a loose DLL is invisible to side-by-side binding and so could only ever
+  help those plugins. Half right, and the wrong half mattered: the VC9 CRT polices this
+  itself. `msvcr90.dll` checks at load time that it was resolved through a
+  `Microsoft.VC90.CRT` activation context, and a loose copy beside the exe is by definition
+  outside one, so it refuses to start and takes the process down with it. The copy was
+  therefore never once useful — a plugin carrying a VC90 manifest resolves out of `WinSxS`
+  and never looks at it, and a plugin without one finds it and dies. We had turned a plugin
+  that quietly failed to load into a modal that killed the game.
+- **The app now removes the copy it made.** Deleting the code that placed it does nothing for
+  the players already carrying one, so the same poll that used to lay the file down now takes
+  it away, and "Repair runtimes" does too. It only ever deletes a `msvcr90.dll` whose bytes
+  match a VC90 assembly on this PC — that's where ours came from, and it's what stops us
+  reaching for a file somebody else put there on purpose. A `Microsoft.VC90.CRT` folder beside
+  the exe is left strictly alone: that arrangement is a real side-by-side identity, it
+  satisfies the CRT's check, and it works. If the game is open and holding the file, the next
+  start tries again.
+- **A loose `msvcr90.dll` no longer counts as "VC90 is present".** It isn't a route to the
+  CRT, and counting it let a file we ourselves planted quietly satisfy the check that should
+  have been reporting the machine had no runtime at all.
+
+### Changed
+- "Repair runtimes" no longer offers to put `msvcr90.dll` where the game looks for it, because
+  there is no such place — nothing app-local short of a full private assembly can satisfy the
+  VC9 CRT. It installs the runtimes this PC is short of, both architectures, and clears out
+  what older versions of this app left behind. Plugins with a plain `MSVCR90.dll` import go
+  back to reporting "MSVCR90.dll was not found"; they were never actually fixed, only given a
+  different error.
+
 ## Unreleased — logs as a link
 
 ### Added

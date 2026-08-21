@@ -312,7 +312,7 @@ export const ptBR: Translation = {
     "Não deu para concluir: {{what}}. O Windows precisa da sua permissão, ou o download não chegou — você pode instalar na mão.",
   "runtime.repairNoGameFolder": "Nenhuma pasta do jogo definida",
   "runtime.repairNoGameFolderDesc":
-    "Os componentes estão instalados, mas sem a pasta de instalação não há onde deixar a cópia que o jogo procura. Defina-a acima e repare de novo.",
+    "Os componentes estão instalados, mas sem a pasta de instalação não dá para verificar a pasta do jogo. Defina-a acima e repare de novo.",
   "runtime.repairFailed": "Não foi possível reparar os componentes",
   "update.checkFailed": "Não foi possível verificar as atualizações",
   "update.failed": "A atualização falhou",
@@ -619,7 +619,7 @@ export const ptBR: Translation = {
     "Falta ao Windows um componente do Visual C++ que o FrostMod precisa — instale-o para acabar com o erro \"dll was not found\".",
   "settings.repairRuntimes": "Reparar componentes",
   "settings.repairRuntimesHint":
-    "Instala todos os componentes do Visual C++ que faltam neste PC (32 e 64 bits) e coloca a msvcr90.dll onde o jogo a procura. Vale a pena mesmo que nada acima pareça errado.",
+    "Instala todos os componentes do Visual C++ que faltam neste PC, 32 e 64 bits, e remove o que uma versão anterior deste app deixou na pasta do jogo. Vale a pena mesmo que nada acima pareça errado.",
   "settings.frostmodNeedsRepair":
     "Os arquivos instalados não batem com esta versão — reinstalar resolve.",
   "settings.frostmodRepair": "Reparar instalação",
