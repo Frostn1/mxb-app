@@ -539,13 +539,44 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     if let Some(mods) = &plan.mods_root {
         args.extend(["--mods".into(), mods.to_string_lossy().into_owned()]);
     }
+    // Logged on both sides, as Linux and macOS already are. FrostMod not working is the
+    // single most reported thing about this app, and until now the Windows path — the one
+    // nearly every report comes from — said nothing at all in the log, whether it worked
+    // or not.
+    log::info!("starting FrostMod: {} {:?}", plan.exe.display(), args);
     let child = std::process::Command::new(&plan.exe)
         .current_dir(frostmod_dir(app))
         .args(&args)
         .creation_flags(CREATE_NO_WINDOW)
-        .spawn()?;
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Couldn't start {}: {e}", plan.exe.display()))?;
+    log::info!("FrostMod started (pid {})", child.id());
     *state.0.lock().unwrap() = Some(child);
     Ok(true)
+}
+
+/// Re-arm FrostMod for a game session that has just begun.
+///
+/// FrostMod injects into one game process. When that process goes, so does the injection —
+/// and nothing used to bring it back, because the only automatic start was at app launch.
+/// So the second race of a session ran without it: no live reloads, no model swaps, and no
+/// indication that anything was different from the first.
+///
+/// Called from [`crate::integritywatch`], which already polls for the game starting, and so
+/// covers a launch from Steam or the desktop exactly as well as one from the Play button.
+pub fn on_game_started(app: &AppHandle, cfg: &crate::config::AppConfig) {
+    if !cfg.auto_run_frostmod || !is_installed(app) {
+        return;
+    }
+    let state = app.state::<FrostmodProcess>();
+    match start(app, &state) {
+        Ok(true) => log::info!("FrostMod re-armed for the new game session"),
+        // Already up and holding its reload event, which is the ordinary case when the
+        // launcher outlives a game. Whether it got *into* this game is a separate
+        // question, and `frostmod::attachment` is what answers it.
+        Ok(false) => log::debug!("FrostMod was already running when the game started"),
+        Err(e) => log::warn!("couldn't start FrostMod for the new game session: {e:#}"),
+    }
 }
 
 /// Where the wrapper's own output goes — Proton's on Linux, Wine's on macOS — appended to

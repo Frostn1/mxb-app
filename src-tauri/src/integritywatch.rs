@@ -11,6 +11,13 @@
 //! is a standing watcher started at app launch, not something hung off the Play button — it
 //! sits on a cheap "is the game up?" poll and only does real work while it is.
 //!
+//! Because it is already the one place that notices the game starting, it is also where
+//! FrostMod is re-armed for a new session ([`crate::frostmod_manage::on_game_started`]).
+//! That is a second job for one poll rather than a second poll, and it inherits the reason
+//! this watcher is standing rather than hung off the Play button: the game is just as often
+//! started from Steam. The re-arm sits *above* the `integrityWatch` gate — turning the
+//! scanner off is not a request to stop FrostMod working.
+//!
 //! Two settings, deliberately separate, because they are two different decisions:
 //!
 //!   * `integrityWatch` — scan at all. On by default; it reads the game's own module list and
@@ -203,34 +210,48 @@ pub fn start(app: &AppHandle) {
         }
         refresh_rules(&app).await;
 
+        // The game process, tracked regardless of any setting — `scanned` below is the
+        // scanner's own view, which the `integrityWatch` switch is allowed to reset.
         let mut was_running = false;
+        let mut scanned = false;
         loop {
             let cfg = crate::config::load_or_detect(&app).unwrap_or_default();
+
+            let running = crate::gameproc::is_game_running();
+            let started = running && !was_running;
+            was_running = running;
+
+            // Above the `integrityWatch` gate deliberately: re-arming FrostMod has nothing
+            // to do with cheat scanning, and someone who turned the scanner off has not
+            // asked for FrostMod to stop working.
+            if started {
+                crate::frostmod_manage::on_game_started(&app, &cfg);
+            }
+
             if !cfg.integrity_watch {
                 // Turned off mid-session: forget the last answer so the UI shows "not
                 // watching" rather than a stale verdict from an hour ago.
                 if let Ok(mut slot) = last().lock() {
                     *slot = Report::default();
                 }
-                was_running = false;
+                scanned = false;
                 tokio::time::sleep(IDLE_POLL).await;
                 continue;
             }
 
-            let running = crate::gameproc::is_game_running();
-            if running && !was_running {
+            if running && !scanned {
                 // A new session is the natural moment to pick up rules published since the
                 // app started — someone may have been playing for eight hours.
                 refresh_rules(&app).await;
             }
-            if !running && was_running {
+            if !running && scanned {
                 // The session is over, so the verdict is about a game that no longer exists.
                 if let Ok(mut slot) = last().lock() {
                     *slot = Report::default();
                 }
                 let _ = app.emit(EVENT, Report::default());
             }
-            was_running = running;
+            scanned = running;
 
             if running {
                 scan_once(&app);
