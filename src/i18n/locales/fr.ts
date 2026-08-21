@@ -1471,7 +1471,7 @@ export const fr: Translation = {
   // ── Journaux ───────────────────────────────────────────────────────────────
   "settings.logs": "Journaux",
   "logs.desc":
-    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App, FrostMod et {{game}} ont chacun les leurs — ouvre le dossier qu'il te faut, ou enregistre le tout dans un zip à joindre à un rapport.",
+    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App, FrostMod et {{game}} ont chacun les leurs — ouvre le dossier qu'il te faut, enregistre le tout dans un zip, ou partage-le sous forme de lien à coller dans un rapport.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Ce que l'app elle-même a enregistré",
   "logs.frostmodLogsDesc": "Ce que le loader a écrit dans son propre dossier",
@@ -1490,6 +1490,20 @@ export const fr: Translation = {
   "logs.savedDesc_one": "{{count}} fichier de journal, {{size}}",
   "logs.savedDesc_other": "{{count}} fichiers de journal, {{size}}",
   "logs.saveFailed": "Impossible d'enregistrer les journaux",
+  "logs.share": "Partager les journaux",
+  "logs.sharePacking": "Préparation…",
+  "logs.sharing": "Envoi…",
+  "logs.shared": "Journaux envoyés",
+  "logs.sharedCopied": "{{size}} — le lien est dans ton presse-papiers.",
+  "logs.sharedDesc": "{{size}} — le lien est ci-dessous.",
+  "logs.sharedSummary_one": "{{count}} fichier de journal, {{size}} envoyés.",
+  "logs.sharedSummary_other": "{{count}} fichiers de journal, {{size}} envoyés.",
+  "logs.shareFailed": "Impossible de partager les journaux",
+  "logs.copyLink": "Copier le lien",
+  "logs.linkCopiedShort": "Copié",
+  "logs.linkCopied": "Lien copié",
+  "logs.shareWarning":
+    "Le zip est déposé sur un hébergeur public — n'importe qui avec le lien peut le télécharger, alors ne le donne qu'à la personne qui l'a demandé.",
   "logs.privacy":
     "Les journaux contiennent des chemins de dossiers et ce que faisait l'app — jamais tes mots de passe ni tes cookies de session, et aucun fichier de réglages n'est inclus.",
 

@@ -9,9 +9,10 @@
 //! reporting it is the last person who can tell.
 //!
 //! None of them is somewhere a player finds on their own, and "send me your logs" is the
-//! first thing every bug report asks for. So this module answers three questions for
-//! Settings: where they are, what's actually in there, and how to hand the lot over as
-//! one file.
+//! first thing every bug report asks for. So this module answers four questions for
+//! Settings: where they are, what's actually in there, how to hand the lot over as one
+//! file, and — since the file still has to get to whoever asked — how to turn that file
+//! into a link, through the same upload a shared track goes out on.
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -274,12 +275,100 @@ fn groups(info: &LogsInfo) -> [(&'static str, &LogGroup); 3] {
     [("app", &info.app), ("frostmod", &info.frostmod), ("game", &info.game)]
 }
 
+/// A log bundle that went up to the file host, and the link that came back.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareResult {
+    /// The direct download link — the whole point of the button, pasteable as it stands.
+    pub url: String,
+    /// Every slice's link, in order, on the rare occasion the zip was too big to go up in
+    /// one piece. Empty for the single-part upload every log bundle should be.
+    pub parts: Vec<String>,
+    /// How many log files made it in, as [`ExportResult`] counts them.
+    pub files: usize,
+    /// Bytes of log collected, before compression.
+    pub bytes: u64,
+    /// Bytes actually uploaded — the zip, which for plain text is a fraction of `bytes`.
+    pub size: u64,
+}
+
+/// Phase updates ride their own event, so the Settings share never hears the Library's
+/// upload progress or the other way round.
+pub const SHARE_EVENT: &str = "logs-share-progress";
+
+/// Pack every log set exactly as [`export`] does, upload the zip, and hand back the link.
+///
+/// The save button asks for a folder and leaves the player to attach the file somewhere.
+/// This is the same archive with the last step done for them: one link to paste into a
+/// bug report, uploaded through the same host and the same slicing as a shared track
+/// ([`crate::upload`]). What goes in is unchanged — logs and the summary, never the
+/// config file — because the link is public to anyone who has it.
+pub async fn share(
+    app: &tauri::AppHandle,
+    info: &LogsInfo,
+    summary: &str,
+) -> anyhow::Result<ShareResult> {
+    let work = std::env::temp_dir().join(format!("mxb-logs-share-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work)?;
+    let zip_path = work.join("mxb-app-logs.zip");
+
+    crate::bundle::emit(app, SHARE_EVENT, "bundling", None);
+    // Reading every log is blocking work, and an app log that has been growing for a month
+    // is not small — off the UI thread, the same as the save-to-disk export.
+    let written = {
+        let (info, summary, dest) = (info.clone(), summary.to_string(), zip_path.clone());
+        tauri::async_runtime::spawn_blocking(move || export(&dest, &info, &summary))
+            .await
+            .map_err(|e| anyhow::anyhow!("packing the logs failed: {e}"))??
+    };
+
+    let size = crate::bundle::file_size(&zip_path);
+    let total = crate::bundle::human_size(size);
+    crate::bundle::emit(app, SHARE_EVENT, "uploading", Some(format!("Uploading {total}…")));
+    let client = crate::install::build_client()?;
+    let up = crate::upload::upload_file(&client, &zip_path, |i, n| {
+        let msg = if n > 1 {
+            format!("Uploading part {i} of {n} ({total})…")
+        } else {
+            format!("Uploading {total}…")
+        };
+        crate::bundle::emit(app, SHARE_EVENT, "uploading", Some(msg));
+    })
+    .await?;
+
+    // The zip is on the host now; the copy under temp has done its job either way.
+    let _ = std::fs::remove_dir_all(&work);
+
+    let mut parts = up.parts;
+    let Some(url) = parts.first().cloned() else {
+        anyhow::bail!("the upload returned no link")
+    };
+    // As in the file share: the first slice is the link, and the rest are only carried
+    // when there is more than one to stitch back together.
+    if parts.len() == 1 {
+        parts.clear();
+    }
+
+    crate::bundle::emit(app, SHARE_EVENT, "done", None);
+    Ok(ShareResult { url, parts, files: written.files, bytes: written.bytes, size: up.size })
+}
+
 /// The plain-text header that goes in beside the logs: what was included, and the handful
 /// of facts every report starts by asking for.
-pub fn summary(version: &str, cfg: &AppConfig, info: &LogsInfo) -> String {
+pub fn summary(
+    version: &str,
+    frostmod_version: Option<&str>,
+    cfg: &AppConfig,
+    info: &LogsInfo,
+) -> String {
     let mut out = String::new();
     out.push_str(&format!("MXB App {version}\n"));
     out.push_str(&format!("os: {} ({})\n", std::env::consts::OS, std::env::consts::ARCH));
+    // Which FrostMod is installed, if any. The loader's own log is in the zip beside this,
+    // and "which build wrote it" is the first thing anyone reading that log has to ask —
+    // `version.txt` itself stays out of the archive as one of the files we put there.
+    out.push_str(&format!("frostmod: {}\n", frostmod_version.unwrap_or("(not installed)")));
     out.push_str(&format!("game: {}\n", cfg.game().display));
     out.push_str(&format!("mods folder: {}\n", show(&cfg.mods_path)));
     out.push_str(&format!("install folder: {}\n", show(&cfg.install_dir())));
@@ -418,6 +507,32 @@ mod tests {
         assert_eq!(group.dir, install.to_string_lossy());
     }
 
+    /// The header is the first thing anyone reading the archive sees, and the FrostMod
+    /// build it names is the one that wrote the loader log sitting beside it — `version.txt`
+    /// itself is filtered out of the zip, so this line is the only place it appears.
+    #[test]
+    fn the_summary_names_the_loader_build() {
+        let root = tmpdir("summary");
+        let app_dir = root.join("applogs");
+        let frostmod_dir = root.join("frostmod");
+        for d in [&app_dir, &frostmod_dir] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        write(&frostmod_dir, "frostmod.log", "loader side");
+
+        let cfg = AppConfig::default();
+        let info = info(&app_dir, &frostmod_dir, &cfg);
+
+        let text = summary("9.9.9", Some("v0.13.0"), &cfg, &info);
+        assert!(text.contains("MXB App 9.9.9"), "{text}");
+        assert!(text.contains("frostmod: v0.13.0"), "{text}");
+        assert!(text.contains("frostmod.log"), "{text}");
+
+        // Nothing installed is a fact worth stating, not a line to leave out.
+        assert!(summary("9.9.9", None, &cfg, &info).contains("frostmod: (not installed)"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn export_holds_every_group_and_a_summary() {
         let root = tmpdir("export");
@@ -443,7 +558,7 @@ mod tests {
         assert_eq!(info.game.files.len(), 1);
 
         let dest = root.join("out").join("logs.zip");
-        let result = export(&dest, &info, &summary("9.9.9", &cfg, &info)).unwrap();
+        let result = export(&dest, &info, &summary("9.9.9", Some("v0.13.0"), &cfg, &info)).unwrap();
         assert_eq!(result.files, 3);
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();

@@ -1460,7 +1460,7 @@ export const ptBR: Translation = {
   // ── Logs ───────────────────────────────────────────────────────────────────
   "settings.logs": "Logs",
   "logs.desc":
-    "Os arquivos para enviar quando algo dá errado. MXB App, FrostMod e {{game}} guardam os seus separadamente — abra a pasta que precisar, ou salve todos num zip para anexar a um relato de bug.",
+    "Os arquivos para enviar quando algo dá errado. MXB App, FrostMod e {{game}} guardam os seus separadamente — abra a pasta que precisar, salve todos num zip, ou compartilhe como um link para colar num relato de bug.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "O que o próprio app registrou",
   "logs.frostmodLogsDesc": "O que o loader escreveu na pasta dele",
@@ -1479,6 +1479,20 @@ export const ptBR: Translation = {
   "logs.savedDesc_one": "{{count}} arquivo de log, {{size}}",
   "logs.savedDesc_other": "{{count}} arquivos de log, {{size}}",
   "logs.saveFailed": "Não foi possível salvar os logs",
+  "logs.share": "Compartilhar logs",
+  "logs.sharePacking": "Empacotando…",
+  "logs.sharing": "Enviando…",
+  "logs.shared": "Logs enviados",
+  "logs.sharedCopied": "{{size}} — o link está na sua área de transferência.",
+  "logs.sharedDesc": "{{size}} — o link está abaixo.",
+  "logs.sharedSummary_one": "{{count}} arquivo de log, {{size}} enviados.",
+  "logs.sharedSummary_other": "{{count}} arquivos de log, {{size}} enviados.",
+  "logs.shareFailed": "Não foi possível compartilhar os logs",
+  "logs.copyLink": "Copiar link",
+  "logs.linkCopiedShort": "Copiado",
+  "logs.linkCopied": "Link copiado",
+  "logs.shareWarning":
+    "O zip fica num host público — qualquer pessoa com o link pode baixá-lo, então passe só para quem pediu.",
   "logs.privacy":
     "Os logs contêm caminhos de pastas e o que o app estava fazendo — nunca suas senhas ou cookies de sessão, e nenhum arquivo de configurações é incluído.",
 

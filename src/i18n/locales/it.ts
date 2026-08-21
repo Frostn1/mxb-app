@@ -1462,7 +1462,7 @@ export const it: Translation = {
   // ── Log ────────────────────────────────────────────────────────────────────
   "settings.logs": "Log",
   "logs.desc":
-    "I file da inviare quando qualcosa non va. MXB App, FrostMod e {{game}} tengono ciascuno i propri — apri la cartella che ti serve, oppure salvali tutti in un unico zip da allegare a una segnalazione.",
+    "I file da inviare quando qualcosa non va. MXB App, FrostMod e {{game}} tengono ciascuno i propri — apri la cartella che ti serve, salvali tutti in un unico zip, oppure condividili come link da incollare in una segnalazione.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Quello che ha registrato l'app stessa",
   "logs.frostmodLogsDesc": "Quello che il loader ha scritto nella sua cartella",
@@ -1481,6 +1481,20 @@ export const it: Translation = {
   "logs.savedDesc_one": "{{count}} file di log, {{size}}",
   "logs.savedDesc_other": "{{count}} file di log, {{size}}",
   "logs.saveFailed": "Impossibile salvare i log",
+  "logs.share": "Condividi i log",
+  "logs.sharePacking": "Preparazione…",
+  "logs.sharing": "Caricamento…",
+  "logs.shared": "Log caricati",
+  "logs.sharedCopied": "{{size}} — il link è nei tuoi appunti.",
+  "logs.sharedDesc": "{{size}} — il link è qui sotto.",
+  "logs.sharedSummary_one": "{{count}} file di log, {{size}} caricati.",
+  "logs.sharedSummary_other": "{{count}} file di log, {{size}} caricati.",
+  "logs.shareFailed": "Impossibile condividere i log",
+  "logs.copyLink": "Copia link",
+  "logs.linkCopiedShort": "Copiato",
+  "logs.linkCopied": "Link copiato",
+  "logs.shareWarning":
+    "Lo zip sta su un host pubblico — chiunque abbia il link può scaricarlo, quindi dallo solo a chi te l'ha chiesto.",
   "logs.privacy":
     "I log contengono percorsi di cartelle e cosa stava facendo l'app — mai le tue password o i cookie di sessione, e nessun file di impostazioni è incluso.",
 
