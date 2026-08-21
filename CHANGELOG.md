@@ -13,6 +13,12 @@
 - **Paints that arrive mid-session are applied without a rejoin.** Paint sync already
   installed other riders' liveries while you rode and then left them sitting on disk until
   the next session. They now go into the running game the moment they land.
+- Three new supporters credited in Settings → Supporters: RodaksRevivalYT | Black Rifle,
+  MintyFlow and Thomas.
+
+### Changed
+- The supporters list now renders in the order `supporters.json` is written in, rather than
+  alphabetically within each tier — the file is hand-edited, so its order is a decision.
 
 ## Unreleased — taking back the DLL we planted
 
