@@ -84,6 +84,12 @@
   The app now checks the tree when a session starts and names the count, the provider and a
   few of the files. It only ever reads attributes — never opens a placeholder, which is what
   would trigger a download.
+- **Bikes you no longer ride can be removed from the Presets picker.** The Bike list is what
+  your profile carries, not what's installed — the game adds a column for every bike you have
+  ever sat on and never takes one out, so bikes whose mod is long gone kept filling the list
+  with nothing in the Library to uninstall. Each row now has a trash can that clears that bike
+  and the look saved for it out of `profile.ini`, with the previous file kept beside it as
+  `profile.ini.bak`. Nothing installed is deleted, and riding that bike again adds it back.
 
 ### Fixed
 - **Steam's own runtime no longer reports as suspicious.** `tier0_s64.dll` and

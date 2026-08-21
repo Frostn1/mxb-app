@@ -134,6 +134,13 @@ export const fr: Translation = {
   "presets.help":
     "Enregistrez un look de pilote complet et chargez-le sur une moto à la demande.",
   "presets.profile": "Profil",
+  "presets.forgetBike": "Retirer la moto",
+  "presets.forgetBikeOne": "Retirer {{name}} de ce profil",
+  "presets.forgetBikeQ": "Retirer cette moto ?",
+  "presets.forgetBikeBody":
+    "« {{name}} » quitte la liste des motos de ce profil, avec le look enregistré pour elle. Rien d’installé n’est supprimé : si vous roulez de nouveau avec cette moto, le jeu la remet aussitôt.",
+  "presets.bikeForgotten": "« {{name}} » retirée de ce profil.",
+  "presets.forgetFailed": "Impossible de retirer cette moto",
   "presets.namePlaceholder": "Nom du preset…",
   "presets.savePreset": "Enregistrer le preset",
   "presets.saveChanges": "Enregistrer les modifications",

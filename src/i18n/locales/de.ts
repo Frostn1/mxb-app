@@ -137,6 +137,13 @@ export const de: Translation = {
   "presets.help":
     "Speichere einen kompletten Fahrer-Look und lade ihn auf Kommando auf ein Motorrad.",
   "presets.profile": "Profil",
+  "presets.forgetBike": "Bike entfernen",
+  "presets.forgetBikeOne": "{{name}} aus diesem Profil entfernen",
+  "presets.forgetBikeQ": "Dieses Bike entfernen?",
+  "presets.forgetBikeBody":
+    "„{{name}}“ verschwindet aus der Bike-Liste dieses Profils, samt dem dafür gespeicherten Look. Installiertes wird nicht gelöscht — fährst du das Bike wieder, trägt das Spiel es sofort erneut ein.",
+  "presets.bikeForgotten": "„{{name}}“ aus diesem Profil entfernt.",
+  "presets.forgetFailed": "Bike konnte nicht entfernt werden",
   "presets.namePlaceholder": "Preset-Name…",
   "presets.savePreset": "Preset speichern",
   "presets.saveChanges": "Änderungen speichern",

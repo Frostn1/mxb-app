@@ -2013,6 +2013,16 @@ export function presetsListBikes(profile: string): Promise<string[]> {
   return invoke<string[]>("presets_list_bikes", { profile });
 }
 
+/**
+ * Drop a bike from a profile and return what's left.
+ *
+ * The list above is `profile.ini`, not the mods folder, so bikes whose mod is gone linger
+ * there with nothing in the Library to uninstall. This is how they go.
+ */
+export function presetsForgetBike(profile: string, bikeid: string): Promise<string[]> {
+  return invoke<string[]>("presets_forget_bike", { profile, bikeid });
+}
+
 /** Read a bike's current cosmetic column (for "capture current look"). */
 export function presetsReadLoadout(
   profile: string,

@@ -129,6 +129,13 @@ export const en = {
   "presets.help":
     "Save a full rider look and load it onto a bike on command.",
   "presets.profile": "Profile",
+  "presets.forgetBike": "Remove bike",
+  "presets.forgetBikeOne": "Remove {{name}} from this profile",
+  "presets.forgetBikeQ": "Remove this bike?",
+  "presets.forgetBikeBody":
+    "“{{name}}” leaves this profile’s bike list, along with the look saved for it. Nothing installed is deleted — if you ride that bike again the game adds it straight back.",
+  "presets.bikeForgotten": "Removed “{{name}}” from this profile.",
+  "presets.forgetFailed": "Couldn’t remove that bike",
   "presets.namePlaceholder": "Preset name…",
   "presets.savePreset": "Save preset",
   "presets.saveChanges": "Save changes",

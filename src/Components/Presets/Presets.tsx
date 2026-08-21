@@ -41,6 +41,7 @@ import {
   onModsChanged,
   presetsListProfiles,
   presetsListBikes,
+  presetsForgetBike,
   presetsReadLoadout,
   presetsSlots,
   presetsApply,
@@ -143,6 +144,11 @@ export default function Presets({
   const [profile, setProfile] = useState<string>("");
   const [bikes, setBikes] = useState<string[]>([]);
   const [bike, setBike] = useState<string>("");
+  // Controlled so the trash on a row can shut the picker before its dialog opens —
+  // an open Select and an open Dialog fight over focus.
+  const [bikeMenuOpen, setBikeMenuOpen] = useState(false);
+  /** The bike the "forget this bike" dialog is about, if it's up. */
+  const [forgetBike, setForgetBike] = useState<string | null>(null);
   const [scans, setScans] = useState<Scans | null>(null);
   const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
   const [saved, setSaved] = useState<Preset[]>([]);
@@ -215,6 +221,27 @@ export default function Presets({
       cancelled = true;
     };
   }, [profile]);
+
+  /** Drop a bike's column from `profile.ini` and re-point the picker at what's left. */
+  const doForgetBike = useCallback(
+    async (target: string) => {
+      setBusy(true);
+      try {
+        const left = await presetsForgetBike(profile, target);
+        setBikes(left);
+        setBike((b) => (b === target ? left[0] ?? "" : b));
+        setForgetBike(null);
+        toast.success(t("presets.bikeForgotten", { name: target }));
+      } catch (e) {
+        toast.error(t("presets.forgetFailed"), {
+          description: String(e).replace(/^Error:\s*/, ""),
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [profile, t],
+  );
 
   const capture = useCallback(async () => {
     if (!profile || !bike) return;
@@ -469,13 +496,43 @@ export default function Presets({
                 <span className="text-[11px] font-medium text-muted-foreground">
                   {t("slotGroup.bike")}
                 </span>
-                <Select value={bike} onValueChange={setBike}>
+                <Select
+                  value={bike}
+                  onValueChange={setBike}
+                  open={bikeMenuOpen}
+                  onOpenChange={setBikeMenuOpen}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={t("slotGroup.bike")} />
                   </SelectTrigger>
                   <SelectContent>
                     {bikes.map((b) => (
-                      <SelectItem key={b} value={b}>
+                      <SelectItem
+                        key={b}
+                        value={b}
+                        trailing={
+                          <button
+                            type="button"
+                            title={t("presets.forgetBike")}
+                            aria-label={t("presets.forgetBikeOne", { name: b })}
+                            className="rounded p-1 text-faint opacity-60 transition-colors hover:bg-destructive/15 hover:text-destructive hover:opacity-100"
+                            // Radix selects a row on pointer-up (mouse) or click (keyboard),
+                            // both of which bubble from here — so neither may reach it.
+                            onPointerUp={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setBikeMenuOpen(false);
+                              // A tick later: a closing Select hands focus back to its
+                              // trigger, which would yank it straight out of a dialog
+                              // mounted in the same commit.
+                              setTimeout(() => setForgetBike(b), 0);
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        }
+                      >
                         {b}
                       </SelectItem>
                     ))}
@@ -668,6 +725,30 @@ export default function Presets({
         onConfirm={() => void commitSave()}
         onCancel={() => setConfirmOpen(false)}
       />
+      <Dialog open={Boolean(forgetBike)} onOpenChange={(o) => !o && setForgetBike(null)}>
+        <DialogContent className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>{t("presets.forgetBikeQ")}</DialogTitle>
+            <DialogDescription>
+              {t("presets.forgetBikeBody", { name: forgetBike ?? "" })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setForgetBike(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={busy}
+              onClick={() => forgetBike && void doForgetBike(forgetBike)}
+            >
+              <Trash2 className="size-3.5" />
+              {t("presets.forgetBike")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <ShareDialog preset={sharePreset} onClose={() => setSharePreset(null)} />
       <ImportDialog
         open={importOpen}
