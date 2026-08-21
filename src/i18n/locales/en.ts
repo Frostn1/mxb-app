@@ -528,6 +528,7 @@ export const en = {
   "modDetail.stagePlace": "Place",
   "modDetail.stageReload": "Reload",
   "modDetail.modFiles": "Mod files",
+  "modDetail.loadFailed": "Couldn't load this mod",
   "modDetail.copied": "Copied",
   "modDetail.copy": "Copy",
   "modDetail.addToLibrary": "Add to Library",

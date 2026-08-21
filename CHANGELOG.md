@@ -18,6 +18,22 @@
   question anyone reading it has; `version.txt` itself stays out, being one of the files we
   put in that folder ourselves.
 
+## 2026-08-20
+
+### Fixed
+- **Opening a mod no longer dead-ends on a Cloudflare refusal.** mxb-mods.com guards its
+  rendered pages far more tightly than its JSON API, so the catalog could browse fine while a
+  single mod came back "refused the request (403)". The fallback that exists to rescue that
+  couldn't: it asked the browser to `fetch()` the page, and a `fetch()` of a challenged URL is
+  answered with the check itself — only a navigation clears it. The hidden window now navigates
+  to the page and reads it, and the HTTP client asks for a page the way a browser does rather
+  than as if a script wanted JSON.
+- **The hidden mxb-mods.com window no longer reports itself ready while still on the check.**
+  It only asked whether script could run, which is just as true on Cloudflare's "Just a
+  moment…" page, so requests were sent from the interstitial and refused.
+- **The mod page's error now has the Retry button it tells you to hit**, and says so in your
+  own language instead of English.
+
 ## 2026-08-19
 
 ### Fixed

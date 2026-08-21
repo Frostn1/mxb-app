@@ -153,10 +153,64 @@ fn on_webview() -> bool {
 /// `GET` with backoff over the transient blocks above. Transport errors retry too, which
 /// is what `install::get_with_retry` already does for download hosts.
 async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<Fetched> {
+    get(url, params, Want::Api).await
+}
+
+/// `GET` a rendered page, asked for the way a browser asks for one.
+///
+/// Its own entry point because Cloudflare guards the rendered pages far more tightly than the
+/// JSON API — a user whose catalog browses fine can still be refused the moment they open a
+/// single mod, which is the whole shape of this failure.
+async fn get_page(url: &str) -> anyhow::Result<Fetched> {
+    get(url, &[], Want::Page).await
+}
+
+/// Which shape of request this is, and therefore what it has to look like on the wire.
+#[derive(Clone, Copy)]
+enum Want {
+    /// The WP REST API. Script asks for these in a browser, and [`client`]'s default headers
+    /// already say exactly that.
+    Api,
+    /// A rendered page. A browser *navigates* to these — see [`page_headers`] for the HTTP
+    /// client and [`crate::mxb_fetch::read_page`] for the WebView.
+    Page,
+}
+
+/// The headers a browser sends when it navigates to a page, replacing the JSON-fetch defaults
+/// [`build_client`] sets.
+///
+/// Those defaults describe a same-origin `fetch` for JSON, which is what every REST call is.
+/// Sending them for a rendered page asks Cloudflare to believe a script wanted an HTML
+/// document — a shape no browser produces, on the one path its bot rules actually guard.
+fn page_headers() -> reqwest::header::HeaderMap {
+    use reqwest::header::{HeaderMap, HeaderValue};
+    let mut headers = HeaderMap::new();
+    for (k, v) in [
+        (
+            "accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,\
+             image/apng,*/*;q=0.8",
+        ),
+        ("sec-fetch-mode", "navigate"),
+        ("sec-fetch-dest", "document"),
+        // A page reached by clicking a link on the site, which is what this stands in for.
+        ("sec-fetch-site", "same-origin"),
+        ("sec-fetch-user", "?1"),
+        ("upgrade-insecure-requests", "1"),
+    ] {
+        headers.insert(k, HeaderValue::from_static(v));
+    }
+    headers
+}
+
+async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result<Fetched> {
     if on_webview() {
         // No backoff loop here: the bridge is a real browser, so a 429/503 it gets is one
         // the site means, and it has its own timeout.
-        return crate::mxb_fetch::get(url, params).await;
+        return match want {
+            Want::Api => crate::mxb_fetch::get(url, params).await,
+            Want::Page => crate::mxb_fetch::read_page(url).await,
+        };
     }
 
     const ATTEMPTS: u32 = 3;
@@ -164,7 +218,12 @@ async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
         let started = Instant::now();
-        match client.get(url).query(params).send().await {
+        let req = client.get(url).query(params);
+        let req = match want {
+            Want::Api => req,
+            Want::Page => req.headers(page_headers()),
+        };
+        match req.send().await {
             Ok(resp) if !worth_retrying(resp.status()) => {
                 // Debug, not info: search runs on every keystroke, and a line per keystroke
                 // would bury the one failure worth reading. `MXB_LOG=debug` turns it on.
@@ -594,7 +653,7 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // swallowed: a 403 is `Ok(resp)`, so its error body went to the parsers and produced
     // zero downloads — the page then said "No download link was found on this page"
     // rather than "we couldn't read the page". Surface it instead.
-    let resp = get_with_retry(&link, &[]).await?;
+    let resp = get_page(&link).await?;
     if !resp.is_success() {
         return Err(refusal("the mod page", &resp));
     }
@@ -982,6 +1041,23 @@ fn dedup(v: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rendered pages are guarded far more tightly than the JSON API, and asking for one
+    /// with the client's JSON-fetch defaults describes a request no browser makes: a script
+    /// wanting an HTML document. Every default this overrides is one that said so.
+    #[test]
+    fn a_page_is_asked_for_the_way_a_browser_navigates() {
+        let h = page_headers();
+        assert_eq!(h.get("sec-fetch-dest").unwrap(), "document");
+        assert_eq!(h.get("sec-fetch-mode").unwrap(), "navigate");
+        assert!(h.get("accept").unwrap().to_str().unwrap().starts_with("text/html"));
+        // A continued string literal is easy to leave a newline in, and a header value with
+        // one in it is rejected outright — which would fail only on the blocked user's machine.
+        for (_, v) in h.iter() {
+            let v = v.to_str().unwrap();
+            assert!(!v.contains('\n') && !v.contains("  "), "{v:?}");
+        }
+    }
 
     #[test]
     fn reads_every_embedded_term_name() {
