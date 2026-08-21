@@ -3765,14 +3765,33 @@ async fn export_logs(app: tauri::AppHandle, dest: String) -> Result<logs::Export
     let version = app.package_info().version.to_string();
     let log_dir = app_log_dir(&app);
     let frostmod_dir = frostmod_manage::frostmod_dir(&app);
+    let frostmod_version = frostmod_manage::installed_version(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).unwrap_or_default();
         let info = logs::info(&log_dir, &frostmod_dir, &cfg);
-        let summary = logs::summary(&version, &cfg, &info);
+        let summary = logs::summary(&version, frostmod_version.as_deref(), &cfg, &info);
         logs::export(std::path::Path::new(&dest), &info, &summary).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| format!("export_logs task failed: {e}"))?
+}
+
+/// Zip every set of logs and upload it, handing back the direct link.
+///
+/// The same archive `export_logs` writes to disk, taken one step further: what a bug
+/// report needs is a link, and asking a player to find a save dialog, then a file, then an
+/// upload box is where "send me your logs" usually stalls. The upload is the one the
+/// Library's file share uses, so the ceiling and the slicing are already understood.
+#[tauri::command]
+async fn share_logs(app: tauri::AppHandle) -> Result<logs::ShareResult, String> {
+    let version = app.package_info().version.to_string();
+    let log_dir = app_log_dir(&app);
+    let frostmod_dir = frostmod_manage::frostmod_dir(&app);
+    let cfg = config::load(&app).unwrap_or_default();
+    let info = logs::info(&log_dir, &frostmod_dir, &cfg);
+    let summary =
+        logs::summary(&version, frostmod_manage::installed_version(&app).as_deref(), &cfg, &info);
+    logs::share(&app, &info, &summary).await.map_err(|e| format!("{e:#}"))
 }
 
 /// Where `tauri_plugin_log`'s `LogDir` target writes. Empty when the path can't be
@@ -6624,6 +6643,7 @@ fn main() {
             uninstall_mod,
             reveal_in_explorer,
             logs_info,
+            share_logs,
             open_logs_folder,
             export_logs,
             set_game_path,

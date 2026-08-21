@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — logs as a link
+
+### Added
+- **Share logs.** Settings → Logs already named all three log sets and saved them into one
+  zip; the file still had to be got to whoever asked, which is where "send me your logs"
+  usually stalls — a save dialog, then a file to find, then somewhere to upload it. **Share
+  logs** packs the same archive and uploads it through the same host a shared track goes out
+  on, then puts the direct link on the clipboard and leaves it on screen with a Copy button.
+  What goes in is what **Save logs…** already packed: the three log sets and the
+  `summary.txt` header (app version, OS, game, folders, and what was collected) — never the
+  config file, which holds session cookies and shop credentials. The link is public to
+  anyone holding it, and the page says so under the field. A bundle big enough to be sliced
+  comes back as a numbered list of parts rather than a first link that loses the rest.
+- **`summary.txt` now names the installed FrostMod build**, in the saved zip as well as the
+  shared one. The loader's log is in the archive and "which build wrote it" is the first
+  question anyone reading it has; `version.txt` itself stays out, being one of the files we
+  put in that folder ourselves.
+
 ## 2026-08-20
 
 ### Fixed
