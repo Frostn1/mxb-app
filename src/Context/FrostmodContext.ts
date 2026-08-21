@@ -43,8 +43,8 @@ export interface FrostmodContextValue {
   /** True while a full runtime repair is in flight. */
   repairingRuntimes: boolean;
   /**
-   * Install every Visual C++ runtime this PC is short of, then place `msvcr90.dll` beside
-   * the game executable.
+   * Install every Visual C++ runtime this PC is short of, and remove a stray `msvcr90.dll`
+   * beside the game executable if an older build of this app left one there.
    *
    * Unlike {@link installRuntime} this isn't gated on anything having been detected as
    * missing, which is the point of it: a PC can report every runtime present and still

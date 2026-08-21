@@ -11,28 +11,43 @@
 //! versions `9.0.21022.8` and `9.0.30729.1`). That resolves machine-wide out of `WinSxS`,
 //! or out of a private assembly folder sitting beside the exe.
 //!
-//! The part that matters, and that an earlier version of this module got wrong: **the
-//! redistributable does not put `msvcr90.dll` anywhere on the ordinary DLL search path.**
-//! It registers the side-by-side assembly under `WinSxS`, and reaching that requires the
-//! loading module to *ask for it by manifest*. The game does. A module that doesn't —
+//! The redistributable does not put `msvcr90.dll` anywhere on the ordinary DLL search
+//! path. It registers the side-by-side assembly under `WinSxS`, and reaching that requires
+//! the loading module to *ask for it by manifest*. The game does. A module that doesn't —
 //! anything with a plain `MSVCR90.dll` import and no VC90 manifest, which is most
-//! community plugins built with VS2008 — gets the ordinary search order instead: the
-//! exe's own folder, `System32`, `PATH`. The redistributable touches none of those.
+//! community plugins built with VS2008 — gets the ordinary search order instead: the exe's
+//! own folder, `System32`, `PATH`. The redistributable touches none of those.
 //!
 //! So the two failures read differently, and the wording in the dialog tells them apart:
 //!
 //! * *"the side-by-side configuration is incorrect"* (error 14001) — the **game's**
 //!   manifested dependency is unsatisfiable. Installing the redistributable fixes it.
 //! * *"MSVCR90.dll was not found"* / *"is missing from your computer"* — a **plain
-//!   import** went unresolved. Installing the redistributable cannot fix this, because
-//!   nothing it installs lands on the search path. Only a copy of `msvcr90.dll` in the
-//!   game folder does.
+//!   import** went unresolved.
 //!
-//! Hence [`ensure_app_local_msvcr90`]: the remedy places the DLL beside the exe, where
-//! both kinds of consumer can reach it. It is deliberately a *bare* copy and not a
-//! private assembly folder — a private assembly participates in side-by-side binding and
-//! a version-mismatched one could hijack a binding that currently works, whereas a bare
-//! DLL in the app directory is invisible to SxS and only ever serves plain imports.
+//! **The second one has no app-local cure, and an earlier version of this module shipped
+//! one anyway.** It copied `msvcr90.dll` out of `WinSxS` and laid it beside the exe, on the
+//! reasoning that a loose DLL is invisible to side-by-side binding and so can only ever
+//! serve the plain imports the redistributable strands. The first half is true. The second
+//! does not follow, because the VC9 CRT polices this itself: `msvcr90.dll` checks at load
+//! time that it was resolved through a `Microsoft.VC90.CRT` activation context, and a loose
+//! copy in the exe's own directory is by definition outside one. It refuses to initialise
+//! and takes the process down with
+//!
+//! ```text
+//! R6034 — An application has made an attempt to load the C runtime library incorrectly.
+//! ```
+//!
+//! Which makes the copy never once helpful and frequently fatal. A module carrying a VC90
+//! manifest resolves from `WinSxS` and never looks at it; a module without one finds it and
+//! dies. We turned a plugin that quietly failed to load into a modal that killed the game —
+//! see [`remove_stray_msvcr90`], which now takes back the copies we made.
+//!
+//! What does work app-locally is a *private assembly*: a `Microsoft.VC90.CRT` folder beside
+//! the exe holding the DLL and its manifest, which is a real side-by-side identity and
+//! satisfies the check. PiBoSo installers have historically laid one down, so [`vc90_present`]
+//! counts it. We don't build one — it participates in binding, and a version-mismatched one
+//! could hijack a binding that currently works. The redistributable is the cure we offer.
 //!
 //! **VC140 (Visual C++ 2015–2022).** `frostmod.dll` and `frostmod.exe` are modern MSVC
 //! builds. Their import tables name `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`,
@@ -189,12 +204,18 @@ fn entry_version(name: &str) -> [u32; 4] {
     out
 }
 
+/// Does this WinSxS entry name the amd64 VC90 CRT assembly?
+///
+/// The one place the matching rule lives, so the directory walk and the version pick can't
+/// drift apart on it.
+fn is_vc90_entry(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with(VC90_SXS_PREFIX)
+}
+
 /// Pick the highest-versioned amd64 VC90 CRT assembly out of a set of WinSxS entry names.
 ///
 /// Split out from the directory walk so the matching rule — the part with the actual
-/// judgement in it — is testable on any platform. Version order is not cosmetic: the copy
-/// we lay down beside the exe should be the newest servicing build on the machine, not
-/// whichever one `read_dir` happened to hand us first.
+/// judgement in it — is testable on any platform.
 fn newest_vc90_entry<I, S>(names: I) -> Option<String>
 where
     I: IntoIterator<Item = S>,
@@ -202,7 +223,7 @@ where
 {
     names
         .into_iter()
-        .filter(|n| n.as_ref().to_ascii_lowercase().starts_with(VC90_SXS_PREFIX))
+        .filter(|n| is_vc90_entry(n.as_ref()))
         .max_by_key(|n| entry_version(n.as_ref()))
         .map(|n| n.as_ref().to_owned())
 }
@@ -228,55 +249,71 @@ fn windir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
 }
 
-/// The newest amd64 VC90 CRT assembly folder in `WinSxS`, if the machine has one.
+/// Every amd64 VC90 CRT assembly folder in `WinSxS`, newest first.
 ///
-/// `None` covers both "no such assembly" and "couldn't read the directory"; callers that
-/// need to tell those apart check `WinSxS` readability themselves.
+/// All of them, not just the newest, because this is what [`remove_stray_msvcr90`] compares
+/// against: a stray copy was taken from whichever build was newest *on the day it was made*,
+/// and a servicing update since then would leave the newest folder holding different bytes.
+/// Matching against every assembly on the machine is what keeps the cleanup working after
+/// Windows Update has moved on.
+///
+/// Empty covers both "no such assembly" and "couldn't read the directory".
 #[cfg(windows)]
-fn sxs_vc90_dir() -> Option<std::path::PathBuf> {
+fn sxs_vc90_dirs() -> Vec<std::path::PathBuf> {
     let sxs = windir().join("WinSxS");
-    let entries = std::fs::read_dir(&sxs).ok()?;
-    let newest = newest_vc90_entry(
-        entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned()),
-    )?;
-    Some(sxs.join(newest))
+    let Ok(entries) = std::fs::read_dir(&sxs) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| is_vc90_entry(n))
+        .collect();
+    names.sort_by_key(|n| std::cmp::Reverse(entry_version(n)));
+    names.into_iter().map(|n| sxs.join(n)).collect()
 }
 
-/// Where a copy of `msvcr90.dll` would sit to serve plain imports inside the game.
+/// Where a loose `msvcr90.dll` sits when something has put one beside the game exe.
 ///
-/// The exe's own directory is the first entry in the ordinary DLL search order, which is
-/// the whole point: it is the one place a module with no VC90 manifest will look.
-#[cfg(windows)]
+/// The exe's own directory is the first entry in the ordinary DLL search order — which is
+/// exactly why a copy here is dangerous rather than useful. See [`remove_stray_msvcr90`].
 fn app_local_msvcr90(game_dir: &std::path::Path) -> std::path::PathBuf {
     game_dir.join(MSVCR90_DLL)
 }
 
+/// Does the game folder itself carry a working route to the CRT?
+///
+/// The private assembly folder PiBoSo installers have historically laid down beside the exe.
+/// A real side-by-side identity, so the CRT's own activation-context check is satisfied by
+/// it — which is exactly what a loose `msvcr90.dll` next to it is not, and why only this
+/// arrangement counts. Split out from [`vc90_present`] so that distinction is testable off
+/// Windows, where the `WinSxS` half of the question can't be asked.
+fn game_dir_has_vc90(game_dir: &std::path::Path) -> bool {
+    game_dir.join("Microsoft.VC90.CRT").join(MSVCR90_DLL).is_file()
+}
+
 /// Can anything in the game resolve `MSVCR90` at all?
 ///
-/// This is the question the banner asks, so it stays broad on purpose: a copy beside the
-/// exe, a private assembly folder, or the machine-wide assembly each count. Any one of
-/// them means there is a working route to the CRT and nothing worth alarming about.
+/// This is the question the banner asks, so it stays broad on purpose: the machine-wide
+/// assembly or a private assembly folder beside the exe each count. Either means there is a
+/// working route to the CRT and nothing worth alarming about.
+///
+/// A bare `msvcr90.dll` in the game folder is deliberately **not** counted. It is not a
+/// route to the CRT — it is the R6034 trap described at the top of this module — and
+/// counting it would let a file we ourselves once planted silence the detector that should
+/// be reporting the machine has no VC90.
 ///
 /// It deliberately does *not* try to answer the narrower "will a plain import resolve"
-/// question. That one is false on the overwhelming majority of perfectly healthy machines
-/// — almost nobody has a bare `msvcr90.dll` beside the exe — so asking it here would put
-/// an amber bar in front of everyone. The plain-import gap is closed by
-/// [`ensure_app_local_msvcr90`] doing the copy, not by nagging about it.
+/// question. That one is false on the overwhelming majority of perfectly healthy machines,
+/// so asking it here would put an amber bar in front of everyone — and, as the module doc
+/// sets out, there is nothing we could safely do about the answer anyway.
 ///
 /// Returns `true` ("present") when `WinSxS` can't be read at all. We'd rather miss a real
 /// problem than raise a false alarm on a machine we simply couldn't inspect.
 #[cfg(windows)]
 fn vc90_present(game_dir: Option<&std::path::Path>) -> bool {
-    if let Some(dir) = game_dir {
-        // A bare copy beside the exe, or the private assembly folder PiBoSo installers
-        // have historically laid down next to it.
-        if app_local_msvcr90(dir).is_file()
-            || dir.join("Microsoft.VC90.CRT").join(MSVCR90_DLL).is_file()
-        {
-            return true;
-        }
+    if game_dir.is_some_and(game_dir_has_vc90) {
+        return true;
     }
     let sxs = windir().join("WinSxS");
     match std::fs::read_dir(&sxs) {
@@ -292,112 +329,95 @@ fn vc90_present(game_dir: Option<&std::path::Path>) -> bool {
     }
 }
 
-/// Put `msvcr90.dll` beside the game exe, so a plugin that imports it plainly can find it.
+/// Take back a loose `msvcr90.dll` we laid beside the game exe.
 ///
-/// This is the half the redistributable can't do. Copied out of `WinSxS` — the assembly
-/// there is the same file, and taking it from the machine avoids shipping Microsoft's
-/// binary ourselves or unpacking an installer to get at it.
+/// Versions 0.9.2 through 0.10.0 copied the CRT out of `WinSxS` into the game folder on
+/// every status poll, believing it served the plain imports the redistributable strands. It
+/// does not — the VC9 CRT aborts with R6034 when it is loaded outside a `Microsoft.VC90.CRT`
+/// activation context, which a loose copy always is. Deleting the code that made the copy
+/// does nothing for the players already carrying one, so the app removes it.
 ///
-/// Best-effort by design, and every failure is a log line rather than an error: the game
-/// folder can sit under `Program Files` where we have no write access, and a player whose
-/// plugins all resolve fine loses nothing by the copy not happening. Returns whether the
-/// file is there when we're done.
+/// **Only ever deletes a file whose bytes match a VC90 assembly on this machine.** That is
+/// where our copy came from, so the compare is what stops us reaching for a `msvcr90.dll`
+/// somebody else put there for a reason we don't know. A byte-identical file is equally
+/// R6034-fatal whoever laid it, so provenance is the right test and a marker file — which
+/// the version that did the damage never wrote — would not have helped.
 ///
-/// Safe to call on a hot path. The settled case costs one `is_file()`, and a folder we
-/// failed on is remembered so a read-only install doesn't retry — and re-log — on every
-/// status poll. [`invalidate`] clears that memory, so an install gets a fresh attempt.
+/// A `Microsoft.VC90.CRT` folder beside the exe is left strictly alone: that one works.
+///
+/// Best-effort, and safe on a hot path. The settled case costs one failed `read`. A locked
+/// file — the game running with the DLL mapped — just means the next poll tries again, and
+/// only the first failure per folder is logged so a stuck one doesn't fill the log.
 #[cfg(windows)]
-pub fn ensure_app_local_msvcr90(game_dir: &std::path::Path) -> bool {
-    let dest = app_local_msvcr90(game_dir);
-    if dest.is_file() {
-        return true;
-    }
-    if let Ok(mut tried) = ATTEMPTED.lock() {
-        if !tried.insert(game_dir.to_path_buf()) {
-            return false;
-        }
-    }
-    let Some(src_dir) = sxs_vc90_dir() else {
-        log::info!("no VC90 assembly in WinSxS to copy to {}", game_dir.display());
+pub fn remove_stray_msvcr90(game_dir: &std::path::Path) -> bool {
+    remove_stray_msvcr90_against(game_dir, &sxs_vc90_dirs())
+}
+
+/// The decision and the deletion, with the `WinSxS` lookup handed in.
+///
+/// Split out the way [`newest_vc90_entry`] is: the judgement — *is this file ours to
+/// delete* — is the part worth testing, and it can't be reached on a machine that has no
+/// `WinSxS` to enumerate.
+fn remove_stray_msvcr90_against(
+    game_dir: &std::path::Path,
+    sxs_dirs: &[std::path::PathBuf],
+) -> bool {
+    let stray = app_local_msvcr90(game_dir);
+    let Ok(found) = std::fs::read(&stray) else {
         return false;
     };
-    let src = src_dir.join(MSVCR90_DLL);
-    match std::fs::copy(&src, &dest) {
-        Ok(_) => {
-            log::info!("placed {} from {}", dest.display(), src_dir.display());
+    let ours = sxs_dirs
+        .iter()
+        .any(|d| std::fs::read(d.join(MSVCR90_DLL)).is_ok_and(|sxs| sxs == found));
+    if !ours {
+        if first_time(&LEFT_ALONE, game_dir) {
+            log::info!(
+                "leaving {} alone — it matches no VC90 assembly on this PC, so it isn't ours",
+                stray.display()
+            );
+        }
+        return false;
+    }
+    match std::fs::remove_file(&stray) {
+        Ok(()) => {
+            log::info!(
+                "removed {} — a loose VC9 CRT there aborts the game with R6034",
+                stray.display()
+            );
             true
         }
         Err(e) => {
-            log::warn!("could not place {} ({e})", dest.display());
+            if first_time(&MOANED, game_dir) {
+                log::warn!(
+                    "could not remove {} ({e}) — will retry (the game holding it open is the usual reason)",
+                    stray.display()
+                );
+            }
             false
         }
     }
 }
 
-/// Game folders we've already tried to lay a copy into, so a failure is attempted — and
-/// logged — once rather than on every poll.
-#[cfg(windows)]
-static ATTEMPTED: std::sync::Mutex<std::collections::BTreeSet<std::path::PathBuf>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
+/// Have we not yet said this about this game folder?
+///
+/// The work is repeated on every call by design — the game closing, or the player swapping
+/// the file, changes the answer — but saying so again doesn't help anyone reading the log.
+/// A poisoned lock reports "first time" so a diagnostic is never swallowed by a bookkeeping
+/// failure.
+type Folders = std::sync::Mutex<std::collections::BTreeSet<std::path::PathBuf>>;
+fn first_time(seen: &Folders, game_dir: &std::path::Path) -> bool {
+    seen.lock().map_or(true, |mut s| s.insert(game_dir.to_path_buf()))
+}
+
+/// Folders holding a `msvcr90.dll` we decided isn't ours to delete.
+static LEFT_ALONE: Folders = std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// Folders where the delete failed — a locked file complains once, not on every call.
+static MOANED: Folders = std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 #[cfg(not(windows))]
-pub fn ensure_app_local_msvcr90(_game_dir: &std::path::Path) -> bool {
+pub fn remove_stray_msvcr90(_game_dir: &std::path::Path) -> bool {
     false
-}
-
-/// Place `msvcr90.dll` beside the exe, raising UAC if the folder needs it.
-///
-/// The unelevated copy above is silent and gives up on `Program Files` — which is exactly
-/// where a Steam install lives, so on the machines that reported this it never lands. This
-/// is the same job with the shell's `runas` behind it, and it is deliberately **not** on
-/// the status path: it can put a UAC dialog on screen, so it only ever runs from a repair
-/// the player pressed.
-///
-/// `cmd.exe /c copy` rather than an elevated helper of our own — copying one file is not
-/// worth a second binary in the bundle, and `copy` is present on every Windows that can
-/// run the game.
-#[cfg(windows)]
-pub fn place_msvcr90_elevated(game_dir: &std::path::Path) -> anyhow::Result<bool> {
-    let dest = app_local_msvcr90(game_dir);
-    if dest.is_file() {
-        return Ok(true);
-    }
-    // Clear the "already tried" mark first: the unelevated attempt almost certainly failed
-    // on this folder, and that must not stop the elevated one.
-    if let Ok(mut tried) = ATTEMPTED.lock() {
-        tried.remove(game_dir);
-    }
-    if ensure_app_local_msvcr90(game_dir) {
-        return Ok(true);
-    }
-    let Some(src_dir) = sxs_vc90_dir() else {
-        anyhow::bail!(
-            "There's no Visual C++ 2008 runtime on this PC to copy from. Install {} first.",
-            Runtime::Vc90.label()
-        );
-    };
-    let src = src_dir.join(MSVCR90_DLL);
-    let cmd = windir().join("System32").join("cmd.exe");
-    // Quoted because both paths routinely contain spaces — `Program Files`, `MX Bikes`.
-    let args = format!("/c copy /y \"{}\" \"{}\"", src.display(), dest.display());
-    if !run_elevated(&cmd, &args)? {
-        // Declined UAC. Not an error: the caller offers the manual route instead.
-        return Ok(false);
-    }
-    // `copy`'s exit code doesn't travel back through ShellExecuteExW usefully, so the disk
-    // is what settles it.
-    let placed = dest.is_file();
-    if placed {
-        log::info!("placed {} (elevated) from {}", dest.display(), src_dir.display());
-    } else {
-        log::warn!("elevated copy of {} reported no error but nothing landed", dest.display());
-    }
-    Ok(placed)
-}
-
-#[cfg(not(windows))]
-pub fn place_msvcr90_elevated(_game_dir: &std::path::Path) -> anyhow::Result<bool> {
-    anyhow::bail!("Visual C++ runtimes only apply on Windows")
 }
 
 /// The 2015–2022 runtime installs into `System32` rather than WinSxS. This process is
@@ -431,16 +451,12 @@ fn vc140_x86_present() -> bool {
 static CACHE: std::sync::Mutex<Option<(Option<std::path::PathBuf>, Vec<Runtime>)>> =
     std::sync::Mutex::new(None);
 
-/// Drop the cached probe so the next `missing()` re-reads the disk, and let a game folder
-/// we previously failed to copy into be tried again — after an install there is a source
-/// in `WinSxS` that wasn't there before.
+/// Drop the cached probe so the next `missing()` re-reads the disk. Installing a runtime is
+/// the one thing that changes the answer under us.
 #[cfg(windows)]
 fn invalidate() {
     if let Ok(mut c) = CACHE.lock() {
         *c = None;
-    }
-    if let Ok(mut tried) = ATTEMPTED.lock() {
-        tried.clear();
     }
 }
 
@@ -522,8 +538,9 @@ pub struct RepairReport {
     /// Still absent afterwards — a declined UAC prompt, a failed download, an install that
     /// needs a reboot to finish. Each one is a link the UI hands over.
     pub still_missing: Vec<Runtime>,
-    /// Whether `msvcr90.dll` now sits beside the game exe.
-    pub msvcr90_placed: bool,
+    /// Whether a stray `msvcr90.dll` beside the game exe was cleaned up — see
+    /// [`remove_stray_msvcr90`]. Left by 0.9.2–0.10.0, and fatal to the game.
+    pub msvcr90_removed: bool,
     /// Set when we had nowhere to place it — no game folder configured.
     pub game_dir_known: bool,
 }
@@ -566,25 +583,19 @@ pub async fn repair(
         }
     }
 
-    // The copy beside the exe, elevating if the folder needs it. Runs even when VC90 was
-    // already "present" — present in WinSxS is not the same as reachable by a plain
-    // import, and that gap is the whole reason this function exists.
+    // Sweep up the loose CRT older builds of this app left beside the exe. Worth doing here
+    // as well as on the status poll: a player pressing repair is a player whose game is
+    // already misbehaving, and this is the likeliest reason.
     if let Some(dir) = game_dir {
-        report.msvcr90_placed = match place_msvcr90_elevated(dir) {
-            Ok(placed) => placed,
-            Err(e) => {
-                log::warn!("repair: could not place {MSVCR90_DLL}: {e:#}");
-                false
-            }
-        };
+        report.msvcr90_removed = remove_stray_msvcr90(dir);
     }
 
     invalidate();
     log::info!(
-        "repair: installed {:?}, still missing {:?}, msvcr90 beside exe: {}",
+        "repair: installed {:?}, still missing {:?}, stray msvcr90 removed: {}",
         report.installed,
         report.still_missing,
-        report.msvcr90_placed
+        report.msvcr90_removed
     );
     report
 }
@@ -771,17 +782,9 @@ pub async fn install(
         return Ok(InstallOutcome::Cancelled);
     }
 
-    // Trust the disk, not the installer's exit code. Clearing first also re-arms the copy
-    // below on a folder an earlier attempt gave up on.
+    // Trust the disk, not the installer's exit code.
     invalidate();
 
-    // The assembly is registered now, so this is the first moment the copy beside the exe
-    // can be taken from WinSxS. Before the install there was nothing there to copy.
-    if runtime == Runtime::Vc90 {
-        if let Some(dir) = game_dir {
-            ensure_app_local_msvcr90(dir);
-        }
-    }
     if missing(game_dir).contains(&runtime) {
         anyhow::bail!(
             "The installer ran but Windows still can't find the component. A restart usually finishes it off."
@@ -963,5 +966,115 @@ mod tests {
             serde_json::to_string(&InstallOutcome::Cancelled).unwrap(),
             "\"cancelled\""
         );
+    }
+
+    /// A scratch tree, named per test so a parallel run doesn't collide. The house pattern
+    /// — see `paintsync`'s tests — rather than a dev-dependency for four directories.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir()
+            .join(format!("mxb-vcruntime-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A stand-in `WinSxS` assembly folder holding a `msvcr90.dll` of known bytes.
+    fn fake_sxs(root: &std::path::Path, bytes: &[u8]) -> std::path::PathBuf {
+        let dir = root.join("amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.30729.9635_none_x");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(MSVCR90_DLL), bytes).unwrap();
+        dir
+    }
+
+    /// The whole point of the change: the copy versions 0.9.2–0.10.0 laid beside the exe is
+    /// taken back. It came out of `WinSxS`, so it matches byte for byte.
+    #[test]
+    fn a_copy_taken_from_winsxs_is_removed() {
+        let root = scratch("ours");
+        let game = root.join("game");
+        std::fs::create_dir_all(&game).unwrap();
+        let sxs = fake_sxs(&root, b"the real VC9 CRT");
+        std::fs::write(game.join(MSVCR90_DLL), b"the real VC9 CRT").unwrap();
+
+        assert!(remove_stray_msvcr90_against(&game, &[sxs]));
+        assert!(!game.join(MSVCR90_DLL).exists(), "the stray copy must be gone");
+    }
+
+    /// A `msvcr90.dll` we didn't put there is somebody else's decision. It is still an R6034
+    /// waiting to happen, but deleting a file of unknown provenance out of someone's game
+    /// folder is not ours to do.
+    #[test]
+    fn a_file_we_didnt_place_is_left_alone() {
+        let root = scratch("theirs");
+        let game = root.join("game");
+        std::fs::create_dir_all(&game).unwrap();
+        let sxs = fake_sxs(&root, b"the real VC9 CRT");
+        std::fs::write(game.join(MSVCR90_DLL), b"something else entirely").unwrap();
+
+        assert!(!remove_stray_msvcr90_against(&game, &[sxs]));
+        assert!(game.join(MSVCR90_DLL).exists(), "an unrecognised file must survive");
+    }
+
+    /// Our copy was taken from whichever assembly was newest the day it was made. A
+    /// servicing update since then leaves the newest folder holding different bytes, and the
+    /// cleanup still has to fire — which is why every assembly is compared, not just the top
+    /// one.
+    #[test]
+    fn a_copy_from_a_superseded_assembly_is_still_ours() {
+        let root = scratch("superseded");
+        let game = root.join("game");
+        std::fs::create_dir_all(&game).unwrap();
+        let old_dir = root.join("amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.30729.6161_none_x");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::write(old_dir.join(MSVCR90_DLL), b"the older servicing build").unwrap();
+        let newest = fake_sxs(&root, b"the newest servicing build");
+        std::fs::write(game.join(MSVCR90_DLL), b"the older servicing build").unwrap();
+
+        assert!(remove_stray_msvcr90_against(&game, &[newest, old_dir]));
+        assert!(!game.join(MSVCR90_DLL).exists());
+    }
+
+    /// Nothing to do, and no source to compare against, are both quiet no-ops.
+    #[test]
+    fn an_empty_game_folder_is_a_no_op() {
+        let root = scratch("empty");
+        let game = root.join("game");
+        std::fs::create_dir_all(&game).unwrap();
+        assert!(!remove_stray_msvcr90_against(&game, &[fake_sxs(&root, b"crt")]));
+        std::fs::write(game.join(MSVCR90_DLL), b"crt").unwrap();
+        assert!(!remove_stray_msvcr90_against(&game, &[]), "no WinSxS means no verdict");
+        assert!(game.join(MSVCR90_DLL).exists());
+    }
+
+    /// The private assembly folder is the arrangement that actually works, and the cleanup
+    /// reaches only the loose file beside it.
+    #[test]
+    fn the_private_assembly_folder_is_never_touched() {
+        let root = scratch("private");
+        let game = root.join("game");
+        let private = game.join("Microsoft.VC90.CRT");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::write(private.join(MSVCR90_DLL), b"the real VC9 CRT").unwrap();
+        let sxs = fake_sxs(&root, b"the real VC9 CRT");
+
+        assert!(!remove_stray_msvcr90_against(&game, &[sxs]));
+        assert!(private.join(MSVCR90_DLL).is_file(), "a working private assembly must survive");
+    }
+
+    /// A private assembly is a route to the CRT; a loose DLL beside the exe is the R6034
+    /// trap. Counting the latter would let a file we planted silence the detector that
+    /// should be reporting this machine has no VC90 at all.
+    #[test]
+    fn only_the_private_assembly_counts_as_a_route_to_the_crt() {
+        let root = scratch("present");
+        let bare = root.join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::write(bare.join(MSVCR90_DLL), b"loose").unwrap();
+        assert!(!game_dir_has_vc90(&bare), "a loose msvcr90.dll is not a working route");
+
+        let proper = root.join("proper");
+        std::fs::create_dir_all(proper.join("Microsoft.VC90.CRT")).unwrap();
+        std::fs::write(proper.join("Microsoft.VC90.CRT").join(MSVCR90_DLL), b"crt").unwrap();
+        assert!(game_dir_has_vc90(&proper));
     }
 }

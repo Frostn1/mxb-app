@@ -250,12 +250,12 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   );
 
   /**
-   * Install everything the PC is short of, then put `msvcr90.dll` beside the game exe.
+   * Install everything the PC is short of, and sweep up the stray `msvcr90.dll` older
+   * builds of this app left beside the game exe.
    *
    * The one path that doesn't ask detection for permission first. A PC can report every
-   * runtime present and still stop the game dead — the redistributable registers a
-   * side-by-side assembly and leaves the plain DLL search path alone — so this always does
-   * the work and reports what it found rather than deciding there was nothing to do.
+   * runtime present and still stop the game dead, so this always does the work and reports
+   * what it found rather than deciding there was nothing to do.
    *
    * Never throws: the backend returns a report instead, so a UAC prompt declined on one
    * installer doesn't cost the player the other two.
@@ -266,7 +266,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       const report = await frostmodRepairRuntimes();
       await refreshStatus();
 
-      const fixed = report.installed.length > 0 || report.msvcr90Placed;
+      const fixed = report.installed.length > 0 || report.msvcr90Removed;
       if (report.stillMissing.length > 0) {
         // Partly done at best, and every remaining item has a link. Offer the first —
         // opening three tabs at once would be its own kind of unhelpful.
@@ -286,8 +286,8 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
           description: t("runtime.repairDoneDesc"),
         });
       } else if (!report.gameDirKnown) {
-        // Everything was already installed, but we had nowhere to put the copy that
-        // actually stops the "not found" box. Saying "all good" here would be a lie.
+        // Everything was already installed, but with no game folder we never looked at the
+        // half of the job that lives in it. Saying "all good" here would be a lie.
         toast.info(t("runtime.repairNoGameFolder"), {
           description: t("runtime.repairNoGameFolderDesc"),
         });

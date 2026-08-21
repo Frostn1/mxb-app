@@ -226,20 +226,20 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
     let supported_for_game =
         crate::frostmod::supported_for_game(active_game, version.as_deref());
 
-    // The game folder is what makes the VC90 answer mean anything: it's both where a copy
-    // of the CRT may already sit and the only place we can put one. `install_dir` hands
-    // back an empty string for "don't know", which must not become the path `""`.
+    // The game folder is what makes the VC90 answer mean anything: it's where a copy of the
+    // CRT may sit, and where a stray one has to be cleaned out of. `install_dir` hands back
+    // an empty string for "don't know", which must not become the path `""`.
     let game_dir = cfg
         .as_ref()
         .map(|c| c.install_dir())
         .filter(|d| !d.trim().is_empty())
         .map(PathBuf::from);
 
-    // Lay the CRT beside the exe if it isn't there yet. This is the half of the VC90 story
-    // the redistributable cannot do — see `crate::vcruntime` — and doing it here means a
-    // player never has to learn the difference between the two failures to be past them.
+    // Take back the loose `msvcr90.dll` versions 0.9.2–0.10.0 laid beside the exe. It kills
+    // the game with R6034 — see `crate::vcruntime` — and the status poll is the only thing
+    // that reaches a player who never opens Settings, so the cleanup rides along here.
     if let Some(dir) = game_dir.as_deref() {
-        crate::vcruntime::ensure_app_local_msvcr90(dir);
+        crate::vcruntime::remove_stray_msvcr90(dir);
     }
 
     FrostmodStatus {
