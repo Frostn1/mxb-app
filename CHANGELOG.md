@@ -14,6 +14,75 @@
   installed other riders' liveries while you rode and then left them sitting on disk until
   the next session. They now go into the running game the moment they land.
 
+## Unreleased — taking back the DLL we planted
+
+### Fixed
+- **MX Bikes crashed with "R6034 — An application has made an attempt to load the C runtime
+  library incorrectly", and this app was the cause.** Since v0.9.2 the FrostMod status poll
+  copied `msvcr90.dll` out of `WinSxS` into the game folder on every start, meaning to serve
+  the plugins with a plain `MSVCR90.dll` import that the redistributable strands. The
+  reasoning was that a loose DLL is invisible to side-by-side binding and so could only ever
+  help those plugins. Half right, and the wrong half mattered: the VC9 CRT polices this
+  itself. `msvcr90.dll` checks at load time that it was resolved through a
+  `Microsoft.VC90.CRT` activation context, and a loose copy beside the exe is by definition
+  outside one, so it refuses to start and takes the process down with it. The copy was
+  therefore never once useful — a plugin carrying a VC90 manifest resolves out of `WinSxS`
+  and never looks at it, and a plugin without one finds it and dies. We had turned a plugin
+  that quietly failed to load into a modal that killed the game.
+- **The app now removes the copy it made.** Deleting the code that placed it does nothing for
+  the players already carrying one, so the same poll that used to lay the file down now takes
+  it away, and "Repair runtimes" does too. It only ever deletes a `msvcr90.dll` whose bytes
+  match a VC90 assembly on this PC — that's where ours came from, and it's what stops us
+  reaching for a file somebody else put there on purpose. A `Microsoft.VC90.CRT` folder beside
+  the exe is left strictly alone: that arrangement is a real side-by-side identity, it
+  satisfies the CRT's check, and it works. If the game is open and holding the file, the next
+  start tries again.
+- **A loose `msvcr90.dll` no longer counts as "VC90 is present".** It isn't a route to the
+  CRT, and counting it let a file we ourselves planted quietly satisfy the check that should
+  have been reporting the machine had no runtime at all.
+
+### Changed
+- "Repair runtimes" no longer offers to put `msvcr90.dll` where the game looks for it, because
+  there is no such place — nothing app-local short of a full private assembly can satisfy the
+  VC9 CRT. It installs the runtimes this PC is short of, both architectures, and clears out
+  what older versions of this app left behind. Plugins with a plain `MSVCR90.dll` import go
+  back to reporting "MSVCR90.dll was not found"; they were never actually fixed, only given a
+  different error.
+
+## Unreleased — logs as a link
+
+### Added
+- **Share logs.** Settings → Logs already named all three log sets and saved them into one
+  zip; the file still had to be got to whoever asked, which is where "send me your logs"
+  usually stalls — a save dialog, then a file to find, then somewhere to upload it. **Share
+  logs** packs the same archive and uploads it through the same host a shared track goes out
+  on, then puts the direct link on the clipboard and leaves it on screen with a Copy button.
+  What goes in is what **Save logs…** already packed: the three log sets and the
+  `summary.txt` header (app version, OS, game, folders, and what was collected) — never the
+  config file, which holds session cookies and shop credentials. The link is public to
+  anyone holding it, and the page says so under the field. A bundle big enough to be sliced
+  comes back as a numbered list of parts rather than a first link that loses the rest.
+- **`summary.txt` now names the installed FrostMod build**, in the saved zip as well as the
+  shared one. The loader's log is in the archive and "which build wrote it" is the first
+  question anyone reading it has; `version.txt` itself stays out, being one of the files we
+  put in that folder ourselves.
+
+## 2026-08-20
+
+### Fixed
+- **Opening a mod no longer dead-ends on a Cloudflare refusal.** mxb-mods.com guards its
+  rendered pages far more tightly than its JSON API, so the catalog could browse fine while a
+  single mod came back "refused the request (403)". The fallback that exists to rescue that
+  couldn't: it asked the browser to `fetch()` the page, and a `fetch()` of a challenged URL is
+  answered with the check itself — only a navigation clears it. The hidden window now navigates
+  to the page and reads it, and the HTTP client asks for a page the way a browser does rather
+  than as if a script wanted JSON.
+- **The hidden mxb-mods.com window no longer reports itself ready while still on the check.**
+  It only asked whether script could run, which is just as true on Cloudflare's "Just a
+  moment…" page, so requests were sent from the interstitial and refused.
+- **The mod page's error now has the Retry button it tells you to hit**, and says so in your
+  own language instead of English.
+
 ## 2026-08-19
 
 ### Fixed

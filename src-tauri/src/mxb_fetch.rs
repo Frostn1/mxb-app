@@ -83,9 +83,17 @@ struct Reply {
     body: String,
     #[serde(default)]
     url: String,
+    /// The document's `performance.timeOrigin`, minted fresh per document. It is how
+    /// [`probe`] tells the page a navigation asked for from the one it asked to leave.
+    #[serde(default)]
+    origin: f64,
     #[serde(default)]
     error: Option<String>,
 }
+
+/// Ids for requests in flight. Module-wide rather than per entry point: [`run`] and
+/// [`read_page`] share one [`waiting`] map, and two counters would hand out the same id twice.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Route a reply to whoever is waiting for it.
 ///
@@ -117,6 +125,71 @@ pub async fn get(url: &str, params: &[(&str, String)]) -> anyhow::Result<Fetched
 
 pub async fn post(url: &str, form: &[(&str, String)]) -> anyhow::Result<Fetched> {
     run(url, Some(&encode_form(form))).await
+}
+
+/// A rendered page, read from the window after *navigating* to it.
+///
+/// [`get`] cannot serve this, and the difference is the whole reason a mod page could be
+/// refused while the catalog browsed fine. A `fetch()` of a challenged URL is answered with
+/// the interstitial — only a navigation runs the check that clears it — and no `fetch` may
+/// claim `sec-fetch-dest: document`, so it never looks like the page view it stands in for.
+/// mxb-mods.com guards its rendered pages far more tightly than its JSON API.
+///
+/// The status comes from the navigation timing entry, which WebView2 exposes and WKWebView
+/// does not; where it is missing, a document we were handed at all counts as a 200. That is
+/// what keeps a refusal reported as one rather than as a page that parsed to nothing.
+pub async fn read_page(url: &str) -> anyhow::Result<Fetched> {
+    let app = app()?;
+    let window = ensure_window(app).await?;
+
+    // Which document is being replaced. `navigate` returns immediately and the old page stays
+    // loaded — and past its own check — until the new one arrives, so a readiness test that
+    // could not tell them apart would pass at once and read the page we just left.
+    let previous = probe(&window).await.ok();
+    window.navigate(url.parse()?)?;
+    wait_until_ready_replacing(&window, previous).await?;
+
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    lock(waiting()).insert(id, tx);
+
+    let started = std::time::Instant::now();
+    if let Err(e) = window.eval(read_script(id)) {
+        lock(waiting()).remove(&id);
+        return Err(anyhow::anyhow!("could not read the mxb-mods.com page: {e}"));
+    }
+
+    let reply = match tokio::time::timeout(TIMEOUT, rx).await {
+        Ok(Ok(reply)) => reply,
+        Ok(Err(_)) => return Err(anyhow::anyhow!("the WebView read was cancelled")),
+        Err(_) => {
+            lock(waiting()).remove(&id);
+            return Err(anyhow::anyhow!(
+                "the WebView did not hand back {url} within {TIMEOUT:?}"
+            ));
+        }
+    };
+
+    log::debug!(
+        "webview PAGE {} -> {} ({} bytes) in {:?}",
+        url.strip_prefix(mxb_session::base()).unwrap_or(url),
+        reply.status,
+        reply.body.len(),
+        started.elapsed()
+    );
+
+    Ok(Fetched {
+        status: reply.status,
+        // A navigation's response headers are not visible to script, so the refusal log will
+        // say `cf-ray=-` for this transport. The body carries the block reason regardless.
+        headers: reply.headers,
+        body: reply.body,
+        url: if reply.url.is_empty() {
+            url.to_string()
+        } else {
+            reply.url
+        },
+    })
 }
 
 /// `application/x-www-form-urlencoded`, matching what `reqwest`'s `.form()` sends, so the
@@ -161,7 +234,6 @@ async fn run(url: &str, body: Option<&str>) -> anyhow::Result<Fetched> {
     let app = app()?;
     let window = ensure_window(app).await?;
 
-    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = tokio::sync::oneshot::channel();
     lock(waiting()).insert(id, tx);
@@ -248,6 +320,23 @@ fn script(id: u64, url: &str, body: Option<&str>) -> String {
     )
 }
 
+/// Read the document the window is sitting on, rather than `fetch`ing it — see [`read_page`].
+fn read_script(id: u64) -> String {
+    format!(
+        r#"(function(){{
+  try {{
+    var nav = performance.getEntriesByType('navigation')[0];
+    window.__TAURI_INTERNALS__.invoke('plugin:event|emit', {{
+      event: {event},
+      payload: {{ id: {id}, status: (nav && nav.responseStatus) || 200,
+                  body: document.documentElement.outerHTML, url: location.href }}
+    }});
+  }} catch (e) {{}}
+}})();"#,
+        event = js_string(RESULT_EVENT),
+    )
+}
+
 /// A JS string literal. The URLs here are ours, but they carry user-typed search terms, and
 /// a quote or backslash reaching `eval` unescaped would break the script — or worse.
 fn js_string(s: &str) -> String {
@@ -321,51 +410,83 @@ async fn ensure_window(app: &AppHandle) -> anyhow::Result<tauri::WebviewWindow> 
     Ok(window)
 }
 
-/// Wait for the page to be able to run our script.
-///
-/// Two things have to be true: the IPC primitive has to be injected, and Cloudflare's
-/// challenge — which the window will be served on first navigation, exactly as the visible
-/// clearance window is — has to have cleared. Polling a one-line `eval` covers both, since
-/// the challenge page is replaced by the real one when it passes.
+/// Wait for the page to be able to run our script, and to be past Cloudflare's check.
 async fn wait_until_ready(window: &tauri::WebviewWindow) -> anyhow::Result<()> {
+    wait_until_ready_replacing(window, None).await
+}
+
+/// [`wait_until_ready`], for a page a navigation has just been asked for.
+///
+/// `replacing` is the document that has to be *gone* before the window counts as ready,
+/// identified by its `performance.timeOrigin`. Without it the check answers about whatever is
+/// still on screen, which straight after a `navigate` is the previous page: complete, past its
+/// own check, and wrong.
+async fn wait_until_ready_replacing(
+    window: &tauri::WebviewWindow,
+    replacing: Option<f64>,
+) -> anyhow::Result<()> {
     let deadline = std::time::Instant::now() + READY_TIMEOUT;
     let mut last: Option<String> = None;
     while std::time::Instant::now() < deadline {
         match probe(window).await {
-            Ok(()) => return Ok(()),
+            Ok(origin) if Some(origin) != replacing => return Ok(()),
+            Ok(_) => last = Some("the page it was told to leave is still loaded".to_string()),
             Err(e) => last = Some(e.to_string()),
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     Err(anyhow::anyhow!(
-        "the hidden mxb-mods.com window never became ready{}",
+        "the hidden mxb-mods.com window never became ready — Cloudflare's check did not clear{}",
         last.map(|e| format!(" ({e})")).unwrap_or_default()
     ))
 }
 
-/// One round-trip that proves script can run and reach us. Doubles as the check that
-/// `__TAURI_INTERNALS__` still exists — if a Tauri upgrade renames it, this fails here with
-/// a clear message instead of every fetch timing out.
-async fn probe(window: &tauri::WebviewWindow) -> anyhow::Result<()> {
+/// One round-trip that proves script can run and reach us, *and* that we are past the check.
+///
+/// This used to ask only whether `__TAURI_INTERNALS__` existed. Tauri injects that into
+/// Cloudflare's interstitial as readily as into the real page, so the window was declared
+/// ready while still sitting on "Just a moment…" — and every request made from there was
+/// refused, which is precisely the "its check window didn't clear it either" a blocked user
+/// was shown. [`crate::shop_fetch`] has always asked the fuller question; this is that.
+///
+/// "Past the check" is asked as `window._cf_chl_opt`, which the interstitial defines and an
+/// ordinary page does not. The obvious test — looking for `challenge-platform` in the HTML —
+/// is wrong, and quietly so: Cloudflare injects that script into ordinary pages too when JS
+/// detections are on, so the window would never be declared ready at all.
+///
+/// Doubles as the check that `__TAURI_INTERNALS__` still exists — if a Tauri upgrade renames
+/// it, this fails here with a clear message instead of every fetch timing out.
+///
+/// Answers with the document's `performance.timeOrigin`, so a caller that has just navigated
+/// can tell the page it asked for from the one it asked to leave.
+async fn probe(window: &tauri::WebviewWindow) -> anyhow::Result<f64> {
     const PROBE_ID: u64 = 0;
     let (tx, rx) = tokio::sync::oneshot::channel();
     lock(waiting()).insert(PROBE_ID, tx);
-    let js = format!(
-        "if (window.__TAURI_INTERNALS__) {{ window.__TAURI_INTERNALS__.invoke\
-         ('plugin:event|emit', {{ event: {event}, payload: {{id:0,status:204}} }}); }}",
-        event = js_string(RESULT_EVENT)
-    );
-    if let Err(e) = window.eval(&js) {
+    if let Err(e) = window.eval(probe_script()) {
         lock(waiting()).remove(&PROBE_ID);
         return Err(anyhow::anyhow!("{e}"));
     }
     match tokio::time::timeout(Duration::from_millis(400), rx).await {
-        Ok(Ok(_)) => Ok(()),
+        Ok(Ok(reply)) => Ok(reply.origin),
         _ => {
             lock(waiting()).remove(&PROBE_ID);
-            Err(anyhow::anyhow!("no answer from the page yet"))
+            Err(anyhow::anyhow!("still on the check, or not ready yet"))
         }
     }
+}
+
+/// The probe, as its own function so a test can hold it to what it has to say.
+fn probe_script() -> String {
+    format!(
+        "if (window.__TAURI_INTERNALS__ && document.readyState === 'complete' \
+         && typeof window._cf_chl_opt === 'undefined' \
+         && !/^just a moment/i.test(document.title || '')) {{ \
+         window.__TAURI_INTERNALS__.invoke\
+         ('plugin:event|emit', {{ event: {event}, \
+         payload: {{id:0, origin: performance.timeOrigin}} }}); }}",
+        event = js_string(RESULT_EVENT)
+    )
 }
 
 #[cfg(test)]
@@ -398,6 +519,47 @@ mod tests {
             !js.contains("JSON.stringify"),
             "the payload must be the object, not a JSON string of it: {js}"
         );
+    }
+
+    /// The bug this module shipped with: the probe answered on Cloudflare's interstitial,
+    /// because Tauri injects its IPC there too. Every question below has to be asked, or the
+    /// window is declared ready while still on "Just a moment…" and every request is refused.
+    #[test]
+    fn the_probe_refuses_to_answer_on_the_challenge() {
+        let js = probe_script();
+        assert!(js.contains("_cf_chl_opt"), "{js}");
+        assert!(js.contains("just a moment"), "{js}");
+        assert!(js.contains("readyState === 'complete'"), "{js}");
+        // The naive test: Cloudflare injects `challenge-platform` into ordinary pages as
+        // well, so keying on it would mean the window is never ready at all.
+        assert!(!js.contains("challenge-platform"), "{js}");
+        // Without a per-document token a caller that just navigated cannot tell the page it
+        // asked for from the one it asked to leave.
+        assert!(js.contains("performance.timeOrigin"), "{js}");
+    }
+
+    /// A page is read off the document, never fetched — a `fetch()` of a challenged URL is
+    /// answered with the interstitial, and cannot claim `sec-fetch-dest: document` either.
+    #[test]
+    fn a_page_is_read_from_the_document_not_fetched() {
+        let js = read_script(11);
+        assert!(js.contains("document.documentElement.outerHTML"), "{js}");
+        assert!(!js.contains("fetch("), "{js}");
+        assert!(js.contains("id: 11"), "{js}");
+        // Where the engine exposes the navigation's status, a refusal stays a refusal rather
+        // than becoming a page that parsed to nothing.
+        assert!(js.contains("responseStatus"), "{js}");
+    }
+
+    /// `run` and `read_page` share one `waiting()` map, so they must share one counter — two
+    /// would issue the same id twice and let one reply resolve the other's request.
+    #[test]
+    fn request_ids_are_issued_from_one_counter() {
+        let a = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let b = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        assert_ne!(a, b);
+        // Zero is the probe's, and must never be handed to a real request.
+        assert!(a > 0 && b > 0);
     }
 
     #[test]
@@ -443,6 +605,7 @@ mod tests {
             headers: HashMap::new(),
             body: "injected".into(),
             url: String::new(),
+            origin: 0.0,
             error: None,
         });
         assert!(
@@ -456,6 +619,7 @@ mod tests {
             headers: HashMap::new(),
             body: "ours".into(),
             url: String::new(),
+            origin: 0.0,
             error: None,
         });
         assert_eq!(rx.try_recv().unwrap().body, "ours");
