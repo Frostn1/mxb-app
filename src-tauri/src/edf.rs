@@ -708,9 +708,17 @@ pub fn inflate_texture(b: &[u8], t: &EmbeddedTexture) -> Option<Vec<u8>> {
     use std::io::Read;
     let expected = (t.width as usize) * (t.height as usize) * 4;
     let mut buf = Vec::with_capacity(expected);
-    flate2::read::DeflateDecoder::new(&b[t.data_off..t.data_off + t.data_len])
-        .read_to_end(&mut buf)
-        .ok()?;
+    // Bounded, because `data_len` is a *compressed* length and nothing in the record says what
+    // it expands to. Reading the stream whole let anything that inflates to gigabytes do
+    // exactly that before the size check below threw it away — and the records these come from
+    // are found by scanning for a byte pattern, so a false positive is not a hostile file, it
+    // is Tuesday. Everything past `expected` was truncated anyway.
+    std::io::Read::take(
+        flate2::read::DeflateDecoder::new(&b[t.data_off..t.data_off + t.data_len]),
+        expected as u64,
+    )
+    .read_to_end(&mut buf)
+    .ok()?;
     (buf.len() >= expected).then(|| {
         buf.truncate(expected);
         buf
@@ -1192,6 +1200,31 @@ fn submesh_transform(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A record that claims to be a small texture but whose payload inflates to far more than
+    /// that. Everything past `width * height * 4` was always thrown away — the bug was that it
+    /// was decoded first, so what the file said it expanded to decided how much memory this
+    /// took. 64 MB here stands in for the gigabytes a real one could ask for.
+    #[test]
+    fn a_payload_that_expands_past_its_texture_is_not_inflated_whole() {
+        use flate2::write::DeflateEncoder;
+        use std::io::Write;
+
+        let mut enc = DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(&vec![0u8; 64 * 1024 * 1024]).unwrap();
+        let payload = enc.finish().unwrap();
+        assert!(payload.len() < 1024 * 1024, "the point is that it compresses hard");
+
+        let tex = EmbeddedTexture {
+            name: "bomb".into(),
+            width: 64,
+            height: 64,
+            data_off: 0,
+            data_len: payload.len(),
+        };
+        let out = inflate_texture(&payload, &tex).expect("still decodes");
+        assert_eq!(out.len(), 64 * 64 * 4, "bounded by what the record claims to be");
+    }
 
     // Material indices count the colour textures, so a map counted among them slides every
     // later texture onto the wrong mesh — the Tactical Vest wore its pouch's normal map.

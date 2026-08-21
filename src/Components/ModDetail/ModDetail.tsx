@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   ExternalLink,
   Check,
@@ -13,11 +14,13 @@ import { useT, type TKey } from "../../i18n/context";
 import {
   buildDestinations,
   buildRiderDestinations,
+  defaultMirrorIndex,
   destStorageKey,
   getInstalledMods,
   getModDetail,
   isBlockedDownload,
   isLiveryContext,
+  isServerOnly,
   isSoundContext,
   riderTarget,
   resolveInitialFolder,
@@ -121,6 +124,9 @@ export default function ModDetail({
   } | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmReinstall, setConfirmReinstall] = useState(false);
+  // Bumped by the Retry button below. The load otherwise only re-runs when the slug changes,
+  // so a user the catalog refused once had no way back short of leaving the page.
+  const [reloadKey, setReloadKey] = useState(0);
 
   const { active, startInstall, startImport } = useInstall();
   const myActive = active && active.slug === slug ? active : null;
@@ -181,7 +187,7 @@ export default function ModDetail({
     return () => {
       cancelled = true;
     };
-  }, [slug, modType, livery, sound, game, rider]);
+  }, [slug, modType, livery, sound, game, rider, reloadKey]);
 
   const folderCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -192,9 +198,15 @@ export default function ModDetail({
   // "Official" mirror + metadata for the collapsed install panel.
   const mirrors = useMemo(() => (detail ? sortMirrors(detail) : []), [detail]);
 
-  const primary = mirrors[0] ?? null;
+  // What the dialog would start on — the best playable file, so the panel below the button
+  // describes the download that's actually about to run.
+  const primary = mirrors[defaultMirrorIndex(mirrors)] ?? null;
   const format = primary ? fileFormat(primary.url) : null;
-  const mirrorNames = [...new Set(mirrors.map((m) => m.host))].join(" · ");
+  // Server builds aren't mirrors of the playable file, so they don't belong in this count.
+  const mirrorNames = [
+    ...new Set(mirrors.filter((m) => !m.isServer).map((m) => m.host)),
+  ].join(" · ");
+  const serverOnly = isServerOnly(mirrors);
 
   const destKey = destStorageKey(game, modType);
   const initialFolder = useMemo(
@@ -267,8 +279,18 @@ export default function ModDetail({
     return (
       <div className="flex h-full flex-col px-7 py-5">
         <Breadcrumb modType={modType} title="—" onBack={onBack} link={null} />
-        <div className="mt-6 rounded-xl border border-destructive/30 bg-destructive/[0.06] p-4 text-[13px] text-destructive">
-          Couldn&apos;t load this mod: {loadError}
+        <div className="mt-6 flex flex-col items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/[0.06] p-4">
+          <p className="text-[13px] font-semibold text-destructive">
+            {t("modDetail.loadFailed")}
+          </p>
+          {/* Selectable: a block explains itself in a sentence, and carries the Cloudflare
+              ray that identifies it — which is the whole of what a bug report needs. */}
+          <p className="select-text text-[12.5px] leading-relaxed text-muted-foreground">
+            {loadError.replace(/^Error:\s*/, "")}
+          </p>
+          <Button variant="outline" size="sm" onClick={() => setReloadKey((n) => n + 1)}>
+            {t("common.retry")}
+          </Button>
         </div>
       </div>
     );
@@ -383,6 +405,17 @@ export default function ModDetail({
               />
             ) : primary ? (
               <>
+                {/* Every file this page offers is a dedicated-server build. Said before the
+                    button, not after the install: it lands in the library either way and
+                    then does nothing in-game, which reads as a broken mod. */}
+                {serverOnly && (
+                  <div className="flex items-start gap-2.5 rounded-[10px] border border-warning/30 bg-warning/[0.07] px-3 py-2.5">
+                    <AlertTriangle className="mt-px size-3.5 flex-none text-warning" />
+                    <span className="text-[12px] text-warning/90">
+                      {t("modDetail.serverOnlyNotice")}
+                    </span>
+                  </div>
+                )}
                 <Button className="h-11 w-full text-[14px]" onClick={openInstall}>
                   {isInstalled ? t("browse.reinstall") : t("modDetail.addToLibrary")}
                 </Button>

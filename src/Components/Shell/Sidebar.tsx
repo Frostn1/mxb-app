@@ -17,12 +17,13 @@ import {
   PanelLeftOpen,
   Server as ServerIcon,
   Plug,
+  Download as DownloadIcon,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useFrostmod } from "../../Context/FrostmodContext";
-import { useInstall } from "../../Context/Install";
-import { displayName } from "../../lib/mods";
+import { useDownloads } from "../../Context/Downloads";
 import { useT, type TKey } from "../../i18n/context";
 import {
   experimentalState,
@@ -34,12 +35,15 @@ import {
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
+import { ATTACH_PROBLEM } from "../../types";
 import JoinServerDialog from "./JoinServerDialog";
+import DownloadQueue from "./DownloadQueue";
 
 export type DashboardView =
   | "browse"
   | "shop"
   | "library"
+  | "downloads"
   | "locker"
   | "presets"
   | "studio"
@@ -62,11 +66,21 @@ type NavEntry = {
   label: TKey;
   icon: typeof Home;
   cap?: keyof GameCaps;
+  /** Indented under this entry, behind a chevron. */
+  children?: NavEntry[];
 };
 
 const NAV: NavEntry[] = [
   { id: "browse", label: "nav.browse", icon: Home },
-  { id: "library", label: "nav.library", icon: LibraryIcon },
+  {
+    id: "library",
+    label: "nav.library",
+    icon: LibraryIcon,
+    // Under the library rather than beside it: Downloads answers the question the library
+    // can't — which of these arrived today, and what didn't arrive at all — so it reads as
+    // part of the same place, not a seventh destination competing with it.
+    children: [{ id: "downloads", label: "nav.downloads", icon: DownloadIcon }],
+  },
   // The Locker and Rider views are the 3D preview; GP Bikes' meshes need their own
   // part bindings before they can be shown.
   { id: "locker", label: "nav.locker", icon: Bike, cap: "viewer" },
@@ -103,15 +117,112 @@ const EXPERIMENTAL_NAV: NavEntry = {
 /** Remembered across launches: a collapsed sidebar is a preference, not a mode. */
 const COLLAPSED_KEY = "mxb:sidebarCollapsed:v1";
 
-const IN_PROGRESS = new Set(["resolving", "downloading", "extracting", "placing"]);
+/** Same idea, for the nav groups the user left open. */
+const OPEN_GROUPS_KEY = "mxb:sidebarOpenGroups:v1";
 
 /** MX Bikes takes a while to show up in the process list; stop saying "Starting…" after this. */
 const STARTING_TIMEOUT_MS = 15000;
 
+/**
+ * One row of the nav.
+ *
+ * A row with children carries a chevron beside its label, and its children are indented under
+ * it — except when the sidebar is collapsed, where there is nothing to indent into and a group
+ * is simply its icons one after another.
+ */
+function NavRow({
+  entry,
+  active,
+  collapsed,
+  child,
+  badge,
+  group,
+  onSelect,
+}: {
+  entry: NavEntry;
+  active: boolean;
+  collapsed: boolean;
+  child: boolean;
+  /** Unseen download failures to flag on this row; 0 for none. */
+  badge: number;
+  /** Only on a row that has children. */
+  group?: { open: boolean; onToggle: () => void };
+  onSelect: () => void;
+}) {
+  const t = useT();
+  const Icon = entry.icon;
+  const indented = child && !collapsed;
+  return (
+    // The pill is the row, not the button inside it, so the active background and the hover
+    // reach under the chevron too.
+    <div
+      data-tour={entry.id}
+      className={cn(
+        "relative flex items-center rounded-lg transition-colors",
+        active
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+      )}
+    >
+      <button
+        onClick={onSelect}
+        title={collapsed ? t(entry.label) : undefined}
+        aria-label={collapsed ? t(entry.label) : undefined}
+        className={cn(
+          "flex min-w-0 flex-1 cursor-default items-center gap-2.5",
+          collapsed ? "justify-center px-0 py-2.5" : indented ? "py-2 pl-9 pr-3" : "px-3 py-2.5",
+          indented ? "text-[13px]" : "text-[13.5px]",
+          active ? "font-semibold" : "font-medium",
+        )}
+      >
+        <Icon className={cn("flex-none", indented ? "size-3.5" : "size-4")} />
+        {!collapsed && <span className="truncate">{t(entry.label)}</span>}
+      </button>
+
+      {/* A failed download used to exist only as a toast, so one dismissed in passing left no
+          sign anything had gone wrong. This is that sign — and it sits on the parent while the
+          group is shut, because closing a group must not hide the failure with it. */}
+      {badge > 0 && (
+        <span
+          title={t("downloads.failedBadge", { count: badge })}
+          className={cn(
+            "flex-none rounded-full bg-destructive text-center text-[10px] font-bold leading-[16px] text-destructive-foreground",
+            collapsed ? "absolute right-1.5 top-1.5 size-2 p-0" : "mr-2.5 min-w-[18px] px-1",
+          )}
+        >
+          {!collapsed && badge}
+        </span>
+      )}
+
+      {group && !collapsed && (
+        <button
+          onClick={group.onToggle}
+          title={t(group.open ? "sidebar.hideGroup" : "sidebar.showGroup", {
+            name: t(entry.label),
+          })}
+          aria-label={t(group.open ? "sidebar.hideGroup" : "sidebar.showGroup", {
+            name: t(entry.label),
+          })}
+          aria-expanded={group.open}
+          className="flex flex-none cursor-default items-center py-2.5 pl-1 pr-2.5"
+        >
+          <ChevronDown
+            className={cn("size-3.5 transition-transform", !group.open && "-rotate-90")}
+          />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const t = useT();
-  const { running, reload, status, start, stop } = useFrostmod();
-  const { active, queueLength } = useInstall();
+  const { running, attachment, reload, status, start, stop } = useFrostmod();
+  // FrostMod is up but isn't reaching the game — see `frostmod::attachment`. The good
+  // states (and the grace period after a launch) deliberately look like plain "Running".
+  const attachProblem =
+    attachment !== null && ATTACH_PROBLEM.includes(attachment.state);
+  const { unseenFailures } = useDownloads();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const { game } = useConfig();
   const caps = game.caps;
@@ -127,6 +238,17 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       }),
     [],
   );
+  const [openGroups, setOpenGroups] = useState<string[]>(() =>
+    (localStorage.getItem(OPEN_GROUPS_KEY) ?? "").split(",").filter(Boolean),
+  );
+  const setGroupOpen = useCallback((id: DashboardView, open: boolean) => {
+    setOpenGroups((cur) => {
+      if (cur.includes(id) === open) return cur;
+      const next = open ? [...cur, id] : cur.filter((g) => g !== id);
+      localStorage.setItem(OPEN_GROUPS_KEY, next.join(","));
+      return next;
+    });
+  }, []);
   const [joinOpen, setJoinOpen] = useState(false);
   // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
   // leaving that page is exactly when the nav needs to reflect a change.
@@ -160,12 +282,37 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
 
   // Two independent gates: servers needs the experimental toggle, and every entry needs the
   // active game to support it. Built here rather than inline so the JSX stays one `.map`.
-  const nav = [
-    NAV[0],
-    SHOP_ENTRY,
-    ...NAV.slice(1),
-    ...(experimental ? [EXPERIMENTAL_NAV] : []),
-  ].filter(({ cap }) => !cap || caps[cap]);
+  const supported = ({ cap }: NavEntry) => !cap || caps[cap];
+  const nav = [NAV[0], SHOP_ENTRY, ...NAV.slice(1), ...(experimental ? [EXPERIMENTAL_NAV] : [])]
+    .filter(supported)
+    .map((e) => (e.children ? { ...e, children: e.children.filter(supported) } : e));
+
+  // Flattened to the rows actually on screen, so the JSX below stays one `.map`: a group
+  // contributes its own row, then its children when it's open — or always when the sidebar is
+  // collapsed, where there is no indent to hide them behind.
+  const rows = nav.flatMap((entry) => {
+    const kids = entry.children ?? [];
+    // Open because the user opened it, or because one of its pages is the one on screen —
+    // arriving at Downloads from a toast shouldn't leave it hidden inside a shut group.
+    const open = kids.some((k) => k.id === view) || openGroups.includes(entry.id);
+    const shown = collapsed || open ? kids : [];
+    const failures = (e: NavEntry) => (e.id === "downloads" ? unseenFailures : 0);
+    return [
+      {
+        entry,
+        child: false,
+        // Whatever the children would have flagged, while they aren't on screen to flag it.
+        badge: shown.length ? failures(entry) : Math.max(...kids.map(failures), failures(entry)),
+        group: kids.length ? { open, onToggle: () => setGroupOpen(entry.id, !open) } : undefined,
+      },
+      ...shown.map((kid) => ({
+        entry: kid,
+        child: true,
+        badge: failures(kid),
+        group: undefined,
+      })),
+    ];
+  });
 
   // Drop out of "Starting…" once the game shows up — or once it's clear it isn't going
   // to, so a launch that failed silently doesn't leave the button stuck.
@@ -195,12 +342,6 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
     }
     refreshGame();
   };
-
-  const installing = active && IN_PROGRESS.has(active.stage);
-  const pct =
-    active?.total && active.received
-      ? Math.round((active.received / active.total) * 100)
-      : undefined;
 
   const onReload = async () => {
     const outcome = await reload();
@@ -246,60 +387,28 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex flex-col gap-0.5">
-        {nav.map(({ id, label, icon: Icon }) => {
-          const activeNav = view === id;
-          return (
-            <button
-              key={id}
-              data-tour={id}
-              onClick={() => onNavigate(id)}
-              title={collapsed ? t(label) : undefined}
-              aria-label={collapsed ? t(label) : undefined}
-              className={cn(
-                "flex cursor-default items-center gap-2.5 rounded-lg py-2.5 text-[13.5px] transition-colors",
-                collapsed ? "justify-center px-0" : "px-3",
-                activeNav
-                  ? "bg-accent font-semibold text-accent-foreground"
-                  : "font-medium text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
-              )}
-            >
-              <Icon className="size-4 flex-none" />
-              {!collapsed && <span>{t(label)}</span>}
-            </button>
-          );
-        })}
+        {rows.map(({ entry, child, badge, group }) => (
+          <NavRow
+            key={entry.id}
+            entry={entry}
+            active={view === entry.id}
+            collapsed={collapsed}
+            child={child}
+            badge={badge}
+            group={group}
+            onSelect={() => {
+              onNavigate(entry.id);
+              // Opening the parent's page shows what's under it. Only ever opens: clicking
+              // Library twice shouldn't make Downloads disappear — that's the chevron's job.
+              if (group) setGroupOpen(entry.id, true);
+            }}
+          />
+        ))}
       </nav>
 
       <div className="mt-auto flex flex-col gap-2">
-        {!collapsed && installing && (
-          <div className="flex flex-col gap-[7px] rounded-[10px] border border-white/[0.07] bg-[color-mix(in_srgb,var(--card)_60%,var(--window))] px-3 py-2.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate text-[11.5px] font-semibold text-foreground/85">
-                {t("sidebar.installing", { name: displayName(active.title) })}
-              </span>
-              {pct !== undefined && (
-                <span className="flex-none text-[10.5px] text-muted-foreground">
-                  {pct}%
-                </span>
-              )}
-            </div>
-            {queueLength > 0 && (
-              <span className="text-[10.5px] text-muted-foreground">
-                {t("sidebar.queued", { count: queueLength })}
-              </span>
-            )}
-            <div className="h-[3px] overflow-hidden rounded-full bg-foreground/[0.08]">
-              <div
-                className={cn(
-                  "h-full rounded-full bg-primary transition-[width]",
-                  pct === undefined &&
-                    "w-1/3 animate-[frost-indeterminate_1.2s_ease-in-out_infinite]",
-                )}
-                style={pct !== undefined ? { width: `${pct}%` } : undefined}
-              />
-            </div>
-          </div>
-        )}
+        {/* The install card is the queue's trigger now — same look, opens the panel. */}
+        <DownloadQueue collapsed={collapsed} />
 
         <button
           data-tour="play"
@@ -404,14 +513,20 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         {caps.frostmod && (
         <div
           data-tour="frostmod"
+          // A running FrostMod that never got into the game is the state this pill used
+          // to report as plain "Running", which is exactly as far as the player could get
+          // in working out why nothing was happening in game. The reason goes in the
+          // tooltip whether or not the sidebar is collapsed.
           title={
-            collapsed
-              ? running === null
-                ? t("frostmod.checking")
-                : running
-                  ? t("frostmod.running")
-                  : t("frostmod.notRunning")
-              : undefined
+            attachProblem
+              ? attachment?.reason
+              : collapsed
+                ? running === null
+                  ? t("frostmod.checking")
+                  : running
+                    ? t("frostmod.running")
+                    : t("frostmod.notRunning")
+                : undefined
           }
           className={cn(
             "flex items-center rounded-[10px] border border-white/[0.07] py-2",
@@ -421,16 +536,27 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           <span
             className={cn(
               "size-[7px] flex-none rounded-full",
-              running ? "bg-success" : "bg-muted-foreground/50",
+              attachProblem
+                ? "bg-warning"
+                : running
+                  ? "bg-success"
+                  : "bg-muted-foreground/50",
             )}
           />
           {!collapsed && (
-            <span className="flex-1 text-[11.5px] text-muted-foreground">
-              {running === null
-                ? t("frostmod.checking")
-                : running
-                  ? t("frostmod.running")
-                  : t("frostmod.notRunning")}
+            <span
+              className={cn(
+                "flex-1 text-[11.5px]",
+                attachProblem ? "text-warning" : "text-muted-foreground",
+              )}
+            >
+              {attachProblem
+                ? t("frostmod.notInGame")
+                : running === null
+                  ? t("frostmod.checking")
+                  : running
+                    ? t("frostmod.running")
+                    : t("frostmod.notRunning")}
             </span>
           )}
           {running ? (

@@ -9,7 +9,8 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { cancelDrop, commitDrop, repreviewDrop } from "../api/mods";
-import type { DropCommitItem, DropPlan } from "../types";
+import type { DropCommitItem, DropPlan, NewDownload } from "../types";
+import { useDownloads } from "./Downloads";
 import { useT } from "../i18n/context";
 import DropReview, { type RowState } from "../Components/Dropzone/DropReview";
 
@@ -57,6 +58,7 @@ export function DropReviewProvider({
   onInstalledRef.current = onInstalled;
   const tRef = useRef(t);
   tRef.current = t;
+  const { note } = useDownloads();
   // A plan holds a staging directory; if a second one arrives we must release the first.
   const planRef = useRef<DropPlan | null>(null);
   planRef.current = plan;
@@ -204,6 +206,29 @@ export function DropReviewProvider({
     setInstalling(true);
     try {
       const outcome = await commitDrop(current.id, items);
+
+      // One history row per item, from the committed request rather than the receipt: the
+      // receipt shows a display path, and the page needs the real subpath to route back to
+      // the library. A dropped file has no mod page, hence the empty slug.
+      const asked = new Map(items.map((i) => [i.id, i]));
+      const forHistory = (id: string, name: string): NewDownload => ({
+        title: name,
+        slug: "",
+        subpath: asked.get(id)?.subpath ?? "",
+        destFolder: asked.get(id)?.destFolder ?? "",
+        categoryId: null,
+        source: "file",
+        host: null,
+        url: null,
+        bytes: rows.find((r) => r.item.id === id)?.item.bytes ?? null,
+        status: "installed",
+        error: null,
+      });
+      for (const i of outcome.installed) note(forHistory(i.id, i.name));
+      for (const f of outcome.failed) {
+        note({ ...forHistory(f.id, f.name), status: "failed", error: f.error });
+      }
+
       reset();
       if (outcome.installed.length > 0) {
         toast.success(
@@ -228,7 +253,7 @@ export function DropReviewProvider({
         description: String(e),
       });
     }
-  }, [rows, reset]);
+  }, [rows, reset, note]);
 
   const value = useMemo(
     () => ({ reviewPlan, reviewing: plan !== null }),

@@ -65,6 +65,9 @@ export const BUNDLED_SUPPORTERS: SupportersManifest = {
     { name: "SoggySwisher" },
     { name: "LupaHo" },
     { name: "Qwest" },
+    { name: "RodaksRevivalYT | Black Rifle" },
+    { name: "MintyFlow" },
+    { name: "Thomas" },
     { name: "Kelso" },
   ],
 };
@@ -173,6 +176,9 @@ export interface TierGroup {
  * renaming one on Buy Me a Coffee degrades to "listed last" rather than "silently
  * dropped". People with no level — a one-off coffee — always come last, under a
  * generic heading.
+ *
+ * Within a level, people keep the order they're written in. The manifest is hand-edited,
+ * so that order is a decision somebody made; re-sorting here would quietly overrule it.
  */
 export function groupByTier(manifest: SupportersManifest): TierGroup[] {
   const buckets = new Map<string, Supporter[]>();
@@ -194,19 +200,8 @@ export function groupByTier(manifest: SupportersManifest): TierGroup[] {
 
   const groups: TierGroup[] = [...named, ...rest].map((tier) => ({
     tier,
-    people: sortPeople(buckets.get(tier) ?? []),
+    people: buckets.get(tier) ?? [],
   }));
-  if (untiered.length) groups.push({ tier: null, people: sortPeople(untiered) });
+  if (untiered.length) groups.push({ tier: null, people: untiered });
   return groups;
-}
-
-/** Longest-standing first, then alphabetical — seniority is the one ordering nobody
- *  can read as playing favourites. */
-function sortPeople(people: Supporter[]): Supporter[] {
-  return [...people].sort((a, b) => {
-    if (a.since && b.since && a.since !== b.since) return a.since < b.since ? -1 : 1;
-    if (a.since && !b.since) return -1;
-    if (!a.since && b.since) return 1;
-    return a.name.localeCompare(b.name);
-  });
 }

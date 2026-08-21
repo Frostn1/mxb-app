@@ -37,7 +37,16 @@ import { LayerInspector } from "./LayerInspector";
 import { PaintTools } from "./PaintTools";
 import { bitmapFromRgba, composite, hasInk, sheetTexture, toPng } from "./composite";
 import { EMPTY_GHOST, ghostShows, type Ghost } from "./ghost";
-import { partPath, uvParts, uvWireframe, type UvPart } from "./uv";
+import {
+  islandAt,
+  partAt,
+  partBox,
+  partPath,
+  triangleAt,
+  uvParts,
+  uvWireframe,
+  type UvPart,
+} from "./uv";
 import {
   blankSheet,
   imageLayer,
@@ -45,18 +54,22 @@ import {
   layerExtent,
   newId,
   paintLayer,
+  shapeLayer,
   textLayer,
   unionRegion,
   type Layer,
   type PaintLayer,
+  type ShapeLayer,
   type Region,
   type Sheet,
 } from "./layers";
 import {
   DEFAULT_PAINT,
   PaintHistory,
+  SHAPE_TOOLS,
   Stroke,
   TOOL_KEYS,
+  constrained,
   type PaintSettings,
   type PaintTool,
   type Point,
@@ -110,7 +123,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const [paint, setPaint] = useState<PaintSettings>(DEFAULT_PAINT);
   // Painting history, and a counter to bring its undo/redo buttons back into a render — the
   // stack itself is a mutable object, so nothing about it would reach React on its own.
-  const history = useRef(new PaintHistory());
+  const history = useRef(new PaintHistory<Sheet[]>());
   const [historyRev, setHistoryRev] = useState(0);
   // The stroke in progress. A ref because it changes on every pointer sample and no render
   // depends on it — the pixels it writes are what reach the screen.
@@ -167,6 +180,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // What was last published as `overrideNames`. Held beside the state so the recomposite below
   // can tell whether it has anything to say *before* saying it — see the note there.
   const publishedNames = useRef("");
+
+  // The sheets as they stand, for the undo stack to snapshot on its way past an edit. A mirror
+  // rather than a read of `sheets`: the callbacks that mutate are memoised on their own
+  // dependencies, and one holding a stale array would remember a state that had already moved on.
+  const sheetsRef = useRef(sheets);
+  sheetsRef.current = sheets;
 
   const active = sheets.find((s) => s.id === activeId) ?? null;
   const bump = useCallback(() => setVersion((v) => v + 1), []);
@@ -272,21 +291,46 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     };
   }, []);
 
-  const patchSheet = useCallback((id: string, fn: (s: Sheet) => Sheet) => {
-    // Every route into a sheet but a stroke comes through here, and none of them says where it
-    // drew. Marking the sheet wholly dirty on the way past is what lets the recomposite treat a
-    // region as a promise rather than a hint: if one is there, a stroke put it there.
-    dirty.current.set(id, null);
-    setSheets((prev) => prev.map((s) => (s.id === id ? fn(s) : s)));
+  /**
+   * Record the document as it stands, so the edit about to happen can be taken back.
+   *
+   * Before the mutation, never after: what undo needs is the state that existed a moment ago,
+   * and once `setSheets` has run there is nothing left holding it. `key` collapses a run of
+   * edits that are one gesture — see `PaintHistory.pushDoc`.
+   */
+  const remember = useCallback((key: string | null = null) => {
+    history.current.pushDoc(sheetsRef.current, key);
+    setHistoryRev((v) => v + 1);
   }, []);
 
+  const patchSheet = useCallback(
+    /**
+     * `undoKey` names the gesture for coalescing, or `false` for an edit the history must not
+     * record — one whose other half lives outside the document, where an undo would restore the
+     * sheet and leave that half where it was.
+     */
+    (id: string, fn: (s: Sheet) => Sheet, undoKey: string | null | false = null) => {
+      // Every route into a sheet but a stroke comes through here, and none of them says where it
+      // drew. Marking the sheet wholly dirty on the way past is what lets the recomposite treat a
+      // region as a promise rather than a hint: if one is there, a stroke put it there.
+      if (undoKey !== false) remember(undoKey);
+      dirty.current.set(id, null);
+      setSheets((prev) => prev.map((s) => (s.id === id ? fn(s) : s)));
+    },
+    [remember],
+  );
+
   const patchLayer = useCallback(
-    (layerId: string, fn: (l: Layer) => Layer) => {
+    (layerId: string, fn: (l: Layer) => Layer, undoKey: string | null | false = null) => {
       if (!activeId) return;
-      patchSheet(activeId, (s) => ({
-        ...s,
-        layers: s.layers.map((l) => (l.id === layerId ? fn(l) : l)),
-      }));
+      patchSheet(
+        activeId,
+        (s) => ({
+          ...s,
+          layers: s.layers.map((l) => (l.id === layerId ? fn(l) : l)),
+        }),
+        undoKey,
+      );
     },
     [activeId, patchSheet],
   );
@@ -350,6 +394,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * the moment it arrives, because that is what the mark is made of; only the telling-everyone
    * waits, and it waits at most until the next frame, which is the soonest anyone could see it.
    */
+  // The shape layer a drag is currently rewriting, and where the press landed. Null except
+  // between the press and the release of a shape tool — the stroke ref's opposite number.
+  const shaping = useRef<{ id: string; from: Point } | null>(null);
+
   const queued = useRef<{ sheetId: string; layerId: string } | null>(null);
   const frame = useRef(0);
 
@@ -404,7 +452,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const pickTool = useCallback(
     (tool: PaintTool) => {
       setPaint((p) => ({ ...p, tool }));
-      if (tool === "move" || !active) return;
+      // A shape makes its own layer on the press, so it needs nothing selected to land on.
+      if (tool === "move" || SHAPE_TOOLS.has(tool) || !active) return;
       const selected = active.layers.find((l) => l.id === selectedId);
       if (selected?.kind === "paint") return;
       const existing = [...active.layers].reverse().find((l) => l.kind === "paint");
@@ -414,20 +463,34 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [active, addPaintLayer, selectedId],
   );
 
-  const startPaint = useCallback(
-    (at: Point) => {
-      if (!target || !activeId) return;
-      const next = new Stroke(target.canvas, paint, at);
-      stroke.current = next;
-      // Straight through rather than queued: the press is the one sample nobody would forgive a
-      // frame's wait on, and a tool that puts nothing down on the press has nothing to show.
-      if (next.dirty) touchPaint(activeId, target.id, next.dirty);
-    },
-    [activeId, paint, target, touchPaint],
-  );
 
   const movePaint = useCallback(
     (points: Point[], constrain: boolean) => {
+      // A shape in progress is a layer, not a stroke: the drag rewrites its box and the
+      // composite redraws it, so what is on screen mid-drag is the shape itself rather than a
+      // preview of one. See `startPaint`.
+      const drawing = shaping.current;
+      if (drawing) {
+        const raw = points[points.length - 1];
+        if (!raw) return;
+        const to = constrain ? constrained(drawing.from, raw, paint.tool) : raw;
+        patchLayer(
+          drawing.id,
+          (l) =>
+            l.kind === "shape"
+              ? {
+                  ...l,
+                  x: (drawing.from.x + to.x) / 2,
+                  y: (drawing.from.y + to.y) / 2,
+                  w: to.x - drawing.from.x,
+                  h: -(to.y - drawing.from.y),
+                }
+              : l,
+          `shape:${drawing.id}`,
+        );
+        bump();
+        return;
+      }
       const live = stroke.current;
       if (!live || !target || !activeId) return;
       live.move(points, constrain);
@@ -435,10 +498,28 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       markPaint(activeId, live.dirty);
       schedulePaint(activeId, target.id);
     },
-    [activeId, markPaint, schedulePaint, target],
+    [activeId, bump, markPaint, paint.tool, patchLayer, schedulePaint, target],
   );
 
   const endPaint = useCallback(() => {
+    const drawing = shaping.current;
+    if (drawing) {
+      shaping.current = null;
+      // A click with a shape tool selected is not a shape. Left in, it would be an invisible
+      // layer in the list with handles too small to grab and nothing to see.
+      if (active) {
+        const made = active.layers.find((l) => l.id === drawing.id);
+        if (made?.kind === "shape" && Math.abs(made.w) < 2 && Math.abs(made.h) < 2) {
+          patchSheet(active.id, (sh) => ({
+            ...sh,
+            layers: sh.layers.filter((l) => l.id !== drawing.id),
+          }));
+          setSelectedId(null);
+          bump();
+        }
+      }
+      return;
+    }
     const done = stroke.current;
     stroke.current = null;
     // Whatever the last frame didn't get to, now — a stroke that ended between two frames would
@@ -449,7 +530,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     if (!done?.end() || !target || !activeId) return;
     history.current.push(activeId, target.id, done.before);
     setHistoryRev((v) => v + 1);
-  }, [activeId, flushPaint, target]);
+  }, [active, activeId, bump, flushPaint, patchSheet, target]);
 
   /** The live canvas behind a layer id, wherever it lives — history spans every sheet. */
   const paintCanvas = useCallback(
@@ -471,21 +552,49 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [historyRev],
   );
 
+  /**
+   * Reading and replacing the document for the history — plus putting the cursor somewhere real
+   * afterwards.
+   *
+   * Undoing the sheet you were looking at leaves `activeId` naming something that no longer
+   * exists, and the editor would come back empty rather than showing what it just restored. The
+   * same for a selected layer. Neither is part of the document, so neither is restored by it.
+   */
+  const docAccess = useMemo(
+    () => ({
+      read: () => sheetsRef.current,
+      write: (next: Sheet[]) => {
+        setSheets(next);
+        setActiveId((cur) => (cur && next.some((s) => s.id === cur) ? cur : next[0]?.id ?? null));
+        setSelectedId((cur) =>
+          cur && next.some((s) => s.layers.some((l) => l.id === cur)) ? cur : null,
+        );
+      },
+    }),
+    [],
+  );
+
   // Not while the pointer is still down: the stroke redraws its layer from its own snapshot on
   // the next sample, so an undo mid-drag would be silently taken back a moment later.
   const undo = useCallback(() => {
     if (stroke.current) return;
-    const entry = history.current.undo(paintCanvas);
+    const entry = history.current.undo(paintCanvas, docAccess);
     setHistoryRev((v) => v + 1);
-    if (entry) touchPaint(entry.sheetId, entry.layerId);
-  }, [paintCanvas, touchPaint]);
+    if (!entry) return;
+    // A document step replaces sheet objects wholesale, and the recomposite already follows
+    // sheet identity — so it needs no region, only to be told the drawing moved.
+    if (entry.kind === "pixels") touchPaint(entry.sheetId, entry.layerId);
+    else bump();
+  }, [bump, docAccess, paintCanvas, touchPaint]);
 
   const redo = useCallback(() => {
     if (stroke.current) return;
-    const entry = history.current.redo(paintCanvas);
+    const entry = history.current.redo(paintCanvas, docAccess);
     setHistoryRev((v) => v + 1);
-    if (entry) touchPaint(entry.sheetId, entry.layerId);
-  }, [paintCanvas, touchPaint]);
+    if (!entry) return;
+    if (entry.kind === "pixels") touchPaint(entry.sheetId, entry.layerId);
+    else bump();
+  }, [bump, docAccess, paintCanvas, touchPaint]);
 
   // Which paint layers exist, as a string. `sheets` changes on every pointer sample of a
   // stroke; this changes only when one is added or deleted, which is the only time the
@@ -544,10 +653,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   /**
    * Pixels for a file the user picked, at the sheet's own resolution.
    *
-   * No orientation is imposed. A `.pnt` doesn't record which way up its rows are and paints in
-   * the wild are stored both ways, so the editor shows exactly what the file holds — the same
-   * rows the viewer renders and the game reads. A sheet that looks upside down here is upside
-   * down in the file, and guessing otherwise would flip every correctly-made paint.
+   * The rows arrive in the order the file holds them, which is the order the mesh samples
+   * them — and that is upside down from the template a painter works in. Nothing is flipped
+   * here: the sheet, the composite and the save all stay in the file's own row order, and the
+   * 2D stage turns it the right way up for display alone (see `CanvasStage`). Flipping the
+   * pixels instead would put the editor's opinion about orientation inside the saved paint.
    */
   const readImage = useCallback(async (path: string) => {
     const tex = await paintStudioPixels(path);
@@ -581,6 +691,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         base: bitmap,
         layers: [],
       }));
+      remember();
       setSheets(next);
       setActiveId(next[0]?.id ?? null);
       setSelectedId(null);
@@ -588,7 +699,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       bump();
       toast.success(t("designer.loadedSheets", { count: String(next.length) }));
     },
-    [bump, readImage, t],
+    [bump, readImage, remember, t],
   );
 
   const startFromPaint = useCallback(async () => {
@@ -646,11 +757,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     // the difference between a paint that shows and a paint that doesn't.
     const suggested = missingHints[0] ?? "";
     const sheet = blankSheet(suggested, BLANK_SIZE);
+    remember();
     setSheets((prev) => [...prev, sheet]);
     setActiveId(sheet.id);
     setSelectedId(null);
     bump();
-  }, [bump, missingHints]);
+  }, [bump, missingHints, remember]);
 
   /**
    * One sheet per colour texture the model asks for that isn't on the list yet.
@@ -664,11 +776,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const addHintSheets = useCallback(() => {
     const made = missingHints.map((h) => blankSheet(h, BLANK_SIZE));
     if (!made.length) return;
+    remember();
     setSheets((prev) => [...prev, ...made]);
     setActiveId(made[0].id);
     setSelectedId(null);
     bump();
-  }, [bump, missingHints]);
+  }, [bump, missingHints, remember]);
 
   const addImage = useCallback(async () => {
     if (!active) return;
@@ -714,7 +827,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
 
   const moveLayer = useCallback(
     (id: string, dx: number, dy: number) => {
-      patchLayer(id, (l) => ({ ...l, x: l.x + dx, y: l.y + dy }));
+      patchLayer(id, (l) => ({ ...l, x: l.x + dx, y: l.y + dy }), `layer:${id}`);
       bump();
     },
     [bump, patchLayer],
@@ -723,7 +836,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   /** A corner drag, as an absolute scale. Clamped by the stage to the inspector's range. */
   const scaleLayer = useCallback(
     (id: string, scale: number) => {
-      patchLayer(id, (l) => ({ ...l, scale }));
+      patchLayer(id, (l) => ({ ...l, scale }), `layer:${id}`);
       bump();
     },
     [bump, patchLayer],
@@ -752,9 +865,69 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // And only when it *did* arrive that way — a bike that loaded without its `.geom` is a heap
   // of parts in their own frames, and a side named from that is worse than no side at all.
   const bike = isBikeKind(destState.kind);
+  // The island the pointer is over, for the 3D view to light up. Held here rather than in the
+  // stage because it crosses from the 2D half of the editor to the 3D one, and this is the
+  // only thing that owns both.
+  const [hoverIsland, setHoverIsland] = useState<Int32Array | null>(null);
   const parts = useMemo<UvPart[]>(
     () => (geometry ? uvParts(geometry, activeName, { assembled: bike && assembled }) : []),
     [geometry, activeName, bike, assembled],
+  );
+
+  const startPaint = useCallback(
+    (at: Point, whole: boolean) => {
+      // A rectangle, ellipse or line becomes a layer, not pixels. Made on the press and
+      // rewritten as the drag goes, so the thing being dragged out *is* the finished object —
+      // there is no separate preview to disagree with the result, and on release it is
+      // already selected with handles on it.
+      if (SHAPE_TOOLS.has(paint.tool) && active) {
+        const shape = paint.tool as ShapeLayer["shape"];
+        const layer = shapeLayer(
+          t(`designer.tool.${shape}`),
+          shape,
+          at,
+          at,
+          paint.shape,
+          paint.colorA,
+          paint.strokeWidth,
+        );
+        remember();
+        patchSheet(active.id, (sh) => ({ ...sh, layers: [...sh.layers, layer] }));
+        setSelectedId(layer.id);
+        shaping.current = { id: layer.id, from: at };
+        bump();
+        return;
+      }
+      if (!target || !activeId) return;
+      // The bucket fills the uv triangle under the press, not the sheet and not the whole mesh
+      // group. Worked out here rather than inside `Stroke`, because the parts are the editor's
+      // knowledge of the model and paint.ts is deliberately ignorant of it — it puts pixels
+      // down, wherever it is told to.
+      //
+      // The group is only the first cut: `shroud` is both flanks and often several islands, so
+      // stopping there floods panels the press never pointed at. Left button takes the one
+      // triangle under the pointer; right button takes the island it belongs to.
+      let fillTo: { path: Path2D; box: Region } | null = null;
+      if (paint.tool === "fill" && active && parts.length) {
+        const u = at.x / active.width;
+        const v = at.y / active.height;
+        const under = partAt(parts, u, v);
+        const pick = whole ? islandAt : triangleAt;
+        const region = under ? (pick(under, u, v) ?? under) : null;
+        if (region) {
+          fillTo = {
+            path: partPath(region, active.width, active.height),
+            box: partBox(region, active.width, active.height),
+          };
+        }
+      }
+      const next = new Stroke(target.canvas, paint, at, fillTo);
+      stroke.current = next;
+      // Straight through rather than queued: the press is the one sample nobody would forgive a
+      // frame's wait on, and a tool that puts nothing down on the press has nothing to show.
+      if (next.dirty) touchPaint(activeId, target.id, next.dirty);
+    },
+    [active, activeId, bump, paint, parts, patchSheet, remember, t, target, touchPaint],
   );
 
   /** Pin the selected layer to a piece of bodywork, or let it cover the sheet again. */
@@ -859,13 +1032,17 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       const sheet = sheets.find((s) => s.id === sheetId);
       if (!sheet) return;
       const ghost = ghostOf(sheetId);
+      // Not recorded by the history, either way: the bitmap moves between the sheet and the
+      // ghost, and the ghost isn't part of the document — an undo would put the template back
+      // on the sheet while the ghost still held it, which is the copy this is careful not to
+      // make. Pressing the button again is the way back, as it always was.
       if (sheet.base) {
         const template = sheet.base;
-        patchSheet(sheetId, (s) => ({ ...s, base: null }));
+        patchSheet(sheetId, (s) => ({ ...s, base: null }), false);
         patchGhost(sheetId, (g) => ({ ...g, template, showTemplate: true }));
       } else if (ghost.template) {
         const base = ghost.template;
-        patchSheet(sheetId, (s) => ({ ...s, base }));
+        patchSheet(sheetId, (s) => ({ ...s, base }), false);
         patchGhost(sheetId, (g) => ({ ...g, template: null }));
       }
       bump();
@@ -973,20 +1150,26 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * the `.pnt`. The mesh binds by name either way, but a paint whose sheets are ordered the
    * way its author expects is easier to diff and to hand to somebody else.
    */
-  const reorderSheet = useCallback((id: string, delta: number) => {
-    setSheets((prev) => {
-      const at = prev.findIndex((s) => s.id === id);
-      const to = at + delta;
-      if (at < 0 || to < 0 || to >= prev.length) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(at, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }, []);
+  const reorderSheet = useCallback(
+    (id: string, delta: number) => {
+      // Keyed, so walking a sheet three places up is one step back rather than three.
+      remember(`sheet-order:${id}`);
+      setSheets((prev) => {
+        const at = prev.findIndex((s) => s.id === id);
+        const to = at + delta;
+        if (at < 0 || to < 0 || to >= prev.length) return prev;
+        const next = [...prev];
+        const [moved] = next.splice(at, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+    },
+    [remember],
+  );
 
   const removeSheet = useCallback(
     (id: string) => {
+      remember();
       setSheets((prev) => {
         const next = prev.filter((s) => s.id !== id);
         setActiveId((cur) => (cur === id ? next[0]?.id ?? null : cur));
@@ -994,7 +1177,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       });
       bump();
     },
-    [bump],
+    [bump, remember],
   );
 
   /** Why saving isn't possible yet, as a translated message — or null when it is, and on an
@@ -1215,7 +1398,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               onClip={clipLayer}
               onFit={fitLayer}
               onChange={(fn) => {
-                patchLayer(selected.id, fn);
+                patchLayer(selected.id, fn, `layer:${selected.id}`);
                 bump();
               }}
             />
@@ -1232,13 +1415,14 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               version={version}
               ghost={ghostOf(active.id)}
               parts={parts}
+              onHoverSpot={setHoverIsland}
               selectedId={selectedId}
               onSelect={setSelectedId}
               onMove={moveLayer}
               onScale={scaleLayer}
               tool={paint.tool}
               brushSize={paint.size}
-              canPaint={!!target}
+              canPaint={!!target || SHAPE_TOOLS.has(paint.tool)}
               onPaintStart={startPaint}
               onPaintMove={movePaint}
               onPaintEnd={endPaint}
@@ -1268,6 +1452,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           frameToken={version}
           onGeometry={onGeometry}
           onStock={onStock}
+          highlight={hoverIsland}
           className="flex-1"
         />
       </section>

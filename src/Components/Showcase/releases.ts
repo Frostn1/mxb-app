@@ -38,6 +38,8 @@ import {
   Wrench,
   RefreshCw,
   Package,
+  Download,
+  Share2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
@@ -64,6 +66,21 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.10.0",
+    hero: {
+      icon: Wand2,
+      title: "showcase.v0100.hero.title",
+      body: "showcase.v0100.hero.body",
+    },
+    highlights: [
+      { icon: Grid3x3, text: "showcase.v0100.location" },
+      { icon: Download, text: "showcase.v0100.downloads" },
+      { icon: Mountain, text: "showcase.v0100.terrain" },
+      { icon: Share2, text: "showcase.v0100.sharing" },
+      { icon: Wrench, text: "showcase.v0100.linux" },
+    ],
+  },
   {
     version: "0.9.2",
     hero: {

@@ -143,6 +143,14 @@ export interface ModSummary {
   /** Featured image URL, if any. */
   image: string | null;
   categoryId: number;
+  /**
+   * Who posted the mod, as the catalog names them. Null where the site didn't say.
+   *
+   * Optional rather than required because `ShopItem` extends this shape and a purchased
+   * download has no byline to carry — the store's "All My Downloads" page lists files, not
+   * authors.
+   */
+  author?: string | null;
 }
 
 /** A mod's community score on mxb-mods.com, as shown under the site's own thumbnails. */
@@ -224,6 +232,9 @@ export interface LibraryEntry {
   path: string;
   folder: string;
   size: number;
+  /** Unix milliseconds the files were last written — what "Recently added" sorts on. 0 when
+   *  the filesystem wouldn't say. */
+  modified: number;
   kind: LibraryKind;
   category: LibraryCategory;
   /** For paints / model-swaps: the owning bike / gear model / rider profile. */
@@ -651,6 +662,36 @@ export interface DropOutcome {
   failed: DropFailed[];
 }
 
+/** Where a download's bytes came from: the mod site, a shop purchase, or a local file the
+ *  user imported or dragged in. */
+export type DownloadSource = "site" | "shop" | "file";
+
+export type DownloadStatus = "installed" | "failed";
+
+/** One finished download, as kept in `download-history.json`. */
+export interface DownloadRecord {
+  id: string;
+  /** Unix milliseconds, stamped by the backend. */
+  at: number;
+  title: string;
+  /** Empty for a dragged-in file — it has no mod page to go back to. */
+  slug: string;
+  subpath: string;
+  destFolder: string;
+  categoryId: number | null;
+  source: DownloadSource;
+  /** Which mirror served it — MediaFire, Google Drive, MEGA… */
+  host: string | null;
+  /** The link it came from, so a failed row can be retried in place. Null for shop and file. */
+  url: string | null;
+  bytes: number | null;
+  status: DownloadStatus;
+  error: string | null;
+}
+
+/** What a caller supplies; `id` and `at` are the backend's to assign. */
+export type NewDownload = Omit<DownloadRecord, "id" | "at">;
+
 export type InstallStage =
   | "resolving"
   | "downloading"
@@ -680,6 +721,33 @@ export interface FrostmodReload {
    *  this — an in-app install already knows what it placed. */
   mods?: string[];
 }
+
+/** Whether FrostMod's DLL is actually inside the running game. Mirrors
+ *  `frostmod::AttachState`.
+ *
+ *  `running` (the pill's usual source) only says the launcher process is up. These two
+ *  answers come apart when the game runs at a higher integrity level than the app: the
+ *  injector can't open a process above it, so FrostMod is running and simply never gets
+ *  in — which used to look like the app lying about it. */
+export type AttachState =
+  | "game_not_running"
+  | "attached"
+  /** Up, not in yet, and still inside the grace period. Not a problem. */
+  | "attaching"
+  | "not_attached"
+  /** Windows won't let us look inside the game — and won't let FrostMod in either. */
+  | "blocked"
+  | "unknown";
+
+/** Mirrors `frostmod::Attachment`. */
+export interface Attachment {
+  state: AttachState;
+  /** What is wrong and how to fix it. Empty unless the state calls for it. */
+  reason: string;
+}
+
+/** The attach states worth putting in front of the user. */
+export const ATTACH_PROBLEM: readonly AttachState[] = ["blocked", "not_attached"];
 
 /** Result of pressing Play. `already_running` means we deliberately did nothing. */
 export type LaunchOutcome = "launched" | "already_running";
@@ -793,11 +861,38 @@ export interface FrostmodStatus {
   missingRuntimes: VcRuntime[];
 }
 
-/** A Visual C++ runtime the FrostMod chain needs. Matches `vcruntime::Runtime`. */
-export type VcRuntime = "vc90" | "vc140";
+/**
+ * A Visual C++ runtime the FrostMod chain needs. Matches `vcruntime::Runtime`.
+ *
+ * `vc140_x86` never appears in {@link FrostmodStatus.missingRuntimes} — nothing we ship is
+ * 32-bit, so its absence proves nothing is wrong and it would only ever be a false alarm.
+ * It exists for the repair, which installs the pair Microsoft's own downloads page hands
+ * out, and for the manual download links.
+ */
+export type VcRuntime = "vc90" | "vc140" | "vc140_x86";
 
 /** What a runtime install did. `cancelled` is the user dismissing the UAC prompt. */
 export type RuntimeInstallOutcome = "installed" | "cancelled";
+
+/**
+ * What a repair run did. Mirrors `vcruntime::RepairReport`.
+ *
+ * Nothing here is an error: a repair does what it can and reports the rest, so
+ * `stillMissing` is a list to hand download links for rather than a failure.
+ */
+export interface RuntimeRepairReport {
+  /** Runtimes that went on during this run. */
+  installed: VcRuntime[];
+  /** Runtimes that were already there — "nothing to do" is a real answer worth saying. */
+  alreadyPresent: VcRuntime[];
+  /** Still absent afterwards: a declined UAC prompt, a failed download, a pending reboot. */
+  stillMissing: VcRuntime[];
+  /** Whether a stray `msvcr90.dll` beside the game executable was cleaned up. Versions
+   *  0.9.2–0.10.0 put one there, and it aborts the game with R6034. */
+  msvcr90Removed: boolean;
+  /** False when no game folder is configured, so there was nowhere to look. */
+  gameDirKnown: boolean;
+}
 
 /** What an install landed, beyond succeeding. */
 export interface FrostmodInstallReport {

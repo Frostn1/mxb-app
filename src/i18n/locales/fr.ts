@@ -48,6 +48,7 @@ export const fr: Translation = {
   "nav.browse": "Parcourir",
   "nav.shop": "Boutique",
   "nav.library": "Bibliothèque",
+  "nav.downloads": "Téléchargements",
   "nav.locker": "Casier",
   "nav.presets": "Presets",
   "nav.rider": "Pilote",
@@ -62,11 +63,14 @@ export const fr: Translation = {
   "sidebar.queued": "+{{count}} en attente",
   "sidebar.expand": "Développer la barre latérale",
   "sidebar.collapse": "Réduire la barre latérale",
+  "sidebar.showGroup": "Afficher ce qui se trouve sous {{name}}",
+  "sidebar.hideGroup": "Masquer ce qui se trouve sous {{name}}",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "Vérification de FrostMod…",
   "frostmod.running": "FrostMod actif",
   "frostmod.notRunning": "FrostMod inactif",
+  "frostmod.notInGame": "FrostMod absent du jeu",
   "frostmod.reloadGame": "Recharger le jeu",
   "frostmod.start": "Démarrer FrostMod",
   "frostmod.reloadedGame": "FrostMod a rechargé le jeu.",
@@ -130,6 +134,13 @@ export const fr: Translation = {
   "presets.help":
     "Enregistrez un look de pilote complet et chargez-le sur une moto à la demande.",
   "presets.profile": "Profil",
+  "presets.forgetBike": "Retirer la moto",
+  "presets.forgetBikeOne": "Retirer {{name}} de ce profil",
+  "presets.forgetBikeQ": "Retirer cette moto ?",
+  "presets.forgetBikeBody":
+    "« {{name}} » quitte la liste des motos de ce profil, avec le look enregistré pour elle. Rien d’installé n’est supprimé : si vous roulez de nouveau avec cette moto, le jeu la remet aussitôt.",
+  "presets.bikeForgotten": "« {{name}} » retirée de ce profil.",
+  "presets.forgetFailed": "Impossible de retirer cette moto",
   "presets.namePlaceholder": "Nom du preset…",
   "presets.savePreset": "Enregistrer le preset",
   "presets.saveChanges": "Enregistrer les modifications",
@@ -296,6 +307,21 @@ export const fr: Translation = {
     "Windows a besoin de votre autorisation. Ouverture du téléchargement Microsoft à la place.",
   "runtime.installFailed": "Impossible d'installer le composant",
   "runtime.downloadManually": "Le télécharger soi-même",
+  "runtime.componentVc140X86": "Microsoft Visual C++ 2015–2022 (x86)",
+  "runtime.repairing": "Réparation…",
+  "runtime.repairDone": "Composants réparés",
+  "runtime.repairDoneDesc":
+    "Redémarrez MX Bikes s'il est déjà ouvert, puis réessayez.",
+  "runtime.repairNothingToDo": "Tout était déjà en place",
+  "runtime.repairNothingToDoDesc":
+    "Tous les composants Visual C++ sont installés et le dossier du jeu a ce qu'il lui faut. Si le jeu ne démarre toujours pas, envoyez-nous votre journal.",
+  "runtime.repairPartial": "Une partie a encore besoin de vous",
+  "runtime.repairPartialDesc":
+    "N'a pas pu aboutir : {{what}}. Windows demande votre autorisation, ou le téléchargement n'est pas arrivé — vous pouvez l'installer à la main.",
+  "runtime.repairNoGameFolder": "Aucun dossier de jeu défini",
+  "runtime.repairNoGameFolderDesc":
+    "Les composants sont installés, mais sans le dossier d'installation nous ne pouvons pas vérifier le dossier du jeu lui-même. Indiquez-le ci-dessus, puis réparez à nouveau.",
+  "runtime.repairFailed": "Impossible de réparer les composants",
   "update.checkFailed": "Impossible de vérifier les mises à jour",
   "update.failed": "Échec de la mise à jour",
 
@@ -355,7 +381,6 @@ export const fr: Translation = {
   "browse.empty": "Aucun résultat pour {{type}}.",
   "browse.loadMore": "Charger plus",
   "browse.selectedCount": "{{count}} sélectionné(s)",
-  "browse.queuing": "Mise en file…",
   "browse.quickInstallCount": "Installation rapide de {{count}}",
   "browse.quickInstall": "Installation rapide",
   "browse.quickReinstall": "Réinstallation rapide",
@@ -369,27 +394,21 @@ export const fr: Translation = {
   "browse.reinstall": "Réinstaller",
   "browse.reinstallAll": "Tout réinstaller",
   "browse.queued": "« {{title}} » en file d'attente",
-  "browse.queuedDesc": "Installation dans {{folder}}.",
-  "browse.rootFolder": "racine",
+  "browse.queuedDesc": "Il s'installera dès que son tour arrivera.",
+  "browse.byAuthor": "par {{author}}",
   "browse.needsBrowser":
     "« {{title}} » doit être téléchargé depuis le navigateur",
   "browse.needsBrowserDesc":
     "{{host}} bloque les téléchargements dans l'application — ouvrez sa page pour terminer.",
   "browse.noDownload": "Aucun téléchargement trouvé pour « {{title}} »",
+  "browse.serverOnly": "« {{title}} » ne propose que des fichiers serveur",
+  "browse.serverOnlyDesc":
+    "Ouvrez le mod pour voir ses téléchargements — une version pour serveur dédié n'est pas installée à votre place.",
   "browse.quickInstallFailed":
     "Impossible d'installer rapidement « {{title}} »",
   "browse.queuedBulk_one": "{{count}} mod en file d'attente",
   "browse.queuedBulk_other": "{{count}} mods en file d'attente",
   "browse.queuedBulkDesc": "Ils s'installeront l'un après l'autre.",
-  "browse.queuedBulkSkipped_one":
-    "{{count}} ignoré — hébergeur navigateur uniquement.",
-  "browse.queuedBulkSkipped_other":
-    "{{count}} ignorés — hébergeur navigateur uniquement.",
-  "browse.bulkFailed": "Impossible d'installer rapidement la sélection",
-  "browse.bulkFailedDesc_one":
-    "Il doit être téléchargé depuis le navigateur.",
-  "browse.bulkFailedDesc_other":
-    "Les {{count}} doivent être téléchargés depuis le navigateur.",
 
   // ── Boutique (MX Bikes Shop — téléchargements achetés) ─────────────────────
   "shop.help":
@@ -486,10 +505,18 @@ export const fr: Translation = {
   "installDialog.differentBike": "Moto / pack différent",
   "installDialog.directFastest": "Direct · le plus rapide",
   "installDialog.direct": "Direct",
+  "installDialog.recommendedBadge": "Recommandé",
+  "installDialog.browserBadge": "Navigateur",
+  "installDialog.serverBadge": "Serveur",
+  "installDialog.serverBuildNote": "Version serveur dédié — pas pour jouer",
+  "installDialog.serverFiles_one": "1 fichier pour serveur dédié",
+  "installDialog.serverFiles_other": "{{count}} fichiers pour serveur dédié",
+  "installDialog.serverOnlyNotice":
+    "Ici, chaque téléchargement est une version pour serveur dédié. N'en installez une que si vous hébergez un serveur — elle n'ajoute rien à piloter.",
+  "installDialog.moreMirrors_one": "1 autre miroir",
+  "installDialog.moreMirrors_other": "{{count}} autres miroirs",
   "installDialog.perBikeHint":
     "Chaque téléchargement correspond à une moto différente — sélectionné automatiquement selon votre choix. Choisissez le pack « all bikes » pour toutes les motos d'un coup.",
-  "installDialog.mirrorsHint":
-    "Tous les miroirs contiennent le même fichier. Si l'un échoue, essayez le suivant.",
 
   // ── Détails de bibliothèque ────────────────────────────────────────────────
   "libraryDetail.author": "Auteur",
@@ -518,12 +545,15 @@ export const fr: Translation = {
   "modDetail.stagePlace": "Placement",
   "modDetail.stageReload": "Rechargement",
   "modDetail.modFiles": "Fichiers de mod",
+  "modDetail.loadFailed": "Impossible de charger ce mod",
   "modDetail.copied": "Copié",
   "modDetail.copy": "Copier",
   "modDetail.addToLibrary": "Ajouter à la bibliothèque",
   "modDetail.host": "Hébergeur",
   "modDetail.installsTo": "Installe dans",
   "modDetail.noDownloadLink": "Aucun lien de téléchargement trouvé sur cette page — ouvrez-la sur {{site}}.",
+  "modDetail.serverOnlyNotice":
+    "Cette page ne propose que des fichiers pour serveur dédié. Ils s'installent, mais il n'y a rien à piloter en jeu.",
   "modDetail.frostmodHint":
     "FrostMod rechargera la liste des {{kind}} une fois terminé.",
   "modDetail.kindRider": "pilotes",
@@ -598,6 +628,9 @@ export const fr: Translation = {
   "settings.latestVersion": "Dernière : {{version}}",
   "settings.frostmodRuntimeMissing":
     "Il manque à Windows un composant Visual C++ dont FrostMod a besoin — installez-le pour faire disparaître l'erreur « dll was not found ».",
+  "settings.repairRuntimes": "Réparer les composants",
+  "settings.repairRuntimesHint":
+    "Installe tous les composants Visual C++ qui manquent à ce PC, 32 et 64 bits, et retire ce qu'une ancienne version de cette app a laissé dans le dossier du jeu. Utile même si rien ne semble anormal ci-dessus.",
   "settings.frostmodNeedsRepair":
     "Les fichiers installés ne correspondent pas à cette version — une réinstallation corrige ça.",
   "settings.frostmodRepair": "Réparer l'installation",
@@ -859,6 +892,8 @@ export const fr: Translation = {
   "library.byAuthor": "par {{author}}",
   "library.locked": "Verrouillé — le contenu ne peut pas être lu",
   "library.searchPlaceholder": "Rechercher parmi les installés…",
+  "library.sortFolder": "Par dossier",
+  "library.sortRecent": "Ajoutés récemment",
   "library.scanning": "Analyse de votre bibliothèque…",
   "library.empty":
     "Aucun mod {{type}} installé — allez dans Parcourir pour en ajouter un.",
@@ -1046,6 +1081,44 @@ export const fr: Translation = {
   "install.failed": "Échec de l'installation — {{title}}",
   "install.openModPage": "Ouvrir la page du mod",
   "install.clickToOpen": "Cliquez pour ouvrir la page du mod",
+  "install.cancelled": "{{title}} annulé",
+
+  "downloads.title": "Téléchargements",
+  "downloads.open": "Afficher la file de téléchargement",
+  "downloads.preparing": "Préparation…",
+  "downloads.waiting": "En attente",
+  "downloads.cancel": "Annuler ce téléchargement",
+  "downloads.remove": "Retirer de la file",
+  "downloads.cancelling": "Annulation…",
+  "downloads.stageResolving": "Recherche du fichier…",
+  "downloads.stageDownloading": "Téléchargement",
+  "downloads.stageExtracting": "Extraction",
+  "downloads.stagePlacing": "Installation",
+
+  // ── Téléchargements (historique) ───────────────────────────────────────────
+  "downloads.help":
+    "Tout ce que vous avez téléchargé, du plus récent au plus ancien — échecs compris. Filtrez par statut, ou cherchez un mod dont le nom vous échappe.",
+  "downloads.filterAll": "Tous",
+  "downloads.filterFailed": "Échecs",
+  "downloads.searchPlaceholder": "Rechercher dans les téléchargements…",
+  "downloads.clearAction": "Vider",
+  "downloads.clearTitle": "Vider l'historique des téléchargements ?",
+  "downloads.clearBody":
+    "Cela n'oublie que la liste. Rien de ce que vous avez installé n'est supprimé.",
+  "downloads.empty":
+    "Rien de téléchargé pour l'instant — allez dans Parcourir pour ajouter quelque chose.",
+  "downloads.noMatches": "Aucun résultat.",
+  "downloads.today": "Aujourd'hui",
+  "downloads.yesterday": "Hier",
+  "downloads.sourceSite": "Téléchargement",
+  "downloads.sourceShop": "Boutique",
+  "downloads.sourceFile": "Fichier importé",
+  "downloads.showInLibrary": "Voir dans la bibliothèque",
+  "downloads.openModPage": "Ouvrir la page du mod",
+  "downloads.forget": "Retirer de la liste",
+  "downloads.rowActions": "Plus",
+  "downloads.failedBadge_one": "{{count}} téléchargement échoué",
+  "downloads.failedBadge_other": "{{count}} téléchargements échoués",
 
   // ── Catégories (singulier) ─────────────────────────────────────────────────
   "category.track": "Circuit",
@@ -1167,6 +1240,19 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0100.hero.title": "Le Designer prépare ses planches tout seul",
+  "showcase.v0100.hero.body":
+    "Il crée maintenant les planches qu'un modèle demande, glisse en dessous les plastiques de la moto elle-même pour décalquer et ouvre un modèle en une seconde environ au lieu de près de vingt.",
+  "showcase.v0100.location":
+    "Survole la planche et elle te dit ce qu'il y a sous le curseur : la pièce, le côté de la moto où elle se trouve, et si c'est une face que tu verras ou un dessous que tu ne verras pas.",
+  "showcase.v0100.downloads":
+    "La page Téléchargements liste ce que tu as récupéré : par jour, le plus récent en haut, avec l'endroit où chaque fichier a atterri et le miroir d'où il vient.",
+  "showcase.v0100.terrain":
+    "Un circuit s'ouvre maintenant en 3D directement depuis la bibliothèque, ses sauts et ses ornières dessinés à partir du propre champ de hauteurs du jeu.",
+  "showcase.v0100.sharing":
+    "Maintenant tout ce qui se trouve dans ta Bibliothèque peut devenir un code que tu donnes à quelqu'un, et il repart dans les mêmes dossiers que chez toi.",
+  "showcase.v0100.linux":
+    "Sur Linux, FrostMod tourne maintenant dans le même prefix Proton que celui sous lequel tourne déjà le jeu.",
   "showcase.v092.hero.title": "Regarde le terrain d'un circuit en 3D",
   "showcase.v092.hero.body":
     "Les circuits étaient la seule chose que la bibliothèque ne savait pas montrer : un nom, une image et une taille. Le visualiseur lit maintenant le champ de hauteurs d'un circuit et dessine le sol lui-même, donc les sauts, les ornières et la forme d'un virage sont là à regarder avant même de le charger. Il s'ouvre depuis un circuit dans la bibliothèque, à côté de Voir en 3D.",
@@ -1393,7 +1479,7 @@ export const fr: Translation = {
   // ── Journaux ───────────────────────────────────────────────────────────────
   "settings.logs": "Journaux",
   "logs.desc":
-    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App, FrostMod et {{game}} ont chacun les leurs — ouvre le dossier qu'il te faut, ou enregistre le tout dans un zip à joindre à un rapport.",
+    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App, FrostMod et {{game}} ont chacun les leurs — ouvre le dossier qu'il te faut, enregistre le tout dans un zip, ou partage-le sous forme de lien à coller dans un rapport.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Ce que l'app elle-même a enregistré",
   "logs.frostmodLogsDesc": "Ce que le loader a écrit dans son propre dossier",
@@ -1412,6 +1498,20 @@ export const fr: Translation = {
   "logs.savedDesc_one": "{{count}} fichier de journal, {{size}}",
   "logs.savedDesc_other": "{{count}} fichiers de journal, {{size}}",
   "logs.saveFailed": "Impossible d'enregistrer les journaux",
+  "logs.share": "Partager les journaux",
+  "logs.sharePacking": "Préparation…",
+  "logs.sharing": "Envoi…",
+  "logs.shared": "Journaux envoyés",
+  "logs.sharedCopied": "{{size}} — le lien est dans ton presse-papiers.",
+  "logs.sharedDesc": "{{size}} — le lien est ci-dessous.",
+  "logs.sharedSummary_one": "{{count}} fichier de journal, {{size}} envoyés.",
+  "logs.sharedSummary_other": "{{count}} fichiers de journal, {{size}} envoyés.",
+  "logs.shareFailed": "Impossible de partager les journaux",
+  "logs.copyLink": "Copier le lien",
+  "logs.linkCopiedShort": "Copié",
+  "logs.linkCopied": "Lien copié",
+  "logs.shareWarning":
+    "Le zip est déposé sur un hébergeur public — n'importe qui avec le lien peut le télécharger, alors ne le donne qu'à la personne qui l'a demandé.",
   "logs.privacy":
     "Les journaux contiennent des chemins de dossiers et ce que faisait l'app — jamais tes mots de passe ni tes cookies de session, et aucun fichier de réglages n'est inclus.",
 
@@ -1566,6 +1666,8 @@ export const fr: Translation = {
   "designer.flank.left": "côté gauche",
   "designer.flank.right": "côté droit",
   "designer.flank.both": "les deux côtés",
+  "designer.flankWashHint":
+    "Le chaud, c'est le côté gauche de la moto ; le froid, le côté droit. Les deux côtés sont souvent dépliés en deux copies presque identiques du même panneau — c'est la seule chose sur la texture qui les distingue.",
   "designer.flankSharedHint":
     "Les deux flancs sont dépliés sur cette même zone : ce que vous dessinez ici apparaît de chaque côté de la moto, en miroir, et pas là où vous l'attendriez de l'autre côté.",
   "designer.focusHint": "Double-cliquez sur une pièce pour remplir la vue avec elle.",

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  Attachment,
   BikeModels,
   BikeSounds,
   DropCommitItem,
@@ -12,10 +13,13 @@ import type {
   RegisterReport,
   Config,
   DownloadOption,
+  DownloadRecord,
+  NewDownload,
   FrostmodInstallReport,
   FrostmodReload,
   FrostmodStatus,
   RuntimeInstallOutcome,
+  RuntimeRepairReport,
   VcRuntime,
   InstalledMod,
   InstallProgress,
@@ -748,6 +752,34 @@ export function exportLogs(dest: string): Promise<LogsExport> {
   return invoke<LogsExport>("export_logs", { dest });
 }
 
+/** A shared log bundle: what went up, and the link that came back. */
+export interface LogsShare {
+  /** Direct download link — what gets pasted into a bug report. */
+  url: string;
+  /** Every slice's link, in order, when the zip was too big to go up in one piece.
+   *  Empty for the single-part upload a log bundle almost always is. */
+  parts: string[];
+  files: number;
+  /** Bytes of log collected, before compression. */
+  bytes: number;
+  /** Bytes uploaded — the zip, a fraction of `bytes` for plain text. */
+  size: number;
+}
+
+/** Zip every log set, upload it, and hand back the direct link. Same archive as
+ *  {@link exportLogs}, and the same upload the Library's file share goes out on. */
+export function shareLogs(): Promise<LogsShare> {
+  return invoke<LogsShare>("share_logs");
+}
+
+/** Subscribe to log-share pack/upload phase updates. Same payload as the file share's,
+ *  on its own event so Settings never hears the Library's upload. */
+export function onLogsShareProgress(
+  cb: (p: BundleProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<BundleProgress>("logs-share-progress", (event) => cb(event.payload));
+}
+
 /** Hide-to-tray + keep-running toggle. */
 export function setRunInBackground(enabled: boolean): Promise<void> {
   return invoke<void>("set_run_in_background", { enabled });
@@ -833,6 +865,12 @@ export function addToLibrary(
   destFolder: string,
 ): Promise<void> {
   return invoke<void>("add_to_library", { slug, url, host, subpath, destFolder });
+}
+
+/** Stop the install in flight for `slug`. `false` when nothing is running under it — only the
+ *  transfer is interruptible, so this does nothing once extraction has begun. */
+export function cancelInstall(slug: string): Promise<boolean> {
+  return invoke<boolean>("cancel_install", { slug });
 }
 
 /** Import a file the user downloaded manually (extract + place into `subpath`). */
@@ -1341,11 +1379,17 @@ export function isBlockedDownload(opt: { url: string; host: string }): boolean {
   return BLOCKED_HOST_PATTERNS.some((p) => s.includes(p));
 }
 
+/**
+ * Every download a mod offers, best first.
+ *
+ * Dedicated-server builds are sorted last rather than dropped. Hiding them read as "this
+ * mod has one file" while the flag was a guess — a mislabelled block took the only download
+ * off the page, and a server build the parser missed was silently preselected instead.
+ * Ranked below even a browser-only mirror, since that at least installs something playable.
+ */
 export function sortMirrors(detail: ModDetail): DownloadOption[] {
-  const all = detail.downloads ?? [];
-  const playable = all.filter((d) => !d.isServer);
-  const pool = playable.length ? playable : all;
-  return [...pool].sort((a, b) => {
+  return [...(detail.downloads ?? [])].sort((a, b) => {
+    if (a.isServer !== b.isServer) return Number(a.isServer) - Number(b.isServer);
     const ab = isBlockedDownload(a) ? 1 : 0;
     const bb = isBlockedDownload(b) ? 1 : 0;
     if (ab !== bb) return ab - bb;
@@ -1353,17 +1397,40 @@ export function sortMirrors(detail: ModDetail): DownloadOption[] {
   });
 }
 
+/** The downloads that install something playable — everything but the server builds. */
+export function playableMirrors(mirrors: DownloadOption[]): DownloadOption[] {
+  return mirrors.filter((m) => !m.isServer);
+}
+
+/**
+ * Which of `mirrors` (in {@link sortMirrors} order) a picker should start on: the best
+ * playable file, never a server build while anything else is on offer.
+ */
+export function defaultMirrorIndex(mirrors: DownloadOption[]): number {
+  const i = mirrors.findIndex((m) => !m.isServer);
+  return i >= 0 ? i : 0;
+}
+
+/** A mod whose every download is a dedicated-server build — nothing here is playable. */
+export function isServerOnly(mirrors: DownloadOption[]): boolean {
+  return mirrors.length > 0 && mirrors.every((m) => m.isServer);
+}
+
 export function pickDownloadForBike(
   mirrors: DownloadOption[],
   bikeName: string,
 ): DownloadOption | null {
   if (mirrors.length === 0) return null;
-  const fallback = () => mirrors.find((m) => m.isDefault) ?? mirrors[0];
+  // A sound pack's server build is named after the same bike as the file to play with, so
+  // it matches just as well — pick among the playable ones while there are any.
+  const playable = playableMirrors(mirrors);
+  const pool = playable.length ? playable : mirrors;
+  const fallback = () => pool.find((m) => m.isDefault) ?? pool[0];
   const want = tokens(bikeName);
   if (want.size === 0) return fallback();
 
   let best: { m: DownloadOption; score: number } | null = null;
-  for (const m of mirrors) {
+  for (const m of pool) {
     const fname = m.url.split(/[/\\]/).pop() ?? "";
     const hay = tokens(`${m.label} ${m.host} ${fname}`);
     let score = 0;
@@ -1436,7 +1503,13 @@ export interface QuickInstallParams {
 
 export type QuickInstallResult =
   | { ok: true; params: QuickInstallParams }
-  | { ok: false; reason: "blocked" | "none"; title: string; host?: string };
+  | {
+      ok: false;
+      /** `serverOnly` — every file the page offers is a dedicated-server build. */
+      reason: "blocked" | "none" | "serverOnly";
+      title: string;
+      host?: string;
+    };
 
 /**
  * The folder a one-click install from the Browse grid uses — the same answer the install
@@ -1454,8 +1527,12 @@ export async function resolveQuickInstall(
 ): Promise<QuickInstallResult> {
   const detail = await getModDetail(slug);
   const mirrors = sortMirrors(detail);
-  const primary = mirrors[0];
+  const primary = mirrors[defaultMirrorIndex(mirrors)];
   if (!primary) return { ok: false, reason: "none", title: detail.title };
+  // One click can't ask which build was meant, and a dedicated-server file installed by
+  // mistake looks installed while the game shows nothing. Send them to the mod's page,
+  // where every download is spelled out.
+  if (primary.isServer) return { ok: false, reason: "serverOnly", title: detail.title };
   if (isBlockedDownload(primary))
     return { ok: false, reason: "blocked", title: detail.title, host: primary.host };
 
@@ -1592,6 +1669,29 @@ export function shopInstalledMap(): Promise<Record<string, string[]>> {
   return invoke<Record<string, string[]>>("shop_installed_map");
 }
 
+/**
+ * The download history — everything the app installed, newest first, failures included.
+ *
+ * Kept in Rust rather than derived from the library scan because a scan can only see what is
+ * on disk: it has no idea when a mod arrived, and a download that failed left nothing to find.
+ */
+export function downloadHistory(): Promise<DownloadRecord[]> {
+  return invoke<DownloadRecord[]>("download_history");
+}
+
+/** Note a finished download. Resolves to `null` if there was nothing worth recording. */
+export function recordDownload(entry: NewDownload): Promise<DownloadRecord | null> {
+  return invoke<DownloadRecord | null>("record_download", { entry });
+}
+
+export function forgetDownload(id: string): Promise<void> {
+  return invoke<void>("forget_download", { id });
+}
+
+export function clearDownloadHistory(): Promise<void> {
+  return invoke<void>("clear_download_history");
+}
+
 /** Fires after a WebView sign-in completes; payload is whether it succeeded. */
 export function onShopAuth(cb: (ok: boolean) => void): Promise<UnlistenFn> {
   return listen<boolean>("shop-auth", (event) => cb(event.payload));
@@ -1604,6 +1704,13 @@ export function reloadFrostmod(): Promise<ReloadOutcome> {
 /** Is FrostMod currently running on this PC? */
 export function isFrostmodRunning(): Promise<boolean> {
   return invoke<boolean>("frostmod_running");
+}
+
+/** Did FrostMod actually get into the running game, and if not, why not?
+ *
+ *  Distinct from {@link isFrostmodRunning}, which only reports that the launcher is up. */
+export function frostmodAttachment(): Promise<Attachment> {
+  return invoke<Attachment>("frostmod_attachment");
 }
 
 /** Start MX Bikes. Resolves to `already_running` when the game is already up. */
@@ -1649,13 +1756,41 @@ export function frostmodInstallRuntime(
   return invoke<RuntimeInstallOutcome>("frostmod_install_runtime", { runtime });
 }
 
+/** Install everything this PC is short of, and clear a stray `msvcr90.dll` beside the exe.
+ *
+ *  The repair the warning bar can't reach: it runs whatever detection said, because a
+ *  machine can report every runtime present and still fail to start the game. Raises UAC
+ *  once per installer, and never rejects — what it couldn't do comes back in
+ *  `stillMissing` for the caller to offer links for. */
+export function frostmodRepairRuntimes(): Promise<RuntimeRepairReport> {
+  return invoke<RuntimeRepairReport>("frostmod_repair_runtimes");
+}
+
 /** Where to send someone whose UAC prompt we can't raise (or who declined it).
  *
  *  Microsoft's own direct downloads, the same ones the backend fetches — a download page
- *  would make them pick an architecture, and picking x86 here fixes nothing. */
+ *  would make them pick an architecture, and picking the wrong one fixes nothing. Both
+ *  2015–2022 builds are here because that is what Microsoft's "Latest Supported Visual C++
+ *  Downloads" page hands out, and a 32-bit plugin or the dedicated-server build needs the
+ *  x86 one no matter how many x64 packages are already installed. */
 export const RUNTIME_DOWNLOAD_URL: Record<VcRuntime, string> = {
   vc90: "https://download.microsoft.com/download/5/D/8/5D8C65CB-C849-4025-8E95-C3966CAFD8AE/vcredist_x64.exe",
   vc140: "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+  vc140_x86: "https://aka.ms/vs/17/release/vc_redist.x86.exe",
+};
+
+/** Microsoft's index page for the pair above, for a player who'd rather see the source. */
+export const RUNTIME_DOWNLOADS_PAGE =
+  "https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist";
+
+/** Translation key naming each runtime the way Microsoft's installer does.
+ *
+ *  The architecture is part of the name on purpose: someone told to install "Visual C++"
+ *  who already has the x64 package needs to see that it's the other one being asked for. */
+export const RUNTIME_NAME_KEY: Record<VcRuntime, TKey> = {
+  vc90: "runtime.componentVc90",
+  vc140: "runtime.componentVc140",
+  vc140_x86: "runtime.componentVc140X86",
 };
 
 /** Launch the managed FrostMod process if it isn't already running. */
@@ -1800,7 +1935,6 @@ export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });
 }
 
-/** Sentinel slug the backend tags folder-watch reloads with (vs in-app installs). */
 export const MODS_WATCH_SLUG = "__mods_watch__";
 
 /** Fires after each install with whether FrostMod picked the new mod up live. */
@@ -1836,6 +1970,16 @@ export function presetsListProfiles(): Promise<ProfilesScan> {
 /** Bike ids present in a profile — the targets a loadout can be applied to. */
 export function presetsListBikes(profile: string): Promise<string[]> {
   return invoke<string[]>("presets_list_bikes", { profile });
+}
+
+/**
+ * Drop a bike from a profile and return what's left.
+ *
+ * The list above is `profile.ini`, not the mods folder, so bikes whose mod is gone linger
+ * there with nothing in the Library to uninstall. This is how they go.
+ */
+export function presetsForgetBike(profile: string, bikeid: string): Promise<string[]> {
+  return invoke<string[]>("presets_forget_bike", { profile, bikeid });
 }
 
 /** Read a bike's current cosmetic column (for "capture current look"). */

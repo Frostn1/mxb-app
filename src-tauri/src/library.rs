@@ -365,6 +365,9 @@ pub struct LibraryEntry {
     pub path: String,
     pub folder: String,
     pub size: u64,
+    /// Unix milliseconds, so the library can be sorted by what arrived most recently — the only
+    /// answer available for mods installed before the download history existed.
+    pub modified: u64,
     pub kind: String,
     pub category: String,
     pub parent: Option<String>,
@@ -394,18 +397,33 @@ fn rel_folder(base: &Path, path: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn dir_size(dir: &Path) -> u64 {
+/// Unix milliseconds, or 0 when the filesystem won't say — a mod with no time sorts last under
+/// "recently added" rather than jumping to the top of it.
+pub(crate) fn mtime_ms(m: &fs::Metadata) -> u64 {
+    m.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Total bytes and the newest mtime among a folder's immediate files, taking the folder's own
+/// mtime as the floor. The files matter as well as the folder because a copy can carry the
+/// original folder timestamp across while the files it wrote are stamped now.
+fn dir_size_and_mtime(dir: &Path) -> (u64, u64) {
     let mut total = 0;
+    let mut newest = fs::metadata(dir).map(|m| mtime_ms(&m)).unwrap_or(0);
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             if let Ok(m) = e.metadata() {
                 if m.is_file() {
                     total += m.len();
+                    newest = newest.max(mtime_ms(&m));
                 }
             }
         }
     }
-    total
+    (total, newest)
 }
 
 fn immediate_dirs(base: &Path) -> Vec<String> {
@@ -432,10 +450,12 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
     } else {
         "loose"
     };
-    let size = if is_dir {
-        dir_size(p)
+    let (size, modified) = if is_dir {
+        dir_size_and_mtime(p)
     } else {
-        fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+        fs::metadata(p)
+            .map(|m| (m.len(), mtime_ms(&m)))
+            .unwrap_or((0, 0))
     };
     LibraryEntry {
         name: p
@@ -445,6 +465,7 @@ fn make_entry(base: &Path, p: &Path, category: &str, parent: Option<String>) -> 
         path: p.to_string_lossy().into_owned(),
         folder: rel_folder(base, p),
         size,
+        modified,
         kind: kind.to_string(),
         category: category.to_string(),
         parent,

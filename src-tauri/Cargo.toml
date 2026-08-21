@@ -1,7 +1,10 @@
 [package]
-name = "frost"
-version = "0.9.2"
-description = "Frost — MX Bikes mod manager"
+# `mainBinaryName` renames the bundled binary, but only for `tauri build` — a dev run is
+# whatever cargo called it. Cargo target names can't hold a space, so this is as close as
+# it gets. The description is what Windows Task Manager shows in its Processes tab.
+name = "mxb-app"
+version = "0.10.0"
+description = "MXB App — MX Bikes mod manager"
 authors = ["Frost"]
 edition = "2021"
 
@@ -38,6 +41,9 @@ walkdir = "2"
 percent-encoding = "2"
 # The custom URI scheme handler builds its own responses. Same crate Tauri re-exports.
 http = "1"
+# How much memory this process is holding, for `memwatch`. A few lines of platform FFI
+# behind one call; not worth hand-rolling three times over.
+memory-stats = "1"
 # rustls: consistent modern TLS across platforms (native SChannel failed on
 # Windows). MediaFire downloads work directly with this client — its CDN no
 # longer blocks the rustls fingerprint (verified against a live 427 MB .pkz).

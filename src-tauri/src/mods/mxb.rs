@@ -153,10 +153,64 @@ fn on_webview() -> bool {
 /// `GET` with backoff over the transient blocks above. Transport errors retry too, which
 /// is what `install::get_with_retry` already does for download hosts.
 async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<Fetched> {
+    get(url, params, Want::Api).await
+}
+
+/// `GET` a rendered page, asked for the way a browser asks for one.
+///
+/// Its own entry point because Cloudflare guards the rendered pages far more tightly than the
+/// JSON API — a user whose catalog browses fine can still be refused the moment they open a
+/// single mod, which is the whole shape of this failure.
+async fn get_page(url: &str) -> anyhow::Result<Fetched> {
+    get(url, &[], Want::Page).await
+}
+
+/// Which shape of request this is, and therefore what it has to look like on the wire.
+#[derive(Clone, Copy)]
+enum Want {
+    /// The WP REST API. Script asks for these in a browser, and [`client`]'s default headers
+    /// already say exactly that.
+    Api,
+    /// A rendered page. A browser *navigates* to these — see [`page_headers`] for the HTTP
+    /// client and [`crate::mxb_fetch::read_page`] for the WebView.
+    Page,
+}
+
+/// The headers a browser sends when it navigates to a page, replacing the JSON-fetch defaults
+/// [`build_client`] sets.
+///
+/// Those defaults describe a same-origin `fetch` for JSON, which is what every REST call is.
+/// Sending them for a rendered page asks Cloudflare to believe a script wanted an HTML
+/// document — a shape no browser produces, on the one path its bot rules actually guard.
+fn page_headers() -> reqwest::header::HeaderMap {
+    use reqwest::header::{HeaderMap, HeaderValue};
+    let mut headers = HeaderMap::new();
+    for (k, v) in [
+        (
+            "accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,\
+             image/apng,*/*;q=0.8",
+        ),
+        ("sec-fetch-mode", "navigate"),
+        ("sec-fetch-dest", "document"),
+        // A page reached by clicking a link on the site, which is what this stands in for.
+        ("sec-fetch-site", "same-origin"),
+        ("sec-fetch-user", "?1"),
+        ("upgrade-insecure-requests", "1"),
+    ] {
+        headers.insert(k, HeaderValue::from_static(v));
+    }
+    headers
+}
+
+async fn get(url: &str, params: &[(&str, String)], want: Want) -> anyhow::Result<Fetched> {
     if on_webview() {
         // No backoff loop here: the bridge is a real browser, so a 429/503 it gets is one
         // the site means, and it has its own timeout.
-        return crate::mxb_fetch::get(url, params).await;
+        return match want {
+            Want::Api => crate::mxb_fetch::get(url, params).await,
+            Want::Page => crate::mxb_fetch::read_page(url).await,
+        };
     }
 
     const ATTEMPTS: u32 = 3;
@@ -164,7 +218,12 @@ async fn get_with_retry(url: &str, params: &[(&str, String)]) -> anyhow::Result<
     let mut last_err: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
         let started = Instant::now();
-        match client.get(url).query(params).send().await {
+        let req = client.get(url).query(params);
+        let req = match want {
+            Want::Api => req,
+            Want::Page => req.headers(page_headers()),
+        };
+        match req.send().await {
             Ok(resp) if !worth_retrying(resp.status()) => {
                 // Debug, not info: search runs on every keystroke, and a line per keystroke
                 // would bury the one failure worth reading. `MXB_LOG=debug` turns it on.
@@ -442,7 +501,8 @@ async fn listing_response(
     let url = format!("{}{}", mxb_session::base(), obfstr!("/wp-json/wp/v2/posts"));
     let mut params: Vec<(&str, String)> = vec![
         ("categories", category_id.to_string()),
-        ("_embed", "wp:featuredmedia".to_string()),
+        // `author` rides along so a card can carry a byline; it costs no extra request.
+        ("_embed", "author,wp:featuredmedia".to_string()),
     ];
     match page {
         Page::Number(n) => {
@@ -533,7 +593,7 @@ async fn popular(category_id: u32, page: u32, range: &str) -> anyhow::Result<Vec
         ("order_by", "views".to_string()),
         ("limit", per_page.to_string()),
         ("offset", ((page - 1) * per_page).to_string()),
-        ("_embed", "wp:featuredmedia".to_string()),
+        ("_embed", "author,wp:featuredmedia".to_string()),
     ];
 
     let resp = get_with_retry(&url, &params).await?;
@@ -593,7 +653,7 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     // swallowed: a 403 is `Ok(resp)`, so its error body went to the parsers and produced
     // zero downloads — the page then said "No download link was found on this page"
     // rather than "we couldn't read the page". Surface it instead.
-    let resp = get_with_retry(&link, &[]).await?;
+    let resp = get_page(&link).await?;
     if !resp.is_success() {
         return Err(refusal("the mod page", &resp));
     }
@@ -736,7 +796,25 @@ fn summary_from_post(p: &Value, category_id: u32) -> Option<ModSummary> {
         date: p.get("date").and_then(Value::as_str).unwrap_or("").to_string(),
         image: featured_image(p),
         category_id,
+        author: embedded_author(p),
     })
+}
+
+/// The post author's display name, from `_embed=author`.
+///
+/// Optional on purpose. WordPress answers the embed with an error object rather than a user
+/// when the site keeps its author list private, and a catalog that stops naming anyone is no
+/// reason for a listing to fail — the card simply doesn't show a byline.
+fn embedded_author(p: &Value) -> Option<String> {
+    let name = p
+        .get("_embedded")?
+        .get("author")?
+        .as_array()?
+        .first()?
+        .get("name")?
+        .as_str()?;
+    let name = decode_entities(name).trim().to_string();
+    (!name.is_empty()).then_some(name)
 }
 
 /// `post[field]["rendered"]` as a &str.
@@ -823,6 +901,34 @@ fn strip_images(html: &str) -> String {
     img.replace_all(&s, "").into_owned()
 }
 
+/// The file name a download URL ends in — where an author who didn't label the block
+/// often still says what the file is (`…/Track_Server.zip`).
+///
+/// MediaFire and Google Drive hang a routing segment off the end of the path
+/// (`…/track.zip/file`, `…/view`), so those are stepped over to reach the real name.
+fn url_file_name(url: &str) -> &str {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let mut segs = path.trim_end_matches('/').rsplit('/').filter(|s| !s.is_empty());
+    let last = segs.next().unwrap_or("");
+    if ["file", "view", "download"].iter().any(|s| last.eq_ignore_ascii_case(s)) {
+        segs.next().unwrap_or(last)
+    } else {
+        last
+    }
+}
+
+/// Does this text call something a server build?
+///
+/// The word has to stand on its own: a track named "Observer Hill" contains the letters
+/// but isn't a server file, and mistaking one for the other hides the only download a mod
+/// has. Letters are what separate them rather than `\b`, because `_` is a word character
+/// to a regex and `Ironman_2024_Server.pkz` is how these files are actually named.
+fn mentions_server(text: &str) -> bool {
+    Regex::new(r"(?i)(?:^|[^a-z])servers?(?:[^a-z]|$)")
+        .unwrap()
+        .is_match(text)
+}
+
 /// Parse the theme's `div.download-container` blocks into download options.
 fn parse_downloads(html: &str) -> Vec<DownloadOption> {
     let doc = Html::parse_document(html);
@@ -836,10 +942,14 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
             .value()
             .classes()
             .any(|c| c.eq_ignore_ascii_case("container-default"));
-        // Dedicated-server builds are labelled "server" somewhere in the block.
-        let is_server = el.text().collect::<String>().to_lowercase().contains("server");
         let href = el.select(&a_sel).next().and_then(|a| a.value().attr("href"));
         let Some(url) = href else { continue };
+
+        // Dedicated-server builds are labelled "server" in the block — or, when the author
+        // only said it in the file's name, nowhere but the link. Both are read, because a
+        // server build that reaches the app unflagged is one the picker can preselect.
+        let is_server =
+            mentions_server(&el.text().collect::<String>()) || mentions_server(url_file_name(url));
 
         // The shown origin must reflect the ACTUAL link — authors often type a
         // mirror nickname (e.g. "GoWithTheFlow") in `div.filename`, which is not
@@ -862,8 +972,10 @@ fn parse_downloads(html: &str) -> Vec<DownloadOption> {
         });
     }
 
-    // Show the author's default file first.
-    out.sort_by_key(|d| !d.is_default);
+    // The author's default file first, and dedicated-server builds after everything else —
+    // whatever the page's own order was, a server build is never the file someone browsing
+    // for something to ride is after.
+    out.sort_by_key(|d| (d.is_server, !d.is_default));
     out
 }
 
@@ -930,6 +1042,23 @@ fn dedup(v: &mut Vec<String>) {
 mod tests {
     use super::*;
 
+    /// The rendered pages are guarded far more tightly than the JSON API, and asking for one
+    /// with the client's JSON-fetch defaults describes a request no browser makes: a script
+    /// wanting an HTML document. Every default this overrides is one that said so.
+    #[test]
+    fn a_page_is_asked_for_the_way_a_browser_navigates() {
+        let h = page_headers();
+        assert_eq!(h.get("sec-fetch-dest").unwrap(), "document");
+        assert_eq!(h.get("sec-fetch-mode").unwrap(), "navigate");
+        assert!(h.get("accept").unwrap().to_str().unwrap().starts_with("text/html"));
+        // A continued string literal is easy to leave a newline in, and a header value with
+        // one in it is rejected outright — which would fail only on the blocked user's machine.
+        for (_, v) in h.iter() {
+            let v = v.to_str().unwrap();
+            assert!(!v.contains('\n') && !v.contains("  "), "{v:?}");
+        }
+    }
+
     #[test]
     fn reads_every_embedded_term_name() {
         // Shape of `_embed=wp:term` on a real livery post: one group per taxonomy, the
@@ -993,6 +1122,96 @@ mod tests {
         assert_eq!(downloads.len(), 1);
         assert_eq!(downloads[0].host, "MediaFire");
         assert_eq!(downloads[0].label, "GoWithTheFlow");
+    }
+
+    #[test]
+    fn reads_the_posts_author() {
+        let post: Value = serde_json::from_str(
+            r#"{"id":1,"slug":"a-track","title":{"rendered":"A Track"},
+                "_embedded":{"author":[{"name":"Ren&#038;s Bikes"}]}}"#,
+        )
+        .unwrap();
+        let summary = summary_from_post(&post, 22).unwrap();
+        // Entities decoded, same as the title.
+        assert_eq!(summary.author.as_deref(), Some("Ren&s Bikes"));
+
+        // A site that keeps its author list private answers the embed with an error object
+        // instead of a user. That's a card without a byline, not a failed listing.
+        let hidden: Value = serde_json::from_str(
+            r#"{"id":2,"slug":"b-track","title":{"rendered":"B Track"},
+                "_embedded":{"author":[{"code":"rest_user_cannot_view"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(summary_from_post(&hidden, 22).unwrap().author, None);
+
+        // No `_embed` at all, and a blank name, are the same non-answer.
+        let bare: Value =
+            serde_json::from_str(r#"{"id":3,"slug":"c","title":{"rendered":"C"}}"#).unwrap();
+        assert_eq!(summary_from_post(&bare, 22).unwrap().author, None);
+        let blank: Value = serde_json::from_str(
+            r#"{"id":4,"slug":"d","title":{"rendered":"D"},"_embedded":{"author":[{"name":"  "}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(summary_from_post(&blank, 22).unwrap().author, None);
+    }
+
+    #[test]
+    fn flags_server_builds_and_sorts_them_last() {
+        // The author marked the server build in the block's text, and made it the page's
+        // default — which is exactly how a server file used to end up preselected.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">Dedicated Server files</div>
+              <a href="https://www.mediafire.com/file/abc/track_srv.zip/file">Download</a>
+            </div>
+            <div class="download-container container-mirror">
+              <div class="filename">mediafire.com</div>
+              <a href="https://www.mediafire.com/file/xyz/track.zip/file">Download</a>
+            </div>
+        "#;
+        let downloads = parse_downloads(html);
+        assert_eq!(downloads.len(), 2);
+        // Playable first, despite the server build carrying the page's "default" flag.
+        assert!(!downloads[0].is_server);
+        assert!(downloads[1].is_server);
+        assert!(downloads[1].is_default);
+    }
+
+    #[test]
+    fn reads_the_server_label_out_of_the_link() {
+        // Nothing in the block says "server"; only the file it points at does.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">MediaFire</div>
+              <a href="https://www.mediafire.com/file/abc/Ironman_2024_Server.pkz/file">Download</a>
+            </div>
+        "#;
+        assert!(parse_downloads(html)[0].is_server);
+    }
+
+    #[test]
+    fn a_track_named_observer_is_not_a_server_build() {
+        // Substring matching flagged this one, which left the mod looking undownloadable.
+        let html = r#"
+            <div class="download-container container-default">
+              <div class="filename">Observer Hill</div>
+              <a href="https://www.mediafire.com/file/abc/ObserverHill.zip/file">Download</a>
+            </div>
+        "#;
+        assert!(!parse_downloads(html)[0].is_server);
+    }
+
+    #[test]
+    fn file_name_skips_the_hosts_routing_segment() {
+        assert_eq!(
+            url_file_name("https://www.mediafire.com/file/abc/track_server.zip/file"),
+            "track_server.zip",
+        );
+        assert_eq!(
+            url_file_name("https://drive.google.com/file/d/ABC123/view?usp=sharing"),
+            "ABC123",
+        );
+        assert_eq!(url_file_name("https://x.com/downloads/pack.7z"), "pack.7z");
     }
 
     #[test]

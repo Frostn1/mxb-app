@@ -66,6 +66,16 @@ mod ffi {
     /// blur the very distinction [`super::steam_elevation_conflict`] reads out of it.
     pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 
+    /// Enough to wait on a process handle. Paired with
+    /// `PROCESS_QUERY_LIMITED_INFORMATION` it is the whole access set
+    /// [`super::GameSession`] needs, and it is granted on a process of our own user
+    /// without elevation.
+    pub const SYNCHRONIZE: u32 = 0x0010_0000;
+
+    /// `WaitForSingleObject` said the handle is signalled — for a process handle, that
+    /// means the process has exited.
+    pub const WAIT_OBJECT_0: u32 = 0x0000_0000;
+
     pub const TOKEN_QUERY: u32 = 0x0008;
     /// `TokenElevation` in `TOKEN_INFORMATION_CLASS`.
     pub const TOKEN_ELEVATION_CLASS: i32 = 20;
@@ -129,6 +139,21 @@ mod ffi {
         pub sz_exe_file: [c_char; 260],
     }
 
+    /// A Windows `FILETIME` — 100-nanosecond ticks since 1601, split across two `u32`s
+    /// because the struct is not guaranteed to be 8-byte aligned.
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    pub struct FileTime {
+        pub low: u32,
+        pub high: u32,
+    }
+
+    impl FileTime {
+        pub fn ticks(self) -> u64 {
+            ((self.high as u64) << 32) | self.low as u64
+        }
+    }
+
     #[repr(C)]
     pub struct ModuleEntry32 {
         pub dw_size: u32,
@@ -160,6 +185,16 @@ mod ffi {
             thread_id: *mut u32,
         ) -> Handle;
         pub fn WaitForSingleObject(handle: Handle, ms: u32) -> u32;
+        pub fn GetExitCodeProcess(process: Handle, exit_code: *mut u32) -> i32;
+        /// Creation and exit stamps, so a session's length is the kernel's own answer
+        /// rather than the gap between two of our polls.
+        pub fn GetProcessTimes(
+            process: Handle,
+            creation: *mut FileTime,
+            exit: *mut FileTime,
+            kernel: *mut FileTime,
+            user: *mut FileTime,
+        ) -> i32;
         pub fn CloseHandle(handle: Handle) -> i32;
         pub fn GetCurrentProcessId() -> u32;
         /// A pseudo-handle for our own process — a constant, not a handle to close.
@@ -295,6 +330,295 @@ pub fn is_game_running() -> bool {
     find_game_pid().is_some()
 }
 
+/// A handle held on the running game so that *how it ended* survives it.
+///
+/// Without this the app watches the game through a process-table poll, which can only ever
+/// report presence: the game is there, and then it isn't. That is the same observation
+/// whether the player quit or the process died on an access violation, and support threads
+/// were being argued from logs that could not tell those apart.
+///
+/// A handle opened while the process is alive keeps the exit code readable after it is
+/// gone, and `GetProcessTimes` keeps the session's true length — so a crash four seconds
+/// into a load reads as one, instead of as "somewhere inside the last poll interval".
+#[cfg(windows)]
+pub struct GameSession {
+    handle: ffi::Handle,
+    pid: u32,
+}
+
+#[cfg(windows)]
+impl GameSession {
+    /// Take a handle to the game if it is up. `None` if it isn't, or if the handle is
+    /// refused — which is not worth surfacing, since the only cost is a session whose
+    /// ending we can't describe.
+    pub fn open() -> Option<Self> {
+        let pid = find_game_pid()?;
+        // SAFETY: `pid` came from a process snapshot; the handle is closed in `Drop`.
+        let handle = unsafe {
+            ffi::OpenProcess(ffi::SYNCHRONIZE | ffi::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)
+        };
+        if handle.is_null() {
+            log::debug!("[session] couldn't hold a handle on pid {pid}: exit code won't be readable");
+            return None;
+        }
+        Some(Self { handle, pid })
+    }
+
+    /// `Some(code)` once the process is gone, `None` while it is still up.
+    fn exit_code(&self) -> Option<u32> {
+        // SAFETY: `self.handle` is live until `Drop`. A zero timeout polls without blocking.
+        unsafe {
+            if ffi::WaitForSingleObject(self.handle, 0) != ffi::WAIT_OBJECT_0 {
+                return None;
+            }
+            let mut code = 0u32;
+            if ffi::GetExitCodeProcess(self.handle, &mut code) == 0 {
+                return Some(u32::MAX);
+            }
+            Some(code)
+        }
+    }
+
+    /// How long the process lived, straight from the kernel.
+    fn lifetime(&self) -> Option<std::time::Duration> {
+        let (mut created, mut exited) = (ffi::FileTime::default(), ffi::FileTime::default());
+        let (mut kernel, mut user) = (ffi::FileTime::default(), ffi::FileTime::default());
+        // SAFETY: `self.handle` is live and carries `PROCESS_QUERY_LIMITED_INFORMATION`.
+        let ok = unsafe {
+            ffi::GetProcessTimes(self.handle, &mut created, &mut exited, &mut kernel, &mut user)
+        };
+        let (created, exited) = (created.ticks(), exited.ticks());
+        // A still-running process reports a zero exit stamp.
+        if ok == 0 || exited <= created {
+            return None;
+        }
+        // FILETIME counts 100ns ticks.
+        Some(std::time::Duration::from_nanos((exited - created) * 100))
+    }
+
+    /// If the game has ended, say how, and consume the session. `None` means it's still up.
+    ///
+    /// The severity is the point: a clean quit is `info` and a crash is `warn`, so the one
+    /// question a support log has to answer is answerable by grep.
+    pub fn report_if_ended(self) -> Option<Self> {
+        // Deliberately not `?`: that would drop `self` — and with it the handle — every
+        // poll the game is still up, so the exit code would never be readable.
+        let Some(code) = self.exit_code() else { return Some(self) };
+        let lived = self
+            .lifetime()
+            .map(|d| format!("{:.1}s", d.as_secs_f64()))
+            .unwrap_or_else(|| "unknown".into());
+        let pid = self.pid;
+        match describe_exit(code) {
+            None => log::info!("[session] game exited cleanly after {lived} (pid {pid})"),
+            Some(what) => log::warn!(
+                "[session] game CRASHED after {lived} — {what} (exit 0x{code:08X}, pid {pid})"
+            ),
+        }
+        None
+    }
+}
+
+// SAFETY: a Windows `HANDLE` belongs to the process, not to the thread that opened it —
+// it stays valid in any thread and `CloseHandle` may be called from any of them. The
+// handle is owned solely by this struct, so there is no aliasing to race over. Needed
+// because the watcher that holds a session is an async task, which may be resumed on a
+// different worker thread across an `.await`.
+#[cfg(windows)]
+unsafe impl Send for GameSession {}
+
+#[cfg(windows)]
+impl Drop for GameSession {
+    fn drop(&mut self) {
+        // SAFETY: opened in `open`, closed exactly once here.
+        unsafe { ffi::CloseHandle(self.handle) };
+    }
+}
+
+/// Name the NTSTATUS values a game actually dies on. `None` means "not a crash".
+///
+/// Exit code 0 is a clean quit. Anything with the high bit set is an unhandled exception
+/// the loader turned into an exit code, and those names are the difference between a
+/// diagnosable report and "it crashed".
+#[cfg(windows)]
+fn describe_exit(code: u32) -> Option<&'static str> {
+    Some(match code {
+        0 => return None,
+        // The one that matters most here: a memory-mapped read that the filesystem could
+        // not satisfy. A cloud-backed file that is a placeholder rather than real bytes
+        // fails exactly this way, which is why the mods folder gets checked at launch.
+        0xC000_0006 => "in-page error — a file the game had mapped couldn't be read (cloud placeholder, failing disk, or removed media)",
+        0xC000_0005 => "access violation",
+        0xC000_001D => "illegal instruction",
+        0xC000_0025 => "non-continuable exception",
+        0xC000_008C => "array bounds exceeded",
+        0xC000_008E => "float divide by zero",
+        0xC000_0094 => "integer divide by zero",
+        0xC000_00FD => "stack overflow",
+        0xC000_0135 => "a required DLL was not found",
+        0xC000_0142 => "a DLL failed to initialise",
+        0xC000_0374 => "heap corruption",
+        0xC000_0409 => "stack buffer overrun",
+        0xC000_0017 => "out of memory",
+        0x8000_0003 => "breakpoint (a debug build or an attached debugger)",
+        u32::MAX => "exit code unreadable",
+        // Anything else non-zero is still an abnormal exit worth seeing.
+        _ => "abnormal exit",
+    })
+}
+
+/// Read a fixed-size NUL-padded ANSI field as a `String`, stopping at the terminator.
+#[cfg(windows)]
+fn ansi_field(field: &[std::os::raw::c_char]) -> String {
+    let bytes: Vec<u8> = field.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Every DLL currently mapped into the running game, by full path.
+///
+/// A module is *in* this list no matter how it arrived — `LoadLibrary`, a proxy DLL the
+/// loader pulled in for the exe, or a manual map that registered itself. (One that never
+/// registers is invisible here.)
+///
+/// `None` means we could not look — the game isn't up, or the snapshot failed — which is
+/// deliberately different from `Some(vec![])`, "we looked and there was nothing to list".
+#[cfg(windows)]
+pub fn game_module_paths() -> Option<Vec<String>> {
+    match game_modules() {
+        GameModules::Loaded(paths) => Some(paths),
+        _ => None,
+    }
+}
+
+/// What a module walk over the game produced.
+///
+/// The reason `game_module_paths`' `None` was split apart: "Windows refused to let us look"
+/// is a different fact from "the walk came up empty", and it is the one worth acting on.
+/// A refusal means the game is running at a higher integrity level than we are — and that
+/// is the same wall an injector hits, so it is also the answer to "why isn't FrostMod in
+/// the game?" (see [`crate::frostmod::attachment`]).
+// Only the Windows walk can be refused; elsewhere the variant is unreachable by design.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum GameModules {
+    /// Everything mapped into the game right now.
+    Loaded(Vec<String>),
+    /// Windows refused the snapshot. Retrying will not help.
+    Denied,
+    /// No game to look at.
+    NotRunning,
+    /// The walk produced nothing usable, and not because we were refused.
+    Unavailable,
+}
+
+/// Walk the game's loaded modules, saying *why* when it doesn't work.
+#[cfg(windows)]
+pub fn game_modules() -> GameModules {
+    let Some(pid) = find_game_pid() else {
+        return GameModules::NotRunning;
+    };
+    // A snapshot taken while the game is loading its own modules fails with
+    // ERROR_BAD_LENGTH; the documented remedy is simply to ask again. A refusal is not
+    // that, so it breaks out rather than burning the retries on an answer that won't change.
+    for _ in 0..8 {
+        match module_paths(pid) {
+            Ok(paths) => return GameModules::Loaded(paths),
+            Err(WalkFailure::Denied) => return GameModules::Denied,
+            Err(WalkFailure::Transient) => continue,
+        }
+    }
+    GameModules::Unavailable
+}
+
+/// Why one module walk didn't produce a list.
+#[cfg(windows)]
+enum WalkFailure {
+    /// `ERROR_ACCESS_DENIED` — the process is above us.
+    Denied,
+    /// Anything else, including the `ERROR_BAD_LENGTH` that just wants asking again.
+    Transient,
+}
+
+/// One Toolhelp module walk over `pid`.
+#[cfg(windows)]
+fn module_paths(pid: u32) -> Result<Vec<String>, WalkFailure> {
+    // SAFETY: module snapshot for a known pid; the handle is closed on every path out,
+    // and we only read fields the API filled in.
+    unsafe {
+        let snap =
+            ffi::CreateToolhelp32Snapshot(ffi::TH32CS_SNAPMODULE | ffi::TH32CS_SNAPMODULE32, pid);
+        if snap == ffi::INVALID_HANDLE_VALUE {
+            // Reading another process's module list needs rights UIPI withholds across an
+            // integrity boundary, so this is what an elevated game looks like from an
+            // unelevated app — the one failure here that retrying cannot fix.
+            return Err(if ffi::GetLastError() == ffi::ERROR_ACCESS_DENIED {
+                WalkFailure::Denied
+            } else {
+                WalkFailure::Transient
+            });
+        }
+        let mut me: ffi::ModuleEntry32 = std::mem::zeroed();
+        me.dw_size = std::mem::size_of::<ffi::ModuleEntry32>() as u32;
+        let mut paths = Vec::new();
+        if ffi::Module32First(snap, &mut me) != 0 {
+            loop {
+                let path = ansi_field(&me.sz_exe_path);
+                if !path.is_empty() {
+                    paths.push(path);
+                }
+                if ffi::Module32Next(snap, &mut me) == 0 {
+                    break;
+                }
+            }
+        }
+        ffi::CloseHandle(snap);
+        // An empty walk means the snapshot gave us nothing usable, not that a live process
+        // has no modules — every process has at least its own exe. Treat it as a failure so
+        // the caller retries rather than reporting an empty machine.
+        if paths.is_empty() {
+            Err(WalkFailure::Transient)
+        } else {
+            Ok(paths)
+        }
+    }
+}
+
+/// Every process on the machine, by executable name.
+///
+/// Names only: `Process32Next` carries `szExeFile` and nothing else, and asking each pid for
+/// its full path means opening it, which fails on anything running as another user or at a
+/// higher integrity level. A name is enough for what this is used for.
+#[cfg(windows)]
+pub fn running_process_names() -> Option<Vec<String>> {
+    // SAFETY: standard Toolhelp process walk; the snapshot handle is closed before return.
+    unsafe {
+        let snap = ffi::CreateToolhelp32Snapshot(ffi::TH32CS_SNAPPROCESS, 0);
+        if snap == ffi::INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: ffi::ProcessEntry32 = std::mem::zeroed();
+        entry.dw_size = std::mem::size_of::<ffi::ProcessEntry32>() as u32;
+        let mut names = Vec::new();
+        if ffi::Process32First(snap, &mut entry) != 0 {
+            loop {
+                let name = ansi_field(&entry.sz_exe_file);
+                if !name.is_empty() {
+                    names.push(name);
+                }
+                if ffi::Process32Next(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        ffi::CloseHandle(snap);
+        if names.is_empty() {
+            None
+        } else {
+            Some(names)
+        }
+    }
+}
+
 /// State threaded through the `EnumWindows` walk: the pid we want, the handle we found.
 #[cfg(windows)]
 struct WindowSearch {
@@ -376,14 +700,29 @@ pub fn foreground_is_another_app() -> bool {
 ///
 /// Used to put the overlay over the game rather than wherever the primary monitor is —
 /// a triple-screen sim rig would otherwise get it on the wrong display.
+///
+/// `None` for a minimized game, which is the case that made this worth a comment:
+/// minimizing does not clear `WS_VISIBLE`, so [`collect_game_window`] hands one back like
+/// any other window, and `GetWindowRect` then reports the iconic position — around
+/// (-32000, -32000), off every monitor there is. Anything centred on that rect goes with
+/// it. The caller wants "no answer" there, not an answer from another world.
+///
+/// Deliberately filtered here rather than in the walk: [`focus_game`] wants the minimized
+/// window precisely so it can restore it.
 #[cfg(windows)]
 pub fn game_window_rect() -> Option<(i32, i32, i32, i32)> {
     let hwnd = game_hwnd()?;
-    let mut rect = ffi::Rect::default();
-    // SAFETY: `hwnd` is a live handle from the walk above; `GetWindowRect` only writes
-    // the four ints of the `RECT` we own.
-    let ok = unsafe { ffi::GetWindowRect(hwnd, &mut rect) != 0 };
-    ok.then_some((rect.left, rect.top, rect.right, rect.bottom))
+    // SAFETY: `hwnd` is a live handle from the walk above; both calls are reads, and both
+    // are safe on a stale handle (they simply fail).
+    unsafe {
+        if ffi::IsIconic(hwnd) != 0 {
+            return None;
+        }
+        let mut rect = ffi::Rect::default();
+        // `GetWindowRect` only writes the four ints of the `RECT` we own.
+        let ok = ffi::GetWindowRect(hwnd, &mut rect) != 0;
+        ok.then_some((rect.left, rect.top, rect.right, rect.bottom))
+    }
 }
 
 /// Is a DirectX app holding the screen in *exclusive* fullscreen right now?
@@ -450,11 +789,8 @@ pub fn refresh_look() -> LiveRefresh {
 /// `ps` finds it. Without this Play would cheerfully start a second copy.
 #[cfg(target_os = "macos")]
 pub fn is_game_running() -> bool {
-    let Ok(out) = std::process::Command::new("ps").args(["-Ao", "pid=,args="]).output() else {
-        return false;
-    };
     crate::winehost::running_exe(
-        &String::from_utf8_lossy(&out.stdout),
+        &crate::winehost::process_table(),
         crate::game::active().exe,
         std::process::id(),
     )
@@ -475,9 +811,90 @@ pub fn is_game_running() -> bool {
     false
 }
 
+/// The game's mapped DLLs, read out of Proton's view of the process.
+///
+/// Wine maps a PE the same way the loader would, file-backed, so `/proc/<pid>/maps` names
+/// every DLL the game has loaded — including one an injector pushed in. More than one pid
+/// can name the exe (Proton leaves its wrapper around it), so the union across all of them
+/// is what we want rather than a guess at which is the real one.
+#[cfg(target_os = "linux")]
+pub fn game_module_paths() -> Option<Vec<String>> {
+    let pids = crate::proton::exe_pids(crate::game::active().exe);
+    if pids.is_empty() {
+        return None;
+    }
+    let mut paths: Vec<String> = Vec::new();
+    for pid in pids {
+        paths.extend(crate::proton::mapped_pe_files(pid));
+    }
+    if paths.is_empty() {
+        None
+    } else {
+        paths.sort();
+        paths.dedup();
+        Some(paths)
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn running_process_names() -> Option<Vec<String>> {
+    let names = crate::proton::process_names();
+    if names.is_empty() {
+        None
+    } else {
+        Some(names)
+    }
+}
+
+/// macOS runs the game through a Wine bottle we don't own the process tree of, and there is
+/// no `/proc` to read a mapping list out of. Rather than half-answer, say we couldn't look —
+/// `None` reports "not supported here" rather than an empty list that reads as "nothing".
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn game_module_paths() -> Option<Vec<String>> {
+    None
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn running_process_names() -> Option<Vec<String>> {
+    None
+}
+
+/// The same answer off Windows, from whatever each platform can see.
+///
+/// No `Denied` arm: the integrity levels that produce one are a Windows idea, and the game
+/// here is a Wine process we either can read the mappings of (Linux, via `/proc`) or cannot
+/// look inside at all (macOS). Both are `Unavailable` rather than a refusal to explain.
+#[cfg(not(windows))]
+pub fn game_modules() -> GameModules {
+    if !is_game_running() {
+        return GameModules::NotRunning;
+    }
+    match game_module_paths() {
+        Some(paths) => GameModules::Loaded(paths),
+        None => GameModules::Unavailable,
+    }
+}
+
 #[cfg(not(windows))]
 pub fn refresh_look() -> LiveRefresh {
     LiveRefresh::Unsupported
+}
+
+/// Exit codes are a Windows story: the crash reports this exists to answer come from
+/// Windows machines, and neither Wine nor a dev build has the same notion of an NTSTATUS
+/// exit. The session opens as `None` and nothing else changes.
+#[cfg(not(windows))]
+pub struct GameSession;
+
+#[cfg(not(windows))]
+impl GameSession {
+    pub fn open() -> Option<Self> {
+        None
+    }
+
+    pub fn report_if_ended(self) -> Option<Self> {
+        None
+    }
 }
 
 /// No game to focus on a dev machine — the overlay just stays a normal window.
@@ -544,6 +961,43 @@ fn resolve_exe(cfg: &AppConfig) -> anyhow::Result<(std::path::PathBuf, std::path
         );
     }
     Ok((dir, exe))
+}
+
+/// The Wine prefix `exe` lives in, and the runner that should drive it (macOS).
+///
+/// The game is a Windows binary here, so it runs inside a prefix, and the prefix is
+/// whatever sits above `drive_c` in the exe's own path — see [`crate::winehost`]. Shared
+/// with FrostMod's start, which has to land in that same prefix to inject into the game:
+/// both fail with the same words, because it is the same thing missing.
+#[cfg(target_os = "macos")]
+pub fn prefix_and_runner(
+    cfg: &AppConfig,
+    exe: &std::path::Path,
+) -> anyhow::Result<(std::path::PathBuf, crate::winehost::Runner)> {
+    let game = cfg.game().display;
+    let (prefix, _) = crate::winehost::split_prefix(exe).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{game} is a Windows game — on macOS the install folder has to be the copy \
+             inside your CrossOver, Whisky or Wine bottle (a path with drive_c in it). \
+             Set it in Settings, under {game} install folder."
+        )
+    })?;
+    let runner = crate::winehost::resolve(&cfg.wine_runner, Some(&prefix)).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No Wine runner found — install CrossOver, Whisky or Wine to run {game} on \
+             macOS, or point Settings at one you already have."
+        )
+    })?;
+    Ok((prefix, runner))
+}
+
+/// The same pair for a caller that doesn't already have the exe in hand.
+#[cfg(target_os = "macos")]
+pub fn game_prefix_and_runner(
+    cfg: &AppConfig,
+) -> anyhow::Result<(std::path::PathBuf, crate::winehost::Runner)> {
+    let (_, exe) = resolve_exe(cfg)?;
+    prefix_and_runner(cfg, &exe)
 }
 
 /// The Steam client's own executable.
@@ -645,6 +1099,20 @@ unsafe fn token_elevated(process: ffi::Handle) -> Option<bool> {
     ok.then(|| elevation.token_is_elevated != 0)
 }
 
+/// Is *this* process elevated? `None` when Windows won't say.
+#[cfg(windows)]
+pub fn we_are_elevated() -> Option<bool> {
+    // SAFETY: `GetCurrentProcess` hands back a pseudo-handle to ourselves, which is a
+    // constant rather than a handle to close.
+    unsafe { token_elevated(ffi::GetCurrentProcess()) }
+}
+
+/// Off Windows there is no elevation to be on the wrong side of.
+#[cfg(not(windows))]
+pub fn we_are_elevated() -> Option<bool> {
+    Some(false)
+}
+
 /// Why Steam is about to refuse us, when it is.
 ///
 /// Steam will not start a game for a program running at a different Windows integrity
@@ -667,29 +1135,33 @@ fn steam_elevation_conflict() -> Option<&'static str> {
         then press Play again.";
 
     let pid = find_pid(STEAM_EXE)?;
-    // SAFETY: `GetCurrentProcess` hands back a pseudo-handle to ourselves, which is a
-    // constant rather than a handle to close.
-    let ours = unsafe { token_elevated(ffi::GetCurrentProcess()) }?;
+    let ours = we_are_elevated()?;
+    let theirs = process_elevated(pid, ours)?;
 
+    (ours != theirs).then_some(if ours { WE_ARE_ELEVATED } else { STEAM_IS_ELEVATED })
+}
+
+/// Is `pid` elevated, as seen from here? `None` when Windows won't say.
+///
+/// `ours` is our own elevation, which the refusal case needs: a process of our own user
+/// that we may not even look at is one sitting above us — which only leaves elevation, and
+/// only when we're the unelevated one. Any other failure (it exited between the walk and
+/// here) says nothing, and a guess would be worse than silence.
+#[cfg(windows)]
+fn process_elevated(pid: u32, ours: bool) -> Option<bool> {
     // SAFETY: the handle is opened for a query-only right and closed on every path out.
-    let theirs = unsafe {
+    unsafe {
         let proc = ffi::OpenProcess(ffi::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if proc.is_null() {
-            // A process of our own user that we may not even look at is one sitting above
-            // us — which only leaves elevation, and only when we're the unelevated one.
-            // Any other failure (Steam exited between the walk and here) says nothing.
             if ours || ffi::GetLastError() != ffi::ERROR_ACCESS_DENIED {
                 return None;
             }
-            Some(true)
-        } else {
-            let elevated = token_elevated(proc);
-            ffi::CloseHandle(proc);
-            elevated
+            return Some(true);
         }
-    }?;
-
-    (ours != theirs).then_some(if ours { WE_ARE_ELEVATED } else { STEAM_IS_ELEVATED })
+        let elevated = token_elevated(proc);
+        ffi::CloseHandle(proc);
+        elevated
+    }
 }
 
 /// Turn a refused `CreateProcess` into something the player can act on.
@@ -851,21 +1323,7 @@ fn launch_with(cfg: &AppConfig, address: Option<&str>) -> anyhow::Result<LaunchO
 
     #[cfg(target_os = "macos")]
     {
-        // The game is a Windows binary here, so it runs inside a Wine prefix. The prefix
-        // is whatever sits above `drive_c` in the exe's own path — see `winehost`.
-        let (prefix, _) = crate::winehost::split_prefix(&exe).ok_or_else(|| {
-            anyhow::anyhow!(
-                "{game} is a Windows game — on macOS the install folder has to be the copy \
-                 inside your CrossOver, Whisky or Wine bottle (a path with drive_c in it). \
-                 Set it in Settings, under {game} install folder."
-            )
-        })?;
-        let runner = crate::winehost::resolve(&cfg.wine_runner, Some(&prefix)).ok_or_else(|| {
-            anyhow::anyhow!(
-                "No Wine runner found — install CrossOver, Whisky or Wine to run {game} on \
-                 macOS, or point Settings at one you already have."
-            )
-        })?;
+        let (prefix, runner) = prefix_and_runner(cfg, &exe)?;
 
         let extra: Vec<String> = address.map(|a| connect_args(a).to_vec()).unwrap_or_default();
         let plan = crate::winehost::plan(&runner, &prefix, &exe, &extra);

@@ -1,476 +1,295 @@
 # Changelog
 
-## Unreleased — FrostMod runs on Linux, and the app can see the game there
+## 2026-08-20
 
 ### Added
-- **FrostMod installs and runs on Linux.** It used to refuse with *FrostMod runs on Windows
-  only*, which was true of the binary and beside the point: on Linux the game is a Windows
-  process too — Steam runs it under Proton — so FrostMod belongs in that same Proton prefix,
-  where the process it injects into lives. The app now finds the prefix
-  (`steamapps/compatdata/655500`), finds the Proton build that made it (from the prefix's own
-  `config_info`, so it uses the build Steam used rather than the newest one installed), and
-  starts `frostmod.exe` in it. `--mods` is handed over as the prefix sees the folder —
-  `C:\users\steamuser\…` rather than `/home/…`, which is the same path and not a name FrostMod
-  could have made sense of.
-- **The Reload button works from outside the prefix.** The app is a native Linux process and
-  FrostMod's reload event is a Wine kernel object: nothing this side of the wall can pulse it.
-  So a reload goes as a file instead — FrostMod v0.13.0 reads its command file on a poll — and
-  the status pill reads the process table rather than asking for an event it can't open.
-  Anything older than v0.13.0 is refused with a version to update to, rather than started into
-  a state where the in-game `F8` works and every button here quietly doesn't.
-- **The FrostMod section of Settings, and its log row, appear on Linux** on the same terms as
-  Windows. macOS still hides them: the app launches a CrossOver/Whisky bottle there but does
-  not inject into it.
-
-### Fixed
-- **The app knows when the game is running on Linux.** It answered *no* unconditionally —
-  macOS got a process-table check when Play landed there and Linux was never given one. So Play
-  never greyed out mid-session, and every question that turns on it ("will this paint show now
-  or at the next launch?", "is it safe to move this file?") was answered for a machine where the
-  game supposedly never runs. Under Proton the game is an ordinary Linux process whose command
-  line still names `mxbikes.exe`, so `/proc` finds it — no `ps` needed, which the AppImage
-  doesn't carry.
-
-## Unreleased — the Linux app stops carrying the library that blanked its window
-
-### Fixed
-- **The AppImage no longer ships its own libwayland.** linuxdeploy pulls libwayland-client,
-  -cursor, -egl and -server in as dependencies of GTK and WebKit, so our AppImage carried
-  Ubuntu 22.04's copies and put them ahead of the host's on the library path — where the
-  *host's* Mesa loaded them, and then couldn't create an EGL display. That is the window that
-  comes up and never paints. The AppImage excludelist names libwayland-client for exactly this
-  reason; the linuxdeploy build Tauri downloads carries an older copy of that list and bundles
-  it regardless. Release builds now take those four libraries back out of the image before it
-  is published, and sign it again over the bytes that ship, so the app uses the same libwayland
-  as every other program on the machine.
-- **The XWayland workaround from v0.9.1 turned out never to run, and has been dropped.** An
-  AppImage sets `GDK_BACKEND=x11` in its own startup hook, before a line of our code executes
-  — so the default the app set for the same thing could never apply, every AppImage was
-  already going through XWayland, and the white screen that release was meant to cure survived
-  it untouched. Nothing about how an AppImage runs changes here: the hook still says x11. The
-  app now only asks for a backend when `MXB_SAFE_GRAPHICS=1` does, which is the one case where
-  it's a knob somebody is deliberately turning.
-
-## Unreleased — the sheet says which panel, which side, and which face
-
-### Fixed
-- **A sheet region no longer names the wrong flank.** The hover asked whichever part won the
-  pick which side of the bike it was, and the winner is the *smallest* part covering the point —
-  so a bracket sharing the shroud's island answered for the shroud, and a region on the right of
-  the bike came up as the left. The side and the facing are now asked of every part covering the
-  point, and where two of them overlap the label names both (`plastics on metal.027`) instead of
-  quietly picking one.
-- **A bike that loaded without its `.geom` no longer gets sides invented for it.** Its parts are
-  never placed into one frame, so a vertex's position says nothing about where it sits on the
-  bike — the flanks were read off those numbers anyway. The model now reports whether it was
-  assembled, and the Designer says nothing about sides when it wasn't. The warning also goes to
-  the app log rather than only to a terminal.
-- **A bike archive with no mesh in it now fails instead of loading empty.** The viewer took the
-  empty result for a successful load and put its stand-in bike on screen, which reads as *this
-  is your bike* rather than *none of this bike arrived*. Cloud-synced archives that haven't been
-  downloaded yet land here, and now say so.
-
-### Added
-- **The sheet says when you're about to paint a panel's underside.** A rear fender's outer skin
-  and its underside are one part with one name and regularly share one island, so artwork could
-  land where nobody will ever see it. The hover now reads `underside` or `top + underside`
-  alongside the part and the flank.
-- **Double-click a part to fill the view with it.** A shroud is a tenth of a 2048² sheet, and
-  reaching it by wheel-and-drag meant aiming at the shape you were trying to see.
-
-## Unreleased — an empty canvas stops asking for a sheet
+- **A paint saved on disk shows up in the running game.** The game reads your look once,
+  when the profile loads, so painting used to mean save, alt-tab, reselect your profile,
+  look, repeat — and mid-session there was no way to see a change at all. The app now
+  watches the `.pnt` files the rider is actually wearing (the bike's paint and font, and
+  every piece of gear) and, when one is rewritten, re-runs the game's own look loader in
+  place. Same call the Locker and presets already make, gated on the same **Instant
+  refresh** setting, so there is nothing new to switch on.
+- **Paints that arrive mid-session are applied without a rejoin.** Paint sync already
+  installed other riders' liveries while you rode and then left them sitting on disk until
+  the next session. They now go into the running game the moment they land.
+- Three new supporters credited in Settings → Supporters: RodaksRevivalYT | Black Rifle,
+  MintyFlow and Thomas.
 
 ### Changed
-- **The Designer no longer nags about an empty canvas.** Opening it with nothing drawn yet put
-  *Add a sheet to draw on.* next to a greyed-out Save, which stated the obvious about a canvas
-  you had only just opened. Save is still off until there's a sheet to save — it just stays
-  quiet about it, and the hints worth acting on (a missing name, a duplicate texture name, no
-  target picked) read exactly as before.
+- The supporters list now renders in the order `supporters.json` is written in, rather than
+  alphabetically within each tier — the file is hand-edited, so its order is a decision.
 
-## Unreleased — the paint changes on disk, the model changes with it
+## Unreleased — taking back the DLL we planted
 
-### Added
-- **The 3D viewer reloads a paint that changes on disk.** Leave the bike open in the viewer,
-  re-save the paint, and the model re-dresses itself — the draw, look, fix, look loop no
-  longer needs the dialog closed and re-opened between passes. Only the textures are
-  replaced, so nothing rebuilds the bike's geometry for a livery, and a brief **Paint
-  reloaded** chip says when one landed (an edit that turned out to change nothing visible
-  otherwise looks identical to one the viewer missed).
-- The watched paint is whichever one is showing — a bike's installed livery, a model-swap
-  preview's, or a loose gear paint. The paint's *folder* is watched rather than the file,
-  because saving one usually means writing a temp file and renaming it over the target, and
-  a watch on the file itself would go silent after exactly the first save.
-
-## Unreleased — the bike's own plastics, under the UV map
-
-### Added
-- **The bike's own plastics, under the UV map.** The reference underlay could show the paint you
-  started from — and on an OEM bike there isn't one: its stock `.pnt` replaces the wheels and the
-  chain, and the plastics are embedded in the model itself. So the one sheet anybody opens the
-  Designer for was the one sheet with nothing to trace, just bare islands. Reference now has a
-  **Stock texture** toggle that draws the model's own artwork beneath them, so you can see where
-  the vents and shut lines fall before drawing over them. Fetched only for the sheet you're
-  looking at, and no more part of what you save than the UV map is.
-
-## Unreleased — the UV map says which side of the bike it is
-
-### Added
-- **The sheet now says left or right.** Hovering a piece of bodywork named it; it now says which
-  flank of the bike that piece is, and the clip picker carries the same suffix. The model already
-  knew — the geometry arrives assembled about its mirror plane, so the sign of a triangle's x is
-  the answer — and not passing it on left the one question a flat square can't answer to guesswork.
-- **"Both sides" is said out loud.** Bikes routinely unwrap their two flanks onto *one* island, so
-  a decal placed off-centre there comes out at the mirrored spot on the far side — which reads as
-  the editor having painted the wrong side. Where that is what the model does, the sheet says so
-  and the tooltip says what it means. Rider gear is left unlabelled: a helmet's up-axis is worked
-  out per mod, and a side named from the wrong axis would be worse than no side at all.
-
-## Unreleased — the Designer sets up its own sheets
-
-### Added
-- **Create the sheets a model asks for, in one click.** The Designer already listed the texture
-  names a bike's paints use — and the name is the whole binding, so a sheet called anything else
-  paints nothing — but getting them onto the list meant reading them off and typing each one
-  back in. There's now a button beside that list that makes the missing ones.
-- **A ＋ beside Sheets**, and another beside Layers, add one without hunting for a button.
-- **See a model swap before you switch to it.** Every model set in the Locker now has a 3D
-  button beside it, and "Stock" has one too — that one shows the model packed in the bike's
-  own archive, the one your loose files are covering. The bike is assembled in memory exactly
-  as applying the swap would leave it (the set's mesh over the bike's own `.hrc`s, `.geom` and
-  textures), so nothing moves on disk and you can look with the game open.
-- **See the helmet on its own, not on the rider.** Painting a helmet, boots or protection always
-  previewed the piece worn by the stock rider — a small thing across the canvas with half of it
-  turned away, next to a grey body you weren't painting. A **Gear only** toggle in the preview
-  header takes it off and fills the frame with it, the way the library's 3D view already shows
-  one, and puts it back on the rider in a click when you want to see how it sits.
+### Fixed
+- **MX Bikes crashed with "R6034 — An application has made an attempt to load the C runtime
+  library incorrectly", and this app was the cause.** Since v0.9.2 the FrostMod status poll
+  copied `msvcr90.dll` out of `WinSxS` into the game folder on every start, meaning to serve
+  the plugins with a plain `MSVCR90.dll` import that the redistributable strands. The
+  reasoning was that a loose DLL is invisible to side-by-side binding and so could only ever
+  help those plugins. Half right, and the wrong half mattered: the VC9 CRT polices this
+  itself. `msvcr90.dll` checks at load time that it was resolved through a
+  `Microsoft.VC90.CRT` activation context, and a loose copy beside the exe is by definition
+  outside one, so it refuses to start and takes the process down with it. The copy was
+  therefore never once useful — a plugin carrying a VC90 manifest resolves out of `WinSxS`
+  and never looks at it, and a plugin without one finds it and dies. We had turned a plugin
+  that quietly failed to load into a modal that killed the game.
+- **The app now removes the copy it made.** Deleting the code that placed it does nothing for
+  the players already carrying one, so the same poll that used to lay the file down now takes
+  it away, and "Repair runtimes" does too. It only ever deletes a `msvcr90.dll` whose bytes
+  match a VC90 assembly on this PC — that's where ours came from, and it's what stops us
+  reaching for a file somebody else put there on purpose. A `Microsoft.VC90.CRT` folder beside
+  the exe is left strictly alone: that arrangement is a real side-by-side identity, it
+  satisfies the CRT's check, and it works. If the game is open and holding the file, the next
+  start tries again.
+- **A loose `msvcr90.dll` no longer counts as "VC90 is present".** It isn't a route to the
+  CRT, and counting it let a file we ourselves planted quietly satisfy the check that should
+  have been reporting the machine had no runtime at all.
 
 ### Changed
-- **The UV map is on by default.** It answers the question a flat sheet always raises — which
-  rectangle of this ends up on the shroud — and having to know it existed before you could ask
-  for it was one step too many. It still only builds for the sheet you're looking at.
-- **"Start from a paint…" is offered only while there is nothing to draw on.** It *replaces*
-  every sheet, which is what makes it a template step, so sitting it beside work in progress was
-  offering to throw that work away.
-- The sheet list scrolls instead of growing: a bike's paint runs to two dozen sheets, and that
-  pushed the hint line and every button below the fold.
-- **Add image and Add text moved down beside the drawing tools**, which is the panel you are
-  already in while working on a sheet — the top bar is for naming and saving the paint. The
-  separate "Paint layer" button is gone with them; the ＋ beside Layers is that.
+- "Repair runtimes" no longer offers to put `msvcr90.dll` where the game looks for it, because
+  there is no such place — nothing app-local short of a full private assembly can satisfy the
+  VC9 CRT. It installs the runtimes this PC is short of, both architectures, and clears out
+  what older versions of this app left behind. Plugins with a plain `MSVCR90.dll` import go
+  back to reporting "MSVCR90.dll was not found"; they were never actually fixed, only given a
+  different error.
 
-### Fixed
-- **A paint no longer ships sheets you never drew on.** A `.pnt` replaces the model's textures
-  by name, so an empty sheet doesn't add a blank — it *removes* whatever the bike had there. A
-  paint saved with twenty untouched sheets wiped the bike's own normal and roughness maps, and
-  came to 350 MB of pixels, which is enough on its own to push the texture store past its
-  ceiling and leave the 3D preview grey. Empty sheets are left out, and the save says how many.
-- Offering to create every missing sheet no longer offers the companion maps (`_n`, `_r`). They
-  aren't drawn like a livery, and a blank one is the exact thing above: it throws away the real
-  one. The hint line still lists them, and one can still be added by hand.
-- **The plastics are on the list.** The sheet names came from the paints already installed for a
-  model, and the OEM bikes ship one paint that replaces the wheels and the chain — so a stock
-  Husqvarna offered `chain`, `wheel`, `wheels`, and not the bodywork anyone opened the Designer
-  for. The model's own mesh is now asked what it draws, which is the half no paint can answer.
-  A helmet's goggles still go on their paints alone: a mesh can't say which of its textures
-  belong to the goggles beside it.
-- **Picking a model no longer takes twenty seconds.** Working out what it expects read every
-  installed paint whole — tens of megabytes each — for the few hundred bytes of header that
-  hold the names. It seeks to them instead: 19s down to 0.6s on a bike with paints installed.
-
-## Unreleased — a helmet you installed is a helmet you can see
-
-### Fixed
-- **A packaged mod bought from the shop landed one folder too deep.** A helmet, boots or any
-  other rider mod that downloads as a finished `.pkz` was filed inside a folder named after the
-  download — `helmets/shop-44/` — and a package only loads from the area itself. Neither the
-  game nor this app could see it, and it showed in the pickers under that name rendering
-  nothing. New installs go straight into the area under the mod's own name.
-- **The Rider tab offers to move the ones already buried.** The same banner that gathers a mod
-  installed loose now spots a package a folder too deep and raises it, so a mod already on disk
-  doesn't have to be reinstalled to be found. It moves the package and nothing else, never
-  overwrites a name already in the area, and leaves any folder with files of its own alone.
-- **A one-piece helmet or boot rendered as nothing at all.** Gear whose mesh comes as a single
-  piece — the game's own stock helmet, and any mod that doesn't split the shell from the
-  goggles — was handed one material per piece for a mesh with no pieces to hand them to, and
-  drew not one triangle. Everything else about it arrived intact, which is why the paints were
-  listed for a helmet that never appeared.
-- **A one-piece helmet rendered on its side.** A mesh in that shape never had its placement
-  applied, so one authored in a rotated frame stayed rotated. Harmless where a model is
-  authored square, which is most of them — the game's own gear is unchanged — and every mod
-  now lands where its own file says the model sits.
-
-## 2026-08-13
+## Unreleased — logs as a link
 
 ### Added
-- **Toggle to talk, as an alternative to holding the key.** Press once to open the mic,
-  press again to close it. Push-to-talk stays the default: it cannot leave a microphone
-  open by accident, and toggle can. Because a latched mic has nothing physical to remind
-  you it is open, the Voice section now shows a live **Mic open** indicator whenever it is.
-- The mic key is rebound whenever the mode changes, and always starts closed — a rebind, or
-  switching voice off and on, must never leave someone transmitting with no key press
-  behind it.
-- Auto-repeat is ignored in toggle mode. The OS repeats a held key, and acting on each
-  repeat would open and close the mic dozens of times a second for as long as someone
-  leant on it.
+- **Share logs.** Settings → Logs already named all three log sets and saved them into one
+  zip; the file still had to be got to whoever asked, which is where "send me your logs"
+  usually stalls — a save dialog, then a file to find, then somewhere to upload it. **Share
+  logs** packs the same archive and uploads it through the same host a shared track goes out
+  on, then puts the direct link on the clipboard and leaves it on screen with a Copy button.
+  What goes in is what **Save logs…** already packed: the three log sets and the
+  `summary.txt` header (app version, OS, game, folders, and what was collected) — never the
+  config file, which holds session cookies and shop credentials. The link is public to
+  anyone holding it, and the page says so under the field. A bundle big enough to be sliced
+  comes back as a numbered list of parts rather than a first link that loses the rest.
+- **`summary.txt` now names the installed FrostMod build**, in the saved zip as well as the
+  shared one. The loader's log is in the archive and "which build wrote it" is the first
+  question anyone reading it has; `version.txt` itself stays out, being one of the files we
+  put in that folder ourselves.
 
-## Unreleased — the image builder survives long enough to build an image
-
-### Fixed
-- **The idle sweep destroyed the machine building the server image.** Builders were left out of
-  the query that lists known instances, which meant the very next check — the one that
-  terminates anything with no database row — saw them as untracked and killed them within five
-  minutes of launching. They are listed like everything else now and skipped at the idle check
-  instead, which is the only part that should ignore them. A build whose machine disappears
-  also clears itself, rather than blocking every later build as one already in progress.
-
-## Unreleased — back to the game's own model, in one click
-
-### Fixed
-- **A bike with one model swap can go back to the game's own model.** The Locker only ever
-  listed model sets that existed as folders, so a bike carrying a single swap showed one tile
-  and "Only one model — install more to swap", with no way back. Every bike now gets a
-  **Stock** row, the way sounds always have. Choosing it files the loose model away under
-  `FrostMod Models/` — never deletes it — and one click puts it back.
-- **Reverting to Stock clears the setup files a swap brought with it.** A swap dropped
-  straight into a bike folder was never registered, so only its meshes were filed away and
-  its `.hrc`/`.cfg` stayed behind, still overriding the packed bike but naming meshes that
-  were gone. Those now travel with the model they belong to.
-
-## Unreleased — an import fills the gaps, it doesn't trade
-
-### Fixed
-- **Importing a full bundle no longer overwrites the mods you already have.** A bundle carries
-  whole asset folders — share a single helmet paint and the helmet's mesh and every other livery
-  on it travel too — so importing one quietly replaced your copy of a model with the sender's.
-  An import now writes only the files you're missing and leaves anything already on disk alone.
-  Downloading or dropping a mod still overwrites, which is how updating one works.
-
-## Unreleased — a server arrives in two minutes, not fifteen
+## 2026-08-20
 
 ### Added
-- **Servers launch from a prebuilt image.** Every one of them used to download and install the
-  same 6 GB — the game, then the whole bike pack — which was the entire wait. That work now
-  happens once, into a machine image, and each new server writes its own config and starts.
-  Two minutes instead of fifteen, and it stops getting slower every time the pack grows.
-  Building the image is a one-off `POST /v1/images/build`; until one exists, servers install
-  from scratch exactly as before.
-
-## Unreleased — share any track or paint, not just a preset
-
-### Added
-- **Share installed files with a code.** Sharing was a preset's privilege: a code carried a
-  *look*, and the full bundle packed whatever its slots resolved to. Handing someone the track
-  you just rode, or the paint you just made, still meant uploading it somewhere and pasting a
-  link. Anything the Library lists can now go straight into a code — **Share** on any item, or
-  pick several with **Select** and share them together. It packs them, uploads them, and puts
-  one line on your clipboard.
-- **The other end: Import → Paste a share code…** Files land back in the folders the sender
-  had them in — a track filed under `tracks/EU/` arrives under `tracks/EU/`, a helmet paint
-  goes to the helmet it belongs to — so a share carries where things go, not just what they
-  are. The code is previewed before anything downloads: what it holds, how big it is, and
-  where it's hosted.
-- Sharing reuses the preset bundle's upload, so the same 2 GB ceiling and the same slicing
-  past one part apply, and a share whose parts have gone missing says which one.
-
-## Unreleased — a created server can see the bikes it installed
+- **The app records how the game ended, not just that it ended.** Until now the only thing
+  watching MX Bikes was a process-table poll, which can say the game is gone and nothing
+  else — a clean quit and a crash on the loading screen looked identical in the log. A
+  handle is now held on the running game, so its exit code and true session length survive
+  it: a clean quit logs as one, and a crash logs `[session] game CRASHED after 4.1s` with
+  the exception named. `STATUS_IN_PAGE_ERROR` is called out by name, because that is what a
+  file the game had mapped but could not read looks like.
+- **A warning when the mods folder isn't really on disk.** OneDrive, Dropbox and iCloud can
+  leave a file looking completely ordinary while its contents still live on a server. MX
+  Bikes reads the mods tree during the load screen, memory-mapped, so a placeholder whose
+  fetch is slow or refused surfaces there as a crash with nothing in any log to explain it.
+  The app now checks the tree when a session starts and names the count, the provider and a
+  few of the files. It only ever reads attributes — never opens a placeholder, which is what
+  would trigger a download.
+- **Bikes you no longer ride can be removed from the Presets picker.** The Bike list is what
+  your profile carries, not what's installed — the game adds a column for every bike you have
+  ever sat on and never takes one out, so bikes whose mod is long gone kept filling the list
+  with nothing in the Library to uninstall. Each row now has a trash can that clears that bike
+  and the look saved for it out of `profile.ini`, with the previous file kept beside it as
+  `profile.ini.bak`. Nothing installed is deleted, and riding that bike again adds it back.
 
 ### Fixed
-- **A provisioned server rejected riders on bikes it had been given.** The pack was downloaded
-  into the game folder, and MX Bikes reads mods from PiBoSo's user folder instead — the same
-  place the client uses, which under the service account lives elsewhere entirely. The files
-  were on disk the whole time and the game was never looking there. They now install where the
-  game reads, with the game folder linked to the same content so nothing is copied twice.
+- **Steam's own runtime no longer reports as suspicious.** `tier0_s64.dll` and
+  `vstdlib_s64.dll` are loaded into every Steam game from the Steam install, which is
+  neither the game folder nor the system folder, so every scan on every machine ended with
+  two Suspect findings against a rule list holding no signatures. Two false positives on
+  every single run is how people learn to ignore a verdict.
+- **Log timestamps are local time.** They were UTC while FrostMod's log is local, so reading
+  the two side by side meant holding a timezone offset in your head, and support threads
+  were getting it wrong.
+- **Opening a mod no longer dead-ends on a Cloudflare refusal.** mxb-mods.com guards its
+  rendered pages far more tightly than its JSON API, so the catalog could browse fine while a
+  single mod came back "refused the request (403)". The fallback that exists to rescue that
+  couldn't: it asked the browser to `fetch()` the page, and a `fetch()` of a challenged URL is
+  answered with the check itself — only a navigation clears it. The hidden window now navigates
+  to the page and reads it, and the HTTP client asks for a page the way a browser does rather
+  than as if a script wanted JSON.
+- **The hidden mxb-mods.com window no longer reports itself ready while still on the check.**
+  It only asked whether script could run, which is just as true on Cloudflare's "Just a
+  moment…" page, so requests were sent from the interstitial and refused.
+- **The mod page's error now has the Retry button it tells you to hit**, and says so in your
+  own language instead of English.
 
-## Unreleased — a full share isn't capped at 200 MB any more
+## 2026-08-19
+
+### Fixed
+- **The in-game overlay opens where you can see it.** Once MX Bikes was minimized — which
+  exclusive fullscreen does the moment the overlay takes focus — the hotkey placed the
+  overlay ~32,000px off the left of the desktop: shown, focused, and invisible, so it read
+  as a hotkey that did nothing, and it took focus off the game on its way. A minimized game
+  no longer contributes a position, and the overlay is kept inside the bounds of whichever
+  monitor the game is on.
+- **FrostMod is re-armed when the game restarts.** It was only ever started automatically at
+  app launch, so a second race in one sitting ran without it — no live reloads, no model
+  swaps, no indication anything was different. The app now notices the game starting,
+  whether that came from the Play button, Steam or the desktop.
+- **The FrostMod pill says when FrostMod isn't reaching the game.** "Running" only ever meant
+  the launcher was up. When the game runs as administrator and MXB App doesn't, FrostMod
+  can't get into it at all — no in-game pill — and the app reported it as running the whole
+  time. That case is now named, with both ways out of it (run the game without administrator,
+  or run MXB App with it).
 
 ### Changed
-- **Full-share bundles are no longer capped at 200 MB.** That ceiling was the upload host's,
-  not ours, and a preset carrying a big track or a few detailed bikes ran straight into it. A
-  bundle past 190 MB is now sliced across several uploads and stitched back together on
-  import, taking the limit to 2 GB. Codes for smaller bundles are unchanged, and a share whose
-  parts have gone missing says so — with the size it expected — instead of failing at the
-  unzip.
+- Starting FrostMod is logged on Windows, on success and on failure, as it already was on
+  Linux and macOS — the platform nearly every report comes from was the one saying nothing.
 
-## 2026-08-11 — v0.9.2 — A track's terrain in 3D, and voice chat picks its microphone
+## 2026-08-18 — v0.10.0 — A Designer that sets itself up, a Downloads page, and tracks in 3D
 
-On top of v0.9.1 — the Designer's painting tools, Play on macOS and the SteamOS white screen
-are all still in here, and v0.9.0's notes are repeated below.
+The first full release since v0.9.1. It folds in everything the v0.9.2 betas carried, so
+the terrain viewer, the voice device settings and the rest of that line are all in here.
 
-Worth knowing: **voice chat doesn't transmit yet.** This is the device half — the mic, the
-headset, the levels and the key that opens the mic, with test buttons that do work. The codec
-and the voice room are still to come, and the Settings section says so rather than looking
-finished.
-
-Also worth knowing: the terrain is read from the game's own height file and checked against
-four published tracks' marshal posts, not against every track there is. If one comes out
-looking nothing like the track you ride, name it in the report — that's the thing to send.
+Worth knowing: **voice chat still doesn't transmit** — this is the device half (mic, output,
+levels and the key that opens the mic), with test buttons that work. The codec and the voice
+room are still to come, and the Settings section says so. Terrain is read from the game's own
+height file and checked against four published tracks, not every track there is; if one comes
+out looking nothing like the track you ride, name it in the report.
 
 ### Added
-- **See a track's terrain in 3D.** Tracks were the one thing the library couldn't show you —
-  a name, a preview and a size. The viewer now reads the heightfield out of a track and draws
-  the ground, opening from the library detail view next to **View in 3D**.
-- **Tracks are drawn with their surfaces, where the track says what they are.** A track's
-  height file can carry coverage masks — one per surface the builder painted, a byte per cell
-  — and the viewer reads them, so grass, apron, hard standing and the dirt of the riding line
-  each get their own colour. Tracks that carry no masks keep the elevation shading.
-  - Each surface takes the colour of the material the track names for it — the ids below six
-    index the table every track carries (asphalt, grass, sand, kerb, soil, concrete), so a
-    farm's fields come out as the soil they are and a grass circuit comes out green, rather
-    than every track being coloured by whichever surface happened to cover the most of it.
-  - Tracks also ship a picture in `[ui] pic_info`, and that is deliberately *not* used. Some
-    of those are true overhead photographs, but others are branded posters — a diagram on a
-    paper texture with a series logo across the bottom — and laying one on the terrain puts a
-    logo on the dirt. Nothing in the file distinguishes them, and three ways of asking a
-    picture to prove it describes the ground all failed to separate a real photograph from a
-    poster (extents of 0.709 against 0.715). The masks need no such test: they are a byte per
-    cell of the very grid being drawn, so they line up by construction.
-- **The terrain is lit by its own hollows.** A directional light can only shade a slope by
-  which way it faces, so a rut running along the light and a ridge running along it were lit
-  identically and the shapes a track is made of came out flat. Every point is now measured
-  against a blurred copy of the terrain at two scales — tight enough to find a rut, wide
-  enough to see the bowl a turn sits in — and the result darkens hollows and lifts ridges.
-  The terrain also casts and receives real shadows now.
-- **Voice chat settings — microphone, output, levels and a push-to-talk key.** A new
-  Settings section that picks the mic to listen to and the headset other riders will come
-  out of, with a live input meter and a test tone. Both device settings default to *system
-  default* and mean it: they follow whatever Windows is set to rather than pinning the
-  headset that happened to be plugged in when you chose. A device that has since been
-  unplugged falls back to the default and **says so** — silently going mute is the failure
-  that reads as "voice chat is broken".
-- **Push-to-talk**, bound through the same global-shortcut path as the overlay hotkey, so
-  it works while the game holds focus. It acts on both edges — mic opens on press, closes
-  on release — and is bound even when the overlay is switched off.
-- **Your logs, in Settings → Logs.** "Send me your logs" was the first thing every bug
-  report asked for and the one thing there was no way to do. There are three sets and they
-  sit in three places: MXB App writes its own into a folder buried in AppData, FrostMod
-  writes into the folder we install and run it from, and the game writes `log.txt` beside
-  its executable — or, when the game's folder has been moved, somewhere only the app knows.
-  All three are now named on one page, with how many files are there and how old the newest
-  one is, so a log that predates the run you're reporting can be seen for what it is.
-  **Open folder** takes you to any of them with the newest file selected, and **Save logs…**
-  writes the lot into a single zip to attach. The zip holds the logs and a summary of the
-  folders they came from — never the settings file, which carries session cookies.
+- **The Designer sets up its own sheets.** Create the sheets a model asks for in one click,
+  with ＋ buttons beside Sheets and Layers. The model's own mesh is asked what it draws, so an
+  OEM bike's plastics are on the list instead of only its wheels, and picking a model dropped
+  from 19s to 0.6s.
+- **A Stock texture underlay** draws the bike's own artwork — the plastics embedded in an OEM
+  model — beneath the UV map, so the one sheet with nothing to trace finally has something under
+  it.
+- **The sheet says where you are.** Hovering names the part, its flank (left or right), and
+  whether you're over a face you'll see or an underside you won't; the spot under the pointer
+  lights up on the 3D model. Where a bike unwraps both flanks onto one island it says so, with
+  the left washed warm and the right cool.
+- **Double-click a part to fill the view with it**, rather than aiming at it by wheel and drag.
+- **Rectangles, ellipses and lines are editable layers** now, not flattened pixels — each lands selected with handles and stays resizable, its colour, fill-or-outline and pen width still editable.
+- **Undo covers the whole editor** — adding, moving, scaling, rotating and deleting layers and
+  sheets are all on one timeline, not just the last brush stroke — and **the bucket fills the UV triangle under the press** rather than the whole mesh group, which was flooding panels the press never pointed at. Right-click fills the whole island.
+- **The 3D viewer reloads a paint that changes on disk**: re-save, and the model re-dresses
+  itself without closing the dialog. Preview a model swap before you switch to it, and take a
+  helmet off the rider to fill the frame with a **Gear only** toggle.
+- **A Downloads page** — everything you've installed, newest first, grouped by day, with where
+  each one landed and which mirror served it, searchable by name, destination or host.
+- **Failed downloads are kept** with their error and retry in place through the same queue, and
+  a **"Recently added" sort** in the library covers everything already on disk.
+- **The download queue opens** into a panel listing the transfer in progress and everything
+  behind it, and **any download can be cancelled** — one waiting simply leaves, the one in
+  flight is stopped mid-transfer and its partial file cleaned up.
+- **See a track's terrain in 3D.** The viewer reads the heightfield out of a track and draws the
+  ground, coloured by the surfaces the track names and lit by its own hollows, from the library
+  detail view next to View in 3D.
+- **Share any track or paint with a code.** Sharing was a preset's privilege; now anything the
+  Library lists goes into a code with **Share**, or several at once with **Select**. The other
+  end is **Import → Paste a share code…**, and files land back in the folders the sender had them
+  in.
+- **FrostMod installs and runs on Linux and macOS** — in the game's Proton prefix on Linux, in
+  the CrossOver/Whisky bottle on macOS. Reload works from outside the prefix or bottle (a polled
+  command file; needs FrostMod v0.13.0 or newer), and the FrostMod Settings section and log row
+  now appear on both.
+- **"Repair runtimes" in Settings** installs every Visual C++ runtime the PC is short of — both
+  32- and 64-bit — and puts `msvcr90.dll` where the game looks for it, elevating when the game
+  lives under Program Files. It's always available rather than gated on a detected fault, and
+  hands over download links for anything it couldn't finish.
+- **Voice chat settings** — pick the microphone you're heard through and the headset everyone
+  else comes out of, with a live meter and a test tone, plus a **push-to-talk** key that works
+  while the game holds focus and a **toggle-to-talk** mode with a live Mic-open indicator.
+- **Your logs, in Settings → Logs.** All three log sets named on one page, with how many files
+  and how old the newest is; **Open folder** and **Save logs…** into a single zip that never
+  carries the settings file.
+- **Mod cards carry a byline**, so two versions of a track are told apart without opening both.
 - **Qwest and Kelso** credited on Settings → Supporters.
-- **Point ReShade at the folder it's actually in.** The ReShade card only ever looked in the
-  game's install folder, so if that was unset or detection landed somewhere else, it said
-  "not installed" to people with ReShade sitting right there, and offered nothing to do about
-  it. It now names the folder it looked in and takes a pick of your own, kept separately from
-  the game folder — that one also drives the 3D rider, the game log location and Play, none of
-  which a choice made on this card should move. A folder with no ReShade in it is still
-  accepted and simply reported as such, and there's a link back to the game folder.
-- **Share installed files with a code.** Sharing was a preset's privilege: a code carried a
-  *look*, and the full bundle packed whatever its slots resolved to. Handing someone the track
-  you just rode, or the paint you just made, still meant uploading it somewhere and pasting a
-  link. Anything the Library lists can now go straight into a code — **Share** on any item, or
-  pick several with **Select** and share them together. It packs them, uploads them, and puts
-  one line on your clipboard.
-- **The other end: Import → Paste a share code…** Files land back in the folders the sender
-  had them in — a track filed under `tracks/EU/` arrives under `tracks/EU/`, a helmet paint
-  goes to the helmet it belongs to — so a share carries where things go, not just what they
-  are. The code is previewed before anything downloads: what it holds, how big it is, and
-  where it's hosted.
-- Sharing reuses the preset bundle's upload, so the same 2 GB ceiling and the same slicing
-  past one part apply, and a share whose parts have gone missing says which one.
 
 ### Changed
-- **Settings shows one section at a time.** Twelve sections rendered into a single column
-  meant the folder settings and the version number shared a scrollbar, and the nav on the left
-  only scrolled you to an anchor in it. That nav is now grouped — Setup, App, Advanced, About
-  — and opens each section on its own. **Experimental** was in that column with nothing in the
-  nav pointing at it; it has an entry now, under Advanced.
-- **Voice chat settings read shorter.** Five lines of help text under controls whose labels
-  already said the same thing are gone — a device picker labelled "Microphone" didn't need a
-  sentence under it explaining that it picks a microphone. What's left is the things the
-  labels can't say: that nothing transmits yet, and what the test buttons do.
-- **Full-share bundles are no longer capped at 200 MB.** That ceiling was the upload host's,
-  not ours, and a preset carrying a big track or a few detailed bikes ran straight into it. A
-  bundle past 190 MB is now sliced across several uploads and stitched back together on
-  import, taking the limit to 2 GB. Codes for smaller bundles are unchanged, and a share whose
-  parts have gone missing says so — with the size it expected — instead of failing at the
-  unzip.
+- **Downloads is now part of the Library** — an expandable group under it in the sidebar rather
+  than a tab beside it. A failed download still shows its count on the Library row while the
+  group is shut.
+- **The install picker shows every download**, the recommended one preselected, dedicated-server
+  builds badged *Server* and folded under a disclosure rather than dropped. The mirror list opens
+  on more than one row, each with the author's own name for the file.
+- **The mirrors hint line is gone** from the download dialog — the list already reads as a list
+  of the same file.
+- **Settings shows one section at a time**, with the left nav grouped into Setup, App, Advanced
+  and About.
+- **The UV map is on by default**, "Start from a paint…" is offered only while the canvas is
+  empty, the sheet list scrolls, and Add image / Add text moved down beside the drawing tools.
+- **Back to the game's own model in one click** — every bike gets a **Stock** row in the Locker,
+  and choosing it files the loose model away (never deletes) along with the setup files a swap
+  brought with it.
+- **The ReShade card takes a folder of your own** and names where it looked, kept separate from
+  the game folder.
+- **The process is called "MXB App"** in Activity Monitor and Task Manager, not the name of the
+  Rust crate behind it.
 
 ### Fixed
-- **Terrain below a track's datum is no longer drawn as a wall around it.** A `.trh` stores
-  its samples *signed*, and they were read unsigned, so every point below the datum came out
-  a full half-range — eleven metres — too high. Tracks that sit entirely one side of it were
-  merely offset; ones that straddle it, like Farm14, were drawn as a plateau with the track
-  sunk in a pit and the jumps at the bottom of it. Confirmed against the marshal posts of two
-  published tracks: read signed, their stated ground heights come back to the centimetre
-  (SandPoint's median error is 0.000 m against 11.001 m read unsigned), and the 32768-unit
-  cliffs that wrapping left across three of four tracks disappear entirely.
-- **The track is no longer drawn mirrored.** The terrain was placed straight into the scene
-  while the game's frame is left-handed and the viewer's is not, so every track came out
-  flipped — a left-hander read as a right-hander. It now goes through the same axis
-  conversion every bike and rider model in the app already does (`edf::to_right_handed`),
-  with the triangle winding turned to match so the ground is still lit from above.
-- **Terrain is drawn at the detail it was asked for — twice over.** Reductions moved by a
-  whole number of samples in two separate places, and both overshot. Reading a heightfield
-  into the master could only halve a 2049-sample grid asked for 2048, so the master was 1025
-  and half the file was thrown away before the viewer could ask for it. The same fault in the
-  view's own reduction meant a request for 320 across a 410-sample master could only step by
-  two and drew 205 — one drawn square covering nearly three metres of ground, wider than the jump
-  faces and ruts it was meant to show. Reductions now land on the size requested, and the
-  master itself is kept at twice the resolution. A track is drawn with roughly 3.7x the
-  samples across it, and a drawn square covers under a metre.
-- **The blind heightfield probe no longer reads a shifted grid.** It required the samples to
-  run to the last byte of the file, so a height file with a trailing block — which is what a
-  real `.trh` is — could only fit by treating that block as a header, landing the grid over
-  half a row late and reporting full confidence while doing it. Alignment is now measured
-  rather than assumed: a read that starts in the wrong place wraps mid-row, breaking every
-  row in the same column, and that is what the probe now looks for.
-- **Relief is drawn at a fixed, gentle exaggeration.** The 1×/2×/4× control is gone: 4×
-  stretched a track's boundary into spikes without making the track itself any clearer. What
-  replaces it is a single 1.5×, which is enough for a jump face to cast a shadow while the
-  ground still reads as ground.
-- **Paints larger than 32 MB were refused, and took the whole publish with them.** A 4K livery
-  runs well past that: the largest on a normal install is 121.7 MB. Because a loadout is
-  checked as a whole, owning one such paint meant publishing nothing at all and looking default
-  to everyone. The limit is now 192 MB, and anything still over it is left behind — and said
-  out loud — rather than failing the rest.
-- **A loadout the control plane refused took your whole look with it.** Two things a real
-  install produces would fail the entire publish: a paint filed under a slot the control plane
-  does not store, and the same slot resolving twice — a livery installed both loose and inside
-  a pack. Either one meant a rider published nothing at all. Only publishable slots are sent
-  now, one paint per slot, first match winning as it does in the game.
-- **A refused publish says why.** The app reported the status and discarded the explanation, so
-  "400 Bad Request" was the whole story. It now carries the control plane's reason.
-- **A provisioned server rejected riders on bikes it had been given.** The pack was downloaded
-  into the game folder, and MX Bikes reads mods from PiBoSo's user folder instead — the same
-  place the client uses, which under the service account lives elsewhere entirely. The files
-  were on disk the whole time and the game was never looking there. They now install where the
-  game reads, with the game folder linked to the same content so nothing is copied twice.
-- **"MSVCR90.dll was not found" now gets the fix it was always missing.** Installing
-  Microsoft's 2008 redistributable registers a side-by-side assembly under `WinSxS` and puts
-  nothing on the ordinary DLL search path. The game reaches that assembly because its manifest
-  asks for it by name; a module with a plain `MSVCR90.dll` import and no VC90 manifest — most
-  things built with VS2008 — gets the ordinary search order instead, and never sees it. So the
-  install succeeded, the check went green, and the box kept appearing. The app now also places
-  a copy of `msvcr90.dll` beside the game executable, which is the one place that import will
-  look. Taken from the machine's own `WinSxS` (newest servicing build). This corrects the fix
-  described under v0.9.0, which addressed the wrong half of the problem.
-- **A game folder that carries its own copy of the CRT is no longer called broken.** The check
-  only ever looked in `WinSxS`, so an install keeping the runtime beside the executable — the
-  way PiBoSo's own installers have long shipped it — showed a warning bar it could never clear.
-- **The missing-runtime check now looks for `vcruntime140_1.dll`.** FrostMod imports it, but
-  only `vcruntime140.dll` and `msvcp140.dll` were probed. A machine still on the original 2015
-  redistributable has those two and not this one, so it read as perfectly healthy while
-  injection failed naming a file the app never checked for.
+- Quick install queues the whole selection the moment you click — each row marked *Preparing* —
+  and names any mod it skips rather than reporting a bare count.
+- **MediaFire** resolves through its own API instead of the shape of its page; folder links
+  install, and a removed, password-protected, taken-down or bandwidth-exhausted file is each
+  named with what to do about it.
+- **Double-click to focus a part works**, recognised from the presses themselves rather than a
+  `dblclick` WebKit won't deliver under pointer capture.
+- A dedicated-server build is no longer installed as if it were the mod, and quick install stops
+  guessing on a mod that offers nothing but server files.
+- **The 2D sheet is shown the right way up.** It was displayed upside down against the template painters work from — the forks landing top-left where the template has them bottom-left. The flip is the view's alone, so a paint loaded and saved back is byte-identical, and a decal placed upright now lands upright on the bike.
+- **Designer:** a paint no longer ships blank sheets — which removed the bike's own normal and
+  roughness maps and ran to 350 MB — and blank companion maps aren't offered for creation; a
+  collapsed UV triangle no longer answers for the whole sheet; one junk vertex can't switch
+  left/right off for a bike; the flank named is the right one; a bike loaded without its `.geom`
+  gets no invented sides; a bike archive with no mesh fails instead of loading its stand-in; the
+  empty-canvas nag is gone.
+- **Gear:** a packaged mod bought from the shop no longer lands a folder too deep — and the Rider
+  tab offers to raise ones already buried — and a one-piece helmet or boot renders at all, and
+  upright.
+- **Importing a full bundle fills the gaps** rather than overwriting mods you already have.
+- **Terrain** is read signed (no eleven-metre wall below the datum), drawn the right way round
+  rather than mirrored, at roughly four times the detail, with the blind heightfield probe and
+  the relief exaggeration both corrected.
+- **The AppImage no longer ships its own libwayland** — the cause of the SteamOS white screen —
+  and the XWayland workaround that never ran is dropped.
+- **Missing-runtime checks:** the MSVCR90 side-by-side case gets a `msvcr90.dll` beside the game
+  executable, a game folder carrying its own CRT is no longer called broken, and
+  `vcruntime140_1.dll` is now probed.
+- **Nothing downloads without a ceiling:** a thumbnail is refused above 32 MB and an embedded
+  texture is only decompressed as far as it claims to go, so neither a card image nor a scanned
+  model record can pull unbounded memory.
 
 ### Notes
-- Voice is **off until turned on**. A feature that opens a microphone shouldn't be
-  something a player discovers by accident.
-- Global shortcuts are now all rebound from one place. `unregister_all` clears every
-  binding, so a push-to-talk key registered independently would have been wiped the next
-  time the overlay hotkey changed; the overlay binds first, so a push-to-talk combo another
-  app owns costs you the mic key and not the overlay as well.
-- Audio comes from `cpal`, pinned to 0.15 — 0.18 doesn't build for Windows in this
-  workspace (its WASAPI backend collides with the `windows-core` version Tauri unifies on).
-  The pin carries the reason, since a macOS build gives no hint that it's needed.
-- The Linux build and CI now install `libasound2-dev`. cpal reaches ALSA through
-  `alsa-sys`, whose build script shells out to `pkg-config` and fails the entire build
-  without it — the AppImage would not have built either.
-- The `msvcr90.dll` copy beside the executable is written without elevation, so it cannot
-  land in a game folder under `Program Files`. A Steam install there still needs the runtime
-  repaired by hand until the elevated fallback lands.
+- Voice is **off until turned on** — a feature that opens a microphone shouldn't be discovered by
+  accident — and every global shortcut is now rebound from one place.
+- Buy Me a Coffee donations post to the Discord for money-in events only, carrying a name and
+  their note and nothing else — no amount, no email.
+- Audio comes from `cpal` pinned to 0.15; the Linux build and CI install `libasound2-dev`.
+
+
+## Unannounced — server provisioning and paint publishing
+
+Also kept out of the release notes: both need an account on the invite-only control plane, so
+these fold into the notes of whichever release opens enrollment up. They join the servers and
+paint-sync work described further below.
+
+### Added
+- **Servers launch from a prebuilt image.** Every server used to download and install the same
+  6 GB — the game, then the whole bike pack — which was the entire wait. That happens once now,
+  into a machine image, and each new server writes its own config and starts: two minutes instead
+  of fifteen. Building the image is a one-off `POST /v1/images/build`.
+
+### Fixed
+- **The idle sweep no longer destroys the machine building the server image.** Builders were left
+  out of the query that lists known instances, so the next check terminated them as untracked
+  within five minutes of launch. They are listed and skipped at the idle check now, and a build
+  whose machine disappears clears itself instead of blocking every later build.
+- **A provisioned server can see the bikes it was given.** The pack was downloaded into the game
+  folder, but MX Bikes reads mods from PiBoSo's user folder — the files were on disk the whole
+  time and the game was never looking there. They now install where the game reads, with the game
+  folder linked to the same content.
+- **Paints larger than 32 MB no longer fail a publish.** A loadout is checked as a whole, so one
+  4K livery meant publishing nothing and looking default to everyone; the limit is now 192 MB and
+  anything still over it is left behind and said out loud. Only publishable slots are sent, one
+  paint per slot, and a refused publish now carries the control plane's reason.
 
 ## Unannounced — a debugger can't ride along
 
@@ -2264,8 +2083,8 @@ still refused, which is what stops an archive writing outside the folder it unpa
     is left untouched). Tauri commands `garage_scan_bikes` / `garage_swap_bike`.
   - Pairs with FrostMod **Stage A** (observation-only) in the sibling repo, which logs
     the game's bike-load calls to confirm the loader offset before any live swap.
-  - Online swapping is intentionally **out of scope** — the server is authoritative and
-    anti-cheat validates client integrity on join; this is offline/local only.
+  - Online swapping is intentionally **out of scope** — the server is authoritative on
+    what a joined client may change; this is offline/local only.
 - **CI verification on every push and PR** (`.github/workflows/ci.yml`) — nothing checked
   a change before it landed: `release.yml` only runs on a version tag and `pages.yml` only
   deploys the site. Two jobs now run on pushes to `main` and on every PR: frontend

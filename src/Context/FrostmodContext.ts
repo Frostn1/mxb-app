@@ -1,9 +1,22 @@
 import { createContext, useContext } from "react";
-import type { FrostmodStatus, ReloadOutcome, VcRuntime } from "../types";
+import type {
+  Attachment,
+  FrostmodStatus,
+  ReloadOutcome,
+  VcRuntime,
+} from "../types";
 
 export interface FrostmodContextValue {
   /** Whether FrostMod is currently running (polled). `null` until first probe. */
   running: boolean | null;
+  /**
+   * Whether FrostMod's DLL actually made it into the running game (polled alongside
+   * {@link running}). `null` until the first probe.
+   *
+   * Worth having next to `running`, not instead of it: `running` is what the Start/Stop
+   * buttons act on, while this is what says whether any of it is reaching the game.
+   */
+  attachment: Attachment | null;
   /** Install/version snapshot (`null` until first fetched). */
   status: FrostmodStatus | null;
   /** True while an install/update download is in flight. */
@@ -27,6 +40,20 @@ export interface FrostmodContextValue {
    * way, and opens Microsoft's download page if the prompt was declined.
    */
   installRuntime: (runtime: VcRuntime) => Promise<void>;
+  /** True while a full runtime repair is in flight. */
+  repairingRuntimes: boolean;
+  /**
+   * Install every Visual C++ runtime this PC is short of, and remove a stray `msvcr90.dll`
+   * beside the game executable if an older build of this app left one there.
+   *
+   * Unlike {@link installRuntime} this isn't gated on anything having been detected as
+   * missing, which is the point of it: a PC can report every runtime present and still
+   * stop the game with "MSVCR90.dll was not found", because the redistributable registers
+   * a side-by-side assembly and never touches the plain DLL search path. Prompts for admin
+   * once per installer and resolves either way, handing over download links for whatever
+   * it couldn't do.
+   */
+  repairRuntimes: () => Promise<void>;
   /** Hide the runtime banner for this session (the Settings panel keeps showing it). */
   dismissRuntimeWarning: () => void;
   /** What the banner should warn about — `null` once dismissed this session. */

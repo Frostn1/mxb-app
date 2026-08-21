@@ -49,6 +49,7 @@ export const ptBR: Translation = {
   "nav.browse": "Explorar",
   "nav.shop": "Loja",
   "nav.library": "Biblioteca",
+  "nav.downloads": "Downloads",
   "nav.locker": "Armário",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
@@ -63,11 +64,14 @@ export const ptBR: Translation = {
   "sidebar.queued": "+{{count}} na fila",
   "sidebar.expand": "Expandir a barra lateral",
   "sidebar.collapse": "Recolher a barra lateral",
+  "sidebar.showGroup": "Mostrar o que está em {{name}}",
+  "sidebar.hideGroup": "Ocultar o que está em {{name}}",
 
   // ── FrostMod ───────────────────────────────────────────────────────────────
   "frostmod.checking": "Verificando o FrostMod…",
   "frostmod.running": "FrostMod ativo",
   "frostmod.notRunning": "FrostMod inativo",
+  "frostmod.notInGame": "FrostMod não está no jogo",
   "frostmod.reloadGame": "Recarregar o jogo",
   "frostmod.start": "Iniciar o FrostMod",
   "frostmod.reloadedGame": "O FrostMod recarregou o jogo.",
@@ -131,6 +135,13 @@ export const ptBR: Translation = {
   "presets.help":
     "Salve um visual completo do piloto e carregue numa moto quando quiser.",
   "presets.profile": "Perfil",
+  "presets.forgetBike": "Remover moto",
+  "presets.forgetBikeOne": "Remover {{name}} deste perfil",
+  "presets.forgetBikeQ": "Remover esta moto?",
+  "presets.forgetBikeBody":
+    "“{{name}}” sai da lista de motos deste perfil, junto com o visual salvo para ela. Nada instalado é apagado — se você pilotar essa moto de novo, o jogo a adiciona outra vez.",
+  "presets.bikeForgotten": "“{{name}}” removida deste perfil.",
+  "presets.forgetFailed": "Não foi possível remover essa moto",
   "presets.namePlaceholder": "Nome do preset…",
   "presets.savePreset": "Salvar preset",
   "presets.saveChanges": "Salvar alterações",
@@ -295,6 +306,21 @@ export const ptBR: Translation = {
     "O Windows precisa da sua permissão. Abrindo o download da Microsoft no lugar.",
   "runtime.installFailed": "Não foi possível instalar o componente",
   "runtime.downloadManually": "Baixar por conta própria",
+  "runtime.componentVc140X86": "Microsoft Visual C++ 2015–2022 (x86)",
+  "runtime.repairing": "Reparando…",
+  "runtime.repairDone": "Componentes reparados",
+  "runtime.repairDoneDesc":
+    "Reinicie o MX Bikes se ele já estiver aberto e tente de novo.",
+  "runtime.repairNothingToDo": "Já estava tudo no lugar",
+  "runtime.repairNothingToDoDesc":
+    "Todos os componentes do Visual C++ estão instalados e a pasta do jogo tem o que precisa. Se mesmo assim o jogo não abrir, mande seu log para a gente.",
+  "runtime.repairPartial": "Uma parte ainda depende de você",
+  "runtime.repairPartialDesc":
+    "Não deu para concluir: {{what}}. O Windows precisa da sua permissão, ou o download não chegou — você pode instalar na mão.",
+  "runtime.repairNoGameFolder": "Nenhuma pasta do jogo definida",
+  "runtime.repairNoGameFolderDesc":
+    "Os componentes estão instalados, mas sem a pasta de instalação não dá para verificar a pasta do jogo. Defina-a acima e repare de novo.",
+  "runtime.repairFailed": "Não foi possível reparar os componentes",
   "update.checkFailed": "Não foi possível verificar as atualizações",
   "update.failed": "A atualização falhou",
 
@@ -354,7 +380,6 @@ export const ptBR: Translation = {
   "browse.empty": "Nenhum resultado em {{type}}.",
   "browse.loadMore": "Carregar mais",
   "browse.selectedCount": "{{count}} selecionados",
-  "browse.queuing": "Colocando na fila…",
   "browse.quickInstallCount": "Instalar {{count}} rapidamente",
   "browse.quickInstall": "Instalação rápida",
   "browse.quickReinstall": "Reinstalação rápida",
@@ -368,25 +393,20 @@ export const ptBR: Translation = {
   "browse.reinstall": "Reinstalar",
   "browse.reinstallAll": "Reinstalar tudo",
   "browse.queued": "“{{title}}” na fila",
-  "browse.queuedDesc": "Instalando em {{folder}}.",
-  "browse.rootFolder": "raiz",
+  "browse.queuedDesc": "Será instalado assim que chegar a vez dele.",
+  "browse.byAuthor": "por {{author}}",
   "browse.needsBrowser": "“{{title}}” precisa ser baixado pelo navegador",
   "browse.needsBrowserDesc":
     "O {{host}} bloqueia downloads dentro do app — abra a página dele para concluir.",
   "browse.noDownload": "Nenhum download encontrado para “{{title}}”",
+  "browse.serverOnly": "“{{title}}” só oferece arquivos de servidor",
+  "browse.serverOnlyDesc":
+    "Abra o mod para ver os downloads — uma versão para servidor dedicado não é instalada por você.",
   "browse.quickInstallFailed":
     "Não foi possível instalar “{{title}}” rapidamente",
   "browse.queuedBulk_one": "{{count}} mod na fila",
   "browse.queuedBulk_other": "{{count}} mods na fila",
   "browse.queuedBulkDesc": "Eles serão instalados um depois do outro.",
-  "browse.queuedBulkSkipped_one":
-    "{{count}} ignorado — host só pelo navegador.",
-  "browse.queuedBulkSkipped_other":
-    "{{count}} ignorados — host só pelo navegador.",
-  "browse.bulkFailed": "Não foi possível instalar a seleção rapidamente",
-  "browse.bulkFailedDesc_one": "Ele precisa ser baixado pelo navegador.",
-  "browse.bulkFailedDesc_other":
-    "Todos os {{count}} precisam ser baixados pelo navegador.",
 
   // ── Loja (MX Bikes Shop — downloads comprados) ─────────────────────────────
   "shop.help":
@@ -483,10 +503,18 @@ export const ptBR: Translation = {
   "installDialog.differentBike": "Moto / pacote diferente",
   "installDialog.directFastest": "Direto · o mais rápido",
   "installDialog.direct": "Direto",
+  "installDialog.recommendedBadge": "Recomendado",
+  "installDialog.browserBadge": "Navegador",
+  "installDialog.serverBadge": "Servidor",
+  "installDialog.serverBuildNote": "Versão para servidor dedicado — não serve para jogar",
+  "installDialog.serverFiles_one": "1 arquivo para servidor dedicado",
+  "installDialog.serverFiles_other": "{{count}} arquivos para servidor dedicado",
+  "installDialog.serverOnlyNotice":
+    "Todos os downloads aqui são versões para servidor dedicado. Instale uma só se você mantém um servidor — não acrescenta nada para pilotar.",
+  "installDialog.moreMirrors_one": "mais 1 espelho",
+  "installDialog.moreMirrors_other": "mais {{count}} espelhos",
   "installDialog.perBikeHint":
     "Cada download é uma moto diferente — selecionado automaticamente conforme a sua escolha. Escolha o pacote “all bikes” para todas de uma vez.",
-  "installDialog.mirrorsHint":
-    "Todos os espelhos têm o mesmo arquivo. Se um falhar, tente o próximo.",
 
   // ── Detalhes da biblioteca ─────────────────────────────────────────────────
   "libraryDetail.author": "Autor",
@@ -515,12 +543,15 @@ export const ptBR: Translation = {
   "modDetail.stagePlace": "Posicionar",
   "modDetail.stageReload": "Recarregar",
   "modDetail.modFiles": "Arquivos de mod",
+  "modDetail.loadFailed": "Não foi possível carregar este mod",
   "modDetail.copied": "Copiado",
   "modDetail.copy": "Copiar",
   "modDetail.addToLibrary": "Adicionar à biblioteca",
   "modDetail.host": "Host",
   "modDetail.installsTo": "Instala em",
   "modDetail.noDownloadLink": "Nenhum link de download foi encontrado nesta página — abra-a em {{site}}.",
+  "modDetail.serverOnlyNotice":
+    "Esta página só oferece arquivos para servidor dedicado. Eles instalam normalmente, mas não há nada para pilotar no jogo.",
   "modDetail.frostmodHint":
     "O FrostMod vai recarregar a lista de {{kind}} quando isso terminar.",
   "modDetail.kindRider": "piloto",
@@ -593,6 +624,9 @@ export const ptBR: Translation = {
   "settings.latestVersion": "Última: {{version}}",
   "settings.frostmodRuntimeMissing":
     "Falta ao Windows um componente do Visual C++ que o FrostMod precisa — instale-o para acabar com o erro \"dll was not found\".",
+  "settings.repairRuntimes": "Reparar componentes",
+  "settings.repairRuntimesHint":
+    "Instala todos os componentes do Visual C++ que faltam neste PC, 32 e 64 bits, e remove o que uma versão anterior deste app deixou na pasta do jogo. Vale a pena mesmo que nada acima pareça errado.",
   "settings.frostmodNeedsRepair":
     "Os arquivos instalados não batem com esta versão — reinstalar resolve.",
   "settings.frostmodRepair": "Reparar instalação",
@@ -853,6 +887,8 @@ export const ptBR: Translation = {
   "library.byAuthor": "de {{author}}",
   "library.locked": "Bloqueado — não dá pra ler o conteúdo",
   "library.searchPlaceholder": "Pesquisar entre os instalados…",
+  "library.sortFolder": "Por pasta",
+  "library.sortRecent": "Adicionados recentemente",
   "library.scanning": "Varrendo sua biblioteca…",
   "library.empty":
     "Nenhuma mod de {{type}} instalada — vá em Explorar e adicione uma.",
@@ -1035,6 +1071,43 @@ export const ptBR: Translation = {
   "install.failed": "Falha na instalação — {{title}}",
   "install.openModPage": "Abrir a página do mod",
   "install.clickToOpen": "Clique para abrir a página do mod",
+  "install.cancelled": "{{title}} cancelado",
+
+  "downloads.title": "Downloads",
+  "downloads.open": "Mostrar a fila de downloads",
+  "downloads.preparing": "Preparando…",
+  "downloads.waiting": "Aguardando",
+  "downloads.cancel": "Cancelar este download",
+  "downloads.remove": "Remover da fila",
+  "downloads.cancelling": "Cancelando…",
+  "downloads.stageResolving": "Localizando o arquivo…",
+  "downloads.stageDownloading": "Baixando",
+  "downloads.stageExtracting": "Extraindo",
+  "downloads.stagePlacing": "Instalando",
+
+  // ── Downloads (histórico) ──────────────────────────────────────────────────
+  "downloads.help":
+    "Tudo o que você baixou, do mais recente para o mais antigo — incluindo os que falharam. Filtre por status ou procure uma mod cujo nome você não lembra direito.",
+  "downloads.filterAll": "Todos",
+  "downloads.filterFailed": "Falharam",
+  "downloads.searchPlaceholder": "Pesquisar nos downloads…",
+  "downloads.clearAction": "Limpar",
+  "downloads.clearTitle": "Limpar o histórico de downloads?",
+  "downloads.clearBody":
+    "Isso apenas esquece a lista. Nada do que você instalou é removido.",
+  "downloads.empty": "Nada baixado ainda — vá em Explorar e adicione algo.",
+  "downloads.noMatches": "Nenhum resultado.",
+  "downloads.today": "Hoje",
+  "downloads.yesterday": "Ontem",
+  "downloads.sourceSite": "Download",
+  "downloads.sourceShop": "Loja",
+  "downloads.sourceFile": "Arquivo importado",
+  "downloads.showInLibrary": "Ver na biblioteca",
+  "downloads.openModPage": "Abrir a página do mod",
+  "downloads.forget": "Remover da lista",
+  "downloads.rowActions": "Mais",
+  "downloads.failedBadge_one": "{{count}} download falhou",
+  "downloads.failedBadge_other": "{{count}} downloads falharam",
 
   // ── Categorias (singular) ──────────────────────────────────────────────────
   "category.track": "Pista",
@@ -1156,6 +1229,19 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0100.hero.title": "O Designer prepara as próprias folhas",
+  "showcase.v0100.hero.body":
+    "Agora ele cria as folhas que um modelo pede, coloca embaixo os plásticos da própria moto para decalcar e abre um modelo em cerca de um segundo em vez de quase vinte.",
+  "showcase.v0100.location":
+    "Passe o cursor pela folha e ela te diz o que está embaixo dele: a peça, o lado da moto em que ela fica, e se é uma face que você vai ver ou uma parte de baixo que não.",
+  "showcase.v0100.downloads":
+    "A página de Downloads lista o que você baixou: por dia, o mais novo no topo, com onde cada arquivo foi parar e de qual mirror veio.",
+  "showcase.v0100.terrain":
+    "Uma pista agora abre em 3D direto da biblioteca, com seus saltos e sulcos desenhados a partir do próprio mapa de alturas do jogo.",
+  "showcase.v0100.sharing":
+    "Agora qualquer coisa na sua Biblioteca pode virar um código que você passa para alguém, e volta para as mesmas pastas em que você a guarda.",
+  "showcase.v0100.linux":
+    "No Linux, o FrostMod agora roda no mesmo prefix do Proton sob o qual o jogo já roda.",
   "showcase.v092.hero.title": "Veja o terreno de uma pista em 3D",
   "showcase.v092.hero.body":
     "Pistas eram a única coisa que a biblioteca não conseguia te mostrar: um nome, uma imagem e um tamanho. O visualizador agora lê o mapa de alturas de uma pista e desenha o próprio terreno, então os saltos, os sulcos e o formato de uma curva estão ali para olhar antes mesmo de carregar. Abre a partir de uma pista na biblioteca, ao lado de Ver em 3D.",
@@ -1382,7 +1468,7 @@ export const ptBR: Translation = {
   // ── Logs ───────────────────────────────────────────────────────────────────
   "settings.logs": "Logs",
   "logs.desc":
-    "Os arquivos para enviar quando algo dá errado. MXB App, FrostMod e {{game}} guardam os seus separadamente — abra a pasta que precisar, ou salve todos num zip para anexar a um relato de bug.",
+    "Os arquivos para enviar quando algo dá errado. MXB App, FrostMod e {{game}} guardam os seus separadamente — abra a pasta que precisar, salve todos num zip, ou compartilhe como um link para colar num relato de bug.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "O que o próprio app registrou",
   "logs.frostmodLogsDesc": "O que o loader escreveu na pasta dele",
@@ -1401,6 +1487,20 @@ export const ptBR: Translation = {
   "logs.savedDesc_one": "{{count}} arquivo de log, {{size}}",
   "logs.savedDesc_other": "{{count}} arquivos de log, {{size}}",
   "logs.saveFailed": "Não foi possível salvar os logs",
+  "logs.share": "Compartilhar logs",
+  "logs.sharePacking": "Empacotando…",
+  "logs.sharing": "Enviando…",
+  "logs.shared": "Logs enviados",
+  "logs.sharedCopied": "{{size}} — o link está na sua área de transferência.",
+  "logs.sharedDesc": "{{size}} — o link está abaixo.",
+  "logs.sharedSummary_one": "{{count}} arquivo de log, {{size}} enviados.",
+  "logs.sharedSummary_other": "{{count}} arquivos de log, {{size}} enviados.",
+  "logs.shareFailed": "Não foi possível compartilhar os logs",
+  "logs.copyLink": "Copiar link",
+  "logs.linkCopiedShort": "Copiado",
+  "logs.linkCopied": "Link copiado",
+  "logs.shareWarning":
+    "O zip fica num host público — qualquer pessoa com o link pode baixá-lo, então passe só para quem pediu.",
   "logs.privacy":
     "Os logs contêm caminhos de pastas e o que o app estava fazendo — nunca suas senhas ou cookies de sessão, e nenhum arquivo de configurações é incluído.",
 
@@ -1553,6 +1653,8 @@ export const ptBR: Translation = {
   "designer.flank.left": "lado esquerdo",
   "designer.flank.right": "lado direito",
   "designer.flank.both": "ambos os lados",
+  "designer.flankWashHint":
+    "O quente é o lado esquerdo da moto; o frio, o direito. Os dois lados costumam ser desdobrados como duas cópias quase idênticas do mesmo painel — é a única coisa na textura que os diferencia.",
   "designer.flankSharedHint":
     "Os dois flancos são abertos sobre a mesma área, então o que você desenha aqui aparece nos dois lados da moto: espelhado, e não onde você esperaria no outro.",
   "designer.focusHint": "Dê um duplo clique numa peça para preencher a vista com ela.",

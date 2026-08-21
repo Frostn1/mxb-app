@@ -5,9 +5,12 @@ mod antidebug;
 mod bikefiles;
 mod bikeswap;
 mod bundle;
+mod cancel;
 mod cfg;
+mod cloudfiles;
 mod config;
 mod cookie_session;
+mod downloads;
 mod dropzone;
 mod edf;
 mod fileshare;
@@ -23,6 +26,7 @@ mod library;
 mod linkwalk;
 mod logs;
 mod lru;
+mod memwatch;
 mod modelswap;
 mod mods;
 mod modstate;
@@ -44,6 +48,7 @@ mod presets;
 mod paintsync;
 mod reshade;
 mod servers;
+mod sessionwatch;
 mod shop_catalog_session;
 mod shop_credentials;
 mod shop_fetch;
@@ -62,7 +67,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
-use paintwatch::PaintWatcher;
+use paintwatch::{LookWatcher, PaintWatcher};
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
 // that does it wants the same treatment — so this sits here rather than in one function.
 use rayon::prelude::*;
@@ -347,6 +352,9 @@ fn scan_library_blocking(
             .presets
             .into_iter()
             .map(|p| library::LibraryEntry {
+                modified: std::fs::metadata(&p.path)
+                    .map(|m| library::mtime_ms(&m))
+                    .unwrap_or(0),
                 name: p.name,
                 path: p.path,
                 folder: String::new(),
@@ -454,6 +462,122 @@ fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
     }
 }
 
+/// Shortest gap between two unattended look refreshes.
+///
+/// Every refresh is a thread started inside the running game, and the watcher that drives
+/// them fires without anyone asking. A painter saving repeatedly, or a sync pull landing
+/// half a grid's paints, would otherwise queue one call per event; this collapses that
+/// burst into one. Sized to outlast a save the debounce didn't already fold together,
+/// while still being imperceptible to someone waiting to see their paint.
+const LIVE_LOOK_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// When the last unattended refresh went out. Not shared with the apply paths — a refresh
+/// the player asked for by clicking is never worth withholding.
+static LAST_LIVE_LOOK: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
+
+/// Has the cooldown passed? Records the attempt when it has, so two callers racing here
+/// produce one refresh.
+fn live_look_cooldown_passed() -> bool {
+    let now = std::time::Instant::now();
+    let mut last = LAST_LIVE_LOOK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(at) = *last {
+        if now.duration_since(at) < LIVE_LOOK_COOLDOWN {
+            return false;
+        }
+    }
+    *last = Some(now);
+    true
+}
+
+/// Can a look change reach the running game at all?
+///
+/// Two things have to hold, and both are fixed for the life of the process. The title needs
+/// a loader offset ([`game::Caps::instant_refresh`]), and the call that uses it is Windows'
+/// alone — under Wine or Proton the game is a Windows binary but we are not the one that can
+/// start a thread in it. Asked before watching as well as before firing, so a platform that
+/// could never act on a save doesn't hold OS watch handles waiting for one.
+fn can_refresh_live_look() -> bool {
+    cfg!(windows) && game::active().caps.instant_refresh
+}
+
+/// Push a look that changed on disk into the running game.
+///
+/// The trigger nobody clicked: a `.pnt` rewritten under the player's feet, or paints pulled
+/// from the control plane mid-session. Everything else about it is the apply paths' refresh
+/// — the same loader call, gated on the same Instant refresh setting, because that setting
+/// already means "put look changes into the live game" and this is another way one arrives.
+///
+/// Silent when there is nothing to do: no game, no setting, or a title whose loader we don't
+/// have an offset for. Only a real attempt is logged, so the log answers "did it fire, and
+/// what did the game say" — which is the question a first Windows run has to settle.
+fn refresh_live_look(app: &tauri::AppHandle) {
+    if !can_refresh_live_look() {
+        return;
+    }
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    if !cfg.instant_refresh || !gameproc::is_game_running() {
+        return;
+    }
+    if !live_look_cooldown_passed() {
+        log::debug!("[look] a refresh went out moments ago; folding this one into it");
+        return;
+    }
+    log::info!("[look] refreshing the live game: {:?}", gameproc::refresh_look());
+}
+
+/// The `.pnt` files the game is wearing right now — the bike's own paint and font, and every
+/// piece of gear on the rider.
+///
+/// Read through the same resolver an upload uses, so a paint packed in a `.pkz`, sitting
+/// loose beside it, or living under the rider profile is found the same way here as
+/// everywhere else. [`bundle::plan_detailed`] rather than `plan`, for the reason Manage
+/// needs it too: `plan` collapses a gear paint into the model folder that contains it, and a
+/// folder is not a file to watch. Only the *active* bike — the others aren't on screen, and
+/// re-running the game's loader for a paint nobody can see is a thread started for nothing.
+///
+/// Empty whenever the look can't be read — no profile, no bike, an unreadable `profile.ini`.
+/// That stops the watcher rather than failing anything; the next `profile.ini` write rebuilds
+/// it.
+fn worn_paints(cfg: &AppConfig) -> Vec<String> {
+    let profiles_dir = cfg.profiles_dir();
+    let Some(profile) = sync_profile(cfg) else {
+        return Vec::new();
+    };
+    let Some(bike) = presets::active_bike(&profiles_dir, &profile) else {
+        return Vec::new();
+    };
+    let Ok(loadout) = presets::read_loadout(&profiles_dir, &profile, &bike) else {
+        return Vec::new();
+    };
+    let Ok(plan) = bundle::plan_detailed(cfg, &loadout) else {
+        return Vec::new();
+    };
+    plan.assets
+        .iter()
+        .filter(|a| !a.is_dir && paintsync::is_paint(std::path::Path::new(&a.abs_path)))
+        .map(|a| a.abs_path.clone())
+        .collect()
+}
+
+/// Point the look watcher at whatever the rider is wearing now, replacing what it watched
+/// before. Called from every path that can change the answer, and cheap enough to be: one
+/// `profile.ini` parse and one library walk.
+fn watch_worn_paints(app: &tauri::AppHandle) {
+    if !can_refresh_live_look() {
+        return;
+    }
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    let paths = worn_paints(&cfg);
+    let handle = app.clone();
+    paintwatch::start_with(
+        &app.state::<LookWatcher>().0,
+        "look watcher",
+        &paths,
+        move |_changed| refresh_live_look(&handle),
+    );
+}
+
 /// Ask FrostMod to re-apply `bike` so a just-swapped model shows live. `None` when
 /// instant refresh is off — the same switch that gates `live_refresh`, since both
 /// reach into the running game.
@@ -511,6 +635,9 @@ fn apply_model_swap_blocking(
     // inside FrostMod, which is the only side that knows). Gated on the same
     // instant-refresh setting as the look refresh — both poke the live game.
     let model_refresh = model_refresh_cmd(&app, cfg.instant_refresh, &bike);
+    // A different model can resolve a slot to a different file, so the look watcher has to
+    // follow the swap — nothing writes `profile.ini` here for it to notice on its own.
+    watch_worn_paints(&app);
     Ok(SwapApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
@@ -1355,7 +1482,7 @@ fn preview_model_swap_blocking(
     let set =
         modelswap::preview_set(&cfg.mods_path, &bike, &variant).map_err(|e| format!("{e:#}"))?;
     let label = format!("{bike} · {variant}");
-    let key = swap_cache_key(&set);
+    let key = format!("{}#p{:x}", swap_cache_key(&set), paints_stamp(&set.bike_dir));
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         log::info!("preview_model_swap {label}: cache hit ({:?})", t0.elapsed());
         return Ok(m);
@@ -1366,9 +1493,56 @@ fn preview_model_swap_blocking(
     build_bike_model(&label, key, files, installed, t0)
 }
 
+/// A stamp over the loose paints beside a bike, for the cache key to carry.
+///
+/// The bike's own file can't see them. A `.pnt` is written into `<bike>/paints/`, which
+/// leaves the `.pkz`'s mtime and size exactly as they were — and on a bike loaded from its
+/// folder, writing a file inside `paints/` doesn't touch the folder above it either. So the
+/// key matched, the cache answered, and the model handed back was the one read before the
+/// paint existed: you saved, the bike didn't change, and nothing in the log looked wrong.
+///
+/// Name, length and mtime per `.pnt`, sorted so `read_dir` order can't shuffle the answer.
+/// Covers all three ways the set can move — a paint added, removed, or re-saved in place.
+fn paints_stamp(source: &std::path::Path) -> u64 {
+    let folder = if source.is_dir() {
+        source.to_path_buf()
+    } else {
+        source.with_extension("")
+    };
+    let mut rows: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(folder.join("paints")) {
+        for e in entries.flatten() {
+            let path = e.path();
+            if !path.extension().is_some_and(|x| x.eq_ignore_ascii_case("pnt")) {
+                continue;
+            }
+            let len = e.metadata().map(|m| m.len()).unwrap_or(0);
+            rows.push(format!(
+                "{}:{len}:{}",
+                path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                mtime_nanos(&path),
+            ));
+        }
+    }
+    rows.sort_unstable();
+    // FNV-1a. Not a security question — this only has to change when the folder does.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for row in &rows {
+        for b in row.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x1000_0000_01b3);
+        }
+    }
+    h
+}
+
 fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
     let t0 = std::time::Instant::now();
-    let key = bike_cache_key(&source);
+    let key = format!(
+        "{}#p{:x}",
+        bike_cache_key(&source),
+        paints_stamp(std::path::Path::new(&source)),
+    );
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         log::info!("load_bike_model {source}: cache hit ({:?})", t0.elapsed());
         return Ok(m);
@@ -3516,9 +3690,20 @@ async fn add_to_library(
     dest_folder: String,
 ) -> Result<(), String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let _cancel = cancel::begin(&slug);
     install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+/// Stop the install running under `slug`. `false` when nothing is running under it — the
+/// frontend drops queued items itself and only reaches for this on the one in flight.
+///
+/// Only the transfer is interruptible: once the bytes are down and extraction has started
+/// there is nothing safe to stop, so the flag is polled by the download loops alone.
+#[tauri::command]
+fn cancel_install(slug: String) -> bool {
+    cancel::request(&slug)
 }
 
 #[tauri::command]
@@ -3699,14 +3884,33 @@ async fn export_logs(app: tauri::AppHandle, dest: String) -> Result<logs::Export
     let version = app.package_info().version.to_string();
     let log_dir = app_log_dir(&app);
     let frostmod_dir = frostmod_manage::frostmod_dir(&app);
+    let frostmod_version = frostmod_manage::installed_version(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).unwrap_or_default();
         let info = logs::info(&log_dir, &frostmod_dir, &cfg);
-        let summary = logs::summary(&version, &cfg, &info);
+        let summary = logs::summary(&version, frostmod_version.as_deref(), &cfg, &info);
         logs::export(std::path::Path::new(&dest), &info, &summary).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| format!("export_logs task failed: {e}"))?
+}
+
+/// Zip every set of logs and upload it, handing back the direct link.
+///
+/// The same archive `export_logs` writes to disk, taken one step further: what a bug
+/// report needs is a link, and asking a player to find a save dialog, then a file, then an
+/// upload box is where "send me your logs" usually stalls. The upload is the one the
+/// Library's file share uses, so the ceiling and the slicing are already understood.
+#[tauri::command]
+async fn share_logs(app: tauri::AppHandle) -> Result<logs::ShareResult, String> {
+    let version = app.package_info().version.to_string();
+    let log_dir = app_log_dir(&app);
+    let frostmod_dir = frostmod_manage::frostmod_dir(&app);
+    let cfg = config::load(&app).unwrap_or_default();
+    let info = logs::info(&log_dir, &frostmod_dir, &cfg);
+    let summary =
+        logs::summary(&version, frostmod_manage::installed_version(&app).as_deref(), &cfg, &info);
+    logs::share(&app, &info, &summary).await.map_err(|e| format!("{e:#}"))
 }
 
 /// Where `tauri_plugin_log`'s `LogDir` target writes. Empty when the path can't be
@@ -3851,11 +4055,12 @@ fn set_profiles_path(app: tauri::AppHandle, path: String) -> Result<(), String> 
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.profiles_path = path;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-    // The watcher is pinned to a folder that just moved; re-point it, and publish in case
-    // the new folder's look differs from what the old one last sent.
-    if cfg.experimental_enabled() {
+    // Both watchers are pinned to a folder that just moved; re-point them, and publish in
+    // case the new folder's look differs from what the old one last sent.
+    if watches_looks(&cfg) {
         let profiles = app.state::<ProfileWatcher>();
         profilewatch::start(&app, &profiles, &cfg.profiles_dir());
+        watch_worn_paints(&app);
         publish_paints_soon(&app, &cfg, None);
     }
     Ok(())
@@ -3950,6 +4155,31 @@ fn set_launch_at_startup(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     .map_err(|e| e.to_string())
 }
 
+/// What to do with the login item at startup.
+#[derive(Debug, PartialEq, Eq)]
+enum Autostart {
+    Leave,
+    Enable,
+    /// It is there, but it was written for a binary this build no longer has.
+    Rebind,
+    Disable,
+}
+
+/// Reconcile the login item with the setting.
+///
+/// `stale` is the case that isn't obvious: the entry holds the executable's absolute path, so
+/// renaming the binary leaves every existing one pointing at a file that is gone — while
+/// `is_enabled` still answers yes, because all it looks for is the entry. Left alone, the app
+/// simply stops starting at login and nothing ever says why.
+fn autostart_action(wanted: bool, enabled: bool, stale: bool) -> Autostart {
+    match (wanted, enabled) {
+        (true, false) => Autostart::Enable,
+        (true, true) if stale => Autostart::Rebind,
+        (false, true) => Autostart::Disable,
+        _ => Autostart::Leave,
+    }
+}
+
 fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -3966,6 +4196,16 @@ fn frostmod_reload() -> ReloadOutcome {
 #[tauri::command]
 fn frostmod_running() -> bool {
     frostmod::is_running()
+}
+
+/// Whether FrostMod actually got into the running game — and what to do when it didn't.
+///
+/// `frostmod_running` only says the launcher is up, which is what made an elevated game so
+/// confusing to be on the wrong side of: the app said FrostMod was running, and the game
+/// had no pill in it. See [`frostmod::attachment`].
+#[tauri::command]
+fn frostmod_attachment() -> frostmod::Attachment {
+    frostmod::attachment()
 }
 
 /// Start MX Bikes from the Play button in the sidebar.
@@ -4056,7 +4296,7 @@ fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> 
     // whole session. That is the session a player has just enrolled in, which makes it the
     // worst one to be quietly missing.
     let watcher = app.state::<ProfileWatcher>();
-    if cfg.experimental_enabled() {
+    if watches_looks(&cfg) {
         profilewatch::start(&app, &watcher, &cfg.profiles_dir());
         // And publish once now, since nothing has been watching until this moment.
         publish_paints_soon(&app, &cfg, None);
@@ -4323,6 +4563,20 @@ pub fn publish_look_now(app: &tauri::AppHandle) {
     publish_paints_soon(app, &cfg, None);
 }
 
+/// Is a look change worth noticing? Paint sync publishes them, and the look watcher rebuilds
+/// on them — either one is reason enough to watch `profile.ini`.
+fn watches_looks(cfg: &AppConfig) -> bool {
+    cfg.experimental_enabled() || can_refresh_live_look()
+}
+
+/// The rider is wearing something different: re-point the look watcher at the new files, and
+/// publish. One entry point rather than two calls at every site, because forgetting the
+/// re-point leaves the watcher holding the paints of a look nobody is in any more.
+pub fn look_changed(app: &tauri::AppHandle) {
+    watch_worn_paints(app);
+    publish_look_now(app);
+}
+
 fn emit_sync(app: &tauri::AppHandle, event: SyncEvent) {
     if let Err(e) = app.emit(SYNC_EVENT, event) {
         log::warn!("[sync] couldn't tell the UI: {e}");
@@ -4478,6 +4732,11 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 Ok(o) if o.installed > 0 => {
                     log::info!("[sync] {} new paints mid-session", o.installed);
                     emit_sync(&app, SyncEvent::pulled(&o));
+                    // The files are on disk but the game read its grid when it built it.
+                    // Same loader call a save on disk gets, for the same reason: a rider
+                    // who is already out there shouldn't have to rejoin to stop seeing
+                    // default liveries.
+                    refresh_live_look(&app);
                 }
                 Ok(_) => {}
                 Err(e) => log::debug!("[sync] live pull failed: {e}"),
@@ -5051,6 +5310,33 @@ async fn frostmod_install(
 /// Raises a UAC prompt — Microsoft's redistributables require admin, and only the shell
 /// can ask. A declined prompt comes back as `cancelled`, not an error, so the UI can fall
 /// back to handing over the download link instead of reading as broken.
+/// Install every Visual C++ runtime this machine is short of, and finish the VC90 job by
+/// placing `msvcr90.dll` beside the game exe.
+///
+/// Deliberately not gated on `frostmod_status` having reported anything missing. The
+/// machine this exists for reported everything present and still couldn't start the game,
+/// so a repair reachable only from the warning bar would never have run there.
+#[tauri::command]
+async fn frostmod_repair_runtimes(app: tauri::AppHandle) -> vcruntime::RepairReport {
+    let game_dir = config::load(&app)
+        .ok()
+        .map(|c| c.install_dir())
+        .filter(|d| !d.trim().is_empty())
+        .map(std::path::PathBuf::from);
+    vcruntime::repair(&app, game_dir.as_deref()).await
+}
+
+/// Microsoft's download page links for every runtime, so the UI can always offer the
+/// manual route — the backstop for a declined UAC prompt or a PC that can't reach
+/// `aka.ms`.
+#[tauri::command]
+fn runtime_downloads() -> Vec<(vcruntime::Runtime, &'static str, &'static str)> {
+    vcruntime::Runtime::ALL
+        .into_iter()
+        .map(|r| (r, r.label(), r.url()))
+        .collect()
+}
+
 #[tauri::command]
 async fn frostmod_install_runtime(
     app: tauri::AppHandle,
@@ -5447,6 +5733,7 @@ async fn shop_install(
     let work = install::staging_dir("shop");
     std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
 
+    let _cancel = cancel::begin(&item.slug);
     let archive = match shop_fetch::download(&app, &item.slug, &item.download_url, &work).await {
         Ok(path) => path,
         Err(e) => {
@@ -5501,6 +5788,37 @@ fn shop_installed_map(
     Ok(shop_installed::recorded(&dir))
 }
 
+/// Note a finished download — installed or failed. Called from the two places every install
+/// passes through (`Context/Install` and `Context/DropReview`), which is why nothing in the
+/// download paths themselves has to know history exists.
+#[tauri::command]
+fn record_download(
+    app: tauri::AppHandle,
+    entry: downloads::NewDownload,
+) -> Result<Option<downloads::DownloadRecord>, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    downloads::record(&dir, entry).map_err(|e| format!("{e:#}"))
+}
+
+/// Everything downloaded, newest first.
+#[tauri::command]
+fn download_history(app: tauri::AppHandle) -> Result<Vec<downloads::DownloadRecord>, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    Ok(downloads::history(&dir))
+}
+
+#[tauri::command]
+fn forget_download(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    downloads::forget(&dir, &id).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn clear_download_history(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    downloads::clear(&dir).map_err(|e| format!("{e:#}"))
+}
+
 fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()
         .app_local_data_dir()
@@ -5520,6 +5838,23 @@ fn presets_list_profiles(app: tauri::AppHandle) -> Result<presets::ProfilesScan,
 fn presets_list_bikes(app: tauri::AppHandle, profile: String) -> Result<Vec<String>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     presets::list_bikes(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
+}
+
+/// Drop a bike from a profile — its saved loadout in every section, and the active-bike
+/// pointer if it was the one.
+///
+/// The bike picker is a view of `profile.ini`, not of the mods folder, so a bike whose mod
+/// was deleted long ago still sits in the list with nothing in the Library to uninstall.
+#[tauri::command]
+fn presets_forget_bike(
+    app: tauri::AppHandle,
+    profile: String,
+    bikeid: String,
+) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let dir = cfg.profiles_dir();
+    presets::forget_bike(&dir, &profile, &bikeid).map_err(|e| format!("{e:#}"))?;
+    presets::list_bikes(&dir, &profile).map_err(|e| format!("{e:#}"))
 }
 
 /// Which cosmetic slots this profile actually has, in `profile.ini` order.
@@ -6065,6 +6400,10 @@ fn main() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level())
+                // Local time, not UTC. FrostMod's log is stamped in local time, and a
+                // support thread that has to hold a timezone offset in its head while
+                // reading the two side by side gets read wrong.
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
@@ -6090,6 +6429,7 @@ fn main() {
         .manage(ModWatcher::default())
         .manage(ProfileWatcher::default())
         .manage(PaintWatcher::default())
+        .manage(LookWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
         .manage(voice::Monitor::default())
@@ -6141,10 +6481,11 @@ fn main() {
             if let Ok(dir) = app.path().app_local_data_dir() {
                 log::info!("data dir (config/session/frostmod): {}", dir.display());
             }
-            // Linux drives FrostMod by leaving a file in its folder — the one thing this
-            // side of the Wine prefix can reach. Told once here, because the senders are
-            // called from watchers that hold no handle to resolve a data dir with.
-            #[cfg(target_os = "linux")]
+            // Linux and macOS drive FrostMod by leaving a file in its folder — the one
+            // thing this side of the Wine prefix can reach. Told once here, because the
+            // senders are called from watchers that hold no handle to resolve a data dir
+            // with.
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             frostmod::set_command_dir(frostmod_manage::frostmod_dir(app.handle()));
             if let Ok(dir) = app.path().app_log_dir() {
                 log::info!("log dir: {}", dir.display());
@@ -6217,15 +6558,37 @@ fn main() {
                     }
                 }
                 let manager = handle.autolaunch();
-                let enabled = manager.is_enabled().unwrap_or(false);
-                if cfg.launch_at_startup && !enabled {
-                    let _ = manager.enable();
-                } else if !cfg.launch_at_startup && enabled {
-                    let _ = manager.disable();
+                let stale = cfg.autostart_binding_rev < config::AUTOSTART_BINDING_REV;
+                match autostart_action(
+                    cfg.launch_at_startup,
+                    manager.is_enabled().unwrap_or(false),
+                    stale,
+                ) {
+                    Autostart::Enable => {
+                        let _ = manager.enable();
+                    }
+                    Autostart::Rebind => {
+                        log::info!("re-binding the login item to this build's binary");
+                        let _ = manager.disable();
+                        let _ = manager.enable();
+                    }
+                    Autostart::Disable => {
+                        let _ = manager.disable();
+                    }
+                    Autostart::Leave => {}
+                }
+                if stale {
+                    cfg.autostart_binding_rev = config::AUTOSTART_BINDING_REV;
+                    let _ = config::save(handle, &cfg);
                 }
                 if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
                     let state = handle.state::<FrostmodProcess>();
-                    let _ = frostmod_manage::start(handle, &state);
+                    // Not `let _ =`: a FrostMod that refused to start at launch is the
+                    // reason half the "FrostMod isn't working" reports exist, and it used
+                    // to leave nothing behind in the log to say so.
+                    if let Err(e) = frostmod_manage::start(handle, &state) {
+                        log::warn!("FrostMod didn't start at launch: {e:#}");
+                    }
                 }
                 if cfg.watch_mods_reload {
                     let watcher = handle.state::<ModWatcher>();
@@ -6235,12 +6598,19 @@ fn main() {
                 //  * publish, because the look may have changed in the game's garage while
                 //    the app was shut, and nothing would ever have noticed;
                 //  * watch, so the same change during this session is noticed as it happens.
-                // Both no-op unless the experimental features are on and an account exists.
+                // The publish no-ops unless the experimental features are on and an account
+                // exists; the watching is also what keeps the look watcher pointed at the
+                // right files, which has nothing to do with sync.
                 if cfg.experimental_enabled() {
                     publish_paints_soon(handle, &cfg, None);
+                }
+                if watches_looks(&cfg) {
                     let profiles = handle.state::<ProfileWatcher>();
                     profilewatch::start(handle, &profiles, &cfg.profiles_dir());
                 }
+                // And watch the paints the rider is wearing, so saving one over the top
+                // while the game runs reaches the game.
+                watch_worn_paints(handle);
                 // A combo another app already owns shouldn't stop the app from starting
                 // — Settings reports the state and lets the player pick another.
                 if let Err(e) = overlay::register(handle, &cfg) {
@@ -6249,10 +6619,14 @@ fn main() {
             } else {
                 log::info!("no MX Bikes folder found — showing first-run setup");
             }
+            // Notice the game starting (Steam or Play button) to re-arm FrostMod for the
+            // session and check the mods folder is really on disk.
+            sessionwatch::start(handle);
             shop_session::load_session(handle);
             shop_catalog_session::load(handle);
             mxb_session::load(handle);
             imgcache::start_maintenance(handle);
+            memwatch::start();
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
@@ -6356,6 +6730,7 @@ fn main() {
             detect_orphaned_setup,
             repair_orphaned_setup,
             add_to_library,
+            cancel_install,
             import_file,
             plan_drop,
             repreview_drop,
@@ -6365,6 +6740,7 @@ fn main() {
             uninstall_mod,
             reveal_in_explorer,
             logs_info,
+            share_logs,
             open_logs_folder,
             export_logs,
             set_game_path,
@@ -6400,11 +6776,14 @@ fn main() {
             set_watch_mods_reload,
             frostmod_reload,
             frostmod_running,
+            frostmod_attachment,
             garage_scan_bikes,
             garage_swap_bike,
             frostmod_status,
             frostmod_install,
             frostmod_install_runtime,
+            frostmod_repair_runtimes,
+            runtime_downloads,
             frostmod_start,
             frostmod_stop,
             launch_game,
@@ -6438,6 +6817,10 @@ fn main() {
             shop_match_catalog,
             shop_install,
             shop_installed_map,
+            record_download,
+            download_history,
+            forget_download,
+            clear_download_history,
             shop_catalog_available,
             shop_catalog_status,
             shop_catalog_categories,
@@ -6446,6 +6829,7 @@ fn main() {
             shop_catalog_refresh,
             presets_list_profiles,
             presets_list_bikes,
+            presets_forget_bike,
             presets_read_loadout,
             presets_slots,
             list_games,
@@ -6615,6 +6999,34 @@ mod release_version_tests {
 }
 
 #[cfg(test)]
+mod autostart_tests {
+    use super::*;
+
+    #[test]
+    fn the_setting_is_honoured_when_the_binding_is_current() {
+        assert_eq!(autostart_action(true, false, false), Autostart::Enable);
+        assert_eq!(autostart_action(true, true, false), Autostart::Leave);
+        assert_eq!(autostart_action(false, true, false), Autostart::Disable);
+        assert_eq!(autostart_action(false, false, false), Autostart::Leave);
+    }
+
+    /// The rename bug: the entry exists, so nothing looks wrong, but it names a binary that
+    /// is gone. Without this the app quietly stops starting at login for everyone upgrading.
+    #[test]
+    fn an_entry_written_for_the_old_binary_is_rewritten() {
+        assert_eq!(autostart_action(true, true, true), Autostart::Rebind);
+    }
+
+    /// Whoever turned it off gets it off, however old their entry is — a stale binding is a
+    /// reason to rewrite the entry, never to bring one back.
+    #[test]
+    fn a_stale_binding_never_revives_a_disabled_login_item() {
+        assert_eq!(autostart_action(false, true, true), Autostart::Disable);
+        assert_eq!(autostart_action(false, false, true), Autostart::Leave);
+    }
+}
+
+#[cfg(test)]
 mod window_tests {
     use super::*;
 
@@ -6662,6 +7074,8 @@ mod window_tests {
                 "shop_install",
                 "shop_logout",
                 "commit_drop",
+                "record_download",
+                "clear_download_history",
                 "plugin:shell|open",
                 "plugin:dialog|open",
                 "plugin:event|listen",
@@ -8475,4 +8889,104 @@ mod viewer_tests {
     }
 }
 
+#[cfg(test)]
+mod live_look_tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
 
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("frost-look-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    fn touch(p: &Path) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"x").unwrap();
+    }
+
+    /// A profile wearing a bike paint and a helmet paint, plus a helmet model and a tyre
+    /// set that are emphatically not paints.
+    fn fixture(root: &Path) -> AppConfig {
+        touch(&root.join("mods/bikes/KTM450/paints/RedBud.pnt"));
+        touch(&root.join("mods/bikes/KTM450/paints/Southwick.pnt")); // owned, not worn
+        touch(&root.join("mods/rider/helmets/AGV/AGV.pkz"));
+        touch(&root.join("mods/rider/helmets/AGV/paints/Blue.pnt"));
+        touch(&root.join("mods/tyres/oem_mx.pkz"));
+        touch(&root.join("profiles/Frost/profile.ini"));
+        std::fs::write(
+            root.join("profiles/Frost/profile.ini"),
+            "[info]\nbikeid = KTM450\n\n\
+             [paint]\nKTM450 = RedBud\n\n\
+             [helmet]\nKTM450 = AGV\n\n\
+             [helmet_paint]\nKTM450 = Blue\n\n\
+             [tyres]\nKTM450 = oem_mx\n",
+        )
+        .unwrap();
+        AppConfig {
+            mods_path: root.to_string_lossy().into_owned(),
+            profiles_path: root.join("profiles").to_string_lossy().into_owned(),
+            ..Default::default()
+        }
+    }
+
+    /// The set the watcher is pointed at: every `.pnt` the active bike is wearing, and
+    /// nothing else. A helmet's mesh and a tyre archive are resolved by the same plan and
+    /// must not become watches — re-running the game's loader can't change a mesh, so a
+    /// watch on one is a thread started for nothing.
+    #[test]
+    fn only_the_paints_the_active_bike_is_wearing_are_watched() {
+        let root = tmp("worn");
+        let cfg = fixture(&root);
+
+        let mut names: Vec<String> = worn_paints(&cfg)
+            .iter()
+            .map(|p| Path::new(p).file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+
+        assert_eq!(names, vec!["Blue.pnt".to_string(), "RedBud.pnt".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A profile that names a paint nobody installed leaves nothing to watch, rather than
+    /// leaving the watcher pointed at the last look the rider was in.
+    #[test]
+    fn a_look_that_resolves_to_nothing_watches_nothing() {
+        let root = tmp("empty");
+        let cfg = fixture(&root);
+        std::fs::write(
+            root.join("profiles/Frost/profile.ini"),
+            "[info]\nbikeid = KTM450\n\n[paint]\nKTM450 = A Paint Nobody Has\n",
+        )
+        .unwrap();
+
+        assert!(worn_paints(&cfg).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// No profile, no bike, no `profile.ini` — every one of these is an ordinary state for
+    /// a fresh install to be in, and none of them may panic on the way to an empty answer.
+    #[test]
+    fn an_unreadable_look_is_an_empty_answer_not_a_panic() {
+        let root = tmp("unreadable");
+        std::fs::create_dir_all(root.join("profiles")).unwrap();
+        let cfg = AppConfig {
+            mods_path: root.to_string_lossy().into_owned(),
+            profiles_path: root.join("profiles").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert!(worn_paints(&cfg).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The cooldown is what keeps a burst of saves — or half a grid's paints landing at
+    /// once — from becoming a queue of threads started inside the running game.
+    #[test]
+    fn a_burst_gets_one_refresh() {
+        assert!(live_look_cooldown_passed(), "the first one always goes");
+        for _ in 0..5 {
+            assert!(!live_look_cooldown_passed(), "the rest fold into it");
+        }
+    }
+}
