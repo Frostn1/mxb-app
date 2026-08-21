@@ -69,7 +69,31 @@
 
 ## 2026-08-20
 
+### Added
+- **The app records how the game ended, not just that it ended.** Until now the only thing
+  watching MX Bikes was a process-table poll, which can say the game is gone and nothing
+  else — a clean quit and a crash on the loading screen looked identical in the log. A
+  handle is now held on the running game, so its exit code and true session length survive
+  it: a clean quit logs as one, and a crash logs `[session] game CRASHED after 4.1s` with
+  the exception named. `STATUS_IN_PAGE_ERROR` is called out by name, because that is what a
+  file the game had mapped but could not read looks like.
+- **A warning when the mods folder isn't really on disk.** OneDrive, Dropbox and iCloud can
+  leave a file looking completely ordinary while its contents still live on a server. MX
+  Bikes reads the mods tree during the load screen, memory-mapped, so a placeholder whose
+  fetch is slow or refused surfaces there as a crash with nothing in any log to explain it.
+  The app now checks the tree when a session starts and names the count, the provider and a
+  few of the files. It only ever reads attributes — never opens a placeholder, which is what
+  would trigger a download.
+
 ### Fixed
+- **Steam's own runtime no longer reports as suspicious.** `tier0_s64.dll` and
+  `vstdlib_s64.dll` are loaded into every Steam game from the Steam install, which is
+  neither the game folder nor the system folder, so every scan on every machine ended with
+  two Suspect findings against a rule list holding no signatures. Two false positives on
+  every single run is how people learn to ignore a verdict.
+- **Log timestamps are local time.** They were UTC while FrostMod's log is local, so reading
+  the two side by side meant holding a timezone offset in your head, and support threads
+  were getting it wrong.
 - **Opening a mod no longer dead-ends on a Cloudflare refusal.** mxb-mods.com guards its
   rendered pages far more tightly than its JSON API, so the catalog could browse fine while a
   single mod came back "refused the request (403)". The fallback that exists to rescue that

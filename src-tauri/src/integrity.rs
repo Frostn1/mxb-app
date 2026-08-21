@@ -341,7 +341,7 @@ fn is_sha256(s: &str) -> bool {
 /// otherwise make the first scan on an ordinary gaming PC produce a page of findings.
 /// Everything here loads from somewhere the path rules don't already cover: an overlay
 /// injects from its own install, which is exactly the shape a cheat has.
-const BUNDLED_ALLOW: [&str; 25] = [
+const BUNDLED_ALLOW: [&str; 29] = [
     // Steam: the overlay is injected into every game Steam starts.
     "gameoverlayrenderer64.dll",
     "gameoverlayrenderer.dll",
@@ -350,6 +350,14 @@ const BUNDLED_ALLOW: [&str; 25] = [
     "steam_api64.dll",
     "steam_api.dll",
     "steamoverlayvulkanlayer64.dll",
+    // Valve's own runtime, which `steamclient` pulls in from the Steam install rather than
+    // from the game folder or the system folder. Missing these made every scan on every
+    // Steam machine report two Suspect findings — the shape of a false positive that
+    // teaches people to ignore the verdict.
+    "tier0_s64.dll",
+    "vstdlib_s64.dll",
+    "tier0.dll",
+    "vstdlib.dll",
     // Discord's in-game overlay.
     "discordhook64.dll",
     "discordhook.dll",

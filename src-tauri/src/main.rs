@@ -7,6 +7,7 @@ mod bikeswap;
 mod bundle;
 mod cancel;
 mod cfg;
+mod cloudfiles;
 mod config;
 mod cookie_session;
 mod downloads;
@@ -6451,6 +6452,10 @@ fn main() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level())
+                // Local time, not UTC. FrostMod's log is stamped in local time, and a
+                // support thread that has to hold a timezone offset in its head while
+                // reading the two side by side gets read wrong.
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
