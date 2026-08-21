@@ -387,6 +387,174 @@ pub fn supported_for_game(game: crate::game::Game, tag: Option<&str>) -> bool {
     }
 }
 
+// ===========================================================================
+// Did it actually get in?
+//
+// `is_running` answers "is FrostMod up?", which everything so far has treated as "is
+// FrostMod working?". They come apart in one important case: the game running at a higher
+// integrity level than the app. FrostMod is launched by us, so it inherits our level, and
+// an injector cannot open a process above it — the DLL never goes in, the pill in the game
+// never appears, and the app cheerfully reports FrostMod as running the whole time.
+//
+// So ask the game instead. A DLL that is in the process is in its module list however it
+// got there, and the walk that reads that list is refused by exactly the same barrier that
+// refuses the injection — which makes "we can't look" not a gap in the answer but the
+// answer itself.
+// ===========================================================================
+
+/// The DLL FrostMod injects. Matched by file name: wherever it was loaded from, its being
+/// in the game's module list is what "attached" means.
+const INJECTED_DLL: &str = "frostmod.dll";
+
+/// How long to give an injection before calling it a failure.
+///
+/// FrostMod polls for the game and injects when it sees it, so there is always a window
+/// where the game is up and the DLL legitimately isn't in yet. Complaining inside that
+/// window would fire a warning on every single launch.
+const ATTACH_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// When we first saw a game with no FrostMod in it, for [`ATTACH_GRACE`]. Cleared whenever
+/// the answer is anything else, so each game session gets its own grace period.
+static WAITING_SINCE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Whether FrostMod's DLL is inside the running game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachState {
+    /// No game running, so nothing to be attached to.
+    GameNotRunning,
+    /// `frostmod.dll` is in the game.
+    Attached,
+    /// The game is up, the DLL isn't in yet, and it hasn't been long enough to worry.
+    Attaching,
+    /// The game is up, FrostMod's DLL is not in it, and it has had time to be.
+    NotAttached,
+    /// Windows won't let us see inside the game — and won't let FrostMod in either.
+    Blocked,
+    /// This platform can't answer the question.
+    Unknown,
+}
+
+/// The attach answer, plus what to do about it when it's bad news.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub state: AttachState,
+    /// What is wrong and how to fix it. Empty unless the state calls for it — the good
+    /// states are their own explanation.
+    pub reason: String,
+}
+
+impl Attachment {
+    fn plain(state: AttachState) -> Self {
+        Self { state, reason: String::new() }
+    }
+}
+
+/// Is this module path FrostMod's injected DLL?
+fn is_injected_dll(path: &str) -> bool {
+    path.rsplit(['\\', '/'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case(INJECTED_DLL))
+}
+
+/// Decide how long a game has been sitting there without FrostMod in it.
+///
+/// Split from [`attachment`] so the grace period is testable without a game: `now` is the
+/// clock, and the `Option` is the stored "first seen like this" the caller keeps.
+fn waiting_verdict(
+    first_seen: &mut Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> AttachState {
+    let since = *first_seen.get_or_insert(now);
+    if now.duration_since(since) >= ATTACH_GRACE {
+        AttachState::NotAttached
+    } else {
+        AttachState::Attaching
+    }
+}
+
+/// Is FrostMod actually in the game — and if not, why not?
+pub fn attachment() -> Attachment {
+    use crate::gameproc::GameModules;
+
+    // Every answer but "the game is up and FrostMod isn't in it yet" ends the wait, so a
+    // later session that comes back around to that state gets a fresh grace period rather
+    // than inheriting the last one's — which would have it warn instantly.
+    let forget_the_wait = || {
+        if let Ok(mut slot) = WAITING_SINCE.lock() {
+            *slot = None;
+        }
+    };
+
+    match crate::gameproc::game_modules() {
+        GameModules::NotRunning => {
+            forget_the_wait();
+            Attachment::plain(AttachState::GameNotRunning)
+        }
+        GameModules::Unavailable => {
+            forget_the_wait();
+            Attachment::plain(AttachState::Unknown)
+        }
+        GameModules::Denied => {
+            forget_the_wait();
+            Attachment { state: AttachState::Blocked, reason: blocked_reason() }
+        }
+        GameModules::Loaded(paths) if paths.iter().any(|p| is_injected_dll(p)) => {
+            forget_the_wait();
+            Attachment::plain(AttachState::Attached)
+        }
+        GameModules::Loaded(_) => {
+            let now = std::time::Instant::now();
+            let state = match WAITING_SINCE.lock() {
+                Ok(mut slot) => waiting_verdict(&mut slot, now),
+                // A poisoned lock must not be what turns into a false alarm.
+                Err(_) => AttachState::Attaching,
+            };
+            let reason = match state {
+                AttachState::NotAttached => not_attached_reason(),
+                _ => String::new(),
+            };
+            Attachment { state, reason }
+        }
+    }
+}
+
+/// What to tell someone whose game we aren't allowed to look inside.
+///
+/// Both ways out are offered because either genuinely works, and which one is right isn't
+/// ours to decide — running the game unelevated is the better habit, running the app
+/// elevated is the quicker fix.
+fn blocked_reason() -> String {
+    let game = crate::game::active().display;
+    match crate::gameproc::we_are_elevated() {
+        // The ordinary case, and the one worth naming outright.
+        Some(false) => format!(
+            "{game} is running as administrator and MXB App isn't, so FrostMod can't get \
+             into it — no in-game pill, no live reloads, no model swaps. Close {game} and \
+             start it without administrator, or run MXB App as administrator too, then \
+             launch the game again."
+        ),
+        // We are the elevated one, or Windows wouldn't say. Either way "run as admin" is
+        // no longer advice we can give straight-faced, so describe the shape of the fix.
+        _ => format!(
+            "Windows won't let MXB App see inside {game}, so FrostMod can't get into it \
+             either — no in-game pill, no live reloads, no model swaps. {game} and MXB App \
+             have to run at the same level: either both as administrator, or neither."
+        ),
+    }
+}
+
+/// The game is readable, FrostMod is not in it, and the grace period is up.
+fn not_attached_reason() -> String {
+    let game = crate::game::active().display;
+    format!(
+        "FrostMod is running but hasn't got into {game} — no in-game pill, no live reloads, \
+         no model swaps. Stop FrostMod and start it again; if it keeps happening, close \
+         {game} first so FrostMod is up before the game is."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,5 +708,74 @@ mod tests {
             command_json_at("reload_mods", "", 7),
             r#"{"at":"7","bikeId":"","verb":"reload_mods"}"#
         );
+    }
+
+    /// Module lists come back as full paths, in whatever case the loader recorded — and on
+    /// Linux the same DLL is reached through a `/proc` mapping with forward slashes.
+    #[test]
+    fn the_injected_dll_is_recognised_wherever_it_was_loaded_from() {
+        for path in [
+            r"C:\Users\me\AppData\Local\com.frost.mxbikes\frostmod\frostmod.dll",
+            r"C:\Users\me\AppData\Local\com.frost.mxbikes\frostmod\FrostMod.DLL",
+            "/home/me/.steam/steamapps/compatdata/pfx/drive_c/frostmod/frostmod.dll",
+            "frostmod.dll",
+        ] {
+            assert!(is_injected_dll(path), "should be FrostMod's DLL: {path}");
+        }
+    }
+
+    /// The near-misses that must not read as an attached FrostMod — the launcher is a
+    /// sibling of the DLL in the same folder, and it is the thing that is always running.
+    #[test]
+    fn nothing_else_counts_as_attached() {
+        for path in [
+            r"C:\frostmod\frostmod.exe",
+            r"C:\Program Files\MX Bikes\mxbikes.exe",
+            r"C:\frostmod\frostmod.dll.bak",
+            r"C:\frostmod\notfrostmod.dll",
+            "",
+        ] {
+            assert!(!is_injected_dll(path), "should not be FrostMod's DLL: {path}");
+        }
+    }
+
+    /// FrostMod injects a moment *after* the game process appears, so the first look is
+    /// always a miss. Warning then would fire on every launch the app ever saw.
+    #[test]
+    fn a_game_that_just_started_is_given_time_to_be_injected() {
+        let start = std::time::Instant::now();
+        let mut first_seen = None;
+        assert_eq!(waiting_verdict(&mut first_seen, start), AttachState::Attaching);
+        assert_eq!(
+            waiting_verdict(&mut first_seen, start + ATTACH_GRACE - std::time::Duration::from_secs(1)),
+            AttachState::Attaching,
+            "still inside the grace period",
+        );
+    }
+
+    /// Past the grace period it is no longer "any moment now", and saying so is the whole
+    /// point — this is the state the player is currently left to work out for themselves.
+    #[test]
+    fn a_game_that_never_got_injected_is_reported() {
+        let start = std::time::Instant::now();
+        let mut first_seen = None;
+        waiting_verdict(&mut first_seen, start);
+        assert_eq!(
+            waiting_verdict(&mut first_seen, start + ATTACH_GRACE),
+            AttachState::NotAttached,
+        );
+    }
+
+    /// The clock starts when we first see the game without FrostMod, not when we're asked.
+    /// Without this a slow poll could hand out a fresh grace period every time.
+    #[test]
+    fn the_grace_period_runs_from_the_first_sighting() {
+        let start = std::time::Instant::now();
+        let mut first_seen = Some(start);
+        assert_eq!(
+            waiting_verdict(&mut first_seen, start + ATTACH_GRACE),
+            AttachState::NotAttached,
+        );
+        assert_eq!(first_seen, Some(start), "the first sighting is not moved by a later look");
     }
 }

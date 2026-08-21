@@ -67,6 +67,7 @@ export const en = {
   "frostmod.checking": "Checking FrostMod…",
   "frostmod.running": "FrostMod running",
   "frostmod.notRunning": "FrostMod not running",
+  "frostmod.notInGame": "FrostMod not in game",
   "frostmod.reloadGame": "Reload game",
   "frostmod.start": "Start FrostMod",
   "frostmod.reloadedGame": "FrostMod reloaded the game.",

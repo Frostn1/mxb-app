@@ -12,6 +12,7 @@ import {
   frostmodInstall,
   frostmodInstallRuntime,
   frostmodRepairRuntimes,
+  frostmodAttachment,
   frostmodStart,
   frostmodStatus,
   frostmodStop,
@@ -23,7 +24,8 @@ import {
   RUNTIME_DOWNLOADS_PAGE,
   RUNTIME_NAME_KEY,
 } from "../api/mods";
-import type { FrostmodStatus, VcRuntime } from "../types";
+import type { Attachment, FrostmodStatus, VcRuntime } from "../types";
+import { ATTACH_PROBLEM } from "../types";
 import { displayName } from "../lib/mods";
 import { useT, type TFunc } from "../i18n/context";
 import { FrostmodContext } from "./FrostmodContext";
@@ -51,6 +53,11 @@ function watchDescription(mods: string[], t: TFunc): string {
 export function FrostmodProvider({ children }: { children: ReactNode }) {
   const t = useT();
   const [running, setRunning] = useState<boolean | null>(null);
+  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  // What we last warned about, so a problem that persists across the 5s poll is reported
+  // once rather than every tick. Cleared when the state stops being a problem, which is
+  // what lets the *next* game session warn again.
+  const warnedFor = useRef<string | null>(null);
   const [status, setStatus] = useState<FrostmodStatus | null>(null);
   const [installing, setInstalling] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -67,7 +74,30 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
     } catch {
       if (mounted.current) setRunning(false);
     }
-  }, []);
+    // Folded into the same tick rather than given a poll of its own: it answers the
+    // follow-up to the question above, and asking them apart would let the pill show a
+    // running FrostMod and a stale attach state at the same time.
+    try {
+      const a = await frostmodAttachment();
+      if (!mounted.current) return;
+      setAttachment(a);
+      if (!ATTACH_PROBLEM.includes(a.state)) {
+        warnedFor.current = null;
+        return;
+      }
+      // The reason carries the game name, so a state that stays the same while the
+      // player switches title still gets said once for each.
+      const key = `${a.state}:${a.reason}`;
+      if (warnedFor.current === key) return;
+      warnedFor.current = key;
+      toast.warning(t("frostmod.notInGame"), {
+        description: a.reason,
+        duration: 12000,
+      });
+    } catch {
+      /* older backend or non-Tauri — leave the pill on `running` alone */
+    }
+  }, [t]);
 
   const refreshStatus = useCallback(async () => {
     if (mounted.current) setChecking(true);
@@ -326,6 +356,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       running,
+      attachment,
       status,
       installing,
       checking,
@@ -344,7 +375,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       runtimeWarning,
       missingRuntime,
     }),
-    [running, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, repairingRuntimes, repairRuntimes, dismissRuntimeWarning, runtimeWarning, missingRuntime],
+    [running, attachment, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, repairingRuntimes, repairRuntimes, dismissRuntimeWarning, runtimeWarning, missingRuntime],
   );
 
   return (

@@ -73,6 +73,7 @@ export const de: Translation = {
   "frostmod.checking": "FrostMod wird geprüft…",
   "frostmod.running": "FrostMod läuft",
   "frostmod.notRunning": "FrostMod läuft nicht",
+  "frostmod.notInGame": "FrostMod nicht im Spiel",
   "frostmod.reloadGame": "Spiel neu laden",
   "frostmod.start": "FrostMod starten",
   "frostmod.reloadedGame": "FrostMod hat das Spiel neu geladen.",
