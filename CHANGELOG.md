@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-20
+
+### Added
+- **A paint saved on disk shows up in the running game.** The game reads your look once,
+  when the profile loads, so painting used to mean save, alt-tab, reselect your profile,
+  look, repeat — and mid-session there was no way to see a change at all. The app now
+  watches the `.pnt` files the rider is actually wearing (the bike's paint and font, and
+  every piece of gear) and, when one is rewritten, re-runs the game's own look loader in
+  place. Same call the Locker and presets already make, gated on the same **Instant
+  refresh** setting, so there is nothing new to switch on.
+- **Paints that arrive mid-session are applied without a rejoin.** Paint sync already
+  installed other riders' liveries while you rode and then left them sitting on disk until
+  the next session. They now go into the running game the moment they land.
+
 ## 2026-08-19
 
 ### Fixed
