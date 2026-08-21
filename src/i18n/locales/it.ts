@@ -532,6 +532,7 @@ export const it: Translation = {
   "modDetail.stagePlace": "Posizionamento",
   "modDetail.stageReload": "Ricarica",
   "modDetail.modFiles": "File mod",
+  "modDetail.loadFailed": "Impossibile caricare questa mod",
   "modDetail.copied": "Copiato",
   "modDetail.copy": "Copia",
   "modDetail.addToLibrary": "Aggiungi alla libreria",

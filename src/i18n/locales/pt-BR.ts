@@ -535,6 +535,7 @@ export const ptBR: Translation = {
   "modDetail.stagePlace": "Posicionar",
   "modDetail.stageReload": "Recarregar",
   "modDetail.modFiles": "Arquivos de mod",
+  "modDetail.loadFailed": "Não foi possível carregar este mod",
   "modDetail.copied": "Copiado",
   "modDetail.copy": "Copiar",
   "modDetail.addToLibrary": "Adicionar à biblioteca",

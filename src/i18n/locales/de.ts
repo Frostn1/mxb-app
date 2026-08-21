@@ -541,6 +541,7 @@ export const de: Translation = {
   "modDetail.stagePlace": "Ablegen",
   "modDetail.stageReload": "Neu laden",
   "modDetail.modFiles": "Mod-Dateien",
+  "modDetail.loadFailed": "Diese Mod konnte nicht geladen werden",
   "modDetail.copied": "Kopiert",
   "modDetail.copy": "Kopieren",
   "modDetail.addToLibrary": "Zur Bibliothek hinzufügen",
