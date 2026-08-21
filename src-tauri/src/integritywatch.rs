@@ -214,6 +214,9 @@ pub fn start(app: &AppHandle) {
         // scanner's own view, which the `integrityWatch` switch is allowed to reset.
         let mut was_running = false;
         let mut scanned = false;
+        // A handle on the current session, held so that how it ended is still readable
+        // once the process is gone. See [`crate::gameproc::GameSession`].
+        let mut session: Option<crate::gameproc::GameSession> = None;
         loop {
             let cfg = crate::config::load_or_detect(&app).unwrap_or_default();
 
@@ -221,11 +224,22 @@ pub fn start(app: &AppHandle) {
             let started = running && !was_running;
             was_running = running;
 
+            // Checked every pass, not only when the poll says the game is gone: the handle
+            // is what knows the process ended, and it knows it exactly.
+            if let Some(open) = session.take() {
+                session = open.report_if_ended();
+            }
+
             // Above the `integrityWatch` gate deliberately: re-arming FrostMod has nothing
             // to do with cheat scanning, and someone who turned the scanner off has not
             // asked for FrostMod to stop working.
             if started {
                 crate::frostmod_manage::on_game_started(&app, &cfg);
+                session = crate::gameproc::GameSession::open();
+                // The mods folder is read during the load screen, so a placeholder that
+                // isn't really on disk becomes a crash there. Ask now, while there is
+                // still a log line to attach the answer to.
+                crate::cloudfiles::warn_if_dehydrated(&app, &cfg);
             }
 
             if !cfg.integrity_watch {
