@@ -317,7 +317,7 @@ export const es: Translation = {
     "No se pudo terminar: {{what}}. Windows necesita tu permiso, o la descarga no llegó — puedes instalarlo a mano.",
   "runtime.repairNoGameFolder": "No hay carpeta del juego",
   "runtime.repairNoGameFolderDesc":
-    "Los componentes están instalados, pero sin la carpeta de instalación no hay dónde dejar la copia que el juego busca. Indícala arriba y repara otra vez.",
+    "Los componentes están instalados, pero sin la carpeta de instalación no podemos revisar la carpeta del juego. Indícala arriba y repara otra vez.",
   "runtime.repairFailed": "No se pudieron reparar los componentes",
   "update.checkFailed": "No se pudieron comprobar las actualizaciones",
   "update.failed": "La actualización falló",
@@ -541,6 +541,7 @@ export const es: Translation = {
   "modDetail.stagePlace": "Colocar",
   "modDetail.stageReload": "Recargar",
   "modDetail.modFiles": "Archivos de mod",
+  "modDetail.loadFailed": "No se pudo cargar este mod",
   "modDetail.copied": "Copiado",
   "modDetail.copy": "Copiar",
   "modDetail.addToLibrary": "Añadir a la biblioteca",
@@ -624,7 +625,7 @@ export const es: Translation = {
     "A Windows le falta un componente de Visual C++ que FrostMod necesita — instálalo para quitar el error «dll was not found».",
   "settings.repairRuntimes": "Reparar componentes",
   "settings.repairRuntimesHint":
-    "Instala todos los componentes de Visual C++ que le falten a este PC (32 y 64 bits) y deja msvcr90.dll donde el juego la busca. Vale la pena aunque arriba no se vea nada mal.",
+    "Instala todos los componentes de Visual C++ que le falten a este PC, 32 y 64 bits, y retira lo que una versión anterior de esta app dejó en la carpeta del juego. Vale la pena aunque arriba no se vea nada mal.",
   "settings.frostmodNeedsRepair":
     "Los archivos instalados no coinciden con esta versión — reinstalar lo arregla.",
   "settings.frostmodRepair": "Reparar instalación",
@@ -1474,7 +1475,7 @@ export const es: Translation = {
   // ── Registros ──────────────────────────────────────────────────────────────
   "settings.logs": "Registros",
   "logs.desc":
-    "Los archivos que hay que enviar cuando algo falla. MXB App, FrostMod y {{game}} guardan los suyos por separado — abre la carpeta que necesites o guárdalos todos en un zip para adjuntarlo a un informe.",
+    "Los archivos que hay que enviar cuando algo falla. MXB App, FrostMod y {{game}} guardan los suyos por separado — abre la carpeta que necesites, guárdalos todos en un zip, o compártelos como un enlace para pegar en un informe.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Lo que registró la propia app",
   "logs.frostmodLogsDesc": "Lo que el cargador escribió en su propia carpeta",
@@ -1493,6 +1494,20 @@ export const es: Translation = {
   "logs.savedDesc_one": "{{count}} archivo de registro, {{size}}",
   "logs.savedDesc_other": "{{count}} archivos de registro, {{size}}",
   "logs.saveFailed": "No se pudieron guardar los registros",
+  "logs.share": "Compartir registros",
+  "logs.sharePacking": "Empaquetando…",
+  "logs.sharing": "Subiendo…",
+  "logs.shared": "Registros subidos",
+  "logs.sharedCopied": "{{size}} — el enlace está en tu portapapeles.",
+  "logs.sharedDesc": "{{size}} — el enlace está abajo.",
+  "logs.sharedSummary_one": "{{count}} archivo de registro, {{size}} subidos.",
+  "logs.sharedSummary_other": "{{count}} archivos de registro, {{size}} subidos.",
+  "logs.shareFailed": "No se pudieron compartir los registros",
+  "logs.copyLink": "Copiar enlace",
+  "logs.linkCopiedShort": "Copiado",
+  "logs.linkCopied": "Enlace copiado",
+  "logs.shareWarning":
+    "El zip queda en un alojamiento público — cualquiera con el enlace puede descargarlo, así que dáselo solo a quien te lo pidió.",
   "logs.privacy":
     "Los registros contienen rutas de carpetas y lo que estaba haciendo la app — nunca tus contraseñas ni las cookies de sesión, y no se incluye ningún archivo de ajustes.",
 

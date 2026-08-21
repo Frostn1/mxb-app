@@ -320,7 +320,7 @@ export const fr: Translation = {
     "N'a pas pu aboutir : {{what}}. Windows demande votre autorisation, ou le téléchargement n'est pas arrivé — vous pouvez l'installer à la main.",
   "runtime.repairNoGameFolder": "Aucun dossier de jeu défini",
   "runtime.repairNoGameFolderDesc":
-    "Les composants sont installés, mais sans le dossier d'installation il n'y a nulle part où déposer la copie que le jeu cherche. Indiquez-le ci-dessus, puis réparez à nouveau.",
+    "Les composants sont installés, mais sans le dossier d'installation nous ne pouvons pas vérifier le dossier du jeu lui-même. Indiquez-le ci-dessus, puis réparez à nouveau.",
   "runtime.repairFailed": "Impossible de réparer les composants",
   "update.checkFailed": "Impossible de vérifier les mises à jour",
   "update.failed": "Échec de la mise à jour",
@@ -545,6 +545,7 @@ export const fr: Translation = {
   "modDetail.stagePlace": "Placement",
   "modDetail.stageReload": "Rechargement",
   "modDetail.modFiles": "Fichiers de mod",
+  "modDetail.loadFailed": "Impossible de charger ce mod",
   "modDetail.copied": "Copié",
   "modDetail.copy": "Copier",
   "modDetail.addToLibrary": "Ajouter à la bibliothèque",
@@ -629,7 +630,7 @@ export const fr: Translation = {
     "Il manque à Windows un composant Visual C++ dont FrostMod a besoin — installez-le pour faire disparaître l'erreur « dll was not found ».",
   "settings.repairRuntimes": "Réparer les composants",
   "settings.repairRuntimesHint":
-    "Installe tous les composants Visual C++ qui manquent à ce PC (32 et 64 bits) et place msvcr90.dll là où le jeu la cherche. Utile même si rien ne semble anormal ci-dessus.",
+    "Installe tous les composants Visual C++ qui manquent à ce PC, 32 et 64 bits, et retire ce qu'une ancienne version de cette app a laissé dans le dossier du jeu. Utile même si rien ne semble anormal ci-dessus.",
   "settings.frostmodNeedsRepair":
     "Les fichiers installés ne correspondent pas à cette version — une réinstallation corrige ça.",
   "settings.frostmodRepair": "Réparer l'installation",
@@ -1478,7 +1479,7 @@ export const fr: Translation = {
   // ── Journaux ───────────────────────────────────────────────────────────────
   "settings.logs": "Journaux",
   "logs.desc":
-    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App, FrostMod et {{game}} ont chacun les leurs — ouvre le dossier qu'il te faut, ou enregistre le tout dans un zip à joindre à un rapport.",
+    "Les fichiers à envoyer quand quelque chose ne va pas. MXB App, FrostMod et {{game}} ont chacun les leurs — ouvre le dossier qu'il te faut, enregistre le tout dans un zip, ou partage-le sous forme de lien à coller dans un rapport.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Ce que l'app elle-même a enregistré",
   "logs.frostmodLogsDesc": "Ce que le loader a écrit dans son propre dossier",
@@ -1497,6 +1498,20 @@ export const fr: Translation = {
   "logs.savedDesc_one": "{{count}} fichier de journal, {{size}}",
   "logs.savedDesc_other": "{{count}} fichiers de journal, {{size}}",
   "logs.saveFailed": "Impossible d'enregistrer les journaux",
+  "logs.share": "Partager les journaux",
+  "logs.sharePacking": "Préparation…",
+  "logs.sharing": "Envoi…",
+  "logs.shared": "Journaux envoyés",
+  "logs.sharedCopied": "{{size}} — le lien est dans ton presse-papiers.",
+  "logs.sharedDesc": "{{size}} — le lien est ci-dessous.",
+  "logs.sharedSummary_one": "{{count}} fichier de journal, {{size}} envoyés.",
+  "logs.sharedSummary_other": "{{count}} fichiers de journal, {{size}} envoyés.",
+  "logs.shareFailed": "Impossible de partager les journaux",
+  "logs.copyLink": "Copier le lien",
+  "logs.linkCopiedShort": "Copié",
+  "logs.linkCopied": "Lien copié",
+  "logs.shareWarning":
+    "Le zip est déposé sur un hébergeur public — n'importe qui avec le lien peut le télécharger, alors ne le donne qu'à la personne qui l'a demandé.",
   "logs.privacy":
     "Les journaux contiennent des chemins de dossiers et ce que faisait l'app — jamais tes mots de passe ni tes cookies de session, et aucun fichier de réglages n'est inclus.",
 

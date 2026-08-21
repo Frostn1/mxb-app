@@ -323,7 +323,7 @@ export const de: Translation = {
     "Nicht abgeschlossen: {{what}}. Windows braucht deine Erlaubnis, oder der Download kam nicht an — du kannst es auch von Hand installieren.",
   "runtime.repairNoGameFolder": "Kein Spielordner festgelegt",
   "runtime.repairNoGameFolderDesc":
-    "Die Laufzeitkomponenten sind installiert, aber ohne Installationsordner gibt es keinen Ort für die Kopie, nach der das Spiel sucht. Lege ihn oben fest und repariere erneut.",
+    "Die Laufzeitkomponenten sind installiert, aber ohne Installationsordner können wir den Spielordner selbst nicht prüfen. Lege ihn oben fest und repariere erneut.",
   "runtime.repairFailed": "Laufzeitkomponenten konnten nicht repariert werden",
   "update.checkFailed": "Updates konnten nicht geprüft werden",
   "update.failed": "Update fehlgeschlagen",
@@ -549,6 +549,7 @@ export const de: Translation = {
   "modDetail.stagePlace": "Ablegen",
   "modDetail.stageReload": "Neu laden",
   "modDetail.modFiles": "Mod-Dateien",
+  "modDetail.loadFailed": "Diese Mod konnte nicht geladen werden",
   "modDetail.copied": "Kopiert",
   "modDetail.copy": "Kopieren",
   "modDetail.addToLibrary": "Zur Bibliothek hinzufügen",
@@ -632,7 +633,7 @@ export const de: Translation = {
     "Windows fehlt eine Visual-C++-Komponente, die FrostMod braucht — installiere sie, um den Fehler „dll was not found“ loszuwerden.",
   "settings.repairRuntimes": "Laufzeit reparieren",
   "settings.repairRuntimesHint":
-    "Installiert alle fehlenden Visual-C++-Laufzeiten dieses PCs (32- und 64-Bit) und legt msvcr90.dll dorthin, wo das Spiel sie sucht. Lohnt sich auch, wenn oben nichts falsch aussieht.",
+    "Installiert alle fehlenden Visual-C++-Laufzeiten dieses PCs, 32- und 64-Bit, und räumt weg, was eine ältere Version dieser App im Spielordner hinterlassen hat. Lohnt sich auch, wenn oben nichts falsch aussieht.",
   "settings.frostmodNeedsRepair":
     "Die installierten Dateien passen nicht zu dieser Version — eine Neuinstallation behebt das.",
   "settings.frostmodRepair": "Installation reparieren",
@@ -1487,7 +1488,7 @@ export const de: Translation = {
   // ── Logs ───────────────────────────────────────────────────────────────────
   "settings.logs": "Logs",
   "logs.desc":
-    "Die Dateien, die du schickst, wenn etwas schiefgeht. MXB App, FrostMod und {{game}} führen jeweils eigene — öffne den Ordner, den du brauchst, oder speichere alle als ein Zip für einen Fehlerbericht.",
+    "Die Dateien, die du schickst, wenn etwas schiefgeht. MXB App, FrostMod und {{game}} führen jeweils eigene — öffne den Ordner, den du brauchst, speichere alle als ein Zip, oder teile sie als Link für einen Fehlerbericht.",
   "logs.appLogs": "MXB App",
   "logs.appLogsDesc": "Was die App selbst aufgezeichnet hat",
   "logs.frostmodLogsDesc": "Was der Loader in seinen eigenen Ordner geschrieben hat",
@@ -1506,6 +1507,20 @@ export const de: Translation = {
   "logs.savedDesc_one": "{{count}} Log-Datei, {{size}}",
   "logs.savedDesc_other": "{{count}} Log-Dateien, {{size}}",
   "logs.saveFailed": "Logs konnten nicht gespeichert werden",
+  "logs.share": "Logs teilen",
+  "logs.sharePacking": "Wird gepackt…",
+  "logs.sharing": "Wird hochgeladen…",
+  "logs.shared": "Logs hochgeladen",
+  "logs.sharedCopied": "{{size}} — der Link liegt in deiner Zwischenablage.",
+  "logs.sharedDesc": "{{size}} — der Link steht unten.",
+  "logs.sharedSummary_one": "{{count}} Log-Datei, {{size}} hochgeladen.",
+  "logs.sharedSummary_other": "{{count}} Log-Dateien, {{size}} hochgeladen.",
+  "logs.shareFailed": "Logs konnten nicht geteilt werden",
+  "logs.copyLink": "Link kopieren",
+  "logs.linkCopiedShort": "Kopiert",
+  "logs.linkCopied": "Link kopiert",
+  "logs.shareWarning":
+    "Das Zip liegt auf einem öffentlichen Filehoster — wer den Link hat, kann es herunterladen. Gib ihn also nur dem, der danach gefragt hat.",
   "logs.privacy":
     "Logs enthalten Ordnerpfade und was die App gerade getan hat — nie deine Passwörter oder Session-Cookies, und keine Einstellungsdatei ist dabei.",
 
