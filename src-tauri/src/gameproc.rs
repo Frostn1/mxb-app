@@ -315,27 +315,78 @@ fn ansi_field(field: &[std::os::raw::c_char]) -> String {
 /// never report a clean bill of health for a machine it failed to read.
 #[cfg(windows)]
 pub fn game_module_paths() -> Option<Vec<String>> {
-    let pid = find_game_pid()?;
-    // A snapshot taken while the game is loading its own modules fails with
-    // ERROR_BAD_LENGTH; the documented remedy is simply to ask again.
-    for _ in 0..8 {
-        if let Some(paths) = module_paths(pid) {
-            return Some(paths);
-        }
+    match game_modules() {
+        GameModules::Loaded(paths) => Some(paths),
+        _ => None,
     }
-    None
 }
 
-/// One Toolhelp module walk over `pid`. `None` if the snapshot itself failed.
+/// What a module walk over the game produced.
+///
+/// The reason `game_module_paths`' `None` was split apart: "Windows refused to let us look"
+/// is a different fact from "the walk came up empty", and it is the one worth acting on.
+/// A refusal means the game is running at a higher integrity level than we are — and that
+/// is the same wall an injector hits, so it is also the answer to "why isn't FrostMod in
+/// the game?" (see [`crate::frostmod::attachment`]).
+// Only the Windows walk can be refused; elsewhere the variant is unreachable by design.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum GameModules {
+    /// Everything mapped into the game right now.
+    Loaded(Vec<String>),
+    /// Windows refused the snapshot. Retrying will not help.
+    Denied,
+    /// No game to look at.
+    NotRunning,
+    /// The walk produced nothing usable, and not because we were refused.
+    Unavailable,
+}
+
+/// Walk the game's loaded modules, saying *why* when it doesn't work.
 #[cfg(windows)]
-fn module_paths(pid: u32) -> Option<Vec<String>> {
+pub fn game_modules() -> GameModules {
+    let Some(pid) = find_game_pid() else {
+        return GameModules::NotRunning;
+    };
+    // A snapshot taken while the game is loading its own modules fails with
+    // ERROR_BAD_LENGTH; the documented remedy is simply to ask again. A refusal is not
+    // that, so it breaks out rather than burning the retries on an answer that won't change.
+    for _ in 0..8 {
+        match module_paths(pid) {
+            Ok(paths) => return GameModules::Loaded(paths),
+            Err(WalkFailure::Denied) => return GameModules::Denied,
+            Err(WalkFailure::Transient) => continue,
+        }
+    }
+    GameModules::Unavailable
+}
+
+/// Why one module walk didn't produce a list.
+#[cfg(windows)]
+enum WalkFailure {
+    /// `ERROR_ACCESS_DENIED` — the process is above us.
+    Denied,
+    /// Anything else, including the `ERROR_BAD_LENGTH` that just wants asking again.
+    Transient,
+}
+
+/// One Toolhelp module walk over `pid`.
+#[cfg(windows)]
+fn module_paths(pid: u32) -> Result<Vec<String>, WalkFailure> {
     // SAFETY: module snapshot for a known pid; the handle is closed on every path out,
     // and we only read fields the API filled in.
     unsafe {
         let snap =
             ffi::CreateToolhelp32Snapshot(ffi::TH32CS_SNAPMODULE | ffi::TH32CS_SNAPMODULE32, pid);
         if snap == ffi::INVALID_HANDLE_VALUE {
-            return None;
+            // Reading another process's module list needs rights UIPI withholds across an
+            // integrity boundary, so this is what an elevated game looks like from an
+            // unelevated app — the one failure here that retrying cannot fix.
+            return Err(if ffi::GetLastError() == ffi::ERROR_ACCESS_DENIED {
+                WalkFailure::Denied
+            } else {
+                WalkFailure::Transient
+            });
         }
         let mut me: ffi::ModuleEntry32 = std::mem::zeroed();
         me.dw_size = std::mem::size_of::<ffi::ModuleEntry32>() as u32;
@@ -356,9 +407,9 @@ fn module_paths(pid: u32) -> Option<Vec<String>> {
         // has no modules — every process has at least its own exe. Treat it as a failure so
         // the caller retries rather than reporting an empty machine.
         if paths.is_empty() {
-            None
+            Err(WalkFailure::Transient)
         } else {
-            Some(paths)
+            Ok(paths)
         }
     }
 }
@@ -480,14 +531,29 @@ pub fn foreground_is_another_app() -> bool {
 ///
 /// Used to put the overlay over the game rather than wherever the primary monitor is —
 /// a triple-screen sim rig would otherwise get it on the wrong display.
+///
+/// `None` for a minimized game, which is the case that made this worth a comment:
+/// minimizing does not clear `WS_VISIBLE`, so [`collect_game_window`] hands one back like
+/// any other window, and `GetWindowRect` then reports the iconic position — around
+/// (-32000, -32000), off every monitor there is. Anything centred on that rect goes with
+/// it. The caller wants "no answer" there, not an answer from another world.
+///
+/// Deliberately filtered here rather than in the walk: [`focus_game`] wants the minimized
+/// window precisely so it can restore it.
 #[cfg(windows)]
 pub fn game_window_rect() -> Option<(i32, i32, i32, i32)> {
     let hwnd = game_hwnd()?;
-    let mut rect = ffi::Rect::default();
-    // SAFETY: `hwnd` is a live handle from the walk above; `GetWindowRect` only writes
-    // the four ints of the `RECT` we own.
-    let ok = unsafe { ffi::GetWindowRect(hwnd, &mut rect) != 0 };
-    ok.then_some((rect.left, rect.top, rect.right, rect.bottom))
+    // SAFETY: `hwnd` is a live handle from the walk above; both calls are reads, and both
+    // are safe on a stale handle (they simply fail).
+    unsafe {
+        if ffi::IsIconic(hwnd) != 0 {
+            return None;
+        }
+        let mut rect = ffi::Rect::default();
+        // `GetWindowRect` only writes the four ints of the `RECT` we own.
+        let ok = ffi::GetWindowRect(hwnd, &mut rect) != 0;
+        ok.then_some((rect.left, rect.top, rect.right, rect.bottom))
+    }
 }
 
 /// Is a DirectX app holding the screen in *exclusive* fullscreen right now?
@@ -622,6 +688,22 @@ pub fn game_module_paths() -> Option<Vec<String>> {
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn running_process_names() -> Option<Vec<String>> {
     None
+}
+
+/// The same answer off Windows, from whatever each platform can see.
+///
+/// No `Denied` arm: the integrity levels that produce one are a Windows idea, and the game
+/// here is a Wine process we either can read the mappings of (Linux, via `/proc`) or cannot
+/// look inside at all (macOS). Both are `Unavailable` rather than a refusal to explain.
+#[cfg(not(windows))]
+pub fn game_modules() -> GameModules {
+    if !is_game_running() {
+        return GameModules::NotRunning;
+    }
+    match game_module_paths() {
+        Some(paths) => GameModules::Loaded(paths),
+        None => GameModules::Unavailable,
+    }
 }
 
 #[cfg(not(windows))]
@@ -831,6 +913,20 @@ unsafe fn token_elevated(process: ffi::Handle) -> Option<bool> {
     ok.then(|| elevation.token_is_elevated != 0)
 }
 
+/// Is *this* process elevated? `None` when Windows won't say.
+#[cfg(windows)]
+pub fn we_are_elevated() -> Option<bool> {
+    // SAFETY: `GetCurrentProcess` hands back a pseudo-handle to ourselves, which is a
+    // constant rather than a handle to close.
+    unsafe { token_elevated(ffi::GetCurrentProcess()) }
+}
+
+/// Off Windows there is no elevation to be on the wrong side of.
+#[cfg(not(windows))]
+pub fn we_are_elevated() -> Option<bool> {
+    Some(false)
+}
+
 /// Why Steam is about to refuse us, when it is.
 ///
 /// Steam will not start a game for a program running at a different Windows integrity
@@ -853,29 +949,33 @@ fn steam_elevation_conflict() -> Option<&'static str> {
         then press Play again.";
 
     let pid = find_pid(STEAM_EXE)?;
-    // SAFETY: `GetCurrentProcess` hands back a pseudo-handle to ourselves, which is a
-    // constant rather than a handle to close.
-    let ours = unsafe { token_elevated(ffi::GetCurrentProcess()) }?;
+    let ours = we_are_elevated()?;
+    let theirs = process_elevated(pid, ours)?;
 
+    (ours != theirs).then_some(if ours { WE_ARE_ELEVATED } else { STEAM_IS_ELEVATED })
+}
+
+/// Is `pid` elevated, as seen from here? `None` when Windows won't say.
+///
+/// `ours` is our own elevation, which the refusal case needs: a process of our own user
+/// that we may not even look at is one sitting above us — which only leaves elevation, and
+/// only when we're the unelevated one. Any other failure (it exited between the walk and
+/// here) says nothing, and a guess would be worse than silence.
+#[cfg(windows)]
+fn process_elevated(pid: u32, ours: bool) -> Option<bool> {
     // SAFETY: the handle is opened for a query-only right and closed on every path out.
-    let theirs = unsafe {
+    unsafe {
         let proc = ffi::OpenProcess(ffi::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if proc.is_null() {
-            // A process of our own user that we may not even look at is one sitting above
-            // us — which only leaves elevation, and only when we're the unelevated one.
-            // Any other failure (Steam exited between the walk and here) says nothing.
             if ours || ffi::GetLastError() != ffi::ERROR_ACCESS_DENIED {
                 return None;
             }
-            Some(true)
-        } else {
-            let elevated = token_elevated(proc);
-            ffi::CloseHandle(proc);
-            elevated
+            return Some(true);
         }
-    }?;
-
-    (ours != theirs).then_some(if ours { WE_ARE_ELEVATED } else { STEAM_IS_ELEVATED })
+        let elevated = token_elevated(proc);
+        ffi::CloseHandle(proc);
+        elevated
+    }
 }
 
 /// Turn a refused `CreateProcess` into something the player can act on.
