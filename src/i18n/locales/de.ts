@@ -316,7 +316,7 @@ export const de: Translation = {
     "Nicht abgeschlossen: {{what}}. Windows braucht deine Erlaubnis, oder der Download kam nicht an — du kannst es auch von Hand installieren.",
   "runtime.repairNoGameFolder": "Kein Spielordner festgelegt",
   "runtime.repairNoGameFolderDesc":
-    "Die Laufzeitkomponenten sind installiert, aber ohne Installationsordner gibt es keinen Ort für die Kopie, nach der das Spiel sucht. Lege ihn oben fest und repariere erneut.",
+    "Die Laufzeitkomponenten sind installiert, aber ohne Installationsordner können wir den Spielordner selbst nicht prüfen. Lege ihn oben fest und repariere erneut.",
   "runtime.repairFailed": "Laufzeitkomponenten konnten nicht repariert werden",
   "update.checkFailed": "Updates konnten nicht geprüft werden",
   "update.failed": "Update fehlgeschlagen",
@@ -625,7 +625,7 @@ export const de: Translation = {
     "Windows fehlt eine Visual-C++-Komponente, die FrostMod braucht — installiere sie, um den Fehler „dll was not found“ loszuwerden.",
   "settings.repairRuntimes": "Laufzeit reparieren",
   "settings.repairRuntimesHint":
-    "Installiert alle fehlenden Visual-C++-Laufzeiten dieses PCs (32- und 64-Bit) und legt msvcr90.dll dorthin, wo das Spiel sie sucht. Lohnt sich auch, wenn oben nichts falsch aussieht.",
+    "Installiert alle fehlenden Visual-C++-Laufzeiten dieses PCs, 32- und 64-Bit, und räumt weg, was eine ältere Version dieser App im Spielordner hinterlassen hat. Lohnt sich auch, wenn oben nichts falsch aussieht.",
   "settings.frostmodNeedsRepair":
     "Die installierten Dateien passen nicht zu dieser Version — eine Neuinstallation behebt das.",
   "settings.frostmodRepair": "Installation reparieren",

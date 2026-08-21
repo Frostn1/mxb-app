@@ -303,7 +303,7 @@ export const en = {
     "Couldn't finish: {{what}}. Windows needs your permission, or the download didn't arrive — you can install it by hand.",
   "runtime.repairNoGameFolder": "No game folder set",
   "runtime.repairNoGameFolderDesc":
-    "The runtimes are installed, but without the install folder there's nowhere to put the copy the game looks for. Set it above, then repair again.",
+    "The runtimes are installed, but without the install folder we can't check the game folder itself. Set it above, then repair again.",
   "runtime.repairFailed": "Couldn't repair the runtimes",
   "update.checkFailed": "Couldn't check for updates",
   "update.failed": "Update failed",
@@ -610,7 +610,7 @@ export const en = {
     "Windows is missing a Visual C++ component FrostMod needs — install it to stop the \"dll was not found\" error.",
   "settings.repairRuntimes": "Repair runtimes",
   "settings.repairRuntimesHint":
-    "Installs every Visual C++ runtime this PC is short of (both 32- and 64-bit) and puts msvcr90.dll where the game looks for it. Worth running even if nothing above looks wrong.",
+    "Installs every Visual C++ runtime this PC is short of, both 32- and 64-bit, and clears out anything an older version of this app left in the game folder. Worth running even if nothing above looks wrong.",
   "settings.frostmodNeedsRepair":
     "The installed files don't match this version — reinstalling fixes it.",
   "settings.frostmodRepair": "Repair install",

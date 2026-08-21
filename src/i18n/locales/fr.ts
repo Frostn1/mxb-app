@@ -313,7 +313,7 @@ export const fr: Translation = {
     "N'a pas pu aboutir : {{what}}. Windows demande votre autorisation, ou le téléchargement n'est pas arrivé — vous pouvez l'installer à la main.",
   "runtime.repairNoGameFolder": "Aucun dossier de jeu défini",
   "runtime.repairNoGameFolderDesc":
-    "Les composants sont installés, mais sans le dossier d'installation il n'y a nulle part où déposer la copie que le jeu cherche. Indiquez-le ci-dessus, puis réparez à nouveau.",
+    "Les composants sont installés, mais sans le dossier d'installation nous ne pouvons pas vérifier le dossier du jeu lui-même. Indiquez-le ci-dessus, puis réparez à nouveau.",
   "runtime.repairFailed": "Impossible de réparer les composants",
   "update.checkFailed": "Impossible de vérifier les mises à jour",
   "update.failed": "Échec de la mise à jour",
@@ -622,7 +622,7 @@ export const fr: Translation = {
     "Il manque à Windows un composant Visual C++ dont FrostMod a besoin — installez-le pour faire disparaître l'erreur « dll was not found ».",
   "settings.repairRuntimes": "Réparer les composants",
   "settings.repairRuntimesHint":
-    "Installe tous les composants Visual C++ qui manquent à ce PC (32 et 64 bits) et place msvcr90.dll là où le jeu la cherche. Utile même si rien ne semble anormal ci-dessus.",
+    "Installe tous les composants Visual C++ qui manquent à ce PC, 32 et 64 bits, et retire ce qu'une ancienne version de cette app a laissé dans le dossier du jeu. Utile même si rien ne semble anormal ci-dessus.",
   "settings.frostmodNeedsRepair":
     "Les fichiers installés ne correspondent pas à cette version — une réinstallation corrige ça.",
   "settings.frostmodRepair": "Réparer l'installation",

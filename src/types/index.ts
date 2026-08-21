@@ -959,9 +959,10 @@ export interface RuntimeRepairReport {
   alreadyPresent: VcRuntime[];
   /** Still absent afterwards: a declined UAC prompt, a failed download, a pending reboot. */
   stillMissing: VcRuntime[];
-  /** Whether `msvcr90.dll` now sits beside the game executable. */
-  msvcr90Placed: boolean;
-  /** False when no game folder is configured, so there was nowhere to place it. */
+  /** Whether a stray `msvcr90.dll` beside the game executable was cleaned up. Versions
+   *  0.9.2–0.10.0 put one there, and it aborts the game with R6034. */
+  msvcr90Removed: boolean;
+  /** False when no game folder is configured, so there was nowhere to look. */
   gameDirKnown: boolean;
 }
 
