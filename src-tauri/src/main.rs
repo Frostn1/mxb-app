@@ -7,6 +7,7 @@ mod bikeswap;
 mod bundle;
 mod cancel;
 mod cfg;
+mod cloudfiles;
 mod config;
 mod cookie_session;
 mod downloads;
@@ -67,7 +68,7 @@ use frostmod::ReloadOutcome;
 use frostmod_manage::{FrostmodProcess, FrostmodStatus, InstallReport};
 use library::InstalledMod;
 use modwatch::ModWatcher;
-use paintwatch::PaintWatcher;
+use paintwatch::{LookWatcher, PaintWatcher};
 // Decoding a paint's textures is per-texture CPU work over no shared state, and every path
 // that does it wants the same treatment — so this sits here rather than in one function.
 use rayon::prelude::*;
@@ -462,6 +463,122 @@ fn live_refresh(enabled: bool) -> gameproc::LiveRefresh {
     }
 }
 
+/// Shortest gap between two unattended look refreshes.
+///
+/// Every refresh is a thread started inside the running game, and the watcher that drives
+/// them fires without anyone asking. A painter saving repeatedly, or a sync pull landing
+/// half a grid's paints, would otherwise queue one call per event; this collapses that
+/// burst into one. Sized to outlast a save the debounce didn't already fold together,
+/// while still being imperceptible to someone waiting to see their paint.
+const LIVE_LOOK_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// When the last unattended refresh went out. Not shared with the apply paths — a refresh
+/// the player asked for by clicking is never worth withholding.
+static LAST_LIVE_LOOK: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
+
+/// Has the cooldown passed? Records the attempt when it has, so two callers racing here
+/// produce one refresh.
+fn live_look_cooldown_passed() -> bool {
+    let now = std::time::Instant::now();
+    let mut last = LAST_LIVE_LOOK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(at) = *last {
+        if now.duration_since(at) < LIVE_LOOK_COOLDOWN {
+            return false;
+        }
+    }
+    *last = Some(now);
+    true
+}
+
+/// Can a look change reach the running game at all?
+///
+/// Two things have to hold, and both are fixed for the life of the process. The title needs
+/// a loader offset ([`game::Caps::instant_refresh`]), and the call that uses it is Windows'
+/// alone — under Wine or Proton the game is a Windows binary but we are not the one that can
+/// start a thread in it. Asked before watching as well as before firing, so a platform that
+/// could never act on a save doesn't hold OS watch handles waiting for one.
+fn can_refresh_live_look() -> bool {
+    cfg!(windows) && game::active().caps.instant_refresh
+}
+
+/// Push a look that changed on disk into the running game.
+///
+/// The trigger nobody clicked: a `.pnt` rewritten under the player's feet, or paints pulled
+/// from the control plane mid-session. Everything else about it is the apply paths' refresh
+/// — the same loader call, gated on the same Instant refresh setting, because that setting
+/// already means "put look changes into the live game" and this is another way one arrives.
+///
+/// Silent when there is nothing to do: no game, no setting, or a title whose loader we don't
+/// have an offset for. Only a real attempt is logged, so the log answers "did it fire, and
+/// what did the game say" — which is the question a first Windows run has to settle.
+fn refresh_live_look(app: &tauri::AppHandle) {
+    if !can_refresh_live_look() {
+        return;
+    }
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    if !cfg.instant_refresh || !gameproc::is_game_running() {
+        return;
+    }
+    if !live_look_cooldown_passed() {
+        log::debug!("[look] a refresh went out moments ago; folding this one into it");
+        return;
+    }
+    log::info!("[look] refreshing the live game: {:?}", gameproc::refresh_look());
+}
+
+/// The `.pnt` files the game is wearing right now — the bike's own paint and font, and every
+/// piece of gear on the rider.
+///
+/// Read through the same resolver an upload uses, so a paint packed in a `.pkz`, sitting
+/// loose beside it, or living under the rider profile is found the same way here as
+/// everywhere else. [`bundle::plan_detailed`] rather than `plan`, for the reason Manage
+/// needs it too: `plan` collapses a gear paint into the model folder that contains it, and a
+/// folder is not a file to watch. Only the *active* bike — the others aren't on screen, and
+/// re-running the game's loader for a paint nobody can see is a thread started for nothing.
+///
+/// Empty whenever the look can't be read — no profile, no bike, an unreadable `profile.ini`.
+/// That stops the watcher rather than failing anything; the next `profile.ini` write rebuilds
+/// it.
+fn worn_paints(cfg: &AppConfig) -> Vec<String> {
+    let profiles_dir = cfg.profiles_dir();
+    let Some(profile) = sync_profile(cfg) else {
+        return Vec::new();
+    };
+    let Some(bike) = presets::active_bike(&profiles_dir, &profile) else {
+        return Vec::new();
+    };
+    let Ok(loadout) = presets::read_loadout(&profiles_dir, &profile, &bike) else {
+        return Vec::new();
+    };
+    let Ok(plan) = bundle::plan_detailed(cfg, &loadout) else {
+        return Vec::new();
+    };
+    plan.assets
+        .iter()
+        .filter(|a| !a.is_dir && paintsync::is_paint(std::path::Path::new(&a.abs_path)))
+        .map(|a| a.abs_path.clone())
+        .collect()
+}
+
+/// Point the look watcher at whatever the rider is wearing now, replacing what it watched
+/// before. Called from every path that can change the answer, and cheap enough to be: one
+/// `profile.ini` parse and one library walk.
+fn watch_worn_paints(app: &tauri::AppHandle) {
+    if !can_refresh_live_look() {
+        return;
+    }
+    let cfg = config::load_or_detect(app).unwrap_or_default();
+    let paths = worn_paints(&cfg);
+    let handle = app.clone();
+    paintwatch::start_with(
+        &app.state::<LookWatcher>().0,
+        "look watcher",
+        &paths,
+        move |_changed| refresh_live_look(&handle),
+    );
+}
+
 /// Ask FrostMod to re-apply `bike` so a just-swapped model shows live. `None` when
 /// instant refresh is off — the same switch that gates `live_refresh`, since both
 /// reach into the running game.
@@ -519,6 +636,9 @@ fn apply_model_swap_blocking(
     // inside FrostMod, which is the only side that knows). Gated on the same
     // instant-refresh setting as the look refresh — both poke the live game.
     let model_refresh = model_refresh_cmd(&app, cfg.instant_refresh, &bike);
+    // A different model can resolve a slot to a different file, so the look watcher has to
+    // follow the swap — nothing writes `profile.ini` here for it to notice on its own.
+    watch_worn_paints(&app);
     Ok(SwapApplyOutcome {
         content_reload,
         game_running: gameproc::is_game_running(),
@@ -3936,11 +4056,12 @@ fn set_profiles_path(app: tauri::AppHandle, path: String) -> Result<(), String> 
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.profiles_path = path;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-    // The watcher is pinned to a folder that just moved; re-point it, and publish in case
-    // the new folder's look differs from what the old one last sent.
-    if cfg.experimental_enabled() {
+    // Both watchers are pinned to a folder that just moved; re-point them, and publish in
+    // case the new folder's look differs from what the old one last sent.
+    if watches_looks(&cfg) {
         let profiles = app.state::<ProfileWatcher>();
         profilewatch::start(&app, &profiles, &cfg.profiles_dir());
+        watch_worn_paints(&app);
         publish_paints_soon(&app, &cfg, None);
     }
     Ok(())
@@ -4176,7 +4297,7 @@ fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> 
     // whole session. That is the session a player has just enrolled in, which makes it the
     // worst one to be quietly missing.
     let watcher = app.state::<ProfileWatcher>();
-    if cfg.experimental_enabled() {
+    if watches_looks(&cfg) {
         profilewatch::start(&app, &watcher, &cfg.profiles_dir());
         // And publish once now, since nothing has been watching until this moment.
         publish_paints_soon(&app, &cfg, None);
@@ -4443,6 +4564,20 @@ pub fn publish_look_now(app: &tauri::AppHandle) {
     publish_paints_soon(app, &cfg, None);
 }
 
+/// Is a look change worth noticing? Paint sync publishes them, and the look watcher rebuilds
+/// on them — either one is reason enough to watch `profile.ini`.
+fn watches_looks(cfg: &AppConfig) -> bool {
+    cfg.experimental_enabled() || can_refresh_live_look()
+}
+
+/// The rider is wearing something different: re-point the look watcher at the new files, and
+/// publish. One entry point rather than two calls at every site, because forgetting the
+/// re-point leaves the watcher holding the paints of a look nobody is in any more.
+pub fn look_changed(app: &tauri::AppHandle) {
+    watch_worn_paints(app);
+    publish_look_now(app);
+}
+
 fn emit_sync(app: &tauri::AppHandle, event: SyncEvent) {
     if let Err(e) = app.emit(SYNC_EVENT, event) {
         log::warn!("[sync] couldn't tell the UI: {e}");
@@ -4598,6 +4733,11 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 Ok(o) if o.installed > 0 => {
                     log::info!("[sync] {} new paints mid-session", o.installed);
                     emit_sync(&app, SyncEvent::pulled(&o));
+                    // The files are on disk but the game read its grid when it built it.
+                    // Same loader call a save on disk gets, for the same reason: a rider
+                    // who is already out there shouldn't have to rejoin to stop seeing
+                    // default liveries.
+                    refresh_live_look(&app);
                 }
                 Ok(_) => {}
                 Err(e) => log::debug!("[sync] live pull failed: {e}"),
@@ -6329,6 +6469,10 @@ fn main() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log_level())
+                // Local time, not UTC. FrostMod's log is stamped in local time, and a
+                // support thread that has to hold a timezone offset in its head while
+                // reading the two side by side gets read wrong.
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
@@ -6354,6 +6498,7 @@ fn main() {
         .manage(ModWatcher::default())
         .manage(ProfileWatcher::default())
         .manage(PaintWatcher::default())
+        .manage(LookWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
         .manage(voice::Monitor::default())
@@ -6522,12 +6667,19 @@ fn main() {
                 //  * publish, because the look may have changed in the game's garage while
                 //    the app was shut, and nothing would ever have noticed;
                 //  * watch, so the same change during this session is noticed as it happens.
-                // Both no-op unless the experimental features are on and an account exists.
+                // The publish no-ops unless the experimental features are on and an account
+                // exists; the watching is also what keeps the look watcher pointed at the
+                // right files, which has nothing to do with sync.
                 if cfg.experimental_enabled() {
                     publish_paints_soon(handle, &cfg, None);
+                }
+                if watches_looks(&cfg) {
                     let profiles = handle.state::<ProfileWatcher>();
                     profilewatch::start(handle, &profiles, &cfg.profiles_dir());
                 }
+                // And watch the paints the rider is wearing, so saving one over the top
+                // while the game runs reaches the game.
+                watch_worn_paints(handle);
                 // A combo another app already owns shouldn't stop the app from starting
                 // — Settings reports the state and lets the player pick another.
                 if let Err(e) = overlay::register(handle, &cfg) {
@@ -8814,4 +8966,104 @@ mod viewer_tests {
     }
 }
 
+#[cfg(test)]
+mod live_look_tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
 
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("frost-look-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    fn touch(p: &Path) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"x").unwrap();
+    }
+
+    /// A profile wearing a bike paint and a helmet paint, plus a helmet model and a tyre
+    /// set that are emphatically not paints.
+    fn fixture(root: &Path) -> AppConfig {
+        touch(&root.join("mods/bikes/KTM450/paints/RedBud.pnt"));
+        touch(&root.join("mods/bikes/KTM450/paints/Southwick.pnt")); // owned, not worn
+        touch(&root.join("mods/rider/helmets/AGV/AGV.pkz"));
+        touch(&root.join("mods/rider/helmets/AGV/paints/Blue.pnt"));
+        touch(&root.join("mods/tyres/oem_mx.pkz"));
+        touch(&root.join("profiles/Frost/profile.ini"));
+        std::fs::write(
+            root.join("profiles/Frost/profile.ini"),
+            "[info]\nbikeid = KTM450\n\n\
+             [paint]\nKTM450 = RedBud\n\n\
+             [helmet]\nKTM450 = AGV\n\n\
+             [helmet_paint]\nKTM450 = Blue\n\n\
+             [tyres]\nKTM450 = oem_mx\n",
+        )
+        .unwrap();
+        AppConfig {
+            mods_path: root.to_string_lossy().into_owned(),
+            profiles_path: root.join("profiles").to_string_lossy().into_owned(),
+            ..Default::default()
+        }
+    }
+
+    /// The set the watcher is pointed at: every `.pnt` the active bike is wearing, and
+    /// nothing else. A helmet's mesh and a tyre archive are resolved by the same plan and
+    /// must not become watches — re-running the game's loader can't change a mesh, so a
+    /// watch on one is a thread started for nothing.
+    #[test]
+    fn only_the_paints_the_active_bike_is_wearing_are_watched() {
+        let root = tmp("worn");
+        let cfg = fixture(&root);
+
+        let mut names: Vec<String> = worn_paints(&cfg)
+            .iter()
+            .map(|p| Path::new(p).file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+
+        assert_eq!(names, vec!["Blue.pnt".to_string(), "RedBud.pnt".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A profile that names a paint nobody installed leaves nothing to watch, rather than
+    /// leaving the watcher pointed at the last look the rider was in.
+    #[test]
+    fn a_look_that_resolves_to_nothing_watches_nothing() {
+        let root = tmp("empty");
+        let cfg = fixture(&root);
+        std::fs::write(
+            root.join("profiles/Frost/profile.ini"),
+            "[info]\nbikeid = KTM450\n\n[paint]\nKTM450 = A Paint Nobody Has\n",
+        )
+        .unwrap();
+
+        assert!(worn_paints(&cfg).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// No profile, no bike, no `profile.ini` — every one of these is an ordinary state for
+    /// a fresh install to be in, and none of them may panic on the way to an empty answer.
+    #[test]
+    fn an_unreadable_look_is_an_empty_answer_not_a_panic() {
+        let root = tmp("unreadable");
+        std::fs::create_dir_all(root.join("profiles")).unwrap();
+        let cfg = AppConfig {
+            mods_path: root.to_string_lossy().into_owned(),
+            profiles_path: root.join("profiles").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert!(worn_paints(&cfg).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The cooldown is what keeps a burst of saves — or half a grid's paints landing at
+    /// once — from becoming a queue of threads started inside the running game.
+    #[test]
+    fn a_burst_gets_one_refresh() {
+        assert!(live_look_cooldown_passed(), "the first one always goes");
+        for _ in 0..5 {
+            assert!(!live_look_cooldown_passed(), "the rest fold into it");
+        }
+    }
+}

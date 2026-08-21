@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-20
+
+### Added
+- **A paint saved on disk shows up in the running game.** The game reads your look once,
+  when the profile loads, so painting used to mean save, alt-tab, reselect your profile,
+  look, repeat — and mid-session there was no way to see a change at all. The app now
+  watches the `.pnt` files the rider is actually wearing (the bike's paint and font, and
+  every piece of gear) and, when one is rewritten, re-runs the game's own look loader in
+  place. Same call the Locker and presets already make, gated on the same **Instant
+  refresh** setting, so there is nothing new to switch on.
+- **Paints that arrive mid-session are applied without a rejoin.** Paint sync already
+  installed other riders' liveries while you rode and then left them sitting on disk until
+  the next session. They now go into the running game the moment they land.
+
 ## Unreleased — taking back the DLL we planted
 
 ### Fixed
@@ -56,6 +70,20 @@
 ## 2026-08-20
 
 ### Added
+- **The app records how the game ended, not just that it ended.** Until now the only thing
+  watching MX Bikes was a process-table poll, which can say the game is gone and nothing
+  else — a clean quit and a crash on the loading screen looked identical in the log. A
+  handle is now held on the running game, so its exit code and true session length survive
+  it: a clean quit logs as one, and a crash logs `[session] game CRASHED after 4.1s` with
+  the exception named. `STATUS_IN_PAGE_ERROR` is called out by name, because that is what a
+  file the game had mapped but could not read looks like.
+- **A warning when the mods folder isn't really on disk.** OneDrive, Dropbox and iCloud can
+  leave a file looking completely ordinary while its contents still live on a server. MX
+  Bikes reads the mods tree during the load screen, memory-mapped, so a placeholder whose
+  fetch is slow or refused surfaces there as a crash with nothing in any log to explain it.
+  The app now checks the tree when a session starts and names the count, the provider and a
+  few of the files. It only ever reads attributes — never opens a placeholder, which is what
+  would trigger a download.
 - **Bikes you no longer ride can be removed from the Presets picker.** The Bike list is what
   your profile carries, not what's installed — the game adds a column for every bike you have
   ever sat on and never takes one out, so bikes whose mod is long gone kept filling the list
@@ -64,6 +92,14 @@
   `profile.ini.bak`. Nothing installed is deleted, and riding that bike again adds it back.
 
 ### Fixed
+- **Steam's own runtime no longer reports as suspicious.** `tier0_s64.dll` and
+  `vstdlib_s64.dll` are loaded into every Steam game from the Steam install, which is
+  neither the game folder nor the system folder, so every scan on every machine ended with
+  two Suspect findings against a rule list holding no signatures. Two false positives on
+  every single run is how people learn to ignore a verdict.
+- **Log timestamps are local time.** They were UTC while FrostMod's log is local, so reading
+  the two side by side meant holding a timezone offset in your head, and support threads
+  were getting it wrong.
 - **Opening a mod no longer dead-ends on a Cloudflare refusal.** mxb-mods.com guards its
   rendered pages far more tightly than its JSON API, so the catalog could browse fine while a
   single mod came back "refused the request (403)". The fallback that exists to rescue that

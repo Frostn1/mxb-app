@@ -66,6 +66,16 @@ mod ffi {
     /// blur the very distinction [`super::steam_elevation_conflict`] reads out of it.
     pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 
+    /// Enough to wait on a process handle. Paired with
+    /// `PROCESS_QUERY_LIMITED_INFORMATION` it is the whole access set
+    /// [`super::GameSession`] needs, and it is granted on a process of our own user
+    /// without elevation.
+    pub const SYNCHRONIZE: u32 = 0x0010_0000;
+
+    /// `WaitForSingleObject` said the handle is signalled — for a process handle, that
+    /// means the process has exited.
+    pub const WAIT_OBJECT_0: u32 = 0x0000_0000;
+
     pub const TOKEN_QUERY: u32 = 0x0008;
     /// `TokenElevation` in `TOKEN_INFORMATION_CLASS`.
     pub const TOKEN_ELEVATION_CLASS: i32 = 20;
@@ -129,6 +139,21 @@ mod ffi {
         pub sz_exe_file: [c_char; 260],
     }
 
+    /// A Windows `FILETIME` — 100-nanosecond ticks since 1601, split across two `u32`s
+    /// because the struct is not guaranteed to be 8-byte aligned.
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    pub struct FileTime {
+        pub low: u32,
+        pub high: u32,
+    }
+
+    impl FileTime {
+        pub fn ticks(self) -> u64 {
+            ((self.high as u64) << 32) | self.low as u64
+        }
+    }
+
     #[repr(C)]
     pub struct ModuleEntry32 {
         pub dw_size: u32,
@@ -160,6 +185,16 @@ mod ffi {
             thread_id: *mut u32,
         ) -> Handle;
         pub fn WaitForSingleObject(handle: Handle, ms: u32) -> u32;
+        pub fn GetExitCodeProcess(process: Handle, exit_code: *mut u32) -> i32;
+        /// Creation and exit stamps, so a session's length is the kernel's own answer
+        /// rather than the gap between two of our polls.
+        pub fn GetProcessTimes(
+            process: Handle,
+            creation: *mut FileTime,
+            exit: *mut FileTime,
+            kernel: *mut FileTime,
+            user: *mut FileTime,
+        ) -> i32;
         pub fn CloseHandle(handle: Handle) -> i32;
         pub fn GetCurrentProcessId() -> u32;
         /// A pseudo-handle for our own process — a constant, not a handle to close.
@@ -293,6 +328,143 @@ fn module_base(pid: u32) -> Option<*mut u8> {
 #[cfg(windows)]
 pub fn is_game_running() -> bool {
     find_game_pid().is_some()
+}
+
+/// A handle held on the running game so that *how it ended* survives it.
+///
+/// Without this the app watches the game through a process-table poll, which can only ever
+/// report presence: the game is there, and then it isn't. That is the same observation
+/// whether the player quit or the process died on an access violation, and support threads
+/// were being argued from logs that could not tell those apart.
+///
+/// A handle opened while the process is alive keeps the exit code readable after it is
+/// gone, and `GetProcessTimes` keeps the session's true length — so a crash four seconds
+/// into a load reads as one, instead of as "somewhere inside the last poll interval".
+#[cfg(windows)]
+pub struct GameSession {
+    handle: ffi::Handle,
+    pid: u32,
+}
+
+#[cfg(windows)]
+impl GameSession {
+    /// Take a handle to the game if it is up. `None` if it isn't, or if the handle is
+    /// refused — which is not worth surfacing, since the only cost is a session whose
+    /// ending we can't describe.
+    pub fn open() -> Option<Self> {
+        let pid = find_game_pid()?;
+        // SAFETY: `pid` came from a process snapshot; the handle is closed in `Drop`.
+        let handle = unsafe {
+            ffi::OpenProcess(ffi::SYNCHRONIZE | ffi::PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)
+        };
+        if handle.is_null() {
+            log::debug!("[session] couldn't hold a handle on pid {pid}: exit code won't be readable");
+            return None;
+        }
+        Some(Self { handle, pid })
+    }
+
+    /// `Some(code)` once the process is gone, `None` while it is still up.
+    fn exit_code(&self) -> Option<u32> {
+        // SAFETY: `self.handle` is live until `Drop`. A zero timeout polls without blocking.
+        unsafe {
+            if ffi::WaitForSingleObject(self.handle, 0) != ffi::WAIT_OBJECT_0 {
+                return None;
+            }
+            let mut code = 0u32;
+            if ffi::GetExitCodeProcess(self.handle, &mut code) == 0 {
+                return Some(u32::MAX);
+            }
+            Some(code)
+        }
+    }
+
+    /// How long the process lived, straight from the kernel.
+    fn lifetime(&self) -> Option<std::time::Duration> {
+        let (mut created, mut exited) = (ffi::FileTime::default(), ffi::FileTime::default());
+        let (mut kernel, mut user) = (ffi::FileTime::default(), ffi::FileTime::default());
+        // SAFETY: `self.handle` is live and carries `PROCESS_QUERY_LIMITED_INFORMATION`.
+        let ok = unsafe {
+            ffi::GetProcessTimes(self.handle, &mut created, &mut exited, &mut kernel, &mut user)
+        };
+        let (created, exited) = (created.ticks(), exited.ticks());
+        // A still-running process reports a zero exit stamp.
+        if ok == 0 || exited <= created {
+            return None;
+        }
+        // FILETIME counts 100ns ticks.
+        Some(std::time::Duration::from_nanos((exited - created) * 100))
+    }
+
+    /// If the game has ended, say how, and consume the session. `None` means it's still up.
+    ///
+    /// The severity is the point: a clean quit is `info` and a crash is `warn`, so the one
+    /// question a support log has to answer is answerable by grep.
+    pub fn report_if_ended(self) -> Option<Self> {
+        // Deliberately not `?`: that would drop `self` — and with it the handle — every
+        // poll the game is still up, so the exit code would never be readable.
+        let Some(code) = self.exit_code() else { return Some(self) };
+        let lived = self
+            .lifetime()
+            .map(|d| format!("{:.1}s", d.as_secs_f64()))
+            .unwrap_or_else(|| "unknown".into());
+        let pid = self.pid;
+        match describe_exit(code) {
+            None => log::info!("[session] game exited cleanly after {lived} (pid {pid})"),
+            Some(what) => log::warn!(
+                "[session] game CRASHED after {lived} — {what} (exit 0x{code:08X}, pid {pid})"
+            ),
+        }
+        None
+    }
+}
+
+// SAFETY: a Windows `HANDLE` belongs to the process, not to the thread that opened it —
+// it stays valid in any thread and `CloseHandle` may be called from any of them. The
+// handle is owned solely by this struct, so there is no aliasing to race over. Needed
+// because the watcher that holds a session is an async task, which may be resumed on a
+// different worker thread across an `.await`.
+#[cfg(windows)]
+unsafe impl Send for GameSession {}
+
+#[cfg(windows)]
+impl Drop for GameSession {
+    fn drop(&mut self) {
+        // SAFETY: opened in `open`, closed exactly once here.
+        unsafe { ffi::CloseHandle(self.handle) };
+    }
+}
+
+/// Name the NTSTATUS values a game actually dies on. `None` means "not a crash".
+///
+/// Exit code 0 is a clean quit. Anything with the high bit set is an unhandled exception
+/// the loader turned into an exit code, and those names are the difference between a
+/// diagnosable report and "it crashed".
+#[cfg(windows)]
+fn describe_exit(code: u32) -> Option<&'static str> {
+    Some(match code {
+        0 => return None,
+        // The one that matters most here: a memory-mapped read that the filesystem could
+        // not satisfy. A cloud-backed file that is a placeholder rather than real bytes
+        // fails exactly this way, which is why the mods folder gets checked at launch.
+        0xC000_0006 => "in-page error — a file the game had mapped couldn't be read (cloud placeholder, failing disk, or removed media)",
+        0xC000_0005 => "access violation",
+        0xC000_001D => "illegal instruction",
+        0xC000_0025 => "non-continuable exception",
+        0xC000_008C => "array bounds exceeded",
+        0xC000_008E => "float divide by zero",
+        0xC000_0094 => "integer divide by zero",
+        0xC000_00FD => "stack overflow",
+        0xC000_0135 => "a required DLL was not found",
+        0xC000_0142 => "a DLL failed to initialise",
+        0xC000_0374 => "heap corruption",
+        0xC000_0409 => "stack buffer overrun",
+        0xC000_0017 => "out of memory",
+        0x8000_0003 => "breakpoint (a debug build or an attached debugger)",
+        u32::MAX => "exit code unreadable",
+        // Anything else non-zero is still an abnormal exit worth seeing.
+        _ => "abnormal exit",
+    })
 }
 
 /// Read a fixed-size NUL-padded ANSI field as a `String`, stopping at the terminator.
@@ -709,6 +881,23 @@ pub fn game_modules() -> GameModules {
 #[cfg(not(windows))]
 pub fn refresh_look() -> LiveRefresh {
     LiveRefresh::Unsupported
+}
+
+/// Exit codes are a Windows story: the crash reports this exists to answer come from
+/// Windows machines, and neither Wine nor a dev build has the same notion of an NTSTATUS
+/// exit. The session opens as `None` and nothing else changes.
+#[cfg(not(windows))]
+pub struct GameSession;
+
+#[cfg(not(windows))]
+impl GameSession {
+    pub fn open() -> Option<Self> {
+        None
+    }
+
+    pub fn report_if_ended(self) -> Option<Self> {
+        None
+    }
 }
 
 /// No game to focus on a dev machine — the overlay just stays a normal window.
