@@ -1,9 +1,22 @@
 import { createContext, useContext } from "react";
-import type { FrostmodStatus, ReloadOutcome, VcRuntime } from "../types";
+import type {
+  Attachment,
+  FrostmodStatus,
+  ReloadOutcome,
+  VcRuntime,
+} from "../types";
 
 export interface FrostmodContextValue {
   /** Whether FrostMod is currently running (polled). `null` until first probe. */
   running: boolean | null;
+  /**
+   * Whether FrostMod's DLL actually made it into the running game (polled alongside
+   * {@link running}). `null` until the first probe.
+   *
+   * Worth having next to `running`, not instead of it: `running` is what the Start/Stop
+   * buttons act on, while this is what says whether any of it is reaching the game.
+   */
+  attachment: Attachment | null;
   /** Install/version snapshot (`null` until first fetched). */
   status: FrostmodStatus | null;
   /** True while an install/update download is in flight. */

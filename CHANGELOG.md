@@ -18,6 +18,29 @@
   question anyone reading it has; `version.txt` itself stays out, being one of the files we
   put in that folder ourselves.
 
+## 2026-08-19
+
+### Fixed
+- **The in-game overlay opens where you can see it.** Once MX Bikes was minimized — which
+  exclusive fullscreen does the moment the overlay takes focus — the hotkey placed the
+  overlay ~32,000px off the left of the desktop: shown, focused, and invisible, so it read
+  as a hotkey that did nothing, and it took focus off the game on its way. A minimized game
+  no longer contributes a position, and the overlay is kept inside the bounds of whichever
+  monitor the game is on.
+- **FrostMod is re-armed when the game restarts.** It was only ever started automatically at
+  app launch, so a second race in one sitting ran without it — no live reloads, no model
+  swaps, no indication anything was different. The app now notices the game starting,
+  whether that came from the Play button, Steam or the desktop.
+- **The FrostMod pill says when FrostMod isn't reaching the game.** "Running" only ever meant
+  the launcher was up. When the game runs as administrator and MXB App doesn't, FrostMod
+  can't get into it at all — no in-game pill — and the app reported it as running the whole
+  time. That case is now named, with both ways out of it (run the game without administrator,
+  or run MXB App with it).
+
+### Changed
+- Starting FrostMod is logged on Windows, on success and on failure, as it already was on
+  Linux and macOS — the platform nearly every report comes from was the one saying nothing.
+
 ## 2026-08-18 — v0.10.0 — A Designer that sets itself up, a Downloads page, and tracks in 3D
 
 The first full release since v0.9.1. It folds in everything the v0.9.2 betas carried, so

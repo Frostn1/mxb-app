@@ -70,6 +70,7 @@ export const fr: Translation = {
   "frostmod.checking": "Vérification de FrostMod…",
   "frostmod.running": "FrostMod actif",
   "frostmod.notRunning": "FrostMod inactif",
+  "frostmod.notInGame": "FrostMod absent du jeu",
   "frostmod.reloadGame": "Recharger le jeu",
   "frostmod.start": "Démarrer FrostMod",
   "frostmod.reloadedGame": "FrostMod a rechargé le jeu.",

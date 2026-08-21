@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  Attachment,
   BikeModels,
   BikeSounds,
   DropCommitItem,
@@ -1705,6 +1706,13 @@ export function reloadFrostmod(): Promise<ReloadOutcome> {
 /** Is FrostMod currently running on this PC? */
 export function isFrostmodRunning(): Promise<boolean> {
   return invoke<boolean>("frostmod_running");
+}
+
+/** Did FrostMod actually get into the running game, and if not, why not?
+ *
+ *  Distinct from {@link isFrostmodRunning}, which only reports that the launcher is up. */
+export function frostmodAttachment(): Promise<Attachment> {
+  return invoke<Attachment>("frostmod_attachment");
 }
 
 /** Start MX Bikes. Resolves to `already_running` when the game is already up. */

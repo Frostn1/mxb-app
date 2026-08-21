@@ -35,6 +35,7 @@ import {
 import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
+import { ATTACH_PROBLEM } from "../../types";
 import JoinServerDialog from "./JoinServerDialog";
 import DownloadQueue from "./DownloadQueue";
 
@@ -216,7 +217,11 @@ function NavRow({
 
 export default function Sidebar({ view, onNavigate }: SidebarProps) {
   const t = useT();
-  const { running, reload, status, start, stop } = useFrostmod();
+  const { running, attachment, reload, status, start, stop } = useFrostmod();
+  // FrostMod is up but isn't reaching the game — see `frostmod::attachment`. The good
+  // states (and the grace period after a launch) deliberately look like plain "Running".
+  const attachProblem =
+    attachment !== null && ATTACH_PROBLEM.includes(attachment.state);
   const { unseenFailures } = useDownloads();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
   const { game } = useConfig();
@@ -508,14 +513,20 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         {caps.frostmod && (
         <div
           data-tour="frostmod"
+          // A running FrostMod that never got into the game is the state this pill used
+          // to report as plain "Running", which is exactly as far as the player could get
+          // in working out why nothing was happening in game. The reason goes in the
+          // tooltip whether or not the sidebar is collapsed.
           title={
-            collapsed
-              ? running === null
-                ? t("frostmod.checking")
-                : running
-                  ? t("frostmod.running")
-                  : t("frostmod.notRunning")
-              : undefined
+            attachProblem
+              ? attachment?.reason
+              : collapsed
+                ? running === null
+                  ? t("frostmod.checking")
+                  : running
+                    ? t("frostmod.running")
+                    : t("frostmod.notRunning")
+                : undefined
           }
           className={cn(
             "flex items-center rounded-[10px] border border-white/[0.07] py-2",
@@ -525,16 +536,27 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
           <span
             className={cn(
               "size-[7px] flex-none rounded-full",
-              running ? "bg-success" : "bg-muted-foreground/50",
+              attachProblem
+                ? "bg-warning"
+                : running
+                  ? "bg-success"
+                  : "bg-muted-foreground/50",
             )}
           />
           {!collapsed && (
-            <span className="flex-1 text-[11.5px] text-muted-foreground">
-              {running === null
-                ? t("frostmod.checking")
-                : running
-                  ? t("frostmod.running")
-                  : t("frostmod.notRunning")}
+            <span
+              className={cn(
+                "flex-1 text-[11.5px]",
+                attachProblem ? "text-warning" : "text-muted-foreground",
+              )}
+            >
+              {attachProblem
+                ? t("frostmod.notInGame")
+                : running === null
+                  ? t("frostmod.checking")
+                  : running
+                    ? t("frostmod.running")
+                    : t("frostmod.notRunning")}
             </span>
           )}
           {running ? (

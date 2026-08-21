@@ -794,6 +794,33 @@ export interface FrostmodReload {
   mods?: string[];
 }
 
+/** Whether FrostMod's DLL is actually inside the running game. Mirrors
+ *  `frostmod::AttachState`.
+ *
+ *  `running` (the pill's usual source) only says the launcher process is up. These two
+ *  answers come apart when the game runs at a higher integrity level than the app: the
+ *  injector can't open a process above it, so FrostMod is running and simply never gets
+ *  in — which used to look like the app lying about it. */
+export type AttachState =
+  | "game_not_running"
+  | "attached"
+  /** Up, not in yet, and still inside the grace period. Not a problem. */
+  | "attaching"
+  | "not_attached"
+  /** Windows won't let us look inside the game — and won't let FrostMod in either. */
+  | "blocked"
+  | "unknown";
+
+/** Mirrors `frostmod::Attachment`. */
+export interface Attachment {
+  state: AttachState;
+  /** What is wrong and how to fix it. Empty unless the state calls for it. */
+  reason: string;
+}
+
+/** The attach states worth putting in front of the user. */
+export const ATTACH_PROBLEM: readonly AttachState[] = ["blocked", "not_attached"];
+
 /** Result of pressing Play. `already_running` means we deliberately did nothing. */
 export type LaunchOutcome = "launched" | "already_running";
 

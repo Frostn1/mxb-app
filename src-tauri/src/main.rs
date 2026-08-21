@@ -4078,6 +4078,16 @@ fn frostmod_running() -> bool {
     frostmod::is_running()
 }
 
+/// Whether FrostMod actually got into the running game — and what to do when it didn't.
+///
+/// `frostmod_running` only says the launcher is up, which is what made an elevated game so
+/// confusing to be on the wrong side of: the app said FrostMod was running, and the game
+/// had no pill in it. See [`frostmod::attachment`].
+#[tauri::command]
+fn frostmod_attachment() -> frostmod::Attachment {
+    frostmod::attachment()
+}
+
 /// Start MX Bikes from the Play button in the sidebar.
 #[tauri::command]
 fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String> {
@@ -6480,7 +6490,12 @@ fn main() {
                 }
                 if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
                     let state = handle.state::<FrostmodProcess>();
-                    let _ = frostmod_manage::start(handle, &state);
+                    // Not `let _ =`: a FrostMod that refused to start at launch is the
+                    // reason half the "FrostMod isn't working" reports exist, and it used
+                    // to leave nothing behind in the log to say so.
+                    if let Err(e) = frostmod_manage::start(handle, &state) {
+                        log::warn!("FrostMod didn't start at launch: {e:#}");
+                    }
                 }
                 if cfg.watch_mods_reload {
                     let watcher = handle.state::<ModWatcher>();
@@ -6669,6 +6684,7 @@ fn main() {
             integrity_server_reports,
             frostmod_reload,
             frostmod_running,
+            frostmod_attachment,
             garage_scan_bikes,
             garage_swap_bike,
             frostmod_status,
