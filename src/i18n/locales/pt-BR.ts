@@ -135,6 +135,13 @@ export const ptBR: Translation = {
   "presets.help":
     "Salve um visual completo do piloto e carregue numa moto quando quiser.",
   "presets.profile": "Perfil",
+  "presets.forgetBike": "Remover moto",
+  "presets.forgetBikeOne": "Remover {{name}} deste perfil",
+  "presets.forgetBikeQ": "Remover esta moto?",
+  "presets.forgetBikeBody":
+    "“{{name}}” sai da lista de motos deste perfil, junto com o visual salvo para ela. Nada instalado é apagado — se você pilotar essa moto de novo, o jogo a adiciona outra vez.",
+  "presets.bikeForgotten": "“{{name}}” removida deste perfil.",
+  "presets.forgetFailed": "Não foi possível remover essa moto",
   "presets.namePlaceholder": "Nome do preset…",
   "presets.savePreset": "Salvar preset",
   "presets.saveChanges": "Salvar alterações",

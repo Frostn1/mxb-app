@@ -5750,6 +5750,23 @@ fn presets_list_bikes(app: tauri::AppHandle, profile: String) -> Result<Vec<Stri
     presets::list_bikes(&cfg.profiles_dir(), &profile).map_err(|e| format!("{e:#}"))
 }
 
+/// Drop a bike from a profile — its saved loadout in every section, and the active-bike
+/// pointer if it was the one.
+///
+/// The bike picker is a view of `profile.ini`, not of the mods folder, so a bike whose mod
+/// was deleted long ago still sits in the list with nothing in the Library to uninstall.
+#[tauri::command]
+fn presets_forget_bike(
+    app: tauri::AppHandle,
+    profile: String,
+    bikeid: String,
+) -> Result<Vec<String>, String> {
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    let dir = cfg.profiles_dir();
+    presets::forget_bike(&dir, &profile, &bikeid).map_err(|e| format!("{e:#}"))?;
+    presets::list_bikes(&dir, &profile).map_err(|e| format!("{e:#}"))
+}
+
 /// Which cosmetic slots this profile actually has, in `profile.ini` order.
 ///
 /// The two games don't offer the same ones — GP Bikes has no goggles, boots or
@@ -6717,6 +6734,7 @@ fn main() {
             shop_catalog_refresh,
             presets_list_profiles,
             presets_list_bikes,
+            presets_forget_bike,
             presets_read_loadout,
             presets_slots,
             list_games,

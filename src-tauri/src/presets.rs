@@ -245,6 +245,25 @@ impl IniDoc {
         }
     }
 
+    /// Drop `key` from `section`, if it's there. Every other line is left as it was.
+    ///
+    /// Case-insensitive on the key: the game is not consistent about the case of a bike id
+    /// between `[info] bikeid` and the columns keyed by it.
+    pub(crate) fn remove(&mut self, section: &str, key: &str) -> bool {
+        let Some((h, end)) = self.section_span(section) else {
+            return false;
+        };
+        for idx in (h + 1)..end {
+            if let Some(eq) = self.lines[idx].find('=') {
+                if self.lines[idx][..eq].trim().eq_ignore_ascii_case(key) {
+                    self.lines.remove(idx);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Every section header in the file, in the order they appear.
     ///
     /// This is what lets the app read a `profile.ini` it has no hardcoded knowledge of.
@@ -485,6 +504,45 @@ pub fn apply_loadout(
         if !loadout.race_number.trim().is_empty() {
             doc.set("info", "race_number", &loadout.race_number);
         }
+    }
+
+    fs::write(&path, encode_ini(&doc.render(), was_utf8))
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+/// Drop every trace of one bike from a profile.
+///
+/// The bike picker lists what `profile.ini` carries, not what's installed — the game adds a
+/// column for every bike the rider has ever sat on and never removes one, so bikes whose mod
+/// is long gone still fill the list and the Library, which only sees `mods/bikes`, has nothing
+/// to delete. This is the only place they can be removed from.
+///
+/// Sections come from the file rather than [`SLOT_SECTIONS`]: any section keyed by bike id
+/// counts, including ones only GP Bikes or a future patch writes. Miss one and the bike is
+/// still in the list afterwards, since [`bikes_in`] reads whichever section it finds.
+pub fn forget_bike(profiles_dir: &Path, profile: &str, bikeid: &str) -> anyhow::Result<()> {
+    let path = profile_ini_path(profiles_dir, profile);
+    let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+
+    // Same rolling backup as `apply_loadout` — raw bytes, so it stays byte-identical.
+    let bak = PathBuf::from(format!("{}.bak", path.display()));
+    let _ = fs::write(&bak, &bytes);
+
+    let (text, was_utf8) = decode_ini(&bytes);
+    let mut doc = IniDoc::parse(&text);
+    for section in doc.sections() {
+        if is_slot_section(&section) {
+            doc.remove(&section, bikeid);
+        }
+    }
+    // Never leave the game pointed at a column that no longer exists.
+    if doc
+        .get("info", "bikeid")
+        .is_some_and(|b| b.trim().eq_ignore_ascii_case(bikeid))
+    {
+        let next = bikes_in(&doc).first().cloned().unwrap_or_default();
+        doc.set("info", "bikeid", &next);
     }
 
     fs::write(&path, encode_ini(&doc.render(), was_utf8))
@@ -861,6 +919,65 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         assert_eq!(doc.get("info", "bikeid").as_deref(), Some("KTM250"));
         assert_eq!(doc.get("info", "race_number").as_deref(), Some("7"));
         assert!(root.join("profiles/main/profile.ini.bak").is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn forgetting_a_bike_clears_its_columns_and_leaves_the_others() {
+        let root = tmp("forget");
+        let ini = write_sample(&root, "main");
+        let profiles = root.join("profiles");
+
+        forget_bike(&profiles, "main", "KTM250").unwrap();
+
+        assert_eq!(list_bikes(&profiles, "main").unwrap(), vec!["YZ450F"]);
+        let doc = IniDoc::parse(&fs::read_to_string(&ini).unwrap());
+        for section in ["paint", "helmet", "helmet_paint", "rider", "tyres"] {
+            assert_eq!(doc.get(section, "KTM250"), None, "[{section}] still has the bike");
+        }
+        // The bike that stays keeps every value it had.
+        let other = read_loadout(&profiles, "main", "YZ450F").unwrap();
+        assert_eq!(other.paint, "RedBud");
+        assert_eq!(other.helmet, "Fox");
+        assert_eq!(other.helmet_paint, "CLUTCH");
+        // And the pre-change file is recoverable.
+        assert!(root.join("profiles/main/profile.ini.bak").is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Sections are read from the file, so one this app has no name for goes too — otherwise
+    /// `bikes_in` finds the bike again and forgetting it looks like it did nothing.
+    #[test]
+    fn forgetting_clears_sections_the_app_has_no_name_for() {
+        let root = tmp("forget-extra");
+        let ini = write_ini(
+            &root,
+            "main",
+            &format!("{GP_SAMPLE}\n[visor_tint]\nBSB23_Ducati_V4R=Smoke\n"),
+        );
+        let profiles = root.join("profiles");
+
+        forget_bike(&profiles, "main", "BSB23_Ducati_V4R").unwrap();
+
+        assert!(list_bikes(&profiles, "main").unwrap().is_empty());
+        let doc = IniDoc::parse(&fs::read_to_string(&ini).unwrap());
+        assert_eq!(doc.get("visor_tint", "BSB23_Ducati_V4R"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn forgetting_the_active_bike_repoints_the_profile() {
+        let root = tmp("forget-active");
+        let profiles = root.join("profiles");
+        write_sample(&root, "main");
+
+        // YZ450F is the active one in the sample.
+        forget_bike(&profiles, "main", "YZ450F").unwrap();
+        assert_eq!(active_bike(&profiles, "main").as_deref(), Some("KTM250"));
+
+        // Forgetting the last bike leaves nothing to point at rather than a dangling id.
+        forget_bike(&profiles, "main", "KTM250").unwrap();
+        assert_eq!(active_bike(&profiles, "main"), None);
         let _ = fs::remove_dir_all(&root);
     }
 

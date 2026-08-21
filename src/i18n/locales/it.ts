@@ -132,6 +132,13 @@ export const it: Translation = {
   "presets.help":
     "Salva un look completo del pilota e caricalo su una moto quando vuoi.",
   "presets.profile": "Profilo",
+  "presets.forgetBike": "Rimuovi moto",
+  "presets.forgetBikeOne": "Rimuovi {{name}} da questo profilo",
+  "presets.forgetBikeQ": "Rimuovere questa moto?",
+  "presets.forgetBikeBody":
+    "“{{name}}” sparisce dall’elenco moto di questo profilo, insieme all’aspetto salvato per lei. Non viene eliminato nulla di installato: se torni a guidarla, il gioco la riaggiunge subito.",
+  "presets.bikeForgotten": "“{{name}}” rimossa da questo profilo.",
+  "presets.forgetFailed": "Impossibile rimuovere la moto",
   "presets.namePlaceholder": "Nome del preset…",
   "presets.savePreset": "Salva preset",
   "presets.saveChanges": "Salva modifiche",

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-20
+
+### Added
+- **Bikes you no longer ride can be removed from the Presets picker.** The Bike list is what
+  your profile carries, not what's installed — the game adds a column for every bike you have
+  ever sat on and never takes one out, so bikes whose mod is long gone kept filling the list
+  with nothing in the Library to uninstall. Each row now has a trash can that clears that bike
+  and the look saved for it out of `profile.ini`, with the previous file kept beside it as
+  `profile.ini.bak`. Nothing installed is deleted, and riding that bike again adds it back.
+
 ## 2026-08-19
 
 ### Fixed
