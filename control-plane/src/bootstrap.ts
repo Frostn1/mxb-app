@@ -288,27 +288,54 @@ try {
   $listing = Invoke-RestMethod -Uri "${input.controlPlaneUrl}/v1/content/bikes" -TimeoutSec 60
   $total = $listing.bikes.Count
   $count = 0
-  $i = 0
-  foreach ($bike in $listing.bikes) {
-    $i = $i + 1
-    $dest = Join-Path $bikesDir $bike.name
-    # A stalled transfer used to hang here for as long as the instance lived: --retry does
-    # nothing for a connection that stays open and stops sending. --max-time bounds each file
-    # so one bad download costs that bike rather than the whole build, and --speed-limit gives
-    # up on a transfer that has effectively died.
-    & $curl -L --fail --silent --show-error --retry 3 --retry-delay 5 \`
-      --max-time 300 --speed-limit 10240 --speed-time 60 \`
-      -o $dest "${input.controlPlaneUrl}/v1/content/bikes/$($bike.name)"
-    if ($LASTEXITCODE -eq 0) { $count = $count + 1 }
-    else { Write-Output "couldn't fetch $($bike.name) (curl $LASTEXITCODE)" }
-    # Say where we are. Reporting the step once and then going quiet for the length of a four
-    # gigabyte download is indistinguishable from having hung -- which is exactly how the
-    # first image build looked for three quarters of an hour.
-    if (($i % 5) -eq 0 -or $i -eq $total) {
-      Send-Stage -Stage "installing bikes $i of $total"
+  # Two passes over whatever is still missing. The common causes of a lost file here are
+  # transient, and the cost of not trying again is a server that rejects riders on a bike it
+  # was meant to have -- which is how this failure is met: "bike unknown to server".
+  $pending = @($listing.bikes)
+  for ($pass = 1; $pass -le 2 -and $pending.Count -gt 0; $pass++) {
+    $next = @()
+    $i = 0
+    foreach ($bike in $pending) {
+      $i = $i + 1
+      $dest = Join-Path $bikesDir $bike.name
+      # A flat five-minute cap was the wrong budget. The pack's two biggest bikes are 184 MB,
+      # which only fits inside five minutes above 0.6 MB/s -- so the slower the instance, the
+      # more certain it was to drop exactly the OEM bikes somebody provisioned a server for.
+      # Each file gets the time 100 KB/s would need instead, never less than five minutes.
+      #
+      # --speed-limit is what actually catches a dead transfer: a connection that stays open
+      # and stops sending, which --retry cannot see and which hung the first build for three
+      # quarters of an hour.
+      $budget = [int][Math]::Max(300, $bike.size / 102400)
+      & $curl -L --fail --silent --show-error --retry 3 --retry-delay 5 \`
+        --max-time $budget --speed-limit 10240 --speed-time 60 \`
+        -o $dest "${input.controlPlaneUrl}/v1/content/bikes/$($bike.name)"
+      if ($LASTEXITCODE -eq 0) { $count = $count + 1 }
+      else {
+        $next += $bike
+        Write-Output "couldn't fetch $($bike.name) (curl $LASTEXITCODE)"
+      }
+      # Say where we are. Reporting the step once and then going quiet for the length of a four
+      # gigabyte download is indistinguishable from having hung -- which is exactly how the
+      # first image build looked.
+      if (($i % 5) -eq 0 -or $i -eq $pending.Count) {
+        Send-Stage -Stage "installing bikes $count of $total"
+      }
+    }
+    $pending = @($next)
+    if ($pending.Count -gt 0 -and $pass -eq 1) {
+      Send-Stage -Stage "retrying $($pending.Count) bikes"
     }
   }
   Write-Output "installed $count of $total bikes"
+  # A short pack is not worth destroying the instance over, but it must not pass for a clean
+  # build either. The names go in the log, which is kept only for a report that says something
+  # went wrong -- and which has no charset, unlike a stage string, where a bike's dots and
+  # underscores would be rejected outright.
+  if ($pending.Count -gt 0) {
+    $names = ($pending | ForEach-Object { $_.name }) -join ", "
+    Send-Stage -Stage "installed $count of $total bikes" -Ok $false -Log "missing: $names"
+  }
 } catch {
   Write-Output "couldn't install the bike pack: $_"
 }
