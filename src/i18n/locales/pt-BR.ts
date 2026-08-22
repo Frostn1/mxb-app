@@ -1252,6 +1252,20 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0101.hero.title":
+    "Sua biblioteca lembra o que você apagou",
+  "showcase.v0101.hero.body":
+    "Apagar uma pista fazia o app esquecer que ela existiu. Agora ficam o nome, o autor, onde era e uma imagem — pra que aquela que você não consegue nomear meses depois ainda dê pra achar.",
+  "showcase.v0101.restore":
+    "Restaurar devolve ao lugar um mod que o app apagou, e “Achar de novo” procura no mxb-mods e na loja com o nome guardado.",
+  "showcase.v0101.paints":
+    "Uma pintura salva no disco agora aparece no jogo rodando — sem alt-tab, sem reselecionar o perfil.",
+  "showcase.v0101.r6034":
+    "Corrigido um crash que este app causava: a cópia de msvcr90.dll que ele deixava matava o MX Bikes com R6034. Agora ele recolhe essa cópia.",
+  "showcase.v0101.logs":
+    "Compartilhar logs monta o mesmo arquivo que Salvar logs e te devolve um link, em vez de um arquivo pra subir.",
+  "showcase.v0101.bikes":
+    "Motos que você não usa mais podem sair do seletor de presets.",
   "showcase.v0100.hero.title": "O Designer prepara as próprias folhas",
   "showcase.v0100.hero.body":
     "Agora ele cria as folhas que um modelo pede, coloca embaixo os plásticos da própria moto para decalcar e abre um modelo em cerca de um segundo em vez de quase vinte.",

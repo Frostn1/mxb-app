@@ -40,6 +40,9 @@ import {
   Package,
   Download,
   Share2,
+  History,
+  Undo2,
+  ShieldAlert,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
@@ -66,6 +69,21 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.10.1",
+    hero: {
+      icon: History,
+      title: "showcase.v0101.hero.title",
+      body: "showcase.v0101.hero.body",
+    },
+    highlights: [
+      { icon: Undo2, text: "showcase.v0101.restore" },
+      { icon: Palette, text: "showcase.v0101.paints" },
+      { icon: ShieldAlert, text: "showcase.v0101.r6034" },
+      { icon: Share2, text: "showcase.v0101.logs" },
+      { icon: Bike, text: "showcase.v0101.bikes" },
+    ],
+  },
   {
     version: "0.10.0",
     hero: {

@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-21
+## 2026-08-21 — v0.10.1 — Mods you deleted, remembered — and a crash we caused, undone
 
 ### Added
 - **The Library remembers what you used to have installed.** It only ever showed what was on
@@ -20,43 +20,6 @@
   the remembered name, and a result opens straight on its mod page. Sources live in one list,
   so a new one added later shows up here without another button.
 
-### Fixed
-- **The Library no longer loses the name and picture of a mod that is merely offloaded.**
-  A `.pkz` whose bytes live in iCloud or OneDrive reads as an empty archive, so its details
-  came back blank. They are now recognised and left for a moment when the file is really
-  there. macOS gained the offloaded-file check it previously only had on Windows, which also
-  makes the existing "your mods aren't really on disk" warning work there.
-- **Uninstalling a mod stored in iCloud no longer fails on macOS.** Deleting went through
-  Finder, which refuses a file iCloud has offloaded — *"the item needs to be downloaded"* —
-  so with a mods folder under `Documents` and most of it offloaded, uninstall failed on
-  nearly every mod. It now goes through `NSFileManager` instead, which handles an offloaded
-  file without downloading it first and still puts the mod in the Trash, recoverable.
-
-## Unreleased — a stalled download no longer hangs a server build
-
-### Fixed
-- **One stuck file could hang a build indefinitely.** Each bike now gets a download budget
-  scaled to its own size — the time 100 KB/s would need, and never less than five minutes —
-  alongside a stall detector, so a transfer that stops sending costs that one bike rather than
-  the whole machine. `--retry` never helped: a connection that stays open and goes quiet is not
-  a failure it can see. The flat five-minute cap this started as would have been its own bug —
-  the pack's two biggest bikes are 184 MB, so the slower the instance, the more certain it was
-  to drop exactly the OEM bikes somebody built the server for.
-- **A bike that misses gets a second pass**, and a build that still comes up short records which
-  ones went missing instead of reporting the same "installed" as a complete build.
-- **A build says how far through the bikes it is.** The step was announced once and then went
-  silent for the length of a four gigabyte download, which is indistinguishable from having
-  hung — and for three quarters of an hour, it was.
-
-### Changed
-- The two bootstrap scripts are rendered and parsed by PowerShell in CI. They run in exactly one
-  place — as user-data on a Windows instance with no console, where every failure path destroys
-  the evidence — and they are assembled by string interpolation, so a mis-escaped backtick is a
-  broken build nobody can see. A stage the control plane would reject is caught there too.
-
-## 2026-08-20
-
-### Added
 - **A paint saved on disk shows up in the running game.** The game reads your look once,
   when the profile loads, so painting used to mean save, alt-tab, reselect your profile,
   look, repeat — and mid-session there was no way to see a change at all. The app now
@@ -70,13 +33,86 @@
 - Three new supporters credited in Settings → Supporters: RodaksRevivalYT | Black Rifle,
   MintyFlow and Thomas.
 
+- **Share logs.** Settings → Logs already named all three log sets and saved them into one
+  zip; the file still had to be got to whoever asked, which is where "send me your logs"
+  usually stalls — a save dialog, then a file to find, then somewhere to upload it. **Share
+  logs** packs the same archive and uploads it through the same host a shared track goes out
+  on, then puts the direct link on the clipboard and leaves it on screen with a Copy button.
+  What goes in is what **Save logs…** already packed: the three log sets and the
+  `summary.txt` header (app version, OS, game, folders, and what was collected) — never the
+  config file, which holds session cookies and shop credentials. The link is public to
+  anyone holding it, and the page says so under the field. A bundle big enough to be sliced
+  comes back as a numbered list of parts rather than a first link that loses the rest.
+- **`summary.txt` now names the installed FrostMod build**, in the saved zip as well as the
+  shared one. The loader's log is in the archive and "which build wrote it" is the first
+  question anyone reading it has; `version.txt` itself stays out, being one of the files we
+  put in that folder ourselves.
+
+- **The app records how the game ended, not just that it ended.** Until now the only thing
+  watching MX Bikes was a process-table poll, which can say the game is gone and nothing
+  else — a clean quit and a crash on the loading screen looked identical in the log. A
+  handle is now held on the running game, so its exit code and true session length survive
+  it: a clean quit logs as one, and a crash logs `[session] game CRASHED after 4.1s` with
+  the exception named. `STATUS_IN_PAGE_ERROR` is called out by name, because that is what a
+  file the game had mapped but could not read looks like.
+- **A warning when the mods folder isn't really on disk.** OneDrive, Dropbox and iCloud can
+  leave a file looking completely ordinary while its contents still live on a server. MX
+  Bikes reads the mods tree during the load screen, memory-mapped, so a placeholder whose
+  fetch is slow or refused surfaces there as a crash with nothing in any log to explain it.
+  The app now checks the tree when a session starts and names the count, the provider and a
+  few of the files. It only ever reads attributes — never opens a placeholder, which is what
+  would trigger a download.
+- **Bikes you no longer ride can be removed from the Presets picker.** The Bike list is what
+  your profile carries, not what's installed — the game adds a column for every bike you have
+  ever sat on and never takes one out, so bikes whose mod is long gone kept filling the list
+  with nothing in the Library to uninstall. Each row now has a trash can that clears that bike
+  and the look saved for it out of `profile.ini`, with the previous file kept beside it as
+  `profile.ini.bak`. Nothing installed is deleted, and riding that bike again adds it back.
+
 ### Changed
+- The two bootstrap scripts are rendered and parsed by PowerShell in CI. They run in exactly one
+  place — as user-data on a Windows instance with no console, where every failure path destroys
+  the evidence — and they are assembled by string interpolation, so a mis-escaped backtick is a
+  broken build nobody can see. A stage the control plane would reject is caught there too.
+
 - The supporters list now renders in the order `supporters.json` is written in, rather than
   alphabetically within each tier — the file is hand-edited, so its order is a decision.
 
-## Unreleased — taking back the DLL we planted
+- "Repair runtimes" no longer offers to put `msvcr90.dll` where the game looks for it, because
+  there is no such place — nothing app-local short of a full private assembly can satisfy the
+  VC9 CRT. It installs the runtimes this PC is short of, both architectures, and clears out
+  what older versions of this app left behind. Plugins with a plain `MSVCR90.dll` import go
+  back to reporting "MSVCR90.dll was not found"; they were never actually fixed, only given a
+  different error.
+
+- Starting FrostMod is logged on Windows, on success and on failure, as it already was on
+  Linux and macOS — the platform nearly every report comes from was the one saying nothing.
 
 ### Fixed
+- **The Library no longer loses the name and picture of a mod that is merely offloaded.**
+  A `.pkz` whose bytes live in iCloud or OneDrive reads as an empty archive, so its details
+  came back blank. They are now recognised and left for a moment when the file is really
+  there. macOS gained the offloaded-file check it previously only had on Windows, which also
+  makes the existing "your mods aren't really on disk" warning work there.
+- **Uninstalling a mod stored in iCloud no longer fails on macOS.** Deleting went through
+  Finder, which refuses a file iCloud has offloaded — *"the item needs to be downloaded"* —
+  so with a mods folder under `Documents` and most of it offloaded, uninstall failed on
+  nearly every mod. It now goes through `NSFileManager` instead, which handles an offloaded
+  file without downloading it first and still puts the mod in the Trash, recoverable.
+
+- **One stuck file could hang a build indefinitely.** Each bike now gets a download budget
+  scaled to its own size — the time 100 KB/s would need, and never less than five minutes —
+  alongside a stall detector, so a transfer that stops sending costs that one bike rather than
+  the whole machine. `--retry` never helped: a connection that stays open and goes quiet is not
+  a failure it can see. The flat five-minute cap this started as would have been its own bug —
+  the pack's two biggest bikes are 184 MB, so the slower the instance, the more certain it was
+  to drop exactly the OEM bikes somebody built the server for.
+- **A bike that misses gets a second pass**, and a build that still comes up short records which
+  ones went missing instead of reporting the same "installed" as a complete build.
+- **A build says how far through the bikes it is.** The step was announced once and then went
+  silent for the length of a four gigabyte download, which is indistinguishable from having
+  hung — and for three quarters of an hour, it was.
+
 - **MX Bikes crashed with "R6034 — An application has made an attempt to load the C runtime
   library incorrectly", and this app was the cause.** Since v0.9.2 the FrostMod status poll
   copied `msvcr90.dll` out of `WinSxS` into the game folder on every start, meaning to serve
@@ -101,57 +137,6 @@
   CRT, and counting it let a file we ourselves planted quietly satisfy the check that should
   have been reporting the machine had no runtime at all.
 
-### Changed
-- "Repair runtimes" no longer offers to put `msvcr90.dll` where the game looks for it, because
-  there is no such place — nothing app-local short of a full private assembly can satisfy the
-  VC9 CRT. It installs the runtimes this PC is short of, both architectures, and clears out
-  what older versions of this app left behind. Plugins with a plain `MSVCR90.dll` import go
-  back to reporting "MSVCR90.dll was not found"; they were never actually fixed, only given a
-  different error.
-
-## Unreleased — logs as a link
-
-### Added
-- **Share logs.** Settings → Logs already named all three log sets and saved them into one
-  zip; the file still had to be got to whoever asked, which is where "send me your logs"
-  usually stalls — a save dialog, then a file to find, then somewhere to upload it. **Share
-  logs** packs the same archive and uploads it through the same host a shared track goes out
-  on, then puts the direct link on the clipboard and leaves it on screen with a Copy button.
-  What goes in is what **Save logs…** already packed: the three log sets and the
-  `summary.txt` header (app version, OS, game, folders, and what was collected) — never the
-  config file, which holds session cookies and shop credentials. The link is public to
-  anyone holding it, and the page says so under the field. A bundle big enough to be sliced
-  comes back as a numbered list of parts rather than a first link that loses the rest.
-- **`summary.txt` now names the installed FrostMod build**, in the saved zip as well as the
-  shared one. The loader's log is in the archive and "which build wrote it" is the first
-  question anyone reading it has; `version.txt` itself stays out, being one of the files we
-  put in that folder ourselves.
-
-## 2026-08-20
-
-### Added
-- **The app records how the game ended, not just that it ended.** Until now the only thing
-  watching MX Bikes was a process-table poll, which can say the game is gone and nothing
-  else — a clean quit and a crash on the loading screen looked identical in the log. A
-  handle is now held on the running game, so its exit code and true session length survive
-  it: a clean quit logs as one, and a crash logs `[session] game CRASHED after 4.1s` with
-  the exception named. `STATUS_IN_PAGE_ERROR` is called out by name, because that is what a
-  file the game had mapped but could not read looks like.
-- **A warning when the mods folder isn't really on disk.** OneDrive, Dropbox and iCloud can
-  leave a file looking completely ordinary while its contents still live on a server. MX
-  Bikes reads the mods tree during the load screen, memory-mapped, so a placeholder whose
-  fetch is slow or refused surfaces there as a crash with nothing in any log to explain it.
-  The app now checks the tree when a session starts and names the count, the provider and a
-  few of the files. It only ever reads attributes — never opens a placeholder, which is what
-  would trigger a download.
-- **Bikes you no longer ride can be removed from the Presets picker.** The Bike list is what
-  your profile carries, not what's installed — the game adds a column for every bike you have
-  ever sat on and never takes one out, so bikes whose mod is long gone kept filling the list
-  with nothing in the Library to uninstall. Each row now has a trash can that clears that bike
-  and the look saved for it out of `profile.ini`, with the previous file kept beside it as
-  `profile.ini.bak`. Nothing installed is deleted, and riding that bike again adds it back.
-
-### Fixed
 - **Steam's own runtime no longer reports as suspicious.** `tier0_s64.dll` and
   `vstdlib_s64.dll` are loaded into every Steam game from the Steam install, which is
   neither the game folder nor the system folder, so every scan on every machine ended with
@@ -173,9 +158,6 @@
 - **The mod page's error now has the Retry button it tells you to hit**, and says so in your
   own language instead of English.
 
-## 2026-08-19
-
-### Fixed
 - **The in-game overlay opens where you can see it.** Once MX Bikes was minimized — which
   exclusive fullscreen does the moment the overlay takes focus — the hotkey placed the
   overlay ~32,000px off the left of the desktop: shown, focused, and invisible, so it read
@@ -191,10 +173,6 @@
   can't get into it at all — no in-game pill — and the app reported it as running the whole
   time. That case is now named, with both ways out of it (run the game without administrator,
   or run MXB App with it).
-
-### Changed
-- Starting FrostMod is logged on Windows, on success and on failure, as it already was on
-  Linux and macOS — the platform nearly every report comes from was the one saying nothing.
 
 ## 2026-08-18 — v0.10.0 — A Designer that sets itself up, a Downloads page, and tracks in 3D
 
