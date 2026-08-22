@@ -984,6 +984,7 @@ export const ptBR: Translation = {
     "Troque o modelo e o som do motor de cada moto entre os sets que você instalou.",
   "locker.rescan": "Varrer de novo",
   "locker.restore": "Restaurar",
+  "locker.hideOrphan": "Ocultar este aviso",
   "locker.register": "Registrar",
   "locker.scanning": "Varrendo as motos…",
   "locker.scanForSwaps": "Procurar sets",

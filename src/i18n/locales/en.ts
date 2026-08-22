@@ -968,6 +968,7 @@ export const en = {
     "Swap each bike's model and engine sound between the sets you've installed.",
   "locker.rescan": "Rescan",
   "locker.restore": "Restore",
+  "locker.hideOrphan": "Hide this warning",
   "locker.register": "Register",
   "locker.scanning": "Scanning bikes…",
   "locker.scanForSwaps": "Scan for swaps",

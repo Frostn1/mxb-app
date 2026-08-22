@@ -982,6 +982,7 @@ export const it: Translation = {
     "Cambia il modello e il suono del motore di ogni moto tra i set che hai installato.",
   "locker.rescan": "Riscansiona",
   "locker.restore": "Ripristina",
+  "locker.hideOrphan": "Nascondi questo avviso",
   "locker.register": "Registra",
   "locker.scanning": "Scansione delle moto…",
   "locker.scanForSwaps": "Cerca set da scambiare",
