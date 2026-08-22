@@ -121,6 +121,14 @@ tauri-plugin-deep-link = "2.4.9"
 # catch it, and a Windows-first app can't ship without it.
 cpal = "0.15"
 
+# Only for putting a mod back after an uninstall. `trash` calls `trashItemAtURL` but throws
+# away the destination it reports, and the Trash folder can't simply be read back — macOS
+# refuses `~/.Trash` to an app without Full Disk Access. Asking the API where it put the file
+# is the one way to know. Both are already in the tree as `trash`'s own dependencies.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSFileManager", "NSURL", "NSError", "NSString"] }
+
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]

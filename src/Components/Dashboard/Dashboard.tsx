@@ -127,6 +127,17 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   );
   const clearLibraryFocus = useCallback(() => setLibraryFocus(null), []);
 
+  // The other direction: from a mod the Library only *remembers* to the catalog page it
+  // could be downloaded from again. The category comes from the tab being browsed, the same
+  // fallback the detail view uses when nothing more specific is known.
+  const openFoundMod = useCallback(
+    (slug: string) => {
+      openMod(slug, modType.categoryId);
+      navigate("browse");
+    },
+    [openMod, modType.categoryId, navigate],
+  );
+
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
   const openInRider = useCallback((lo: Loadout) => {
     setRiderPreset(lo);
@@ -176,6 +187,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onChanged={onInstalled}
               focus={libraryFocus}
               onFocusApplied={clearLibraryFocus}
+              onOpenMod={openFoundMod}
             />
           ) : view === "downloads" ? (
             <Downloads

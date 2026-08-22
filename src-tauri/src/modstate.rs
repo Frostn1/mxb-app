@@ -168,7 +168,7 @@ const RIDER_PAINT_CATEGORIES: [&str; 6] = [
 ///
 /// Still excluded: a `FrostMod Models` variant, a sound folder, a bike livery and a rider
 /// profile, all of which are tracked by path elsewhere in the app and would desync if moved.
-fn is_candidate(e: &LibraryEntry) -> bool {
+pub(crate) fn is_candidate(e: &LibraryEntry) -> bool {
     match e.kind.as_str() {
         "pkz" => true,
         "folder" => {
@@ -196,13 +196,27 @@ fn entry_from_library(mods_path: &str, e: &LibraryEntry, enabled: bool) -> Optio
 /// folder* — the same [`library::scan_library`] pass, so a disabled track is categorized
 /// exactly like an enabled one and the two lists can sit next to each other.
 pub fn scan(cfg: &AppConfig, sound_bikes: &[String]) -> Vec<ModEntry> {
+    scan_with(cfg, sound_bikes, is_candidate)
+}
+
+/// [`scan`], with the caller choosing what counts as a mod.
+///
+/// Manage's own answer is [`is_candidate`], which leaves out bike liveries on purpose. The
+/// library ledger wants them: what it records is what the player *had*, not what Manage is
+/// willing to move. Everything else about the pass — most of all the shadow-tree half that
+/// tells a parked mod from a deleted one — is the same either way, and worth having once.
+pub fn scan_with(
+    cfg: &AppConfig,
+    sound_bikes: &[String],
+    pred: fn(&LibraryEntry) -> bool,
+) -> Vec<ModEntry> {
     let mut out = Vec::new();
 
     for subpath in subpaths(cfg) {
         for e in library::scan_library(&cfg.mods_path, &subpath, sound_bikes, cfg.game())
             .unwrap_or_default()
             .iter()
-            .filter(|e| is_candidate(e))
+            .filter(|e| pred(e))
         {
             if let Some(m) = entry_from_library(&cfg.mods_path, e, true) {
                 out.push(m);
@@ -219,7 +233,7 @@ pub fn scan(cfg: &AppConfig, sound_bikes: &[String]) -> Vec<ModEntry> {
             for e in library::scan_library(&shadow_str, leaf, sound_bikes, cfg.game())
                 .unwrap_or_default()
                 .iter()
-                .filter(|e| is_candidate(e))
+                .filter(|e| pred(e))
             {
                 // Report it under the path it will occupy once enabled, not where it's parked.
                 let Some(parked) = rel_under(&shadow, Path::new(&e.path)) else {
@@ -436,7 +450,7 @@ pub fn set_many(cfg: &AppConfig, rels: &[String], enabled: bool) -> StateOutcome
 ///
 /// `library::uninstall_mod` already does this for an enabled mod, but it takes an absolute
 /// path inside a content folder — a disabled mod is parked outside one, and Manage lists
-/// both side by side. Same `trash::delete`, addressed by `rel` instead.
+/// both side by side. Same [`library::move_to_trash`], addressed by `rel` instead.
 pub fn delete_many(cfg: &AppConfig, rels: &[String]) -> StateOutcome {
     let mut out = StateOutcome::default();
     for rel in rels {
@@ -448,7 +462,7 @@ pub fn delete_many(cfg: &AppConfig, rels: &[String]) -> StateOutcome {
             if !target.exists() {
                 anyhow::bail!("not there any more");
             }
-            trash::delete(&target)?;
+            library::move_to_trash(&target)?;
             Ok(())
         });
         match result {
@@ -696,6 +710,39 @@ mod tests {
             mods_path: root.to_string_lossy().into_owned(),
             ..Default::default()
         }
+    }
+
+    /// The ledger widens the predicate to take bike liveries; Manage's own pass must not
+    /// change. Run against the real scanner rather than hand-built entries, because what is
+    /// being checked is exactly how `scan_library` categorizes what it finds.
+    #[test]
+    fn the_predicate_is_what_decides_whether_liveries_are_scanned() {
+        let root = tmp("ledger-predicate");
+        touch(&root.join("mods/tracks/RedBud.pkz"));
+        touch(&root.join("mods/bikes/CLUBMX YZ450F.pkz"));
+        touch(&root.join("mods/bikes/CLUBMX YZ450F/paints/red.pnt"));
+        touch(&root.join("mods/rider/helmets/Airoh/paints/blue.pnt"));
+        let cfg = cfg_at(&root);
+
+        let manage = scan(&cfg, &[]);
+        assert!(
+            !manage.iter().any(|m| m.category == "bikePaint"),
+            "Manage still leaves liveries alone: {manage:?}"
+        );
+
+        let ledger = scan_with(&cfg, &[], |e| is_candidate(e) || e.category == "bikePaint");
+        let livery = ledger
+            .iter()
+            .find(|m| m.category == "bikePaint")
+            .expect("the ledger sees the livery");
+        assert_eq!(livery.rel, "mods/bikes/CLUBMX YZ450F/paints/red.pnt");
+        assert!(livery.enabled);
+
+        // Widening must add, not replace: everything Manage saw is still there.
+        for m in &manage {
+            assert!(ledger.iter().any(|l| l.rel == m.rel), "lost {}", m.rel);
+        }
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn preset(name: &str, content: PresetContent) -> Preset {

@@ -22,6 +22,13 @@ import {
   ClipboardPaste,
   ArrowUpDown,
   Clock,
+  History,
+  PackageOpen,
+  Download,
+  Copy,
+  EyeOff,
+  Undo2,
+  Search as SearchIcon,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -32,10 +39,21 @@ import {
   moveMod,
   revealInExplorer,
   uninstallMod,
+  libraryLedger,
+  ledgerCapture,
+  forgetLedgerEntry,
+  restoreLedgerEntry,
+  downloadHistory,
   type ModType,
 } from "../../api/mods";
-import type { LibraryEntry, PkzMeta } from "../../types";
-import { displayName, folderLabel, formatBytes, formatLength } from "../../lib/mods";
+import type { DownloadRecord, LedgerRow, LibraryEntry, PkzMeta } from "../../types";
+import {
+  displayName,
+  folderLabel,
+  formatBytes,
+  formatDay,
+  formatLength,
+} from "../../lib/mods";
 import { useT, type TFunc } from "../../i18n/context";
 import { metaKey, peekMeta, primeMetaCache, requestMeta } from "../../lib/pkzMeta";
 import {
@@ -47,10 +65,12 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import LibraryDetail from "./LibraryDetail";
 import { ShareDialog, ImportShareDialog } from "./ShareDialogs";
+import FindAgainDialog from "./FindAgainDialog";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { entryViewerProps } from "../Viewer/entryViewer";
 import { useConfig } from "../../Context/Config";
 import { useImport } from "../Dropzone/useImport";
+import { useInstall } from "../../Context/Install";
 import { Segmented } from "@/Components/ui/segmented";
 import { Button } from "@/Components/ui/button";
 import HelpHint from "@/Components/ui/help-hint";
@@ -194,6 +214,115 @@ function LibraryCardBody({
   );
 }
 
+/**
+ * A mod the tree no longer holds.
+ *
+ * Deliberately not folded into {@link LibraryCardBody}'s sections: a missing mod has no path
+ * to act on, and letting one into `visibleItems` would put it in reach of select-all, move,
+ * share and uninstall — every one of which would then be aimed at a file that isn't there.
+ * Rendering it separately makes that impossible rather than merely unlikely.
+ *
+ * The snapshot is all there is to go on, which is the point — it was captured while the mod
+ * was still installed precisely so this card could exist.
+ */
+function GhostCard({
+  row,
+  typeIcon: TypeIcon,
+  actions,
+}: {
+  row: LedgerRow;
+  typeIcon: LucideIcon;
+  actions: RowAction[];
+}) {
+  const t = useT();
+  const title = row.title?.trim() || displayName(row.name);
+  const parts: string[] = [];
+  if (row.author) parts.push(t("library.byAuthor", { author: row.author }));
+  if (row.length) parts.push(formatLength(row.length));
+  if (row.size) parts.push(formatBytes(row.size));
+  const subtitle = parts.join(" · ") || folderLabel(row.folder);
+  const when =
+    row.state === "parked"
+      ? t("library.parkedHint")
+      : t("library.goneOn", { date: formatDay(row.goneAt ?? row.lastSeen) });
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-dashed border-white/[0.09] bg-card/40 p-3">
+      <div className="relative grid h-12 w-[76px] flex-none place-items-center overflow-hidden rounded-md bg-gradient-to-br from-[#33373c] to-[#1c1f24] text-foreground/20">
+        {row.thumbData ? (
+          // Saturation dropped rather than opacity: the picture stays readable — which is the
+          // whole reason it was kept — while still reading as not-installed.
+          <img src={row.thumbData} alt="" className="h-full w-full object-cover saturate-[0.35]" />
+        ) : (
+          <TypeIcon className="size-5" strokeWidth={1.5} />
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="w-fit max-w-full truncate text-[13px] font-semibold text-muted-foreground">
+              {title}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="start" className="max-w-sm">
+            <p className="font-semibold">{title}</p>
+            <p className="text-muted-foreground">{row.rel}</p>
+            {row.location && <p className="text-muted-foreground">{row.location}</p>}
+            <p className="text-muted-foreground">{when}</p>
+          </TooltipContent>
+        </Tooltip>
+        <span className="truncate text-[11px] text-faint" title={subtitle}>
+          {subtitle}
+        </span>
+        <span className="truncate text-[11px] text-faint">{when}</span>
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="flex-none cursor-default rounded-md px-1 text-faint transition-colors hover:text-foreground"
+          >
+            <MoreHorizontal className="size-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {actions.map((a) => (
+            <Fragment key={a.key}>
+              {a.separatorBefore && <DropdownMenuSeparator />}
+              <DropdownMenuItem
+                variant={a.destructive ? "destructive" : "default"}
+                onSelect={a.onSelect}
+              >
+                <a.icon className="size-4" /> {a.label}
+              </DropdownMenuItem>
+            </Fragment>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+/** Ledger rows for this tab, filtered by the same search box as the installed ones. */
+function ghostsFor(rows: LedgerRow[], modType: ModType, search: string): LedgerRow[] {
+  const q = search.trim().toLowerCase();
+  const matches = q
+    ? rows.filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          (r.title ?? "").toLowerCase().includes(q) ||
+          (r.author ?? "").toLowerCase().includes(q) ||
+          (r.location ?? "").toLowerCase().includes(q) ||
+          r.folder.toLowerCase().includes(q),
+      )
+    : rows;
+  // Bikes hides liveries and model-swaps from its own grid; its ghosts follow suit rather
+  // than becoming the one place hundreds of paint rows show up unasked.
+  return modType.id === "bikes"
+    ? matches.filter((r) => r.category !== "bikePaint" && r.category !== "bikeModelSwap")
+    : matches;
+}
+
 interface Section {
   key: string;
   label: string;
@@ -276,6 +405,9 @@ interface LibraryProps {
   focus?: { name: string } | null;
   /** Consumed: the jump has been applied, and must not be re-applied on the next visit. */
   onFocusApplied?: () => void;
+  /** Open a catalog mod's page. Lets a hit from "Find it again" go straight to the mod,
+   *  rather than leaving the player to search Browse for the name a second time. */
+  onOpenMod?: (slug: string) => void;
 }
 
 export default function Library({
@@ -285,6 +417,7 @@ export default function Library({
   onChanged,
   focus,
   onFocusApplied,
+  onOpenMod,
 }: LibraryProps) {
   const t = useT();
   const { pickAndImport, staging } = useImport();
@@ -306,6 +439,12 @@ export default function Library({
   // Non-null while the share dialog is up: the absolute paths it's about to pack.
   const [sharePaths, setSharePaths] = useState<string[] | null>(null);
   const [importShareOpen, setImportShareOpen] = useState(false);
+  // What the tree used to hold. Off by default: the common visit is about what is installed.
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [findAgain, setFindAgain] = useState<LedgerRow | null>(null);
+  // Joined to ledger rows so a mod the app installed can be fetched again from the row.
+  const [history, setHistory] = useState<DownloadRecord[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -316,12 +455,32 @@ export default function Library({
       // opened before renders complete without touching a single archive.
       await primeMetaCache(scanned);
       setEntries(scanned);
+      // With the cache warm, snapshotting the installed mods costs a file read each — and it
+      // has to happen now, while they still exist. Never blocks the scan being shown.
+      void ledgerCapture().catch(() => {});
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
   }, [modType]);
+
+  // The ledger is only fetched once the player asks to see it: it inflates a thumbnail per
+  // missing mod, which is real work for a panel most visits never open.
+  useEffect(() => {
+    if (!showRemoved) return;
+    let alive = true;
+    void Promise.all([libraryLedger(modType.installSubpath), downloadHistory()])
+      .then(([rows, records]) => {
+        if (!alive) return;
+        setLedger(rows);
+        setHistory(records);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [showRemoved, modType, refreshKey]);
 
   useEffect(() => {
     load();
@@ -352,8 +511,19 @@ export default function Library({
     [modType, entries, search, sort, t],
   );
 
+  // Installed items only — this feeds select-all and every bulk action, and a missing mod
+  // has no file to act on.
   const visibleItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   const visibleCount = visibleItems.length;
+
+  const ghosts = useMemo(
+    () => (showRemoved ? ghostsFor(ledger, modType, search) : []),
+    [showRemoved, ledger, modType, search],
+  );
+  // Parked and gone are different facts and get their own headings: one is a mod Manage can
+  // hand straight back, the other is a mod that would have to be found again.
+  const parked = useMemo(() => ghosts.filter((r) => r.state === "parked"), [ghosts]);
+  const gone = useMemo(() => ghosts.filter((r) => r.state === "gone"), [ghosts]);
 
   const toggleSelect = useCallback((path: string) => {
     setSelected((prev) => {
@@ -380,6 +550,7 @@ export default function Library({
   );
 
   const { bikePreview, game } = useConfig();
+  const { startInstall } = useInstall();
   // The Library is a view of the mods tree, so the one type that installs outside it —
   // ReShade presets, which live in the game's install folder — has no tab here. They're
   // managed in Settings, where their install status can be shown alongside them.
@@ -510,6 +681,131 @@ export default function Library({
     },
   ];
 
+  /** The download that installed this mod, when the app was the one that fetched it. */
+  const sourceOf = (row: LedgerRow) =>
+    history.find(
+      (r) =>
+        !!r.url &&
+        r.status === "installed" &&
+        (r.title.toLowerCase() === (row.title ?? "").toLowerCase() ||
+          r.title.toLowerCase() === displayName(row.name).toLowerCase()),
+    );
+
+  const forgetGhost = async (row: LedgerRow) => {
+    try {
+      await forgetLedgerEntry(row.key);
+      setLedger((prev) => prev.filter((r) => r.key !== row.key));
+    } catch (e) {
+      toast.error(t("library.forgetFailed"), { description: String(e) });
+    }
+  };
+
+  const restoreGhost = async (row: LedgerRow) => {
+    try {
+      await restoreLedgerEntry(row.key);
+      toast.success(t("library.restored"));
+      setLedger((prev) => prev.filter((r) => r.key !== row.key));
+      await load();
+      onChanged();
+    } catch (e) {
+      toast.error(t("library.restoreFailed"), { description: String(e) });
+    }
+  };
+
+  const ghostActions = (row: LedgerRow): RowAction[] => {
+    const source = sourceOf(row);
+    return [
+      // Offered only when the files are still recoverable — the app deleted them and noted
+      // where they went. A Restore that can only fail is worse than no Restore.
+      ...(row.state === "gone" && row.trashedAt
+        ? [
+            {
+              key: "restore",
+              icon: Undo2,
+              label: t("library.restore"),
+              onSelect: () => void restoreGhost(row),
+            },
+          ]
+        : []),
+      // The name is often all that survives, so make it searchable everywhere at once.
+      {
+        key: "find",
+        icon: SearchIcon,
+        label: t("library.findAgain"),
+        onSelect: () => setFindAgain(row),
+      },
+      // The best possible answer to "I want to ride that again": the app already knows where
+      // it came from, so getting it back is one click rather than a search.
+      ...(source
+        ? [
+            {
+              key: "reinstall",
+              icon: Download,
+              label: t("library.reinstall"),
+              onSelect: () =>
+                startInstall({
+                  slug: source.slug,
+                  title: source.title,
+                  subpath: source.subpath,
+                  destFolder: source.destFolder,
+                  categoryId: source.categoryId ?? undefined,
+                  url: source.url!,
+                  host: source.host ?? "",
+                }),
+            },
+          ]
+        : []),
+      // Otherwise the name is the thing worth having — it's what was forgotten.
+      {
+        key: "copy",
+        icon: Copy,
+        label: t("library.copyName"),
+        onSelect: () => {
+          void navigator.clipboard
+            .writeText(row.title?.trim() || displayName(row.name))
+            .then(() => toast.success(t("library.copiedName")))
+            .catch(() => {});
+        },
+      },
+      {
+        key: "forget",
+        icon: EyeOff,
+        label: t("library.forget"),
+        destructive: true,
+        separatorBefore: true,
+        onSelect: () => void forgetGhost(row),
+      },
+    ];
+  };
+
+  const ghostSection = (
+    key: string,
+    label: string,
+    rows: LedgerRow[],
+    hint: string,
+  ) =>
+    rows.length > 0 && (
+      <section key={key} className="flex flex-col gap-2.5">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[12px] font-bold uppercase tracking-[1.2px] text-faint">
+            ▸ {label}
+          </span>
+          <span className="text-[11px] text-faint">{rows.length}</span>
+          <span className="text-[11px] text-faint/70">{hint}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {rows.map((row) => (
+            <GhostCard
+              key={row.key}
+              row={row}
+              typeIcon={categoryIcon(row.category)}
+              actions={ghostActions(row)}
+            />
+          ))}
+        </div>
+      </section>
+    );
+
   return (
     <div className="flex h-full flex-col">
       {detail ? (
@@ -578,6 +874,16 @@ export default function Library({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {/* The library only ever showed what is on disk. This is the rest of the story —
+            what used to be there, which is the only way to name a mod you already deleted. */}
+        <Button
+          variant={showRemoved ? "default" : "outline"}
+          size="sm"
+          onClick={() => setShowRemoved((v) => !v)}
+          title={t("library.showRemovedHint")}
+        >
+          <History className="size-3.5" /> {t("library.showRemoved")}
+        </Button>
         <Button
           variant={selectMode ? "default" : "outline"}
           size="sm"
@@ -632,7 +938,7 @@ export default function Library({
           <p className="py-16 text-center text-[13px] text-muted-foreground">
             {t("library.scanning")}
           </p>
-        ) : sections.length === 0 ? (
+        ) : sections.length === 0 && ghosts.length === 0 ? (
           <p className="py-16 text-center text-[13px] text-muted-foreground">
             {entries.length === 0
               ? t("library.empty", { type: t(modType.labelInline) })
@@ -744,6 +1050,21 @@ export default function Library({
                 </div>
               </section>
             ))}
+            {/* After the installed grid, never mixed into it: these are a different kind of
+                fact and support a different set of actions. */}
+            {ghostSection(
+              "__parked__",
+              t("section.parked"),
+              parked,
+              t("library.parkedNote"),
+            )}
+            {ghostSection("__gone__", t("section.removed"), gone, t("library.goneNote"))}
+            {showRemoved && ghosts.length === 0 && (
+              <p className="py-6 text-center text-[12.5px] text-faint">
+                <PackageOpen className="mr-1.5 inline size-3.5" />
+                {t("library.nothingRemoved")}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -807,6 +1128,14 @@ export default function Library({
       />
 
       <ShareDialog paths={sharePaths} onClose={() => setSharePaths(null)} />
+
+      {findAgain && (
+        <FindAgainDialog
+          row={findAgain}
+          onOpenMod={onOpenMod}
+          onClose={() => setFindAgain(null)}
+        />
+      )}
 
       <ImportShareDialog
         open={importShareOpen}

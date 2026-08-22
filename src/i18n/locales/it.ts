@@ -887,6 +887,27 @@ export const it: Translation = {
   "library.searchPlaceholder": "Cerca tra le installate…",
   "library.sortFolder": "Per cartella",
   "library.sortRecent": "Aggiunte di recente",
+  "library.showRemoved": "Rimosse",
+  "library.showRemovedHint":
+    "Mostra le mod che questa cartella ha avuto, comprese quelle cancellate fuori dall'app",
+  "library.goneOn": "Rimossa il {{date}}",
+  "library.goneNote": "tenute da parte così le ritrovi",
+  "library.parkedHint": "Disattivata in Gestisci — è ancora sul disco",
+  "library.parkedNote": "riattivale in Gestisci",
+  "library.nothingRemoved":
+    "Non manca ancora niente. D'ora in poi tutto quello che cancelli resta segnato qui.",
+  "library.reinstall": "Scarica di nuovo",
+  "library.copyName": "Copia il nome",
+  "library.copiedName": "Nome copiato",
+  "library.forget": "Dimentica",
+  "library.forgetFailed": "Non sono riuscito a dimenticarla",
+  "library.restore": "Ripristina",
+  "library.restored": "Rimessa a posto",
+  "library.restoreFailed": "Non sono riuscito a ripristinarla",
+  "library.findAgain": "Ritrovala",
+  "library.findAgainFor": "Cerco “{{name}}” in tutte le fonti.",
+  "library.findAgainNone": "Niente con quel nome.",
+  "library.findAgainFailed": "Qui la ricerca non è riuscita.",
   "library.scanning": "Scansione della libreria…",
   "library.empty":
     "Nessuna mod {{type}} installata — vai su Esplora e aggiungine una.",
@@ -1129,6 +1150,8 @@ export const it: Translation = {
   "category.misc": "Altro",
 
   // ── Intestazioni di sezione (plurale) ──────────────────────────────────────
+  "section.removed": "Non più installate",
+  "section.parked": "Messe da parte da Gestisci",
   "section.bikePaint": "Livree",
   "section.bikeModelSwap": "Cambi modello",
   "section.sound": "Suoni",
