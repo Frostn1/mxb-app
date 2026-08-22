@@ -149,7 +149,7 @@ fn provider_of(root: &std::path::Path) -> Option<String> {
 ///   * `RECALL_ON_OPEN` — the older whole-file variant.
 ///   * `OFFLINE` — set by classic HSM tools, and still what some providers use.
 #[cfg(windows)]
-fn is_placeholder(path: &std::path::Path) -> bool {
+pub(crate) fn is_placeholder(path: &std::path::Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
     const FILE_ATTRIBUTE_OFFLINE: u32 = 0x0000_1000;
@@ -175,11 +175,22 @@ fn is_placeholder(path: &std::path::Path) -> bool {
         != 0
 }
 
-/// The crash this exists to catch is a Windows one. macOS has the same idea (iCloud
-/// dataless files, `SF_DATALESS`) and it is worth reading there eventually, but the
-/// reports driving this are all Windows.
-#[cfg(not(windows))]
-fn is_placeholder(_path: &std::path::Path) -> bool {
+/// macOS has the same idea: iCloud Drive evicts a file's bytes and leaves the entry behind,
+/// flagged `SF_DATALESS`. Reading one is *meant* to fetch it back transparently, and often
+/// does — but not always, and a `.pkz` that reads as empty is indistinguishable from a mod
+/// with nothing in it. That is why this is worth knowing before reading rather than after.
+///
+/// Like the Windows half, this asks for attributes only. `stat` does not hydrate.
+#[cfg(target_os = "macos")]
+pub(crate) fn is_placeholder(path: &std::path::Path) -> bool {
+    use std::os::macos::fs::MetadataExt;
+    /// `SF_DATALESS` from `sys/stat.h` — the bytes live in iCloud, not here.
+    const SF_DATALESS: u32 = 0x4000_0000;
+    std::fs::metadata(path).is_ok_and(|m| m.st_flags() & SF_DATALESS != 0)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub(crate) fn is_placeholder(_path: &std::path::Path) -> bool {
     false
 }
 

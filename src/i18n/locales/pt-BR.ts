@@ -889,6 +889,27 @@ export const ptBR: Translation = {
   "library.searchPlaceholder": "Pesquisar entre os instalados…",
   "library.sortFolder": "Por pasta",
   "library.sortRecent": "Adicionados recentemente",
+  "library.showRemoved": "Removidos",
+  "library.showRemovedHint":
+    "Mostra os mods que esta pasta já teve, inclusive os apagados fora do app",
+  "library.goneOn": "Removido em {{date}}",
+  "library.goneNote": "guardados pra você achar de novo",
+  "library.parkedHint": "Desativado em Gerenciar — ainda está no disco",
+  "library.parkedNote": "reative em Gerenciar",
+  "library.nothingRemoved":
+    "Nada sumiu ainda. Daqui pra frente, tudo que você apagar fica registrado aqui.",
+  "library.reinstall": "Baixar de novo",
+  "library.copyName": "Copiar nome",
+  "library.copiedName": "Nome copiado",
+  "library.forget": "Esquecer",
+  "library.forgetFailed": "Não deu pra esquecer",
+  "library.restore": "Restaurar",
+  "library.restored": "De volta",
+  "library.restoreFailed": "Não deu pra restaurar",
+  "library.findAgain": "Achar de novo",
+  "library.findAgainFor": "Procurando “{{name}}” em todas as fontes.",
+  "library.findAgainNone": "Nada com esse nome.",
+  "library.findAgainFailed": "Não deu pra buscar aqui.",
   "library.scanning": "Varrendo sua biblioteca…",
   "library.empty":
     "Nenhuma mod de {{type}} instalada — vá em Explorar e adicione uma.",
@@ -1127,6 +1148,8 @@ export const ptBR: Translation = {
   "category.misc": "Outros",
 
   // ── Cabeçalhos de seção (plural) ───────────────────────────────────────────
+  "section.removed": "Não instalados",
+  "section.parked": "Guardados pelo Gerenciar",
   "section.bikePaint": "Pinturas",
   "section.bikeModelSwap": "Trocas de modelo",
   "section.sound": "Sons",

@@ -896,6 +896,27 @@ export const de: Translation = {
   "library.searchPlaceholder": "Installierte durchsuchen…",
   "library.sortFolder": "Nach Ordner",
   "library.sortRecent": "Zuletzt hinzugefügt",
+  "library.showRemoved": "Entfernt",
+  "library.showRemovedHint":
+    "Mods anzeigen, die dieser Ordner mal hatte — auch außerhalb der App gelöschte",
+  "library.goneOn": "Entfernt am {{date}}",
+  "library.goneNote": "aufbewahrt, damit du sie wiederfindest",
+  "library.parkedHint": "In Verwalten deaktiviert — noch auf der Platte",
+  "library.parkedNote": "in Verwalten wieder einschalten",
+  "library.nothingRemoved":
+    "Noch nichts verschwunden. Ab jetzt wird alles gemerkt, was du löschst.",
+  "library.reinstall": "Erneut herunterladen",
+  "library.copyName": "Namen kopieren",
+  "library.copiedName": "Name kopiert",
+  "library.forget": "Vergessen",
+  "library.forgetFailed": "Konnte das nicht vergessen",
+  "library.restore": "Wiederherstellen",
+  "library.restored": "Zurückgelegt",
+  "library.restoreFailed": "Konnte das nicht wiederherstellen",
+  "library.findAgain": "Wiederfinden",
+  "library.findAgainFor": "Suche „{{name}}“ in allen Quellen.",
+  "library.findAgainNone": "Nichts unter dem Namen.",
+  "library.findAgainFailed": "Suche hier fehlgeschlagen.",
   "library.scanning": "Deine Bibliothek wird gescannt…",
   "library.empty":
     "Noch keine {{type}} installiert — geh zu Entdecken und füge etwas hinzu.",
@@ -1147,6 +1168,8 @@ export const de: Translation = {
   "category.misc": "Sonstiges",
 
   // ── Abschnittsüberschriften (Plural) ───────────────────────────────────────
+  "section.removed": "Nicht mehr installiert",
+  "section.parked": "Von Verwalten geparkt",
   "section.bikePaint": "Lackierungen",
   "section.bikeModelSwap": "Modellwechsel",
   "section.sound": "Sounds",

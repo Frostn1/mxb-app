@@ -692,6 +692,51 @@ export interface DownloadRecord {
 /** What a caller supplies; `id` and `at` are the backend's to assign. */
 export type NewDownload = Omit<DownloadRecord, "id" | "at">;
 
+/** Whether the mods tree still holds a mod the ledger knows about.
+ *  `parked` is Manage having moved it aside — recoverable, and not a deletion. */
+export type LedgerState = "present" | "parked" | "gone";
+
+/** One mod the library has held, from the first time it was seen. Outlives the files:
+ *  the snapshot fields are captured while the mod is installed and are all that remains
+ *  once it is deleted. See `src-tauri/src/ledger.rs`. */
+export interface LedgerEntry {
+  /** Lowercased path relative to the MX Bikes root — the row's stable identity. */
+  key: string;
+  /** Last known path relative to that root, e.g. `mods/tracks/EU/RedBud.pkz`. */
+  rel: string;
+  name: string;
+  category: LibraryCategory;
+  folder: string;
+  size: number;
+  isDir: boolean;
+  /** Unix milliseconds. */
+  firstSeen: number;
+  lastSeen: number;
+  state: LedgerState;
+  /** When it went, stamped once — null while it is still installed or parked. */
+  goneAt: number | null;
+  /** The mod's own declared name, often nothing like its filename. */
+  title: string | null;
+  author: string | null;
+  location: string | null;
+  /** Track length in metres. */
+  length: number | null;
+  /** Thumbnail filename on disk; use `thumbData` to render. */
+  thumb: string | null;
+  /** When the snapshot was taken, whether or not it found anything — plenty of archives
+   *  carry no metadata, and those must not be re-read on every pass. */
+  snapshotAt: number | null;
+  /** Where the Trash put the files, when the app deleted them and could tell. Non-null is
+   *  what makes Restore offerable; null means it went some other way. */
+  trashedAt: string | null;
+}
+
+/** A ledger row on its way to the UI, with its thumbnail inflated for rendering. */
+export interface LedgerRow extends LedgerEntry {
+  /** `data:image/jpeg;base64,…`, or null when no snapshot was ever taken. */
+  thumbData: string | null;
+}
+
 export type InstallStage =
   | "resolving"
   | "downloading"

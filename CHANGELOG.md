@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-08-21
+
+### Added
+- **The Library remembers what you used to have installed.** It only ever showed what was on
+  disk right now, so deleting a track erased every trace that it existed — and months later
+  there was no way to work out what it had been called. A new **Removed** toggle in the
+  Library toolbar shows what the folder used to hold, with each mod's name, author, location,
+  length and its thumbnail, all captured while it was still installed. Covers everything that
+  was ever in the folder, however it got there: tracks you built yourself and copied in by
+  hand are remembered exactly like ones the app downloaded. Where the app was the one that
+  fetched it, the row offers to download it again.
+- Mods disabled in Manage are listed separately as **Parked by Manage**, so a track that has
+  merely been switched off is never mistaken for one that was deleted.
+- **Restore puts a deleted mod back.** When the app was the one that removed it, it now notes
+  where the Trash put the files, so the row can move them back where they came from. Refuses
+  rather than overwrites if something is installed there again.
+- **"Find it again" searches every source at once** — mxb-mods and the Shop together — using
+  the remembered name, and a result opens straight on its mod page. Sources live in one list,
+  so a new one added later shows up here without another button.
+
+### Fixed
+- **The Library no longer loses the name and picture of a mod that is merely offloaded.**
+  A `.pkz` whose bytes live in iCloud or OneDrive reads as an empty archive, so its details
+  came back blank. They are now recognised and left for a moment when the file is really
+  there. macOS gained the offloaded-file check it previously only had on Windows, which also
+  makes the existing "your mods aren't really on disk" warning work there.
+- **Uninstalling a mod stored in iCloud no longer fails on macOS.** Deleting went through
+  Finder, which refuses a file iCloud has offloaded — *"the item needs to be downloaded"* —
+  so with a mods folder under `Documents` and most of it offloaded, uninstall failed on
+  nearly every mod. It now goes through `NSFileManager` instead, which handles an offloaded
+  file without downloading it first and still puts the mod in the Trash, recoverable.
+
 ## Unreleased — a stalled download no longer hangs a server build
 
 ### Fixed

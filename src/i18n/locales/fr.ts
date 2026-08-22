@@ -894,6 +894,27 @@ export const fr: Translation = {
   "library.searchPlaceholder": "Rechercher parmi les installés…",
   "library.sortFolder": "Par dossier",
   "library.sortRecent": "Ajoutés récemment",
+  "library.showRemoved": "Supprimés",
+  "library.showRemovedHint":
+    "Afficher les mods qu'a contenus ce dossier, y compris ceux supprimés hors de l'app",
+  "library.goneOn": "Supprimé le {{date}}",
+  "library.goneNote": "conservés pour que tu les retrouves",
+  "library.parkedHint": "Désactivé dans Gérer — toujours sur le disque",
+  "library.parkedNote": "réactive-les dans Gérer",
+  "library.nothingRemoved":
+    "Rien ne manque encore. Désormais, tout ce que tu supprimes est retenu ici.",
+  "library.reinstall": "Télécharger à nouveau",
+  "library.copyName": "Copier le nom",
+  "library.copiedName": "Nom copié",
+  "library.forget": "Oublier",
+  "library.forgetFailed": "Impossible d'oublier ça",
+  "library.restore": "Restaurer",
+  "library.restored": "Remis en place",
+  "library.restoreFailed": "Impossible de restaurer",
+  "library.findAgain": "Le retrouver",
+  "library.findAgainFor": "Recherche de « {{name}} » dans toutes les sources.",
+  "library.findAgainNone": "Rien à ce nom.",
+  "library.findAgainFailed": "Recherche impossible ici.",
   "library.scanning": "Analyse de votre bibliothèque…",
   "library.empty":
     "Aucun mod {{type}} installé — allez dans Parcourir pour en ajouter un.",
@@ -1138,6 +1159,8 @@ export const fr: Translation = {
   "category.misc": "Autre",
 
   // ── En-têtes de section (pluriel) ──────────────────────────────────────────
+  "section.removed": "Plus installés",
+  "section.parked": "Mis de côté par Gérer",
   "section.bikePaint": "Livrées",
   "section.bikeModelSwap": "Changements de modèle",
   "section.sound": "Sons",

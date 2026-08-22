@@ -889,6 +889,27 @@ export const es: Translation = {
   "library.searchPlaceholder": "Buscar entre los instalados…",
   "library.sortFolder": "Por carpeta",
   "library.sortRecent": "Añadidas recientemente",
+  "library.showRemoved": "Eliminados",
+  "library.showRemovedHint":
+    "Muestra los mods que tuvo esta carpeta, incluidos los borrados fuera de la app",
+  "library.goneOn": "Eliminado el {{date}}",
+  "library.goneNote": "guardados para que puedas encontrarlos otra vez",
+  "library.parkedHint": "Desactivado en Gestionar — sigue en el disco",
+  "library.parkedNote": "vuelve a activarlos en Gestionar",
+  "library.nothingRemoved":
+    "Aún no falta nada. A partir de ahora se recordará todo lo que borres.",
+  "library.reinstall": "Descargar de nuevo",
+  "library.copyName": "Copiar nombre",
+  "library.copiedName": "Nombre copiado",
+  "library.forget": "Olvidar esto",
+  "library.forgetFailed": "No se pudo olvidar",
+  "library.restore": "Restaurar",
+  "library.restored": "Restaurado",
+  "library.restoreFailed": "No se pudo restaurar",
+  "library.findAgain": "Encontrarlo otra vez",
+  "library.findAgainFor": "Buscando “{{name}}” en todas las fuentes.",
+  "library.findAgainNone": "Nada con ese nombre.",
+  "library.findAgainFailed": "No se pudo buscar aquí.",
   "library.scanning": "Analizando tu biblioteca…",
   "library.empty":
     "Aún no hay {{type}} instaladas — ve a Explorar y añade alguna.",
@@ -1134,6 +1155,8 @@ export const es: Translation = {
   "category.misc": "Otros",
 
   // ── Encabezados de sección (plural) ────────────────────────────────────────
+  "section.removed": "Ya no instalados",
+  "section.parked": "Apartados por Gestionar",
   "section.bikePaint": "Libreas",
   "section.bikeModelSwap": "Cambios de modelo",
   "section.sound": "Sonidos",

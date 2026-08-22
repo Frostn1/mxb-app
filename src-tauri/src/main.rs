@@ -22,6 +22,7 @@ mod gearrepair;
 mod heightfield;
 mod imgcache;
 mod install;
+mod ledger;
 mod library;
 mod linkwalk;
 mod logs;
@@ -366,7 +367,30 @@ fn scan_library_blocking(
             .collect());
     }
     let sound_bikes = sound_bikes_of(&app);
+    // Looking at the library is the moment its record of what used to be there most needs to
+    // be current. Detached and rate-limited: the scan the user is waiting on never pays for it.
+    if ledger_due() {
+        ledger_reconcile_detached(&app);
+    }
     library::scan_library(&cfg.mods_path, &subpath, &sound_bikes, cfg.game()).map_err(|e| format!("{e:#}"))
+}
+
+/// Rate-limit for the Library-scan trigger. Switching tabs fires a scan each time, and
+/// walking the whole tree once per tab would be work nobody asked for.
+const LEDGER_MIN_GAP: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether enough time has passed since the last Library-triggered reconcile. Claims the slot
+/// when it answers yes, so two scans racing only produce one pass.
+fn ledger_due() -> bool {
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    if last.is_some_and(|t| now.duration_since(t) < LEDGER_MIN_GAP) {
+        return false;
+    }
+    *last = Some(now);
+    true
 }
 
 #[tauri::command]
@@ -3840,7 +3864,12 @@ async fn move_mod(
 async fn uninstall_mod(app: tauri::AppHandle, from_path: String, subpath: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
-        library::uninstall_mod(&cfg.mods_path, &from_path, &subpath).map_err(|e| format!("{e:#}"))
+        let landed =
+            library::uninstall_mod(&cfg.mods_path, &from_path, &subpath).map_err(|e| format!("{e:#}"))?;
+        // Remember where the Trash put it, while we still know: that is what makes the
+        // ledger row able to offer Restore rather than only a name to go hunting with.
+        ledger_note_trashed(&app, &cfg, &from_path, landed);
+        Ok(())
     })
     .await
     .map_err(|e| format!("uninstall_mod task failed: {e}"))?
@@ -5819,6 +5848,236 @@ fn clear_download_history(app: tauri::AppHandle) -> Result<(), String> {
     downloads::clear(&dir).map_err(|e| format!("{e:#}"))
 }
 
+// ===========================================================================
+// Library ledger — what the mods tree used to hold
+// ===========================================================================
+
+/// What the ledger counts as a mod: everything Manage governs, plus bike liveries.
+///
+/// Manage leaves liveries out because it has no reason to move them. The ledger has every
+/// reason to remember them — a livery you deleted is exactly as hard to name months later as
+/// a track you deleted.
+fn ledger_candidate(e: &library::LibraryEntry) -> bool {
+    modstate::is_candidate(e) || e.category == "bikePaint"
+}
+
+/// Fold the current state of the mods tree into the ledger.
+///
+/// Blocking: it walks the content folders and the shadow tree. Every caller runs it off the
+/// UI thread.
+fn ledger_reconcile_blocking(app: &tauri::AppHandle) {
+    let Ok(dir) = app.path().app_local_data_dir() else {
+        return;
+    };
+    let Ok(cfg) = config::load(app) else {
+        return;
+    };
+    if cfg.mods_path.trim().is_empty() {
+        return;
+    }
+    let game = cfg.active_game.id().to_string();
+
+    let scanned = modstate::scan_with(&cfg, &sound_bikes_of(app), ledger_candidate);
+    // Whether the tree was there to be read at all. Without this an unplugged drive and an
+    // emptied library are the same observation, and only one of them means anything.
+    let tree_ok = library::mods_root(&cfg.mods_path).is_dir();
+
+    let mut store = ledger::load(&dir, &game);
+    ledger::reconcile_store(&mut store, &cfg.mods_path, &scanned, tree_ok, ledger::now_ms());
+    let pruned = ledger::prune(&dir, &game, &mut store, ledger::now_ms());
+    if pruned > 0 {
+        log::info!("ledger: pruned {pruned} row(s) gone longer than the keep window");
+    }
+    if let Err(e) = ledger::save(&dir, &game, &store) {
+        log::warn!("ledger: could not save: {e:#}");
+    }
+}
+
+/// Reconcile without making the caller wait. Used by the triggers that fire during normal
+/// use, where the ledger being a moment behind costs nothing.
+pub fn ledger_reconcile_detached(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || ledger_reconcile_blocking(&app));
+}
+
+/// How many archives one capture pass may open to backfill a snapshot.
+///
+/// Most snapshots cost nothing — the Library warms the metadata cache on every load, so the
+/// data is already on disk. This covers the rest: a library that predates the ledger has no
+/// cached metadata for mods the player never scrolled past, and without a bounded inflating
+/// pass those rows would record a name and no picture forever. Small, so a capture never
+/// becomes something the user waits on; repeated, so it finishes across a few visits.
+const LEDGER_BACKFILL_PER_PASS: usize = 12;
+
+/// Take the snapshot — title, author, location, length, thumbnail — for installed mods whose
+/// row hasn't got one yet.
+///
+/// This is the only chance: once the files are gone, so is any way to learn what they were.
+#[tauri::command]
+async fn ledger_capture(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Ok(dir) = app.path().app_local_data_dir() else {
+            return;
+        };
+        let Ok(cfg) = config::load(&app) else {
+            return;
+        };
+        let game = cfg.active_game.id().to_string();
+        let mut store = ledger::load(&dir, &game);
+
+        // Only mods still on disk can be snapshotted, and only `.pkz` carries metadata to
+        // read — an extracted track folder or a loose `.pnt` has none.
+        let todo: Vec<String> = store
+            .entries
+            .values()
+            .filter(|e| e.state == ledger::PRESENT && e.needs_snapshot() && !e.is_dir)
+            .filter(|e| e.name.to_ascii_lowercase().ends_with(".pkz"))
+            .map(|e| e.key.clone())
+            .collect();
+        if todo.is_empty() {
+            return;
+        }
+
+        let mut inflated = 0usize;
+        let mut captured = 0usize;
+        let mut skipped = 0usize;
+        for key in todo {
+            let Some(rel) = store.entries.get(&key).map(|e| e.rel.clone()) else {
+                continue;
+            };
+            let path = library::mods_subdir(&cfg.mods_path, &rel);
+            if !path.is_file() {
+                continue;
+            }
+            // A mod whose bytes are off in iCloud or OneDrive reads as an empty archive, and
+            // recording *that* as the snapshot would be worse than having none: the row would
+            // be marked done and never looked at again, so a mod that is merely offloaded
+            // today would lose its name and picture permanently. Leave it for a pass when the
+            // file is actually here. Attributes only — this never triggers a download.
+            if cloudfiles::is_placeholder(&path) {
+                skipped += 1;
+                continue;
+            }
+            let path = path.to_string_lossy().into_owned();
+
+            // Free first: whatever the Library already warmed costs a single file read.
+            let meta = match pkz::read_meta_if_cached(&app, &path) {
+                Some(m) => Some(m),
+                None if inflated < LEDGER_BACKFILL_PER_PASS => {
+                    inflated += 1;
+                    pkz::read_meta_cached(&app, &path).ok()
+                }
+                None => None,
+            };
+            let (Some(meta), Some(entry)) = (meta, store.entries.get_mut(&key)) else {
+                continue;
+            };
+            ledger::apply_snapshot(&dir, &game, entry, &meta, ledger::now_ms());
+            captured += 1;
+        }
+
+        if skipped > 0 {
+            log::info!("ledger: {skipped} mod(s) left for later — offloaded to the cloud");
+        }
+        if captured > 0 {
+            log::info!("ledger: captured {captured} snapshot(s), {inflated} by opening the archive");
+            if let Err(e) = ledger::save(&dir, &game, &store) {
+                log::warn!("ledger: could not save snapshots: {e:#}");
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("ledger_capture task failed: {e}"))
+}
+
+/// Mods under `subpath` that the tree no longer holds — deleted, or parked by Manage.
+///
+/// Only the missing ones: what is installed is already in the caller's scan, and inflating a
+/// thumbnail for a mod the Library can see for itself is work for nothing.
+#[tauri::command]
+async fn library_ledger(app: tauri::AppHandle, subpath: String) -> Result<Vec<ledger::LedgerRow>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let game = cfg.active_game.id().to_string();
+        let prefix = format!("{}/", subpath.trim_end_matches('/').to_lowercase());
+
+        let store = ledger::load(&dir, &game);
+        let missing = store
+            .entries
+            .values()
+            .filter(|e| e.state != ledger::PRESENT && e.key.starts_with(&prefix))
+            .cloned();
+        Ok(ledger::rows(&dir, &game, missing))
+    })
+    .await
+    .map_err(|e| format!("library_ledger task failed: {e}"))?
+}
+
+/// Record where the Trash put a mod the app just uninstalled.
+///
+/// Best-effort throughout: losing the Restore option is a smaller harm than failing an
+/// uninstall that has already happened.
+fn ledger_note_trashed(
+    app: &tauri::AppHandle,
+    cfg: &config::AppConfig,
+    from_path: &str,
+    landed: library::TrashedAt,
+) {
+    let Ok(dir) = app.path().app_local_data_dir() else {
+        return;
+    };
+    let root = library::mods_root(&cfg.mods_path);
+    let Ok(rel) = std::path::Path::new(from_path).strip_prefix(&root) else {
+        return;
+    };
+    let rel = format!("mods/{}", rel.to_string_lossy().replace('\\', "/"));
+    ledger::note_trashed(&dir, cfg.active_game.id(), &rel, landed);
+}
+
+/// Put a mod the app deleted back where it came from.
+#[tauri::command]
+async fn restore_ledger_entry(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let game = cfg.active_game.id().to_string();
+
+        let store = ledger::load(&dir, &game);
+        let entry = store
+            .entries
+            .get(&key.to_lowercase())
+            .ok_or_else(|| "no such entry".to_string())?;
+        let original = library::mods_subdir(&cfg.mods_path, &entry.rel);
+
+        library::restore_from_trash(&original, entry.trashed_at.as_deref())
+            .map_err(|e| format!("{e:#}"))?;
+
+        // Straight back to the truth rather than patching the row by hand: the mod is on disk
+        // again, and a scan is what says so.
+        ledger_reconcile_blocking(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("restore_ledger_entry task failed: {e}"))?
+}
+
+#[tauri::command]
+fn forget_ledger_entry(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    ledger::forget(&dir, cfg.active_game.id(), &key).map_err(|e| format!("{e:#}"))
+}
+
+/// Forget everything no longer installed. What is still on disk stays — the next pass would
+/// only write it straight back.
+#[tauri::command]
+fn clear_ledger(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    ledger::clear_gone(&dir, cfg.active_game.id()).map_err(|e| format!("{e:#}"))
+}
+
 fn presets_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()
         .app_local_data_dir()
@@ -6594,6 +6853,11 @@ fn main() {
                     let watcher = handle.state::<ModWatcher>();
                     modwatch::start(handle, &watcher, &cfg.mods_path);
                 }
+                // Catch up on whatever changed while the app was shut. The folder watcher
+                // above only sees changes from here on, and it is a setting the player can
+                // turn off — so without this pass, mods deleted between sessions would never
+                // be noticed at all.
+                ledger_reconcile_detached(handle);
                 // Paint sync, both directions, from the moment the app opens:
                 //  * publish, because the look may have changed in the game's garage while
                 //    the app was shut, and nothing would ever have noticed;
@@ -6821,6 +7085,11 @@ fn main() {
             download_history,
             forget_download,
             clear_download_history,
+            library_ledger,
+            ledger_capture,
+            forget_ledger_entry,
+            restore_ledger_entry,
+            clear_ledger,
             shop_catalog_available,
             shop_catalog_status,
             shop_catalog_categories,

@@ -14,6 +14,7 @@ import type {
   Config,
   DownloadOption,
   DownloadRecord,
+  LedgerRow,
   NewDownload,
   FrostmodInstallReport,
   FrostmodReload,
@@ -1690,6 +1691,53 @@ export function forgetDownload(id: string): Promise<void> {
 
 export function clearDownloadHistory(): Promise<void> {
   return invoke<void>("clear_download_history");
+}
+
+/**
+ * Mods under `subpath` the tree no longer holds — deleted, or parked by Manage.
+ *
+ * Only the missing ones: what is installed came back from {@link scanLibrary} already, and a
+ * thumbnail inflated for a mod the Library can see for itself is bytes over IPC for nothing.
+ *
+ * Distinct from {@link downloadHistory}, which knows only what the app itself fetched. This
+ * covers everything that was ever in the folder, however it got there — a track built in the
+ * editor and copied in by hand included.
+ */
+export function libraryLedger(subpath: string): Promise<LedgerRow[]> {
+  return invoke<LedgerRow[]>("library_ledger", { subpath });
+}
+
+/**
+ * Snapshot title, author, location and thumbnail for installed mods whose ledger row hasn't
+ * got one yet.
+ *
+ * Call after {@link primeMetaCache}: most of the work is then already done and reduces to a
+ * file read per mod. It is the only chance to capture any of it — once the files are deleted
+ * there is no way to learn what they were.
+ */
+export function ledgerCapture(): Promise<void> {
+  return invoke<void>("ledger_capture");
+}
+
+/**
+ * Put a mod the app deleted back where it came from.
+ *
+ * Only possible when the row carries a `trashedAt`, or on a platform whose Trash can be
+ * asked to undo its own recycle. Refuses rather than overwrites if something is already
+ * installed at that path.
+ */
+export function restoreLedgerEntry(key: string): Promise<void> {
+  return invoke<void>("restore_ledger_entry", { key });
+}
+
+/** Drop one row, and its thumbnail, from the ledger. */
+export function forgetLedgerEntry(key: string): Promise<void> {
+  return invoke<void>("forget_ledger_entry", { key });
+}
+
+/** Forget everything no longer installed. Rows still on disk stay. */
+export function clearLedger(): Promise<void> {
+  return invoke<void>("clear_ledger");
 }
 
 /** Fires after a WebView sign-in completes; payload is whether it succeeded. */
