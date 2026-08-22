@@ -1259,6 +1259,20 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0101.hero.title":
+    "Tu biblioteca recuerda lo que borraste",
+  "showcase.v0101.hero.body":
+    "Antes, borrar un circuito lo borraba de la memoria de la app. Ahora guarda el nombre, el autor, dónde estaba y una imagen — así el que no sabes nombrar meses después sigue ahí para encontrarlo.",
+  "showcase.v0101.restore":
+    "Restaurar devuelve a su sitio un mod que borró la app, y “Encontrarlo otra vez” busca en mxb-mods y en la tienda con el nombre guardado.",
+  "showcase.v0101.paints":
+    "Una pintura guardada en disco ya aparece en el juego en marcha: sin alt-tab y sin volver a elegir tu perfil.",
+  "showcase.v0101.r6034":
+    "Arreglado un fallo que causaba esta app: la copia de msvcr90.dll que dejaba mataba MX Bikes con R6034. Ahora la retira.",
+  "showcase.v0101.logs":
+    "Compartir registros empaqueta lo mismo que Guardar registros y te da un enlace, en vez de un archivo que subir.",
+  "showcase.v0101.bikes":
+    "Las motos que ya no usas se pueden quitar del selector de Ajustes rápidos.",
   "showcase.v0100.hero.title": "El Designer prepara sus propias hojas",
   "showcase.v0100.hero.body":
     "Ahora crea las hojas que pide un modelo, coloca debajo los plásticos de la propia moto para calcar y abre un modelo en cerca de un segundo en vez de casi veinte.",

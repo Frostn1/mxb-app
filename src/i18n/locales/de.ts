@@ -1272,6 +1272,20 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0101.hero.title":
+    "Deine Bibliothek merkt sich, was du gelöscht hast",
+  "showcase.v0101.hero.body":
+    "Eine gelöschte Strecke war früher spurlos weg. Jetzt bleiben Name, Autor, Ort und ein Bild erhalten — damit du die, deren Namen du Monate später nicht mehr weißt, trotzdem wiederfindest.",
+  "showcase.v0101.restore":
+    "Wiederherstellen legt einen von der App gelöschten Mod zurück, und „Wiederfinden“ durchsucht mxb-mods und den Shop mit dem gemerkten Namen.",
+  "showcase.v0101.paints":
+    "Ein gespeichertes Paint erscheint jetzt im laufenden Spiel — kein Alt-Tab, kein erneutes Profilwählen.",
+  "showcase.v0101.r6034":
+    "Ein Absturz, den diese App verursacht hat, ist behoben: die von ihr abgelegte msvcr90.dll ließ MX Bikes mit R6034 sterben. Sie räumt die Kopie jetzt wieder weg.",
+  "showcase.v0101.logs":
+    "„Logs teilen“ packt dasselbe Archiv wie „Logs speichern“ und gibt dir einen Link statt einer Datei zum Hochladen.",
+  "showcase.v0101.bikes":
+    "Bikes, die du nicht mehr fährst, lassen sich aus der Presets-Auswahl entfernen.",
   "showcase.v0100.hero.title": "Der Designer richtet seine Blätter selbst ein",
   "showcase.v0100.hero.body":
     "Er legt jetzt die Blätter an, die ein Modell braucht, legt die eigenen Plastikteile des Bikes darunter zum Abpausen und öffnet ein Modell in etwa einer Sekunde statt in fast zwanzig.",

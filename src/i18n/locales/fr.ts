@@ -1263,6 +1263,20 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0101.hero.title":
+    "Ta bibliothèque se souvient de ce que tu as supprimé",
+  "showcase.v0101.hero.body":
+    "Supprimer un circuit l'effaçait complètement. L'app garde désormais le nom, l'auteur, le lieu et une image — pour que celui dont tu ne retrouves plus le nom des mois après reste retrouvable.",
+  "showcase.v0101.restore":
+    "Restaurer remet en place un mod supprimé par l'app, et « Le retrouver » cherche sur mxb-mods et la boutique avec le nom conservé.",
+  "showcase.v0101.paints":
+    "Une peinture enregistrée apparaît maintenant dans le jeu en cours — sans alt-tab, sans resélectionner ton profil.",
+  "showcase.v0101.r6034":
+    "Un plantage causé par cette app est corrigé : la copie de msvcr90.dll qu'elle déposait tuait MX Bikes avec R6034. Elle la retire désormais.",
+  "showcase.v0101.logs":
+    "Partager les journaux crée la même archive que Enregistrer et te rend un lien, au lieu d'un fichier à téléverser.",
+  "showcase.v0101.bikes":
+    "Les motos que tu ne pilotes plus peuvent être retirées du sélecteur des préréglages.",
   "showcase.v0100.hero.title": "Le Designer prépare ses planches tout seul",
   "showcase.v0100.hero.body":
     "Il crée maintenant les planches qu'un modèle demande, glisse en dessous les plastiques de la moto elle-même pour décalquer et ouvre un modèle en une seconde environ au lieu de près de vingt.",

@@ -1233,6 +1233,20 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0101.hero.title":
+    "Your library remembers what you deleted",
+  "showcase.v0101.hero.body":
+    "Delete a track and the app used to forget it had ever existed. It now keeps the name, the author, where it was and a picture of it — so the one you can't name months later is still there to find.",
+  "showcase.v0101.restore":
+    "Restore puts a mod the app deleted back where it came from, and “Find it again” searches mxb-mods and the Shop using the name it kept.",
+  "showcase.v0101.paints":
+    "A paint saved on disk now shows up in the running game — no alt-tab, no reselecting your profile.",
+  "showcase.v0101.r6034":
+    "A crash this app was causing is fixed: the copy of msvcr90.dll it planted made MX Bikes die with R6034. It now takes that copy back.",
+  "showcase.v0101.logs":
+    "Share logs packs the same archive as Save logs and hands you a link, instead of a file to go and upload.",
+  "showcase.v0101.bikes":
+    "Bikes you no longer ride can be cleared out of the Presets picker.",
   "showcase.v0100.hero.title": "The Designer sets up its own sheets",
   "showcase.v0100.hero.body":
     "It now builds the sheets a model needs, lays the bike's own plastics underneath to trace over, and opens a model in about a second instead of nearly twenty.",

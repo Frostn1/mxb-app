@@ -1254,6 +1254,20 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0101.hero.title":
+    "La libreria si ricorda cosa hai cancellato",
+  "showcase.v0101.hero.body":
+    "Cancellare una pista la faceva sparire del tutto. Ora restano nome, autore, dove si trovava e un'immagine — così quella di cui mesi dopo non ricordi il nome la ritrovi lo stesso.",
+  "showcase.v0101.restore":
+    "Ripristina rimette a posto una mod cancellata dall'app, e “Ritrovala” cerca su mxb-mods e nello shop con il nome che si è tenuto.",
+  "showcase.v0101.paints":
+    "Una livrea salvata su disco ora compare nel gioco già avviato: niente alt-tab, niente riselezionare il profilo.",
+  "showcase.v0101.r6034":
+    "Risolto un crash causato da questa app: la copia di msvcr90.dll che lasciava faceva morire MX Bikes con R6034. Ora se la riprende.",
+  "showcase.v0101.logs":
+    "Condividi i log crea lo stesso archivio di Salva i log e ti restituisce un link, invece di un file da caricare.",
+  "showcase.v0101.bikes":
+    "Le moto che non usi più si possono togliere dall'elenco dei preset.",
   "showcase.v0100.hero.title": "Il Designer prepara i fogli da solo",
   "showcase.v0100.hero.body":
     "Ora crea i fogli che un modello chiede, mette sotto le plastiche della moto stessa da ricalcare e apre un modello in circa un secondo invece che in quasi venti.",
