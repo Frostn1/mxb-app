@@ -3,13 +3,24 @@
 ## Unreleased — a stalled download no longer hangs a server build
 
 ### Fixed
-- **One stuck file could hang a build indefinitely.** Each bike is fetched with a time limit
-  and a stall detector now, so a transfer that stops sending costs that one bike rather than
-  the whole machine; `--retry` never helped, because a connection that stays open and goes
-  quiet is not a failure it can see.
+- **One stuck file could hang a build indefinitely.** Each bike now gets a download budget
+  scaled to its own size — the time 100 KB/s would need, and never less than five minutes —
+  alongside a stall detector, so a transfer that stops sending costs that one bike rather than
+  the whole machine. `--retry` never helped: a connection that stays open and goes quiet is not
+  a failure it can see. The flat five-minute cap this started as would have been its own bug —
+  the pack's two biggest bikes are 184 MB, so the slower the instance, the more certain it was
+  to drop exactly the OEM bikes somebody built the server for.
+- **A bike that misses gets a second pass**, and a build that still comes up short records which
+  ones went missing instead of reporting the same "installed" as a complete build.
 - **A build says how far through the bikes it is.** The step was announced once and then went
   silent for the length of a four gigabyte download, which is indistinguishable from having
   hung — and for three quarters of an hour, it was.
+
+### Changed
+- The two bootstrap scripts are rendered and parsed by PowerShell in CI. They run in exactly one
+  place — as user-data on a Windows instance with no console, where every failure path destroys
+  the evidence — and they are assembled by string interpolation, so a mis-escaped backtick is a
+  broken build nobody can see. A stage the control plane would reject is caught there too.
 
 ## 2026-08-20
 

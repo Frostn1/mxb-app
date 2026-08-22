@@ -124,6 +124,57 @@ jobs:
       - name: Test
         run: npx vitest run
 
+  bootstrap-script:
+    # The one part of this repo that runs somewhere nobody can watch.
+    #
+    # Both scripts execute only as EC2 user-data on a Windows box with no console and no key
+    # pair, where every failure path ends in `Stop-Computer` and takes the transcript with it.
+    # They are also assembled by string interpolation -- a dozen escaped backticks and thirty
+    # escaped backslashes -- so a mis-escaped one produces PowerShell that is malformed rather
+    # than merely wrong, and `tsc` sees only a string either way. That is what this catches.
+    #
+    # It would not have caught the failures that actually lost builds so far: `-Tail -Raw` was
+    # an invalid parameter set, the hand-built `agent.json` was valid PowerShell holding invalid
+    # JSON, and `Start-BitsTransfer` failed at runtime. A parser sees none of those.
+    name: Bootstrap script (parse)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: control-plane/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./control-plane
+
+      - name: Render the bootstrap scripts
+        run: npm run render:bootstrap -- "${{ runner.temp }}"
+        working-directory: ./control-plane
+
+      - name: Parse them with PowerShell
+        shell: pwsh
+        run: |
+          $bad = $false
+          foreach ($name in @("bootstrap.ps1", "image-bootstrap.ps1")) {
+            $path = Join-Path "${{ runner.temp }}" $name
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($path, [ref] $null, [ref] $errors) | Out-Null
+            if ($errors -and $errors.Count -gt 0) {
+              $bad = $true
+              Write-Host "::error file=control-plane/src/bootstrap.ts::$name does not parse"
+              foreach ($e in $errors) { Write-Host "  line $($e.Extent.StartLineNumber): $($e.Message)" }
+            } else {
+              Write-Host "$name parses"
+            }
+          }
+          if ($bad) { exit 1 }
+
   server-agent:
     name: Server agent (test)
     runs-on: ubuntu-latest
