@@ -12,6 +12,7 @@ import {
   Link2,
   Link2Off,
   Wrench,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,35 @@ import { useT, type TFunc } from "../../i18n/context";
  * switching a model preserves the sound (and vice versa). A sound can optionally be
  * **bound** to a model swap, so activating that model pulls its sound along.
  */
+
+/**
+ * Orphan warnings the user has hidden, keyed on the bike *and* the files it's missing —
+ * a different breakage on the same bike is news again. Stored per machine, since which
+ * bikes are broken is a property of the install, not the account.
+ */
+const HIDDEN_ORPHANS_KEY = "mxb:orphanWarningsHidden:v1";
+
+function orphanKey(o: OrphanedSetup): string {
+  return `${o.bike}/${[...o.files].sort().join(",")}`;
+}
+
+function readHiddenOrphans(): Set<string> {
+  return new Set(
+    (localStorage.getItem(HIDDEN_ORPHANS_KEY) ?? "").split("|").filter(Boolean),
+  );
+}
+
+function writeHiddenOrphans(keys: Set<string>): Set<string> {
+  localStorage.setItem(HIDDEN_ORPHANS_KEY, [...keys].join("|"));
+  return keys;
+}
+
+/** Forget hidden warnings whose breakage is gone, so a repaired bike that breaks the
+ *  same way later warns afresh instead of staying silently hidden forever. */
+function pruneHiddenOrphans(live: OrphanedSetup[]): Set<string> {
+  const alive = new Set(live.map(orphanKey));
+  return writeHiddenOrphans(new Set([...readHiddenOrphans()].filter((k) => alive.has(k))));
+}
 
 /**
  * Trailing feedback for a swap toast.
@@ -151,6 +181,8 @@ export default function Locker() {
   const [registerOpen, setRegisterOpen] = useState(false);
   // Bikes gutted by a pre-0.6.3 swap — their setup files are in a swap folder.
   const [orphaned, setOrphaned] = useState<OrphanedSetup[]>([]);
+  // Of those, the ones the user has hidden with the banner's ✕.
+  const [hiddenOrphans, setHiddenOrphans] = useState<Set<string>>(readHiddenOrphans);
 
   const load = useCallback(async () => {
     setError(null);
@@ -159,11 +191,14 @@ export default function Locker() {
         scanModelSwaps(),
         scanSoundSwaps().catch(() => [] as BikeSounds[]),
         detectLooseSwaps().catch(() => [] as LooseSwapBike[]),
-        detectOrphanedSetup().catch(() => [] as OrphanedSetup[]),
+        detectOrphanedSetup().catch(() => null),
       ]);
       setRows(mergeRows(models, sounds));
       setLoose(detected);
-      setOrphaned(broken);
+      setOrphaned(broken ?? []);
+      // Prune only off a scan that actually ran — a failed detection is no evidence the
+      // breakage is fixed, and would drop the hidden warnings for nothing.
+      if (broken) setHiddenOrphans(pruneHiddenOrphans(broken));
     } catch (e) {
       setError(String(e));
       setRows([]);
@@ -207,6 +242,10 @@ export default function Locker() {
     },
     [load],
   );
+
+  const onHideOrphan = useCallback((o: OrphanedSetup) => {
+    setHiddenOrphans(writeHiddenOrphans(new Set(readHiddenOrphans()).add(orphanKey(o))));
+  }, []);
 
   const onRepair = (bike: string) =>
     run(
@@ -253,37 +292,47 @@ export default function Locker() {
         </button>
       </header>
 
-      {orphaned.map((o) => (
-        <div
-          key={o.bike}
-          className="mx-7 mb-3.5 flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/[0.07] px-3.5 py-2.5"
-        >
-          <Wrench className="size-4 flex-none text-destructive/80" />
-          <span className="min-w-0 flex-1 text-[12.5px] text-foreground/90">
-            <Trans
-              k="locker.orphanBanner"
-              values={{
-                bike: <span className="font-semibold">{o.bike}</span>,
-                files: (
-                  <span className="font-mono text-faint">{o.files.join(", ")}</span>
-                ),
-              }}
-            />
-          </span>
-          <button
-            onClick={() => void onRepair(o.bike)}
-            disabled={busy !== null}
-            className="flex flex-none items-center gap-1.5 rounded-md bg-destructive/15 px-2.5 py-1.5 text-[12px] font-semibold text-destructive transition-colors hover:bg-destructive/25 disabled:opacity-50"
+      {orphaned
+        .filter((o) => !hiddenOrphans.has(orphanKey(o)))
+        .map((o) => (
+          <div
+            key={o.bike}
+            className="mx-7 mb-3.5 flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/[0.07] px-3.5 py-2.5"
           >
-            {busy === o.bike ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Wrench className="size-3.5" />
-            )}
-            {t("locker.restore")}
-          </button>
-        </div>
-      ))}
+            <Wrench className="size-4 flex-none text-destructive/80" />
+            <span className="min-w-0 flex-1 text-[12.5px] text-foreground/90">
+              <Trans
+                k="locker.orphanBanner"
+                values={{
+                  bike: <span className="font-semibold">{o.bike}</span>,
+                  files: (
+                    <span className="font-mono text-faint">{o.files.join(", ")}</span>
+                  ),
+                }}
+              />
+            </span>
+            <button
+              onClick={() => void onRepair(o.bike)}
+              disabled={busy !== null}
+              className="flex flex-none items-center gap-1.5 rounded-md bg-destructive/15 px-2.5 py-1.5 text-[12px] font-semibold text-destructive transition-colors hover:bg-destructive/25 disabled:opacity-50"
+            >
+              {busy === o.bike ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Wrench className="size-3.5" />
+              )}
+              {t("locker.restore")}
+            </button>
+            <button
+              onClick={() => onHideOrphan(o)}
+              aria-label={t("locker.hideOrphan")}
+              title={t("locker.hideOrphan")}
+              className="flex size-7 flex-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        ))}
 
       {looseCount > 0 && (
         <button

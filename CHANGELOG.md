@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-22
+
+### Added
+- **A Locker repair warning can be dismissed.** The banner for a bike whose setup files an
+  old swap moved away sat at the top of the Locker with no way to put it down, so anyone who
+  had decided to leave that bike alone read the same three lines every visit. Each one now
+  carries a ✕. Hiding is remembered per bike *and* per set of missing files, so the same bike
+  breaking a different way still speaks up, and a bike you repair — then break again later —
+  warns afresh rather than staying quietly hidden.
+
 ## 2026-08-21 — v0.10.1 — Mods you deleted, remembered — and a crash we caused, undone
 
 ### Added
