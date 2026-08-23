@@ -271,7 +271,7 @@ fn keep_keys(cfg: &AppConfig, preset: &Preset) -> (BTreeSet<String>, Vec<bundle:
     let mut keys = BTreeSet::new();
     let mut unresolved = Vec::new();
 
-    if let Ok(plan) = bundle::plan_detailed(cfg, &preset.loadout) {
+    if let Ok(plan) = bundle::plan_detailed(cfg, &preset.loadout, None) {
         for a in &plan.assets {
             keys.insert(key(&format!("mods/{}", a.rel_dest)));
         }

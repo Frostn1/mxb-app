@@ -2,6 +2,20 @@
 
 ## 2026-08-22
 
+### Fixed
+- **Paint sync published the wrong bike's livery.** Liveries were matched by filename alone,
+  so a rider with `Race.pnt` on two bikes published whichever the folder walk reached first —
+  and the file carried that bike's install path, so everyone on the grid saw it land on the
+  wrong bike as well. A livery is now resolved under the bike that actually wears it, and a
+  livery missing from that bike is reported as missing rather than borrowed from another one.
+  The same mismatch made the live-reload watcher watch another bike's file, so a paint edited
+  mid-session could refresh late or not at all.
+- **Helmet, goggle, boot and protection paints were never shared.** Gear paints that sit
+  inside their model's folder were being folded into that folder — correct for a preset zip,
+  which carries the folder whole, but a publish uploads paint files one at a time and skips
+  folders, so those paints silently went nowhere. Gear paints now publish alongside bike
+  liveries; preset bundles still pack the folder once.
+
 ### Added
 - **A Locker repair warning can be dismissed.** The banner for a bike whose setup files an
   old swap moved away sat at the top of the Locker with no way to put it down, so anyone who

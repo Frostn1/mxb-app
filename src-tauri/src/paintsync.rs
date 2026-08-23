@@ -244,7 +244,7 @@ pub const MAX_BIKES: usize = 32;
 /// Read every bike in a profile and hash what each one is wearing.
 ///
 /// One `profile.ini` parse ([`presets::read_all_loadouts`]) and one library walk
-/// ([`bundle::plan_many`]) for the whole profile — doing either per bike turns publishing
+/// ([`bundle::plan_profile`]) for the whole profile — doing either per bike turns publishing
 /// into dozens of recursive scans of a folder holding every livery the player owns.
 pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let profiles_dir = cfg.profiles_dir();
@@ -259,7 +259,7 @@ pub fn local_look(cfg: &AppConfig, profile: &str) -> anyhow::Result<LocalLook> {
     let skipped = loadouts.len().saturating_sub(MAX_BIKES);
     loadouts.truncate(MAX_BIKES);
 
-    let plans = bundle::plan_many(cfg, &loadouts.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>());
+    let plans = bundle::plan_profile(cfg, &loadouts);
 
     let mut sources = std::collections::HashMap::new();
     let mut oversized = 0usize;
