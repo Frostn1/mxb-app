@@ -3,6 +3,14 @@
 ## 2026-08-22
 
 ### Fixed
+- **An install blocked by antivirus reported a bare "os error 2".** When a security product
+  blocks a freshly downloaded mod file in the temp folder, the app's check for it asked the
+  wrong question — it tested only whether the file still had a directory entry, which a
+  scanner holding the *contents* leaves untouched. The advice written for exactly this case
+  never fired, and the install failed with a raw path and an error number that reads as if
+  the mod were broken. The check now tries to read the file the same way the copy does, so a
+  blocked install names the file, says whether it was removed or locked, and points at the
+  folder to add an exclusion for.
 - **Paint sync published the wrong bike's livery.** Liveries were matched by filename alone,
   so a rider with `Race.pnt` on two bikes published whichever the folder walk reached first —
   and the file carried that bike's install path, so everyone on the grid saw it land on the
