@@ -574,7 +574,7 @@ fn worn_paints(cfg: &AppConfig) -> Vec<String> {
     let Ok(loadout) = presets::read_loadout(&profiles_dir, &profile, &bike) else {
         return Vec::new();
     };
-    let Ok(plan) = bundle::plan_detailed(cfg, &loadout) else {
+    let Ok(plan) = bundle::plan_detailed(cfg, &loadout, Some(&bike)) else {
         return Vec::new();
     };
     plan.assets
