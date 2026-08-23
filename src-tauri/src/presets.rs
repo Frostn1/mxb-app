@@ -605,7 +605,78 @@ pub fn encode_code_public(preset: &Preset) -> String {
     encode_code(preset)
 }
 
+/// Reject a decoded preset that could reach outside the folders a preset is meant to touch.
+///
+/// A code is written by whoever hands it over, and its fields all end up somewhere real: the
+/// content paths are joined onto the mods root, `model_swap` names a folder under a bike,
+/// the slot values become `profile.ini` lines, and the bundle links get fetched. Checking
+/// here means every caller of [`decode_code`] gets the same guarantee from one place.
+fn check_code(preset: &Preset) -> anyhow::Result<()> {
+    let clean = |s: &str| !s.chars().any(|c| c.is_control());
+    if !clean(&preset.name) {
+        anyhow::bail!("share code has a malformed preset name");
+    }
+
+    // A slot value is written verbatim as `bikeid=value`. A newline in one would inject
+    // whatever lines the sender liked into the receiver's `profile.ini`.
+    for section in SLOT_SECTIONS {
+        if let Some(v) = preset.loadout.slot(section) {
+            if !clean(v) {
+                anyhow::bail!("share code has a malformed '{section}' value");
+            }
+        }
+    }
+    for (section, value) in &preset.loadout.extra {
+        // Keys become `[section]` headers, so brackets are as dangerous as newlines here.
+        if !clean(section) || !clean(value) || section.contains(['[', ']']) {
+            anyhow::bail!("share code has a malformed '{section}' slot");
+        }
+    }
+    if !clean(&preset.loadout.race_number) {
+        anyhow::bail!("share code has a malformed race number");
+    }
+
+    // The variant folder brought in under `<bike>/FrostMod Models/`. `apply_model_swap`
+    // checks this too — this rejects the code rather than letting it sit in the list until
+    // the day someone applies it.
+    let swap = preset.loadout.model_swap.trim();
+    if !swap.is_empty() && !crate::library::is_simple_name(swap) {
+        anyhow::bail!("share code names an unsafe model swap ('{swap}')");
+    }
+
+    if let Some(content) = preset.content.as_ref() {
+        for rel in content.tracks.iter().chain(content.keep.iter()) {
+            if !rel.trim().is_empty() && !crate::library::is_safe_rel(rel) {
+                anyhow::bail!("share code carries an unsafe path ('{rel}')");
+            }
+        }
+    }
+    if let Some(bundle) = preset.bundle.as_ref() {
+        check_bundle_ref(bundle)?;
+    }
+    Ok(())
+}
+
+/// Every link in a bundle has to be one the app would fetch over the network — never a
+/// `file://` URL or a local path dressed up as one.
+pub fn check_bundle_ref(bundle: &BundleRef) -> anyhow::Result<()> {
+    let http = |u: &str| {
+        let u = u.trim().to_ascii_lowercase();
+        u.starts_with("https://") || u.starts_with("http://")
+    };
+    if !http(&bundle.url) || bundle.parts.iter().any(|p| !http(p)) {
+        anyhow::bail!("share code points at something that isn't a download link");
+    }
+    Ok(())
+}
+
 pub fn decode_code(text: &str) -> anyhow::Result<Preset> {
+    let preset = parse_code(text)?;
+    check_code(&preset)?;
+    Ok(preset)
+}
+
+fn parse_code(text: &str) -> anyhow::Result<Preset> {
     let t = text.trim();
     if let Some(b64) = t.strip_prefix(CODE_PREFIX) {
         let bytes = STANDARD
@@ -1030,6 +1101,37 @@ BSB23_Ducati_V4R=BS_Racing_Battlax
         assert_eq!(back.loadout.helmet_paint, "CLUTCH Deeg F REDB");
         assert_eq!(back.content.unwrap().tracks, vec!["mods/tracks/RedBud.pkz"]);
         let _ = round_trip_raw_json(&preset);
+    }
+
+    /// A code is a string someone pastes in from Discord, so every path it carries is
+    /// hostile until checked. These are the shapes that reached a real file operation:
+    /// `content` paths join onto the mods root, `model_swap` names a folder under a bike,
+    /// and a slot value is written verbatim as a `profile.ini` line.
+    #[test]
+    fn a_code_that_climbs_out_is_refused() {
+        let hostile = [
+            r#"{"name":"x","loadout":{},"content":{"tracks":["../../mxbikes.exe"],"keep":[]}}"#,
+            r#"{"name":"x","loadout":{},"content":{"tracks":[],"keep":["/etc/passwd"]}}"#,
+            r#"{"name":"x","loadout":{},"content":{"tracks":["C:/Windows/System32"],"keep":[]}}"#,
+            r#"{"name":"x","loadout":{"modelSwap":"../../../Startup"}}"#,
+            r#"{"name":"x","loadout":{"paint":"a\n[info]\nbikeid=b"}}"#,
+            r#"{"name":"x","loadout":{"extra":{"[info]\nbikeid":"b"}}}"#,
+            r#"{"name":"x","loadout":{},"bundle":{"url":"file:///etc/passwd","host":"x","size":1}}"#,
+            r#"{"name":"x","loadout":{},"bundle":{"url":"https://x/a.zip","host":"x","size":1,"parts":["file:///etc/passwd"]}}"#,
+        ];
+        for json in hostile {
+            assert!(decode_code(json).is_err(), "should be refused: {json}");
+        }
+    }
+
+    /// And the ordinary shapes still decode — a relative content path, a plain model swap,
+    /// and slot values with the punctuation real paint names carry.
+    #[test]
+    fn an_ordinary_code_still_decodes() {
+        let json = r#"{"name":"RedBud #92","loadout":{"paint":"CLUTCH Deeg F REDB","modelSwap":"2024 Factory"},"content":{"tracks":["mods/tracks/EU/RedBud.pkz"],"keep":["mods/bikes/OEM Pack.pkz"]},"bundle":{"url":"https://files.catbox.moe/a.zip","host":"catbox","size":10}}"#;
+        let back = decode_code(json).unwrap();
+        assert_eq!(back.loadout.model_swap, "2024 Factory");
+        assert_eq!(back.content.unwrap().tracks, vec!["mods/tracks/EU/RedBud.pkz"]);
     }
 
     /// Presets saved before Manage existed have no `content` key at all. They have to keep

@@ -120,6 +120,25 @@ pub fn is_simple_name(s: &str) -> bool {
         && !s.contains(':')
 }
 
+/// True when `rel` is a relative path that cannot leave the folder it is joined onto —
+/// no `..`, no absolute or UNC root, no drive letter, no control characters.
+///
+/// [`is_simple_name`] guards a single segment; this guards a whole `mods/`-relative path,
+/// which is the shape a share code carries (`tracks/EU/RedBud.pkz`). A code is written by
+/// whoever hands it to you, so every path out of one is checked with this before it reaches
+/// anything that joins it onto the mods root.
+pub fn is_safe_rel(rel: &str) -> bool {
+    // A trailing separator is just how some senders write a folder; a leading one is a path
+    // that means to start from the root, which this must never accept.
+    let rel = rel.trim().trim_end_matches(['/', '\\']);
+    if rel.is_empty() || rel.chars().any(|c| c.is_control()) {
+        return false;
+    }
+    // Split on both separators so a Windows-shaped path is judged the same way a POSIX one
+    // is: any empty segment left is a leading separator (absolute, or a UNC root).
+    rel.split(['/', '\\']).all(is_simple_name)
+}
+
 fn sanitize_seg(seg: &str) -> String {
     seg.chars()
         .map(|c| match c {
@@ -827,6 +846,34 @@ mod tests {
         let d = std::env::temp_dir().join(format!("frost-lib-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    /// The guard every share code is checked against. A rel that climbs, starts at a root,
+    /// or names a drive can never be joined onto the mods folder.
+    #[test]
+    fn safe_rels_are_the_ones_that_stay_put() {
+        for ok in [
+            "tracks/EU/RedBud.pkz",
+            "rider/helmets/AGV/paints/Blue.pnt",
+            "bikes\\KTM\\paints",
+            "tracks/EU/",
+            " tracks/RedBud.pkz ",
+        ] {
+            assert!(is_safe_rel(ok), "should be safe: {ok:?}");
+        }
+        for bad in [
+            "",
+            "..",
+            "../mxbikes.exe",
+            "tracks/../../evil",
+            "tracks\\..\\evil",
+            "/etc/passwd",
+            "\\\\server\\share",
+            "C:/Windows/System32",
+            "tracks/\nRedBud.pkz",
+        ] {
+            assert!(!is_safe_rel(bad), "should be refused: {bad:?}");
+        }
     }
 
     #[test]

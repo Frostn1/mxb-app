@@ -261,6 +261,17 @@ pub fn decode(text: &str) -> anyhow::Result<FileShare> {
     if share.items.is_empty() {
         anyhow::bail!("this share code carries no files");
     }
+    // Every `rel` is joined onto the receiver's mods root on import, and the first segment
+    // of the first one picks the type folder outright — so a code written by hand with
+    // `../` in it would install into the game folder itself. Nothing this app produces
+    // looks like that: `plan` derives every rel from a real path under the mods root.
+    if let Some(bad) = share.items.iter().find(|i| !library::is_safe_rel(&i.rel)) {
+        anyhow::bail!(
+            "this share code points outside the mods folder ('{}') — don't import it",
+            bad.rel
+        );
+    }
+    crate::presets::check_bundle_ref(&share.bundle)?;
     Ok(share)
 }
 
@@ -389,6 +400,40 @@ mod tests {
         assert_eq!(p.items[0].rel, "tracks/Loose Track");
         assert!(p.items[0].is_dir);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The import target is picked from the first segment of the first item's `rel`, so a
+    /// hand-written code with `../` in it would install into the game folder itself.
+    #[test]
+    fn a_code_that_points_outside_the_mods_folder_is_refused() {
+        let item = |rel: &str| ShareItem {
+            name: "x.pkz".into(),
+            rel: rel.into(),
+            size: 1,
+            is_dir: false,
+        };
+        let share = |items: Vec<ShareItem>, url: &str| FileShare {
+            items,
+            total_size: 1,
+            bundle: BundleRef {
+                url: url.into(),
+                host: "catbox".into(),
+                size: 1,
+                parts: Vec::new(),
+            },
+        };
+        let good = "https://files.catbox.moe/a.zip";
+        for hostile in [
+            share(vec![item("../evil.dll")], good),
+            share(vec![item("tracks/../../evil.dll")], good),
+            share(vec![item("/etc/passwd")], good),
+            // The first item routes the install; a climb hiding behind a good one still lands.
+            share(vec![item("tracks/EU/RedBud.pkz"), item("../evil.dll")], good),
+            share(vec![item("tracks/EU/RedBud.pkz")], "file:///etc/passwd"),
+        ] {
+            let code = encode(&hostile);
+            assert!(decode(&code).is_err(), "should be refused: {:?}", hostile.items);
+        }
     }
 
     #[test]
