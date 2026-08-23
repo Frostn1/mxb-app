@@ -8,7 +8,7 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -1192,7 +1192,7 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
             .captures(cd)
         {
             let name = c[1].trim().trim_matches('"');
-            if !name.is_empty() {
+            if is_usable_filename(name) {
                 return sanitize(name);
             }
         }
@@ -1205,11 +1205,21 @@ fn filename_from(resp: &reqwest::Response, url: &str) -> String {
         .next()
         .unwrap_or("")
         .to_string();
-    if from_url.is_empty() {
-        "download.bin".to_string()
-    } else {
+    if is_usable_filename(&from_url) {
         sanitize(&from_url)
+    } else {
+        "download.bin".to_string()
     }
+}
+
+/// Whether a name a server handed us can be used as a file name at all.
+///
+/// `sanitize` strips separators but leaves dots alone, so `..` would survive it and name the
+/// staging folder's parent. Both sources here are remote — a `Content-Disposition` header and
+/// the URL — and a share code chooses the URL.
+fn is_usable_filename(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty() && name != "." && name != ".."
 }
 
 pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()> {
@@ -1217,6 +1227,10 @@ pub(crate) fn extract_archive(archive: &Path, dest: &Path) -> anyhow::Result<()>
         "zip" => {
             let file = File::open(archive)?;
             zip::ZipArchive::new(file)?.extract(dest)?;
+            // `zip` filters `..` out of entry names, but a symlink entry is the escape a
+            // name filter can't see: the link lands inside `dest` and points anywhere, and
+            // the entries after it are written straight through it. Sweep it like the rest.
+            purge_escapees(archive, dest)?;
         }
         "7z" => {
             sevenz_rust::decompress_file(archive, dest)
@@ -1626,6 +1640,7 @@ pub(crate) fn place_mod_with(
     on_conflict: OnConflict,
 ) -> anyhow::Result<usize> {
     let route = plan_placement(extracted, mods_dir, type_folder, dest_folder, slug);
+    guard_placement(mods_dir, &route.placement)?;
     apply(&route.placement, on_conflict).inspect_err(|e| {
         // The one place every install — download, import, drop — funnels through, so one
         // log line here covers all three. Without it a failed install left no trace at all
@@ -1680,6 +1695,33 @@ fn roots_for(placement: &Placement) -> Vec<PathBuf> {
 /// or even whether it was the source or the destination. Every step says what it was doing
 /// to what, and a failure is logged as well as returned — the toast is transient, the log
 /// is what a player can send back.
+/// Refuse a placement that would write outside the mods folder.
+///
+/// `type_folder` and `dest_folder` are joined onto `mods_dir`, and `Path::join` is happy to
+/// accept `..` in either — a file-share code picks its type folder from a path the sender
+/// wrote, and the dropzone's destination comes back from the frontend. Every install funnels
+/// through [`place_mod_with`], so the check belongs here rather than at each of its doors.
+fn guard_placement(mods_dir: &Path, placement: &Placement) -> anyhow::Result<()> {
+    let dsts = roots_for(placement)
+        .into_iter()
+        .chain(writes_for(placement).into_iter().map(|(_, dst)| dst));
+    for dst in dsts {
+        // `starts_with` alone would pass `<mods>/..`: joining never normalises, so the
+        // climb is still sitting there as a component.
+        let inside = dst
+            .strip_prefix(mods_dir)
+            .map(|rel| !rel.components().any(|c| c == Component::ParentDir))
+            .unwrap_or(false);
+        if !inside {
+            anyhow::bail!(
+                "refusing to install to {} — that's outside the mods folder",
+                dst.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 fn apply(placement: &Placement, on_conflict: OnConflict) -> anyhow::Result<usize> {
     for root in roots_for(placement) {
         std::fs::create_dir_all(&root)
@@ -2695,6 +2737,26 @@ mod tests {
             .join("bikes/MX1OEM_2023_KTM_450_SX-F/paints/cool.pnt")
             .exists());
         assert!(!mods.join("tracks/MX1OEM_2023_KTM_450_SX-F").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The type folder is not always ours to trust — a file-share code picks it from a path
+    /// the sender wrote. `mods_dir.join("..")` is the MX Bikes folder itself, next to the
+    /// executable, so the placement has to be refused rather than merely misrouted.
+    #[test]
+    fn refuses_a_destination_outside_the_mods_folder() {
+        let root = place_tmp("escape-place");
+        let ex = root.join("ex");
+        touch(&ex.join("evil.dll"));
+        let mods = root.join("game/mods");
+        std::fs::create_dir_all(&mods).unwrap();
+
+        for (type_folder, dest_folder) in [("..", ""), ("tracks", "../.."), ("../..", "x")] {
+            let err = place_mod(&ex, &mods, type_folder, dest_folder, "slug").unwrap_err();
+            assert!(err.to_string().contains("outside the mods folder"), "{err}");
+        }
+        assert!(!root.join("game/evil.dll").exists(), "a placement escaped the mods folder");
+        assert!(!root.join("evil.dll").exists(), "a placement escaped the mods folder");
         let _ = std::fs::remove_dir_all(&root);
     }
 
