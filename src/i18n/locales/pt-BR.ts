@@ -353,6 +353,12 @@ export const ptBR: Translation = {
   "viewer.scrollToZoom": "Role para dar zoom",
   "viewer.rightDragToPan": "Arraste com o botão direito para mover",
   "viewer.paintReloaded": "Pintura recarregada",
+  "viewer.pose": "Postura",
+  "viewer.poseRear": "Traseira",
+  "viewer.poseFront": "Dianteira",
+  "viewer.poseSteer": "Direção",
+  "viewer.poseLevel": "Nivelar rodas",
+  "viewer.poseReset": "Redefinir",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Pesquisar…",

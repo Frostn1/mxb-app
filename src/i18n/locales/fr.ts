@@ -354,6 +354,12 @@ export const fr: Translation = {
   "viewer.scrollToZoom": "Molette pour zoomer",
   "viewer.rightDragToPan": "Clic droit glissé pour déplacer",
   "viewer.paintReloaded": "Déco rechargée",
+  "viewer.pose": "Position",
+  "viewer.poseRear": "Arrière",
+  "viewer.poseFront": "Avant",
+  "viewer.poseSteer": "Direction",
+  "viewer.poseLevel": "Aligner les roues",
+  "viewer.poseReset": "Réinitialiser",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Rechercher…",

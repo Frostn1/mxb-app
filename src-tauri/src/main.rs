@@ -1504,6 +1504,12 @@ struct BikeModel {
     /// nothing about where it is on the bike. The Designer names the flank a sheet region
     /// paints from the sign of x, and that answer is only worth giving once this is true.
     assembled: bool,
+    /// The joints this bike can be posed about, in the frame `nodes` came back in.
+    ///
+    /// `None` for a bike that wasn't assembled — there is nothing to pose a pile of parts
+    /// that are each still in their own frame. See [`edf::BikeRig`] for why the viewer poses
+    /// at all rather than drawing one settled stance.
+    rig: Option<edf::BikeRig>,
 }
 
 impl BikeModel {
@@ -1770,22 +1776,27 @@ fn build_bike_model(
     // Whether the parts ended up in one frame. Logged rather than printed: it decides what the
     // Designer may say about a sheet's flanks, so "was this bike assembled?" has to be
     // answerable from the log file after the fact, not only from a terminal nobody kept.
-    let assembled = match geom {
+    let mut rig = match geom {
         Some(g) => {
-            let ok = edf::assemble_bike(&mut nodes, g);
-            if !ok {
+            let rig = edf::assemble_bike(&mut nodes, g);
+            if rig.is_none() {
                 log::warn!("[viewer] {label}: .geom present but missing mount points — parts unassembled");
             }
-            ok
+            rig
         }
         None => {
             if !nodes.is_empty() {
                 log::warn!("[viewer] {label}: no .geom alongside the mesh — parts unassembled");
             }
-            false
+            None
         }
     };
+    let assembled = rig.is_some();
     edf::to_right_handed(&mut nodes);
+    // The rig names points on the mesh, so it goes through the same mirror the mesh does.
+    if let Some(r) = rig.as_mut() {
+        r.to_right_handed();
+    }
     // Nothing to draw. Returning a model with no nodes is worse than failing: the viewer reads
     // it as a successful load and puts its stand-in bike on screen, which reads as "this is your
     // bike" rather than "none of this bike arrived". A cloud-synced archive that hasn't been
@@ -1917,7 +1928,7 @@ fn build_bike_model(
         log::info!("  node '{}' placed={} {}", n.name, n.placed, subs.join(", "));
     }
 
-    let model = BikeModel { nodes, paints, base: model_base, assembled };
+    let model = BikeModel { nodes, paints, base: model_base, assembled, rig };
     if let Ok(mut c) = bike_cache().lock() {
         // The evicted bike's pixels go with it — nothing else references them.
         if let Some(dropped) = c.insert(key, model.clone()) {
@@ -8218,6 +8229,7 @@ mod viewer_tests {
             }],
             base: vec![tex("plastics", "t-own"), tex("wheel", "t-shared")],
             assembled: true,
+            rig: None,
         };
         let tokens = model.tokens();
         assert!(tokens.contains(&"t-own".to_string()), "the overridden one is still released");

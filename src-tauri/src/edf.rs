@@ -276,24 +276,119 @@ fn rot_x(p: [f32; 3], deg: f32) -> [f32; 3] {
     [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]
 }
 
+// Where every part of a bike hangs off, resolved from the .geom once.
+struct Mounts {
+    // Rake tilts the steering head back, i.e. toward -Z (front is +Z). Degrees, as rot_x takes.
+    rake: f32,
+    head: [f32; 3],
+    pivot: [f32; 3],
+    steer_joint: [f32; 3],
+    rsusp_joint: [f32; 3],
+    fork_origin: [f32; 3],
+}
+
+fn mounts(
+    g: &std::collections::HashMap<String, [f32; 3]>,
+    sc: &std::collections::HashMap<String, f32>,
+) -> Option<Mounts> {
+    let head = *g.get("chassis_steer")?;
+    let pivot = *g.get("chassis_rsusp_min")?;
+    let steer_joint = *g.get("steer_joint")?;
+    let rsusp_joint = *g.get("rsusp_joint")?;
+    let front_upper = *g.get("front_upper")?;
+    let rake = -sc.get("rakeangle_min").copied().unwrap_or(0.0);
+    let fork_origin = v_add(rot_x(v_sub(front_upper, steer_joint), rake), head);
+    Some(Mounts { rake, head, pivot, steer_joint, rsusp_joint, fork_origin })
+}
+
+impl Mounts {
+    /// (front, rear) axle, in the assembled bike's frame.
+    ///
+    /// Front is the fork's `fwheel` point carried down the raked fork. Rear is the swingarm's,
+    /// taken at the midpoint of the chain-adjuster range the .geom gives as `rwheel_min`/
+    /// `rwheel_max`. `None` when the .geom names neither — a bike we can still assemble but
+    /// can't say where the wheels ride on.
+    fn axles(&self, g: &std::collections::HashMap<String, [f32; 3]>) -> Option<([f32; 3], [f32; 3])> {
+        let fwheel = *g.get("fwheel")?;
+        let lo = *g.get("rwheel_min")?;
+        let hi = g.get("rwheel_max").copied().unwrap_or(lo);
+        let rear = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
+        Some((
+            v_add(rot_x(fwheel, self.rake), self.fork_origin),
+            v_add(rear, v_sub(self.pivot, self.rsusp_joint)),
+        ))
+    }
+}
+
+/// The joints an assembled bike can be posed about, in the frame its vertices come back in.
+///
+/// The .geom places the parts in the frame the bike was *authored* in, and says nothing about
+/// where the suspension rides at rest — there is no travel in the file, only a setup range
+/// (`chassis_rsusp_min`/`_max`, tenths of a millimetre apart) and the chain-adjuster slot
+/// (`rwheel_min`/`_max`). Ride height falls out of the physics, which the viewer doesn't run.
+/// So the viewer is handed the joints instead and lets the user move them: the swingarm turns
+/// about `pivot`, the fork slides along the axis `rake` tilts through `steer_head`, and the
+/// axles say where the wheels ride so a pose can be solved for level.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BikeRig {
+    /// Swingarm pivot.
+    pub pivot: [f32; 3],
+    /// A point on the steering axis (the head itself).
+    pub steer_head: [f32; 3],
+    /// Rake, in degrees, tilting the steering axis back from vertical.
+    pub rake: f32,
+    pub front_axle: Option<[f32; 3]>,
+    pub rear_axle: Option<[f32; 3]>,
+}
+
+impl BikeRig {
+    /// Shift every point by the same amount the vertices were shifted by when the assembled
+    /// bike was centred, so the rig and the mesh stay in one frame.
+    fn recentre(&mut self, c: [f32; 3]) {
+        self.pivot = v_sub(self.pivot, c);
+        self.steer_head = v_sub(self.steer_head, c);
+        self.front_axle = self.front_axle.map(|p| v_sub(p, c));
+        self.rear_axle = self.rear_axle.map(|p| v_sub(p, c));
+    }
+
+    /// Follow the mesh into three.js' frame — see [`to_right_handed`], which must have been
+    /// run on the nodes for this to be the right thing to do.
+    ///
+    /// Points mirror; `rake` doesn't. The mirror negates x alone, and both the fork axis
+    /// (x = 0) and the rotation about it act purely on y/z, so the angle carries over as it
+    /// stands and reads as a three.js `rotation.x` of the same sign.
+    pub fn to_right_handed(&mut self) {
+        self.pivot[0] = -self.pivot[0];
+        self.steer_head[0] = -self.steer_head[0];
+        if let Some(p) = self.front_axle.as_mut() {
+            p[0] = -p[0];
+        }
+        if let Some(p) = self.rear_axle.as_mut() {
+            p[0] = -p[0];
+        }
+    }
+}
+
 // Assemble a bike's parts onto its chassis via the .geom mount points, then centre
-// on the origin. Returns false (nodes untouched) if the .geom lacks the mounts.
-pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> bool {
+// on the origin. `None` (nodes untouched) if the .geom lacks the mounts.
+pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> Option<BikeRig> {
     let g = parse_geom(geom_bytes);
     let sc = parse_geom_scalars(geom_bytes);
-    let (Some(&head), Some(&pivot), Some(&steer_joint), Some(&rsusp_joint), Some(&front_upper)) = (
-        g.get("chassis_steer"),
-        g.get("chassis_rsusp_min"),
-        g.get("steer_joint"),
-        g.get("rsusp_joint"),
-        g.get("front_upper"),
-    ) else {
-        return false;
+    let Some(m) = mounts(&g, &sc) else {
+        return None;
     };
-    // Rake tilts the steering head back, i.e. toward -Z (front is +Z).
-    let rake = -sc.get("rakeangle_min").copied().unwrap_or(0.0);
-    let place_steer = |p: [f32; 3]| v_add(rot_x(v_sub(p, steer_joint), rake), head);
-    let fork_origin = place_steer(front_upper);
+    let (head, pivot, steer_joint, rsusp_joint, rake) =
+        (m.head, m.pivot, m.steer_joint, m.rsusp_joint, m.rake);
+    let fork_origin = m.fork_origin;
+    let axles = m.axles(&g);
+    let mut rig = BikeRig {
+        pivot,
+        steer_head: head,
+        rake,
+        front_axle: axles.map(|(f, _)| f),
+        rear_axle: axles.map(|(_, r)| r),
+    };
 
     for n in nodes.iter_mut() {
         // An unplaced part is still in raw authored space — the .geom mounts don't apply.
@@ -334,7 +429,7 @@ pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> bool {
         }
     }
     if lo[0] > hi[0] {
-        return true;
+        return Some(rig);
     }
     let c = [
         (lo[0] + hi[0]) * 0.5,
@@ -348,7 +443,8 @@ pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> bool {
             }
         }
     }
-    true
+    rig.recentre(c);
+    Some(rig)
 }
 
 // A node name at `o`: 2-31 name-safe chars starting with a letter, else None.
@@ -1437,6 +1533,105 @@ mod tests {
         assert_eq!(m.get("steer_joint"), Some(&[0.0, 0.0412, -0.0372]));
         assert!(!m.contains_key("rsusp_type")); // non-vector line ignored
         assert!(!m.contains_key("chain_pitch")); // single scalar ignored
+    }
+
+    /// The mount points of a real bike (MX1OEM_1996_Honda_CR250), trimmed to the lines the
+    /// rig is built from. Kept verbatim so the numbers below can be checked against the
+    /// bike's published spec rather than against this test.
+    const CR250_GEOM: &[u8] = b"type = bike\n\
+chassis_steer = 0, 0.9591, 0.3317\n\
+chassis_rsusp_min = 0, 0.401, -0.219\n\
+rakeangle_min = 27.2\n\
+steer_joint = 0, 0.0025, -0.0229\n\
+front_upper = 0, -0.4032, -0.0026\n\
+fwheel = 0, -0.2046, 0.0147\n\
+rsusp_joint = 0, 0.0004, 0.0558\n\
+rwheel_min = 0, 0.0118, -0.4985\n\
+rwheel_max = 0, 0.0122, -0.5359\n";
+
+    /// A node of loose points, already in its part's local frame — the shape `assemble_bike`
+    /// mounts. What comes back is where those points landed.
+    fn mount_node(name: &str, points: &[[f32; 3]]) -> EdfNode {
+        EdfNode {
+            name: name.into(),
+            positions: points.iter().flatten().copied().collect(),
+            uvs: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+            submeshes: Vec::new(),
+            texture: None,
+            placed: true,
+            materials: Vec::new(),
+        }
+    }
+
+    fn vertex(n: &EdfNode, i: usize) -> [f32; 3] {
+        [n.positions[i * 3], n.positions[i * 3 + 1], n.positions[i * 3 + 2]]
+    }
+
+    fn close(a: [f32; 3], b: [f32; 3], tol: f32) -> bool {
+        (0..3).all(|k| (a[k] - b[k]).abs() < tol)
+    }
+
+    /// The axles are what a stance is solved against, and nothing in the mesh says where they
+    /// are — only the .geom does. Checked against the real bike: a 1996 CR250R's wheelbase is
+    /// about 1450 mm.
+    #[test]
+    fn rig_axles_land_a_real_wheelbase_apart() {
+        let mut nodes = [mount_node("chassis", &[[0.0, 0.0, 0.0], [0.0, 1.0, 0.5]])];
+        let rig = assemble_bike(&mut nodes, CR250_GEOM).expect("the .geom has every mount");
+        let (front, rear) = (rig.front_axle.expect("front"), rig.rear_axle.expect("rear"));
+        let wheelbase = front[2] - rear[2];
+        assert!(
+            (wheelbase - 1.434).abs() < 0.03,
+            "wheelbase {wheelbase} m is not a 250's"
+        );
+        // Both axles on the bike's centreline, and within a wheel's worth of the same height —
+        // a rig that had the rear swung out would pass the wheelbase check and nothing else.
+        assert!(front[0].abs() < 1e-4 && rear[0].abs() < 1e-4);
+        assert!((front[1] - rear[1]).abs() < 0.05, "axles {front:?} {rear:?}");
+    }
+
+    /// The rig names points *on the mesh*, so it has to survive the centring the mesh gets:
+    /// a vertex sitting exactly on the swingarm pivot must still be on `rig.pivot` afterwards.
+    /// Off by the centring shift, every pose would swing about a point in mid-air.
+    #[test]
+    fn rig_lands_in_the_frame_the_mesh_came_back_in() {
+        let g = parse_geom(CR250_GEOM);
+        // The swingarm's own joint: assembly puts this vertex on the chassis' pivot.
+        let joint = g["rsusp_joint"];
+        let mut nodes = [
+            mount_node("chassis", &[[0.0, 0.0, 0.0], [0.0, 1.2, 0.9]]),
+            mount_node("rsusp", &[joint]),
+        ];
+        let rig = assemble_bike(&mut nodes, CR250_GEOM).expect("assembled");
+        assert!(
+            close(vertex(&nodes[1], 0), rig.pivot, 1e-4),
+            "pivot {:?} left the mesh's {:?}",
+            rig.pivot,
+            vertex(&nodes[1], 0)
+        );
+    }
+
+    /// …and the same again through the mirror into three.js' frame.
+    #[test]
+    fn rig_follows_the_mesh_into_the_right_handed_frame() {
+        let g = parse_geom(CR250_GEOM);
+        let joint = g["rsusp_joint"];
+        let mut nodes = [
+            // Off the centreline, so a mirror that did nothing would be caught.
+            mount_node("chassis", &[[0.3, 0.0, 0.0], [-0.1, 1.2, 0.9]]),
+            mount_node("rsusp", &[[joint[0] + 0.25, joint[1], joint[2]]]),
+        ];
+        let mut rig = assemble_bike(&mut nodes, CR250_GEOM).expect("assembled");
+        let before = rig.pivot;
+        to_right_handed(&mut nodes);
+        rig.to_right_handed();
+        assert!((rig.pivot[0] + before[0]).abs() < 1e-6, "x should have flipped");
+        assert_eq!(rig.pivot[1], before[1]);
+        // The swingarm vertex sits 0.25 m off the pivot either side of the mirror.
+        let d = vertex(&nodes[1], 0)[0] - rig.pivot[0];
+        assert!((d + 0.25).abs() < 1e-4, "mesh and rig disagree after mirroring: {d}");
     }
 
     #[test]

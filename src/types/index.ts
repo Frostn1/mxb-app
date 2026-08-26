@@ -392,6 +392,30 @@ export interface BikePaint {
   changesPreview: boolean;
 }
 
+/** A point in the bike's frame — the same one `EdfNode.positions` are in. */
+export type Vec3 = [number, number, number];
+
+/**
+ * The joints an assembled bike can be posed about.
+ *
+ * A bike's `.geom` places its parts in the frame it was *authored* in and says nothing about
+ * where the suspension rides at rest — there is no travel in the file, and ride height falls
+ * out of physics the viewer doesn't run. So the viewer poses instead: the swingarm turns about
+ * `pivot`, the fork slides along the axis `rake` tilts through `steerHead`, and the axles say
+ * where the wheels ride so a stance can be solved for level.
+ */
+export interface BikeRig {
+  /** Swingarm pivot. */
+  pivot: Vec3;
+  /** A point on the steering axis (the head itself). */
+  steerHead: Vec3;
+  /** Rake in degrees, tilting the steering axis back from vertical. */
+  rake: number;
+  /** Where the wheels ride. Null when the `.geom` names no axles. */
+  frontAxle: Vec3 | null;
+  rearAxle: Vec3 | null;
+}
+
 export interface BikeModel {
   nodes: EdfNode[];
   paints: BikePaint[];
@@ -412,6 +436,8 @@ export interface BikeModel {
    * facing from exactly those, and stays quiet rather than guessing when this is false.
    */
   assembled: boolean;
+  /** The joints to pose about. Null for a bike that wasn't assembled. */
+  rig: BikeRig | null;
 }
 
 export interface RiderPart {

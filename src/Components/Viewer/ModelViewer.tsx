@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Center, ContactShadows } from "@react-three/drei";
-import { Move, Rotate3d, ZoomIn } from "lucide-react";
+import { ChevronDown, Move, Rotate3d, SlidersHorizontal, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
-import type { EdfNode, PaintTexture, RiderPart } from "../../types";
+import { Row, Slider } from "@/Components/ui/controls";
+import type { BikeRig, EdfNode, PaintTexture, RiderPart, Vec3 } from "../../types";
 import { textureBytes } from "../../api/mods";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
@@ -899,13 +900,25 @@ function useEdfMeshes(
  * the parts in front of it: a panel glowing *through* the bike would read as being on the near
  * side whichever flank it is actually on, which is the confusion this exists to settle.
  */
-function HighlightMesh({ nodes, tris }: { nodes: EdfNode[]; tris: Int32Array }) {
+function HighlightMesh({
+  nodes,
+  tris,
+  groups,
+  want,
+}: {
+  nodes: EdfNode[];
+  tris: Int32Array;
+  /** Each node's pose group — see {@link poseGroup}. */
+  groups: PoseGroup[];
+  /** Draw only the triangles of nodes in this group, so the rest stay with their own part. */
+  want: PoseGroup;
+}) {
   const geom = useMemo(() => {
     const pos = new Float32Array((tris.length / 2) * 9);
     let o = 0;
     for (let i = 0; i < tris.length; i += 2) {
       const node = nodes[tris[i]];
-      if (!node) continue;
+      if (!node || groups[tris[i]] !== want) continue;
       const t = tris[i + 1];
       for (let c = 0; c < 3; c += 1) {
         const v = node.indices[t * 3 + c];
@@ -919,7 +932,7 @@ function HighlightMesh({ nodes, tris }: { nodes: EdfNode[]; tris: Int32Array }) 
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos.subarray(0, o), 3));
     g.computeBoundingSphere();
     return g;
-  }, [nodes, tris]);
+  }, [nodes, tris, groups, want]);
   useEffect(() => () => geom.dispose(), [geom]);
 
   const mat = useMemo(
@@ -943,29 +956,212 @@ function HighlightMesh({ nodes, tris }: { nodes: EdfNode[]; tris: Int32Array }) 
   return <mesh geometry={geom} material={mat} renderOrder={2} />;
 }
 
+/**
+ * How a bike is standing: the three joints its `.geom` gives, in the units the controls show.
+ *
+ * All zero is the bike exactly as the `.geom` assembled it — the frame it was *authored* in,
+ * which is not a stance it ever holds on the ground. See {@link BikeRig}.
+ */
+export interface BikePose {
+  /** How far the rear axle hangs below where it was authored, in mm. */
+  rearDrop: number;
+  /** How far the fork is pushed up its own axis, in mm. */
+  forkUp: number;
+  /** Steering angle, in degrees. */
+  steer: number;
+}
+
+export const NEUTRAL_POSE: BikePose = { rearDrop: 0, forkUp: 0, steer: 0 };
+
+/** Which part of the bike moves with which joint. */
+type PoseGroup = "static" | "swing" | "steer" | "fork";
+
+/**
+ * Which pose group a node belongs to, read off the same name prefixes `assemble_bike` mounts
+ * it by — so the two can only agree. `steer` is the triple clamps and bars; `fork` is the
+ * sliding leg the wheel hangs off, which is why it moves inside the steering group.
+ */
+function poseGroup(name: string): PoseGroup {
+  const n = name.toLowerCase();
+  if (n.startsWith("rsusp") || n.startsWith("rwheel")) return "swing";
+  if (n.startsWith("fsusp") || n.startsWith("fwheel")) return "fork";
+  if (n.startsWith("steer")) return "steer";
+  return "static";
+}
+
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+
+/** The fork/steering axis: straight up, tilted back by the rake. */
+function forkAxis(rake: number): THREE.Vector3 {
+  const r = rake * THREE.MathUtils.DEG2RAD;
+  return new THREE.Vector3(0, Math.cos(r), Math.sin(r));
+}
+
+function wrapPi(a: number): number {
+  return Math.atan2(Math.sin(a), Math.cos(a));
+}
+
+/**
+ * The swingarm rotation that puts the rear axle at `targetY`, or null where it can't reach.
+ *
+ * The axle rides a circle about the pivot, so `y(θ) = pivotY + dy·cosθ − dz·sinθ` — a single
+ * cosine of amplitude `hypot(dy, dz)`. Two rotations hit any height inside that; the one
+ * nearest as-authored is the one meant, the other swings the wheel over the seat.
+ */
+function swingAngleForAxleY(rig: BikeRig, targetY: number): number | null {
+  if (!rig.rearAxle) return null;
+  const dy = rig.rearAxle[1] - rig.pivot[1];
+  const dz = rig.rearAxle[2] - rig.pivot[2];
+  const r = Math.hypot(dy, dz);
+  const k = targetY - rig.pivot[1];
+  if (r < 1e-6 || Math.abs(k) > r) return null;
+  const phi = Math.atan2(dz, dy);
+  const a = Math.acos(k / r);
+  const both = [wrapPi(a - phi), wrapPi(-a - phi)];
+  return both.reduce((best, x) => (Math.abs(x) < Math.abs(best) ? x : best));
+}
+
+/**
+ * A wheel's radius, off the mesh rather than off a number we'd have to keep: the tyre is
+ * authored about its own axle, so half its height is what it rolls on. Null when the bike
+ * has no such wheel — a mod whose tyres aren't installed, or any bike before the wheels went
+ * on at all.
+ */
+function wheelRadius(nodes: EdfNode[], prefix: string): number | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const n of nodes) {
+    if (!n.name.toLowerCase().startsWith(prefix)) continue;
+    for (let i = 1; i < n.positions.length; i += 3) {
+      lo = Math.min(lo, n.positions[i]);
+      hi = Math.max(hi, n.positions[i]);
+    }
+  }
+  return hi > lo ? (hi - lo) / 2 : null;
+}
+
+/** As far as the rear may be dropped or squatted from as-authored, in mm. */
+const REAR_LIMIT_MM = 140;
+
+/**
+ * The rear drop that stands the bike level — both tyres touching the same ground.
+ *
+ * Contact points, not axles: a 21" front and a 19" rear are not level when their axles are.
+ * Null when there is nothing to solve against — no axles in the `.geom`, no wheel meshes, or
+ * a bike whose swingarm can't reach that far — and the bike then stands as it was authored,
+ * which is exactly how it stood before any of this.
+ */
+function levelRearDrop(
+  rig: BikeRig | null | undefined,
+  nodes: EdfNode[],
+  forkUpM: number,
+): number | null {
+  if (!rig?.frontAxle || !rig.rearAxle) return null;
+  const rf = wheelRadius(nodes, "fwheel");
+  const rr = wheelRadius(nodes, "rwheel");
+  if (rf == null || rr == null) return null;
+  const frontY = rig.frontAxle[1] + forkAxis(rig.rake).y * forkUpM;
+  const targetY = frontY - rf + rr;
+  const angle = swingAngleForAxleY(rig, targetY);
+  if (angle == null) return null;
+  const drop = (rig.rearAxle[1] - targetY) * 1000;
+  return Math.abs(drop) > REAR_LIMIT_MM ? null : drop;
+}
+
+/** The stance a bike is first drawn in: level if it can be solved, as-authored if not. */
+function settledPose(rig: BikeRig | null | undefined, nodes: EdfNode[]): BikePose {
+  if (!rig) return NEUTRAL_POSE;
+  const drop = levelRearDrop(rig, nodes, 0);
+  return drop == null ? NEUTRAL_POSE : { ...NEUTRAL_POSE, rearDrop: drop };
+}
+
+/** Turn a group about a point that isn't the origin. */
+function About({
+  at,
+  q,
+  children,
+}: {
+  at: Vec3;
+  q: THREE.Quaternion;
+  children: React.ReactNode;
+}) {
+  return (
+    <group position={at}>
+      <group quaternion={q}>
+        <group position={[-at[0], -at[1], -at[2]]}>{children}</group>
+      </group>
+    </group>
+  );
+}
+
 // MX Bikes meshes are authored Y-up, +Z forward (three.js' convention) — no rotation.
 function EdfMesh({
   nodes,
   textures,
   highlight,
+  rig,
+  pose = NEUTRAL_POSE,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
   highlight?: Int32Array | null;
+  /** The joints to pose about. Absent (an unassembled bike, or gear) draws one rigid group. */
+  rig?: BikeRig | null;
+  pose?: BikePose;
 }) {
   const { geoms, materials } = useEdfMeshes(nodes, textures);
+  const groups = useMemo<PoseGroup[]>(
+    () => nodes.map((n) => (rig ? poseGroup(n.name) : "static")),
+    [nodes, rig],
+  );
+
+  const swingQ = useMemo(() => {
+    const target = rig?.rearAxle ? rig.rearAxle[1] - pose.rearDrop / 1000 : null;
+    const a = rig && target !== null ? swingAngleForAxleY(rig, target) : null;
+    return new THREE.Quaternion().setFromAxisAngle(X_AXIS, a ?? 0);
+  }, [rig, pose.rearDrop]);
+  const axis = useMemo(() => forkAxis(rig?.rake ?? 0), [rig?.rake]);
+  const steerQ = useMemo(
+    () => new THREE.Quaternion().setFromAxisAngle(axis, pose.steer * THREE.MathUtils.DEG2RAD),
+    [axis, pose.steer],
+  );
+  const forkAt = useMemo<Vec3>(() => {
+    const v = axis.clone().multiplyScalar(pose.forkUp / 1000);
+    return [v.x, v.y, v.z];
+  }, [axis, pose.forkUp]);
+
+  const part = (want: PoseGroup) => (
+    <>
+      {geoms.map((g, i) =>
+        groups[i] === want ? (
+          <mesh
+            key={i}
+            geometry={g}
+            material={materials[i].length === 1 ? materials[i][0] : materials[i]}
+            castShadow
+            receiveShadow
+          />
+        ) : null,
+      )}
+      {!!highlight?.length && (
+        <HighlightMesh nodes={nodes} tris={highlight} groups={groups} want={want} />
+      )}
+    </>
+  );
+
+  // No rig: every node is "static", so this is the one flat group it has always been.
+  if (!rig) return <group>{part("static")}</group>;
   return (
     <group>
-      {geoms.map((g, i) => (
-        <mesh
-          key={i}
-          geometry={g}
-          material={materials[i].length === 1 ? materials[i][0] : materials[i]}
-          castShadow
-          receiveShadow
-        />
-      ))}
-      {!!highlight?.length && <HighlightMesh nodes={nodes} tris={highlight} />}
+      {part("static")}
+      <About at={rig.pivot} q={swingQ}>
+        {part("swing")}
+      </About>
+      <About at={rig.steerHead} q={steerQ}>
+        {part("steer")}
+        {/* Inside the steering group: the fork slides along the axis the bars turn about. */}
+        <group position={forkAt}>{part("fork")}</group>
+      </About>
     </group>
   );
 }
@@ -1004,12 +1200,16 @@ function SideBySide({
   highlight,
   parts,
   overrides,
+  rig,
+  pose,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
   highlight?: Int32Array | null;
   parts: RiderPart[];
   overrides?: Map<string, THREE.Texture>;
+  rig?: BikeRig | null;
+  pose?: BikePose;
 }) {
   const at = useMemo(() => {
     const bike = partBounds(nodes);
@@ -1025,7 +1225,13 @@ function SideBySide({
   return (
     <group>
       <group position={at.bike}>
-        <EdfMesh nodes={nodes} textures={textures} highlight={highlight} />
+        <EdfMesh
+          nodes={nodes}
+          textures={textures}
+          highlight={highlight}
+          rig={rig}
+          pose={pose}
+        />
       </group>
       <group position={at.rider}>
         <RiderComposite parts={parts} overrides={overrides} />
@@ -1071,6 +1277,97 @@ function CameraRig({ frame }: { frame: Framing }) {
 
 // Legend for the OrbitControls gestures below — the canvas gives no other clue
 // that it's draggable. Kept muted so it reads as chrome, never competing with the model.
+/**
+ * The pose panel: the bike's own joints, on sliders.
+ *
+ * Sliders in millimetres of wheel movement rather than in joint angles — how far the rear
+ * wheel hangs is a thing anyone can see, where "8.4° of swingarm" is a thing only the maths
+ * knows. {@link swingAngleForAxleY} turns the one into the other.
+ */
+function PoseControls({
+  pose,
+  onChange,
+  onLevel,
+  onReset,
+}: {
+  pose: BikePose;
+  onChange: (p: BikePose) => void;
+  /** Absent when the bike gives nothing to level against — no axles, or no wheels on it. */
+  onLevel?: () => void;
+  onReset: () => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const mm = (v: number) => `${Math.round(v)}mm`;
+  return (
+    <div className="absolute bottom-2 right-2 w-[230px] rounded-md border border-white/10 bg-black/60 text-white/80 backdrop-blur-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium leading-none text-white/70 hover:text-white"
+      >
+        <SlidersHorizontal className="h-3.5 w-3.5" />
+        {t("viewer.pose")}
+        <ChevronDown
+          className={cn("ml-auto h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="flex flex-col gap-1.5 border-t border-white/10 px-2 py-2">
+          <Row label={t("viewer.poseRear")}>
+            <Slider
+              value={pose.rearDrop}
+              min={-REAR_LIMIT_MM}
+              max={REAR_LIMIT_MM}
+              step={1}
+              onChange={(v) => onChange({ ...pose, rearDrop: v })}
+              format={mm}
+            />
+          </Row>
+          <Row label={t("viewer.poseFront")}>
+            <Slider
+              value={pose.forkUp}
+              min={-60}
+              max={180}
+              step={1}
+              onChange={(v) => onChange({ ...pose, forkUp: v })}
+              format={mm}
+            />
+          </Row>
+          <Row label={t("viewer.poseSteer")}>
+            <Slider
+              value={pose.steer}
+              min={-40}
+              max={40}
+              step={1}
+              onChange={(v) => onChange({ ...pose, steer: v })}
+              format={(v) => `${Math.round(v)}°`}
+            />
+          </Row>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            {onLevel && (
+              <button
+                type="button"
+                onClick={onLevel}
+                className="rounded border border-white/15 px-2 py-1 text-[11px] leading-none text-white/75 hover:bg-white/10 hover:text-white"
+              >
+                {t("viewer.poseLevel")}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onReset}
+              className="rounded border border-white/15 px-2 py-1 text-[11px] leading-none text-white/75 hover:bg-white/10 hover:text-white"
+            >
+              {t("viewer.poseReset")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ControlsHint() {
   const t = useT();
   const items = [
@@ -1133,6 +1430,15 @@ export interface ModelViewerProps {
    */
   highlight?: Int32Array | null;
   riderParts?: RiderPart[] | null;
+  /**
+   * The bike's joints, from the model that carried `nodes`.
+   *
+   * Absent leaves the bike rigid, exactly as it was drawn before it could be posed — which is
+   * also what an unassembled bike gets, since there is nothing to pose a pile of loose parts.
+   */
+  rig?: BikeRig | null;
+  /** Offer the pose panel. Off by default: a preview nobody is posing shouldn't grow chrome. */
+  poseControls?: boolean;
   loading?: boolean;
   noStandIn?: boolean;
   className?: string;
@@ -1147,12 +1453,27 @@ export function ModelViewer({
   nodes,
   highlight,
   riderParts,
+  rig,
+  poseControls = false,
   loading = false,
   noStandIn = false,
   className,
 }: ModelViewerProps) {
   const map = useDataTexture(texture);
   const texMap = useTextureMapWith(textures, overrides);
+  // The stance the bike is drawn in until someone moves a slider. Held as "no answer yet"
+  // rather than as a copy of `settled`, so a new bike settles on its own instead of inheriting
+  // the pose the last one was left in.
+  const settled = useMemo(() => settledPose(rig, nodes ?? []), [rig, nodes]);
+  const [posed, setPosed] = useState<BikePose | null>(null);
+  useEffect(() => setPosed(null), [settled]);
+  const pose = posed ?? settled;
+  // Solved against the fork where it is now, so "level" still means level after the front
+  // has been moved.
+  const level = useMemo(
+    () => levelRearDrop(rig, nodes ?? [], pose.forkUp / 1000),
+    [rig, nodes, pose.forkUp],
+  );
   // What `mode` asks for, narrowed to what actually arrived. In `both`, either half can be
   // missing — a bike that wouldn't resolve, a rider still loading — and the scene falls back
   // to whichever one is here rather than to a stand-in.
@@ -1217,9 +1538,17 @@ export function ModelViewer({
                 highlight={highlight}
                 parts={riderParts!}
                 overrides={overrides}
+                rig={rig}
+                pose={pose}
               />
             ) : hasReal ? (
-              <EdfMesh nodes={nodes!} textures={texMap} highlight={highlight} />
+              <EdfMesh
+                nodes={nodes!}
+                textures={texMap}
+                highlight={highlight}
+                rig={rig}
+                pose={pose}
+              />
             ) : hasRider ? (
               <RiderComposite parts={riderParts!} overrides={overrides} />
             ) : loading || noStandIn ? null : mode === "bike" ? (
@@ -1248,6 +1577,16 @@ export function ModelViewer({
         </Canvas>
       </ErrorBoundary>
       {!loading && <ControlsHint />}
+      {poseControls && showBike && !!rig && !loading && (
+        <PoseControls
+          pose={pose}
+          onChange={setPosed}
+          onLevel={
+            level === null ? undefined : () => setPosed({ ...pose, rearDrop: level })
+          }
+          onReset={() => setPosed(NEUTRAL_POSE)}
+        />
+      )}
     </div>
   );
 }
