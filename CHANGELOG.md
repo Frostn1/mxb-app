@@ -3,6 +3,12 @@
 ## 2026-08-26
 
 ### Added
+- **See a bike's model swaps without leaving the Library.** A bike card now carries a
+  **models** badge when there is more than one model set installed, and opening it lists them
+  in place — the active one ticked, an incomplete set flagged, a "no model" set marked, and a
+  file count for the rest. It reads the same vocabulary as the Locker, so a variant looks the
+  same wherever you meet it. Deliberately read-only: the Locker stays the one place that moves
+  files, so two views can never disagree about which model is live.
 - **Move the bike and the rider around in the Rider tab.** The pair stood where the viewer put
   them — shoulder to shoulder, a fixed gap apart — which is the one arrangement nobody was
   composing for. A **Placement** panel now moves either model: side, up, forward and turn, in

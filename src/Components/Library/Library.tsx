@@ -21,6 +21,11 @@ import {
   Share2,
   ClipboardPaste,
   ArrowUpDown,
+  Check,
+  AlertTriangle,
+  Ban,
+  Layers,
+  ChevronDown,
   Clock,
   History,
   PackageOpen,
@@ -44,9 +49,17 @@ import {
   forgetLedgerEntry,
   restoreLedgerEntry,
   downloadHistory,
+  scanModelSwaps,
   type ModType,
 } from "../../api/mods";
-import type { DownloadRecord, LedgerRow, LibraryEntry, PkzMeta } from "../../types";
+import type {
+  BikeModels,
+  DownloadRecord,
+  LedgerRow,
+  LibraryEntry,
+  ModelVariant,
+  PkzMeta,
+} from "../../types";
 import {
   displayName,
   folderLabel,
@@ -211,6 +224,52 @@ function LibraryCardBody({
         </span>
       </div>
     </>
+  );
+}
+
+/**
+ * The model swaps a bike carries, listed under its Library card.
+ *
+ * Read-only on purpose: the Locker is the only place that moves files, so there is no way
+ * for two views to disagree about which model is live. Mirrors the Locker's own vocabulary —
+ * same icons, same states — so a variant reads the same wherever you meet it.
+ */
+function ModelSwapList({ variants, t }: { variants: ModelVariant[]; t: TFunc }) {
+  return (
+    <ul
+      onClick={(e) => e.stopPropagation()}
+      className="mt-2 flex w-full cursor-default flex-col gap-1 border-t border-white/[0.07] pt-2"
+    >
+      {variants.map((v) => (
+        <li
+          key={v.name}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-2 py-1",
+            v.active ? "bg-primary/[0.08]" : "opacity-80",
+          )}
+        >
+          <span className="flex size-3.5 flex-none items-center justify-center">
+            {v.active ? (
+              <Check className="size-3.5 text-primary" />
+            ) : v.empty ? (
+              <Ban className="size-3 text-muted-foreground" />
+            ) : !v.valid ? (
+              <AlertTriangle className="size-3 text-amber-500/80" />
+            ) : null}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium">{v.name}</span>
+          <span className="flex-none text-[10.5px] text-faint">
+            {v.active
+              ? t("common.active")
+              : v.empty
+                ? t("locker.noModel")
+                : !v.valid
+                  ? t("library.modelIncomplete")
+                  : t("swaps.fileCount", { count: v.fileCount })}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -430,6 +489,11 @@ export default function Library({
   const [detail, setDetail] = useState<LibraryEntry | null>(null);
   const [view3d, setView3d] = useState<LibraryEntry | null>(null);
   const [moveTarget, setMoveTarget] = useState<LibraryEntry | null>(null);
+  // Model swaps per bike folder, for the expandable row on a bike card. Bikes only — no
+  // other mod type has them — and read-only: switching stays in the Locker.
+  const [swaps, setSwaps] = useState<Map<string, BikeModels>>(new Map());
+  // Which bike cards are showing their variants, by path.
+  const [openSwaps, setOpenSwaps] = useState<Set<string>>(new Set());
   const [uninstallTarget, setUninstallTarget] = useState<LibraryEntry | null>(null);
   // Multi-select: a "Select" mode turns cards into checkboxes for bulk actions.
   const [selectMode, setSelectMode] = useState(false);
@@ -485,6 +549,29 @@ export default function Library({
   useEffect(() => {
     load();
   }, [load, refreshKey]);
+
+  // Model swaps, for the bikes tab only — one scan of the whole tree, indexed by bike
+  // folder. Installing a mod or editing the folder changes what's swappable, so it rides
+  // the same `refreshKey` the library scan does. A failure leaves the map empty and the
+  // cards simply carry no badge; it must never take the library down with it.
+  useEffect(() => {
+    if (modType.id !== "bikes") {
+      setSwaps(new Map());
+      return;
+    }
+    let alive = true;
+    void scanModelSwaps()
+      .then((rows) => {
+        if (alive) setSwaps(new Map(rows.map((r) => [r.bike, r])));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [modType, refreshKey]);
+
+  // A card that has scrolled away, or a tab change, must not leave a row expanded.
+  useEffect(() => setOpenSwaps(new Set()), [modType]);
 
   useEffect(() => setDetail(null), [modType]);
   // Arriving from a download row: search for that mod so the jump lands on it, not just on
@@ -960,6 +1047,12 @@ export default function Library({
                     const Icon = categoryIcon(item.category);
                     const canView3d = entryViewerProps(item, entries, bikePreview) !== null;
                     const isSel = selected.has(item.path);
+                    // A bike's model swaps. The Locker always lists the active set as a row
+                    // of its own, so a bike with nothing to switch between still reports one
+                    // variant — only two or more is a choice worth a badge.
+                    const models = swaps.get(item.name);
+                    const showModels = !selectMode && (models?.variants.length ?? 0) > 1;
+                    const swapsOpen = openSwaps.has(item.path);
                     return (
                       <ContextMenu key={item.path}>
                         <ContextMenuTrigger asChild>
@@ -974,12 +1067,13 @@ export default function Library({
                               (selectMode ? toggleSelect(item.path) : setDetail(item))
                             }
                             className={cn(
-                              "flex cursor-pointer items-center gap-3 rounded-xl border bg-card p-3 transition-colors",
+                              "flex cursor-pointer flex-col self-start rounded-xl border bg-card p-3 transition-colors",
                               isSel
                                 ? "border-primary/60 bg-primary/[0.06]"
                                 : "border-white/[0.07] hover:border-white/15",
                             )}
                           >
+                            <div className="flex w-full items-center gap-3">
                             {selectMode && (
                               <span className="flex-none">
                                 {isSel ? (
@@ -990,6 +1084,33 @@ export default function Library({
                               </span>
                             )}
                             <LibraryCardBody item={item} typeIcon={Icon} />
+                            {showModels && (
+                              <button
+                                title={t("library.modelsHint")}
+                                aria-expanded={swapsOpen}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenSwaps((prev) => {
+                                    const next = new Set(prev);
+                                    if (!next.delete(item.path)) next.add(item.path);
+                                    return next;
+                                  });
+                                }}
+                                className={cn(
+                                  "flex flex-none cursor-default items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[11px] font-semibold transition-colors hover:bg-foreground/[0.06]",
+                                  swapsOpen ? "text-primary" : "text-faint hover:text-primary",
+                                )}
+                              >
+                                <Layers className="size-3.5" />
+                                {t("library.models", { count: models!.variants.length })}
+                                <ChevronDown
+                                  className={cn(
+                                    "size-3 transition-transform",
+                                    swapsOpen && "rotate-180",
+                                  )}
+                                />
+                              </button>
+                            )}
                             {!selectMode && canView3d && (
                               <button
                                 title={t("library.quick3d")}
@@ -1028,6 +1149,10 @@ export default function Library({
                                   ))}
                                 </DropdownMenuContent>
                               </DropdownMenu>
+                            )}
+                            </div>
+                            {showModels && swapsOpen && (
+                              <ModelSwapList variants={models!.variants} t={t} />
                             )}
                           </div>
                         </ContextMenuTrigger>
