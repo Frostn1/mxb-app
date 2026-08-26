@@ -1668,7 +1668,6 @@ export const it: Translation = {
   "paints.kind.bike": "Livrea moto",
   "paints.kind.helmet": "Casco",
   "paints.kind.goggles": "Maschera",
-  "paints.kind.profileGoggles": "Maschera (pilota)",
   "paints.kind.boots": "Stivali",
   "paints.kind.protection": "Protezioni",
   "paints.kind.kit": "Completo pilota",

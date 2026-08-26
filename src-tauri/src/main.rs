@@ -1305,6 +1305,33 @@ async fn paint_studio_hints(app: tauri::AppHandle, rel: String) -> Result<Vec<St
     .map_err(|e| format!("paint_studio_hints task failed: {e}"))?
 }
 
+/// How many paints are read for their names. A handful is plenty: paints for one model
+/// overwhelmingly supply the same names, and this runs every time the destination changes.
+const PAINT_SAMPLE: usize = 8;
+
+/// The texture names of the `.pnt` files sitting loose in `dir`, sampled.
+fn loose_paint_names(dir: &std::path::Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = 0usize;
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in rd.flatten() {
+        let p = entry.path();
+        if seen >= PAINT_SAMPLE || !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pnt")) {
+            continue;
+        }
+        // Seeked, not read: a bike's paints are tens of megabytes each and the names are
+        // in their headers. Reading eight of them whole put nineteen seconds between
+        // picking a model and being told what it wants.
+        if let Ok(found) = paint::texture_names_at(&p) {
+            out.extend(found);
+            seen += 1;
+        }
+    }
+    out
+}
+
 /// [`paint_studio_hints`] for a destination folder that's already been resolved.
 fn paint_hints(dir: &std::path::Path) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
@@ -1316,25 +1343,7 @@ fn paint_hints(dir: &std::path::Path) -> Vec<String> {
         }
     }
 
-    // A handful is plenty: paints for one model overwhelmingly supply the same names,
-    // and this runs every time the destination changes.
-    const SAMPLE: usize = 8;
-    let mut seen = 0usize;
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for entry in rd.flatten() {
-            let p = entry.path();
-            if seen >= SAMPLE || !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pnt")) {
-                continue;
-            }
-            // Seeked, not read: a bike's paints are tens of megabytes each and the names are
-            // in their headers. Reading eight of them whole put nineteen seconds between
-            // picking a model and being told what it wants.
-            if let Ok(found) = paint::texture_names_at(&p) {
-                add(&mut names, found);
-                seen += 1;
-            }
-        }
-    }
+    add(&mut names, loose_paint_names(dir));
     // Nothing installed loose: the model may be packed, and its own paints are the
     // same evidence. `<Model>.pkz` sits beside the `<Model>` folder this destination
     // lives in — for a bike as much as for a helmet.
@@ -1348,8 +1357,28 @@ fn paint_hints(dir: &std::path::Path) -> Vec<String> {
                     n.contains(&tail) && n.ends_with(".pnt")
                 };
                 let packed = pkz::read_selected(&pkz, want).unwrap_or_default();
-                for (_, bytes) in packed.iter().take(SAMPLE) {
+                for (_, bytes) in packed.iter().take(PAINT_SAMPLE) {
                     add(&mut names, paint::texture_names_any(bytes).unwrap_or_default());
+                }
+            }
+        }
+    }
+    // A rider profile that ships its folders empty wears the stock profile's kits.
+    //
+    // `Rider+` and `Rider+RolledUp` do exactly that on purpose — the kits installed under
+    // `default_mx` are meant to work on them, which is why `read_rider_paint_file` reaches
+    // there to render one. The names are the same names, so the hints have to reach there
+    // too, or painting for one of those profiles starts with nothing to call a sheet. It
+    // also spares the walk over the profile's own mesh, which for `Rider+` is 67 MB of
+    // rider read to learn what nine installed kits already say.
+    if names.is_empty() {
+        if let Some((sub, riders)) = dir.file_name().zip(dir.parent().and_then(|p| p.parent())) {
+            if riders.file_name().is_some_and(|n| n.eq_ignore_ascii_case(game::RIDERS_DIR)) {
+                for stock in game::active().rider.stock_profiles {
+                    add(&mut names, loose_paint_names(&riders.join(stock).join(&sub)));
+                    if !names.is_empty() {
+                        break;
+                    }
                 }
             }
         }
@@ -1381,13 +1410,21 @@ fn mesh_texture_names(model_dir: &std::path::Path) -> Vec<String> {
             let p = entry.path();
             if p.is_file() && p.file_name().and_then(|n| n.to_str()).is_some_and(bikefiles::is_mesh)
             {
+                // Reading one back from iCloud or OneDrive costs minutes, and this is a
+                // convenience: a rider profile whose two 67 MB meshes had been evicted put
+                // 84 seconds between picking it and seeing any sheet names. The preview
+                // fetches the model when it actually draws it — that wait buys a picture.
+                if cloudfiles::is_placeholder(&p) {
+                    log::info!("[paint studio] skipping evicted mesh {}", p.display());
+                    continue;
+                }
                 meshes.extend(read_gear_file(&p));
             }
         }
     }
     if meshes.is_empty() {
         let pkz = library::sibling_pkz(model_dir);
-        if pkz.is_file() {
+        if pkz.is_file() && !cloudfiles::is_placeholder(&pkz) {
             for (_, d) in pkz::read_selected(&pkz, bikefiles::is_mesh).unwrap_or_default() {
                 meshes.push(pkz::read_sidecar_blob(&d).unwrap_or(d));
             }
@@ -7682,6 +7719,51 @@ mod mesh_texture_tests {
         // was never unpacked, which is where a paint for a packed mod has to go.
         let dest = root.join("Fox Instinct 2.0 by Aeffertz").join("paints");
         assert_eq!(paint_hints(&dest), vec!["fox".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `Rider+` and `Rider+RolledUp` ship `paints/` and `gloves/` empty on purpose: the kits
+    /// installed under the stock profile are the ones meant to be worn on them, which is
+    /// what `read_rider_paint_file` already does when it renders one. So the sheet names
+    /// have to come from there too — otherwise painting a kit or a pair of gloves for such
+    /// a profile starts with nothing to call the sheet, and a sheet named by guesswork
+    /// binds to nothing.
+    #[test]
+    fn a_profile_that_ships_no_paints_borrows_the_stock_ones() {
+        let root = std::env::temp_dir().join(format!("frost-stock-kit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let riders = root.join("riders");
+        let mine = riders.join("Rider+");
+        std::fs::create_dir_all(mine.join("paints")).unwrap();
+        std::fs::create_dir_all(mine.join("gloves")).unwrap();
+
+        let pnt = |name: &str| {
+            crate::paint::encode(
+                "Stock",
+                &[crate::paint::PntTexture {
+                    name: name.to_string(),
+                    width: 4,
+                    height: 4,
+                    rgba: vec![0u8; 4 * 4 * 4],
+                }],
+            )
+            .unwrap()
+        };
+        let stock = riders.join("default_mx");
+        std::fs::create_dir_all(stock.join("paints")).unwrap();
+        std::fs::create_dir_all(stock.join("gloves")).unwrap();
+        std::fs::write(stock.join("paints").join("Kit.pnt"), pnt("rider")).unwrap();
+        std::fs::write(stock.join("gloves").join("Gloves.pnt"), pnt("gloves")).unwrap();
+
+        assert_eq!(paint_hints(&mine.join("paints")), vec!["rider".to_string()]);
+        assert_eq!(
+            paint_hints(&mine.join("gloves")),
+            vec!["gloves".to_string()],
+            "a gloves folder is never offered the mesh's names, so this is its only source",
+        );
+        // A profile with kits of its own is answered by those, not by the stock ones.
+        std::fs::write(mine.join("paints").join("Mine.pnt"), pnt("rider_mine")).unwrap();
+        assert_eq!(paint_hints(&mine.join("paints")), vec!["rider_mine".to_string()]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

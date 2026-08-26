@@ -1667,7 +1667,6 @@ export const ptBR: Translation = {
   "paints.kind.bike": "Pintura da moto",
   "paints.kind.helmet": "Capacete",
   "paints.kind.goggles": "Óculos",
-  "paints.kind.profileGoggles": "Óculos (piloto)",
   "paints.kind.boots": "Botas",
   "paints.kind.protection": "Proteções",
   "paints.kind.kit": "Kit do piloto",

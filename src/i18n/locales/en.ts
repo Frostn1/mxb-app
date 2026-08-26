@@ -1646,7 +1646,6 @@ export const en = {
   "paints.kind.bike": "Bike livery",
   "paints.kind.helmet": "Helmet",
   "paints.kind.goggles": "Goggles",
-  "paints.kind.profileGoggles": "Goggles (rider)",
   "paints.kind.boots": "Boots",
   "paints.kind.protection": "Protection",
   "paints.kind.kit": "Rider kit",
