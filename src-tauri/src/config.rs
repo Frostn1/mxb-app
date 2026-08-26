@@ -85,6 +85,13 @@ pub struct AppConfig {
     /// The combo that toggles the overlay, in Tauri accelerator syntax
     /// (`"CommandOrControl+Shift+X"`). Blank falls back to [`DEFAULT_OVERLAY_HOTKEY`].
     pub overlay_hotkey: String,
+    /// Which tyre pack the 3D previews put a bike on. **Blank means "the one the bike's own
+    /// `gfx.cfg` names"**, which is what the game itself would fit.
+    ///
+    /// A bike names exactly one pack, so seeing it on another is only possible by
+    /// substituting the name we look up — nothing on disk is touched. Remembered rather than
+    /// asked each time: it's a way you like looking at bikes, not a per-bike decision.
+    pub preview_tyres: String,
     /// Voice chat is off until the player turns it on. A feature that opens a microphone
     /// is not something anyone should discover by accident.
     pub voice_enabled: bool,
@@ -233,6 +240,7 @@ impl Default for AppConfig {
             tour_done: false,
             overlay_enabled: true,
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
+            preview_tyres: String::new(),
             voice_enabled: false,
             voice_input_device: String::new(),
             voice_output_device: String::new(),

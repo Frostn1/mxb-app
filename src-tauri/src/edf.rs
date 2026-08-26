@@ -372,6 +372,18 @@ impl BikeRig {
 
 // Assemble a bike's parts onto its chassis via the .geom mount points, then centre
 // on the origin. `None` (nodes untouched) if the .geom lacks the mounts.
+/// Where a bike's axles land, for a caller deciding whether it has anywhere to hang wheels.
+///
+/// The same two points [`BikeRig`] carries, asked for before the bike is assembled: a bike
+/// ships no wheel of its own — the mesh comes from the tyres mod its `gfx.cfg` names — and
+/// reading that mod is only worth doing once there is somewhere to put what's in it. `None`
+/// when the .geom is missing a mount, where the wheels are better left off than dropped on
+/// the origin.
+pub fn wheel_axles(geom_bytes: &[u8]) -> Option<([f32; 3], [f32; 3])> {
+    let g = parse_geom(geom_bytes);
+    mounts(&g, &parse_geom_scalars(geom_bytes))?.axles(&g)
+}
+
 pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> Option<BikeRig> {
     let g = parse_geom(geom_bytes);
     let sc = parse_geom_scalars(geom_bytes);
@@ -405,6 +417,18 @@ pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> Option<BikeRig
             (rake, v_sub(head, rot_x(steer_joint, rake)))
         } else if name.starts_with("fsusp") {
             (rake, fork_origin)
+        // A wheel is authored about its own axle, and how far it has spun is arbitrary —
+        // so it only ever wants moving, never turning.
+        } else if name.starts_with("fwheel") {
+            match axles {
+                Some((front, _)) => (0.0, front),
+                None => continue,
+            }
+        } else if name.starts_with("rwheel") {
+            match axles {
+                Some((_, rear)) => (0.0, rear),
+                None => continue,
+            }
         } else {
             continue;
         };
@@ -1632,6 +1656,103 @@ rwheel_max = 0, 0.0122, -0.5359\n";
         // The swingarm vertex sits 0.25 m off the pivot either side of the mirror.
         let d = vertex(&nodes[1], 0)[0] - rig.pivot[0];
         assert!((d + 0.25).abs() < 1e-4, "mesh and rig disagree after mirroring: {d}");
+    }
+
+    /// The mount points of a real bike (MX1OEM_2023_Honda_CRF450R), trimmed to the lines
+    /// the wheels are hung off. Kept verbatim so the numbers below can be checked against
+    /// the bike's published spec rather than against this test.
+    const CRF450R_GEOM: &[u8] = b"type = bike\n\
+chassis_steer = 0, 0.9935, 0.2982\n\
+chassis_rsusp_min = 0, 0.4599, -0.2118\n\
+rakeangle_min = 27.1\n\
+steer_joint = 0, 0.0412, -0.0372\n\
+front_upper = 0, -0.4048, -0.0153\n\
+fwheel = 0, -0.2468, 0.0481\n\
+rsusp_joint = 0, -0.0042, 0.0399\n\
+rwheel_min = 0, -0.0011, -0.5282\n\
+rwheel_max = 0, -0.001, -0.5683\n";
+
+    fn wheel_node(name: &str) -> EdfNode {
+        EdfNode {
+            name: name.into(),
+            // One vertex on the axle: what comes back is where the axle landed.
+            positions: vec![0.0, 0.0, 0.0],
+            uvs: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+            submeshes: Vec::new(),
+            texture: None,
+            placed: true,
+            materials: Vec::new(),
+        }
+    }
+
+    /// The wheels aren't in the bike's mesh, so the `.geom` is the only thing that says
+    /// where they go. Checked against the real bike: a 2023 CRF450R's wheelbase is 1481 mm.
+    #[test]
+    fn wheel_axles_land_a_real_wheelbase_apart() {
+        let (front, rear) = wheel_axles(CRF450R_GEOM).expect("the mounts are all there");
+        assert!((front[1] - 0.4086).abs() < 5e-3, "front axle height: {front:?}");
+        assert!((front[2] - 0.6761).abs() < 5e-3, "front axle reach: {front:?}");
+        assert!((rear[1] - 0.4631).abs() < 5e-3, "rear axle height: {rear:?}");
+        assert!((rear[2] + 0.7999).abs() < 5e-3, "rear axle reach: {rear:?}");
+        let wheelbase = front[2] - rear[2];
+        assert!(
+            (wheelbase - 1.481).abs() < 0.02,
+            "wheelbase {wheelbase} is nowhere near the real 1.481 m",
+        );
+        // Both on the bike's centreline, and the front ahead of the rear.
+        assert!(front[0].abs() < 1e-6 && rear[0].abs() < 1e-6);
+        assert!(front[2] > rear[2]);
+    }
+
+    /// The rear axle sits at the midpoint of the chain-adjuster range, which is what the
+    /// `.geom`'s own collision notes tell a modder to use. Taking `rwheel_min` alone put
+    /// the wheel 20 mm forward of where the bike is measured.
+    #[test]
+    fn rear_axle_splits_the_chain_adjuster_range() {
+        let (_, rear) = wheel_axles(CRF450R_GEOM).unwrap();
+        let g = parse_geom(CRF450R_GEOM);
+        let mid = (g["rwheel_min"][2] + g["rwheel_max"][2]) * 0.5;
+        let off = g["chassis_rsusp_min"][2] - g["rsusp_joint"][2];
+        assert!((rear[2] - (mid + off)).abs() < 1e-6, "rear: {rear:?}");
+    }
+
+    #[test]
+    fn assemble_puts_the_wheels_on_their_axles() {
+        let (front, rear) = wheel_axles(CRF450R_GEOM).unwrap();
+        // A chassis vertex at the origin, so the centring pass has a third point to work
+        // with and the two wheels keep their real separation.
+        let mut nodes = vec![wheel_node("chassis"), wheel_node("fwheel"), wheel_node("rwheela")];
+        assert!(assemble_bike(&mut nodes, CRF450R_GEOM).is_some());
+        // Everything is shifted by the same centring offset, so compare the gap.
+        let at = |i: usize| [nodes[i].positions[0], nodes[i].positions[1], nodes[i].positions[2]];
+        let (f, r) = (at(1), at(2));
+        for k in 0..3 {
+            assert!(
+                ((f[k] - r[k]) - (front[k] - rear[k])).abs() < 1e-5,
+                "axle {k}: got {:?}, want {:?}",
+                (f[k] - r[k]),
+                (front[k] - rear[k]),
+            );
+        }
+    }
+
+    /// A `.geom` with no `fwheel`/`rwheel` lines has nowhere to hang a wheel. The bike's
+    /// own parts must still assemble — the wheels are the only thing that goes missing.
+    #[test]
+    fn a_geom_without_wheel_mounts_still_assembles_the_bike() {
+        let geom: Vec<u8> = CRF450R_GEOM
+            .split(|b| *b == b'\n')
+            .filter(|line| !line.starts_with(b"fwheel") && !line.starts_with(b"rwheel"))
+            .map(|line| [line, b"\n"].concat())
+            .collect::<Vec<_>>()
+            .concat();
+        assert!(wheel_axles(&geom).is_none());
+        let mut nodes = vec![wheel_node("chassis"), wheel_node("steer"), wheel_node("fwheel")];
+        assert!(assemble_bike(&mut nodes, &geom).is_some(), "the bike still assembles");
+        // The steering head moved; the wheel, having no mount, did not.
+        assert_ne!(nodes[1].positions, nodes[0].positions, "steer was placed");
     }
 
     #[test]

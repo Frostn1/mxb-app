@@ -38,12 +38,9 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
     );
     return null;
   }
-  const tex = new THREE.DataTexture(
-    new Uint8Array(buf),
-    t.width,
-    t.height,
-    THREE.RGBAFormat,
-  );
+  const rgba = new Uint8Array(buf);
+  const tex = new THREE.DataTexture(rgba, t.width, t.height, THREE.RGBAFormat);
+  tex.userData.maskedAlpha = hasMaskedAlpha(rgba);
   tex.colorSpace = THREE.SRGBColorSpace;
   // MX Bikes paints use a top-left UV origin, which is `DataTexture`'s own default.
   tex.flipY = false;
@@ -56,6 +53,32 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
   tex.anisotropy = 4;
   tex.needsUpdate = true;
   return tex;
+}
+
+/**
+ * Whether a sheet's alpha channel is a cut-out mask, or just a channel nobody filled in.
+ *
+ * A wheel's brake discs and its sprocket are flat quads wearing a masked square — two thirds
+ * of `fdisc` is fully transparent — so drawn without a mask each one is a square sitting on
+ * the wheel. A naive "does it have alpha" test can't be used, though: a bike's `w_plate` is
+ * alpha-0 on *every* pixel, an unused channel, and masking on that erases the number plates
+ * outright. So the channel only counts as a mask when it varies.
+ *
+ * Sampled, not scanned: a 4096² sheet is 16M pixels and this runs per texture per load,
+ * while a real mask covers a third of the image or more and turns up in the first few
+ * samples. A mask smaller than one part in 65536 is missed, and renders as it always did.
+ */
+function hasMaskedAlpha(rgba: Uint8Array): boolean {
+  const pixels = rgba.length / 4;
+  const step = Math.max(1, Math.floor(pixels / 65536));
+  let clear = false;
+  let solid = false;
+  for (let i = 0; i < pixels; i += step) {
+    if (rgba[i * 4 + 3] < 128) clear = true;
+    else solid = true;
+    if (clear && solid) return true;
+  }
+  return false;
 }
 
 /**
@@ -857,6 +880,11 @@ function makeEdfMaterial(t: THREE.Texture | null) {
     color: t ? 0xffffff : 0xb7bcc4,
     metalness: 0.2,
     roughness: 0.55,
+    // Cut the mask out where a sheet carries one (see `hasMaskedAlpha`) — a brake disc and a
+    // sprocket are a masked square on a flat quad, and the square is what shows otherwise.
+    // Tested rather than blended: the mask is hard-edged, and `transparent` would drag the
+    // quad into the sorted pass and let it disappear behind the wheel it sits on.
+    alphaTest: t?.userData.maskedAlpha ? 0.5 : 0,
     // Inconsistent winding — render both sides so the bike isn't see-through.
     side: THREE.DoubleSide,
   });

@@ -49,6 +49,34 @@
   The Bike / Rider / Both toggle picks what's on screen; either half stays up while the other
   one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
 
+
+- **Pick which tyres a bike is previewed on.** A bike's `gfx.cfg` names exactly one tyre
+  pack, so seeing it on another was impossible — the preview fitted what the file said and
+  that was that. A **Tyres** picker now sits beside the livery one in all three previews (the
+  Viewer, the Rider tab and the Designer), listing what's installed under `mods/tyres`. It
+  substitutes the name the wheels are looked up under and nothing else: no file is renamed,
+  no mod is touched, and the bike's own `gfx.cfg` still reads exactly as the game reads it.
+  The choice is remembered, and it's one choice — pick it in the Viewer and the Designer
+  agrees. Picking a pack that isn't installed leaves the bike on its own rather than taking
+  its wheels off.
+
+- **Bikes render with their wheels on.** The 3D preview drew the frame, the forks, the
+  swingarm and the bars, then stopped — every bike stood on bare fork tips and a swingarm
+  stub. The wheels were never in the bike's mesh to begin with: a bike's `gfx.cfg` names a
+  tyres mod (`tyres = oem_mx`), the wheel meshes live in that mod, and the axle points they
+  hang off have been sitting in the bike's `.geom` all along. Both are read now, so the front
+  wheel sits on the fork and the rear on the swingarm, wearing the rim, disc, sprocket and
+  tyre they ship with.
+  - **A livery that paints the wheels finally shows it.** An OEM bike's stock livery replaces
+    the wheels and the chain and nothing else, so picking it changed nothing on screen — and
+    the app said so, in a note apologising for the parts it couldn't draw. Those sheets land
+    on real parts now.
+  - The chain is still left off. It ships as a straight template strip that the game bends
+    onto the sprockets as it runs, and drawn where it sits it is a bar standing out of the
+    rear wheel.
+  - A bike whose tyres mod isn't installed — or whose `.geom` names no axles — renders
+    exactly as it did before.
+
 ### Changed
 - Settings → Supporters lists **Bøddi** in place of **Thomas**.
 
@@ -87,6 +115,14 @@
   names are a convenience; an evicted mesh is now left alone and the paints answer instead, in
   about a tenth of a second. The preview still fetches the model when it draws it, where the
   wait buys a picture.
+
+
+- **A square where each brake disc should be.** A wheel's front disc, rear disc and sprocket
+  are drawn as a masked square on a flat quad — two thirds of `fdisc` is fully transparent —
+  and the bike preview had never needed to cut a mask out before, so each one arrived as the
+  square. The mask is honoured now, but only where a sheet's alpha actually varies: a bike's
+  `w_plate` carries an alpha channel nobody filled in, transparent on every pixel, and
+  treating that as a mask would have erased the number plates instead.
 
 ### Removed
 

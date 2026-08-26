@@ -8,6 +8,8 @@ import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import { loadRiderModel, previewModelSwap } from "../../api/mods";
 import type { BikeModel, Loadout, PaintTexture, RiderPart } from "../../types";
 import { useT } from "../../i18n/context";
+import { TyresPicker } from "./TyresPicker";
+import { useTyresPick } from "./tyresPick";
 
 interface ViewerPanelProps {
   texture?: PaintTexture | null;
@@ -89,6 +91,7 @@ export function ViewerPanel({
   // The bike half. Kept whole rather than as bare nodes: the model carries every paint
   // installed for it, so switching livery is a pick out of this and not another resolve.
   const [bikeModel, setBikeModel] = useState<BikeModel | null>(null);
+  const tyresPick = useTyresPick();
   const [bikeLoading, setBikeLoading] = useState(false);
   const [bikeError, setBikeError] = useState<string | null>(null);
   const bikeFirst = useRef(true);
@@ -181,7 +184,7 @@ export function ViewerPanel({
     const timer = setTimeout(() => {
       // "Stock" is the fallback the backend understands for a bike whose active variant the
       // caller couldn't name — the model packed in the archive.
-      previewModelSwap(bikeId!, bikeVariant || "Stock")
+      previewModelSwap(bikeId!, bikeVariant || "Stock", tyresPick.tyres)
         .then((m) => {
           if (!alive) return;
           setBikeModel(m);
@@ -205,7 +208,7 @@ export function ViewerPanel({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [withBike, bikeId, bikeVariant]);
+  }, [withBike, bikeId, bikeVariant, tyresPick.tyres]);
 
   // The livery the loadout names, out of what the bike carries. Nothing named, or a name
   // nothing installed answers to, leaves the model in the look it ships with.
@@ -299,6 +302,7 @@ export function ViewerPanel({
             {t("viewer.preview3d")}
           </div>
           <div className="flex items-center gap-2">
+            {withBike && <TyresPicker pick={tyresPick} />}
             {!riderOnly && <ModeToggle mode={mode} modes={modes} onChange={setMode} />}
             <Button
               variant="chip"
@@ -327,7 +331,10 @@ export function ViewerPanel({
               <Box className="h-4 w-4 text-muted-foreground" />
               {t("viewer.preview3d")}
             </div>
-            {!riderOnly && <ModeToggle mode={mode} modes={modes} onChange={setMode} />}
+            <div className="flex items-center gap-2">
+              {withBike && <TyresPicker pick={tyresPick} />}
+              {!riderOnly && <ModeToggle mode={mode} modes={modes} onChange={setMode} />}
+            </div>
           </div>
           <div className="relative min-h-0 flex-1">
             {/* Posing only in the expanded view: the inline panel is 280px tall, and a

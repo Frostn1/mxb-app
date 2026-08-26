@@ -3,6 +3,8 @@ import { Box, Loader2, TriangleAlert } from "lucide-react";
 import type * as THREE from "three";
 import { cn } from "@/lib/utils";
 import { ModelViewer } from "../../Viewer/ModelViewer";
+import { TyresPicker } from "../../Viewer/TyresPicker";
+import { useTyresPick } from "../../Viewer/tyresPick";
 import { loadBikeModel, loadRiderModel, scanLibrary } from "../../../api/mods";
 import { displayName } from "../../../lib/mods";
 import { EMPTY_LOADOUT } from "../../../lib/presets";
@@ -89,6 +91,7 @@ export function PreviewPanel({
   const [textures, setTextures] = useState<PaintTexture[]>([]);
   // The model's own textures, kept apart from the ones it is currently wearing.
   const [stock, setStock] = useState<PaintTexture[]>([]);
+  const tyresPick = useTyresPick();
   const [riderParts, setRiderParts] = useState<RiderPart[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -158,7 +161,7 @@ export function PreviewPanel({
         // something else, and it is still the right path to try — the load then fails with
         // the accurate reason (no mesh) instead of this claiming it isn't installed.
         if (!found) throw new Error(t("designer.noModelFound", { model }));
-        return loadBikeModel(found.path);
+        return loadBikeModel(found.path, tyresPick.tyres);
       })
       .then((m) => {
         if (!alive) return;
@@ -183,7 +186,7 @@ export function PreviewPanel({
     return () => {
       alive = false;
     };
-  }, [isBike, model, bikePreview, t]);
+  }, [isBike, model, bikePreview, t, tyresPick.tyres]);
 
   useEffect(() => {
     if (!loadout) {
@@ -261,6 +264,7 @@ export function PreviewPanel({
         {t("viewer.preview3d")}
         {/* What you're looking at, and what's in the way of it. A kit is worn under a chest
             protector, and judging a jersey you can only see half of is judging the protector. */}
+        {isBike && <TyresPicker pick={tyresPick} className="ml-auto" />}
         {!isBike && (
           <div className="ml-auto flex items-center gap-1">
             {/* A helmet on a rider is a small thing across the canvas with half of it turned

@@ -343,6 +343,8 @@ export const fr: Translation = {
   "viewer.preview3d": "Aperçu 3D",
   "viewer.expand": "Agrandir",
   "viewer.paint": "Déco",
+  "viewer.tyres": "Pneus",
+  "viewer.tyresOwn": "Ceux de la moto",
   "viewer.loadingModel": "Chargement du modèle…",
   "viewer.loadingPaint": "Chargement de la déco…",
   "viewer.loadingRider": "Chargement du pilote…",
@@ -907,7 +909,7 @@ export const fr: Translation = {
   "viewer.stockGearNote":
     "Affiché sur le {{part}} d'origine du jeu. Une déco faite pour un autre modèle peut ne pas s'aligner parfaitement.",
   "viewer.paintNoChange":
-    "Aucune texture de cette déco n'est utilisée par les pièces affichées ici, donc l'aperçu ne change pas. Elle peut tout de même peindre les roues ou la chaîne, que cette vue n'affiche pas.",
+    "Aucune texture de cette déco n'est utilisée par les pièces affichées ici, donc l'aperçu ne change pas. Elle peut tout de même peindre la chaîne, que cette vue n'affiche pas.",
   "viewer.noPaintPreview": "Pas d'aperçu de la déco ({{err}})",
 
   // ── Bibliothèque ───────────────────────────────────────────────────────────

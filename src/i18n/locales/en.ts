@@ -333,6 +333,8 @@ export const en = {
   "viewer.preview3d": "3D Preview",
   "viewer.expand": "Expand",
   "viewer.paint": "Paint",
+  "viewer.tyres": "Tyres",
+  "viewer.tyresOwn": "Bike's own",
   "viewer.loadingModel": "Loading model…",
   "viewer.loadingPaint": "Loading paint…",
   "viewer.loadingRider": "Loading rider…",
@@ -886,7 +888,7 @@ export const en = {
   "viewer.stockGearNote":
     "Shown on the game's stock {{part}}. A paint made for a different model may not line up perfectly.",
   "viewer.paintNoChange":
-    "None of this paint's textures are used by the parts shown here, so the preview doesn't change. It may still paint the wheels or chain, which this view doesn't render.",
+    "None of this paint's textures are used by the parts shown here, so the preview doesn't change. It may still paint the chain, which this view doesn't render.",
   "viewer.noPaintPreview": "No paint preview ({{err}})",
 
   // ── Library (installed mods) ───────────────────────────────────────────────

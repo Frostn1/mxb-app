@@ -109,6 +109,10 @@ export interface Config {
   overlayEnabled?: boolean;
   /** Overlay toggle combo in Tauri accelerator syntax, e.g. `"CommandOrControl+Shift+X"`. */
   overlayHotkey?: string;
+  /** Which tyre pack the 3D previews fit a bike with. **Blank means the pack the bike's own
+   *  `gfx.cfg` names**, which is what the game would fit. Substituting the name is all it
+   *  takes to see a bike on another pack — nothing on disk is touched. */
+  previewTyres?: string;
   /** Voice chat is off until turned on — a feature that opens a microphone shouldn't be
    *  something anyone discovers by accident. */
   voiceEnabled?: boolean;
@@ -428,6 +432,13 @@ export interface BikeModel {
    * Designer's reference underlay is the one place that difference matters.
    */
   base: PaintTexture[];
+  /**
+   * The tyres mod the wheels were drawn from, or `null` when the bike drew none.
+   *
+   * What was actually fitted, not what was asked for: a pick naming a pack that isn't
+   * installed falls back to the bike's own, and the picker shows what's on screen.
+   */
+  tyres: string | null;
   /**
    * Whether the bike's `.geom` placed the parts into one frame.
    *
