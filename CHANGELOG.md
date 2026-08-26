@@ -3,6 +3,12 @@
 ## 2026-08-26
 
 ### Added
+- **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
+  needs wheel meshes and axles to measure against; a model that ships neither fell back to the
+  authored frame, which carries no suspension travel at all — so the bike stood with its shock
+  apparently collapsed. The rear now defaults to 140 mm of drop instead. Bikes the solve *can*
+  answer for are unaffected, and **Reset** still puts a bike back exactly as authored.
+
 - **See a bike's model swaps without leaving the Library.** A bike card now carries a
   **models** badge when there is more than one model set installed, and opening it lists them
   in place — the active one ticked, an incomplete set flagged, a "no model" set marked, and a
