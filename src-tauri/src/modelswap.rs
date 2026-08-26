@@ -800,7 +800,7 @@ pub fn preview_set(mods_path: &str, bike: &str, variant: &str) -> anyhow::Result
     // reader downstream finds it by the sibling name, so a missing folder alone isn't a missing
     // bike: it just means every file comes out of the archive. Only the read path is relaxed —
     // applying a swap still needs somewhere to park the files it displaces.
-    if !dir_exists(&root) && !root.with_extension("pkz").is_file() {
+    if !dir_exists(&root) && !crate::library::sibling_pkz(&root).is_file() {
         anyhow::bail!("bike '{bike}' not found");
     }
     let active = current_active(mods_path, bike);

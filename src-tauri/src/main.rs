@@ -1340,7 +1340,7 @@ fn paint_hints(dir: &std::path::Path) -> Vec<String> {
     // lives in — for a bike as much as for a helmet.
     if names.is_empty() {
         if let (Some(sub), Some(model_dir)) = (dir.file_name(), dir.parent()) {
-            let pkz = model_dir.with_extension("pkz");
+            let pkz = library::sibling_pkz(model_dir);
             let tail = format!("/{}/", sub.to_string_lossy().to_ascii_lowercase());
             if pkz.is_file() {
                 let want = |n: &str| {
@@ -1386,7 +1386,7 @@ fn mesh_texture_names(model_dir: &std::path::Path) -> Vec<String> {
         }
     }
     if meshes.is_empty() {
-        let pkz = model_dir.with_extension("pkz");
+        let pkz = library::sibling_pkz(model_dir);
         if pkz.is_file() {
             for (_, d) in pkz::read_selected(&pkz, bikefiles::is_mesh).unwrap_or_default() {
                 meshes.push(pkz::read_sidecar_blob(&d).unwrap_or(d));
@@ -2036,7 +2036,7 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
         if out.iter().any(|(n, _)| n.to_ascii_lowercase().ends_with(".edf")) {
             return Ok(out);
         }
-        let sibling = p.with_extension("pkz");
+        let sibling = library::sibling_pkz(p);
         if sibling.exists() {
             return pkz::read_selected(&sibling, wanted_bike_file);
         }
@@ -2081,7 +2081,7 @@ fn packed_bike(bike_dir: &std::path::Path) -> Option<std::path::PathBuf> {
             }
         }
     }
-    let sibling = bike_dir.with_extension("pkz");
+    let sibling = library::sibling_pkz(bike_dir);
     sibling.exists().then_some(sibling)
 }
 
@@ -7658,6 +7658,33 @@ mod mesh_texture_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A packed model whose name carries a version number: `Fox Instinct 2.0 by Aeffertz`
+    /// has no folder on disk at all, only the archive beside where one would be, and the
+    /// dot in the name is not an extension to be replaced. Getting that wrong asked for
+    /// `Fox Instinct 2.pkz`, and the Designer offered no sheet names for the boots — so
+    /// nothing suggested `fox`, and a sheet named anything else paints nothing.
+    #[test]
+    fn a_packed_model_with_a_dot_in_its_name_still_names_its_sheets() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("frost-dotted-pkz-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let packed = root.join("Fox Instinct 2.0 by Aeffertz.pkz");
+        {
+            let mut w = zip::ZipWriter::new(std::fs::File::create(&packed).unwrap());
+            w.start_file::<_, ()>("boots.edf", zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(&mesh_naming("fox")).unwrap();
+            w.finish().unwrap();
+        }
+
+        // The destination the picker aims at: a `paints` folder under a model folder that
+        // was never unpacked, which is where a paint for a packed mod has to go.
+        let dest = root.join("Fox Instinct 2.0 by Aeffertz").join("paints");
+        assert_eq!(paint_hints(&dest), vec!["fox".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The whole hint list for a real destination:
     /// `MXB_PAINT_DEST='…/mods/bikes/MX1OEM_2023_Husqvarna_FC_450/paints' \
     ///   cargo test paint_hints_from_env -- --ignored --nocapture`
@@ -8045,7 +8072,7 @@ mod viewer_tests {
             .find(|(_, p)| {
                 p.is_dir()
                     && crate::bikefiles::dir_has_mesh(p)
-                    && p.with_extension("pkz").exists()
+                    && crate::library::sibling_pkz(p).exists()
             })
         else {
             eprintln!("no bike with both a loose mesh and a .pkz found");
@@ -8059,7 +8086,8 @@ mod viewer_tests {
         let mp = root.to_str().unwrap();
         let bikes = crate::library::mods_subdir(mp, "mods/bikes");
         copy_tree(&src_dir, &bikes.join(&bike));
-        std::fs::copy(src_dir.with_extension("pkz"), bikes.join(format!("{bike}.pkz"))).unwrap();
+        std::fs::copy(crate::library::sibling_pkz(&src_dir), bikes.join(format!("{bike}.pkz")))
+            .unwrap();
 
         let set = super::modelswap::preview_set(mp, &bike, "Stock").expect("preview set");
         eprintln!("keeps {:?}", set.root_keep);

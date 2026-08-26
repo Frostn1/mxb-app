@@ -35,6 +35,18 @@
   The Bike / Rider / Both toggle picks what's on screen; either half stays up while the other
   one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
 
+### Fixed
+
+- **A packed mod with a version in its name told the Designer nothing.** A model installed as
+  an archive is found by the `<Model>.pkz` sitting where its folder would be — and that name
+  was built by replacing the model's file extension, which a name like `Fox Instinct 2.0 by
+  Aeffertz` appears to have. The app went looking for `Fox Instinct 2.pkz`, a file nobody has.
+  So a packed bike, helmet or boot whose name carries a version number offered no sheet names
+  in the Designer: no "expected names" line, nothing for **Create the sheets this model asks
+  for** to create, and no suggested name on a blank sheet — and a sheet named by guesswork
+  paints nothing, which is only discovered in game. That boots mod now offers `fox` and
+  `fox_n`, as it always should have. The same lookup answers whether a bike exists at all when
+  it's installed as a bare `.pkz`, so a model-swap preview for one resolves too.
 ### Changed
 - **The Rider tab's bike picker is searchable.** It was a plain dropdown, which is a long
   scroll past dozens of bikes for a name you already know. It's now the same searchable
