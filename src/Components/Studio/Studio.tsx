@@ -29,6 +29,8 @@ interface StudioProps {
   onTab: (tab: StudioTab) => void;
   /** A preset handed over by the Presets tab, for the Rider sub-view to load. */
   riderPreset: Loadout | null;
+  /** The bike that preset was built against — a loadout doesn't name one. */
+  riderBike: string | null;
   onRiderPresetLoaded: () => void;
 }
 
@@ -36,6 +38,7 @@ export default function Studio({
   tab,
   onTab,
   riderPreset,
+  riderBike,
   onRiderPresetLoaded,
 }: StudioProps) {
   const t = useT();
@@ -106,7 +109,11 @@ export default function Studio({
       )}
       {hasRider && visited.has("rider") && (
         <Pane active={tab === "rider"}>
-          <RiderStudio initialLoadout={riderPreset} onLoaded={onRiderPresetLoaded} />
+          <RiderStudio
+            initialLoadout={riderPreset}
+            initialBike={riderBike}
+            onLoaded={onRiderPresetLoaded}
+          />
         </Pane>
       )}
     </div>

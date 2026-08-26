@@ -9,7 +9,8 @@ import { textureBytes } from "../../api/mods";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
 
-export type ViewerMode = "bike" | "rider";
+/** `both` draws the bike and the rider in one scene — see {@link SideBySide}. */
+export type ViewerMode = "bike" | "rider" | "both";
 
 /**
  * Pull a texture's pixels over the binary IPC channel and wrap them in a `DataTexture`.
@@ -969,8 +970,76 @@ function EdfMesh({
   );
 }
 
-// Default camera looks down over a bike/rider; a solo gear item gets a level, closer view.
-function CameraRig({ solo }: { solo: boolean }) {
+/** Clear air between the bike and the rider, in metres. */
+const PAIR_GAP = 0.35;
+
+/**
+ * The rider composite's own extent.
+ *
+ * The body, when there is one: every other piece is anchored and scaled off the body's
+ * bounds in `RiderComposite`, so their own boxes describe where they were authored rather
+ * than where they end up. With no body it's a single gear item, and its box is all there is.
+ */
+function riderBounds(parts: RiderPart[]) {
+  const body = parts.find((p) => p.part === "body" && p.nodes.length);
+  if (body) return partBounds(body.nodes);
+  const drawn = parts.filter((p) => p.nodes.length).flatMap((p) => p.nodes);
+  return drawn.length ? partBounds(drawn) : { lo: [0, 0, 0], hi: [0, 0, 0] };
+}
+
+/**
+ * Bike and rider in one scene, standing beside each other.
+ *
+ * Neither is scaled. Both meshes come out of the game in one frame — Y-up, metres — so the
+ * bike really is that much longer than the rider is tall, and the pair reads as a garage
+ * shot instead of two models fitted to the same box. All this adds is the offsets: shoulder
+ * to shoulder along X with `PAIR_GAP` between their bounding boxes, and each dropped onto
+ * y=0 so they share the ground `ContactShadows` is drawn against.
+ *
+ * The pair is centred by the `<Center>` above it, exactly as a lone model is.
+ */
+function SideBySide({
+  nodes,
+  textures,
+  highlight,
+  parts,
+  overrides,
+}: {
+  nodes: EdfNode[];
+  textures: Map<string, THREE.Texture>;
+  highlight?: Int32Array | null;
+  parts: RiderPart[];
+  overrides?: Map<string, THREE.Texture>;
+}) {
+  const at = useMemo(() => {
+    const bike = partBounds(nodes);
+    const rider = riderBounds(parts);
+    return {
+      // Bike's right edge lands on -GAP/2, rider's left edge on +GAP/2, so whatever their
+      // sizes they never intersect.
+      bike: [-PAIR_GAP / 2 - bike.hi[0], -bike.lo[1], 0] as [number, number, number],
+      rider: [PAIR_GAP / 2 - rider.lo[0], -rider.lo[1], 0] as [number, number, number],
+    };
+  }, [nodes, parts]);
+
+  return (
+    <group>
+      <group position={at.bike}>
+        <EdfMesh nodes={nodes} textures={textures} highlight={highlight} />
+      </group>
+      <group position={at.rider}>
+        <RiderComposite parts={parts} overrides={overrides} />
+      </group>
+    </group>
+  );
+}
+
+/** How much of the scene the camera has to take in. */
+type Framing = "default" | "solo" | "pair";
+
+// Default camera looks down over a bike/rider; a solo gear item gets a level, closer view,
+// and a bike-plus-rider pair is roughly twice as wide, so it starts further back.
+function CameraRig({ frame }: { frame: Framing }) {
   const camera = useThree((s) => s.camera);
   // OrbitControls (`makeDefault`) owns the camera each frame, so moves must go through
   // the controls and be committed with `update()`.
@@ -979,7 +1048,12 @@ function CameraRig({ solo }: { solo: boolean }) {
     | null;
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => {
-    const [x, y, z] = solo ? [1.25, 0.35, 1.7] : [2.6, 1.8, 3.2];
+    const [x, y, z] =
+      frame === "solo"
+        ? [1.25, 0.35, 1.7]
+        : frame === "pair"
+          ? [3.9, 2.2, 4.8]
+          : [2.6, 1.8, 3.2];
     camera.position.set(x, y, z);
     camera.updateProjectionMatrix();
     if (controls) {
@@ -991,7 +1065,7 @@ function CameraRig({ solo }: { solo: boolean }) {
     // Moving the camera by hand changes no React state, so under `frameloop="demand"`
     // nothing would repaint and the reframe wouldn't show until the next interaction.
     invalidate();
-  }, [solo, camera, controls, invalidate]);
+  }, [frame, camera, controls, invalidate]);
   return null;
 }
 
@@ -1079,11 +1153,18 @@ export function ModelViewer({
 }: ModelViewerProps) {
   const map = useDataTexture(texture);
   const texMap = useTextureMapWith(textures, overrides);
-  const hasReal = mode === "bike" && !!nodes?.length;
-  const hasRider = mode === "rider" && !!riderParts?.length;
+  // What `mode` asks for, narrowed to what actually arrived. In `both`, either half can be
+  // missing — a bike that wouldn't resolve, a rider still loading — and the scene falls back
+  // to whichever one is here rather than to a stand-in.
+  const showBike = mode !== "rider" && !!nodes?.length;
+  const showRider = mode !== "bike" && !!riderParts?.length;
+  const pair = showBike && showRider;
+  const hasReal = showBike && !showRider;
+  const hasRider = showRider && !showBike;
   // A single gear item (no body) is a small centred object — frame it level.
   const gearSolo =
     hasRider && !riderParts!.some((p) => p.part === "body" && p.nodes.length);
+  const frame: Framing = pair ? "pair" : gearSolo ? "solo" : "default";
   return (
     <div className={cn("relative", className)}>
       <ErrorBoundary compact label="model-viewer">
@@ -1115,7 +1196,7 @@ export function ModelViewer({
         >
           <color attach="background" args={["#0e0f13"]} />
           <FrameOnChange token={frameToken} />
-          <CameraRig solo={gearSolo} />
+          <CameraRig frame={frame} />
           <ambientLight intensity={0.75} />
           {/* Even sky/ground fill so matte paint reads its true colour. */}
           <hemisphereLight args={[0xffffff, 0x555a66, 0.7]} />
@@ -1129,7 +1210,15 @@ export function ModelViewer({
           {/* Front fill from the camera side so the front of the kit isn't in shadow. */}
           <directionalLight position={[0, 1.5, 5]} intensity={0.5} />
           <Center>
-            {hasReal ? (
+            {pair ? (
+              <SideBySide
+                nodes={nodes!}
+                textures={texMap}
+                highlight={highlight}
+                parts={riderParts!}
+                overrides={overrides}
+              />
+            ) : hasReal ? (
               <EdfMesh nodes={nodes!} textures={texMap} highlight={highlight} />
             ) : hasRider ? (
               <RiderComposite parts={riderParts!} overrides={overrides} />

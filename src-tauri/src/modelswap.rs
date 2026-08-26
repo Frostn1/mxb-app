@@ -795,7 +795,12 @@ pub fn preview_set(mods_path: &str, bike: &str, variant: &str) -> anyhow::Result
         anyhow::bail!("invalid bike or model name");
     }
     let root = bike_dir(mods_path, bike);
-    if !dir_exists(&root) {
+    // A bike installed as a bare `NAME.pkz` has no folder beside it until something writes
+    // one — no swap registered, no paint installed. There is still a model in there, and the
+    // reader downstream finds it by the sibling name, so a missing folder alone isn't a missing
+    // bike: it just means every file comes out of the archive. Only the read path is relaxed —
+    // applying a swap still needs somewhere to park the files it displaces.
+    if !dir_exists(&root) && !root.with_extension("pkz").is_file() {
         anyhow::bail!("bike '{bike}' not found");
     }
     let active = current_active(mods_path, bike);
@@ -1666,6 +1671,24 @@ mod tests {
         assert!(preview_set(mp, "KTM450", "Broken").is_err(), "incomplete set");
         assert!(preview_set(mp, "KTM450", "Nope").is_err(), "no such variant");
         assert!(preview_set(mp, "Ghost", "Factory").is_err(), "no such bike");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn preview_reads_a_bike_that_is_only_a_pkz() {
+        // A bike installed as a bare `NAME.pkz` grows its folder the first time a swap is
+        // registered or a paint installed — until then there is no folder, and the preview
+        // used to call that "bike not found". Every file simply comes out of the archive.
+        let root = tmp("preview-pkz-only");
+        let mp = root.to_str().unwrap();
+        touch(&bikes_root(mp).join("Packed.pkz"));
+        assert!(!bike_dir(mp, "Packed").exists(), "no folder beside the archive");
+
+        let set = preview_set(mp, "Packed", ORIGINAL).expect("pkz-only bike previews");
+        assert!(set.root_keep.is_empty(), "nothing loose to keep");
+        assert!(set.variant_files.is_empty());
+        // Still not a bike when neither the folder nor the archive is there.
+        assert!(preview_set(mp, "Ghost", ORIGINAL).is_err());
         let _ = fs::remove_dir_all(&root);
     }
 

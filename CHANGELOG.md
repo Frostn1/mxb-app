@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-26
+
+### Added
+- **The bike now stands next to the rider in the Studio preview.** The 3D panel in Studio →
+  Rider only ever drew the rider, so the bike half of a look — its livery and its model swap —
+  was invisible until you were in-game. The panel now draws both in one scene, at their real
+  sizes, and the Rider tab gains a bike picker with the livery and model-swap slots beside it.
+  A preset opened with "View in Rider" brings its bike along, so it arrives fully dressed.
+  The Bike / Rider / Both toggle picks what's on screen; either half stays up while the other
+  one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
+
 ## 2026-08-26 — v0.10.2 — Liveries that belong to a model, and a Windows that starts
 
 ### Added
@@ -25,6 +36,8 @@
   carries a ✕. Hiding is remembered per bike *and* per set of missing files, so the same bike
   breaking a different way still speaks up, and a bike you repair — then break again later —
   warns afresh rather than staying quietly hidden.
+
+## 2026-08-22
 
 ### Fixed
 
