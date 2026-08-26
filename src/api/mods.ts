@@ -1836,6 +1836,16 @@ export function frostmodRepairRuntimes(): Promise<RuntimeRepairReport> {
   return invoke<RuntimeRepairReport>("frostmod_repair_runtimes");
 }
 
+/** Move a loose `msvcr90.dll` beside the game exe out of the loader's way.
+ *
+ *  Renames it to `msvcr90.dll.disabled` rather than deleting: the loader matches the exact
+ *  filename, so the rename is what defuses it, and a file somebody else put there survives
+ *  the decision. Resolves to where it went; rejects with a message worth showing — a file
+ *  the running game holds open is the common one. */
+export function frostmodClearStrayMsvcr90(): Promise<string> {
+  return invoke<string>("frostmod_clear_stray_msvcr90");
+}
+
 /** Where to send someone whose UAC prompt we can't raise (or who declined it).
  *
  *  Microsoft's own direct downloads, the same ones the backend fetches — a download page

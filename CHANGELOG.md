@@ -27,10 +27,36 @@
 - **A livery inside a model swap was filed under the wrong owner.** The Library attributed it
   to the swap folder rather than to the bike, so it landed in a bucket no bike id ever
   matched — and a preset share code built from that bike silently shipped without the livery.
+- **A `msvcr90.dll` in the game folder that the app wouldn't remove is no longer a silent
+  crash.** A loose VC9 CRT beside `mxbikes.exe` aborts the game with *"R6034 — An application
+  has made an attempt to load the C runtime library incorrectly"* the moment anything
+  plain-imports it, and v0.10.1 began taking back the copies this app itself planted. It only
+  ever deletes a file whose bytes match a Visual C++ 2008 assembly already on the PC, which is
+  what stops it reaching for somebody else's file — but everything it declined to touch it
+  swallowed, in three cases that all end with a dead game and no explanation: a copy that came
+  from somewhere else (a mod archive extracted into the game folder is the reported one), a PC
+  with no VC90 installed at all, where nothing can ever match and even our own copy is
+  stranded, and a file the running game is holding open.
+- **The app now says so, and offers the fix.** A file it won't delete on its own gets a red
+  bar naming it, and a button that renames it to `msvcr90.dll.disabled` — Windows resolves an
+  import by exact filename, so the rename is what defuses it, and a file somebody put there on
+  purpose survives the decision. Automatic removal is unchanged: still only ever a copy this
+  app can prove it made. The press is what settles provenance for everything else. When the
+  game is holding the file, the bar says to close it first rather than failing at a button.
+- **"Repair runtimes" reports the same thing**, so a repair that installed everything and still
+  found the reason the game won't start says that instead of "everything was already in place".
 
 ## 2026-08-22
 
 ### Fixed
+- **An install blocked by antivirus reported a bare "os error 2".** When a security product
+  blocks a freshly downloaded mod file in the temp folder, the app's check for it asked the
+  wrong question — it tested only whether the file still had a directory entry, which a
+  scanner holding the *contents* leaves untouched. The advice written for exactly this case
+  never fired, and the install failed with a raw path and an error number that reads as if
+  the mod were broken. The check now tries to read the file the same way the copy does, so a
+  blocked install names the file, says whether it was removed or locked, and points at the
+  folder to add an exclusion for.
 - **Paint sync published the wrong bike's livery.** Liveries were matched by filename alone,
   so a rider with `Race.pnt` on two bikes published whichever the folder walk reached first —
   and the file carried that bike's install path, so everyone on the grid saw it land on the

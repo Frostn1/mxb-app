@@ -47,6 +47,11 @@ pub struct FrostmodStatus {
     /// which machines inject fine, and refusing to launch would take FrostMod away from
     /// anyone the detection is wrong about. It's a warning with a fix attached.
     pub missing_runtimes: Vec<crate::vcruntime::Runtime>,
+    /// A loose `msvcr90.dll` beside the game exe that we didn't remove. `Clear`/`Removed`
+    /// mean there is nothing to say; the other two mean the game will die with R6034 the
+    /// next time something plain-imports the CRT, and only the player can authorise the
+    /// fix — see `crate::vcruntime::disable_stray_msvcr90`.
+    pub stray_msvcr90: crate::vcruntime::Stray,
 }
 
 /// The folder we install FrostMod into and run it from — so also where anything it
@@ -238,9 +243,13 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
     // Take back the loose `msvcr90.dll` versions 0.9.2–0.10.0 laid beside the exe. It kills
     // the game with R6034 — see `crate::vcruntime` — and the status poll is the only thing
     // that reaches a player who never opens Settings, so the cleanup rides along here.
-    if let Some(dir) = game_dir.as_deref() {
-        crate::vcruntime::remove_stray_msvcr90(dir);
-    }
+    //
+    // Its verdict travels on: what the sweep declines to delete is still a file that stops
+    // the game dead, and reporting it is the only way the player ever learns why.
+    let stray_msvcr90 = game_dir
+        .as_deref()
+        .map(crate::vcruntime::remove_stray_msvcr90)
+        .unwrap_or_default();
 
     FrostmodStatus {
         installed,
@@ -250,6 +259,7 @@ pub async fn status(app: &AppHandle) -> FrostmodStatus {
         running: crate::frostmod::is_running(),
         supported_for_game,
         missing_runtimes: crate::vcruntime::missing(game_dir.as_deref()),
+        stray_msvcr90,
     }
 }
 
