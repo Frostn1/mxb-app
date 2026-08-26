@@ -50,6 +50,8 @@
   one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
 
 ### Changed
+- Settings → Supporters lists **Bøddi** in place of **Thomas**.
+
 - **The Rider tab's bike picker is searchable.** It was a plain dropdown, which is a long
   scroll past dozens of bikes for a name you already know. It's now the same searchable
   field as the Paint and Model swap slots beside it — type to filter. Unlike those, it
