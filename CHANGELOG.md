@@ -3,6 +3,20 @@
 ## 2026-08-26
 
 ### Added
+- **Stand a bike the way you want to see it.** The 3D preview drew every bike in the frame it
+  was *authored* in, which is not a stance it ever holds on the ground — a `.geom` carries no
+  suspension travel at all, and ride height falls out of physics the viewer doesn't run. So
+  bikes stood with the shock apparently collapsed and the rear wheel riding high. The preview
+  now knows the bike's own joints and lets you move them: **Rear** swings the swingarm about
+  its pivot, **Front** slides the fork up its own raked axis, **Steering** turns the bars and
+  the front wheel with them, all in millimetres and degrees of the real thing.
+  - **Level wheels** solves the rear for you — both tyres touching the same ground, measured
+    at the contact patches rather than the axles, since a 21" front and a 19" rear aren't level
+    when their axles are. A bike wearing wheels is drawn that way to begin with, so it stands
+    right without anyone touching a slider; **Reset** puts it back as authored.
+  - The panel is in the expanded preview and the full-screen viewer. A bike whose `.geom`
+    names no mounts has no joints to move and renders exactly as it did before.
+
 - **Mirror a layer to the other side of the bike.** Place a decal on the right shroud, hit
   Mirror, and a copy lands at the same spot on the left one. The place is worked out from the
   model rather than by flipping the sheet — the two flanks are unwrapped wherever the modeller

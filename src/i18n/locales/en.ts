@@ -344,6 +344,12 @@ export const en = {
   "viewer.scrollToZoom": "Scroll to zoom",
   "viewer.rightDragToPan": "Right-drag to pan",
   "viewer.paintReloaded": "Paint reloaded",
+  "viewer.pose": "Pose",
+  "viewer.poseRear": "Rear",
+  "viewer.poseFront": "Front",
+  "viewer.poseSteer": "Steering",
+  "viewer.poseLevel": "Level wheels",
+  "viewer.poseReset": "Reset",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Search…",

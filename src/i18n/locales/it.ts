@@ -350,6 +350,12 @@ export const it: Translation = {
   "viewer.scrollToZoom": "Scorri per zoomare",
   "viewer.rightDragToPan": "Trascina col destro per spostare",
   "viewer.paintReloaded": "Livrea ricaricata",
+  "viewer.pose": "Posa",
+  "viewer.poseRear": "Posteriore",
+  "viewer.poseFront": "Anteriore",
+  "viewer.poseSteer": "Sterzo",
+  "viewer.poseLevel": "Allinea le ruote",
+  "viewer.poseReset": "Ripristina",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Cerca…",

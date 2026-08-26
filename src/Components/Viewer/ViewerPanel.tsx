@@ -277,6 +277,7 @@ export function ViewerPanel({
     texture,
     textures: drawsBike ? bikeTextures : undefined,
     nodes: drawsBike ? bikeModel?.nodes ?? null : null,
+    rig: drawsBike ? bikeModel?.rig ?? null : null,
     riderParts: drawsRider ? shownParts : null,
     loading: riderLoading,
     // With a real bike on the way, the cartoon stand-in beside the rider is worse than
@@ -329,7 +330,9 @@ export function ViewerPanel({
             {!riderOnly && <ModeToggle mode={mode} modes={modes} onChange={setMode} />}
           </div>
           <div className="relative min-h-0 flex-1">
-            <ModelViewer {...view} className="absolute inset-0" />
+            {/* Posing only in the expanded view: the inline panel is 280px tall, and a
+                control stack in it would cover the bike it is posing. */}
+            <ModelViewer {...view} poseControls className="absolute inset-0" />
             {overlay}
           </div>
         </DialogContent>

@@ -115,6 +115,7 @@ export function ViewerDialog({
   const [reloads, setReloads] = useState(0);
 
   const nodes = model?.nodes ?? null;
+  const rig = model?.rig ?? null;
   const paints = model?.paints ?? [];
 
   // The names behind each picker, in order — the labels shown are decorated versions of
@@ -460,6 +461,8 @@ export function ViewerDialog({
             textures={activeTextures}
             nodes={nodes}
             riderParts={riderParts}
+            rig={rig}
+            poseControls
             loading={loading}
             noStandIn={isBike}
             className="absolute inset-0"
