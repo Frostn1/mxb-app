@@ -902,7 +902,7 @@ export const ptBR: Translation = {
   "viewer.stockGearNote":
     "Mostrado no {{part}} original do jogo. Uma pintura feita para outro modelo pode não encaixar perfeitamente.",
   "viewer.paintNoChange":
-    "Nenhuma das texturas desta pintura é usada pelas peças mostradas aqui, então a prévia não muda. Ela ainda pode pintar as rodas ou a corrente, que esta visão não renderiza.",
+    "Nenhuma das texturas desta pintura é usada pelas peças mostradas aqui, então a prévia não muda. Ela ainda pode pintar a corrente, que esta visão não renderiza.",
   "viewer.noPaintPreview": "Sem prévia da pintura ({{err}})",
 
   // ── Biblioteca ─────────────────────────────────────────────────────────────

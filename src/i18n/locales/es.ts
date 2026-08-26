@@ -902,7 +902,7 @@ export const es: Translation = {
   "viewer.stockGearNote":
     "Mostrado sobre el {{part}} de serie del juego. Unos gráficos hechos para otro modelo pueden no encajar del todo.",
   "viewer.paintNoChange":
-    "Ninguna de las texturas de estos gráficos la usan las piezas que se muestran aquí, así que la vista previa no cambia. Aun así puede pintar las ruedas o la cadena, que esta vista no representa.",
+    "Ninguna de las texturas de estos gráficos la usan las piezas que se muestran aquí, así que la vista previa no cambia. Aun así puede pintar la cadena, que esta vista no representa.",
   "viewer.noPaintPreview": "Sin vista previa de los gráficos ({{err}})",
 
   // ── Biblioteca ─────────────────────────────────────────────────────────────

@@ -909,7 +909,7 @@ export const de: Translation = {
   "viewer.stockGearNote":
     "Auf dem Standard-{{part}} des Spiels gezeigt. Ein Design für ein anderes Modell passt möglicherweise nicht exakt.",
   "viewer.paintNoChange":
-    "Keine der Texturen dieses Designs wird von den hier gezeigten Teilen verwendet, deshalb ändert sich die Vorschau nicht. Es kann trotzdem Räder oder Kette einfärben, die diese Ansicht nicht darstellt.",
+    "Keine der Texturen dieses Designs wird von den hier gezeigten Teilen verwendet, deshalb ändert sich die Vorschau nicht. Es kann trotzdem die Kette einfärben, die diese Ansicht nicht darstellt.",
   "viewer.noPaintPreview": "Keine Design-Vorschau ({{err}})",
 
   // ── Bibliothek ─────────────────────────────────────────────────────────────
