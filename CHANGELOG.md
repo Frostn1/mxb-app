@@ -3,6 +3,18 @@
 ## 2026-08-26
 
 ### Added
+- **Move the bike and the rider around in the Rider tab.** The pair stood where the viewer put
+  them — shoulder to shoulder, a fixed gap apart — which is the one arrangement nobody was
+  composing for. A **Placement** panel now moves either model: side, up, forward and turn, in
+  metres and degrees, so the rider can stand at the bike's shoulder, sit on it, or face the
+  camera with the bike behind them. **Reset** puts the pair back the way it opened.
+- **The bike's pose panel, in the Rider tab.** Rear, Front, Steering and Level wheels were in
+  the library's viewer and the expanded preview only; the tab where a look is actually built
+  now carries them too, in the panel beside the pickers.
+- **A 3D preview you can drag wider.** The Rider tab's preview was a fixed 420px onto a bike
+  and a rider side by side. Drag the handle on its left edge to give it as much of the tab as
+  you want — double-click to put it back — and the width is remembered per machine.
+
 - **Stand a bike the way you want to see it.** The 3D preview drew every bike in the frame it
   was *authored* in, which is not a stance it ever holds on the ground — a `.geom` carries no
   suspension travel at all, and ride height falls out of physics the viewer doesn't run. So

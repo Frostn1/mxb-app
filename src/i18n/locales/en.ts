@@ -352,6 +352,12 @@ export const en = {
   "viewer.poseSteer": "Steering",
   "viewer.poseLevel": "Level wheels",
   "viewer.poseReset": "Reset",
+  "viewer.place": "Placement",
+  "viewer.placeSide": "Side",
+  "viewer.placeUp": "Up",
+  "viewer.placeFwd": "Forward",
+  "viewer.placeTurn": "Turn",
+  "viewer.resizePanel": "Drag to resize · double-click to reset",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Search…",

@@ -361,6 +361,12 @@ export const ptBR: Translation = {
   "viewer.poseSteer": "Direção",
   "viewer.poseLevel": "Nivelar rodas",
   "viewer.poseReset": "Redefinir",
+  "viewer.place": "Posicionamento",
+  "viewer.placeSide": "Lado",
+  "viewer.placeUp": "Altura",
+  "viewer.placeFwd": "Frente",
+  "viewer.placeTurn": "Girar",
+  "viewer.resizePanel": "Arraste para redimensionar · clique duplo para redefinir",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Pesquisar…",

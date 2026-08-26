@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, AlertTriangle, Save, Loader2, FolderInput } from "lucide-react";
 import { toast } from "sonner";
 import { useT, type TKey } from "../../i18n/context";
@@ -29,6 +29,18 @@ import { useConfig } from "../../Context/Config";
 import { Combobox } from "../ui/combobox";
 
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
+
+/**
+ * How wide the preview column is, in px, and where that is remembered.
+ *
+ * Machine-local, like the app's other bits of remembered layout — a window that is 1400px
+ * on the desktop and 1024 on the laptop wants a different answer on each, and neither is
+ * worth a round trip to the config file.
+ */
+const PREVIEW_W_KEY = "mxb.rider.previewWidth";
+const PREVIEW_W = { min: 320, max: 900, initial: 420 };
+/** What the picker column keeps for itself, however far the preview is dragged. */
+const PICKERS_MIN = 300;
 
 /**
  * The bike slots the preview actually draws.
@@ -84,6 +96,44 @@ export default function RiderStudio({
   const [repairing, setRepairing] = useState<string | null>(null);
   // Paints the chosen models carry, merged with the loose ones the scan found.
   const { optionsFor, missingFor } = useGearPaints(loadout);
+  // The preview column's width, dragged by the handle on its left edge. A 420px window onto
+  // a bike and a rider side by side is a small one, and this tab is where a look is composed.
+  const row = useRef<HTMLDivElement>(null);
+  const [previewW, setPreviewW] = useState(() => {
+    const saved = Number(localStorage.getItem(PREVIEW_W_KEY));
+    return saved >= PREVIEW_W.min && saved <= PREVIEW_W.max ? saved : PREVIEW_W.initial;
+  });
+  const drag = useRef<{ from: number; was: number } | null>(null);
+
+  // Clamped against the row as it is now, not just the fixed limits: on a narrow window the
+  // pickers have to stay usable, and they're the half that can't be scrolled sideways.
+  const widen = useCallback((to: number) => {
+    const room = (row.current?.clientWidth ?? PREVIEW_W.max) - PICKERS_MIN;
+    setPreviewW(Math.max(PREVIEW_W.min, Math.min(to, Math.min(PREVIEW_W.max, room))));
+  }, []);
+
+  const onDragMove = useCallback(
+    (e: React.PointerEvent) => {
+      // Dragging left grows the preview, since it's the right-hand column.
+      if (drag.current) widen(drag.current.was + (drag.current.from - e.clientX));
+    },
+    [widen],
+  );
+
+  // Remembered wherever the width came from — the drag, the double-click, the arrow keys.
+  useEffect(() => {
+    localStorage.setItem(PREVIEW_W_KEY, String(previewW));
+  }, [previewW]);
+
+  // A width dragged out on a wide window would otherwise squeeze the pickers to nothing when
+  // the window is made small again — re-clamp against the room there actually is.
+  useEffect(() => {
+    const el = row.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => widen(previewW));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [widen, previewW]);
 
   const setSlot = useCallback((key: keyof Loadout, value: string) => {
     setLoadout((prev) => ({ ...prev, [key]: value }));
@@ -274,7 +324,7 @@ export default function RiderStudio({
         </div>
       ))}
 
-      <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
+      <div ref={row} className="flex min-h-0 flex-1 gap-5 overflow-hidden px-7 pb-6">
         {/* Picker column */}
         <section className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
           {/* Show-on-model toggles */}
@@ -353,14 +403,42 @@ export default function RiderStudio({
         </section>
 
         {/* Live render — the rider, and the bike beside them when this build can draw one */}
-        <ViewerPanel
-          loadout={loadout}
-          riderOnly={!showBike}
-          bikeId={showBike ? bike : undefined}
-          bikeVariant={bikeVariant}
-          hiddenParts={hidden}
-          className="w-[420px] flex-none"
-        />
+        <div className="relative flex-none" style={{ width: previewW }}>
+          {/* Drag the preview wider. It sits in the gap between the two columns rather than
+              inside either, so neither loses a pixel to it. */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("viewer.resizePanel")}
+            title={t("viewer.resizePanel")}
+            tabIndex={0}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              drag.current = { from: e.clientX, was: previewW };
+            }}
+            onPointerMove={onDragMove}
+            onPointerUp={() => (drag.current = null)}
+            onPointerCancel={() => (drag.current = null)}
+            onDoubleClick={() => widen(PREVIEW_W.initial)}
+            onKeyDown={(e) => {
+              const step = e.key === "ArrowLeft" ? 24 : e.key === "ArrowRight" ? -24 : 0;
+              if (!step) return;
+              e.preventDefault();
+              widen(previewW + step);
+            }}
+            className="group absolute -left-3.5 top-0 z-10 h-full w-3 cursor-col-resize touch-none focus:outline-none"
+          >
+            <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 rounded bg-white/[0.07] transition-colors group-hover:bg-primary/60 group-focus:bg-primary/60" />
+          </div>
+          <ViewerPanel
+            loadout={loadout}
+            riderOnly={!showBike}
+            bikeId={showBike ? bike : undefined}
+            bikeVariant={bikeVariant}
+            hiddenParts={hidden}
+            className="h-full"
+          />
+        </div>
       </div>
     </div>
   );
