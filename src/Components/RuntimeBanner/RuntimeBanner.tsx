@@ -1,4 +1,12 @@
-import { AlertTriangle, Download, Loader2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Download,
+  FolderInput,
+  Loader2,
+  OctagonAlert,
+  X,
+} from "lucide-react";
+import type { ReactNode } from "react";
 import { Button } from "@/Components/ui/button";
 import { RUNTIME_NAME_KEY } from "@/api/mods";
 import { useFrostmod } from "@/Context/FrostmodContext";
@@ -6,20 +14,60 @@ import { Trans } from "@/i18n";
 import { useT } from "@/i18n/context";
 
 /**
- * Slim bar shown when Windows is missing a Visual C++ runtime the FrostMod chain needs.
+ * Slim bar for the two things that stop FrostMod reaching the game and can't be fixed
+ * behind the player's back.
  *
- * This is the one problem the app can't fix behind the player's back: installing a
- * Microsoft redistributable needs admin rights, so it has to be a button they press. It
- * earns a banner rather than living only in Settings because the symptom — FrostMod
- * silently failing to attach, or a bare "…dll was not found" box over the game — gives no
- * hint that Settings is where to look.
+ * **A stray `msvcr90.dll`** beside the game exe, which aborts MX Bikes with R6034 the
+ * moment anything plain-imports the CRT. The app deletes the copies it planted itself, but
+ * a file it can't prove it planted is somebody else's, and moving it aside has to be a
+ * press. This one is red and outranks the other: it is an active crash, not a gap.
  *
- * Renders nothing when there's nothing missing, which is the overwhelmingly common case.
+ * **A missing Visual C++ runtime**, which needs admin rights to install, so it likewise has
+ * to be a button. It earns a bar rather than living only in Settings because the symptom —
+ * FrostMod silently failing to attach, or a bare "…dll was not found" box over the game —
+ * gives no hint that Settings is where to look.
+ *
+ * Renders nothing when neither applies, which is the overwhelmingly common case.
  */
 export default function RuntimeBanner() {
   const t = useT();
-  const { runtimeWarning, installingRuntime, installRuntime, dismissRuntimeWarning } =
-    useFrostmod();
+  const {
+    runtimeWarning,
+    installingRuntime,
+    installRuntime,
+    dismissRuntimeWarning,
+    strayWarning,
+    clearingStray,
+    clearStrayMsvcr90,
+  } = useFrostmod();
+
+  if (strayWarning) {
+    // `locked` is ours and the game is holding it open, so the fix is theirs to make in
+    // the right order — pressing again before closing the game just fails again.
+    const isLocked = strayWarning === "locked";
+    return (
+      <Bar
+        tone="danger"
+        body={
+          <Trans
+            k={isLocked ? "runtime.strayLocked" : "runtime.strayForeign"}
+            values={{
+              what: <span className="font-semibold">msvcr90.dll</span>,
+            }}
+          />
+        }
+        pitch={t(isLocked ? "runtime.strayLockedPitch" : "runtime.strayPitch")}
+        action={t("runtime.strayFix")}
+        actionIcon={FolderInput}
+        busyLabel={t("runtime.strayClearing")}
+        busy={clearingStray}
+        onAction={() => void clearStrayMsvcr90()}
+        onDismiss={dismissRuntimeWarning}
+        dismissLabel={t("runtime.dismiss")}
+      />
+    );
+  }
+
   if (!runtimeWarning) return null;
 
   // vc90 is the *game's* runtime and vc140 is FrostMod's own, so they need different
@@ -33,38 +81,86 @@ export default function RuntimeBanner() {
   const nameKey = RUNTIME_NAME_KEY[runtimeWarning];
 
   return (
-    <div className="flex items-center gap-3 border-b border-amber-500/25 bg-amber-500/10 px-4 py-2 text-sm text-foreground">
-      <AlertTriangle className="size-4 shrink-0 text-amber-500" />
-      <span className="min-w-0 truncate">
+    <Bar
+      tone="warning"
+      body={
         <Trans
           k={bodyKey}
-          values={{
-            what: <span className="font-semibold">{t(nameKey)}</span>,
-          }}
+          values={{ what: <span className="font-semibold">{t(nameKey)}</span> }}
         />
-        <span className="ml-1 text-muted-foreground">{t("runtime.pitch")}</span>
+      }
+      pitch={t("runtime.pitch")}
+      action={t("runtime.fixIt")}
+      actionIcon={Download}
+      busyLabel={t("runtime.installing")}
+      busy={installingRuntime}
+      onAction={() => void installRuntime(runtimeWarning)}
+      onDismiss={dismissRuntimeWarning}
+      dismissLabel={t("runtime.dismiss")}
+    />
+  );
+}
+
+/**
+ * The bar itself, so the two cases differ in their words and colour rather than in their
+ * markup. `danger` is a file crashing the game right now; `warning` is something that
+ * won't work when it's reached.
+ */
+function Bar({
+  tone,
+  body,
+  pitch,
+  action,
+  actionIcon: ActionIcon,
+  busyLabel,
+  busy,
+  onAction,
+  onDismiss,
+  dismissLabel,
+}: {
+  tone: "danger" | "warning";
+  body: ReactNode;
+  pitch: string;
+  action: string;
+  actionIcon: typeof Download;
+  busyLabel: string;
+  busy: boolean;
+  onAction: () => void;
+  onDismiss: () => void;
+  dismissLabel: string;
+}) {
+  const danger = tone === "danger";
+  const Icon = danger ? OctagonAlert : AlertTriangle;
+  return (
+    <div
+      className={`flex items-center gap-3 border-b px-4 py-2 text-sm text-foreground ${
+        danger
+          ? "border-red-500/25 bg-red-500/10"
+          : "border-amber-500/25 bg-amber-500/10"
+      }`}
+    >
+      <Icon className={`size-4 shrink-0 ${danger ? "text-red-500" : "text-amber-500"}`} />
+      <span className="min-w-0 truncate">
+        {body}
+        <span className="ml-1 text-muted-foreground">{pitch}</span>
       </span>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
-        <Button
-          size="sm"
-          onClick={() => void installRuntime(runtimeWarning)}
-          disabled={installingRuntime}
-        >
-          {installingRuntime ? (
+        <Button size="sm" onClick={onAction} disabled={busy}>
+          {busy ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : (
-            <Download className="size-3.5" />
+            <ActionIcon className="size-3.5" />
           )}
-          {installingRuntime ? t("runtime.installing") : t("runtime.fixIt")}
+          {busy ? busyLabel : action}
         </Button>
         <Button
           size="icon"
           variant="ghost"
           className="size-8"
-          onClick={dismissRuntimeWarning}
-          disabled={installingRuntime}
-          aria-label={t("runtime.dismiss")}
+          onClick={onDismiss}
+          disabled={busy}
+          aria-label={dismissLabel}
         >
           <X className="size-4" />
         </Button>

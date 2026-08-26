@@ -321,6 +321,20 @@ export const ptBR: Translation = {
   "runtime.repairNoGameFolderDesc":
     "Os componentes estão instalados, mas sem a pasta de instalação não dá para verificar a pasta do jogo. Defina-a acima e repare de novo.",
   "runtime.repairFailed": "Não foi possível reparar os componentes",
+  "runtime.strayForeign": "Um arquivo na pasta do jogo ({{what}}) faz o MX Bikes travar.",
+  "runtime.strayLocked": "{{what}}, na pasta do jogo, faz o MX Bikes travar.",
+  "runtime.strayPitch":
+    "É o que causa o erro \"R6034\" ao iniciar. Tirá-lo do caminho resolve, e nada é apagado.",
+  "runtime.strayLockedPitch":
+    "É o que causa o erro \"R6034\" ao iniciar. Feche o MX Bikes primeiro e depois tire-o do caminho.",
+  "runtime.strayFix": "Tirar do caminho",
+  "runtime.strayFixHint":
+    "Renomeia para msvcr90.dll.disabled para o Windows parar de carregá-lo. Nada é apagado.",
+  "runtime.strayClearing": "Movendo…",
+  "runtime.strayCleared": "Tirado do caminho",
+  "runtime.strayClearedDesc":
+    "Agora ele se chama msvcr90.dll.disabled, na mesma pasta. Abra o MX Bikes de novo.",
+  "runtime.strayClearFailed": "Não foi possível mover o arquivo",
   "update.checkFailed": "Não foi possível verificar as atualizações",
   "update.failed": "A atualização falhou",
 
@@ -622,6 +636,8 @@ export const ptBR: Translation = {
   "settings.updateCheckFailed":
     "Não foi possível verificar as atualizações — sem conexão ou GitHub indisponível.",
   "settings.latestVersion": "Última: {{version}}",
+  "settings.frostmodStrayMsvcr90":
+    "Um arquivo na pasta do jogo faz o MX Bikes travar com \"R6034\" — tire-o do caminho para resolver.",
   "settings.frostmodRuntimeMissing":
     "Falta ao Windows um componente do Visual C++ que o FrostMod precisa — instale-o para acabar com o erro \"dll was not found\".",
   "settings.repairRuntimes": "Reparar componentes",

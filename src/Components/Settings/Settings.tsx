@@ -279,7 +279,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // bottle on macOS. The app starts FrostMod in whichever prefix holds the game.
   const hasFrostmod = isWindows || platform === "linux" || isMac;
   const { theme, setTheme } = useTheme();
-  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes } =
+  const { running, reload, status, installing, checking, statusError, install, start, stop, refreshStatus, missingRuntime, installRuntime, installingRuntime, repairRuntimes, repairingRuntimes, strayMsvcr90, clearingStray, clearStrayMsvcr90 } =
     useFrostmod();
   const { check: checkForUpdates } = useUpdate();
   const { startTour } = useTour();
@@ -1521,9 +1521,14 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                     ? t("settings.checkingGitHub")
                     : statusError
                       ? t("settings.updateCheckFailed")
-                      : // Above everything else: a missing Visual C++ runtime stops
-                        // FrostMod attaching at all, and no amount of repairing or
-                        // updating FrostMod puts one on the machine.
+                      : // Above everything else: a file in the game folder that aborts
+                        // MX Bikes with R6034 the moment anything loads the VC9 CRT. The
+                        // game not starting at all outranks FrostMod not attaching.
+                        strayMsvcr90
+                        ? t("settings.frostmodStrayMsvcr90")
+                        : // Then a missing Visual C++ runtime, which stops FrostMod
+                          // attaching at all — and no amount of repairing or updating
+                          // FrostMod puts one on the machine.
                         missingRuntime
                         ? t("settings.frostmodRuntimeMissing")
                         : status?.needsRepair
@@ -1541,6 +1546,22 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
+                {/* The banner carries this too, but a dismissed bar shouldn't take the
+                    only explanation with it — and this is the one press that moves a file
+                    out of somebody's game folder, so it stays somewhere they can find it
+                    again. */}
+                {strayMsvcr90 && (
+                  <Button
+                    size="sm"
+                    onClick={() => void clearStrayMsvcr90()}
+                    disabled={clearingStray || repairingRuntimes}
+                    title={t("runtime.strayFixHint")}
+                  >
+                    {clearingStray
+                      ? t("runtime.strayClearing")
+                      : t("runtime.strayFix")}
+                  </Button>
+                )}
                 {/* Its own button rather than a mode of the one below: the FrostMod
                     install and the Windows component are separate things to fix, and
                     someone can genuinely need both. */}
