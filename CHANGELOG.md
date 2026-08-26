@@ -19,7 +19,23 @@
     selects, so a preset pairs a model with a livery drawn for it.
 
 ### Fixed
-
+- **Liveries that came in with a model pack were invisible.** A model swap that shipped its
+  own `paints/` folder left its liveries inside the swap folder once the app filed it away —
+  somewhere the game never reads and no scan of ours ever looked. They were installed,
+  unusable and unlistable. Opening that model's livery picker now adopts them as its own,
+  which is also what makes them work.
+- **A livery inside a model swap was filed under the wrong owner.** The Library attributed it
+  to the swap folder rather than to the bike, so it landed in a bucket no bike id ever
+  matched — and a preset share code built from that bike silently shipped without the livery.
+- **MXB App wouldn't start at all on a freshly installed Windows,** closing the moment it
+  launched with "the application was unable to start correctly (0xc000007b)" — no window, no
+  log, nothing to send in. The app needs Microsoft's Visual C++ 2015–2022 (x64) runtime and
+  has since v0.3.2; Windows doesn't ship it, but some other game nearly always installs it
+  first, so the gap only shows on a PC that has just been reset. It fails inside Windows'
+  loader, before a line of the app's own code runs, which is why the runtime check the app
+  already carried could never fire — it was on the wrong side of the door. The installer now
+  checks for that runtime and puts it in before it writes the app, and tells you which one is
+  missing if it can't.
 - **A `msvcr90.dll` in the game folder that the app wouldn't remove is no longer a silent
   crash.** A loose VC9 CRT beside `mxbikes.exe` aborts the game with *"R6034 — An application
   has made an attempt to load the C runtime library incorrectly"* the moment anything
