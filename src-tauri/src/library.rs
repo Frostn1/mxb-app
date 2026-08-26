@@ -412,6 +412,18 @@ pub struct RiderTargets {
     pub profiles: Vec<String>,
 }
 
+/// The `<Model>.pkz` that sits beside a model's folder, whether or not either exists.
+///
+/// Not `with_extension("pkz")`: a mod named `Fox Instinct 2.0 by Aeffertz` has
+/// `0 by Aeffertz` for an extension, so replacing it asks for `Fox Instinct 2.pkz` — a file
+/// nobody has. A model's name is the whole name; the archive appends to it, which is also
+/// how `models_in` reads one back.
+pub fn sibling_pkz(model_dir: &Path) -> PathBuf {
+    let mut name = model_dir.file_name().unwrap_or_default().to_os_string();
+    name.push(".pkz");
+    model_dir.with_file_name(name)
+}
+
 /// Installable content sitting directly in `dir`, by the name you'd address it as: a
 /// sub-folder verbatim, a `.pkz` by its stem. Sorted, case-insensitively deduped.
 fn models_in(dir: &Path) -> Vec<String> {
@@ -877,6 +889,30 @@ mod tests {
         let d = std::env::temp_dir().join(format!("frost-lib-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    /// A mod with a version in its name — `Fox Instinct 2.0 by Aeffertz` — has an
+    /// "extension" as far as the path types are concerned, and replacing it asks for an
+    /// archive nobody has. The name is the whole name.
+    #[test]
+    fn a_packed_model_is_found_beside_a_dotted_name() {
+        let boots = Path::new("/mods/rider/boots");
+        assert_eq!(
+            sibling_pkz(&boots.join("Fox Instinct 2.0 by Aeffertz")),
+            boots.join("Fox Instinct 2.0 by Aeffertz.pkz"),
+        );
+        assert_eq!(
+            sibling_pkz(&boots.join("TLD SE4 - Oakley Airbrake")),
+            boots.join("TLD SE4 - Oakley Airbrake.pkz"),
+            "and an undotted one is unchanged",
+        );
+        // What `models_in` reads back out of the archive is the name we started from.
+        assert_eq!(
+            sibling_pkz(&boots.join("Fox Instinct 2.0 by Aeffertz"))
+                .file_stem()
+                .unwrap(),
+            "Fox Instinct 2.0 by Aeffertz",
+        );
     }
 
     /// The guard every share code is checked against. A rel that climbs, starts at a root,
