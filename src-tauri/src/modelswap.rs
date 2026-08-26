@@ -252,6 +252,12 @@ fn active_set_files(mods_path: &str, bike: &str, active: &str, incoming: &[Strin
             m
         }
     };
+    // The bike's own setup is never a model's to own. A variant folder holding copies of
+    // the `.hrc`s/`.cfg`/`.geom` — or a manifest written back when one did — would park
+    // them, leaving the bike a mesh with nothing to say how it is assembled. Only a variant
+    // that actually brings its own replacement displaces them, via `incoming` below.
+    let owned: Vec<String> =
+        owned.into_iter().filter(|f| !crate::bikefiles::is_bike_setup(f)).collect();
 
     root_files
         .into_iter()
@@ -736,12 +742,12 @@ pub fn apply_model_swap_reporting(
     // Only the files that belong to the model move. The bike's own setup stays put.
     let mut root_files = active_set_files(mods_path, bike, &active_label, &target_files);
 
-    // Reverting to Stock has to clear every loose override, not just the meshes. A swap
-    // dropped straight at the bike root was never registered, so it has no manifest and
-    // `active_set_files` finds only its meshes — leaving its `.hrc`/`.cfg` behind, still
-    // overriding the `.pkz` but now naming meshes that are gone. Nothing is deleted: it
-    // parks with the rest, and the manifest written below makes the way back exact.
-    if is_stock && read_manifest(&backup_dir).is_none() {
+    // Reverting to Stock has to clear every loose override, not just the meshes.
+    // `active_set_files` never reports the bike's setup — that is the point of it — so a
+    // swap's `.hrc`/`.cfg` would stay behind, still overriding the `.pkz` but now naming
+    // meshes that are gone. Nothing is deleted: it parks with the rest, and the manifest
+    // written below makes the way back exact.
+    if is_stock {
         for f in root_setup_files(mods_path, bike) {
             if !contains_ci(&root_files, &f) {
                 root_files.push(f);
@@ -827,7 +833,7 @@ pub fn preview_set(mods_path: &str, bike: &str, variant: &str) -> anyhow::Result
     }
 
     let mut parked = active_set_files(mods_path, bike, &active, &variant_files);
-    if is_stock && read_manifest(&variant_dir(mods_path, bike, &active)).is_none() {
+    if is_stock {
         for f in root_setup_files(mods_path, bike) {
             if !contains_ci(&parked, &f) {
                 parked.push(f);
@@ -1580,6 +1586,76 @@ mod tests {
         let parked = names_at(&variant_dir(mp, "KTM450", ORIGINAL));
         assert!(parked.contains(&"model.edf".to_string()), "old mesh parked");
         assert!(!parked.contains(&"chassis.hrc".to_string()), "setup never parked");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The KTM 450 shape: a variant folder holding *only* copies of the setup files — no
+    /// mesh — used to make `files_known_to_other_variants` call the bike's own `.hrc`s and
+    /// `.cfg` model-owned. The preview then kept nothing at the root, and the swap drew a
+    /// mesh with nothing to assemble or texture it.
+    #[test]
+    fn a_setup_only_variant_never_claims_the_bikes_own_files() {
+        let root = tmp("setup-only-variant");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        // The bogus variant: the bike's setup, copied, with no mesh of its own.
+        for f in ["chassis.hrc", "bike.cfg", "wheel.geom"] {
+            touch(&variant_dir(mp, "KTM450", "new model").join(f));
+        }
+        // A real swap: one mesh, nothing else.
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+
+        let set = preview_set(mp, "KTM450", "Factory").unwrap();
+        for keep in ["chassis.hrc", "bike.cfg", "wheel.geom"] {
+            assert!(
+                contains_ci(&set.root_keep, keep),
+                "{keep} must stay at the root: {:?}",
+                set.root_keep,
+            );
+        }
+        assert!(!contains_ci(&set.root_keep, "model.edf"), "the old mesh is parked");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The same damage once it has been written down: a manifest from a build that treated
+    /// the whole folder as the model set. Nothing migrates it, so it has to be ignored where
+    /// it is read.
+    #[test]
+    fn a_manifest_claiming_the_bikes_setup_is_ignored() {
+        let root = tmp("poisoned-manifest");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        write_manifest(
+            &variant_dir(mp, "KTM450", ORIGINAL),
+            &["model.edf", "chassis.hrc", "bike.cfg", "wheel.geom"].map(String::from),
+        );
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+
+        let set = preview_set(mp, "KTM450", "Factory").unwrap();
+        for keep in ["chassis.hrc", "bike.cfg", "wheel.geom"] {
+            assert!(contains_ci(&set.root_keep, keep), "{keep}: {:?}", set.root_keep);
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A swap that ships its own setup still displaces the bike's, or applying it would
+    /// overwrite files nothing had parked and the way back would be lost.
+    #[test]
+    fn a_variant_bringing_its_own_setup_still_displaces_the_roots() {
+        let root = tmp("variant-brings-setup");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        touch(&variant_dir(mp, "KTM450", "Factory").join("chassis.hrc"));
+
+        apply_model_swap(mp, "KTM450", "Factory").unwrap();
+        let parked = names_at(&variant_dir(mp, "KTM450", ORIGINAL));
+        assert!(contains_ci(&parked, "chassis.hrc"), "the overwritten .hrc parked: {parked:?}");
+        assert!(!contains_ci(&parked, "bike.cfg"), "untouched setup stays put: {parked:?}");
+
+        apply_model_swap(mp, "KTM450", ORIGINAL).unwrap();
+        let at_root = names_at(&bike_dir(mp, "KTM450"));
+        assert!(contains_ci(&at_root, "chassis.hrc"), "restored on the way back: {at_root:?}");
         let _ = fs::remove_dir_all(&root);
     }
 
