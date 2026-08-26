@@ -67,7 +67,7 @@ export const BUNDLED_SUPPORTERS: SupportersManifest = {
     { name: "Qwest" },
     { name: "RodaksRevivalYT | Black Rifle" },
     { name: "MintyFlow" },
-    { name: "Thomas" },
+    { name: "Bøddi" },
     { name: "Kelso" },
   ],
 };

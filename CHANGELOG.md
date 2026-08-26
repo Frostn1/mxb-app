@@ -78,6 +78,7 @@
     exactly as it did before.
 
 ### Changed
+- Settings → Supporters lists **Bøddi** in place of **Thomas**.
 
 - **The Rider tab's bike picker is searchable.** It was a plain dropdown, which is a long
   scroll past dozens of bikes for a name you already know. It's now the same searchable
