@@ -1764,6 +1764,56 @@ export const es: Translation = {
     "Esta zona es la cara interior de la pieza: lo que pintes aquí mira al suelo y nunca se ve desde fuera.",
   "designer.faceHint.both":
     "La cara exterior de la pieza y su cara interior comparten esta zona, así que lo que dibujes aquí cae en las dos.",
+  // ── Designer › la selección, y qué se puede hacer con ella ────────────────────
+  "designer.layersSelected": "{{count}} capas seleccionadas",
+  "designer.position": "Posición",
+  "designer.duplicate": "Duplicar",
+  "designer.copy": "Copiar",
+  "designer.paste": "Pegar",
+  "designer.copyName": "{{name}} copia",
+  "designer.copied_one": "1 capa copiada.",
+  "designer.copied_other": "{{count}} capas copiadas.",
+  "designer.pasteWrongSize":
+    "Eso se copió de una hoja de otro tamaño, y una capa de pintura *es* la hoja: aquí no hay nada que encaje.",
+  "designer.pasteDropped_one":
+    "Se dejó fuera 1 capa de pintura: una capa de pintura es la hoja, y esta es de otro tamaño.",
+  "designer.pasteDropped_other":
+    "Se dejaron fuera {{count}} capas de pintura: una capa de pintura es la hoja, y esta es de otro tamaño.",
+  "designer.group": "Agrupar",
+  "designer.ungroup": "Desagrupar",
+  "designer.groupRow": "Juntas",
+  "designer.groupOf": "Grupo de {{count}}",
+  "designer.groupHint":
+    "Muévelas como una. Al hacer clic en cualquiera se toma el grupo entero; mantén Alt para sacar una sola capa.",
+  "designer.flip": "Voltear",
+  "designer.flipX": "Voltear de izquierda a derecha",
+  "designer.flipY": "Voltear de arriba abajo",
+
+  // ── Designer › reflejar al otro flanco ────────────────────────────────────────
+  "designer.mirror": "Reflejar al otro lado",
+  "designer.mirrorName": "{{name}} reflejada",
+  "designer.mirrorHint":
+    "Pone una copia de esta capa donde cae en el otro lado de la moto. Se calcula con el modelo en vez de volteando la hoja, así que llega a la pieza que le toca, y sigue a esta capa hasta que la desvincules.",
+  "designer.mirroredFrom": "Reflejo de «{{name}}».",
+  "designer.mirroredShort": "Reflejada",
+  "designer.mirroredOrphan": "Esto se reflejó de una capa que ya no está.",
+  "designer.unlink": "Desvincular",
+  "designer.unlinkHint":
+    "Deja de seguir y conserva lo que hay. Pasa a ser una capa normal que puedes editar por su cuenta.",
+  "designer.selectSource": "Seleccionar la original",
+  "designer.mirrorPaused":
+    "No hay modelo cargado, así que esto se queda donde se colocó la última vez en lugar de seguir.",
+  "designer.mirrorRough":
+    "El otro lado no está desplegado como reflejo de este, así que la colocación es aproximada, no exacta.",
+  "designer.mirrorWhy.no-model":
+    "Carga primero la moto en la vista previa: sin el modelo no hay otro lado que encontrar.",
+  "designer.mirrorWhy.shared":
+    "Los dos flancos están desplegados en este mismo sitio, así que esto ya está en ambos lados de la moto. Una segunda copia caería sobre la primera.",
+  "designer.mirrorWhy.centre":
+    "Esto está en el eje de la moto, que es su propio reflejo: no hay otro lado al que mandarlo.",
+  "designer.mirrorWhy.asymmetric":
+    "El modelo no tiene nada en el reflejo de este punto, así que no hay otro lado donde ponerlo.",
+
   "designer.opacity": "Opacidad",
   "designer.blend": "Fusión",
   "designer.blend.normal": "Normal",
@@ -1822,7 +1872,7 @@ export const es: Translation = {
   "designer.tool.ellipse": "Elipse",
   "designer.tool.line": "Línea",
   "designer.moveHint":
-    "Arrastra las capas sobre la hoja para colocarlas. Elige una herramienta arriba para pintar sobre ella.",
+    "Arrastra las capas sobre la hoja para colocarlas: se enganchan a las costuras y entre sí; mantén Alt para colocarlas libremente. Mayús+clic añade a la selección, arrastrar sobre el vacío hace un lazo, y el clic derecho tiene el resto. Elige una herramienta arriba para pintar sobre ella.",
   "designer.colourFrom": "Pinta con este",
   "designer.colourTo": "Funde hacia este",
   "designer.swapColours": "Intercambiar los dos colores",

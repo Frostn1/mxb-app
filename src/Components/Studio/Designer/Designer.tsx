@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Bike,
+  ClipboardPaste,
+  Copy,
+  CopyPlus,
   Eye,
   EyeOff,
   FilePlus2,
+  FlipHorizontal2,
+  FlipVertical2,
   Grid3x3,
+  Group,
   Layers as LayersIcon,
+  Link2,
+  Link2Off,
   Loader2,
   PackageOpen,
   PanelLeftClose,
@@ -13,6 +21,7 @@ import {
   Plus,
   Save,
   Trash2,
+  Ungroup,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -49,11 +58,14 @@ import {
 } from "./uv";
 import {
   blankSheet,
+  cloneLayer,
+  groupOf,
   imageLayer,
   isCompanionMap,
   layerExtent,
   newId,
   paintLayer,
+  regroup,
   shapeLayer,
   textLayer,
   unionRegion,
@@ -63,6 +75,14 @@ import {
   type Region,
   type Sheet,
 } from "./layers";
+import { buildMirror, derive, mirrorLayer, type MirrorIndex } from "./mirror";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../ui/dropdown-menu";
 import {
   DEFAULT_PAINT,
   PaintHistory,
@@ -96,6 +116,36 @@ import type { EdfNode, PaintTexture } from "../../../types";
 /** A blank sheet's edge. Powers of two only — the backend would resize anything else. */
 const BLANK_SIZE = 2048;
 
+/**
+ * What was last copied, and the sheet it was cut from.
+ *
+ * Outside the component because the Studio unmounts this pane when another tab is opened, and
+ * a clipboard that emptied when you went to look at something is a clipboard nobody uses. The
+ * sheet's size travels with it: a layer's position is in sheet pixels, so pasting across sheets
+ * of different sizes has to bring the artwork with it rather than leave it off the edge.
+ */
+let clipboard: { width: number; height: number; layers: Layer[] } | null = null;
+
+/** One row of the canvas menu, so a dozen of them don't each spell out the same classes. */
+function MenuRow({
+  icon: Icon,
+  label,
+  disabled,
+  onPick,
+}: {
+  icon: typeof Copy;
+  label: string;
+  disabled?: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <DropdownMenuItem disabled={disabled} onSelect={onPick}>
+      <Icon className="size-3.5" />
+      {label}
+    </DropdownMenuItem>
+  );
+}
+
 interface DesignerProps {
   /**
    * Sheets handed over from Paint Studio, by path — drawn on rather than replaced.
@@ -111,7 +161,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const t = useT();
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<string[]>([]);
+  // Where the canvas's right-click menu is, in client coordinates, or null for closed.
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   // The sheets/layers rail folds away, because once a paint is set up the thing worth the
@@ -144,6 +196,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   // The mesh the preview is showing, reported back by it. Null until one loads, and null again
   // if it fails — a UV map drawn from a model that isn't on screen would be a confident lie.
   const [geometry, setGeometry] = useState<EdfNode[] | null>(null);
+  // The same mesh, reachable without waiting for a render — see `onGeometry` for why it exists
+  // at all, and `ensureMirror` for why it has to be readable from this far up the file.
+  const geometryRef = useRef<EdfNode[] | null>(null);
   // Whether that mesh was assembled about the bike's mirror plane. Without it a position is a
   // number in some part's own frame, and the sides and facings read off it would be invented.
   const [assembled, setAssembled] = useState(false);
@@ -189,6 +244,19 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
 
   const active = sheets.find((s) => s.id === activeId) ?? null;
   const bump = useCallback(() => setVersion((v) => v + 1), []);
+
+  /**
+   * The one selected layer, where "one" is what the question means.
+   *
+   * The paint target, the part picker and the fit all act on a single layer, and null is the
+   * honest answer for a selection of three — better than picking the first and acting on a
+   * layer nobody pointed at.
+   */
+  const selectedId = selection.length === 1 ? selection[0] : null;
+  const chosen = useMemo(
+    () => active?.layers.filter((l) => selection.includes(l.id)) ?? [],
+    [active, selection],
+  );
 
   /**
    * The sheets that exist, as a string.
@@ -303,6 +371,70 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     setHistoryRev((v) => v + 1);
   }, []);
 
+  /* ── Mirroring ─────────────────────────────────────────────────────────────────────────
+     A mirrored layer is a *follower*: it holds no placement of its own worth keeping, and is
+     re-derived from the layer it reflects on every edit. That derivation hangs off `patchSheet`
+     below, which is the one road every edit but a stroke takes. ──────────────────────────── */
+
+  /**
+   * What the mirror needs, in a ref rather than a memo, and built only when something asks.
+   *
+   * `patchSheet` is defined here — long before the model's parts are — and every edit has to
+   * go through it, so the geometry arrives sideways rather than in a dependency list. Lazily,
+   * too: most paints mirror nothing, and a memo would build an index for every sheet anyone
+   * opened to answer a question that was never asked.
+   *
+   * `ready` is the model's own statement that its axes can be trusted. Without it there is no
+   * left and right to reflect between — see `uvParts`.
+   */
+  const mirrorRef = useRef<{
+    sheetId: string | null;
+    parts: UvPart[];
+    ready: boolean;
+    index: MirrorIndex | null;
+  }>({ sheetId: null, parts: [], ready: false, index: null });
+
+  const ensureMirror = useCallback((): MirrorIndex | null => {
+    const held = mirrorRef.current;
+    if (!held.ready) return null;
+    if (!held.index) held.index = buildMirror(held.parts, geometryRef.current ?? []);
+    return held.index;
+  }, []);
+
+  /**
+   * Bring every follower on a sheet back into step with the layer it reflects.
+   *
+   * Strokes don't come through here and don't need to: a paint layer is the sheet, so it can
+   * never be a source or a follower, and that is what keeps this off the one path in the
+   * editor that runs a hundred times a second.
+   */
+  const syncMirrors = useCallback(
+    (sheet: Sheet): Sheet => {
+      if (!sheet.layers.some((l) => l.mirror)) return sheet;
+      const held = mirrorRef.current;
+      const index = held.sheetId === sheet.id ? ensureMirror() : null;
+      const by = new Map(sheet.layers.map((l) => [l.id, l]));
+      return {
+        ...sheet,
+        layers: sheet.layers.map((layer) => {
+          if (!layer.mirror) return layer;
+          const from = by.get(layer.mirror.of);
+          // The source has gone — deleted, or undone away — or is something that can't be a
+          // source. The follower stops following rather than going with it: what it holds is
+          // still somebody's artwork, and it is already on the bike.
+          if (!from || from.id === layer.id || from.kind === "paint") {
+            return { ...layer, mirror: null };
+          }
+          // A null placement leaves it where it is. That is the case where the model isn't
+          // loaded, and a follower that jumped to a guess would look placed rather than stale.
+          const placed = index ? mirrorLayer(index, held.parts, from, sheet) : null;
+          return derive(layer, from, placed?.ok ? placed : null, held.parts, sheet);
+        }),
+      };
+    },
+    [ensureMirror],
+  );
+
   const patchSheet = useCallback(
     /**
      * `undoKey` names the gesture for coalescing, or `false` for an edit the history must not
@@ -315,9 +447,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       // region as a promise rather than a hint: if one is there, a stroke put it there.
       if (undoKey !== false) remember(undoKey);
       dirty.current.set(id, null);
-      setSheets((prev) => prev.map((s) => (s.id === id ? fn(s) : s)));
+      // Followers re-derived on the way out, so no caller has to remember they exist. Dragging
+      // a logo and hiding one are the same kind of edit as far as the far side is concerned.
+      setSheets((prev) => prev.map((s) => (s.id === id ? syncMirrors(fn(s)) : s)));
     },
-    [remember],
+    [remember, syncMirrors],
   );
 
   const patchLayer = useCallback(
@@ -438,7 +572,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     if (!active) return;
     const layer = paintLayer(t("designer.paintLayerName"), active);
     patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, layer] }));
-    setSelectedId(layer.id);
+    setSelection([layer.id]);
     bump();
   }, [active, bump, patchSheet, t]);
 
@@ -457,7 +591,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       const selected = active.layers.find((l) => l.id === selectedId);
       if (selected?.kind === "paint") return;
       const existing = [...active.layers].reverse().find((l) => l.kind === "paint");
-      if (existing) setSelectedId(existing.id);
+      if (existing) setSelection([existing.id]);
       else addPaintLayer();
     },
     [active, addPaintLayer, selectedId],
@@ -514,7 +648,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             ...sh,
             layers: sh.layers.filter((l) => l.id !== drawing.id),
           }));
-          setSelectedId(null);
+          setSelection([]);
           bump();
         }
       }
@@ -566,9 +700,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       write: (next: Sheet[]) => {
         setSheets(next);
         setActiveId((cur) => (cur && next.some((s) => s.id === cur) ? cur : next[0]?.id ?? null));
-        setSelectedId((cur) =>
-          cur && next.some((s) => s.layers.some((l) => l.id === cur)) ? cur : null,
-        );
+        setSelection((cur) => {
+          const alive = cur.filter((id) => next.some((s) => s.layers.some((l) => l.id === id)));
+          return alive.length === cur.length ? cur : alive;
+        });
       },
     }),
     [],
@@ -620,35 +755,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paintLayerKey]);
 
-  /**
-   * Tool keys, and undo.
-   *
-   * On the window rather than on the canvas, because a brush should be one key away wherever
-   * the focus happens to be — but the Studio keeps this pane mounted behind whichever tab is
-   * open, so an invisible Designer would otherwise steal every `b` typed into Paint Studio.
-   */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!rootRef.current?.offsetParent) return;
-      const el = e.target as HTMLElement | null;
-      if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-        return;
-      }
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const key = e.key.toLowerCase();
-      const tool = (Object.keys(TOOL_KEYS) as PaintTool[]).find((k) => TOOL_KEYS[k] === key);
-      if (tool) {
-        e.preventDefault();
-        pickTool(tool);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [pickTool, redo, undo]);
 
   /**
    * Pixels for a file the user picked, at the sheet's own resolution.
@@ -694,7 +800,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       remember();
       setSheets(next);
       setActiveId(next[0]?.id ?? null);
-      setSelectedId(null);
+      setSelection([]);
       if (nameHint) setName((n) => n || nameHint);
       bump();
       toast.success(t("designer.loadedSheets", { count: String(next.length) }));
@@ -760,7 +866,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     remember();
     setSheets((prev) => [...prev, sheet]);
     setActiveId(sheet.id);
-    setSelectedId(null);
+    setSelection([]);
     bump();
   }, [bump, missingHints, remember]);
 
@@ -779,7 +885,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     remember();
     setSheets((prev) => [...prev, ...made]);
     setActiveId(made[0].id);
-    setSelectedId(null);
+    setSelection([]);
     bump();
   }, [bump, missingHints, remember]);
 
@@ -798,7 +904,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         imageLayer(layerName, bitmap, active),
       );
       patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, ...added] }));
-      setSelectedId(added[added.length - 1]?.id ?? null);
+      setSelection(added.length ? [added[added.length - 1].id] : []);
       bump();
     } catch (e) {
       toast.error(String(e).replace(/^Error:\s*/, ""));
@@ -811,35 +917,76 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     if (!active) return;
     const layer = textLayer(t("designer.newTextValue"), active);
     patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, layer] }));
-    setSelectedId(layer.id);
+    setSelection([layer.id]);
     bump();
   }, [active, bump, patchSheet, t]);
 
-  const removeLayer = useCallback(
-    (id: string) => {
-      if (!activeId) return;
-      patchSheet(activeId, (s) => ({ ...s, layers: s.layers.filter((l) => l.id !== id) }));
-      setSelectedId((cur) => (cur === id ? null : cur));
+  const removeLayers = useCallback(
+    (ids: string[]) => {
+      if (!activeId || !ids.length) return;
+      const gone = new Set(ids);
+      patchSheet(activeId, (s) => ({ ...s, layers: s.layers.filter((l) => !gone.has(l.id)) }));
+      setSelection((cur) => cur.filter((id) => !gone.has(id)));
       bump();
     },
     [activeId, bump, patchSheet],
   );
 
-  const moveLayer = useCallback(
-    (id: string, dx: number, dy: number) => {
-      patchLayer(id, (l) => ({ ...l, x: l.x + dx, y: l.y + dy }), `layer:${id}`);
+  /**
+   * Apply a change to every selected layer.
+   *
+   * Followers need no special case here, which is worth saying because it looks like they
+   * should. `patchSheet` re-derives them on the way out, so a change to something a follower
+   * takes from its source is simply put back — that *is* the lock, and it costs nothing.
+   * What a follower owns for itself, its name and its group, sticks.
+   */
+  const patchSelection = useCallback(
+    (fn: (l: Layer) => Layer, undoKey: string | null | false = null) => {
+      if (!activeId || !selection.length) return;
+      const ids = new Set(selection);
+      patchSheet(
+        activeId,
+        (s) => ({ ...s, layers: s.layers.map((l) => (ids.has(l.id) ? fn(l) : l)) }),
+        undoKey,
+      );
       bump();
     },
-    [bump, patchLayer],
+    [activeId, bump, patchSheet, selection],
   );
 
-  /** A corner drag, as an absolute scale. Clamped by the stage to the inspector's range. */
-  const scaleLayer = useCallback(
-    (id: string, scale: number) => {
-      patchLayer(id, (l) => ({ ...l, scale }), `layer:${id}`);
+  const moveSelection = useCallback(
+    (dx: number, dy: number) => {
+      if (!dx && !dy) return;
+      // One undo step per run of the same gesture, however many samples it took — see
+      // `PaintHistory.pushDoc`. Keyed on what is moving, so picking up a different layer
+      // starts a new step rather than folding into the last one.
+      patchSelection(
+        (l) => (l.kind === "paint" ? l : { ...l, x: l.x + dx, y: l.y + dy }),
+        `move:${selection.join(",")}`,
+      );
+    },
+    [patchSelection, selection],
+  );
+
+  /** A corner drag, as where each dragged layer ends up. Clamped by the stage to the range. */
+  const scaleSelection = useCallback(
+    (next: { id: string; x: number; y: number; scale: number }[]) => {
+      if (!activeId || !next.length) return;
+      const by = new Map(next.map((n) => [n.id, n]));
+      patchSheet(
+        activeId,
+        (s) => ({
+          ...s,
+          layers: s.layers.map((l) => {
+            const to = by.get(l.id);
+            return to ? { ...l, x: to.x, y: to.y, scale: to.scale } : l;
+          }),
+        }),
+        `scale:${next.map((n) => n.id).join(",")}`,
+      );
       bump();
     },
-    [bump, patchLayer],
+    [activeId, bump, patchSheet],
   );
 
   /* ── The reference underlay ────────────────────────────────────────────────────────────
@@ -893,7 +1040,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         );
         remember();
         patchSheet(active.id, (sh) => ({ ...sh, layers: [...sh.layers, layer] }));
-        setSelectedId(layer.id);
+        setSelection([layer.id]);
         shaping.current = { id: layer.id, from: at };
         bump();
         return;
@@ -930,12 +1077,12 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [active, activeId, bump, paint, parts, patchSheet, remember, t, target, touchPaint],
   );
 
-  /** Pin the selected layer to a piece of bodywork, or let it cover the sheet again. */
+  /** Pin the selection to a piece of bodywork, or let it cover the sheet again. */
   const clipLayer = useCallback(
     (label: string | null) => {
-      if (!active || !selectedId) return;
+      if (!active) return;
       const part = label ? parts.find((p) => p.label === label) : null;
-      patchLayer(selectedId, (l) => ({
+      patchSelection((l) => ({
         ...l,
         // Built here, at this sheet's size, so the composite never has to. Re-picking the
         // part is what rebuilds it, which is also the answer to a resized sheet.
@@ -943,9 +1090,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           ? { label: part.label, path: partPath(part, active.width, active.height) }
           : null,
       }));
-      bump();
     },
-    [active, bump, parts, patchLayer, selectedId],
+    [active, parts, patchSelection],
   );
 
   /**
@@ -976,6 +1122,252 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     [active, bump, parts, patchLayer, selectedId],
   );
 
+  /**
+   * Hand the mirror the model it should answer from, and drop the index built from the last one.
+   *
+   * Dropped rather than rebuilt. Most sheets are never mirrored on, and the rebuild is a walk
+   * over the whole of the bodywork — `ensureMirror` does it the moment something actually asks.
+   *
+   * During the render rather than in an effect, the same way `sheetsRef` is kept: the button
+   * that offers a mirror is rendered from `ready`, and an effect would leave it a render behind
+   * the model — disabled, with nothing on screen to explain why.
+   */
+  if (mirrorRef.current.sheetId !== activeId || mirrorRef.current.parts !== parts) {
+    mirrorRef.current = {
+      sheetId: activeId,
+      parts,
+      // The flank codes are the model's own statement that its axes mean something; `uvParts`
+      // only produces them for a bike that arrived assembled.
+      ready: parts.some((p) => p.flanks),
+      index: null,
+    };
+  }
+
+  /* ── The selection, and what can be done to it ─────────────────────────────────────────
+     A group is a tag on its members rather than a container (see `layers.ts`), so "select the
+     group" is a question asked of the layer list right here — everything downstream, the stage
+     and the inspector both, only ever sees a list of ids. ─────────────────────────────── */
+
+  const select = useCallback(
+    (ids: string[], mode: "replace" | "toggle" | "isolate") => {
+      const layers = active?.layers ?? [];
+      // Alt reaches inside a group. Anything else takes the whole block a layer belongs to,
+      // which is the entire point of having grouped it.
+      const want =
+        mode === "isolate" ? ids : [...new Set(ids.flatMap((id) => groupOf(layers, id)))];
+      setSelection((cur) => {
+        if (mode !== "toggle") return want;
+        const next = new Set(cur);
+        // A group toggles as a block: if any of it is out, all of it comes in.
+        const add = want.some((id) => !next.has(id));
+        for (const id of want) {
+          if (add) next.add(id);
+          else next.delete(id);
+        }
+        // Kept in stacking order, so anything reading the selection reads it bottom-first.
+        return layers.filter((l) => next.has(l.id)).map((l) => l.id);
+      });
+    },
+    [active],
+  );
+
+  /** How far a duplicate lands from what it was copied from, as a fraction of the sheet. */
+  const offset = active ? Math.max(4, Math.round(Math.min(active.width, active.height) * 0.02)) : 0;
+
+  const duplicateSelection = useCallback(() => {
+    if (!active || !chosen.length) return;
+    // A duplicate of several layers is a group of its own, or the first drag takes it apart.
+    const tag = chosen.length > 1 ? newId("group") : null;
+    const copies = chosen.map((l) => ({
+      ...cloneLayer(l, t("designer.copyName", { name: l.name })),
+      group: tag,
+      // Down and to the right on screen — the sheet's y runs the other way. A copy landing
+      // exactly on its original looks like nothing happened.
+      x: l.x + offset,
+      y: l.y - offset,
+    }));
+    patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, ...copies] }));
+    setSelection(copies.map((c) => c.id));
+    bump();
+  }, [active, bump, chosen, offset, patchSheet, t]);
+
+  const copySelection = useCallback(() => {
+    if (!active || !chosen.length) return;
+    // Cloned on the way in rather than on the way out: the layers left behind go on being
+    // edited, and a clipboard holding the live ones would paste whatever they had become.
+    clipboard = {
+      width: active.width,
+      height: active.height,
+      layers: chosen.map((l) => cloneLayer(l, l.name)),
+    };
+    toast.success(t("designer.copied", { count: String(chosen.length) }));
+  }, [active, chosen, t]);
+
+  const pasteClipboard = useCallback(() => {
+    if (!active || !clipboard?.layers.length) return;
+    const kx = active.width / clipboard.width;
+    const ky = active.height / clipboard.height;
+    const sized = kx === 1 && ky === 1;
+    // A paint layer is the sheet, and its raster is the size of the sheet it was cut from.
+    // Onto a sheet of another size there is nothing sensible to do with it.
+    const keep = sized ? clipboard.layers : clipboard.layers.filter((l) => l.kind !== "paint");
+    const dropped = clipboard.layers.length - keep.length;
+    if (!keep.length) {
+      toast.error(t("designer.pasteWrongSize"));
+      return;
+    }
+    const tag = keep.length > 1 ? newId("group") : null;
+    const copies = keep.map((l) => ({
+      ...cloneLayer(l, l.name),
+      group: tag,
+      // Positions are in sheet pixels, so a decal copied off a 2048² sheet has to be brought
+      // with it or half of what was copied lands off the edge of a 1024² one.
+      x: l.x * kx,
+      y: l.y * ky,
+      scale: l.scale * Math.min(kx, ky),
+    }));
+    patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, ...copies] }));
+    setSelection(copies.map((c) => c.id));
+    if (dropped) toast.warning(t("designer.pasteDropped", { count: String(dropped) }));
+    bump();
+  }, [active, bump, patchSheet, t]);
+
+  const groupSelection = useCallback(() => {
+    if (!active || chosen.length < 2) return;
+    const tag = newId("group");
+    const ids = new Set(chosen.map((l) => l.id));
+    patchSheet(active.id, (s) => {
+      const tagged = s.layers.map((l) => (ids.has(l.id) ? { ...l, group: tag } : l));
+      // Gathered as well as tagged, so raising the group later takes it past what it sits on
+      // rather than past its own members — see `regroup`.
+      return { ...s, layers: regroup(tagged, tag) };
+    });
+    bump();
+  }, [active, bump, chosen, patchSheet]);
+
+  const ungroupSelection = useCallback(() => {
+    const tags = new Set(chosen.map((l) => l.group).filter((g): g is string => !!g));
+    if (!tags.size) return;
+    patchSelection((l) => (l.group && tags.has(l.group) ? { ...l, group: null } : l));
+  }, [chosen, patchSelection]);
+
+  const unlinkSelection = useCallback(() => {
+    patchSelection((l) => (l.mirror ? { ...l, mirror: null } : l));
+  }, [patchSelection]);
+
+  /**
+   * Put a copy of the selected layer where it lands on the far flank, and keep it there.
+   *
+   * The copy is appended with no placement worked out here on purpose: `patchSheet` derives
+   * every follower on the way through, so the same code that puts it down is the code that
+   * will keep it in step afterwards. Asking first is only to have something to say when the
+   * answer is no.
+   */
+  const mirrorSelected = useCallback(() => {
+    const layer = chosen.length === 1 ? chosen[0] : null;
+    if (!active || !layer) return;
+    if (layer.kind === "paint") {
+      toast.error(t("designer.fitNotForPaint"));
+      return;
+    }
+    const result = mirrorLayer(ensureMirror(), mirrorRef.current.parts, layer, active);
+    if (!result.ok) {
+      toast.error(t(`designer.mirrorWhy.${result.why}` as "designer.mirrorWhy.no-model"));
+      return;
+    }
+    const follower: Layer = {
+      ...cloneLayer(layer, t("designer.mirrorName", { name: layer.name })),
+      mirror: { of: layer.id },
+    };
+    patchSheet(active.id, (s) => ({ ...s, layers: [...s.layers, follower] }));
+    setSelection([follower.id]);
+    if (result.approximate) toast.warning(t("designer.mirrorRough"));
+    bump();
+  }, [active, bump, chosen, ensureMirror, patchSheet, t]);
+
+  /**
+   * Tool keys, and undo.
+   *
+   * On the window rather than on the canvas, because a brush should be one key away wherever
+   * the focus happens to be — but the Studio keeps this pane mounted behind whichever tab is
+   * open, so an invisible Designer would otherwise steal every `b` typed into Paint Studio.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!rootRef.current?.offsetParent) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      const key = e.key.toLowerCase();
+      // Everything on a modifier, because every unmodified letter is already a tool.
+      if (e.metaKey || e.ctrlKey) {
+        const run: Record<string, (() => void) | undefined> = {
+          c: copySelection,
+          v: pasteClipboard,
+          d: duplicateSelection,
+          g: e.shiftKey ? ungroupSelection : groupSelection,
+          a: () => setSelection((sheetsRef.current.find((s) => s.id === activeId)?.layers ?? []).map((l) => l.id)),
+        };
+        const act = run[key];
+        if (act) {
+          e.preventDefault();
+          act();
+        }
+        return;
+      }
+      if (e.altKey) return;
+
+      if ((e.key === "Delete" || e.key === "Backspace") && selection.length) {
+        e.preventDefault();
+        removeLayers(selection);
+        return;
+      }
+
+      const step = e.shiftKey ? 10 : 1;
+      // Up on the keyboard is up on the *picture*. The sheet's rows run the other way (see
+      // `CanvasStage`), so the arrow that agrees with what's on screen is the one that
+      // disagrees with the array, and this is where that gets turned round.
+      const arrows: Record<string, [number, number] | undefined> = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, step],
+        ArrowDown: [0, -step],
+      };
+      const nudge = arrows[e.key];
+      if (nudge && selection.length) {
+        e.preventDefault();
+        moveSelection(nudge[0], nudge[1]);
+        return;
+      }
+
+      const tool = (Object.keys(TOOL_KEYS) as PaintTool[]).find((k) => TOOL_KEYS[k] === key);
+      if (tool) {
+        e.preventDefault();
+        pickTool(tool);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    activeId,
+    copySelection,
+    duplicateSelection,
+    groupSelection,
+    moveSelection,
+    pasteClipboard,
+    pickTool,
+    redo,
+    removeLayers,
+    selection,
+    undo,
+    ungroupSelection,
+  ]);
+
   const ghostOf = useCallback(
     (id: string | null | undefined) => (id && ghosts.get(id)) || EMPTY_GHOST,
     [ghosts],
@@ -996,7 +1388,6 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
    * previous model would look perfectly valid over the new one while describing bodywork that
    * isn't there — the worst kind of wrong for a guide.
    */
-  const geometryRef = useRef<EdfNode[] | null>(null);
   const onGeometry = useCallback((nodes: EdfNode[] | null, assembled: boolean) => {
     // Compared against a ref rather than inside a `setState` updater: an updater has to be
     // pure, and this has to invalidate the wires as well as record the mesh.
@@ -1271,7 +1662,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     await write(false);
   }, [blocked, canSave, dest, name, t, write]);
 
-  const selected = active?.layers.find((l) => l.id === selectedId) ?? null;
+  // Whether the model can say where the far flank is at all, for the controls that need it.
+  const mirrorReady = mirrorRef.current.ready && mirrorRef.current.sheetId === activeId;
+  const canGroup = chosen.length > 1;
+  const canUngroup = chosen.some((l) => l.group);
+  const canUnlink = chosen.some((l) => l.mirror);
 
   return (
     <div
@@ -1335,7 +1730,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             hints={hints}
             onPick={(id) => {
               setActiveId(id);
-              setSelectedId(null);
+              setSelection([]);
             }}
             onRename={(id, value) => {
               patchSheet(id, (s) => ({ ...s, name: value }));
@@ -1380,27 +1775,33 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           {active && (
             <LayerList
               layers={active.layers}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
+              selection={selection}
+              onSelect={select}
               onToggle={(id, visible) => {
                 patchLayer(id, (l) => ({ ...l, visible }));
                 bump();
               }}
-              onRemove={removeLayer}
+              onRemove={(id) => removeLayers([id])}
               onReorder={reorder}
               onAdd={addPaintLayer}
             />
           )}
-          {selected && (
+          {!!chosen.length && active && (
             <LayerInspector
-              layer={selected}
+              layers={chosen}
+              all={active.layers}
+              width={active.width}
+              height={active.height}
               parts={parts}
+              mirrorReady={mirrorReady}
               onClip={clipLayer}
               onFit={fitLayer}
-              onChange={(fn) => {
-                patchLayer(selected.id, fn, `layer:${selected.id}`);
-                bump();
-              }}
+              onMirror={mirrorSelected}
+              onUnlink={unlinkSelection}
+              onSelect={(id) => select([id], "replace")}
+              onGroup={groupSelection}
+              onUngroup={ungroupSelection}
+              onChange={(fn) => patchSelection(fn, `layer:${selection.join(",")}`)}
             />
           )}
         </section>
@@ -1416,10 +1817,11 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               ghost={ghostOf(active.id)}
               parts={parts}
               onHoverSpot={setHoverIsland}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onMove={moveLayer}
-              onScale={scaleLayer}
+              selection={selection}
+              onSelect={select}
+              onMove={moveSelection}
+              onScale={scaleSelection}
+              onMenu={(x, y) => setMenuAt({ x, y })}
               tool={paint.tool}
               brushSize={paint.size}
               canPaint={!!target || SHAPE_TOOLS.has(paint.tool)}
@@ -1442,6 +1844,83 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             </div>
           </div>
         )}
+
+        {/* The canvas's own menu. Anchored to a point rather than to the canvas, because what
+            it is about is whatever was under the pointer — and opened from the *release* of a
+            right press, since the native `contextmenu` event fires on the press and can't tell
+            a menu from the start of a pan. See `CanvasStage.onMenu`. */}
+        <DropdownMenu open={!!menuAt} onOpenChange={(open) => !open && setMenuAt(null)}>
+          <DropdownMenuTrigger asChild>
+            <span
+              aria-hidden
+              className="pointer-events-none fixed size-0"
+              style={{ left: menuAt?.x ?? 0, top: menuAt?.y ?? 0 }}
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-52">
+            <MenuRow
+              icon={FlipHorizontal2}
+              label={t("designer.mirror")}
+              disabled={chosen.length !== 1 || !mirrorReady || !!chosen[0]?.mirror}
+              onPick={mirrorSelected}
+            />
+            {canUnlink && (
+              <MenuRow icon={Link2Off} label={t("designer.unlink")} onPick={unlinkSelection} />
+            )}
+            <DropdownMenuSeparator />
+            <MenuRow
+              icon={CopyPlus}
+              label={t("designer.duplicate")}
+              disabled={!chosen.length}
+              onPick={duplicateSelection}
+            />
+            <MenuRow
+              icon={Copy}
+              label={t("designer.copy")}
+              disabled={!chosen.length}
+              onPick={copySelection}
+            />
+            <MenuRow
+              icon={ClipboardPaste}
+              label={t("designer.paste")}
+              disabled={!clipboard?.layers.length}
+              onPick={pasteClipboard}
+            />
+            <DropdownMenuSeparator />
+            <MenuRow
+              icon={FlipHorizontal2}
+              label={t("designer.flipX")}
+              disabled={!chosen.length}
+              onPick={() => patchSelection((l) => ({ ...l, flipX: !l.flipX }))}
+            />
+            <MenuRow
+              icon={FlipVertical2}
+              label={t("designer.flipY")}
+              disabled={!chosen.length}
+              onPick={() => patchSelection((l) => ({ ...l, flipY: !l.flipY }))}
+            />
+            <DropdownMenuSeparator />
+            <MenuRow
+              icon={Group}
+              label={t("designer.group")}
+              disabled={!canGroup}
+              onPick={groupSelection}
+            />
+            <MenuRow
+              icon={Ungroup}
+              label={t("designer.ungroup")}
+              disabled={!canUngroup}
+              onPick={ungroupSelection}
+            />
+            <DropdownMenuSeparator />
+            <MenuRow
+              icon={Trash2}
+              label={t("common.remove")}
+              disabled={!chosen.length}
+              onPick={() => removeLayers(selection)}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
       </section>
 
       {/* ── The model ────────────────────────────────────────────────────────── */}
@@ -1791,10 +2270,17 @@ function GhostToggle({
     </button>
   );
 }
-
+/**
+ * The layer stack, with grouped layers gathered under a heading.
+ *
+ * A group is a tag rather than a container (see `layers.ts`), so this doesn't recurse — it walks
+ * the stack once and starts a block wherever the tag changes. That works because grouping also
+ * *gathers*: `regroup` puts a group's members next to each other, and everything downstream,
+ * this list included, gets to stay flat.
+ */
 function LayerList({
   layers,
-  selectedId,
+  selection,
   onSelect,
   onToggle,
   onRemove,
@@ -1802,14 +2288,88 @@ function LayerList({
   onAdd,
 }: {
   layers: Layer[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  selection: string[];
+  onSelect: (ids: string[], mode: "replace" | "toggle" | "isolate") => void;
   onToggle: (id: string, visible: boolean) => void;
   onRemove: (id: string) => void;
   onReorder: (id: string, delta: number) => void;
   onAdd: () => void;
 }) {
   const t = useT();
+  // Top of the list is the top of the stack, which is how a layer panel reads — the array
+  // itself is bottom-first because that's the order it's drawn in.
+  const shown = [...layers].reverse();
+  const rows: ({ tag: string; members: Layer[] } | { tag: null; members: [Layer] })[] = [];
+  for (let i = 0; i < shown.length; i += 1) {
+    const layer = shown[i];
+    if (!layer.group) {
+      rows.push({ tag: null, members: [layer] });
+      continue;
+    }
+    // The block is emitted at its first member and skipped at the rest of them.
+    if (i > 0 && shown[i - 1].group === layer.group) continue;
+    rows.push({ tag: layer.group, members: shown.filter((l) => l.group === layer.group) });
+  }
+
+  const row = (layer: Layer) => (
+    <div
+      key={layer.id}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11.5px] transition-colors",
+        selection.includes(layer.id) ? "border-primary bg-primary/10" : "border-border",
+      )}
+    >
+      <button
+        type="button"
+        className="flex-none text-muted-foreground hover:text-foreground"
+        onClick={() => onToggle(layer.id, !layer.visible)}
+        title={t(layer.visible ? "designer.hide" : "designer.show")}
+      >
+        {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+      </button>
+      {/* A follower says so here as well as in the inspector: this is the list you scan when
+          you can't work out why a layer won't move. */}
+      {layer.mirror && (
+        <Link2 className="size-3 flex-none text-primary" aria-label={t("designer.mirroredShort")} />
+      )}
+      <button
+        type="button"
+        className="min-w-0 flex-1 truncate text-left"
+        // Alt reaches inside a group, shift adds to the selection — the same two modifiers the
+        // canvas uses, because it is the same question being asked twice.
+        onClick={(e) =>
+          onSelect([layer.id], e.shiftKey ? "toggle" : e.altKey ? "isolate" : "replace")
+        }
+      >
+        {layer.kind === "text" ? layer.text || layer.name : layer.name}
+      </button>
+      <button
+        type="button"
+        className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
+        onClick={() => onReorder(layer.id, 1)}
+        title={t("designer.raise")}
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
+        onClick={() => onReorder(layer.id, -1)}
+        title={t("designer.lower")}
+      >
+        ↓
+      </button>
+      <button
+        type="button"
+        className="flex-none text-muted-foreground hover:text-destructive"
+        onClick={() => onRemove(layer.id)}
+        title={t("common.remove")}
+      >
+        <Trash2 className="size-3.5" />
+      </button>
+    </div>
+  );
+
   return (
     <div className="rounded-lg border border-border bg-card/40 p-3.5">
       <div className="mb-2.5 flex items-center gap-2">
@@ -1827,57 +2387,44 @@ function LayerList({
         <p className="text-[11px] leading-snug text-faint">{t("designer.noLayers")}</p>
       ) : (
         <div className="flex flex-col gap-1">
-          {/* Top of the list is the top of the stack, which is how a layer panel reads —
-              the array itself is bottom-first because that's the order it's drawn in. */}
-          {[...layers].reverse().map((layer) => (
-            <div
-              key={layer.id}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[11.5px] transition-colors",
-                layer.id === selectedId ? "border-primary bg-primary/10" : "border-border",
-              )}
-            >
-              <button
-                type="button"
-                className="flex-none text-muted-foreground hover:text-foreground"
-                onClick={() => onToggle(layer.id, !layer.visible)}
-                title={t(layer.visible ? "designer.hide" : "designer.show")}
+          {rows.map((block) =>
+            block.tag === null ? (
+              row(block.members[0])
+            ) : (
+              <div
+                key={block.tag}
+                className="flex flex-col gap-1 rounded-md border border-dashed border-border/70 p-1"
               >
-                {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-              </button>
-              <button
-                type="button"
-                className="min-w-0 flex-1 truncate text-left"
-                onClick={() => onSelect(layer.id)}
-              >
-                {layer.kind === "text" ? layer.text || layer.name : layer.name}
-              </button>
-              <button
-                type="button"
-                className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
-                onClick={() => onReorder(layer.id, 1)}
-                title={t("designer.raise")}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                className="flex-none px-0.5 text-muted-foreground hover:text-foreground"
-                onClick={() => onReorder(layer.id, -1)}
-                title={t("designer.lower")}
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                className="flex-none text-muted-foreground hover:text-destructive"
-                onClick={() => onRemove(layer.id)}
-                title={t("common.remove")}
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </div>
-          ))}
+                <div className="flex items-center gap-1.5 px-0.5 text-[10.5px] text-muted-foreground">
+                  <button
+                    type="button"
+                    className="flex-none hover:text-foreground"
+                    // One toggle for the block: if any of it is showing, the whole thing hides.
+                    onClick={() => {
+                      const anyVisible = block.members.some((l) => l.visible);
+                      for (const l of block.members) onToggle(l.id, !anyVisible);
+                    }}
+                    title={t("designer.hide")}
+                  >
+                    {block.members.some((l) => l.visible) ? (
+                      <Eye className="size-3" />
+                    ) : (
+                      <EyeOff className="size-3" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-1 truncate text-left hover:text-foreground"
+                    onClick={() => onSelect(block.members.map((l) => l.id), "replace")}
+                  >
+                    <Group className="size-3 flex-none" />
+                    {t("designer.groupOf", { count: String(block.members.length) })}
+                  </button>
+                </div>
+                {block.members.map(row)}
+              </div>
+            ),
+          )}
         </div>
       )}
     </div>

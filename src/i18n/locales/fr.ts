@@ -1769,6 +1769,56 @@ export const fr: Translation = {
     "Cette zone est la face intérieure de la pièce : ce que vous y peignez regarde le sol et ne se voit jamais de l'extérieur.",
   "designer.faceHint.both":
     "La face extérieure de la pièce et sa face intérieure partagent cette zone : ce que vous dessinez ici se retrouve sur les deux.",
+  // ── Designer › la sélection, et ce qu'on peut en faire ────────────────────────
+  "designer.layersSelected": "{{count}} calques sélectionnés",
+  "designer.position": "Position",
+  "designer.duplicate": "Dupliquer",
+  "designer.copy": "Copier",
+  "designer.paste": "Coller",
+  "designer.copyName": "{{name}} copie",
+  "designer.copied_one": "1 calque copié.",
+  "designer.copied_other": "{{count}} calques copiés.",
+  "designer.pasteWrongSize":
+    "Ça vient d'une planche d'une autre taille, et un calque de peinture *est* la planche — il n'y a rien ici qui puisse aller.",
+  "designer.pasteDropped_one":
+    "1 calque de peinture a été laissé de côté — un calque de peinture est la planche, et celle-ci n'a pas la même taille.",
+  "designer.pasteDropped_other":
+    "{{count}} calques de peinture ont été laissés de côté — un calque de peinture est la planche, et celle-ci n'a pas la même taille.",
+  "designer.group": "Grouper",
+  "designer.ungroup": "Dégrouper",
+  "designer.groupRow": "Ensemble",
+  "designer.groupOf": "Groupe de {{count}}",
+  "designer.groupHint":
+    "Les déplacer d'un bloc. Cliquer sur l'un d'eux prend tout le groupe — maintiens Alt pour n'en prendre qu'un.",
+  "designer.flip": "Retourner",
+  "designer.flipX": "Retourner de gauche à droite",
+  "designer.flipY": "Retourner de haut en bas",
+
+  // ── Designer › miroir vers l'autre flanc ──────────────────────────────────────
+  "designer.mirror": "Miroir de l'autre côté",
+  "designer.mirrorName": "{{name}} miroir",
+  "designer.mirrorHint":
+    "Place une copie de ce calque là où il tombe de l'autre côté de la moto. Calculé à partir du modèle plutôt qu'en retournant la planche, donc il arrive sur la bonne pièce — et il suit ce calque tant que tu ne le détaches pas.",
+  "designer.mirroredFrom": "Miroir de « {{name}} ».",
+  "designer.mirroredShort": "Miroir",
+  "designer.mirroredOrphan": "Ceci est le miroir d'un calque qui n'existe plus.",
+  "designer.unlink": "Détacher",
+  "designer.unlinkHint":
+    "Arrête de suivre, et garde ce qu'il y a. Ça devient un calque ordinaire que tu peux modifier seul.",
+  "designer.selectSource": "Sélectionner l'original",
+  "designer.mirrorPaused":
+    "Aucun modèle chargé : ceci reste là où il a été placé la dernière fois au lieu de suivre.",
+  "designer.mirrorRough":
+    "L'autre côté n'est pas déplié en miroir de celui-ci, donc le placement est approchant plutôt qu'exact.",
+  "designer.mirrorWhy.no-model":
+    "Charge d'abord la moto dans l'aperçu — sans le modèle, il n'y a pas d'autre côté à trouver.",
+  "designer.mirrorWhy.shared":
+    "Les deux flancs sont dépliés au même endroit : c'est donc déjà sur les deux côtés de la moto. Une deuxième copie tomberait sur la première.",
+  "designer.mirrorWhy.centre":
+    "Ceci est sur l'axe de la moto, qui est son propre miroir — il n'y a pas d'autre côté où l'envoyer.",
+  "designer.mirrorWhy.asymmetric":
+    "Le modèle n'a rien au miroir de cet endroit, donc il n'y a pas d'autre côté où le poser.",
+
   "designer.opacity": "Opacité",
   "designer.blend": "Fusion",
   "designer.blend.normal": "Normal",
@@ -1827,7 +1877,7 @@ export const fr: Translation = {
   "designer.tool.ellipse": "Ellipse",
   "designer.tool.line": "Ligne",
   "designer.moveHint":
-    "Fais glisser les calques sur la planche pour les placer. Choisis un outil ci-dessus pour peindre dessus.",
+    "Fais glisser les calques sur la planche pour les placer : ils s'aimantent aux coutures et entre eux — maintiens Alt pour placer librement. Maj+clic ajoute à la sélection, un glissé sur le vide fait un lasso, et le clic droit a le reste. Choisis un outil ci-dessus pour peindre dessus.",
   "designer.colourFrom": "Peindre avec cette couleur",
   "designer.colourTo": "Fondre vers cette couleur",
   "designer.swapColours": "Inverser les deux couleurs",

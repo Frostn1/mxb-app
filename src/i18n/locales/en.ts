@@ -1735,6 +1735,56 @@ export const en = {
     "This area is the underside of the panel — painted here, it faces the ground and is never seen from outside.",
   "designer.faceHint.both":
     "A panel's outer skin and its underside share this area, so anything drawn here lands on both.",
+  // ── Designer › the selection, and what can be done to it ──────────────────────
+  "designer.layersSelected": "{{count}} layers selected",
+  "designer.position": "Position",
+  "designer.duplicate": "Duplicate",
+  "designer.copy": "Copy",
+  "designer.paste": "Paste",
+  "designer.copyName": "{{name}} copy",
+  "designer.copied_one": "1 layer copied.",
+  "designer.copied_other": "{{count}} layers copied.",
+  "designer.pasteWrongSize":
+    "That was copied from a sheet of another size, and a paint layer is the sheet — there's nothing here it would fit.",
+  "designer.pasteDropped_one":
+    "1 paint layer was left out — a paint layer is the sheet, and this one is a different size.",
+  "designer.pasteDropped_other":
+    "{{count}} paint layers were left out — a paint layer is the sheet, and this one is a different size.",
+  "designer.group": "Group",
+  "designer.ungroup": "Ungroup",
+  "designer.groupRow": "Together",
+  "designer.groupOf": "Group of {{count}}",
+  "designer.groupHint":
+    "Move these as one. Clicking any of them takes the whole group — hold Alt to pick a single layer out of it.",
+  "designer.flip": "Flip",
+  "designer.flipX": "Flip left to right",
+  "designer.flipY": "Flip top to bottom",
+
+  // ── Designer › mirroring to the far flank ─────────────────────────────────────
+  "designer.mirror": "Mirror to other side",
+  "designer.mirrorName": "{{name}} mirrored",
+  "designer.mirrorHint":
+    "Put a copy of this layer where it lands on the far side of the bike. Worked out from the model rather than by flipping the sheet, so it arrives on the panel it belongs on — and it follows this layer until you unlink it.",
+  "designer.mirroredFrom": "Mirrored from “{{name}}”.",
+  "designer.mirroredShort": "Mirrored",
+  "designer.mirroredOrphan": "This was mirrored from a layer that is no longer here.",
+  "designer.unlink": "Unlink",
+  "designer.unlinkHint":
+    "Stop following, and keep what's here. It becomes an ordinary layer you can edit on its own.",
+  "designer.selectSource": "Select the original",
+  "designer.mirrorPaused":
+    "No model is loaded, so this is sitting where it was last placed rather than following.",
+  "designer.mirrorRough":
+    "The far side isn't unwrapped as a reflection of this one, so the placement is close rather than exact.",
+  "designer.mirrorWhy.no-model":
+    "Load the bike in the preview first — without the model there is no far side to find.",
+  "designer.mirrorWhy.shared":
+    "Both flanks are unwrapped onto this same spot, so this is already on each side of the bike. A second copy would land on top of the first.",
+  "designer.mirrorWhy.centre":
+    "This sits on the bike's centre line, which is its own reflection — there is no other side to send it to.",
+  "designer.mirrorWhy.asymmetric":
+    "The model has nothing at the reflection of this spot, so there is no far side to put it on.",
+
   "designer.opacity": "Opacity",
   "designer.blend": "Blend",
   "designer.blend.normal": "Normal",
@@ -1792,7 +1842,7 @@ export const en = {
   "designer.tool.ellipse": "Ellipse",
   "designer.tool.line": "Line",
   "designer.moveHint":
-    "Drag layers on the sheet to place them. Pick a tool above to paint on it instead.",
+    "Drag layers on the sheet to place them, and they snap to the seams and to each other — hold Alt to place one freely. Shift-click adds to the selection, a drag over empty space lassoes, and right-click has the rest. Pick a tool above to paint on it instead.",
   "designer.colourFrom": "Paint with this",
   "designer.colourTo": "Run into this",
   "designer.swapColours": "Swap the two colours",

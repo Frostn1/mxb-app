@@ -1,5 +1,7 @@
+import { useState } from "react";
+
 /**
- * The two controls the designer's side panels are made of.
+ * The controls the designer's side panels are made of.
  *
  * Shared rather than copied so the layer inspector and the paint tools stay identical instead
  * of merely similar — they sit one above the other in the same rail, and a row that lines up
@@ -46,5 +48,58 @@ export function Slider({
         {format(value)}
       </span>
     </>
+  );
+}
+
+/**
+ * A number typed rather than dragged.
+ *
+ * Held as text while it is being typed and read back as a number only on Enter or on leaving
+ * the box. Committing per keystroke sounds simpler and isn't: "-" and "" are both states you
+ * pass through on the way to `-40`, and each of them would snap the layer to zero and take the
+ * caret with it.
+ *
+ * Shows the live value whenever it isn't being typed into, so dragging on the canvas moves the
+ * number too — which is the answer to the old objection that a typed X was a second way of
+ * saying the same thing without showing the result.
+ */
+export function NumberField({
+  value,
+  min,
+  max,
+  step = 1,
+  title,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  title?: string;
+  onChange: (v: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commit = (text: string) => {
+    setDraft(null);
+    const n = Number(text);
+    if (text.trim() !== "" && Number.isFinite(n)) onChange(Math.min(max, Math.max(min, n)));
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      title={title}
+      value={draft ?? String(Math.round(value / step) * step)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        // Escape drops the draft and the live value comes back — nothing is committed.
+        if (e.key === "Enter") e.currentTarget.blur();
+        else if (e.key === "Escape") setDraft(null);
+      }}
+      className="h-6 min-w-0 flex-1 rounded-md border border-input bg-background px-1.5 text-center text-[11px] tabular-nums"
+    />
   );
 }

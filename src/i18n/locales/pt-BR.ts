@@ -1756,6 +1756,56 @@ export const ptBR: Translation = {
     "Esta área é o lado de baixo da peça: o que você pintar aqui fica virado para o chão e nunca é visto por fora.",
   "designer.faceHint.both":
     "O lado de cima da peça e o de baixo dividem esta área, então o que você desenha aqui cai nos dois.",
+  // ── Designer › a seleção, e o que dá para fazer com ela ───────────────────────
+  "designer.layersSelected": "{{count}} camadas selecionadas",
+  "designer.position": "Posição",
+  "designer.duplicate": "Duplicar",
+  "designer.copy": "Copiar",
+  "designer.paste": "Colar",
+  "designer.copyName": "{{name}} cópia",
+  "designer.copied_one": "1 camada copiada.",
+  "designer.copied_other": "{{count}} camadas copiadas.",
+  "designer.pasteWrongSize":
+    "Isso veio de uma folha de outro tamanho, e uma camada de pintura *é* a folha — aqui não tem nada que caiba.",
+  "designer.pasteDropped_one":
+    "1 camada de pintura ficou de fora: uma camada de pintura é a folha, e esta é de outro tamanho.",
+  "designer.pasteDropped_other":
+    "{{count}} camadas de pintura ficaram de fora: uma camada de pintura é a folha, e esta é de outro tamanho.",
+  "designer.group": "Agrupar",
+  "designer.ungroup": "Desagrupar",
+  "designer.groupRow": "Juntas",
+  "designer.groupOf": "Grupo de {{count}}",
+  "designer.groupHint":
+    "Move todas como uma. Clicar em qualquer uma pega o grupo inteiro — segure Alt para pegar só uma camada.",
+  "designer.flip": "Espelhar",
+  "designer.flipX": "Espelhar da esquerda para a direita",
+  "designer.flipY": "Espelhar de cima para baixo",
+
+  // ── Designer › espelhar para o outro lado ─────────────────────────────────────
+  "designer.mirror": "Espelhar para o outro lado",
+  "designer.mirrorName": "{{name}} espelhada",
+  "designer.mirrorHint":
+    "Coloca uma cópia desta camada onde ela cai do outro lado da moto. Calculado a partir do modelo em vez de virar a folha, então chega na peça certa — e segue esta camada até você desvincular.",
+  "designer.mirroredFrom": "Espelhada de “{{name}}”.",
+  "designer.mirroredShort": "Espelhada",
+  "designer.mirroredOrphan": "Isto foi espelhado de uma camada que não existe mais.",
+  "designer.unlink": "Desvincular",
+  "designer.unlinkHint":
+    "Para de seguir e mantém o que está aqui. Vira uma camada comum, que você edita por conta.",
+  "designer.selectSource": "Selecionar a original",
+  "designer.mirrorPaused":
+    "Nenhum modelo carregado, então isto fica onde foi colocado por último em vez de seguir.",
+  "designer.mirrorRough":
+    "O outro lado não está aberto como reflexo deste, então a posição é próxima, não exata.",
+  "designer.mirrorWhy.no-model":
+    "Carregue a moto na prévia primeiro — sem o modelo não há outro lado para achar.",
+  "designer.mirrorWhy.shared":
+    "Os dois lados estão abertos no mesmo ponto, então isto já está nos dois lados da moto. Uma segunda cópia cairia em cima da primeira.",
+  "designer.mirrorWhy.centre":
+    "Isto está na linha de centro da moto, que é o próprio reflexo — não há outro lado para onde mandar.",
+  "designer.mirrorWhy.asymmetric":
+    "O modelo não tem nada no reflexo deste ponto, então não há outro lado para colocar.",
+
   "designer.opacity": "Opacidade",
   "designer.blend": "Mesclagem",
   "designer.blend.normal": "Normal",
@@ -1812,7 +1862,7 @@ export const ptBR: Translation = {
   "designer.tool.ellipse": "Elipse",
   "designer.tool.line": "Linha",
   "designer.moveHint":
-    "Arraste as camadas na folha para posicioná-las. Escolha uma ferramenta acima para pintar nela.",
+    "Arraste as camadas na folha para posicioná-las: elas encaixam nas emendas e umas nas outras — segure Alt para posicionar livre. Shift+clique soma à seleção, arrastar no vazio faz um laço, e o botão direito tem o resto. Escolha uma ferramenta acima para pintar nela.",
   "designer.colourFrom": "Pintar com esta",
   "designer.colourTo": "Transitar para esta",
   "designer.swapColours": "Trocar as duas cores",
