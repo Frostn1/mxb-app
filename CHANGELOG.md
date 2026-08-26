@@ -3,6 +3,18 @@
 ## 2026-08-26
 
 ### Added
+- **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
+  needs wheel meshes and axles to measure against; a model that ships neither fell back to the
+  authored frame, which carries no suspension travel at all — so the bike stood with its shock
+  apparently collapsed. The rear now defaults to 140 mm of drop instead. Bikes the solve *can*
+  answer for are unaffected, and **Reset** still puts a bike back exactly as authored.
+
+- **See a bike's model swaps without leaving the Library.** A bike card now carries a
+  **models** badge when there is more than one model set installed, and opening it lists them
+  in place — the active one ticked, an incomplete set flagged, a "no model" set marked, and a
+  file count for the rest. It reads the same vocabulary as the Locker, so a variant looks the
+  same wherever you meet it. Deliberately read-only: the Locker stays the one place that moves
+  files, so two views can never disagree about which model is live.
 - **Move the bike and the rider around in the Rider tab.** The pair stood where the viewer put
   them — shoulder to shoulder, a fixed gap apart — which is the one arrangement nobody was
   composing for. A **Placement** panel now moves either model: side, up, forward and turn, in

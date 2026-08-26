@@ -1097,11 +1097,19 @@ function levelRearDrop(
   return Math.abs(drop) > REAR_LIMIT_MM ? null : drop;
 }
 
-/** The stance a bike is first drawn in: level if it can be solved, as-authored if not. */
+/**
+ * Where the rear sits when the level solve has nothing to work with — a bike with no wheel
+ * meshes, no axles in its `.geom`, or a swingarm that can't reach.
+ *
+ * Not zero. Zero is the authored frame, which carries no suspension travel at all, so the
+ * bike stands with its shock apparently collapsed and reads as a fault rather than a stance.
+ */
+const REAR_DEFAULT_MM = 140;
+
+/** The stance a bike is first drawn in: level if it can be solved, on its suspension if not. */
 function settledPose(rig: BikeRig | null | undefined, nodes: EdfNode[]): BikePose {
   if (!rig) return NEUTRAL_POSE;
-  const drop = levelRearDrop(rig, nodes, 0);
-  return drop == null ? NEUTRAL_POSE : { ...NEUTRAL_POSE, rearDrop: drop };
+  return { ...NEUTRAL_POSE, rearDrop: levelRearDrop(rig, nodes, 0) ?? REAR_DEFAULT_MM };
 }
 
 /** Turn a group about a point that isn't the origin. */
