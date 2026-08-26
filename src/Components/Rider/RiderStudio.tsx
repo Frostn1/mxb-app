@@ -26,13 +26,7 @@ import {
 } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
 import { useConfig } from "../../Context/Config";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
+import { Combobox } from "../ui/combobox";
 
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
 
@@ -187,7 +181,18 @@ export default function RiderStudio({
     [],
   );
 
-  const bikeVariant = pickedModel(bike, loadout, scans);
+  // With no model picked, preview the game's own model rather than whatever swap happens to
+  // be on the bike right now. A look composed here is meant to be shared, and "what's on my
+  // disk" renders differently on everyone else's.
+  //
+  // Only when the scan actually offers Stock. A bike whose files are all packed has nothing
+  // loose to park, so no Stock row is listed for it — and its active model already *is* the
+  // packed one, which is what asking for Stock would have shown anyway.
+  const offersStock = (scans?.modelSwaps[bike] ?? []).some(
+    (v) => v.toLowerCase() === "stock",
+  );
+  const bikeVariant =
+    loadout.modelSwap || (offersStock ? "Stock" : pickedModel(bike, loadout, scans));
   const showBike = bikePreview && !!bike;
   // A bike handed over by Presets comes from the profile's own list, which the target scan
   // should already cover — but if it doesn't, keep it pickable rather than showing an empty
@@ -292,23 +297,23 @@ export default function RiderStudio({
                 {t("slotGroup.bike")}
               </h2>
               <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2">
-                <label className="flex flex-col gap-1">
+                {/* Searchable, and matching the two slot fields beside it. A mods folder
+                    runs to dozens of bikes, which is a long way to scroll for a name you
+                    already know. Neither free text nor empty is a bike, so both are off. */}
+                <div className="flex flex-col gap-0.5">
                   <span className="text-[11px] font-medium text-muted-foreground">
                     {t("slotGroup.bike")}
                   </span>
-                  <Select value={bike} onValueChange={setBike}>
-                    <SelectTrigger className="h-8">
-                      <SelectValue placeholder={t("slotGroup.bike")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {bikeOptions.map((b) => (
-                        <SelectItem key={b} value={b}>
-                          {b}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
+                  <Combobox
+                    value={bike}
+                    options={bikeOptions}
+                    onChange={setBike}
+                    placeholder={t("slotGroup.bike")}
+                    allowCreate={false}
+                    allowEmpty={false}
+                    className="h-7 text-[12px]"
+                  />
+                </div>
                 {BIKE_SLOTS.map((slot) => (
                   <SlotField
                     key={slot.key}

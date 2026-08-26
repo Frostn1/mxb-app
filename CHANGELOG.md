@@ -47,6 +47,15 @@
   paints nothing, which is only discovered in game. That boots mod now offers `fox` and
   `fox_n`, as it always should have. The same lookup answers whether a bike exists at all when
   it's installed as a bare `.pkz`, so a model-swap preview for one resolves too.
+### Changed
+- **The Rider tab's bike picker is searchable.** It was a plain dropdown, which is a long
+  scroll past dozens of bikes for a name you already know. It's now the same searchable
+  field as the Paint and Model swap slots beside it — type to filter. Unlike those, it
+  won't take a name you made up or an empty value, because neither is a bike.
+- **The Rider preview starts from the stock model.** With no model swap picked it drew
+  whatever swap happened to be on the bike, so the same look rendered differently on
+  everyone's machine. It now draws the game's own model unless you pick one — for a bike
+  whose files are all packed that was already what you were seeing, so nothing changes there.
 
 ## 2026-08-26 — v0.10.2 — Liveries that belong to a model, and a Windows that starts
 
