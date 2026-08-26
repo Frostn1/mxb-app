@@ -437,8 +437,12 @@ export function applyModelSwap(bike: string, target: string): Promise<SwapApplyO
  * assembled in memory, so nothing moves on disk and the game can stay open. "Stock" shows
  * the packed model the loose files are hiding.
  */
-export function previewModelSwap(bike: string, variant: string): Promise<BikeModel> {
-  return invoke<BikeModel>("preview_model_swap", { bike, variant });
+export function previewModelSwap(
+  bike: string,
+  variant: string,
+  tyres?: string,
+): Promise<BikeModel> {
+  return invoke<BikeModel>("preview_model_swap", { bike, variant, tyres: tyres || null });
 }
 
 /**
@@ -660,8 +664,16 @@ export function unpackPkz(path: string, outDir: string): Promise<string[]> {
   return invoke<string[]>("unpack_pkz", { path, outDir });
 }
 
-export function loadBikeModel(source: string): Promise<BikeModel> {
-  return invoke<BikeModel>("load_bike_model", { source });
+/**
+ * A bike's geometry, its paints, and the wheels it wears.
+ *
+ * `tyres` substitutes the pack the bike's own `gfx.cfg` names — a bike names exactly one, so
+ * that substitution is the only way to see it on another. Nothing on disk is renamed, and a
+ * name that isn't installed falls back to the bike's own rather than losing the wheels.
+ * Omit it (or pass `""`) for whatever the bike itself asks for.
+ */
+export function loadBikeModel(source: string, tyres?: string): Promise<BikeModel> {
+  return invoke<BikeModel>("load_bike_model", { source, tyres: tyres || null });
 }
 
 export function loadRiderModel(loadout: Loadout): Promise<RiderModel> {
@@ -1957,6 +1969,11 @@ export function voiceDevices(): Promise<VoiceDevices> {
 
 export function setVoiceEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_voice_enabled", { enabled });
+}
+
+/** Pick the tyre pack the 3D previews fit. `""` means "whatever the bike names". */
+export function setPreviewTyres(tyres: string): Promise<void> {
+  return invoke<void>("set_preview_tyres", { tyres });
 }
 
 /** Pick the microphone. `""` means "follow the system default". */

@@ -339,6 +339,8 @@ export const it: Translation = {
   "viewer.preview3d": "Anteprima 3D",
   "viewer.expand": "Ingrandisci",
   "viewer.paint": "Grafica",
+  "viewer.tyres": "Gomme",
+  "viewer.tyresOwn": "Quelle della moto",
   "viewer.loadingModel": "Caricamento modello…",
   "viewer.loadingPaint": "Caricamento grafica…",
   "viewer.loadingRider": "Caricamento pilota…",
@@ -900,7 +902,7 @@ export const it: Translation = {
   "viewer.stockGearNote":
     "Mostrato sul {{part}} stock del gioco. Una grafica fatta per un altro modello potrebbe non combaciare alla perfezione.",
   "viewer.paintNoChange":
-    "Nessuna delle texture di questa grafica è usata dalle parti mostrate qui, quindi l'anteprima non cambia. Potrebbe comunque colorare ruote o catena, che questa vista non mostra.",
+    "Nessuna delle texture di questa grafica è usata dalle parti mostrate qui, quindi l'anteprima non cambia. Potrebbe comunque colorare la catena, che questa vista non mostra.",
   "viewer.noPaintPreview": "Nessuna anteprima della grafica ({{err}})",
 
   // ── Libreria ───────────────────────────────────────────────────────────────

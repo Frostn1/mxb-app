@@ -1498,6 +1498,12 @@ struct BikeModel {
     /// Designer's reference underlay needs the distinction: an OEM bike's stock `.pnt`
     /// replaces the wheels and the chain, so `plastics` is only ever in here.
     base: Vec<paint::PaintTexture>,
+    /// The tyres mod the wheels came out of, or `None` when the bike drew none.
+    ///
+    /// What was *actually* fitted, not what was asked for: a pick that names nothing
+    /// installed falls back to the bike's own, and the picker has to show that rather than
+    /// claim a pack that isn't on screen.
+    tyres: Option<String>,
     /// Whether the parts were placed into one frame by the bike's `.geom`.
     ///
     /// False means every node still sits in its own local frame, so a vertex's position says
@@ -1577,8 +1583,8 @@ fn swap_cache_key(set: &modelswap::PreviewSet) -> String {
 }
 
 #[tauri::command]
-async fn load_bike_model(source: String) -> Result<BikeModel, String> {
-    tauri::async_runtime::spawn_blocking(move || load_bike_model_blocking(source))
+async fn load_bike_model(source: String, tyres: Option<String>) -> Result<BikeModel, String> {
+    tauri::async_runtime::spawn_blocking(move || load_bike_model_blocking(source, tyres))
         .await
         .map_err(|e| format!("load_bike_model task failed: {e}"))?
 }
@@ -1591,23 +1597,34 @@ async fn preview_model_swap(
     app: tauri::AppHandle,
     bike: String,
     variant: String,
+    tyres: Option<String>,
 ) -> Result<BikeModel, String> {
-    tauri::async_runtime::spawn_blocking(move || preview_model_swap_blocking(app, bike, variant))
-        .await
-        .map_err(|e| format!("preview_model_swap task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        preview_model_swap_blocking(app, bike, variant, tyres)
+    })
+    .await
+    .map_err(|e| format!("preview_model_swap task failed: {e}"))?
 }
 
 fn preview_model_swap_blocking(
     app: tauri::AppHandle,
     bike: String,
     variant: String,
+    pick: Option<String>,
 ) -> Result<BikeModel, String> {
     let t0 = std::time::Instant::now();
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let set =
         modelswap::preview_set(&cfg.mods_path, &bike, &variant).map_err(|e| format!("{e:#}"))?;
     let label = format!("{bike} · {variant}");
-    let key = format!("{}#p{:x}", swap_cache_key(&set), paints_stamp(&set.bike_dir));
+    let tyres = library::mods_subdir(&cfg.mods_path, "mods/tyres");
+    let key = format!(
+        "{}#p{:x}#t{:x}#w{}",
+        swap_cache_key(&set),
+        paints_stamp(&set.bike_dir),
+        tyres_stamp(&tyres),
+        pick.as_deref().unwrap_or(""),
+    );
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         log::info!("preview_model_swap {label}: cache hit ({:?})", t0.elapsed());
         return Ok(m);
@@ -1615,7 +1632,7 @@ fn preview_model_swap_blocking(
 
     let files = gather_preview_files(&set).map_err(|e| format!("{e:#}"))?;
     let installed = paints_at(&set.paints);
-    build_bike_model(&label, key, files, installed, t0)
+    build_bike_model(&label, key, files, installed, Some(tyres), pick, t0)
 }
 
 /// A stamp over the loose paints beside a bike, for the cache key to carry.
@@ -1650,9 +1667,36 @@ fn paints_stamp(source: &std::path::Path) -> u64 {
         }
     }
     rows.sort_unstable();
-    // FNV-1a. Not a security question — this only has to change when the folder does.
+    fnv1a(&rows)
+}
+
+/// A stamp over the installed tyre mods, for the cache key to carry.
+///
+/// The hole [`paints_stamp`] fills, one folder out. A bike's wheels come from
+/// `mods/tyres/<name>`, which nothing on the bike's own path can see: swapping that mod
+/// changes what the viewer should draw while the bike's mtime, size and paints all stay
+/// exactly as they were.
+fn tyres_stamp(dir: &std::path::Path) -> u64 {
+    let mut rows: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let len = e.metadata().map(|m| m.len()).unwrap_or(0);
+            rows.push(format!(
+                "{}:{len}:{}",
+                e.file_name().to_string_lossy(),
+                mtime_nanos(&e.path()),
+            ));
+        }
+    }
+    rows.sort_unstable();
+    fnv1a(&rows)
+}
+
+/// FNV-1a over the rows a stamp is built from. Not a security question — this only has to
+/// change when the folder does.
+fn fnv1a(rows: &[String]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for row in &rows {
+    for row in rows {
         for b in row.as_bytes() {
             h ^= *b as u64;
             h = h.wrapping_mul(0x1000_0000_01b3);
@@ -1661,12 +1705,18 @@ fn paints_stamp(source: &std::path::Path) -> u64 {
     h
 }
 
-fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
+fn load_bike_model_blocking(
+    source: String,
+    pick: Option<String>,
+) -> Result<BikeModel, String> {
     let t0 = std::time::Instant::now();
+    let tyres = tyres_dir_for(std::path::Path::new(&source));
     let key = format!(
-        "{}#p{:x}",
+        "{}#p{:x}#t{:x}#w{}",
         bike_cache_key(&source),
         paints_stamp(std::path::Path::new(&source)),
+        tyres.as_deref().map(tyres_stamp).unwrap_or(0),
+        pick.as_deref().unwrap_or(""),
     );
     if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
         log::info!("load_bike_model {source}: cache hit ({:?})", t0.elapsed());
@@ -1675,7 +1725,7 @@ fn load_bike_model_blocking(source: String) -> Result<BikeModel, String> {
 
     let files = gather_bike_files(std::path::Path::new(&source)).map_err(|e| format!("{e:#}"))?;
     let installed = installed_paints(std::path::Path::new(&source));
-    build_bike_model(&source, key, files, installed, t0)
+    build_bike_model(&source, key, files, installed, tyres, pick, t0)
 }
 
 /// Turn a bike's files into the viewer's model: resolve each part's mesh through the
@@ -1687,6 +1737,10 @@ fn build_bike_model(
     files: Vec<(String, Vec<u8>)>,
     // The loose paints beside the bike, as `installed_paints` answers them.
     installed: Vec<(String, String, Vec<u8>)>,
+    // Where the tyre mods live, for the wheels this bike wears. `None` skips them.
+    tyres_dir: Option<std::path::PathBuf>,
+    // The tyre pack the player picked, if any. Blank/absent → the one the bike names.
+    tyres_pick: Option<String>,
     t0: std::time::Instant,
 ) -> Result<BikeModel, String> {
     let t_read = t0.elapsed();
@@ -1721,6 +1775,20 @@ fn build_bike_model(
     }
 
     let gfx = gfx_bytes.map(|b| cfg::parse_gfx(b)).unwrap_or_default();
+    // Read before `used` borrows anything, so the wheel meshes outlive the borrows taken of
+    // them below. `edfs` is only consulted so an unreadable bike doesn't pay for a tyre
+    // archive it will never draw.
+    let tyre_set = match (tyres_dir, gfx_bytes, geom) {
+        (Some(dir), Some(bytes), Some(g)) if !edfs.is_empty() => {
+            if edf::wheel_axles(g).is_some() {
+                gather_tyre_files(&dir, bytes, tyres_pick.as_deref())
+            } else {
+                log::warn!("[viewer] {label}: the .geom names no axles — no wheels");
+                None
+            }
+        }
+        _ => None,
+    };
     // Group each part's level0 node under the mesh its `.hrc` names. Bikes that point
     // every part at one `model.edf` collapse to a single group — the original path.
     let mut scenes: Vec<(String, Vec<String>)> = Vec::new();
@@ -1769,6 +1837,19 @@ fn build_bike_model(
             bind_textures(&mut nodes, data, &gfx, &node_part);
             used.push(data);
         }
+    }
+    // Wheels last, and only onto a bike that arrived: a mesh that didn't read has to go on
+    // reading as "none of this bike arrived", not as a pair of wheels hanging in the air.
+    let mut tyres = None;
+    if let Some(set) = tyre_set.as_ref().filter(|_| !nodes.is_empty()) {
+        let (mut wheels, meshes) = wheel_nodes(&set.files);
+        if wheels.is_empty() {
+            log::warn!("[viewer] {label}: tyres '{}' hold no readable wheel mesh", set.name);
+        } else {
+            tyres = Some(set.name.clone());
+        }
+        nodes.append(&mut wheels);
+        used.extend(meshes);
     }
     for (fname, path, data) in &installed {
         pnt_jobs.push((paint_display_name(fname), data.as_slice(), false, Some(path)));
@@ -1928,7 +2009,7 @@ fn build_bike_model(
         log::info!("  node '{}' placed={} {}", n.name, n.placed, subs.join(", "));
     }
 
-    let model = BikeModel { nodes, paints, base: model_base, assembled, rig };
+    let model = BikeModel { nodes, paints, base: model_base, tyres, assembled, rig };
     if let Ok(mut c) = bike_cache().lock() {
         // The evicted bike's pixels go with it — nothing else references them.
         if let Some(dropped) = c.insert(key, model.clone()) {
@@ -2058,6 +2139,247 @@ fn base_edf<'a>(
         .min_by_key(|(name, _)| (name.len(), name.to_string()))
         .or_else(|| edfs.iter().min_by_key(|(name, _)| (name.len(), name.to_string())))
         .map(|(_, data)| *data)
+}
+
+/// The `tyres` folder beside a bike, where the wheels it wears come from.
+///
+/// A bike source is `<mods>/bikes/<Bike>` or `<mods>/bikes/<Bike>.pkz`, so the sibling
+/// folder is two levels up. Derived rather than configured: `load_bike_model` is handed a
+/// path and nothing else, and that path already says where the mods tree is.
+fn tyres_dir_for(source: &std::path::Path) -> Option<std::path::PathBuf> {
+    // Resolved, not joined: under Proton the tree is case-sensitive and a `Tyres` folder is
+    // a different path from `tyres`.
+    Some(library::resolve_child(source.parent()?.parent()?, "tyres"))
+}
+
+/// Whether `mods/tyres/<name>` is installed, as a folder or as the `.pkz` beside it.
+fn tyres_mod_exists(tyres_dir: &std::path::Path, name: &str) -> bool {
+    library::resolve_child(tyres_dir, name).is_dir()
+        || library::resolve_child(tyres_dir, &format!("{name}.pkz")).is_file()
+}
+
+/// A tyres mod, opened: the name it goes by and the files a wheel resolves through.
+struct TyreSet {
+    name: String,
+    files: Vec<(String, Vec<u8>)>,
+}
+
+/// Open the tyres mod a bike will wear — its own `gfx.cfg`, an `.hrc` per wheel, and the
+/// meshes those name.
+///
+/// A bike ships no wheel of its own. Its `gfx.cfg` ends with one line — `tyres = oem_mx` —
+/// and `mods/tyres/oem_mx`, a folder or the `.pkz` beside it, is where the mesh actually
+/// lives. `pick` substitutes that name so a bike can be *seen* on another pack; nothing on
+/// disk moves and the bike's own `gfx.cfg` still reads as the game will read it.
+///
+/// `None` when there is no line, no mod, or nothing readable in one — the bike the viewer
+/// drew before wheels, not a failure.
+fn gather_tyre_files(
+    tyres_dir: &std::path::Path,
+    gfx_bytes: &[u8],
+    // The pack the player picked, if they picked one. Blank or absent → the bike's own.
+    pick: Option<&str>,
+) -> Option<TyreSet> {
+    let root = cfg::parse(gfx_bytes);
+    let own = root.get("tyres").map(str::trim).filter(|n| library::is_simple_name(n));
+    // A pick that names nothing installed falls back to the bike's own rather than taking
+    // the wheels away: the picker is a way to look at a bike, not a way to break it.
+    let name = match pick.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(p) if library::is_simple_name(p) && tyres_mod_exists(tyres_dir, p) => p,
+        Some(p) => {
+            log::warn!("[viewer] tyres '{p}' isn't installed — falling back to the bike's own");
+            own?
+        }
+        None => own?,
+    }
+    .to_string();
+
+    // The `.tyre` parameter files, the previews and the shadow meshes all sit beside these
+    // and none of them are drawn — read only what a wheel is resolved through.
+    let want = |n: &str| {
+        let n = n.rsplit(['/', '\\']).next().unwrap_or(n).to_ascii_lowercase();
+        n.ends_with(".edf") || n.ends_with(".hrc") || n.ends_with(".cfg")
+    };
+
+    let dir = library::resolve_child(tyres_dir, &name);
+    let mut loose = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let path = e.path();
+            let Some(fname) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            if path.is_file() && want(fname) {
+                if let Ok(bytes) = std::fs::read(&path) {
+                    loose.push((fname.to_string(), bytes));
+                }
+            }
+        }
+    }
+    if !loose.is_empty() {
+        return Some(TyreSet { name, files: loose });
+    }
+
+    let pkz = library::resolve_child(tyres_dir, &format!("{name}.pkz"));
+    if !pkz.is_file() {
+        log::warn!("[viewer] tyres '{name}' isn't installed — no wheels");
+        return None;
+    }
+    match pkz::read_selected(&pkz, want) {
+        Ok(files) => Some(TyreSet { name, files }),
+        Err(e) => {
+            log::warn!("[viewer] tyres '{name}' wouldn't read: {e:#} — no wheels");
+            None
+        }
+    }
+}
+
+/// The wheel nodes out of a tyres mod, textured and ready for the `.geom` to mount.
+///
+/// Same shape as a bike's own parts — `gfx.cfg` names an `.hrc` per wheel, and the `.hrc`'s
+/// level0 names both the node and the mesh it lives in — so the bike's own resolution reads
+/// it unchanged. Returns the nodes and the meshes they came out of, which the caller needs
+/// in order to lift the wheel textures out of them.
+fn wheel_nodes(files: &[(String, Vec<u8>)]) -> (Vec<edf::EdfNode>, Vec<&Vec<u8>>) {
+    let mut edfs: std::collections::HashMap<String, &Vec<u8>> = std::collections::HashMap::new();
+    let mut hrcs: std::collections::HashMap<String, &Vec<u8>> = std::collections::HashMap::new();
+    let mut gfx_bytes: Option<&Vec<u8>> = None;
+    for (name, data) in files {
+        let bn = name.rsplit(['/', '\\']).next().unwrap_or(name).to_ascii_lowercase();
+        if bn.ends_with(".edf") {
+            edfs.insert(bn, data);
+        } else if let Some(stem) = bn.strip_suffix(".hrc") {
+            hrcs.insert(stem.to_string(), data);
+        } else if bn.ends_with("gfx.cfg") {
+            gfx_bytes = Some(data);
+        }
+    }
+    let Some(gfx_bytes) = gfx_bytes else {
+        log::warn!("[viewer] the tyres mod ships no gfx.cfg — no wheels");
+        return (Vec::new(), Vec::new());
+    };
+    let gfx = cfg::parse(gfx_bytes);
+
+    let mut nodes = Vec::new();
+    let mut used: Vec<&Vec<u8>> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    // Front then rear, fixed: node order must not shuffle between runs.
+    for part in ["front_wheel", "rear_wheel"] {
+        let Some(hrc_file) = gfx
+            .block(part)
+            .and_then(|p| p.block("model"))
+            .and_then(|m| m.get("file"))
+        else {
+            continue;
+        };
+        let stem = hrc_file
+            .trim_end_matches(".hrc")
+            .trim_end_matches(".HRC")
+            .to_ascii_lowercase();
+        let Some(bytes) = hrcs.get(&stem) else {
+            log::warn!("[viewer] tyres '{part}' wants {hrc_file}, which the mod doesn't ship");
+            continue;
+        };
+        let hrc = cfg::parse(bytes);
+        let Some(node) = cfg::hrc_level0(&hrc, &stem) else { continue };
+        let scene = cfg::hrc_level0_scene(&hrc)
+            .map(|s| s.replace('\\', "/"))
+            .and_then(|s| s.rsplit('/').next().map(str::to_ascii_lowercase))
+            .unwrap_or_else(|| "model.edf".to_string());
+        let Some(data) = edfs.get(&scene) else {
+            log::warn!("[viewer] a tyres .hrc wants {scene}, which the mod doesn't ship");
+            continue;
+        };
+        let mut part_nodes = edf::parse_with_levels(data, &[node]);
+        // No gfx overrides: a wheel binds straight off its own material table.
+        bind_textures(
+            &mut part_nodes,
+            data,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        drop_chain(&mut part_nodes);
+        nodes.append(&mut part_nodes);
+        if !seen.contains(&scene) {
+            seen.push(scene);
+            used.push(data);
+        }
+    }
+    (nodes, used)
+}
+
+fn is_chain(sm: &edf::Submesh) -> bool {
+    sm.texture.as_deref().is_some_and(|t| t.eq_ignore_ascii_case("chain"))
+}
+
+/// Take the chain off the wheels — the one thing the wheel mesh carries that the viewer
+/// can't draw.
+///
+/// It ships as a straight template strip that the game bends onto the sprockets from the
+/// `pos`/`engine`/`ratio` the *bike's* `gfx.cfg` gives, geometry we don't build. Drawn where
+/// it sits it is a bar standing 0.7 m out of the rear wheel.
+///
+/// A node that was nothing but chain goes entirely, since one left with no groups at all is
+/// drawn whole on a single texture rather than not at all.
+fn drop_chain(nodes: &mut Vec<edf::EdfNode>) {
+    nodes.retain_mut(|n| {
+        // No submesh table: a whole-node binding, and not ours to judge.
+        if n.submeshes.is_empty() || !n.submeshes.iter().any(is_chain) {
+            return true;
+        }
+        n.submeshes.retain(|sm| !is_chain(sm));
+        if n.submeshes.is_empty() {
+            return false;
+        }
+        compact_to_submeshes(n);
+        true
+    });
+}
+
+/// Rebuild a node around the submeshes it has left, so what it no longer draws stops
+/// counting for anything else either.
+///
+/// Dropping a submesh on its own leaves its triangles — and their vertices — in the buffers.
+/// Nothing draws them, but everything that *measures* the model still sees them, and the
+/// chain's 0.7 m of template was enough to move where the viewer centres the bike and how
+/// far `SideBySide` drops it onto the ground.
+fn compact_to_submeshes(n: &mut edf::EdfNode) {
+    let old_idx = std::mem::take(&mut n.indices);
+    let old_pos = std::mem::take(&mut n.positions);
+    let old_uv = std::mem::take(&mut n.uvs);
+    let old_nrm = std::mem::take(&mut n.normals);
+    let mut remap: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut indices: Vec<u32> = Vec::with_capacity(old_idx.len());
+    let mut tri_start = 0u32;
+
+    for sm in n.submeshes.iter_mut() {
+        let from = (sm.tri_start as usize).saturating_mul(3);
+        let to = from.saturating_add((sm.tri_count as usize).saturating_mul(3));
+        let range = old_idx.get(from..to).unwrap_or(&[]);
+        for &v in range {
+            let slot = match remap.get(&v) {
+                Some(&slot) => slot,
+                None => {
+                    let slot = (n.positions.len() / 3) as u32;
+                    let o = v as usize;
+                    n.positions
+                        .extend_from_slice(old_pos.get(o * 3..o * 3 + 3).unwrap_or(&[0.0; 3]));
+                    if !old_uv.is_empty() {
+                        n.uvs.extend_from_slice(old_uv.get(o * 2..o * 2 + 2).unwrap_or(&[0.0; 2]));
+                    }
+                    if !old_nrm.is_empty() {
+                        n.normals
+                            .extend_from_slice(old_nrm.get(o * 3..o * 3 + 3).unwrap_or(&[0.0; 3]));
+                    }
+                    remap.insert(v, slot);
+                    slot
+                }
+            };
+            indices.push(slot);
+        }
+        sm.tri_start = tri_start;
+        sm.tri_count = (range.len() / 3) as u32;
+        tri_start += sm.tri_count;
+    }
+    n.indices = indices;
 }
 
 fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
@@ -5615,6 +5937,14 @@ fn set_voice_enabled(
     overlay::register(&app, &cfg)
 }
 
+/// Pick the tyre pack the 3D previews fit. A blank name means "whatever the bike names".
+#[tauri::command]
+fn set_preview_tyres(app: tauri::AppHandle, tyres: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.preview_tyres = tyres;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Pick the microphone. A blank name means "follow the system default".
 #[tauri::command]
 fn set_voice_input_device(app: tauri::AppHandle, device: String) -> Result<(), String> {
@@ -7169,6 +7499,7 @@ fn main() {
             set_overlay_hotkey,
             voice_devices,
             set_voice_enabled,
+            set_preview_tyres,
             set_voice_input_device,
             set_voice_output_device,
             set_voice_ptt_hotkey,
@@ -8126,13 +8457,16 @@ mod viewer_tests {
             "preview-test".into(),
             files,
             super::installed_paints(&set.bike_dir),
+            // What `load_bike_model_blocking` derives for the bike it's compared against.
+            Some(crate::library::mods_subdir(mp, "mods/tyres")),
+            None,
             std::time::Instant::now(),
         )
         .expect("preview builds");
         assert!(!previewed.nodes.is_empty(), "the preview drew nothing");
 
         super::modelswap::apply_model_swap(mp, &bike, "Factory").expect("swap applies");
-        let applied = super::load_bike_model_blocking(dst.to_string_lossy().to_string())
+        let applied = super::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
             .expect("the swapped bike loads");
 
         assert_eq!(shape(&previewed), shape(&applied), "preview differs from the real swap");
@@ -8194,6 +8528,8 @@ mod viewer_tests {
             "stock-preview-test".into(),
             files,
             super::installed_paints(&set.bike_dir),
+            Some(crate::library::mods_subdir(mp, "mods/tyres")),
+            None,
             std::time::Instant::now(),
         )
         .expect("stock preview builds");
@@ -8228,6 +8564,7 @@ mod viewer_tests {
                 changes_preview: true,
             }],
             base: vec![tex("plastics", "t-own"), tex("wheel", "t-shared")],
+            tyres: None,
             assembled: true,
             rig: None,
         };
@@ -8307,6 +8644,200 @@ mod viewer_tests {
         assert_eq!(std::path::Path::new(&found[0].1), paints.join("Frost.pnt"));
     }
 
+    fn sub(name: &str, texture: Option<&str>) -> crate::edf::Submesh {
+        crate::edf::Submesh {
+            name: name.into(),
+            tri_start: 0,
+            tri_count: 1,
+            texture: texture.map(str::to_string),
+            uv_tile: None,
+            mat: None,
+        }
+    }
+
+    fn node(name: &str, subs: Vec<crate::edf::Submesh>) -> crate::edf::EdfNode {
+        crate::edf::EdfNode {
+            name: name.into(),
+            positions: vec![0.0; 3],
+            uvs: Vec::new(),
+            normals: Vec::new(),
+            indices: vec![0, 0, 0],
+            submeshes: subs,
+            texture: None,
+            placed: true,
+            materials: Vec::new(),
+        }
+    }
+
+    /// The rear wheel arrives with the chain in it, and the chain is a template strip the
+    /// game bends — a metre-long bar if it's drawn where it sits. Everything else on the
+    /// wheel has to survive.
+    #[test]
+    fn the_chain_comes_off_the_rear_wheel() {
+        let mut nodes = vec![
+            node("fwheel", vec![sub("thefwheel", Some("wheel")), sub("thefwheel", Some("fgeomax"))]),
+            node(
+                "rwheela",
+                vec![
+                    sub("thechain", Some("chain")),
+                    sub("therwheela", Some("wheel")),
+                    sub("therwheela", Some("sprocket")),
+                    sub("therwheela", Some("rgeomax")),
+                ],
+            ),
+        ];
+        super::drop_chain(&mut nodes);
+        assert_eq!(nodes.len(), 2, "both wheels stay");
+        assert_eq!(nodes[0].submeshes.len(), 2, "the front wheel is untouched");
+        let rear: Vec<&str> =
+            nodes[1].submeshes.iter().filter_map(|s| s.texture.as_deref()).collect();
+        assert_eq!(rear, ["wheel", "sprocket", "rgeomax"], "rim, sprocket and tyre stay");
+    }
+
+    /// The bug the first cut of this had: the submesh went, its vertices stayed, and the
+    /// chain's 0.7 m of template still counted towards the bounds everything else is
+    /// measured against — where the viewer centres the bike, where `SideBySide` stands it.
+    #[test]
+    fn the_chains_vertices_go_with_it() {
+        let mut n = node(
+            "rwheela",
+            vec![sub("therwheela", Some("wheel")), sub("thechain", Some("chain"))],
+        );
+        // Two triangles: the wheel's on the axle, the chain's a long way above it.
+        n.positions = vec![0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.7, 0.0];
+        n.uvs = vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.5, 0.5];
+        n.indices = vec![0, 1, 2, 1, 2, 3];
+        n.submeshes[0].tri_start = 0;
+        n.submeshes[1].tri_start = 1;
+        let mut nodes = vec![n];
+
+        super::drop_chain(&mut nodes);
+        let n = &nodes[0];
+        assert_eq!(n.submeshes.len(), 1);
+        assert_eq!(n.submeshes[0].texture.as_deref(), Some("wheel"));
+        assert_eq!(n.submeshes[0].tri_start, 0, "the survivor is renumbered from zero");
+        assert_eq!(n.submeshes[0].tri_count, 1);
+        assert_eq!(n.indices, vec![0, 1, 2], "vertices remapped onto what's left");
+        assert_eq!(n.positions.len(), 9, "the chain's lone vertex is gone");
+        assert_eq!(n.uvs.len(), 6, "uvs are compacted alongside");
+        let top = n.positions.chunks_exact(3).map(|p| p[1]).fold(f32::MIN, f32::max);
+        assert!(top < 0.2, "nothing left standing 0.7 m up: {top}");
+    }
+
+    /// A node with nothing but chain in it has to go entirely: left with no groups, the
+    /// frontend draws the whole node on one texture rather than nothing at all.
+    #[test]
+    fn a_node_that_is_only_chain_is_dropped() {
+        let mut nodes = vec![
+            node("chain", vec![sub("thechain", Some("CHAIN"))]),
+            // No submesh table at all — a whole-node binding, and not ours to judge.
+            node("rwheela", Vec::new()),
+        ];
+        super::drop_chain(&mut nodes);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].name, "rwheela");
+    }
+
+    /// The bike source is `<mods>/bikes/<Bike>`; the tyres sit beside `bikes`, not inside it.
+    #[test]
+    fn tyres_sit_beside_the_bikes_folder() {
+        let dir = super::tyres_dir_for(Path::new("/games/mods/bikes/MX1OEM_2023_Honda_CRF450R"));
+        assert_eq!(dir.as_deref(), Some(Path::new("/games/mods/tyres")));
+        let packed = super::tyres_dir_for(Path::new("/games/mods/bikes/Some_Bike.pkz"));
+        assert_eq!(packed.as_deref(), Some(Path::new("/games/mods/tyres")));
+    }
+
+    fn tyres_tmp(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir()
+            .join(format!("frost-tyres-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// Lay down a minimal but real tyres mod under `<root>/<name>`.
+    fn write_tyres_mod(root: &Path, name: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (file, body) in [
+            ("gfx.cfg", "front_wheel\n{\n\tmodel\n\t{\n\t\tfile = fwheel.hrc\n\t}\n}\n"),
+            ("fwheel.hrc", "level0\n{\n\tscene = model.edf\n}\n"),
+            ("model.edf", "EDF\0"),
+            // Beside them and never drawn — must not be read.
+            ("OEM_MXf_is80100-21.tyre", "params"),
+            ("preview.tga", "pixels"),
+        ] {
+            std::fs::write(dir.join(file), body).unwrap();
+        }
+    }
+
+    fn tyre_file_names(set: &super::TyreSet) -> Vec<&str> {
+        let mut names: Vec<&str> = set.files.iter().map(|(n, _)| n.as_str()).collect();
+        names.sort_unstable();
+        names
+    }
+
+    #[test]
+    fn tyre_files_come_from_the_mod_the_bike_names() {
+        let root = tyres_tmp("loose");
+        write_tyres_mod(&root, "oem_mx");
+
+        let set = super::gather_tyre_files(&root, b"tyres = oem_mx\n", None).expect("found");
+        assert_eq!(set.name, "oem_mx");
+        assert_eq!(tyre_file_names(&set), ["fwheel.hrc", "gfx.cfg", "model.edf"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The whole point of the picker: a bike names one pack, and picking another has to
+    /// beat it — without anything on disk being renamed.
+    #[test]
+    fn a_picked_pack_beats_the_one_the_bike_names() {
+        let root = tyres_tmp("pick");
+        write_tyres_mod(&root, "oem_mx");
+        write_tyres_mod(&root, "p_mx");
+
+        let own = super::gather_tyre_files(&root, b"tyres = oem_mx\n", None).unwrap();
+        assert_eq!(own.name, "oem_mx");
+        let picked = super::gather_tyre_files(&root, b"tyres = oem_mx\n", Some("p_mx")).unwrap();
+        assert_eq!(picked.name, "p_mx", "the pick wins");
+        // Blank is "no pick", not "a pack called nothing".
+        let blank = super::gather_tyre_files(&root, b"tyres = oem_mx\n", Some("  ")).unwrap();
+        assert_eq!(blank.name, "oem_mx");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A pick that names nothing installed must not cost the bike its wheels — it falls back
+    /// to the pack the bike itself names.
+    #[test]
+    fn a_pick_that_isnt_installed_falls_back_to_the_bikes_own() {
+        let root = tyres_tmp("fallback");
+        write_tyres_mod(&root, "oem_mx");
+
+        for pick in ["uninstalled_pack", "../bikes", "sub/dir"] {
+            let set = super::gather_tyre_files(&root, b"tyres = oem_mx\n", Some(pick))
+                .unwrap_or_else(|| panic!("still wheels for pick {pick:?}"));
+            assert_eq!(set.name, "oem_mx", "pick {pick:?}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every way a bike can end up with no wheels. None of them is an error: that is the
+    /// bike the viewer drew before wheels existed.
+    #[test]
+    fn no_tyres_mod_means_no_wheels_and_no_fuss() {
+        let root = tyres_tmp("empty");
+        let none = |gfx: &[u8], pick: Option<&str>| {
+            super::gather_tyre_files(&root, gfx, pick).is_none()
+        };
+        assert!(none(b"tyres = oem_mx\n", None), "not installed");
+        assert!(none(b"chassis\n{\n}\n", None), "no tyres line");
+        // The name is read out of a mod's own file, so it never gets to walk out of `tyres/`.
+        assert!(none(b"tyres = ../bikes\n", None), "traversal");
+        // A pick can't rescue a bike that names nothing installed either.
+        assert!(none(b"chassis\n{\n}\n", Some("p_mx")), "pick, but nothing installed");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     #[ignore]
     fn bike_model_from_pkz() {
@@ -8314,7 +8845,7 @@ mod viewer_tests {
             eprintln!("set MXB_REAL_PKZ to run");
             return;
         };
-        let m = super::load_bike_model_blocking(path).expect("load bike");
+        let m = super::load_bike_model_blocking(path, std::env::var("MXB_TYRES").ok()).expect("load bike");
         for n in &m.nodes {
             // Where the part ended up. Printed because placement is the half of this that a
             // texture listing can't show: a part bound to the right sheet and hung in the
@@ -9082,7 +9613,7 @@ mod viewer_tests {
             .unwrap_or_default();
 
         // What the viewer renders today.
-        let model = super::load_bike_model_blocking(path.clone()).expect("load bike");
+        let model = super::load_bike_model_blocking(path.clone(), None).expect("load bike");
         // Keyed on the triangle range too: one group name can appear twice in a node,
         // once per material, and those two are exactly the interesting case.
         let bound: std::collections::HashMap<(String, String, u32), Option<String>> = model

@@ -346,6 +346,8 @@ export const de: Translation = {
   "viewer.preview3d": "3D-Vorschau",
   "viewer.expand": "Vergrößern",
   "viewer.paint": "Design",
+  "viewer.tyres": "Reifen",
+  "viewer.tyresOwn": "Die des Bikes",
   "viewer.loadingModel": "Modell wird geladen…",
   "viewer.loadingPaint": "Design wird geladen…",
   "viewer.loadingRider": "Fahrer wird geladen…",
@@ -909,7 +911,7 @@ export const de: Translation = {
   "viewer.stockGearNote":
     "Auf dem Standard-{{part}} des Spiels gezeigt. Ein Design für ein anderes Modell passt möglicherweise nicht exakt.",
   "viewer.paintNoChange":
-    "Keine der Texturen dieses Designs wird von den hier gezeigten Teilen verwendet, deshalb ändert sich die Vorschau nicht. Es kann trotzdem Räder oder Kette einfärben, die diese Ansicht nicht darstellt.",
+    "Keine der Texturen dieses Designs wird von den hier gezeigten Teilen verwendet, deshalb ändert sich die Vorschau nicht. Es kann trotzdem die Kette einfärben, die diese Ansicht nicht darstellt.",
   "viewer.noPaintPreview": "Keine Design-Vorschau ({{err}})",
 
   // ── Bibliothek ─────────────────────────────────────────────────────────────

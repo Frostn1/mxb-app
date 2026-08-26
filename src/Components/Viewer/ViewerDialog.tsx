@@ -15,6 +15,8 @@ import {
 } from "../../api/mods";
 import type { PaintTexture, BikeModel, EdfNode, RiderPart, GearPaints } from "../../types";
 import { useT } from "../../i18n/context";
+import { TyresPicker } from "./TyresPicker";
+import { useTyresPick } from "./tyresPick";
 
 interface ViewerDialogProps {
   open: boolean;
@@ -94,6 +96,7 @@ export function ViewerDialog({
   // Deriving it rather than storing it is what lets a late-arriving list still land on
   // the right paint without ever overriding a pick made in the meantime.
   const [paintPick, setPaintPick] = useState<number | null>(null);
+  const tyresPick = useTyresPick();
   const [gogglesPick, setGogglesPick] = useState<number | null>(null);
   const [model, setModel] = useState<BikeModel | null>(null);
   const [loadingModel, setLoadingModel] = useState(false);
@@ -142,9 +145,9 @@ export function ViewerDialog({
     }
     const load =
       swapBike && swapVariant
-        ? previewModelSwap(swapBike, swapVariant)
+        ? previewModelSwap(swapBike, swapVariant, tyresPick.tyres)
         : modelSource
-          ? loadBikeModel(modelSource)
+          ? loadBikeModel(modelSource, tyresPick.tyres)
           : null;
     if (!load) {
       setModel(null);
@@ -165,7 +168,7 @@ export function ViewerDialog({
     return () => {
       alive = false;
     };
-  }, [open, modelSource, swapBike, swapVariant]);
+  }, [open, modelSource, swapBike, swapVariant, tyresPick.tyres]);
 
   // Drop any pick each time it opens, so the next thing shown starts from its own paint
   // rather than the index left behind by the last one.
@@ -431,6 +434,7 @@ export function ViewerDialog({
                 </select>
               </label>
             )}
+            {isBike && <TyresPicker pick={tyresPick} />}
             {goggleOptions.length > 0 && (
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 {t("category.goggles")}

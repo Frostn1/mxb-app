@@ -1973,7 +1973,7 @@ mod tests {
 
         let before = names_at(&dst);
         eprintln!("root before: {before:?}");
-        let nodes_before = crate::load_bike_model_blocking(dst.to_string_lossy().to_string())
+        let nodes_before = crate::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
             .expect("the bike loads before the swap")
             .nodes
             .len();
@@ -1987,7 +1987,7 @@ mod tests {
             assert!(after.contains(f), "{f} must still be at the bike root after a swap");
         }
         let model =
-            crate::load_bike_model_blocking(dst.to_string_lossy().to_string())
+            crate::load_bike_model_blocking(dst.to_string_lossy().to_string(), None)
                 .expect("the bike still loads after the swap");
         assert_eq!(model.nodes.len(), nodes_before, "same parts resolve after the swap");
 
