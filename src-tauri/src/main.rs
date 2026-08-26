@@ -1563,7 +1563,23 @@ fn mtime_nanos(path: &std::path::Path) -> u128 {
 fn bike_cache_key(source: &str) -> String {
     let path = std::path::Path::new(source);
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    format!("{source}:{}:{size}", mtime_nanos(path))
+    format!("{source}:{}:{size}{}", mtime_nanos(path), packed_stamp(path))
+}
+
+/// The bike's packed archive, as a cache key fragment. It's a real input to every bike now
+/// — the loose folder layers over it — and updating a bike replaces the `.pkz` without
+/// necessarily touching the folder above it.
+fn packed_stamp(bike_dir: &std::path::Path) -> String {
+    if !bike_dir.is_dir() {
+        return String::new(); // the source *is* the archive; its own mtime is already in the key
+    }
+    match packed_bike(bike_dir) {
+        Some(pkz) => {
+            let size = std::fs::metadata(&pkz).map(|m| m.len()).unwrap_or(0);
+            format!("#z{}:{size}", mtime_nanos(&pkz))
+        }
+        None => String::new(),
+    }
 }
 
 /// A swap preview is keyed by both folders it's built from — the same bike renders
@@ -1573,12 +1589,13 @@ fn swap_cache_key(set: &modelswap::PreviewSet) -> String {
     // without touching either folder — so key on the resolved paths, not just the mtimes.
     let paints: Vec<String> = set.paints.iter().map(|p| p.display().to_string()).collect();
     format!(
-        "{}#{}:{}:{}:{}",
+        "{}#{}:{}:{}:{}{}",
         set.bike_dir.display(),
         set.variant_dir.display(),
         mtime_nanos(&set.bike_dir),
         mtime_nanos(&set.variant_dir),
         paints.join(","),
+        packed_stamp(&set.bike_dir),
     )
 }
 
@@ -2392,25 +2409,26 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
         return pkz::read_selected(p, wanted_bike_file);
     }
     if p.is_dir() {
-        let mut out = Vec::new();
+        let mut loose = Vec::new();
         for entry in std::fs::read_dir(p).with_context(|| format!("read dir {p:?}"))? {
             let path = entry?.path();
             let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
             if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
                 if let (Some(name), Ok(bytes)) = (name, std::fs::read(&path)) {
-                    out.push((name, bytes));
+                    loose.push((name, bytes));
                 }
             }
         }
+        // Packed first, loose over it. A folder holding only a swapped-in mesh still draws
+        // with the `.geom`, `gfx.cfg` and stock paint that never left the archive; taking
+        // the loose files alone left every part stacked at the origin and untextured.
+        let mut out = packed_layer(p);
+        overlay_files(&mut out, loose);
         // A mesh of any name will do — `model.edf` is the convention, not a rule.
-        if out.iter().any(|(n, _)| n.to_ascii_lowercase().ends_with(".edf")) {
-            return Ok(out);
+        if !out.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+            bail!("no .edf mesh for bike folder {p:?}");
         }
-        let sibling = library::sibling_pkz(p);
-        if sibling.exists() {
-            return pkz::read_selected(&sibling, wanted_bike_file);
-        }
-        bail!("no .edf mesh for bike folder {p:?}");
+        return Ok(out);
     }
     bail!("can't load a bike model from {p:?}")
 }
@@ -2455,24 +2473,33 @@ fn packed_bike(bike_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     sibling.exists().then_some(sibling)
 }
 
-/// The bytes behind a `PreviewSet`: the loose files that stay, with the variant's laid over
-/// them. Reverting to Stock parks every loose mesh, so the packed model goes underneath —
-/// otherwise there'd be nothing to draw, which is precisely what Stock means.
+/// The bike's packed layer, or nothing at all.
+///
+/// An archive that won't read — a locked one, or a stub iCloud has evicted — must not take
+/// down a bike whose loose folder can still be drawn. Callers bail later if what's left
+/// holds no mesh.
+fn packed_layer(bike_dir: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    let Some(pkz) = packed_bike(bike_dir) else { return Vec::new() };
+    match pkz::read_selected(&pkz, wanted_bike_file) {
+        Ok(files) => files,
+        Err(e) => {
+            log::warn!("[viewer] couldn't read {pkz:?} ({e:#}) — drawing the loose files alone");
+            Vec::new()
+        }
+    }
+}
+
+/// The bytes behind a `PreviewSet`: the packed bike, with the loose files that stay laid
+/// over it and the variant's over those. Stock parks every loose mesh and so draws the
+/// packed model itself; every other variant draws its own mesh on the same foundation.
 fn gather_preview_files(
     set: &modelswap::PreviewSet,
 ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     use anyhow::bail;
-    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
-    let loose_mesh = set
-        .root_keep
-        .iter()
-        .chain(set.variant_files.iter())
-        .any(|f| bikefiles::is_mesh(f));
-    if !loose_mesh {
-        if let Some(pkz) = packed_bike(&set.bike_dir) {
-            overlay_files(&mut out, pkz::read_selected(&pkz, wanted_bike_file)?);
-        }
-    }
+    // Packed, then the loose root, then the variant — the game's own order. The archive is
+    // never skipped: a swap ships a mesh and little else, so the bike's `.geom`, `gfx.cfg`
+    // and `.hrc`s have nowhere else to come from.
+    let mut out = packed_layer(&set.bike_dir);
     overlay_files(&mut out, read_named(&set.bike_dir, &set.root_keep));
     overlay_files(&mut out, read_named(&set.variant_dir, &set.variant_files));
     if !out.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
@@ -8402,6 +8429,101 @@ mod viewer_tests {
                 )
             })
             .collect()
+    }
+
+    /// Write a plain-zip `.pkz` — `pkz::read_selected` reads those natively, so the packed
+    /// half of a bike can be fixtured without the sidecar.
+    fn write_pkz(path: &Path, entries: &[(&str, &[u8])]) {
+        use std::io::Write;
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, data) in entries {
+            z.start_file(*name, opts).unwrap();
+            z.write_all(data).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    fn named<'a>(files: &'a [(String, Vec<u8>)], base: &str) -> Option<&'a [u8]> {
+        files
+            .iter()
+            .find(|(n, _)| {
+                n.rsplit('/').next().unwrap_or(n).eq_ignore_ascii_case(base)
+            })
+            .map(|(_, d)| d.as_slice())
+    }
+
+    /// The fault behind a swap that renders white with every part stacked at the origin: a
+    /// model set is a mesh and little else, so the bike's `.geom`, `gfx.cfg`, `.hrc`s and
+    /// stock paint have nowhere to come from but the archive — which the preview used to
+    /// skip the moment the variant brought a mesh.
+    #[test]
+    fn a_swap_preview_keeps_the_packed_bike_under_it() {
+        let root: PathBuf =
+            std::env::temp_dir().join(format!("frost-packed-under-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mp = root.to_str().unwrap();
+        let bike = "MX1OEM_2023_KTM_450_SX-F";
+        let bikes = crate::library::mods_subdir(mp, "mods/bikes");
+        std::fs::create_dir_all(bikes.join(bike)).unwrap();
+        write_pkz(
+            &bikes.join(format!("{bike}.pkz")),
+            &[
+                (&format!("{bike}/model.edf"), b"packed mesh"),
+                (&format!("{bike}/gfx.cfg"), b"packed gfx"),
+                (&format!("{bike}/chassis.hrc"), b"packed hrc"),
+                (&format!("{bike}/{bike}.geom"), b"packed geom"),
+                (&format!("{bike}/paints/stock.pnt"), b"packed paint"),
+            ],
+        );
+        let variant = bikes.join(bike).join(super::modelswap::LIB_DIR).join("Factory");
+        std::fs::create_dir_all(&variant).unwrap();
+        std::fs::write(variant.join("model.edf"), b"swap mesh").unwrap();
+
+        let set = super::modelswap::preview_set(mp, bike, "Factory").expect("preview set");
+        let files = super::gather_preview_files(&set).expect("preview files");
+
+        // The bike comes through underneath...
+        for base in ["gfx.cfg", "chassis.hrc", &format!("{bike}.geom"), "stock.pnt"] {
+            assert!(named(&files, base).is_some(), "{base} missing from {:?}",
+                files.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>());
+        }
+        // ...and the swap's mesh, not the packed one, is what gets drawn.
+        assert_eq!(named(&files, "model.edf"), Some(&b"swap mesh"[..]));
+        assert_eq!(
+            files.iter().filter(|(n, _)| crate::bikefiles::is_mesh(n)).count(),
+            1,
+            "the packed mesh must be replaced, not added alongside",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The same law on the ordinary load path: an extracted bike whose folder holds only a
+    /// mesh still draws with the setup and paint left behind in its archive.
+    #[test]
+    fn a_loose_bike_still_reads_its_packed_setup() {
+        let root: PathBuf =
+            std::env::temp_dir().join(format!("frost-loose-packed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bikes = root.join("bikes");
+        std::fs::create_dir_all(bikes.join("KTM450")).unwrap();
+        write_pkz(
+            &bikes.join("KTM450.pkz"),
+            &[
+                ("KTM450/model.edf", b"packed mesh"),
+                ("KTM450/gfx.cfg", b"packed gfx"),
+                ("KTM450/wheel.geom", b"packed geom"),
+            ],
+        );
+        std::fs::write(bikes.join("KTM450").join("model.edf"), b"loose mesh").unwrap();
+
+        let files = super::gather_bike_files(&bikes.join("KTM450")).expect("gather");
+        assert_eq!(named(&files, "model.edf"), Some(&b"loose mesh"[..]), "loose wins");
+        assert!(named(&files, "gfx.cfg").is_some(), "packed gfx.cfg comes through");
+        assert!(named(&files, "wheel.geom").is_some(), "packed .geom comes through");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The contract behind the Locker's 3D preview: what it shows is what applying the
