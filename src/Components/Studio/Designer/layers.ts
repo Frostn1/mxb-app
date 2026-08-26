@@ -36,8 +36,32 @@ interface LayerCommon {
   scale: number;
   /** Radians, clockwise. */
   rotation: number;
+  /**
+   * Turned over in the layer's own upright frame — the flip a painter asks for.
+   *
+   * Not to be confused with {@link mirrored}, which is the *stage's* flip and applies to every
+   * layer of a kind whether or not anyone asked. These two multiply rather than replace.
+   */
+  flipX: boolean;
+  flipY: boolean;
+  /** A tag shared by layers that move as one, or null. Stacking stays flat — see `regroup`. */
+  group: string | null;
+  /** Set on the copy that reflects another layer across the bike. Null on everything else. */
+  mirror: MirrorLink | null;
   /** Confine this layer to one piece of bodywork, or null to let it cover the sheet. */
   clip: LayerClip | null;
+}
+
+/**
+ * What makes a layer the far-flank reflection of another one.
+ *
+ * Only the source is named. Everything else about a follower — where it sits, which way it
+ * faces, what it says — is re-derived from that layer on every edit, so there is nothing here
+ * that could fall out of step with it. See `syncMirrors` in `Designer`.
+ */
+export interface MirrorLink {
+  /** The layer this one reflects, by id. */
+  of: string;
 }
 
 /**
@@ -200,6 +224,28 @@ export function newId(prefix: string): string {
   return `${prefix}-${seq}`;
 }
 
+/**
+ * What every new layer starts as, whatever kind it is.
+ *
+ * Shared rather than spelled out four times, so a field added to `LayerCommon` can't be
+ * forgotten by one constructor out of four — which is how a layer reaches the composite with
+ * `mirror: undefined` and nothing to say why.
+ */
+const FRESH: Pick<
+  LayerCommon,
+  "visible" | "opacity" | "blend" | "rotation" | "flipX" | "flipY" | "group" | "mirror" | "clip"
+> = {
+  visible: true,
+  opacity: 1,
+  blend: "normal",
+  rotation: 0,
+  flipX: false,
+  flipY: false,
+  group: null,
+  mirror: null,
+  clip: null,
+};
+
 /** A measuring context. Text extents need one, and this never draws anything. */
 let measureCtx: CanvasRenderingContext2D | null = null;
 function measurer(): CanvasRenderingContext2D | null {
@@ -271,17 +317,13 @@ export function shapeLayer(
   strokeWidth: number,
 ): ShapeLayer {
   return {
+    ...FRESH,
     id: newId("shape"),
     kind: "shape",
     name,
-    visible: true,
-    opacity: 1,
-    blend: "normal",
     x: (from.x + to.x) / 2,
     y: (from.y + to.y) / 2,
     scale: 1,
-    rotation: 0,
-    clip: null,
     shape,
     w: to.x - from.x,
     // Negated on the way in: the drag is in sheet coordinates and the layer's own frame is the
@@ -331,39 +373,64 @@ export function hitTest(layers: Layer[], px: number, py: number): Layer | null {
   return null;
 }
 
+/**
+ * The ids a click on `id` should actually select: its whole group, or just it.
+ *
+ * A group is a tag rather than a container, so "the group" is a question asked of the layer
+ * list each time rather than a thing held anywhere.
+ */
+export function groupOf(layers: Layer[], id: string): string[] {
+  const tag = layers.find((l) => l.id === id)?.group;
+  if (!tag) return [id];
+  return layers.filter((l) => l.group === tag).map((l) => l.id);
+}
+
+/**
+ * Move a group's members so they sit next to each other in the stack, at the topmost one's place.
+ *
+ * Grouping does not nest, so nothing stops a group's members from being spread through the
+ * stack with other layers between them — and then raising "the group" would raise its members
+ * past each other rather than past what they sit on. Gathering them once, when the group is
+ * made, is what lets every later reorder stay the simple one-layer-at-a-time operation it is.
+ *
+ * The topmost member's place, so a group made from a selection ends up where its front-most
+ * layer already was and nothing visibly jumps behind something else.
+ */
+export function regroup(layers: Layer[], tag: string): Layer[] {
+  const members = layers.filter((l) => l.group === tag);
+  if (members.length < 2) return layers;
+  const rest = layers.filter((l) => l.group !== tag);
+  // Counted over the layers *below* the topmost member, which is where the block goes back in.
+  const top = layers.lastIndexOf(members[members.length - 1]);
+  const at = layers.slice(0, top + 1).filter((l) => l.group !== tag).length;
+  return [...rest.slice(0, at), ...members, ...rest.slice(at)];
+}
+
 export function imageLayer(name: string, image: ImageBitmap, sheet: Sheet): ImageLayer {
   // Land it centred, and shrunk to fit if it's bigger than the sheet — a 2048² logo dropped
   // onto a 2048² livery would otherwise cover the whole thing with no visible handle to grab.
   const fit = Math.min(1, (sheet.width * 0.6) / image.width, (sheet.height * 0.6) / image.height);
   return {
+    ...FRESH,
     kind: "image",
     id: newId("layer"),
     name,
-    visible: true,
-    opacity: 1,
-    blend: "normal",
     x: sheet.width / 2,
     y: sheet.height / 2,
     scale: fit,
-    rotation: 0,
-    clip: null,
     image,
   };
 }
 
 export function textLayer(text: string, sheet: Sheet): TextLayer {
   return {
+    ...FRESH,
     kind: "text",
     id: newId("layer"),
     name: text,
-    visible: true,
-    opacity: 1,
-    blend: "normal",
     x: sheet.width / 2,
     y: sheet.height / 2,
     scale: 1,
-    rotation: 0,
-    clip: null,
     text,
     font: FONTS[0],
     // A twelfth of the sheet reads as a name across a jersey back at 2048².
@@ -379,22 +446,40 @@ export function paintLayer(name: string, sheet: Sheet): PaintLayer {
   canvas.width = sheet.width;
   canvas.height = sheet.height;
   return {
+    ...FRESH,
     kind: "paint",
     id: newId("layer"),
     name,
-    visible: true,
-    opacity: 1,
-    blend: "normal",
     // Sheet-sized and sheet-aligned: the identity transform, spelled out in the same fields
     // every other layer uses so `drawLayer` needs no special case for it.
     x: sheet.width / 2,
     y: sheet.height / 2,
     scale: 1,
-    rotation: 0,
-    clip: null,
     canvas,
     rev: 0,
   };
+}
+
+/**
+ * A copy of a layer under a new id, for duplicate and for paste.
+ *
+ * The bitmap behind an image layer is shared rather than copied — an `ImageBitmap` is
+ * immutable, and decoding a second 2048² one to hold the same pixels is pure waste. A paint
+ * layer's canvas is not immutable, so that one really is copied; strokes on the duplicate
+ * would otherwise land on the original as well.
+ *
+ * `group` and `mirror` are dropped. A copy that arrived still tagged would join a group it was
+ * never put in, and one that arrived still linked would be a second follower of a source that
+ * only knows about the first.
+ */
+export function cloneLayer(layer: Layer, name?: string): Layer {
+  const common = { id: newId("layer"), name: name ?? layer.name, group: null, mirror: null };
+  if (layer.kind !== "paint") return { ...layer, ...common };
+  const canvas = document.createElement("canvas");
+  canvas.width = layer.canvas.width;
+  canvas.height = layer.canvas.height;
+  canvas.getContext("2d")?.drawImage(layer.canvas, 0, 0);
+  return { ...layer, ...common, canvas, rev: 0 };
 }
 
 export function blankSheet(name: string, size: number): Sheet {

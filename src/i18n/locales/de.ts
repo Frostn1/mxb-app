@@ -1781,6 +1781,56 @@ export const de: Translation = {
     "Diese Fläche ist die Unterseite des Teils — hier Gemaltes zeigt zum Boden und ist von außen nie zu sehen.",
   "designer.faceHint.both":
     "Ober- und Unterseite des Teils liegen auf derselben Fläche, deshalb landet alles hier Gezeichnete auf beiden.",
+  // ── Designer › die Auswahl, und was man mit ihr machen kann ───────────────────
+  "designer.layersSelected": "{{count}} Ebenen ausgewählt",
+  "designer.position": "Position",
+  "designer.duplicate": "Duplizieren",
+  "designer.copy": "Kopieren",
+  "designer.paste": "Einfügen",
+  "designer.copyName": "{{name}} Kopie",
+  "designer.copied_one": "1 Ebene kopiert.",
+  "designer.copied_other": "{{count}} Ebenen kopiert.",
+  "designer.pasteWrongSize":
+    "Das stammt von einer Bahn anderer Größe, und eine Malebene *ist* die Bahn — hier passt nichts davon hinein.",
+  "designer.pasteDropped_one":
+    "1 Malebene wurde ausgelassen — eine Malebene ist die Bahn, und diese hat eine andere Größe.",
+  "designer.pasteDropped_other":
+    "{{count}} Malebenen wurden ausgelassen — eine Malebene ist die Bahn, und diese hat eine andere Größe.",
+  "designer.group": "Gruppieren",
+  "designer.ungroup": "Gruppierung lösen",
+  "designer.groupRow": "Zusammen",
+  "designer.groupOf": "Gruppe aus {{count}}",
+  "designer.groupHint":
+    "Bewegt sie als eins. Ein Klick auf eine davon nimmt die ganze Gruppe — halte Alt, um eine einzelne Ebene herauszugreifen.",
+  "designer.flip": "Spiegeln",
+  "designer.flipX": "Links–rechts spiegeln",
+  "designer.flipY": "Oben–unten spiegeln",
+
+  // ── Designer › auf die andere Flanke spiegeln ─────────────────────────────────
+  "designer.mirror": "Auf die andere Seite spiegeln",
+  "designer.mirrorName": "{{name}} gespiegelt",
+  "designer.mirrorHint":
+    "Legt eine Kopie dieser Ebene dorthin, wo sie auf der anderen Seite des Motorrads landet. Aus dem Modell berechnet statt durch Umklappen der Bahn, also kommt sie auf dem richtigen Teil an — und sie folgt dieser Ebene, bis du sie löst.",
+  "designer.mirroredFrom": "Gespiegelt von „{{name}}“.",
+  "designer.mirroredShort": "Gespiegelt",
+  "designer.mirroredOrphan": "Dies wurde von einer Ebene gespiegelt, die es nicht mehr gibt.",
+  "designer.unlink": "Lösen",
+  "designer.unlinkHint":
+    "Hört auf zu folgen und behält, was da ist. Es wird eine gewöhnliche Ebene, die du für sich bearbeiten kannst.",
+  "designer.selectSource": "Original auswählen",
+  "designer.mirrorPaused":
+    "Kein Modell geladen — dies bleibt, wo es zuletzt platziert wurde, statt zu folgen.",
+  "designer.mirrorRough":
+    "Die andere Seite ist nicht als Spiegelung dieser abgewickelt, daher ist die Platzierung nah statt exakt.",
+  "designer.mirrorWhy.no-model":
+    "Lade zuerst das Motorrad in die Vorschau — ohne Modell gibt es keine andere Seite zu finden.",
+  "designer.mirrorWhy.shared":
+    "Beide Flanken sind auf dieselbe Stelle abgewickelt, das hier ist also schon auf beiden Seiten. Eine zweite Kopie läge genau auf der ersten.",
+  "designer.mirrorWhy.centre":
+    "Das sitzt auf der Mittellinie des Motorrads, die ihre eigene Spiegelung ist — es gibt keine andere Seite dafür.",
+  "designer.mirrorWhy.asymmetric":
+    "Das Modell hat an der Spiegelung dieser Stelle nichts, es gibt also keine andere Seite dafür.",
+
   "designer.opacity": "Deckkraft",
   "designer.blend": "Modus",
   "designer.blend.normal": "Normal",
@@ -1839,7 +1889,7 @@ export const de: Translation = {
   "designer.tool.ellipse": "Ellipse",
   "designer.tool.line": "Linie",
   "designer.moveHint":
-    "Ziehe Ebenen auf der Bahn, um sie zu platzieren. Wähle oben ein Werkzeug, um stattdessen darauf zu malen.",
+    "Ziehe Ebenen auf der Bahn, um sie zu platzieren — sie rasten an Nähten und aneinander ein, halte Alt zum freien Platzieren. Umschalt+Klick erweitert die Auswahl, ein Zug über leere Fläche zieht ein Lasso, und der Rechtsklick hat den Rest. Wähle oben ein Werkzeug, um stattdessen darauf zu malen.",
   "designer.colourFrom": "Damit malen",
   "designer.colourTo": "Dahin verlaufen",
   "designer.swapColours": "Die beiden Farben tauschen",

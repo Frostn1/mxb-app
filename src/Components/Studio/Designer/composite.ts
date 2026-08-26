@@ -34,7 +34,13 @@ function drawLayer(ctx: CanvasRenderingContext2D, layer: Layer) {
   // Mirrored, because the stage is — see `mirrored`. The sheet keeps the file's row order and
   // the view turns it over, so upright content has to go in upside down to come out upright.
   ctx.rotate(sheetRotation(layer));
-  ctx.scale(layer.scale, mirrored(layer) ? -layer.scale : layer.scale);
+  // Two flips multiplied, not one chosen: the stage's, which every layer of a mirrored kind
+  // gets whether or not anyone asked, and the layer's own. Turning a logo over by hand has to
+  // work the same on a kind that was already going in upside down.
+  ctx.scale(
+    layer.scale * (layer.flipX ? -1 : 1),
+    (mirrored(layer) ? -layer.scale : layer.scale) * (layer.flipY ? -1 : 1),
+  );
 
   if (layer.kind === "image" || layer.kind === "paint") {
     // A paint layer's raster is sheet-sized and its transform is the identity, so this puts it
@@ -145,6 +151,29 @@ export function layerCorners(layer: Layer): [number, number][] {
       [-hw, hh],
     ] as [number, number][]
   ).map(([x, y]) => [layer.x + x * cos - y * sin, layer.y + x * sin + y * cos]);
+}
+
+/**
+ * The axis-aligned box around several layers in sheet space, or null for none.
+ *
+ * What a multi-layer selection is drawn and dragged as. Built from the rotated corners rather
+ * than from centres and extents, so a box around a layer turned 45° actually contains it.
+ */
+export function selectionBounds(layers: Layer[]): Region | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const layer of layers) {
+    for (const [x, y] of layerCorners(layer)) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
 /**

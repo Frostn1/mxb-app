@@ -3,6 +3,30 @@
 ## 2026-08-26
 
 ### Added
+- **Mirror a layer to the other side of the bike.** Place a decal on the right shroud, hit
+  Mirror, and a copy lands at the same spot on the left one. The place is worked out from the
+  model rather than by flipping the sheet — the two flanks are unwrapped wherever the modeller
+  put them, so flipping the square lands artwork on the wrong panel about as often as not.
+  The copy stays **linked**: move, recolour, retype or reshape the original and it follows,
+  until you unlink it.
+  - It says no rather than guessing, and says which no it is: both flanks already sharing that
+    part of the sheet (so it's on both sides already), a spot on the bike's centre line, a
+    part of the model with nothing at its reflection, or no model loaded at all.
+  - Where the far side isn't unwrapped as a true reflection, the placement is still made and
+    flagged as close rather than exact.
+- **The layer handling that was missing.** Duplicate (⌘D), copy and paste (⌘C/⌘V, across
+  sheets too), Delete, and arrow-key nudging — one pixel, or ten with Shift.
+- **Several layers at once.** Shift-click to add, drag over empty canvas to lasso, ⌘A for the
+  lot. Group them with ⌘G and they move, scale and clip as one; Alt-click reaches inside a
+  group for a single layer.
+- **Snapping while dragging.** Layers catch on the sheet's centre lines and edges, on the box
+  of whatever part they're clipped to, and on each other's edges and middles, with a line drawn
+  to show what was caught. Hold Alt to place freely.
+- **Flip a layer** left-to-right or top-to-bottom, from the inspector or the new right-click
+  menu on the canvas.
+- **Type a position and size.** X, Y, size and angle now have boxes as well as sliders, and
+  they track the drag — placing a plate number no longer means nudging it by eye.
+
 - **The bike now stands next to the rider in the Studio preview.** The 3D panel in Studio →
   Rider only ever drew the rider, so the bike half of a look — its livery and its model swap —
   was invisible until you were in-game. The panel now draws both in one scene, at their real

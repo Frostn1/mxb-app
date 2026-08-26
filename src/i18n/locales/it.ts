@@ -1761,6 +1761,56 @@ export const it: Translation = {
     "Quest'area è il lato interno del pezzo: ciò che dipingi qui guarda a terra e non si vede mai da fuori.",
   "designer.faceHint.both":
     "Il lato esterno del pezzo e quello interno condividono quest'area, quindi ciò che disegni qui finisce su entrambi.",
+  // ── Designer › la selezione, e cosa farci ─────────────────────────────────────
+  "designer.layersSelected": "{{count}} livelli selezionati",
+  "designer.position": "Posizione",
+  "designer.duplicate": "Duplica",
+  "designer.copy": "Copia",
+  "designer.paste": "Incolla",
+  "designer.copyName": "{{name}} copia",
+  "designer.copied_one": "1 livello copiato.",
+  "designer.copied_other": "{{count}} livelli copiati.",
+  "designer.pasteWrongSize":
+    "Viene da un foglio di un'altra misura, e un livello di pittura *è* il foglio: qui non c'è niente che ci stia.",
+  "designer.pasteDropped_one":
+    "1 livello di pittura è stato lasciato fuori: un livello di pittura è il foglio, e questo è di un'altra misura.",
+  "designer.pasteDropped_other":
+    "{{count}} livelli di pittura sono stati lasciati fuori: un livello di pittura è il foglio, e questo è di un'altra misura.",
+  "designer.group": "Raggruppa",
+  "designer.ungroup": "Separa",
+  "designer.groupRow": "Insieme",
+  "designer.groupOf": "Gruppo di {{count}}",
+  "designer.groupHint":
+    "Li muove come uno solo. Cliccarne uno prende tutto il gruppo — tieni Alt per prenderne uno solo.",
+  "designer.flip": "Ribalta",
+  "designer.flipX": "Ribalta da sinistra a destra",
+  "designer.flipY": "Ribalta dall'alto in basso",
+
+  // ── Designer › riflettere sull'altro fianco ───────────────────────────────────
+  "designer.mirror": "Rifletti sull'altro lato",
+  "designer.mirrorName": "{{name}} riflesso",
+  "designer.mirrorHint":
+    "Mette una copia di questo livello dove finisce sull'altro lato della moto. Calcolato dal modello invece che ribaltando il foglio, quindi arriva sul pezzo giusto — e segue questo livello finché non lo scolleghi.",
+  "designer.mirroredFrom": "Riflesso da «{{name}}».",
+  "designer.mirroredShort": "Riflesso",
+  "designer.mirroredOrphan": "Questo è il riflesso di un livello che non c'è più.",
+  "designer.unlink": "Scollega",
+  "designer.unlinkHint":
+    "Smette di seguire e tiene quello che c'è. Diventa un livello normale che puoi modificare per conto suo.",
+  "designer.selectSource": "Seleziona l'originale",
+  "designer.mirrorPaused":
+    "Nessun modello caricato: questo resta dov'era stato messo l'ultima volta invece di seguire.",
+  "designer.mirrorRough":
+    "L'altro lato non è aperto come riflesso di questo, quindi la posizione è vicina più che esatta.",
+  "designer.mirrorWhy.no-model":
+    "Carica prima la moto nell'anteprima: senza il modello non c'è nessun altro lato da trovare.",
+  "designer.mirrorWhy.shared":
+    "I due fianchi sono aperti sullo stesso punto, quindi questo è già su entrambi i lati della moto. Una seconda copia finirebbe sopra la prima.",
+  "designer.mirrorWhy.centre":
+    "Questo sta sull'asse della moto, che è il riflesso di sé stesso: non c'è un altro lato dove mandarlo.",
+  "designer.mirrorWhy.asymmetric":
+    "Il modello non ha niente al riflesso di questo punto, quindi non c'è un altro lato dove metterlo.",
+
   "designer.opacity": "Opacità",
   "designer.blend": "Fusione",
   "designer.blend.normal": "Normale",
@@ -1818,7 +1868,7 @@ export const it: Translation = {
   "designer.tool.ellipse": "Ellisse",
   "designer.tool.line": "Linea",
   "designer.moveHint":
-    "Trascina i livelli sul foglio per posizionarli. Scegli uno strumento qui sopra per dipingerci sopra.",
+    "Trascina i livelli sul foglio per posizionarli: si agganciano alle cuciture e fra loro — tieni Alt per posizionarli liberamente. Maiusc+clic aggiunge alla selezione, un trascinamento sul vuoto fa un lazo, e il tasto destro ha il resto. Scegli uno strumento qui sopra per dipingerci sopra.",
   "designer.colourFrom": "Dipingi con questo",
   "designer.colourTo": "Sfuma verso questo",
   "designer.swapColours": "Scambia i due colori",
