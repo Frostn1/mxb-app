@@ -322,6 +322,20 @@ export const fr: Translation = {
   "runtime.repairNoGameFolderDesc":
     "Les composants sont installés, mais sans le dossier d'installation nous ne pouvons pas vérifier le dossier du jeu lui-même. Indiquez-le ci-dessus, puis réparez à nouveau.",
   "runtime.repairFailed": "Impossible de réparer les composants",
+  "runtime.strayForeign": "Un fichier de votre dossier de jeu ({{what}}) fait planter MX Bikes.",
+  "runtime.strayLocked": "{{what}}, dans votre dossier de jeu, fait planter MX Bikes.",
+  "runtime.strayPitch":
+    "C'est l'origine de l'erreur « R6034 » au lancement. Le mettre de côté suffit, et rien n'est supprimé.",
+  "runtime.strayLockedPitch":
+    "C'est l'origine de l'erreur « R6034 » au lancement. Fermez d'abord MX Bikes, puis mettez-le de côté.",
+  "runtime.strayFix": "Le mettre de côté",
+  "runtime.strayFixHint":
+    "Le renomme en msvcr90.dll.disabled pour que Windows cesse de le charger. Rien n'est supprimé.",
+  "runtime.strayClearing": "Déplacement…",
+  "runtime.strayCleared": "Fichier mis de côté",
+  "runtime.strayClearedDesc":
+    "Il s'appelle désormais msvcr90.dll.disabled, dans le même dossier. Relancez MX Bikes.",
+  "runtime.strayClearFailed": "Impossible de déplacer le fichier",
   "update.checkFailed": "Impossible de vérifier les mises à jour",
   "update.failed": "Échec de la mise à jour",
 
@@ -626,6 +640,8 @@ export const fr: Translation = {
   "settings.updateCheckFailed":
     "Impossible de vérifier les mises à jour — hors ligne ou GitHub indisponible.",
   "settings.latestVersion": "Dernière : {{version}}",
+  "settings.frostmodStrayMsvcr90":
+    "Un fichier de votre dossier de jeu fait planter MX Bikes avec « R6034 » — mettez-le de côté pour régler ça.",
   "settings.frostmodRuntimeMissing":
     "Il manque à Windows un composant Visual C++ dont FrostMod a besoin — installez-le pour faire disparaître l'erreur « dll was not found ».",
   "settings.repairRuntimes": "Réparer les composants",

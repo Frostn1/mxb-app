@@ -9,6 +9,7 @@ import {
 import { toast } from "sonner";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import {
+  frostmodClearStrayMsvcr90,
   frostmodInstall,
   frostmodInstallRuntime,
   frostmodRepairRuntimes,
@@ -64,6 +65,7 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
   const [statusError, setStatusError] = useState(false);
   const [installingRuntime, setInstallingRuntime] = useState(false);
   const [repairingRuntimes, setRepairingRuntimes] = useState(false);
+  const [clearingStray, setClearingStray] = useState(false);
   const [runtimeDismissed, setRuntimeDismissed] = useState(false);
   const mounted = useRef(true);
 
@@ -266,7 +268,8 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       const report = await frostmodRepairRuntimes();
       await refreshStatus();
 
-      const fixed = report.installed.length > 0 || report.msvcr90Removed;
+      const fixed =
+        report.installed.length > 0 || report.strayMsvcr90 === "removed";
       if (report.stillMissing.length > 0) {
         // Partly done at best, and every remaining item has a link. Offer the first —
         // opening three tabs at once would be its own kind of unhelpful.
@@ -308,6 +311,36 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       setRepairingRuntimes(false);
     }
   }, [refreshStatus, t]);
+
+  /**
+   * Move the stray `msvcr90.dll` aside, now that the player has asked for it.
+   *
+   * The one file-destroying thing in here, which is why it is only ever reachable from a
+   * bar that has already named the file: the backend refuses to delete a `msvcr90.dll` it
+   * can't prove this app planted, and a press is the only other thing that settles it.
+   */
+  const clearStrayMsvcr90 = useCallback(async () => {
+    setClearingStray(true);
+    try {
+      await frostmodClearStrayMsvcr90();
+      await refreshStatus();
+      toast.success(t("runtime.strayCleared"), {
+        description: t("runtime.strayClearedDesc"),
+      });
+    } catch (e) {
+      // Almost always the game holding the file open, and the backend's message says so.
+      toast.error(t("runtime.strayClearFailed"), { description: String(e) });
+    } finally {
+      setClearingStray(false);
+    }
+  }, [refreshStatus, t]);
+
+  // A file that crashes the game outranks a runtime that isn't installed, so this is
+  // checked before `missingRuntime` wherever one bar has to win. `clear`/`removed` mean
+  // there is nothing there — only the two arms that leave a file behind reach the UI.
+  const stray = status?.strayMsvcr90;
+  const strayMsvcr90 = stray === "foreign" || stray === "locked" ? stray : null;
+  const strayWarning = runtimeDismissed ? null : strayMsvcr90;
 
   // Only ever surface one at a time: two banners stacked over the app is noise, and the
   // game's own runtime (vc90) is the one that produces the error people actually report,
@@ -371,11 +404,15 @@ export function FrostmodProvider({ children }: { children: ReactNode }) {
       installRuntime,
       repairingRuntimes,
       repairRuntimes,
+      strayMsvcr90,
+      strayWarning,
+      clearingStray,
+      clearStrayMsvcr90,
       dismissRuntimeWarning,
       runtimeWarning,
       missingRuntime,
     }),
-    [running, attachment, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, repairingRuntimes, repairRuntimes, dismissRuntimeWarning, runtimeWarning, missingRuntime],
+    [running, attachment, status, installing, checking, statusError, reload, probe, refreshStatus, install, start, stop, installingRuntime, installRuntime, repairingRuntimes, repairRuntimes, strayMsvcr90, strayWarning, clearingStray, clearStrayMsvcr90, dismissRuntimeWarning, runtimeWarning, missingRuntime],
   );
 
   return (
