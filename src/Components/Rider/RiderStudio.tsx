@@ -8,6 +8,7 @@ import { Switch } from "../ui/switch";
 import type { Loadout, RiderPart } from "../../types";
 import {
   presetsSave,
+  scanBikeTargets,
   scanGearRepairs,
   repairGear,
   type GearRepair,
@@ -19,11 +20,32 @@ import {
   SLOT_GROUPS,
   EMPTY_LOADOUT,
   loadScans,
+  pickedModel,
   type Scans,
+  type SlotDef,
 } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
+import { useConfig } from "../../Context/Config";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
+
+/**
+ * The bike slots the preview actually draws.
+ *
+ * `bikeFont` and `tyres` are the rest of the group and neither reaches the model, so they'd
+ * be two controls here that do nothing you can see. They stay in Presets, where a slot's
+ * job is to be written to `profile.ini` rather than to be looked at.
+ */
+const BIKE_SLOTS: SlotDef[] = SLOTS.filter(
+  (s) => s.key === "paint" || s.key === "modelSwap",
+);
 
 const TOGGLES: { part: RiderPart["part"]; label: TKey }[] = [
   { part: "helmet", label: "category.helmet" },
@@ -33,13 +55,26 @@ const TOGGLES: { part: RiderPart["part"]; label: TKey }[] = [
 
 interface RiderStudioProps {
   initialLoadout?: Loadout | null;
+  /** The bike the incoming preset was built against, so the pair view opens on it. */
+  initialBike?: string | null;
   onLoaded?: () => void;
 }
 
-export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioProps) {
+export default function RiderStudio({
+  initialLoadout,
+  initialBike,
+  onLoaded,
+}: RiderStudioProps) {
   const t = useT();
+  // A build with no geometry decoder can't draw a real bike, and a cartoon stand-in next to
+  // a real rider reads as the preset having resolved to that. Rider only there, as before.
+  const { bikePreview } = useConfig();
   const [scans, setScans] = useState<Scans | null>(null);
   const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
+  // The bike the loadout's paint and model swap are read against. Not part of a loadout —
+  // a preset dresses whichever bike it's applied to — so it's picked here.
+  const [bikes, setBikes] = useState<string[]>([]);
+  const [bike, setBike] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   // Nothing hidden to start. Protection used to be, back when it came out of the loader as
@@ -69,9 +104,12 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
   useEffect(() => {
     if (initialLoadout) {
       setLoadout(initialLoadout);
+      // The handed-over bike wins even before the scan lands — the picker below keeps a
+      // value it doesn't recognise rather than snapping to the first installed bike.
+      if (initialBike) setBike(initialBike);
       onLoaded?.();
     }
-  }, [initialLoadout, onLoaded]);
+  }, [initialLoadout, initialBike, onLoaded]);
 
   const onSave = useCallback(async () => {
     const nm = name.trim();
@@ -102,6 +140,12 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
       setLoadout((prev) =>
         prev.rider || !sc.riderProfiles.length ? prev : { ...prev, rider: sc.riderProfiles[0] },
       );
+      // Every bike a paint can be installed for, plus the ids read out of the profiles —
+      // the OEM bikes only exist inside the locked archive, so a profile is the only place
+      // their id can be found until someone installs a paint for one.
+      const bs = await scanBikeTargets().catch(() => [] as string[]);
+      setBikes(bs);
+      setBike((b) => (b || bs[0] || ""));
     } catch (e) {
       setError(String(e));
     }
@@ -142,6 +186,13 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
     () => RIDER_GROUPS.map((g) => ({ ...g, slots: SLOTS.filter((s) => s.group === g.id) })),
     [],
   );
+
+  const bikeVariant = pickedModel(bike, loadout, scans);
+  const showBike = bikePreview && !!bike;
+  // A bike handed over by Presets comes from the profile's own list, which the target scan
+  // should already cover — but if it doesn't, keep it pickable rather than showing an empty
+  // trigger over a preview that is drawing that very bike.
+  const bikeOptions = bike && !bikes.includes(bike) ? [bike, ...bikes] : bikes;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -234,6 +285,45 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
             ))}
           </div>
 
+          {/* Bike — the other half of a preset's look, and what the pair view draws */}
+          {bikePreview && (
+            <div className="flex flex-col gap-1.5">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                {t("slotGroup.bike")}
+              </h2>
+              <div className="grid grid-cols-1 gap-x-3.5 gap-y-2 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    {t("slotGroup.bike")}
+                  </span>
+                  <Select value={bike} onValueChange={setBike}>
+                    <SelectTrigger className="h-8">
+                      <SelectValue placeholder={t("slotGroup.bike")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bikeOptions.map((b) => (
+                        <SelectItem key={b} value={b}>
+                          {b}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+                {BIKE_SLOTS.map((slot) => (
+                  <SlotField
+                    key={slot.key}
+                    slot={slot}
+                    value={loadout[slot.key]}
+                    options={optionsFor(slot, bike, scans)}
+                    missing={missingFor(slot, bike, scans)}
+                    compact
+                    onChange={(v) => setSlot(slot.key, v)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Rider slot groups */}
           {grouped.map((g) => (
             <div key={g.id} className="flex flex-col gap-1.5">
@@ -257,8 +347,15 @@ export default function RiderStudio({ initialLoadout, onLoaded }: RiderStudioPro
           ))}
         </section>
 
-        {/* Live rider render */}
-        <ViewerPanel loadout={loadout} riderOnly hiddenParts={hidden} className="w-[420px] flex-none" />
+        {/* Live render — the rider, and the bike beside them when this build can draw one */}
+        <ViewerPanel
+          loadout={loadout}
+          riderOnly={!showBike}
+          bikeId={showBike ? bike : undefined}
+          bikeVariant={bikeVariant}
+          hiddenParts={hidden}
+          className="w-[420px] flex-none"
+        />
       </div>
     </div>
   );

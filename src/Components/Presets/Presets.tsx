@@ -124,7 +124,7 @@ function applyNoteKey(outcome: PresetApplyOutcome): TKey {
 }
 
 interface PresetsProps {
-  onOpenInRider?: (loadout: Loadout) => void;
+  onOpenInRider?: (loadout: Loadout, bike: string) => void;
   /** Jump to the Locker — where model swaps have to be registered before they show here. */
   onOpenLocker?: () => void;
   /** Jump to Settings — the profiles folder picker lives there. */
@@ -557,7 +557,7 @@ export default function Presets({
                       variant="ghost"
                       size="sm"
                       className="ml-auto h-7"
-                      onClick={() => onOpenInRider(loadout)}
+                      onClick={() => onOpenInRider(loadout, bike)}
                     >
                       <User className="size-3.5" />
                       {t("presets.viewInRider")}
@@ -706,7 +706,7 @@ export default function Presets({
                   onShare={() => onShare(p)}
                   onDelete={() => void onDelete(p)}
                   onViewInRider={
-                    onOpenInRider ? () => onOpenInRider(p.loadout) : undefined
+                    onOpenInRider ? () => onOpenInRider(p.loadout, bike) : undefined
                   }
                 />
               ))

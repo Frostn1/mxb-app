@@ -36,6 +36,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // A preset handed off from the Presets tab to load in the Rider tab (its
   // "View in Rider" button). Consumed once by the Rider view, then cleared.
   const [riderPreset, setRiderPreset] = useState<Loadout | null>(null);
+  const [riderBike, setRiderBike] = useState<string | null>(null);
   // Which Studio sub-view is open. Here rather than inside `Studio` because two things
   // outside it open the Studio *at* a sub-view — Presets' "View in Rider", and the tour.
   const [studioTab, setStudioTab] = useState<StudioTab>("designer");
@@ -139,8 +140,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   );
 
   // Jump from Presets into the Rider tab with a preset loaded, to view it on the model.
-  const openInRider = useCallback((lo: Loadout) => {
+  const openInRider = useCallback((lo: Loadout, bike: string) => {
     setRiderPreset(lo);
+    // The bike rides along: a loadout names a livery and a model swap but never the bike
+    // they belong to, so without this the Rider tab would dress whichever bike it landed on.
+    setRiderBike(bike);
     navigate("studio", "rider");
   }, [navigate]);
   const clearRiderPreset = useCallback(() => setRiderPreset(null), []);
@@ -208,6 +212,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               tab={studioTab}
               onTab={setStudioTab}
               riderPreset={riderPreset}
+              riderBike={riderBike}
               onRiderPresetLoaded={clearRiderPreset}
             />
           ) : view === "servers" ? (

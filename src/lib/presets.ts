@@ -251,6 +251,18 @@ function forBike(map: Record<string, string[]>, bikeid: string): string[] {
 }
 
 /**
+ * The model swap a loadout puts on `bikeid`: its own pick, else whatever is on the bike.
+ *
+ * An empty `modelSwap` slot means *leave the model alone*, so the answer is the variant
+ * currently loose at the bike's root — never `"Stock"`, which is the packed model those
+ * loose files are hiding, and a different bike whenever a swap is applied.
+ */
+export function pickedModel(bikeid: string, loadout: Loadout, scans: Scans | null): string {
+  if (!scans) return loadout.modelSwap;
+  return loadout.modelSwap || byBike(scans.activeModel, bikeid) || "";
+}
+
+/**
  * Narrow a bike's liveries to the ones that suit the model the preset puts on it: the
  * liveries that model claims, plus the ones no model claims at all.
  *
@@ -270,7 +282,7 @@ function forPickedModel(
 ): string[] {
   const claims = byBike(scans.modelPaints, bikeid);
   if (!claims) return liveries;
-  const model = loadout.modelSwap || byBike(scans.activeModel, bikeid) || "";
+  const model = pickedModel(bikeid, loadout, scans);
   const keyed = (name: string) =>
     Object.entries(claims).find(([v]) => v.toLowerCase() === name.toLowerCase())?.[1] ?? [];
 

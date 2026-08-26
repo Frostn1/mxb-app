@@ -1,38 +1,54 @@
-import { useEffect, useRef, useState } from "react";
-import { Maximize2, Bike, User, Box, Loader2, AlertTriangle } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Maximize2, Bike, User, Users, Box, Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent } from "../ui/dialog";
 import { ModelViewer, type ViewerMode } from "./ModelViewer";
-import { loadRiderModel } from "../../api/mods";
-import type { Loadout, PaintTexture, RiderPart } from "../../types";
+import { loadRiderModel, previewModelSwap } from "../../api/mods";
+import type { BikeModel, Loadout, PaintTexture, RiderPart } from "../../types";
 import { useT } from "../../i18n/context";
 
 interface ViewerPanelProps {
   texture?: PaintTexture | null;
   loadout?: Loadout;
   riderOnly?: boolean;
+  /**
+   * Draw this bike beside the rider, wearing the loadout's `paint`.
+   *
+   * Absent means rider (or stand-in bike) only, exactly as before. Present turns the panel
+   * into the pair view and adds "Both" to the toggle.
+   */
+  bikeId?: string;
+  /**
+   * Which model-swap variant to draw the bike as. An empty `modelSwap` slot means "leave
+   * the model alone", which is the variant currently loose at the bike's root — the caller
+   * knows that from its scan, so it passes it rather than this guessing "Stock".
+   */
+  bikeVariant?: string;
   hiddenParts?: RiderPart["part"][];
   className?: string;
 }
 
 function ModeToggle({
   mode,
+  modes,
   onChange,
 }: {
   mode: ViewerMode;
+  /** Which segments to offer, in order. */
+  modes: ViewerMode[];
   onChange: (m: ViewerMode) => void;
 }) {
   const t = useT();
+  const seg: Record<ViewerMode, { icon: typeof Bike; label: string }> = {
+    bike: { icon: Bike, label: t("category.bike") },
+    rider: { icon: User, label: t("nav.rider") },
+    both: { icon: Users, label: t("viewer.both") },
+  };
   return (
     <div className="inline-flex rounded-md border border-border bg-background/60 p-0.5">
-      {(
-        [
-          { m: "bike" as const, icon: Bike, label: t("category.bike") },
-          { m: "rider" as const, icon: User, label: t("nav.rider") },
-        ]
-      ).map(({ m, icon: Icon, label }) => (
+      {modes.map((m) => ({ m, ...seg[m] })).map(({ m, icon: Icon, label }) => (
         <button
           key={m}
           type="button"
@@ -56,14 +72,27 @@ export function ViewerPanel({
   texture,
   loadout,
   riderOnly = false,
+  bikeId,
+  bikeVariant,
   hiddenParts,
   className,
 }: ViewerPanelProps) {
   const t = useT();
-  const [mode, setMode] = useState<ViewerMode>(riderOnly ? "rider" : "bike");
+  const withBike = !!bikeId && !riderOnly;
+  const modes: ViewerMode[] = withBike ? ["both", "bike", "rider"] : ["bike", "rider"];
+  const [mode, setMode] = useState<ViewerMode>(
+    riderOnly ? "rider" : withBike ? "both" : "bike",
+  );
   const [expanded, setExpanded] = useState(false);
   const [riderParts, setRiderParts] = useState<RiderPart[] | null>(null);
   const [loading, setLoading] = useState(false);
+  // The bike half. Kept whole rather than as bare nodes: the model carries every paint
+  // installed for it, so switching livery is a pick out of this and not another resolve.
+  const [bikeModel, setBikeModel] = useState<BikeModel | null>(null);
+  const [bikeLoading, setBikeLoading] = useState(false);
+  const [bikeError, setBikeError] = useState<string | null>(null);
+  const bikeFirst = useRef(true);
+  const bikeToasted = useRef<string | null>(null);
   // A resolve that failed. Kept in state because the previous model stays on screen
   // (see below) — without this the panel looks like the pick simply did nothing.
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -136,37 +165,124 @@ export function ViewerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riderKey]);
 
-  // While the rider model is resolving for the first time, show a clear centered
-  // "Loading" state instead of the placeholder rider (see `riderLoading` passed to
-  // the viewer). Once a model is on screen, a re-resolve only gets the corner chip
-  // so the current model stays visible.
-  const riderFirstLoad = loading && mode === "rider" && !shownParts?.length;
-  // Suppress the stand-in rider while loading, but never hide the bike stand-in.
-  const riderLoading = mode === "rider" && loading;
+  // The bike, resolved the same way the rider is: debounced, and the previous model stays
+  // up while the next one is read. Only the bike and its variant re-resolve — the livery is
+  // already in hand, so picking one below costs nothing.
+  useEffect(() => {
+    if (!withBike) {
+      setBikeModel(null);
+      setBikeLoading(false);
+      return;
+    }
+    let alive = true;
+    setBikeLoading(true);
+    const delay = bikeFirst.current ? 0 : 200;
+    bikeFirst.current = false;
+    const timer = setTimeout(() => {
+      // "Stock" is the fallback the backend understands for a bike whose active variant the
+      // caller couldn't name — the model packed in the archive.
+      previewModelSwap(bikeId!, bikeVariant || "Stock")
+        .then((m) => {
+          if (!alive) return;
+          setBikeModel(m);
+          setBikeError(null);
+          bikeToasted.current = null;
+        })
+        .catch((e) => {
+          const msg = String(e).replace(/^Error:\s*/, "");
+          console.error("[viewer] bike resolve failed:", e);
+          if (!alive) return;
+          setBikeError(msg);
+          if (bikeToasted.current !== msg) {
+            bikeToasted.current = msg;
+            toast.error(t("viewer.bikeLoadFailed"), { description: msg });
+          }
+        })
+        .finally(() => alive && setBikeLoading(false));
+    }, delay);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [withBike, bikeId, bikeVariant]);
 
-  const overlay = riderFirstLoad ? (
+  // The livery the loadout names, out of what the bike carries. Nothing named, or a name
+  // nothing installed answers to, leaves the model in the look it ships with.
+  const bikeTextures = useMemo(() => {
+    if (!bikeModel) return undefined;
+    const pick = loadout?.paint
+      ? bikeModel.paints.find((p) => p.name === loadout.paint)
+      : undefined;
+    return pick?.textures ?? bikeModel.base;
+  }, [bikeModel, loadout?.paint]);
+
+  // Which halves of the scene this mode actually draws.
+  const drawsRider = mode !== "bike";
+  const drawsBike = withBike && mode !== "rider";
+
+  // While a model is resolving for the first time, show a clear centered "Loading" state
+  // instead of the placeholder (see `riderLoading` passed to the viewer). Once something is
+  // on screen, a re-resolve only gets the corner chip so the current model stays visible.
+  const riderFirstLoad = loading && drawsRider && !shownParts?.length;
+  const bikeFirstLoad = bikeLoading && drawsBike && !bikeModel;
+  // In the pair view neither half may claim the whole canvas: a bike still reading while the
+  // rider is up would blank a model that is perfectly good. Only take over the canvas when
+  // nothing at all is on screen yet.
+  const nothingYet =
+    (riderFirstLoad || bikeFirstLoad) &&
+    !(drawsRider && shownParts?.length) &&
+    !(drawsBike && bikeModel);
+  // Suppress the stand-in rider while loading, but never hide the bike stand-in.
+  const riderLoading = drawsRider && mode !== "both" && loading;
+  const busy = (drawsRider && loading) || (drawsBike && bikeLoading);
+  // Stale-model warning, per half — with two of them the badge has to say which one is out
+  // of date, or "preview is out of date" points at whichever model you happen to be reading.
+  const staleKey = drawsRider && loadError
+    ? ("viewer.riderLoadFailed" as const)
+    : drawsBike && bikeError
+      ? ("viewer.bikeLoadFailed" as const)
+      : null;
+  const staleWhy = (drawsRider && loadError) || (drawsBike && bikeError) || "";
+
+  const overlay = nothingYet ? (
     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
       <Loader2 className="h-6 w-6 animate-spin" />
-      <span className="text-[12.5px]">{t("viewer.loadingRider")}</span>
+      <span className="text-[12.5px]">
+        {t(bikeFirstLoad && !riderFirstLoad ? "viewer.loadingBike" : "viewer.loadingRider")}
+      </span>
     </div>
-  ) : loading ? (
+  ) : busy ? (
     <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-black/55 px-2 py-1 text-[11px] text-white/85">
       <Loader2 className="h-3.5 w-3.5 animate-spin" />
       {t("common.loading")}
     </div>
   ) : (
-    // Stale-model warning: what's on screen is the *previous* resolve, so the badge has to
-    // stay up (not a toast that fades) for as long as the model is out of date.
-    loadError && (
+    // The badge has to stay up (not a toast that fades) for as long as the model is out of date.
+    staleKey && (
       <div
-        title={loadError}
+        title={staleWhy}
         className="absolute right-3 top-3 flex max-w-[85%] items-center gap-1.5 rounded-md bg-destructive/90 px-2 py-1 text-[11px] text-destructive-foreground"
       >
         <AlertTriangle className="h-3.5 w-3.5 flex-none" />
-        <span className="truncate">{t("viewer.riderLoadFailed")}</span>
+        <span className="truncate">{t(staleKey)}</span>
       </div>
     )
   );
+
+  // What goes to the canvas. `nodes` is what turns the pair view on in `ModelViewer`, so it
+  // is only handed over when this mode wants the bike drawn.
+  const view = {
+    mode,
+    texture,
+    textures: drawsBike ? bikeTextures : undefined,
+    nodes: drawsBike ? bikeModel?.nodes ?? null : null,
+    riderParts: drawsRider ? shownParts : null,
+    loading: riderLoading,
+    // With a real bike on the way, the cartoon stand-in beside the rider is worse than
+    // nothing — it reads as the preset having resolved to that.
+    noStandIn: withBike,
+  };
 
   return (
     <>
@@ -182,7 +298,7 @@ export function ViewerPanel({
             {t("viewer.preview3d")}
           </div>
           <div className="flex items-center gap-2">
-            {!riderOnly && <ModeToggle mode={mode} onChange={setMode} />}
+            {!riderOnly && <ModeToggle mode={mode} modes={modes} onChange={setMode} />}
             <Button
               variant="chip"
               size="icon"
@@ -195,13 +311,7 @@ export function ViewerPanel({
           </div>
         </div>
         <div className="relative min-h-[280px] flex-1">
-          <ModelViewer
-            mode={mode}
-            texture={texture}
-            riderParts={shownParts}
-            loading={riderLoading}
-            className="absolute inset-0"
-          />
+          <ModelViewer {...view} className="absolute inset-0" />
           {overlay}
         </div>
       </div>
@@ -216,16 +326,10 @@ export function ViewerPanel({
               <Box className="h-4 w-4 text-muted-foreground" />
               {t("viewer.preview3d")}
             </div>
-            {!riderOnly && <ModeToggle mode={mode} onChange={setMode} />}
+            {!riderOnly && <ModeToggle mode={mode} modes={modes} onChange={setMode} />}
           </div>
           <div className="relative min-h-0 flex-1">
-            <ModelViewer
-              mode={mode}
-              texture={texture}
-              riderParts={shownParts}
-              loading={riderLoading}
-              className="absolute inset-0"
-            />
+            <ModelViewer {...view} className="absolute inset-0" />
             {overlay}
           </div>
         </DialogContent>
