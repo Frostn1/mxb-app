@@ -19,14 +19,7 @@
     selects, so a preset pairs a model with a livery drawn for it.
 
 ### Fixed
-- **Liveries that came in with a model pack were invisible.** A model swap that shipped its
-  own `paints/` folder left its liveries inside the swap folder once the app filed it away —
-  somewhere the game never reads and no scan of ours ever looked. They were installed,
-  unusable and unlistable. Opening that model's livery picker now adopts them as its own,
-  which is also what makes them work.
-- **A livery inside a model swap was filed under the wrong owner.** The Library attributed it
-  to the swap folder rather than to the bike, so it landed in a bucket no bike id ever
-  matched — and a preset share code built from that bike silently shipped without the livery.
+
 - **A `msvcr90.dll` in the game folder that the app wouldn't remove is no longer a silent
   crash.** A loose VC9 CRT beside `mxbikes.exe` aborts the game with *"R6034 — An application
   has made an attempt to load the C runtime library incorrectly"* the moment anything

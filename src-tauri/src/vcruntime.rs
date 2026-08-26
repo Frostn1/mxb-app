@@ -56,6 +56,16 @@
 //! to miss: it only ships from the 2019 redistributable onward, so a machine still on the
 //! original 2015 package has the other two and not it.
 //!
+//! **The app's own image needs VC140 as well, and nothing in this module can say so.**
+//! `MXB App.exe` imports `std::_Xout_of_range` and `std::_Xlength_error` from
+//! `MSVCP140.dll` — the STL's throw helpers, by way of the C++ sources `unrar_sys` builds
+//! against the dynamic CRT. Without the redistributable the loader gives up before `main`
+//! with *"the application was unable to start correctly (0xc000007b)"*, and none of the
+//! code below ever runs. That check has to live outside the process, and does:
+//! `installer-hooks.nsh` probes for the same three files before the app is written. See
+//! `tests::the_installer_probes_the_same_runtime_we_do` for what keeps the two copies
+//! from drifting.
+//!
 //! We detect both, and can install either. Detection is deliberately conservative: when
 //! we can't tell, we report nothing missing. Telling a working player their PC is broken
 //! is worse than staying quiet.
@@ -984,6 +994,34 @@ mod tests {
         assert!(
             VC140_DLLS.contains(&"vcruntime140_1.dll"),
             "frostmod.dll imports vcruntime140_1.dll, so it has to be probed: {VC140_DLLS:?}"
+        );
+    }
+
+    /// The installer carries a second copy of this probe, and it has to stay this probe.
+    ///
+    /// Nothing off Windows can run NSIS, so the check that actually rescues a player — the
+    /// one that runs before the app exists — is the one we cannot exercise. This is the
+    /// next best thing: move the list, the URL or the switches here and the `.nsh` stops
+    /// matching, which is the moment to go and change it there too.
+    ///
+    /// `DisableX64FSRedirection` is asserted because it is the part most likely to be
+    /// tidied away by someone who doesn't know it's load-bearing: NSIS builds 32-bit
+    /// installers, and without it every `$SYSDIR` read lands in `SysWOW64` and answers
+    /// about the wrong architecture.
+    #[test]
+    fn the_installer_probes_the_same_runtime_we_do() {
+        let nsh = include_str!("../installer-hooks.nsh");
+        for dll in VC140_DLLS {
+            assert!(nsh.contains(dll), "installer-hooks.nsh should probe {dll}");
+        }
+        assert!(nsh.contains(Runtime::Vc140.url()), "and fetch it from the same place");
+        assert!(
+            nsh.contains(Runtime::Vc140.installer_args()),
+            "with the same silent switches"
+        );
+        assert!(
+            nsh.contains("DisableX64FSRedirection"),
+            "a 32-bit installer probing $SYSDIR reads SysWOW64 without it"
         );
     }
 
