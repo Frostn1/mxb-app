@@ -362,6 +362,12 @@ export const fr: Translation = {
   "viewer.poseSteer": "Direction",
   "viewer.poseLevel": "Aligner les roues",
   "viewer.poseReset": "Réinitialiser",
+  "viewer.place": "Placement",
+  "viewer.placeSide": "Côté",
+  "viewer.placeUp": "Hauteur",
+  "viewer.placeFwd": "Avancer",
+  "viewer.placeTurn": "Pivoter",
+  "viewer.resizePanel": "Glisser pour redimensionner · double-clic pour réinitialiser",
 
   // ── Combobox ───────────────────────────────────────────────────────────────
   "combobox.search": "Rechercher…",

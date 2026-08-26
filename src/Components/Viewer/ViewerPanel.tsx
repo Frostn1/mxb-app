@@ -316,7 +316,9 @@ export function ViewerPanel({
           </div>
         </div>
         <div className="relative min-h-[280px] flex-1">
-          <ModelViewer {...view} className="absolute inset-0" />
+          {/* Both panels are a single collapsed row until someone opens one, so the inline
+              canvas only gives up its corner to a person who asked for it. */}
+          <ModelViewer {...view} poseControls placeControls className="absolute inset-0" />
           {overlay}
         </div>
       </div>
@@ -337,9 +339,7 @@ export function ViewerPanel({
             </div>
           </div>
           <div className="relative min-h-0 flex-1">
-            {/* Posing only in the expanded view: the inline panel is 280px tall, and a
-                control stack in it would cover the bike it is posing. */}
-            <ModelViewer {...view} poseControls className="absolute inset-0" />
+            <ModelViewer {...view} poseControls placeControls className="absolute inset-0" />
             {overlay}
           </div>
         </DialogContent>

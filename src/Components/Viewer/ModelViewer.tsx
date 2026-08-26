@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Center, ContactShadows } from "@react-three/drei";
-import { ChevronDown, Move, Rotate3d, SlidersHorizontal, ZoomIn } from "lucide-react";
+import { ChevronDown, Move, Move3d, Rotate3d, SlidersHorizontal, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import { Row, Slider } from "@/Components/ui/controls";
@@ -1018,6 +1018,7 @@ function poseGroup(name: string): PoseGroup {
 }
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 /** The fork/steering axis: straight up, tilted back by the rake. */
 function forkAxis(rake: number): THREE.Vector3 {
@@ -1211,6 +1212,67 @@ function riderBounds(parts: RiderPart[]) {
   return drawn.length ? partBounds(drawn) : { lo: [0, 0, 0], hi: [0, 0, 0] };
 }
 
+/** Which model a placement is for. */
+export type PlaceTarget = "bike" | "rider";
+
+/**
+ * Where a model stands, on top of the arrangement the scene already puts it in.
+ *
+ * All zero is that arrangement untouched — the pair shoulder to shoulder on the ground — so
+ * resetting returns the scene to what it drew before anyone moved anything, rather than
+ * dropping both models on the origin.
+ */
+export interface Placement {
+  /** Metres along X, the axis the pair is laid out on. */
+  x: number;
+  /** Metres up. Both models rest on y=0, so this is height off the ground. */
+  y: number;
+  /** Metres along Z, the way the models face. */
+  z: number;
+  /** Degrees about the up axis. */
+  yaw: number;
+}
+
+/** A model where the layout left it. */
+export const HOME: Placement = { x: 0, y: 0, z: 0, yaw: 0 };
+
+/** Both models at rest — one object, so resetting is an assignment rather than two. */
+const HOME_BOTH: Record<PlaceTarget, Placement> = { bike: HOME, rider: HOME };
+
+/**
+ * The point a model turns about: the centre of its footprint, on the ground.
+ *
+ * Not its authored origin — a bike's sits near the swingarm pivot, and turning about that
+ * swings the model across the scene instead of spinning it where it stands.
+ */
+function spinPivot(b: { lo: number[]; hi: number[] }): Vec3 {
+  return [(b.lo[0] + b.hi[0]) / 2, b.lo[1], (b.lo[2] + b.hi[2]) / 2];
+}
+
+/** A model under its placement. At {@link HOME} this is the identity — nothing moves. */
+function Placed({
+  at = HOME,
+  pivot,
+  children,
+}: {
+  at?: Placement;
+  /** Turn about this, in the model's own frame — see {@link spinPivot}. */
+  pivot: Vec3;
+  children: React.ReactNode;
+}) {
+  const q = useMemo(
+    () => new THREE.Quaternion().setFromAxisAngle(Y_AXIS, at.yaw * THREE.MathUtils.DEG2RAD),
+    [at.yaw],
+  );
+  return (
+    <group position={[at.x, at.y, at.z]}>
+      <About at={pivot} q={q}>
+        {children}
+      </About>
+    </group>
+  );
+}
+
 /**
  * Bike and rider in one scene, standing beside each other.
  *
@@ -1230,6 +1292,7 @@ function SideBySide({
   overrides,
   rig,
   pose,
+  place,
 }: {
   nodes: EdfNode[];
   textures: Map<string, THREE.Texture>;
@@ -1238,6 +1301,8 @@ function SideBySide({
   overrides?: Map<string, THREE.Texture>;
   rig?: BikeRig | null;
   pose?: BikePose;
+  /** Where each half has been moved to, on top of the arrangement below. */
+  place?: Record<PlaceTarget, Placement>;
 }) {
   const at = useMemo(() => {
     const bike = partBounds(nodes);
@@ -1247,22 +1312,29 @@ function SideBySide({
       // sizes they never intersect.
       bike: [-PAIR_GAP / 2 - bike.hi[0], -bike.lo[1], 0] as [number, number, number],
       rider: [PAIR_GAP / 2 - rider.lo[0], -rider.lo[1], 0] as [number, number, number],
+      // Each model's own spin point, so turning one leaves the other where it stands.
+      bikePivot: spinPivot(bike),
+      riderPivot: spinPivot(rider),
     };
   }, [nodes, parts]);
 
   return (
     <group>
       <group position={at.bike}>
-        <EdfMesh
-          nodes={nodes}
-          textures={textures}
-          highlight={highlight}
-          rig={rig}
-          pose={pose}
-        />
+        <Placed at={place?.bike} pivot={at.bikePivot}>
+          <EdfMesh
+            nodes={nodes}
+            textures={textures}
+            highlight={highlight}
+            rig={rig}
+            pose={pose}
+          />
+        </Placed>
       </group>
       <group position={at.rider}>
-        <RiderComposite parts={parts} overrides={overrides} />
+        <Placed at={place?.rider} pivot={at.riderPivot}>
+          <RiderComposite parts={parts} overrides={overrides} />
+        </Placed>
       </group>
     </group>
   );
@@ -1303,8 +1375,146 @@ function CameraRig({ frame }: { frame: Framing }) {
   return null;
 }
 
-// Legend for the OrbitControls gestures below — the canvas gives no other clue
-// that it's draggable. Kept muted so it reads as chrome, never competing with the model.
+/**
+ * The shell both side panels are made of: a title you click to open, and a body.
+ *
+ * Shared rather than copied — two panels sitting one above the other have to be identical
+ * down to the padding, or the stack reads as a mistake.
+ */
+function Panel({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: typeof SlidersHorizontal;
+  title: string;
+  children: React.ReactNode;
+}) {
+  // Closed to start: a preview nobody is adjusting keeps its whole canvas.
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="w-[230px] rounded-md border border-white/10 bg-black/60 text-white/80 backdrop-blur-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium leading-none text-white/70 hover:text-white"
+      >
+        <Icon className="h-3.5 w-3.5" />
+        {title}
+        <ChevronDown
+          className={cn("ml-auto h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="flex flex-col gap-1.5 border-t border-white/10 px-2 py-2">{children}</div>
+      )}
+    </div>
+  );
+}
+
+/** How far a model can be moved from where the layout put it, in metres and degrees. */
+const PLACE_LIMIT = { x: 2, y: 1.5, z: 2, yaw: 180 };
+
+/**
+ * The placement panel: where each model stands.
+ *
+ * One set of sliders and a target to point them at, rather than a set per model — the pair
+ * is two models today, and a panel that grows a section per half would be taller than the
+ * canvas it sits on.
+ */
+function PlaceControls({
+  targets,
+  place,
+  onChange,
+  onReset,
+}: {
+  /** The halves actually on screen, in the order they're offered. Never empty. */
+  targets: PlaceTarget[];
+  place: Record<PlaceTarget, Placement>;
+  onChange: (who: PlaceTarget, at: Placement) => void;
+  onReset: () => void;
+}) {
+  const t = useT();
+  const [picked, setPicked] = useState<PlaceTarget>(targets[0]);
+  // The scene can lose the half being moved — a mode switch, a model that stopped resolving
+  // — so fall back rather than sliding something nothing is drawing.
+  const who = targets.includes(picked) ? picked : targets[0];
+  const at = place[who];
+  const m = (v: number) => `${v.toFixed(2)}m`;
+  const set = (part: Partial<Placement>) => onChange(who, { ...at, ...part });
+  return (
+    <Panel icon={Move3d} title={t("viewer.place")}>
+      {/* Only worth a chooser when there are two of them: a lone model is the target. */}
+      {targets.length > 1 && (
+        <div className="mb-0.5 inline-flex rounded border border-white/15 p-0.5">
+          {targets.map((tg) => (
+            <button
+              key={tg}
+              type="button"
+              onClick={() => setPicked(tg)}
+              className={cn(
+                "flex-1 rounded px-2 py-1 text-[11px] leading-none transition-colors",
+                who === tg ? "bg-white/85 text-black" : "text-white/70 hover:text-white",
+              )}
+            >
+              {t(tg === "bike" ? "category.bike" : "nav.rider")}
+            </button>
+          ))}
+        </div>
+      )}
+      <Row label={t("viewer.placeSide")}>
+        <Slider
+          value={at.x}
+          min={-PLACE_LIMIT.x}
+          max={PLACE_LIMIT.x}
+          step={0.01}
+          onChange={(v) => set({ x: v })}
+          format={m}
+        />
+      </Row>
+      <Row label={t("viewer.placeUp")}>
+        <Slider
+          value={at.y}
+          min={-PLACE_LIMIT.y}
+          max={PLACE_LIMIT.y}
+          step={0.01}
+          onChange={(v) => set({ y: v })}
+          format={m}
+        />
+      </Row>
+      <Row label={t("viewer.placeFwd")}>
+        <Slider
+          value={at.z}
+          min={-PLACE_LIMIT.z}
+          max={PLACE_LIMIT.z}
+          step={0.01}
+          onChange={(v) => set({ z: v })}
+          format={m}
+        />
+      </Row>
+      <Row label={t("viewer.placeTurn")}>
+        <Slider
+          value={at.yaw}
+          min={-PLACE_LIMIT.yaw}
+          max={PLACE_LIMIT.yaw}
+          step={1}
+          onChange={(v) => set({ yaw: v })}
+          format={(v) => `${Math.round(v)}°`}
+        />
+      </Row>
+      <div className="mt-0.5 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onReset}
+          className="rounded border border-white/15 px-2 py-1 text-[11px] leading-none text-white/75 hover:bg-white/10 hover:text-white"
+        >
+          {t("viewer.poseReset")}
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
 /**
  * The pose panel: the bike's own joints, on sliders.
  *
@@ -1325,78 +1535,64 @@ function PoseControls({
   onReset: () => void;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
   const mm = (v: number) => `${Math.round(v)}mm`;
   return (
-    <div className="absolute bottom-2 right-2 w-[230px] rounded-md border border-white/10 bg-black/60 text-white/80 backdrop-blur-sm">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium leading-none text-white/70 hover:text-white"
-      >
-        <SlidersHorizontal className="h-3.5 w-3.5" />
-        {t("viewer.pose")}
-        <ChevronDown
-          className={cn("ml-auto h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+    <Panel icon={SlidersHorizontal} title={t("viewer.pose")}>
+      <Row label={t("viewer.poseRear")}>
+        <Slider
+          value={pose.rearDrop}
+          min={-REAR_LIMIT_MM}
+          max={REAR_LIMIT_MM}
+          step={1}
+          onChange={(v) => onChange({ ...pose, rearDrop: v })}
+          format={mm}
         />
-      </button>
-      {open && (
-        <div className="flex flex-col gap-1.5 border-t border-white/10 px-2 py-2">
-          <Row label={t("viewer.poseRear")}>
-            <Slider
-              value={pose.rearDrop}
-              min={-REAR_LIMIT_MM}
-              max={REAR_LIMIT_MM}
-              step={1}
-              onChange={(v) => onChange({ ...pose, rearDrop: v })}
-              format={mm}
-            />
-          </Row>
-          <Row label={t("viewer.poseFront")}>
-            <Slider
-              value={pose.forkUp}
-              min={-60}
-              max={180}
-              step={1}
-              onChange={(v) => onChange({ ...pose, forkUp: v })}
-              format={mm}
-            />
-          </Row>
-          <Row label={t("viewer.poseSteer")}>
-            <Slider
-              value={pose.steer}
-              min={-40}
-              max={40}
-              step={1}
-              onChange={(v) => onChange({ ...pose, steer: v })}
-              format={(v) => `${Math.round(v)}°`}
-            />
-          </Row>
-          <div className="mt-0.5 flex items-center gap-1.5">
-            {onLevel && (
-              <button
-                type="button"
-                onClick={onLevel}
-                className="rounded border border-white/15 px-2 py-1 text-[11px] leading-none text-white/75 hover:bg-white/10 hover:text-white"
-              >
-                {t("viewer.poseLevel")}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onReset}
-              className="rounded border border-white/15 px-2 py-1 text-[11px] leading-none text-white/75 hover:bg-white/10 hover:text-white"
-            >
-              {t("viewer.poseReset")}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+      </Row>
+      <Row label={t("viewer.poseFront")}>
+        <Slider
+          value={pose.forkUp}
+          min={-60}
+          max={180}
+          step={1}
+          onChange={(v) => onChange({ ...pose, forkUp: v })}
+          format={mm}
+        />
+      </Row>
+      <Row label={t("viewer.poseSteer")}>
+        <Slider
+          value={pose.steer}
+          min={-40}
+          max={40}
+          step={1}
+          onChange={(v) => onChange({ ...pose, steer: v })}
+          format={(v) => `${Math.round(v)}°`}
+        />
+      </Row>
+      <div className="mt-0.5 flex items-center gap-1.5">
+        {onLevel && (
+          <button
+            type="button"
+            onClick={onLevel}
+            className="rounded border border-white/15 px-2 py-1 text-[11px] leading-none text-white/75 hover:bg-white/10 hover:text-white"
+          >
+            {t("viewer.poseLevel")}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onReset}
+          className="rounded border border-white/15 px-2 py-1 text-[11px] leading-none text-white/75 hover:bg-white/10 hover:text-white"
+        >
+          {t("viewer.poseReset")}
+        </button>
+      </div>
+    </Panel>
   );
 }
 
-function ControlsHint() {
+// Legend for the OrbitControls gestures — the canvas gives no other clue that it's
+// draggable. Kept muted so it reads as chrome, never competing with the model.
+function ControlsHint({ tight }: { tight?: boolean }) {
   const t = useT();
   const items = [
     { Icon: Rotate3d, label: t("viewer.dragToRotate") },
@@ -1404,7 +1600,14 @@ function ControlsHint() {
     { Icon: Move, label: t("viewer.rightDragToPan") },
   ];
   return (
-    <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45">
+    <div
+      className={cn(
+        "pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] leading-none text-white/45",
+        // Panels on the other corner: wrap onto more lines rather than run under them. A
+        // 320px-wide preview has room for one or the other, not both side by side.
+        tight && "max-w-[calc(100%-248px)]",
+      )}
+    >
       {items.map(({ Icon, label }) => (
         <span key={label} className="flex items-center gap-1">
           <Icon className="h-3.5 w-3.5" />
@@ -1467,6 +1670,13 @@ export interface ModelViewerProps {
   rig?: BikeRig | null;
   /** Offer the pose panel. Off by default: a preview nobody is posing shouldn't grow chrome. */
   poseControls?: boolean;
+  /**
+   * Offer the placement panel — moving each model about the scene.
+   *
+   * Off by default, for the same reason `poseControls` is. Independent of it: a rider has no
+   * joints to pose but can still be walked over to the bike.
+   */
+  placeControls?: boolean;
   loading?: boolean;
   noStandIn?: boolean;
   className?: string;
@@ -1483,6 +1693,7 @@ export function ModelViewer({
   riderParts,
   rig,
   poseControls = false,
+  placeControls = false,
   loading = false,
   noStandIn = false,
   className,
@@ -1496,6 +1707,12 @@ export function ModelViewer({
   const [posed, setPosed] = useState<BikePose | null>(null);
   useEffect(() => setPosed(null), [settled]);
   const pose = posed ?? settled;
+  // Where each model has been moved to. Unlike the pose, this survives a re-resolve: the
+  // rider is rebuilt on every slot edit, and having the arrangement someone just composed
+  // spring apart because they picked a helmet would be its own bug.
+  const [place, setPlace] = useState<Record<PlaceTarget, Placement>>(HOME_BOTH);
+  const moveTo = (who: PlaceTarget, at: Placement) =>
+    setPlace((prev) => ({ ...prev, [who]: at }));
   // Solved against the fork where it is now, so "level" still means level after the front
   // has been moved.
   const level = useMemo(
@@ -1514,6 +1731,18 @@ export function ModelViewer({
   const gearSolo =
     hasRider && !riderParts!.some((p) => p.part === "body" && p.nodes.length);
   const frame: Framing = pair ? "pair" : gearSolo ? "solo" : "default";
+  // The models a solo view has to turn about — the pair works its own out, since it measures
+  // both to lay them out anyway.
+  const soloPivot = useMemo(() => {
+    if (hasReal) return spinPivot(partBounds(nodes!));
+    if (hasRider) return spinPivot(riderBounds(riderParts!));
+    return [0, 0, 0] as Vec3;
+  }, [hasReal, hasRider, nodes, riderParts]);
+  // Only the halves on screen can be moved. Bike first, matching the pair's left-to-right.
+  const placeTargets: PlaceTarget[] = [
+    ...(showBike ? (["bike"] as const) : []),
+    ...(showRider ? (["rider"] as const) : []),
+  ];
   return (
     <div className={cn("relative", className)}>
       <ErrorBoundary compact label="model-viewer">
@@ -1568,17 +1797,22 @@ export function ModelViewer({
                 overrides={overrides}
                 rig={rig}
                 pose={pose}
+                place={place}
               />
             ) : hasReal ? (
-              <EdfMesh
-                nodes={nodes!}
-                textures={texMap}
-                highlight={highlight}
-                rig={rig}
-                pose={pose}
-              />
+              <Placed at={place.bike} pivot={soloPivot}>
+                <EdfMesh
+                  nodes={nodes!}
+                  textures={texMap}
+                  highlight={highlight}
+                  rig={rig}
+                  pose={pose}
+                />
+              </Placed>
             ) : hasRider ? (
-              <RiderComposite parts={riderParts!} overrides={overrides} />
+              <Placed at={place.rider} pivot={soloPivot}>
+                <RiderComposite parts={riderParts!} overrides={overrides} />
+              </Placed>
             ) : loading || noStandIn ? null : mode === "bike" ? (
               <BikeStandIn map={map} />
             ) : (
@@ -1604,16 +1838,30 @@ export function ModelViewer({
           />
         </Canvas>
       </ErrorBoundary>
-      {!loading && <ControlsHint />}
-      {poseControls && showBike && !!rig && !loading && (
-        <PoseControls
-          pose={pose}
-          onChange={setPosed}
-          onLevel={
-            level === null ? undefined : () => setPosed({ ...pose, rearDrop: level })
-          }
-          onReset={() => setPosed(NEUTRAL_POSE)}
-        />
+      {!loading && <ControlsHint tight={placeControls || poseControls} />}
+      {/* One stack, so the two panels line up on the same edge whether both are offered or
+          only one — placement above, because moving a model comes before fussing its joints. */}
+      {!loading && (placeControls || poseControls) && (
+        <div className="absolute bottom-2 right-2 flex flex-col items-end gap-1.5">
+          {placeControls && placeTargets.length > 0 && (
+            <PlaceControls
+              targets={placeTargets}
+              place={place}
+              onChange={moveTo}
+              onReset={() => setPlace(HOME_BOTH)}
+            />
+          )}
+          {poseControls && showBike && !!rig && (
+            <PoseControls
+              pose={pose}
+              onChange={setPosed}
+              onLevel={
+                level === null ? undefined : () => setPosed({ ...pose, rearDrop: level })
+              }
+              onReset={() => setPosed(NEUTRAL_POSE)}
+            />
+          )}
+        </div>
       )}
     </div>
   );
