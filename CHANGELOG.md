@@ -91,6 +91,22 @@
 
 ### Fixed
 
+- **A model swap previewed as a white bike in pieces.** A model set is a mesh and little
+  else — the `.geom` that mounts the parts to each other, the `gfx.cfg` and `.hrc`s that say
+  which mesh each part uses, and the stock paint all belong to the bike, and on an OEM bike
+  they never leave its `.pkz`. The preview skipped that archive the moment the swap brought a
+  mesh of its own, so it drew the swap's `model.edf` and nothing else: every part stacked at
+  the origin with no texture on any of it. The packed bike now goes underneath every preview,
+  with the loose files over it and the swap's over those — the order the game itself reads a
+  bike in. The same skip was on the ordinary load path, so an extracted bike whose `.geom`
+  stayed behind in its archive rendered unassembled too, swap or no swap.
+- **A model swap could carry off the bike's own setup files.** A variant folder holding copies
+  of the `.hrc`s, `.cfg` or `.geom` — with no mesh of its own — made the swapper treat those
+  files as the model's, so they were parked along with it and the bike was left a mesh with
+  nothing to assemble or texture it. They're the bike's, never a model's; only a variant that
+  actually brings its own replacement displaces them now. Bikes already recorded that way are
+  read correctly without anything having to be repaired on disk.
+
 - **A packed mod with a version in its name told the Designer nothing.** A model installed as
   an archive is found by the `<Model>.pkz` sitting where its folder would be — and that name
   was built by replacing the model's file extension, which a name like `Fox Instinct 2.0 by
