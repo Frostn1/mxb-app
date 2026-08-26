@@ -253,6 +253,11 @@ export interface ModelVariant {
   empty: boolean;
   /** Number of top-level files in the set. */
   fileCount: number;
+  /**
+   * Liveries assigned to this model, by base name (no `.pnt`). Empty means the model has
+   * no opinion; a livery no model claims stays on offer under every model.
+   */
+  paints: string[];
 }
 
 /** A bike and every model it can be swapped between (active first). */
@@ -870,6 +875,12 @@ export interface SwapApplyOutcome {
    * it still no-ops unless the swapped bike is the one currently selected in-game.
    */
   model_refresh: CommandOutcome | null;
+  /**
+   * Liveries that couldn't be moved into or out of `paints/`. MX Bikes holds bike files
+   * open while it runs, so a swap or an assignment made mid-session can leave some
+   * liveries where they were — and the filter is only as good as the move.
+   */
+  paints_stuck: number;
 }
 
 /** Install/version/running snapshot for the FrostMod settings panel. */

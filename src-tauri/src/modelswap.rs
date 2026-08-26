@@ -1,8 +1,9 @@
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const LIB_DIR: &str = "FrostMod Models";
+pub const LIB_DIR: &str = "FrostMod Models";
 const MARKER: &str = "_active.txt";
 const ORIGINAL: &str = "Original";
 /// The game's own model, inside the bike's `.pkz`. Never a folder — it's reached by
@@ -11,6 +12,15 @@ const STOCK: &str = "Stock";
 /// Per-variant record of the filenames that variant owns, written whenever we park a
 /// set. Lets the reverse swap move back exactly what it moved out instead of guessing.
 const MANIFEST: &str = "_files.txt";
+/// Which liveries each model variant owns: variant name -> livery base names (no `.pnt`).
+/// The game has no notion of a model swap — every livery must sit in the one flat
+/// `<Bike>/paints/` folder — so ownership can only live beside the swaps themselves.
+const PAINT_ASSIGN: &str = "_paints.json";
+/// Where a livery waits while the model it belongs to is *not* active. Out of
+/// `<Bike>/paints/` means out of the game's paint list too, which is the point. One shelf
+/// per bike rather than one per variant, so a livery owned by two models has one home.
+pub const PAINT_SHELF: &str = "_paints";
+const PNT_EXT: &str = ".pnt";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,6 +32,9 @@ pub struct ModelVariant {
     /// distinct from an incomplete set that has files but is missing `model.edf`.
     pub empty: bool,
     pub file_count: usize,
+    /// Liveries assigned to this variant, by base name. Empty means "no opinion" — the
+    /// bike's unassigned liveries are offered under every model.
+    pub paints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +92,18 @@ fn lib_dir(mods_path: &str, bike: &str) -> PathBuf {
 }
 fn variant_dir(mods_path: &str, bike: &str, name: &str) -> PathBuf {
     lib_dir(mods_path, bike).join(name)
+}
+fn paints_dir(mods_path: &str, bike: &str) -> PathBuf {
+    bike_dir(mods_path, bike).join("paints")
+}
+fn shelf_dir(mods_path: &str, bike: &str) -> PathBuf {
+    lib_dir(mods_path, bike).join(PAINT_SHELF)
+}
+
+/// The shelf lives inside `FrostMod Models/` but is not a model set. Every walk over that
+/// folder's children has to say so, or it reads as a variant named `_paints`.
+fn is_shelf(name: &str) -> bool {
+    name.eq_ignore_ascii_case(PAINT_SHELF)
 }
 
 use crate::library::is_simple_name;
@@ -180,7 +205,7 @@ fn files_known_to_other_variants(mods_path: &str, bike: &str, except: &[&str]) -
                 continue;
             }
             let name = e.file_name().to_string_lossy().to_string();
-            if except.iter().any(|x| x.eq_ignore_ascii_case(&name)) {
+            if is_shelf(&name) || except.iter().any(|x| x.eq_ignore_ascii_case(&name)) {
                 continue;
             }
             for f in read_manifest(&p).unwrap_or_else(|| set_files(&p)) {
@@ -265,6 +290,291 @@ fn move_one(src: &Path, dst: &Path) -> bool {
     false
 }
 
+// ---------------------------------------------------------------------------
+// Livery ownership
+//
+// A bike's liveries all have to live in one flat `<Bike>/paints/` folder — that is the
+// game's rule, and it knows nothing about model swaps. So a Yami model swapped onto a KTM
+// shows the Yami liveries and the KTM ones side by side, most of them wrong for whatever
+// mesh is currently on the bike.
+//
+// `_paints.json` records which liveries each variant owns. A livery no variant claims is
+// unassigned and stays on offer under every model — so a tree with no assignments behaves
+// exactly as it did before. `reconcile_paints` then makes the folder agree with the
+// record: liveries owned by some *other* model move to the shelf, the active model's move
+// back. The game lists what it finds, so shelving is what filters it in-game too.
+//
+// Ownership is a record rather than a location on purpose: it lets two models claim the
+// same livery without a second copy of it on disk, and it lets `Stock` — which never has
+// a folder at all (see `STOCK`) — own liveries like any other variant.
+// ---------------------------------------------------------------------------
+
+/// variant name -> the liveries it owns, by base name (no `.pnt`).
+pub type PaintAssignments = BTreeMap<String, Vec<String>>;
+
+fn assign_path(mods_path: &str, bike: &str) -> PathBuf {
+    lib_dir(mods_path, bike).join(PAINT_ASSIGN)
+}
+
+pub fn load_paint_assignments(mods_path: &str, bike: &str) -> PaintAssignments {
+    match fs::read_to_string(assign_path(mods_path, bike)) {
+        Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+        Err(_) => PaintAssignments::new(),
+    }
+}
+
+fn save_paint_assignments(
+    mods_path: &str,
+    bike: &str,
+    assignments: &PaintAssignments,
+) -> anyhow::Result<()> {
+    if assignments.is_empty() {
+        let _ = fs::remove_file(assign_path(mods_path, bike));
+        return Ok(());
+    }
+    let lib = lib_dir(mods_path, bike);
+    fs::create_dir_all(&lib)?;
+    fs::write(assign_path(mods_path, bike), serde_json::to_string_pretty(assignments)?)?;
+    Ok(())
+}
+
+fn strip_pnt(name: &str) -> &str {
+    match name.rsplit_once('.') {
+        Some((stem, ext)) if ext.eq_ignore_ascii_case("pnt") => stem,
+        _ => name,
+    }
+}
+
+/// The `.pnt` files directly in `dir`, as base names.
+fn liveries_in(dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = list_files(dir)
+        .into_iter()
+        .filter(|f| f.to_ascii_lowercase().ends_with(PNT_EXT))
+        .map(|f| strip_pnt(&f).to_string())
+        .collect();
+    out.sort_by_key(|s| s.to_lowercase());
+    out
+}
+
+/// Every livery the bike owns, wherever it currently sits — the loose `paints/` folder and
+/// the shelf both count, so assigning one doesn't make it disappear from the picker that
+/// assigns it.
+pub fn bike_liveries(mods_path: &str, bike: &str) -> Vec<String> {
+    let mut out = liveries_in(&paints_dir(mods_path, bike));
+    for name in liveries_in(&shelf_dir(mods_path, bike)) {
+        if !contains_ci(&out, &name) {
+            out.push(name);
+        }
+    }
+    out.sort_by_key(|s| s.to_lowercase());
+    out
+}
+
+/// The real filename of livery `base` inside `dir`, matched case-insensitively — the
+/// record stores what the user sees, the disk stores whatever the mod author typed.
+fn livery_file(dir: &Path, base: &str) -> Option<String> {
+    list_files(dir).into_iter().find(|f| {
+        f.to_ascii_lowercase().ends_with(PNT_EXT) && strip_pnt(f).eq_ignore_ascii_case(base)
+    })
+}
+
+/// Move a livery between the loose folder and the shelf, refusing to write over one that
+/// is already there. Two different `.pnt`s can share a base name — one drawn for the Yami
+/// and one for the KTM, both called `Redbud` — and `move_one` renames, which would destroy
+/// the one at the destination. Leaving it put keeps both files.
+fn move_livery(from: &Path, to: &Path, file: &str) -> bool {
+    if to.join(file).exists() {
+        return false;
+    }
+    fs::create_dir_all(to).is_ok() && move_one(&from.join(file), &to.join(file))
+}
+
+/// The variant folders under `FrostMod Models/`, shelf excluded.
+fn variant_names(mods_path: &str, bike: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(lib_dir(mods_path, bike)) {
+        for e in rd.flatten() {
+            if !e.path().is_dir() {
+                continue;
+            }
+            if let Some(n) = e.file_name().to_str() {
+                if !is_shelf(n) {
+                    out.push(n.to_string());
+                }
+            }
+        }
+    }
+    out.sort_by_key(|s| s.to_lowercase());
+    out
+}
+
+/// Take ownership of liveries stranded inside a variant folder.
+///
+/// A model pack that shipped `model.edf` alongside its own `paints/` leaves them at
+/// `FrostMod Models/<Variant>/paints/*.pnt` once `register_loose_swaps` moves the folder
+/// in. The game only ever reads `<Bike>/paints/`, and no scan of ours looked in there
+/// either, so those liveries are dead files — installed, invisible, and unusable.
+///
+/// They are exactly what an assignment describes, so record the claim and move them onto
+/// the shelf; the reconcile pass that follows brings them home if their model is the one
+/// on the bike. Idempotent: once moved, the folder is empty and there is nothing to adopt.
+fn adopt_stranded_liveries(mods_path: &str, bike: &str, assignments: &mut PaintAssignments) -> bool {
+    let shelf = shelf_dir(mods_path, bike);
+    let mut changed = false;
+
+    for variant in variant_names(mods_path, bike) {
+        let stray = variant_dir(mods_path, bike, &variant).join("paints");
+        if !stray.is_dir() {
+            continue;
+        }
+        for file in list_files(&stray) {
+            if !file.to_ascii_lowercase().ends_with(PNT_EXT) {
+                continue;
+            }
+            if !move_livery(&stray, &shelf, &file) {
+                continue; // a livery of that name is already shelved — leave this one be
+            }
+            let base = strip_pnt(&file).to_string();
+            let owned = assignments.entry(variant.clone()).or_default();
+            if !contains_ci(owned, &base) {
+                owned.push(base);
+            }
+            changed = true;
+        }
+        // Only if we emptied it: a `paints/` folder still holding something isn't ours.
+        let _ = fs::remove_dir(&stray);
+    }
+    changed
+}
+
+/// Put every *assigned* livery where the active model says it belongs: owned by the active
+/// variant → loose in `paints/`; owned only by others → on the shelf. Liveries no variant
+/// claims are never touched.
+///
+/// Idempotent and order-independent, so it can be re-run after any drift. Returns how many
+/// liveries it could **not** move — MX Bikes holds these files open while it runs, so a
+/// reconcile mid-session legitimately fails and the caller has to say so rather than
+/// report a clean filter.
+pub fn reconcile_paints(mods_path: &str, bike: &str) -> usize {
+    let mut assignments = load_paint_assignments(mods_path, bike);
+    if adopt_stranded_liveries(mods_path, bike, &mut assignments) {
+        let _ = save_paint_assignments(mods_path, bike, &assignments);
+    }
+
+    let paints = paints_dir(mods_path, bike);
+    let shelf = shelf_dir(mods_path, bike);
+
+    // Every livery an assignment has an opinion about: claimed by some variant, or sitting
+    // on the shelf — which only ever happens because it *was* claimed. Including the shelf
+    // is what brings a livery home once its last claim is dropped.
+    let mut subject: Vec<String> = Vec::new();
+    for name in assignments.values().flatten().cloned().chain(liveries_in(&shelf)) {
+        if !contains_ci(&subject, &name) {
+            subject.push(name);
+        }
+    }
+    if subject.is_empty() {
+        return 0;
+    }
+
+    let active = current_active(mods_path, bike);
+    let owned_by_active: Vec<String> = assignments
+        .iter()
+        .filter(|(v, _)| v.eq_ignore_ascii_case(&active))
+        .flat_map(|(_, paints)| paints.iter().cloned())
+        .collect();
+    let mut stuck = 0usize;
+
+    for base in &subject {
+        // Home is the loose folder unless someone else has claimed it and the active model
+        // hasn't — an unclaimed livery belongs on offer under every model.
+        let claimed = assignments.values().any(|p| contains_ci(p, base));
+        let (from, to) = if claimed && !contains_ci(&owned_by_active, base) {
+            (&paints, &shelf)
+        } else {
+            (&shelf, &paints)
+        };
+        let Some(file) = livery_file(from, base) else {
+            continue; // already where it belongs (or gone from the tree entirely)
+        };
+        if !move_livery(from, to, &file) {
+            stuck += 1;
+        }
+    }
+
+    // Don't leave an empty `_paints/` behind once nothing is shelved.
+    if shelf.is_dir() && list_files(&shelf).is_empty() {
+        let _ = fs::remove_dir(&shelf);
+    }
+    stuck
+}
+
+/// The liveries that would sit loose in `paints/` with `variant` on the bike: the ones it
+/// claims, plus every livery no variant claims at all.
+pub fn liveries_under(mods_path: &str, bike: &str, variant: &str) -> Vec<String> {
+    let assignments = load_paint_assignments(mods_path, bike);
+    let mine: Vec<String> = assignments
+        .iter()
+        .filter(|(v, _)| v.eq_ignore_ascii_case(variant))
+        .flat_map(|(_, p)| p.iter().cloned())
+        .collect();
+    bike_liveries(mods_path, bike)
+        .into_iter()
+        .filter(|l| {
+            contains_ci(&mine, l) || !assignments.values().any(|p| contains_ci(p, l))
+        })
+        .collect()
+}
+
+/// Where each of `variant`'s liveries actually sits right now — loose in `paints/` if that
+/// model is the one on the bike, on the shelf if it isn't. Lets a preview show the liveries
+/// a swap would bring without moving anything first.
+fn livery_paths(mods_path: &str, bike: &str, variant: &str) -> Vec<PathBuf> {
+    let paints = paints_dir(mods_path, bike);
+    let shelf = shelf_dir(mods_path, bike);
+    liveries_under(mods_path, bike, variant)
+        .into_iter()
+        .filter_map(|base| {
+            livery_file(&paints, &base)
+                .map(|f| paints.join(f))
+                .or_else(|| livery_file(&shelf, &base).map(|f| shelf.join(f)))
+        })
+        .collect()
+}
+
+/// Replace the set of liveries owned by one variant, then make the folder match. An empty
+/// list drops the variant from the record entirely, so unassigning everything leaves the
+/// tree exactly as it was found.
+pub fn set_model_paints(
+    mods_path: &str,
+    bike: &str,
+    model: &str,
+    paints: &[String],
+) -> anyhow::Result<usize> {
+    if !is_simple_name(bike) || !is_simple_name(model) {
+        anyhow::bail!("invalid bike or model name");
+    }
+    if !dir_exists(&bike_dir(mods_path, bike)) {
+        anyhow::bail!("bike '{bike}' not found");
+    }
+    let mut assignments = load_paint_assignments(mods_path, bike);
+    let cleaned: Vec<String> = paints
+        .iter()
+        .map(|p| strip_pnt(p).to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if cleaned.is_empty() {
+        assignments.remove(model);
+        // The record keys on the name the caller used; an older one may differ in case.
+        assignments.retain(|v, _| !v.eq_ignore_ascii_case(model));
+    } else {
+        assignments.retain(|v, _| !v.eq_ignore_ascii_case(model));
+        assignments.insert(model.to_string(), cleaned);
+    }
+    save_paint_assignments(mods_path, bike, &assignments)?;
+    Ok(reconcile_paints(mods_path, bike))
+}
+
 fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
     let active_label = {
         let a = read_active(mods_path, bike);
@@ -274,13 +584,22 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
     // The active model set is the subset of the bike's loose files that belongs to the
     // model — not the whole folder (see `active_set_files`).
     let active_files = active_set_files(mods_path, bike, &active_label, &[]).len();
+    let assignments = load_paint_assignments(mods_path, bike);
+    let paints_of = |name: &str| -> Vec<String> {
+        assignments
+            .iter()
+            .find(|(v, _)| v.eq_ignore_ascii_case(name))
+            .map(|(_, p)| p.clone())
+            .unwrap_or_default()
+    };
     let mut variants = vec![ModelVariant {
-        name: active_label.clone(),
-        active: true,
         // The active set is loose at the root — valid iff a mesh is there.
         valid: crate::bikefiles::dir_has_mesh(&bike_dir(mods_path, bike)),
         empty: active_files == 0,
         file_count: active_files,
+        paints: paints_of(&active_label),
+        name: active_label.clone(),
+        active: true,
     }];
 
     let mut others: Vec<ModelVariant> = Vec::new();
@@ -294,6 +613,9 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
                 Some(n) => n.to_string(),
                 None => continue,
             };
+            if is_shelf(&name) {
+                continue; // the livery shelf is not a model set
+            }
             if name.eq_ignore_ascii_case(&active_label) {
                 continue; // active is already row 0
             }
@@ -302,6 +624,7 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
                 valid: crate::bikefiles::dir_has_mesh(&p),
                 empty: files == 0,
                 file_count: files,
+                paints: paints_of(&name),
                 name,
                 active: false,
             });
@@ -318,6 +641,7 @@ fn scan_variants(mods_path: &str, bike: &str) -> Vec<ModelVariant> {
     let has_stock = |v: &ModelVariant| v.name.eq_ignore_ascii_case(STOCK);
     if !variants[0].empty && !variants.iter().chain(others.iter()).any(has_stock) {
         others.push(ModelVariant {
+            paints: paints_of(STOCK),
             name: STOCK.to_string(),
             active: false,
             valid: false,
@@ -365,6 +689,16 @@ pub fn scan_model_swaps(mods_path: &str) -> Vec<BikeModels> {
 }
 
 pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Result<()> {
+    apply_model_swap_reporting(mods_path, bike, target).map(|_| ())
+}
+
+/// [`apply_model_swap`], reporting how many liveries the follow-up reconcile could not
+/// move. See [`reconcile_paints`] — MX Bikes holds bike files open while it runs.
+pub fn apply_model_swap_reporting(
+    mods_path: &str,
+    bike: &str,
+    target: &str,
+) -> anyhow::Result<usize> {
     if !is_simple_name(bike) || !is_simple_name(target) {
         anyhow::bail!("invalid bike or model name");
     }
@@ -430,7 +764,10 @@ pub fn apply_model_swap(mods_path: &str, bike: &str, target: &str) -> anyhow::Re
     write_manifest(&backup_dir, &root_files);
     write_manifest(&target_dir, &target_files);
     write_active(mods_path, bike, target)?;
-    Ok(())
+    // The model changed, so the liveries on offer changed with it. The swap itself has
+    // already happened, so a livery the game is holding open is worth a word to the user
+    // rather than a rolled-back swap — hence a count, not an error.
+    Ok(reconcile_paints(mods_path, bike))
 }
 
 /// What the bike's files would look like with `variant` active — filenames only, nothing
@@ -444,6 +781,10 @@ pub struct PreviewSet {
     /// in nothing and lets the packed model show through.
     pub variant_dir: PathBuf,
     pub variant_files: Vec<String>,
+    /// The liveries this model would offer, as full paths — the ones it claims plus every
+    /// unclaimed one. Resolved here rather than read back off `paints/`, which still holds
+    /// the *active* model's set until the swap actually happens.
+    pub paints: Vec<PathBuf>,
 }
 
 /// The file accounting `apply_model_swap` would do, without doing it. Same rules on
@@ -464,6 +805,7 @@ pub fn preview_set(mods_path: &str, bike: &str, variant: &str) -> anyhow::Result
     if variant.eq_ignore_ascii_case(&active) {
         return Ok(PreviewSet {
             root_keep: list_files(&root),
+            paints: livery_paths(mods_path, bike, variant),
             bike_dir: root,
             variant_dir: target_dir,
             variant_files: Vec::new(),
@@ -492,7 +834,8 @@ pub fn preview_set(mods_path: &str, bike: &str, variant: &str) -> anyhow::Result
         .into_iter()
         .filter(|f| !contains_ci(&parked, f))
         .collect();
-    Ok(PreviewSet { bike_dir: root, root_keep, variant_dir: target_dir, variant_files })
+    let paints = livery_paths(mods_path, bike, variant);
+    Ok(PreviewSet { bike_dir: root, root_keep, variant_dir: target_dir, variant_files, paints })
 }
 
 /// A bike whose setup files (`.hrc`/`.cfg`/`.geom`) were carried off into a swap folder
@@ -536,8 +879,8 @@ fn orphaned_setup_for(mods_path: &str, bike: &str) -> Vec<(String, PathBuf)> {
     if let Ok(rd) = fs::read_dir(lib_dir(mods_path, bike)) {
         for e in rd.flatten() {
             let p = e.path();
-            if !p.is_dir() {
-                continue;
+            if !p.is_dir() || e.file_name().to_str().is_some_and(is_shelf) {
+                continue; // the shelf holds liveries, never a bike's setup
             }
             for f in set_files(&p) {
                 if !crate::bikefiles::is_bike_setup(&f) || crate::soundmods::is_sound_file(&f) {
@@ -892,6 +1235,325 @@ mod tests {
         let mut v = list_files(p);
         v.sort();
         v
+    }
+
+    // --- livery ownership -------------------------------------------------------------
+
+    /// A KTM wearing a Yami model swap, with liveries drawn for each — the case the
+    /// feature exists for.
+    fn make_bike_with_liveries(mp: &str, bike: &str, liveries: &[&str]) {
+        make_bike(mp, bike, "model.edf");
+        touch(&variant_dir(mp, bike, "Yami").join("model.edf"));
+        for l in liveries {
+            touch(&paints_dir(mp, bike).join(format!("{l}.pnt")));
+        }
+    }
+    fn assign(mp: &str, bike: &str, model: &str, paints: &[&str]) -> usize {
+        let owned: Vec<String> = paints.iter().map(|s| s.to_string()).collect();
+        set_model_paints(mp, bike, model, &owned).unwrap()
+    }
+    fn loose_liveries(mp: &str, bike: &str) -> Vec<String> {
+        liveries_in(&paints_dir(mp, bike))
+    }
+    fn shelved_liveries(mp: &str, bike: &str) -> Vec<String> {
+        liveries_in(&shelf_dir(mp, bike))
+    }
+
+    #[test]
+    fn assigned_liveries_follow_the_active_model() {
+        let root = tmp("paint-follows-model");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Yami Redbud", "KTM Factory", "Plain White"]);
+
+        assign(mp, "KTM450", "Yami", &["Yami Redbud"]);
+        assign(mp, "KTM450", ORIGINAL, &["KTM Factory"]);
+
+        // Original is active, so only its livery — plus the unassigned one — is on offer.
+        assert_eq!(loose_liveries(mp, "KTM450"), ["KTM Factory", "Plain White"]);
+        assert_eq!(shelved_liveries(mp, "KTM450"), ["Yami Redbud"]);
+
+        apply_model_swap(mp, "KTM450", "Yami").unwrap();
+        assert_eq!(
+            loose_liveries(mp, "KTM450"),
+            ["Plain White", "Yami Redbud"],
+            "the Yami livery came back and the KTM one went away",
+        );
+        assert_eq!(shelved_liveries(mp, "KTM450"), ["KTM Factory"]);
+
+        apply_model_swap(mp, "KTM450", ORIGINAL).unwrap();
+        assert_eq!(loose_liveries(mp, "KTM450"), ["KTM Factory", "Plain White"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unassigned_livery_is_never_moved() {
+        let root = tmp("paint-unassigned");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Yami Redbud", "Plain White"]);
+
+        assign(mp, "KTM450", "Yami", &["Yami Redbud"]);
+        apply_model_swap(mp, "KTM450", "Yami").unwrap();
+        apply_model_swap(mp, "KTM450", ORIGINAL).unwrap();
+
+        assert!(
+            loose_liveries(mp, "KTM450").contains(&"Plain White".to_string()),
+            "a livery no model claims stays on offer under every model",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn swapping_an_unassigned_bike_is_byte_for_byte_what_it_was() {
+        // The invariant the whole feature rests on: until someone assigns a livery, every
+        // path behaves exactly as it did before this existed.
+        let root = tmp("paint-inert");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Red", "Blue", "Green"]);
+        let paints_before = names_at(&paints_dir(mp, "KTM450"));
+        let root_before = names_at(&bike_dir(mp, "KTM450"));
+
+        apply_model_swap(mp, "KTM450", "Yami").unwrap();
+        apply_model_swap(mp, "KTM450", ORIGINAL).unwrap();
+
+        assert_eq!(names_at(&paints_dir(mp, "KTM450")), paints_before);
+        assert_eq!(names_at(&bike_dir(mp, "KTM450")), root_before);
+        assert!(!shelf_dir(mp, "KTM450").exists());
+        assert!(!assign_path(mp, "KTM450").exists());
+        assert!(
+            scan_model_swaps(mp)[0].variants.iter().all(|v| v.paints.is_empty()),
+            "no model claims anything",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unassigning_everything_puts_the_folder_back() {
+        let root = tmp("paint-unassign");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Yami Redbud", "Plain White"]);
+        let before = names_at(&paints_dir(mp, "KTM450"));
+
+        assign(mp, "KTM450", "Yami", &["Yami Redbud"]);
+        assert_eq!(shelved_liveries(mp, "KTM450"), ["Yami Redbud"]);
+
+        assign(mp, "KTM450", "Yami", &[]);
+        assert_eq!(names_at(&paints_dir(mp, "KTM450")), before, "the livery came home");
+        assert!(!shelf_dir(mp, "KTM450").exists(), "and the empty shelf is gone");
+        assert!(!assign_path(mp, "KTM450").exists(), "and so is the record");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn two_models_can_claim_the_same_livery() {
+        // One file, no copies: ownership is a record, so a livery that suits both meshes
+        // comes home under either one.
+        let root = tmp("paint-shared-claim");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Number 7", "Yami Only"]);
+
+        assign(mp, "KTM450", "Yami", &["Number 7", "Yami Only"]);
+        assign(mp, "KTM450", ORIGINAL, &["Number 7"]);
+
+        assert_eq!(loose_liveries(mp, "KTM450"), ["Number 7"]);
+        assert_eq!(shelved_liveries(mp, "KTM450"), ["Yami Only"]);
+
+        apply_model_swap(mp, "KTM450", "Yami").unwrap();
+        assert_eq!(
+            loose_liveries(mp, "KTM450"),
+            ["Number 7", "Yami Only"],
+            "the shared livery stayed put while the Yami one arrived",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stock_can_own_liveries() {
+        // The OP's case: a KTM's own liveries belong to the model in its `.pkz`, which
+        // never has a folder — so only a record can express it.
+        let root = tmp("paint-stock-owns");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["KTM Factory", "Yami Redbud"]);
+        touch(&bike_dir(mp, "KTM450").join("KTM450.pkz"));
+
+        assign(mp, "KTM450", STOCK, &["KTM Factory"]);
+        assign(mp, "KTM450", "Yami", &["Yami Redbud"]);
+
+        apply_model_swap(mp, "KTM450", "Yami").unwrap();
+        assert_eq!(loose_liveries(mp, "KTM450"), ["Yami Redbud"]);
+
+        apply_model_swap(mp, "KTM450", STOCK).unwrap();
+        assert_eq!(loose_liveries(mp, "KTM450"), ["KTM Factory"]);
+
+        let stock = scan_model_swaps(mp)[0]
+            .variants
+            .iter()
+            .find(|v| v.name.eq_ignore_ascii_case(STOCK))
+            .cloned()
+            .expect("a Stock row");
+        assert_eq!(stock.paints, ["KTM Factory"], "and the row reports its claim");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_record_naming_a_deleted_livery_is_harmless() {
+        // Realistic drift: the user deletes a `.pnt` the record still claims. Reconcile
+        // must skip it rather than fail, and must not disturb the liveries that remain.
+        let root = tmp("paint-stale-record");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Yami Redbud", "Plain White"]);
+        assign(mp, "KTM450", "Yami", &["Yami Redbud", "Deleted Livery"]);
+
+        assert_eq!(reconcile_paints(mp, "KTM450"), 0, "a name with no file isn't a failure");
+        assert_eq!(loose_liveries(mp, "KTM450"), ["Plain White"]);
+        assert_eq!(shelved_liveries(mp, "KTM450"), ["Yami Redbud"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reconcile_is_idempotent() {
+        let root = tmp("paint-idempotent");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Yami Redbud", "Plain White"]);
+        assign(mp, "KTM450", "Yami", &["Yami Redbud"]);
+
+        let loose = loose_liveries(mp, "KTM450");
+        let shelved = shelved_liveries(mp, "KTM450");
+        for _ in 0..3 {
+            assert_eq!(reconcile_paints(mp, "KTM450"), 0);
+            assert_eq!(loose_liveries(mp, "KTM450"), loose);
+            assert_eq!(shelved_liveries(mp, "KTM450"), shelved);
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_scan_never_moves_a_livery() {
+        // Adoption moves files, and `scan_model_swaps` runs over the whole tree on every
+        // Locker refresh and every mods-changed event. Only the single-bike, user-initiated
+        // calls reconcile; a scan stays read-only.
+        let root = tmp("paint-scan-readonly");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Plain White"]);
+        let stray = variant_dir(mp, "KTM450", "Yami").join("paints");
+        touch(&stray.join("Yami Redbud.pnt"));
+
+        let _ = scan_model_swaps(mp);
+        assert!(stray.join("Yami Redbud.pnt").is_file(), "the scan left it where it was");
+        assert!(!assign_path(mp, "KTM450").exists(), "and recorded nothing");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bike_liveries_sees_shelved_ones_too() {
+        // The picker that assigns liveries has to keep offering the ones it shelved.
+        let root = tmp("paint-liveries-list");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Yami Redbud", "Plain White"]);
+        assign(mp, "KTM450", "Yami", &["Yami Redbud"]);
+
+        assert_eq!(bike_liveries(mp, "KTM450"), ["Plain White", "Yami Redbud"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_livery_stranded_in_a_variant_folder_is_adopted() {
+        // What a model pack that shipped its own `paints/` leaves behind once
+        // `register_loose_swaps` files it away: liveries the game never reads and no scan
+        // of ours ever showed. They're an assignment waiting to be recorded.
+        let root = tmp("paint-adopt");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Plain White"]);
+        touch(&variant_dir(mp, "KTM450", "Yami").join("paints/Yami Redbud.pnt"));
+
+        assert_eq!(reconcile_paints(mp, "KTM450"), 0);
+        assert_eq!(
+            load_paint_assignments(mp, "KTM450").get("Yami").map(Vec::as_slice),
+            Some(["Yami Redbud".to_string()].as_slice()),
+            "the variant that carried it is recorded as its owner",
+        );
+        assert_eq!(shelved_liveries(mp, "KTM450"), ["Yami Redbud"], "shelved: Yami is off");
+        assert!(
+            !variant_dir(mp, "KTM450", "Yami").join("paints").exists(),
+            "and the emptied folder is tidied away",
+        );
+
+        apply_model_swap(mp, "KTM450", "Yami").unwrap();
+        assert_eq!(
+            loose_liveries(mp, "KTM450"),
+            ["Plain White", "Yami Redbud"],
+            "and it works like any other assignment from then on",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn adopting_never_writes_over_a_livery_of_the_same_name() {
+        // Two different `.pnt`s can share a base name — one drawn for each mesh. Adoption
+        // renames files into a shared shelf, so it has to refuse rather than clobber.
+        let root = tmp("paint-adopt-collision");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Redbud"]);
+        assign(mp, "KTM450", "Yami", &["Redbud"]); // shelves the KTM's `Redbud.pnt`
+        let stray = variant_dir(mp, "KTM450", "Yami").join("paints");
+        fs::create_dir_all(&stray).unwrap();
+        fs::write(stray.join("Redbud.pnt"), b"a different Redbud").unwrap();
+
+        reconcile_paints(mp, "KTM450");
+        assert_eq!(
+            fs::read(stray.join("Redbud.pnt")).unwrap(),
+            b"a different Redbud",
+            "the stranded livery is left where it is rather than destroying the shelved one",
+        );
+        assert_eq!(shelved_liveries(mp, "KTM450"), ["Redbud"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_shelf_is_not_a_model_variant() {
+        // It lives inside `FrostMod Models/`, so every walk over that folder's children
+        // has to skip it or it reads as a swap called `_paints`.
+        let root = tmp("paint-shelf-not-variant");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Yami Redbud", "Plain White"]);
+        assign(mp, "KTM450", "Yami", &["Yami Redbud"]);
+        assert!(shelf_dir(mp, "KTM450").is_dir(), "something is shelved");
+
+        let names: Vec<String> =
+            scan_model_swaps(mp)[0].variants.iter().map(|v| v.name.clone()).collect();
+        assert!(!names.iter().any(|n| is_shelf(n)), "not offered as a model: {names:?}");
+        assert!(detect_orphaned_setup(mp).is_empty(), "and not read as a gutted bike");
+        assert!(
+            detect_loose_swaps(mp).is_empty(),
+            "and not offered for registration as a loose swap",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn preview_reports_the_liveries_the_swap_would_bring() {
+        // The viewer's paint list has to be the target model's, not whatever is sitting in
+        // `paints/` for the model still on the bike.
+        let root = tmp("paint-preview");
+        let mp = root.to_str().unwrap();
+        make_bike_with_liveries(mp, "KTM450", &["Yami Redbud", "KTM Factory", "Plain White"]);
+        assign(mp, "KTM450", "Yami", &["Yami Redbud"]);
+        assign(mp, "KTM450", ORIGINAL, &["KTM Factory"]);
+
+        let names = |set: &PreviewSet| -> Vec<String> {
+            let mut v: Vec<String> = set
+                .paints
+                .iter()
+                .filter_map(|p| p.file_name()?.to_str().map(str::to_string))
+                .collect();
+            v.sort();
+            v
+        };
+
+        let yami = preview_set(mp, "KTM450", "Yami").unwrap();
+        assert_eq!(names(&yami), ["Plain White.pnt", "Yami Redbud.pnt"]);
+        let now = preview_set(mp, "KTM450", ORIGINAL).unwrap();
+        assert_eq!(names(&now), ["KTM Factory.pnt", "Plain White.pnt"]);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -463,6 +463,10 @@ struct SwapApplyOutcome {
     /// loader, which reloads paints/gear but never the mesh — the model needs FrostMod
     /// to re-apply the bike. See `frostmod::signal_refresh_model`.
     model_refresh: Option<frostmod::CommandOutcome>,
+    /// Liveries the swap couldn't move into or out of `paints/`, because MX Bikes holds
+    /// bike files open while it runs. Zero on every other path. See
+    /// `modelswap::reconcile_paints`.
+    paints_stuck: usize,
 }
 
 /// Outcome of switching ReShade preset.
@@ -647,7 +651,8 @@ fn apply_model_swap_blocking(
 ) -> Result<SwapApplyOutcome, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let prev = modelswap::current_active(&cfg.mods_path, &bike);
-    modelswap::apply_model_swap(&cfg.mods_path, &bike, &target).map_err(|e| format!("{e:#}"))?;
+    let paints_stuck = modelswap::apply_model_swap_reporting(&cfg.mods_path, &bike, &target)
+        .map_err(|e| format!("{e:#}"))?;
     // Make a bound sound travel with the model (case 2); independent sounds are left
     // untouched (case 1). Best-effort — the model swap itself already succeeded.
     if let Err(e) = soundmods::reconcile_after_model_swap(&cfg.mods_path, &bike, &prev, &target) {
@@ -667,7 +672,55 @@ fn apply_model_swap_blocking(
         game_running: gameproc::is_game_running(),
         live_refresh: live_refresh(cfg.instant_refresh),
         model_refresh,
+        paints_stuck,
     })
+}
+
+/// Every livery the bike has, wherever it currently sits — the loose `paints/` folder and
+/// the shelf both — so the assignment picker lists a livery it has already shelved.
+///
+/// Reconciles first, which is what adopts liveries stranded inside a model-swap folder: a
+/// livery the picker can't see is one nobody can assign, and adoption is the only thing
+/// that moves them somewhere the picker looks. Deliberately here and not in `scan_*` —
+/// this is a single bike the user has just opened the picker for, where a scan runs over
+/// the whole tree on every refresh and has no business moving files.
+#[tauri::command]
+async fn list_bike_liveries(app: tauri::AppHandle, bike: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        modelswap::reconcile_paints(&cfg.mods_path, &bike);
+        Ok(modelswap::bike_liveries(&cfg.mods_path, &bike))
+    })
+    .await
+    .map_err(|e| format!("list_bike_liveries task failed: {e}"))?
+}
+
+/// Set which liveries a model swap owns, then move the folder to match.
+#[tauri::command]
+async fn set_model_paints(
+    app: tauri::AppHandle,
+    bike: String,
+    model: String,
+    paints: Vec<String>,
+) -> Result<SwapApplyOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        let paints_stuck = modelswap::set_model_paints(&cfg.mods_path, &bike, &model, &paints)
+            .map_err(|e| format!("{e:#}"))?;
+        // Liveries moved in or out of `paints/`, which is exactly what the customization
+        // loader reads — same refresh the Locker's swaps ask for.
+        let content_reload = frostmod::signal_reload();
+        watch_worn_paints(&app);
+        Ok(SwapApplyOutcome {
+            content_reload,
+            game_running: gameproc::is_game_running(),
+            live_refresh: live_refresh(cfg.instant_refresh),
+            model_refresh: None, // the mesh didn't change, only which liveries sit beside it
+            paints_stuck,
+        })
+    })
+    .await
+    .map_err(|e| format!("set_model_paints task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -695,6 +748,7 @@ async fn apply_sound_swap(
             game_running: gameproc::is_game_running(),
             live_refresh: live_refresh(cfg.instant_refresh),
             model_refresh: None, // a sound swap doesn't touch the model
+            paints_stuck: 0,     // nor the liveries
         })
     })
     .await
@@ -1466,12 +1520,16 @@ fn bike_cache_key(source: &str) -> String {
 /// A swap preview is keyed by both folders it's built from — the same bike renders
 /// differently per variant, and either side can change under us.
 fn swap_cache_key(set: &modelswap::PreviewSet) -> String {
+    // The livery list is part of what a preview shows, and an assignment edit changes it
+    // without touching either folder — so key on the resolved paths, not just the mtimes.
+    let paints: Vec<String> = set.paints.iter().map(|p| p.display().to_string()).collect();
     format!(
-        "{}#{}:{}:{}",
+        "{}#{}:{}:{}:{}",
         set.bike_dir.display(),
         set.variant_dir.display(),
         mtime_nanos(&set.bike_dir),
         mtime_nanos(&set.variant_dir),
+        paints.join(","),
     )
 }
 
@@ -1513,7 +1571,7 @@ fn preview_model_swap_blocking(
     }
 
     let files = gather_preview_files(&set).map_err(|e| format!("{e:#}"))?;
-    let installed = installed_paints(&set.bike_dir);
+    let installed = paints_at(&set.paints);
     build_bike_model(&label, key, files, installed, t0)
 }
 
@@ -1894,6 +1952,20 @@ fn paint_display_name(file_name: &str) -> String {
 ///
 /// The path rides along because these are the only paints that can change under the viewer:
 /// they are ordinary files a painter re-saves, where the ones inside the archive are not.
+/// Read an already-resolved livery list. A preview's liveries come from
+/// `modelswap::PreviewSet`, which knows the shelf — reading `paints/` directly would show
+/// whatever the model *currently* on the bike offers, not the one being previewed.
+fn paints_at(paths: &[std::path::PathBuf]) -> Vec<(String, String, Vec<u8>)> {
+    paths
+        .iter()
+        .filter_map(|p| {
+            let name = p.file_name().and_then(|n| n.to_str())?.to_string();
+            let full = p.to_str()?.to_string();
+            Some((name, full, std::fs::read(p).ok()?))
+        })
+        .collect()
+}
+
 fn installed_paints(source: &std::path::Path) -> Vec<(String, String, Vec<u8>)> {
     let folder = if source.is_dir() {
         source.to_path_buf()
@@ -6999,6 +7071,8 @@ fn main() {
             scan_bike_targets,
             scan_model_swaps,
             apply_model_swap,
+            list_bike_liveries,
+            set_model_paints,
             scan_sound_swaps,
             apply_sound_swap,
             bind_sound,
