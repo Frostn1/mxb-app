@@ -20,6 +20,15 @@ interface ComboboxProps {
   placeholder?: string;
   /** Amber "missing" styling on the trigger. */
   invalid?: boolean;
+  /**
+   * Offer the "Use …" row that commits whatever was typed. On by default.
+   *
+   * Off for a slot whose value has to name something that exists — a bike id the backend
+   * resolves a model out of, where a typed-in name is only ever a preview that fails.
+   */
+  allowCreate?: boolean;
+  /** Offer the row that clears the slot back to empty/stock. On by default. */
+  allowEmpty?: boolean;
   className?: string;
 }
 
@@ -30,6 +39,10 @@ interface ComboboxProps {
  * slot back to the empty/stock value, which no amount of typing can produce. Built on the shadcn
  * Popover + Command (cmdk) primitives. cmdk lowercases the value it hands `onSelect`,
  * so each item commits its own original-cased string from the closure instead.
+ *
+ * Both of those extra rows are for a *slot*, where an unknown name and an empty value are
+ * both legitimate answers. `allowCreate` and `allowEmpty` turn them off for a picker that
+ * has to name one of the things in the list — leaving a plain searchable select.
  */
 export function Combobox({
   value,
@@ -37,6 +50,8 @@ export function Combobox({
   onChange,
   placeholder,
   invalid,
+  allowCreate = true,
+  allowEmpty = true,
   className,
 }: ComboboxProps) {
   const t = useT();
@@ -50,7 +65,8 @@ export function Combobox({
   };
 
   const q = query.trim();
-  const canCreate = q.length > 0 && !options.some((o) => o.toLowerCase() === q.toLowerCase());
+  const canCreate =
+    allowCreate && q.length > 0 && !options.some((o) => o.toLowerCase() === q.toLowerCase());
 
   return (
     <Popover
@@ -94,16 +110,18 @@ export function Combobox({
                 a slot is one-way: once set, nothing typeable commits "" again.
                 The extra words in `value` are just cmdk filter fodder.
               */}
-              <CommandItem
-                value={`__stock__ ${placeholder} none clear`}
-                onSelect={() => commit("")}
-                className="text-[12.5px]"
-              >
-                <Check
-                  className={cn("mr-2 h-3.5 w-3.5 flex-none", !value ? "opacity-100" : "opacity-0")}
-                />
-                <span className="truncate text-muted-foreground">{placeholder} (none)</span>
-              </CommandItem>
+              {allowEmpty && (
+                <CommandItem
+                  value={`__stock__ ${placeholder} none clear`}
+                  onSelect={() => commit("")}
+                  className="text-[12.5px]"
+                >
+                  <Check
+                    className={cn("mr-2 h-3.5 w-3.5 flex-none", !value ? "opacity-100" : "opacity-0")}
+                  />
+                  <span className="truncate text-muted-foreground">{placeholder} (none)</span>
+                </CommandItem>
+              )}
               {options.map((o) => (
                 <CommandItem
                   key={o}
