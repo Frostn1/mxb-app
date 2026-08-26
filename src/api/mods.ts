@@ -441,6 +441,28 @@ export function previewModelSwap(bike: string, variant: string): Promise<BikeMod
   return invoke<BikeModel>("preview_model_swap", { bike, variant });
 }
 
+/**
+ * Every livery the bike has, wherever it currently sits — including the ones shelved
+ * because the model that claims them isn't on the bike. The assignment picker needs all of
+ * them, or shelving a livery would look like losing it.
+ */
+export function listBikeLiveries(bike: string): Promise<string[]> {
+  return invoke<string[]>("list_bike_liveries", { bike });
+}
+
+/**
+ * Set which liveries a model swap owns. Liveries belonging to a model that isn't active
+ * are moved out of the bike's `paints/` folder, which is what filters MX Bikes' own paint
+ * list too — the game reads that one folder and knows nothing about model swaps.
+ */
+export function setModelPaints(
+  bike: string,
+  model: string,
+  paints: string[],
+): Promise<SwapApplyOutcome> {
+  return invoke<SwapApplyOutcome>("set_model_paints", { bike, model, paints });
+}
+
 export function scanSoundSwaps(): Promise<BikeSounds[]> {
   return invoke<BikeSounds[]>("scan_sound_swaps");
 }

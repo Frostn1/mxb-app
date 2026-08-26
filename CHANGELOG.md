@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-08-25
+
+### Added
+- **A model swap can own its liveries.** MX Bikes gives a bike one flat `paints/` folder and
+  knows nothing about model swaps, so a Yami mesh running on a KTM offered every KTM livery
+  alongside the Yami ones — a long list where most entries were drawn for a mesh that isn't
+  on the bike. Each model in the Locker now has a palette button: tick the liveries drawn for
+  it and they become the only ones it offers. A livery belonging to a model that isn't on the
+  bike is moved out of `paints/`, so **MX Bikes' own paint picker is filtered too**, not just
+  the app's. A livery left unticked by every model belongs to none and stays available under
+  all of them — so a bike nobody has assigned anything on behaves exactly as before.
+  - A livery can be ticked under several models at once. Ownership is recorded rather than
+    filed, so that costs no second copy of the file.
+  - "Stock" — the model inside the bike's own `.pkz`, which never has a folder — can own
+    liveries like any other model. That's what puts a KTM's own liveries on the KTM.
+  - The Presets livery dropdown now offers only the liveries that suit the model the preset
+    selects, so a preset pairs a model with a livery drawn for it.
+
+### Fixed
+- **Liveries that came in with a model pack were invisible.** A model swap that shipped its
+  own `paints/` folder left its liveries inside the swap folder once the app filed it away —
+  somewhere the game never reads and no scan of ours ever looked. They were installed,
+  unusable and unlistable. Opening that model's livery picker now adopts them as its own,
+  which is also what makes them work.
+- **A livery inside a model swap was filed under the wrong owner.** The Library attributed it
+  to the swap folder rather than to the bike, so it landed in a bucket no bike id ever
+  matched — and a preset share code built from that bike silently shipped without the livery.
+
 ## 2026-08-22
 
 ### Fixed

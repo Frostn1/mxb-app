@@ -701,6 +701,40 @@ fn dir_has_sound_markers(dir: &Path) -> bool {
     found.iter().all(|&f| f)
 }
 
+/// Whether these folder segments name a bike livery, and which bike owns it — `Some(None)`
+/// for a livery loose at the bikes root, `None` when it isn't a livery at all.
+///
+/// Liveries normally live in `<Bike>/paints/`, but a model swap can own them, and then they
+/// sit under `FrostMod Models/` instead — on the shelf (`_paints/`) while that model is
+/// inactive, or in the variant's own `paints/` if a model pack shipped them there and
+/// nothing has adopted them yet. Both are still *the bike's* liveries: attributing them to
+/// the variant folder is what stopped `bundle`'s `Owner::Require` resolving a livery that
+/// came in with a model pack, so a share code shipped without it.
+fn paint_owner(segs: &[&str]) -> Option<Option<String>> {
+    let owner_at = |i: usize| segs.get(i).map(|s| s.to_string());
+    let is_lib =
+        |i: usize| segs.get(i).is_some_and(|s| s.eq_ignore_ascii_case(crate::modelswap::LIB_DIR));
+
+    if let Some(pos) = segs.iter().position(|s| s.eq_ignore_ascii_case("paints")) {
+        // `<Bike>/FrostMod Models/<Variant>/paints/…` — owner is the bike, three up.
+        if pos >= 2 && is_lib(pos - 2) {
+            return Some(pos.checked_sub(3).and_then(owner_at));
+        }
+        // `<Bike>/paints/…` — owner is the segment before `paints`.
+        return Some(pos.checked_sub(1).and_then(owner_at));
+    }
+
+    // `<Bike>/FrostMod Models/_paints/…` — shelved while its model is off the bike. Still
+    // listed, or assigning a livery would look like losing it.
+    let pos = segs
+        .iter()
+        .position(|s| s.eq_ignore_ascii_case(crate::modelswap::PAINT_SHELF))?;
+    if !is_lib(pos.checked_sub(1)?) {
+        return None;
+    }
+    Some(pos.checked_sub(2).and_then(owner_at))
+}
+
 fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
     let mut out = Vec::new();
 
@@ -723,12 +757,9 @@ fn scan_bikes(dir: &Path, sound_bikes: &[String]) -> Vec<LibraryEntry> {
         }
         let folder = rel_folder(dir, p);
         let segs: Vec<&str> = folder.split('/').filter(|s| !s.is_empty()).collect();
-        let paints_pos = segs.iter().position(|s| s.eq_ignore_ascii_case("paints"));
 
-        if let Some(pos) = paints_pos {
-            // `<Bike>/paints/…` livery — owner is the segment before `paints`.
-            let parent = if pos > 0 { Some(segs[pos - 1].to_string()) } else { None };
-            out.push(make_entry(dir, p, "bikePaint", parent));
+        if let Some(owner) = paint_owner(&segs) {
+            out.push(make_entry(dir, p, "bikePaint", owner));
         } else if is_pkz {
             out.push(make_entry(dir, p, "bike", None));
         }
@@ -961,6 +992,56 @@ mod tests {
         assert_eq!(lt.category, "track");
         // The .pkz inside the extracted track must not double-count.
         assert!(cat(&v, "Loose.pkz").is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_livery_loose_at_the_bikes_root_has_no_owner() {
+        // `paints/` directly under `mods/bikes` — the no-owning-bike branch of the livery
+        // classifier, and the one a refactor is most likely to drop.
+        let root = tmp("lib-ownerless-paint");
+        touch(&root.join("mods/bikes/paints/Red.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let paint = cat(&v, "Red.pnt").unwrap();
+        assert_eq!(paint.category, "bikePaint");
+        assert_eq!(paint.parent, None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_shelved_livery_is_still_the_bikes_livery() {
+        // Assigned to an inactive model swap, so parked out of `paints/` — the Library
+        // must still list it, or assigning a livery would look like losing it.
+        let root = tmp("lib-shelved-paint");
+        let base = root.join("mods/bikes");
+        touch(&base.join("KTM450/model.edf"));
+        touch(&base.join("KTM450/paints/Red.pnt"));
+        touch(&base.join("KTM450/FrostMod Models/_paints/Yami Redbud.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let shelved = cat(&v, "Yami Redbud.pnt").unwrap();
+        assert_eq!(shelved.category, "bikePaint");
+        assert_eq!(shelved.parent.as_deref(), Some("KTM450"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_livery_inside_a_model_swap_belongs_to_the_bike() {
+        // What a model pack that shipped its own `paints/` leaves behind. Attributing it to
+        // the variant folder put it in a bucket keyed by a name no `bikeid` ever matches,
+        // so `bundle`'s `Owner::Require` couldn't resolve it and a share code shipped
+        // without the livery.
+        let root = tmp("lib-swap-paint");
+        let base = root.join("mods/bikes");
+        touch(&base.join("KTM450/model.edf"));
+        touch(&base.join("KTM450/FrostMod Models/Yami/model.edf"));
+        touch(&base.join("KTM450/FrostMod Models/Yami/paints/Yami Redbud.pnt"));
+
+        let v = scan_library(root.to_str().unwrap(), "mods/bikes", &[], &crate::game::MXB).unwrap();
+        let paint = cat(&v, "Yami Redbud.pnt").unwrap();
+        assert_eq!(paint.category, "bikePaint");
+        assert_eq!(paint.parent.as_deref(), Some("KTM450"), "the bike, not the variant");
         let _ = fs::remove_dir_all(&root);
     }
 
