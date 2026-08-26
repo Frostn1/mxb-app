@@ -1292,6 +1292,20 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0102.hero.title":
+    "Pinturas que pertencem ao modelo que as veste",
+  "showcase.v0102.hero.body":
+    "O MX Bikes dá a uma moto uma única pasta paints e não sabe nada sobre trocas de modelo, então uma malha Yami numa KTM oferecia também todas as pinturas da KTM. Cada modelo no Locker agora tem um botão de paleta — marque as pinturas desenhadas para ele e serão as únicas oferecidas, inclusive no seletor de pinturas do próprio MX Bikes.",
+  "showcase.v0102.packs":
+    "Pinturas que vieram dentro de um pacote de modelo estavam instaladas, mas invisíveis. Abrir o seletor daquele modelo as adota, e é isso que as faz funcionar.",
+  "showcase.v0102.presets":
+    "A lista de pinturas em Presets oferece apenas as que combinam com o modelo que o preset seleciona.",
+  "showcase.v0102.vcredist":
+    "Num Windows recém-formatado o app fechava assim que era aberto, sem janela e sem log. O instalador agora coloca o runtime Visual C++ da Microsoft antes de gravar o app.",
+  "showcase.v0102.msvcr90":
+    "Um msvcr90.dll perdido que o app não apaga sozinho não é mais uma falha silenciosa: ele nomeia o arquivo e oferece desativá-lo num toque.",
+  "showcase.v0102.paintsync":
+    "A sincronização de pinturas enviava a pintura da moto errada quando duas motos tinham o mesmo nome de pintura — e pinturas de capacete, óculos, botas e proteções nunca eram compartilhadas.",
   "showcase.v0101.hero.title":
     "Sua biblioteca lembra o que você apagou",
   "showcase.v0101.hero.body":

@@ -1312,6 +1312,20 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0102.hero.title":
+    "Lackierungen gehören dem Modell, das sie trägt",
+  "showcase.v0102.hero.body":
+    "MX Bikes gibt einem Bike einen einzigen paints-Ordner und kennt keine Modell-Swaps, also bot ein Yami-Mesh auf einer KTM auch jede KTM-Lackierung an. Jedes Modell im Locker hat jetzt eine Paletten-Schaltfläche — hake die für es gezeichneten Lackierungen an, und nur die werden noch angeboten, auch in der Lackauswahl von MX Bikes selbst.",
+  "showcase.v0102.packs":
+    "Lackierungen, die in einem Modellpaket steckten, waren installiert, aber unsichtbar. Öffnest du die Auswahl dieses Modells, übernimmt es sie — und genau das macht sie nutzbar.",
+  "showcase.v0102.presets":
+    "Die Presets-Lackauswahl zeigt nur noch Lackierungen, die zum gewählten Modell passen.",
+  "showcase.v0102.vcredist":
+    "Auf einem frisch zurückgesetzten Windows schloss sich die App sofort nach dem Start — kein Fenster, kein Log. Der Installer legt jetzt erst Microsofts Visual-C++-Runtime nach und dann die App.",
+  "showcase.v0102.msvcr90":
+    "Eine übrig gebliebene msvcr90.dll, die die App nicht selbst löscht, ist kein stiller Absturz mehr: Sie benennt die Datei und deaktiviert sie auf einen Klick.",
+  "showcase.v0102.paintsync":
+    "Paint-Sync verschickte die Lackierung des falschen Bikes, wenn zwei Bikes denselben Lacknamen hatten — und Helm-, Brillen-, Stiefel- und Protektoren-Lacks wurden nie geteilt.",
   "showcase.v0101.hero.title":
     "Deine Bibliothek merkt sich, was du gelöscht hast",
   "showcase.v0101.hero.body":
