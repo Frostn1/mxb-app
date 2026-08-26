@@ -346,6 +346,8 @@ export const de: Translation = {
   "viewer.preview3d": "3D-Vorschau",
   "viewer.expand": "Vergrößern",
   "viewer.paint": "Design",
+  "viewer.tyres": "Reifen",
+  "viewer.tyresOwn": "Die des Bikes",
   "viewer.loadingModel": "Modell wird geladen…",
   "viewer.loadingPaint": "Design wird geladen…",
   "viewer.loadingRider": "Fahrer wird geladen…",

@@ -50,6 +50,16 @@
   one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
 
 
+- **Pick which tyres a bike is previewed on.** A bike's `gfx.cfg` names exactly one tyre
+  pack, so seeing it on another was impossible — the preview fitted what the file said and
+  that was that. A **Tyres** picker now sits beside the livery one in all three previews (the
+  Viewer, the Rider tab and the Designer), listing what's installed under `mods/tyres`. It
+  substitutes the name the wheels are looked up under and nothing else: no file is renamed,
+  no mod is touched, and the bike's own `gfx.cfg` still reads exactly as the game reads it.
+  The choice is remembered, and it's one choice — pick it in the Viewer and the Designer
+  agrees. Picking a pack that isn't installed leaves the bike on its own rather than taking
+  its wheels off.
+
 - **Bikes render with their wheels on.** The 3D preview drew the frame, the forks, the
   swingarm and the bars, then stopped — every bike stood on bare fork tips and a swingarm
   stub. The wheels were never in the bike's mesh to begin with: a bike's `gfx.cfg` names a

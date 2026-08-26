@@ -333,6 +333,8 @@ export const en = {
   "viewer.preview3d": "3D Preview",
   "viewer.expand": "Expand",
   "viewer.paint": "Paint",
+  "viewer.tyres": "Tyres",
+  "viewer.tyresOwn": "Bike's own",
   "viewer.loadingModel": "Loading model…",
   "viewer.loadingPaint": "Loading paint…",
   "viewer.loadingRider": "Loading rider…",

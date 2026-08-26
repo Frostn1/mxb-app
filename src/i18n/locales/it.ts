@@ -339,6 +339,8 @@ export const it: Translation = {
   "viewer.preview3d": "Anteprima 3D",
   "viewer.expand": "Ingrandisci",
   "viewer.paint": "Grafica",
+  "viewer.tyres": "Gomme",
+  "viewer.tyresOwn": "Quelle della moto",
   "viewer.loadingModel": "Caricamento modello…",
   "viewer.loadingPaint": "Caricamento grafica…",
   "viewer.loadingRider": "Caricamento pilota…",

@@ -343,6 +343,8 @@ export const fr: Translation = {
   "viewer.preview3d": "Aperçu 3D",
   "viewer.expand": "Agrandir",
   "viewer.paint": "Déco",
+  "viewer.tyres": "Pneus",
+  "viewer.tyresOwn": "Ceux de la moto",
   "viewer.loadingModel": "Chargement du modèle…",
   "viewer.loadingPaint": "Chargement de la déco…",
   "viewer.loadingRider": "Chargement du pilote…",
