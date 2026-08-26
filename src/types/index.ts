@@ -904,6 +904,13 @@ export interface FrostmodStatus {
    * FrostMod starting — it's a warning with a one-click fix attached.
    */
   missingRuntimes: VcRuntime[];
+  /**
+   * A loose `msvcr90.dll` beside the game exe that the app didn't remove on its own.
+   *
+   * `clear`/`removed` mean there's nothing to say. `foreign` and `locked` mean a file that
+   * aborts MX Bikes with R6034 is still sitting there — see {@link StrayMsvcr90}.
+   */
+  strayMsvcr90: StrayMsvcr90;
 }
 
 /**
@@ -915,6 +922,22 @@ export interface FrostmodStatus {
  * out, and for the manual download links.
  */
 export type VcRuntime = "vc90" | "vc140" | "vc140_x86";
+
+/**
+ * What's left of a loose `msvcr90.dll` beside the game exe. Mirrors `vcruntime::Stray`.
+ *
+ * A loose VC9 CRT there kills the game with *"R6034 — An application has made an attempt to
+ * load the C runtime library incorrectly"*, because the CRT refuses to initialise outside a
+ * `Microsoft.VC90.CRT` activation context and a loose copy is never in one.
+ *
+ * - `clear` — nothing there. The normal case, and always the case off Windows.
+ * - `removed` — there was one, it was this app's (0.9.2–0.10.0 planted them), it's gone.
+ * - `foreign` — one matching no VC90 assembly on this PC. Someone else put it there, so the
+ *   app won't delete it unasked; the player is shown it and offered the move.
+ * - `locked` — ours, but something holds it open. That something is the game: closing it
+ *   and pressing again is the fix.
+ */
+export type StrayMsvcr90 = "clear" | "removed" | "foreign" | "locked";
 
 /** What a runtime install did. `cancelled` is the user dismissing the UAC prompt. */
 export type RuntimeInstallOutcome = "installed" | "cancelled";
@@ -932,9 +955,10 @@ export interface RuntimeRepairReport {
   alreadyPresent: VcRuntime[];
   /** Still absent afterwards: a declined UAC prompt, a failed download, a pending reboot. */
   stillMissing: VcRuntime[];
-  /** Whether a stray `msvcr90.dll` beside the game executable was cleaned up. Versions
-   *  0.9.2–0.10.0 put one there, and it aborts the game with R6034. */
-  msvcr90Removed: boolean;
+  /** What the sweep of the game folder found. `removed` is a repair that did something;
+   *  `foreign`/`locked` is one that found the likeliest reason the game won't start and
+   *  needs the player to say the word. */
+  strayMsvcr90: StrayMsvcr90;
   /** False when no game folder is configured, so there was nowhere to look. */
   gameDirKnown: boolean;
 }

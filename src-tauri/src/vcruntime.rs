@@ -98,6 +98,36 @@ pub enum Runtime {
     Vc140X86,
 }
 
+/// What is left of a loose `msvcr90.dll` beside the game exe, after the sweep has had its
+/// go.
+///
+/// The two "still there" arms are the ones that matter: a file we won't delete unasked is
+/// still a file that aborts the game with R6034, so the app reports it and offers
+/// [`disable_stray_msvcr90`] rather than logging a line nobody reads. Serialized into
+/// `FrostmodStatus`, so the strings are a UI contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Stray {
+    /// Nothing loose beside the exe. The overwhelmingly common case.
+    #[default]
+    Clear,
+    /// There was one, it was ours, and it's gone now.
+    Removed,
+    /// A `msvcr90.dll` matching no VC90 assembly on this PC. Equally fatal, but not ours
+    /// to delete on our own say-so — the player is shown it and offered the move.
+    Foreign,
+    /// Ours, and the delete failed. Something holds it open, which in practice is the game
+    /// running with it mapped: closing the game and trying again is the whole fix.
+    Locked,
+}
+
+impl Stray {
+    /// Is there still a file there that will kill the game? The question the banner asks.
+    pub fn needs_the_player(self) -> bool {
+        matches!(self, Stray::Foreign | Stray::Locked)
+    }
+}
+
 /// What an install attempt actually did.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -355,11 +385,15 @@ fn vc90_present(game_dir: Option<&std::path::Path>) -> bool {
 ///
 /// A `Microsoft.VC90.CRT` folder beside the exe is left strictly alone: that one works.
 ///
+/// What it *won't* delete, it now reports: a [`Stray::Foreign`] or [`Stray::Locked`] verdict
+/// travels up to the player as a banner offering [`disable_stray_msvcr90`]. Silence here was
+/// its own bug — the app knew there was a file that kills the game and only said so in a log.
+///
 /// Best-effort, and safe on a hot path. The settled case costs one failed `read`. A locked
 /// file — the game running with the DLL mapped — just means the next poll tries again, and
 /// only the first failure per folder is logged so a stuck one doesn't fill the log.
 #[cfg(windows)]
-pub fn remove_stray_msvcr90(game_dir: &std::path::Path) -> bool {
+pub fn remove_stray_msvcr90(game_dir: &std::path::Path) -> Stray {
     remove_stray_msvcr90_against(game_dir, &sxs_vc90_dirs())
 }
 
@@ -371,10 +405,10 @@ pub fn remove_stray_msvcr90(game_dir: &std::path::Path) -> bool {
 fn remove_stray_msvcr90_against(
     game_dir: &std::path::Path,
     sxs_dirs: &[std::path::PathBuf],
-) -> bool {
+) -> Stray {
     let stray = app_local_msvcr90(game_dir);
     let Ok(found) = std::fs::read(&stray) else {
-        return false;
+        return Stray::Clear;
     };
     let ours = sxs_dirs
         .iter()
@@ -386,7 +420,7 @@ fn remove_stray_msvcr90_against(
                 stray.display()
             );
         }
-        return false;
+        return Stray::Foreign;
     }
     match std::fs::remove_file(&stray) {
         Ok(()) => {
@@ -394,7 +428,7 @@ fn remove_stray_msvcr90_against(
                 "removed {} — a loose VC9 CRT there aborts the game with R6034",
                 stray.display()
             );
-            true
+            Stray::Removed
         }
         Err(e) => {
             if first_time(&MOANED, game_dir) {
@@ -403,7 +437,7 @@ fn remove_stray_msvcr90_against(
                     stray.display()
                 );
             }
-            false
+            Stray::Locked
         }
     }
 }
@@ -426,8 +460,72 @@ static LEFT_ALONE: Folders = std::sync::Mutex::new(std::collections::BTreeSet::n
 static MOANED: Folders = std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 #[cfg(not(windows))]
-pub fn remove_stray_msvcr90(_game_dir: &std::path::Path) -> bool {
-    false
+pub fn remove_stray_msvcr90(_game_dir: &std::path::Path) -> Stray {
+    Stray::Clear
+}
+
+/// What a defused copy is parked under. Windows resolves an import by exact filename, so
+/// the rename alone is what makes it harmless — nothing will ever look for this name.
+const DISABLED_SUFFIX: &str = "disabled";
+
+/// Move a loose `msvcr90.dll` out of the loader's way, whoever put it there.
+///
+/// The consenting half of [`remove_stray_msvcr90`]. That one only ever touches a copy this
+/// app made, because reaching for a file of unknown provenance is not a decision to take on
+/// someone's behalf. This runs when the player has been shown the file and asked for it to
+/// go, which settles the provenance question the only way it can be settled.
+///
+/// A rename rather than a delete, for the same reason: it stops being loadable the moment
+/// the name changes, and if it turns out to have been wanted, it is right there. Returns
+/// where it went, so the UI can say.
+///
+/// Not `cfg(windows)`: it is ordinary file work, and keeping it buildable everywhere is
+/// what lets the tests cover it from a Mac.
+pub fn disable_stray_msvcr90(game_dir: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
+    let stray = app_local_msvcr90(game_dir);
+    if !stray.is_file() {
+        anyhow::bail!(
+            "There's no loose msvcr90.dll in {} any more — nothing to move.",
+            game_dir.display()
+        );
+    }
+    let target = free_disabled_name(game_dir)?;
+    // A sharing violation here is the game holding it mapped, and that is the one failure
+    // the player can do something about, so it gets named rather than passed through raw.
+    std::fs::rename(&stray, &target).map_err(|e| {
+        anyhow::anyhow!(
+            "Couldn't move {} aside ({e}). If the game is open, close it and try again — \
+             Windows won't move a file something has loaded.",
+            stray.display()
+        )
+    })?;
+    log::info!(
+        "moved {} aside to {} at the player's request",
+        stray.display(),
+        target.display()
+    );
+    Ok(target)
+}
+
+/// A parking name nothing is using yet.
+///
+/// Pressing the button twice — two archives, two strays, months apart — must not have the
+/// second copy overwrite the first, because the whole point of a rename is that the file
+/// survives the decision.
+fn free_disabled_name(game_dir: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
+    let base = game_dir.join(format!("{MSVCR90_DLL}.{DISABLED_SUFFIX}"));
+    if !base.exists() {
+        return Ok(base);
+    }
+    (1..=50)
+        .map(|n| game_dir.join(format!("{MSVCR90_DLL}.{DISABLED_SUFFIX}.{n}")))
+        .find(|c| !c.exists())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "There are already 50 disabled copies in {} — clear some out first.",
+                game_dir.display()
+            )
+        })
 }
 
 /// The 2015–2022 runtime installs into `System32` rather than WinSxS. This process is
@@ -548,9 +646,10 @@ pub struct RepairReport {
     /// Still absent afterwards — a declined UAC prompt, a failed download, an install that
     /// needs a reboot to finish. Each one is a link the UI hands over.
     pub still_missing: Vec<Runtime>,
-    /// Whether a stray `msvcr90.dll` beside the game exe was cleaned up — see
-    /// [`remove_stray_msvcr90`]. Left by 0.9.2–0.10.0, and fatal to the game.
-    pub msvcr90_removed: bool,
+    /// What the sweep of the game folder found — see [`remove_stray_msvcr90`]. `Removed`
+    /// is a repair that did something; the two "still there" arms are a repair that found
+    /// the likeliest reason the game won't start and needs the player to say the word.
+    pub stray_msvcr90: Stray,
     /// Set when we had nowhere to place it — no game folder configured.
     pub game_dir_known: bool,
 }
@@ -597,15 +696,15 @@ pub async fn repair(
     // as well as on the status poll: a player pressing repair is a player whose game is
     // already misbehaving, and this is the likeliest reason.
     if let Some(dir) = game_dir {
-        report.msvcr90_removed = remove_stray_msvcr90(dir);
+        report.stray_msvcr90 = remove_stray_msvcr90(dir);
     }
 
     invalidate();
     log::info!(
-        "repair: installed {:?}, still missing {:?}, stray msvcr90 removed: {}",
+        "repair: installed {:?}, still missing {:?}, stray msvcr90: {:?}",
         report.installed,
         report.still_missing,
-        report.msvcr90_removed
+        report.stray_msvcr90
     );
     report
 }
@@ -740,10 +839,10 @@ fn run_elevated(exe: &std::path::Path, args: &str) -> anyhow::Result<bool> {
 
 /// Download Microsoft's redistributable and install it, then prove it worked.
 ///
-/// For VC90 the redistributable is only half the job — it registers the side-by-side
-/// assembly and leaves the ordinary search path untouched — so this finishes by placing a
-/// copy beside the game exe. See the module docs for why that second half is the one that
-/// stops the "MSVCR90.dll was not found" box.
+/// `game_dir` is only here for that last part: the VC90 probe reads the game folder too, so
+/// the re-check needs it to reach the same verdict the banner did. Nothing is written there
+/// — an earlier version placed a copy of the CRT beside the exe and that is exactly the
+/// R6034 trap the module docs open with.
 #[cfg(windows)]
 pub async fn install(
     app: &tauri::AppHandle,
@@ -1004,6 +1103,20 @@ mod tests {
             serde_json::to_string(&InstallOutcome::Cancelled).unwrap(),
             "\"cancelled\""
         );
+        assert_eq!(serde_json::to_string(&Stray::Clear).unwrap(), "\"clear\"");
+        assert_eq!(serde_json::to_string(&Stray::Removed).unwrap(), "\"removed\"");
+        assert_eq!(serde_json::to_string(&Stray::Foreign).unwrap(), "\"foreign\"");
+        assert_eq!(serde_json::to_string(&Stray::Locked).unwrap(), "\"locked\"");
+    }
+
+    /// Only the arms that leave a file behind are the player's problem — banner on the
+    /// other two would be an alarm about a folder that is already fine.
+    #[test]
+    fn only_a_surviving_file_asks_for_the_player() {
+        assert!(!Stray::Clear.needs_the_player());
+        assert!(!Stray::Removed.needs_the_player());
+        assert!(Stray::Foreign.needs_the_player());
+        assert!(Stray::Locked.needs_the_player());
     }
 
     /// A scratch tree, named per test so a parallel run doesn't collide. The house pattern
@@ -1034,22 +1147,22 @@ mod tests {
         let sxs = fake_sxs(&root, b"the real VC9 CRT");
         std::fs::write(game.join(MSVCR90_DLL), b"the real VC9 CRT").unwrap();
 
-        assert!(remove_stray_msvcr90_against(&game, &[sxs]));
+        assert_eq!(remove_stray_msvcr90_against(&game, &[sxs]), Stray::Removed);
         assert!(!game.join(MSVCR90_DLL).exists(), "the stray copy must be gone");
     }
 
-    /// A `msvcr90.dll` we didn't put there is somebody else's decision. It is still an R6034
-    /// waiting to happen, but deleting a file of unknown provenance out of someone's game
-    /// folder is not ours to do.
+    /// A `msvcr90.dll` we didn't put there is somebody else's decision, so we don't delete
+    /// it — but it is still an R6034 waiting to happen, so we say so. Reporting `Foreign`
+    /// is what puts the file in front of the player, who *can* authorise the move.
     #[test]
-    fn a_file_we_didnt_place_is_left_alone() {
+    fn a_file_we_didnt_place_is_reported_not_deleted() {
         let root = scratch("theirs");
         let game = root.join("game");
         std::fs::create_dir_all(&game).unwrap();
         let sxs = fake_sxs(&root, b"the real VC9 CRT");
         std::fs::write(game.join(MSVCR90_DLL), b"something else entirely").unwrap();
 
-        assert!(!remove_stray_msvcr90_against(&game, &[sxs]));
+        assert_eq!(remove_stray_msvcr90_against(&game, &[sxs]), Stray::Foreign);
         assert!(game.join(MSVCR90_DLL).exists(), "an unrecognised file must survive");
     }
 
@@ -1068,19 +1181,33 @@ mod tests {
         let newest = fake_sxs(&root, b"the newest servicing build");
         std::fs::write(game.join(MSVCR90_DLL), b"the older servicing build").unwrap();
 
-        assert!(remove_stray_msvcr90_against(&game, &[newest, old_dir]));
+        assert_eq!(
+            remove_stray_msvcr90_against(&game, &[newest, old_dir]),
+            Stray::Removed
+        );
         assert!(!game.join(MSVCR90_DLL).exists());
     }
 
-    /// Nothing to do, and no source to compare against, are both quiet no-ops.
+    /// An empty folder is a quiet no-op. A machine with no VC90 at all is not: nothing can
+    /// ever match, so even our own copy is stranded there — and that is precisely the PC
+    /// someone drops a loose CRT into, having been told it fixes the missing-DLL box. It
+    /// reports `Foreign` rather than the silence it used to, because the file is still
+    /// going to kill the game and somebody has to be told.
     #[test]
-    fn an_empty_game_folder_is_a_no_op() {
+    fn nothing_there_is_clear_and_no_winsxs_still_reports() {
         let root = scratch("empty");
         let game = root.join("game");
         std::fs::create_dir_all(&game).unwrap();
-        assert!(!remove_stray_msvcr90_against(&game, &[fake_sxs(&root, b"crt")]));
+        assert_eq!(
+            remove_stray_msvcr90_against(&game, &[fake_sxs(&root, b"crt")]),
+            Stray::Clear
+        );
         std::fs::write(game.join(MSVCR90_DLL), b"crt").unwrap();
-        assert!(!remove_stray_msvcr90_against(&game, &[]), "no WinSxS means no verdict");
+        assert_eq!(
+            remove_stray_msvcr90_against(&game, &[]),
+            Stray::Foreign,
+            "a PC with no VC90 must still hear about the file"
+        );
         assert!(game.join(MSVCR90_DLL).exists());
     }
 
@@ -1095,8 +1222,46 @@ mod tests {
         std::fs::write(private.join(MSVCR90_DLL), b"the real VC9 CRT").unwrap();
         let sxs = fake_sxs(&root, b"the real VC9 CRT");
 
-        assert!(!remove_stray_msvcr90_against(&game, &[sxs]));
+        assert_eq!(remove_stray_msvcr90_against(&game, &[sxs]), Stray::Clear);
         assert!(private.join(MSVCR90_DLL).is_file(), "a working private assembly must survive");
+
+        // And the player-pressed move doesn't reach into it either.
+        assert!(disable_stray_msvcr90(&game).is_err(), "there is no loose file to move");
+        assert!(private.join(MSVCR90_DLL).is_file());
+    }
+
+    /// The button the banner offers: the file stops being loadable, and it still exists.
+    #[test]
+    fn the_move_renames_rather_than_deletes() {
+        let root = scratch("disable");
+        let game = root.join("game");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join(MSVCR90_DLL), b"somebody else's CRT").unwrap();
+
+        let moved = disable_stray_msvcr90(&game).unwrap();
+        assert!(!game.join(MSVCR90_DLL).exists(), "the loadable name must be gone");
+        assert_eq!(std::fs::read(&moved).unwrap(), b"somebody else's CRT");
+        assert_eq!(moved, game.join("msvcr90.dll.disabled"));
+    }
+
+    /// Twice over — two archives, months apart — must not have the second copy overwrite
+    /// the first. A rename that destroys the file it parked isn't a rename.
+    #[test]
+    fn a_second_move_parks_beside_the_first() {
+        let root = scratch("disable-twice");
+        let game = root.join("game");
+        std::fs::create_dir_all(&game).unwrap();
+
+        std::fs::write(game.join(MSVCR90_DLL), b"the first one").unwrap();
+        disable_stray_msvcr90(&game).unwrap();
+        std::fs::write(game.join(MSVCR90_DLL), b"the second one").unwrap();
+        let second = disable_stray_msvcr90(&game).unwrap();
+
+        assert_eq!(second, game.join("msvcr90.dll.disabled.1"));
+        assert_eq!(
+            std::fs::read(game.join("msvcr90.dll.disabled")).unwrap(),
+            b"the first one"
+        );
     }
 
     /// A private assembly is a route to the CRT; a loose DLL beside the exe is the R6034

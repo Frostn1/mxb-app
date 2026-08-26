@@ -1817,23 +1817,34 @@ fn worth_retrying(dst: &Path, e: &std::io::Error) -> bool {
 
 /// Turn a failed copy into something a player can act on.
 ///
-/// A staged file that has gone missing is the one case where the raw error actively
+/// A staged file the copy can no longer read is the one case where the raw error actively
 /// misleads: it reads as if the *mod* were broken, when the bytes downloaded fine and
 /// something on the machine took them away afterwards. Name the culprit and the folder to
 /// exclude, because "os error 2" leaves a player with nowhere to go.
+///
+/// The probe is a real read, not [`Path::exists`]: `exists` opens for no access at all, so a
+/// scanner blocking a file's *contents* waves it through while `fs::copy`, which asks for
+/// `GENERIC_READ`, is told "os error 2". Gating on `exists` meant this never fired.
 fn copy_failure(src: &Path, dst: &Path, e: std::io::Error) -> anyhow::Error {
-    if e.kind() == std::io::ErrorKind::NotFound && !src.exists() {
+    if let Err(probe) = File::open(src) {
         let name = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let folder = src
             .parent()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| src.display().to_string());
+        // The copy says what it hit, the probe says why the file won't open; a report needs both.
+        log::error!("staged {name} could not be reopened: copy said {e}, opening said {probe}");
+        let fate = if probe.kind() == std::io::ErrorKind::NotFound {
+            "deleted or quarantined"
+        } else {
+            "locked against being read"
+        };
         return anyhow::anyhow!(
-            "{name} vanished from the staging folder part-way through the install. The \
-             download itself worked — something deleted or quarantined the file before it \
-             could be copied into place, which is almost always antivirus (mod .pkz files \
-             are a common false positive) or a temp-folder cleaner. Add an exclusion for \
-             {folder} and install it again."
+            "{name} could not be read back from the staging folder part-way through the \
+             install — it was {fate} after the download finished. The download itself \
+             worked, so this is almost always antivirus (mod .pkz files are a common false \
+             positive) or a temp-folder cleaner. Add an exclusion for {folder} and install \
+             it again."
         );
     }
     anyhow::Error::new(e).context(format!("copying {} to {}", src.display(), dst.display()))
@@ -3077,6 +3088,39 @@ mod tests {
         assert!(msg.contains("Scottsdale.pkz"), "{msg}");
         assert!(msg.contains(&staging.display().to_string()), "{msg}");
         assert!(msg.to_lowercase().contains("antivirus"), "{msg}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The other half of the same trap, and the one that got past us: the staged file is
+    /// still listed, only its contents are out of reach. `Path::exists` answers yes — it
+    /// opens for no access at all — so gating the advice on it handed the player a bare
+    /// "os error 2" for a scanner hold. Unreadable has to count as gone.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_staged_file_blames_the_right_thing() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = place_tmp("unreadable");
+        let staging = root.join("ex");
+        let mods = root.join("mods");
+        std::fs::create_dir_all(&mods).unwrap();
+        let src = staging.join("Scottsdale.pkz");
+        touch(&src);
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if File::open(&src).is_ok() {
+            // Running as root, where the mode is advisory and there is nothing to stand in
+            // for the scanner.
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        assert!(src.exists(), "the entry is still there — that is the whole trap");
+
+        let err = copy_staged(&src, &mods.join("Scottsdale.pkz")).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Scottsdale.pkz"), "{msg}");
+        assert!(msg.contains(&staging.display().to_string()), "{msg}");
+        assert!(msg.to_lowercase().contains("antivirus"), "{msg}");
+
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o644)).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -5339,20 +5339,42 @@ async fn frostmod_install(
 /// Raises a UAC prompt — Microsoft's redistributables require admin, and only the shell
 /// can ask. A declined prompt comes back as `cancelled`, not an error, so the UI can fall
 /// back to handing over the download link instead of reading as broken.
-/// Install every Visual C++ runtime this machine is short of, and finish the VC90 job by
-/// placing `msvcr90.dll` beside the game exe.
+/// Install every Visual C++ runtime this machine is short of, and sweep the game folder for
+/// the loose `msvcr90.dll` older builds of this app left there.
 ///
 /// Deliberately not gated on `frostmod_status` having reported anything missing. The
 /// machine this exists for reported everything present and still couldn't start the game,
 /// so a repair reachable only from the warning bar would never have run there.
 #[tauri::command]
 async fn frostmod_repair_runtimes(app: tauri::AppHandle) -> vcruntime::RepairReport {
-    let game_dir = config::load(&app)
+    vcruntime::repair(&app, game_dir_for_runtimes(&app).as_deref()).await
+}
+
+/// Move a loose `msvcr90.dll` beside the game exe out of the loader's way.
+///
+/// The player-consented counterpart to the sweep, which only ever deletes a copy this app
+/// made. Reachable only once `frostmod_status` has reported a `foreign` or `locked` stray,
+/// because that report is what put the file in front of them to agree to.
+#[tauri::command]
+async fn frostmod_clear_stray_msvcr90(app: tauri::AppHandle) -> Result<String, String> {
+    let Some(dir) = game_dir_for_runtimes(&app) else {
+        return Err("No game folder is set, so there's nowhere to look.".into());
+    };
+    vcruntime::disable_stray_msvcr90(&dir)
+        .map(|p| p.display().to_string())
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Where the active title is installed, or `None` when we don't know.
+///
+/// `install_dir` hands back an empty string for "unset", which must not become the path
+/// `""` — every runtime path that touches the game folder needs the same guard.
+fn game_dir_for_runtimes(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    config::load(app)
         .ok()
         .map(|c| c.install_dir())
         .filter(|d| !d.trim().is_empty())
-        .map(std::path::PathBuf::from);
-    vcruntime::repair(&app, game_dir.as_deref()).await
+        .map(std::path::PathBuf::from)
 }
 
 /// Microsoft's download page links for every runtime, so the UI can always offer the
@@ -5371,13 +5393,9 @@ async fn frostmod_install_runtime(
     app: tauri::AppHandle,
     runtime: vcruntime::Runtime,
 ) -> Result<vcruntime::InstallOutcome, String> {
-    // VC90 isn't finished by the installer alone: the copy that serves plain imports has
-    // to land beside the game exe, so the install needs to know where that is.
-    let game_dir = config::load(&app)
-        .ok()
-        .map(|c| c.install_dir())
-        .filter(|d| !d.trim().is_empty())
-        .map(std::path::PathBuf::from);
+    // The game folder is part of the VC90 answer — a private assembly can sit there — so
+    // the post-install re-check has to be asked the same question the banner was.
+    let game_dir = game_dir_for_runtimes(&app);
     vcruntime::install(&app, runtime, game_dir.as_deref())
         .await
         .map_err(|e| format!("{e:#}"))
@@ -7047,6 +7065,7 @@ fn main() {
             frostmod_install,
             frostmod_install_runtime,
             frostmod_repair_runtimes,
+            frostmod_clear_stray_msvcr90,
             runtime_downloads,
             frostmod_start,
             frostmod_stop,
