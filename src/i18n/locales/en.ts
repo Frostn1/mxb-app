@@ -1273,6 +1273,20 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0102.hero.title":
+    "Liveries that belong to the model wearing them",
+  "showcase.v0102.hero.body":
+    "MX Bikes gives a bike one flat paints folder and knows nothing about model swaps, so a Yami mesh on a KTM offered every KTM livery too. Each model in the Locker now has a palette button — tick the liveries drawn for it and they become the only ones it offers, in MX Bikes' own paint picker as well as here.",
+  "showcase.v0102.packs":
+    "Liveries that arrived inside a model pack were installed but invisible. Opening that model's picker now adopts them, which is also what makes them work.",
+  "showcase.v0102.presets":
+    "The Presets livery dropdown offers only the liveries that suit the model the preset selects.",
+  "showcase.v0102.vcredist":
+    "On a freshly reset Windows the app closed the moment it launched, with no window and no log. The installer now puts Microsoft's Visual C++ runtime in before it writes the app.",
+  "showcase.v0102.msvcr90":
+    "A stray msvcr90.dll it won't delete on its own is no longer a silent crash: the app names the file and offers to disable it in one press.",
+  "showcase.v0102.paintsync":
+    "Paint sync sent the wrong bike's livery when two bikes shared a paint name — and helmet, goggle, boot and protection paints were never shared at all.",
   "showcase.v0101.hero.title":
     "Your library remembers what you deleted",
   "showcase.v0101.hero.body":

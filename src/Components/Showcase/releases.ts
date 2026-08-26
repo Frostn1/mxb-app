@@ -43,6 +43,7 @@ import {
   History,
   Undo2,
   ShieldAlert,
+  SwatchBook,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
@@ -69,6 +70,21 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.10.2",
+    hero: {
+      icon: SwatchBook,
+      title: "showcase.v0102.hero.title",
+      body: "showcase.v0102.hero.body",
+    },
+    highlights: [
+      { icon: FolderInput, text: "showcase.v0102.packs" },
+      { icon: Layers, text: "showcase.v0102.presets" },
+      { icon: Download, text: "showcase.v0102.vcredist" },
+      { icon: ShieldAlert, text: "showcase.v0102.msvcr90" },
+      { icon: Palette, text: "showcase.v0102.paintsync" },
+    ],
+  },
   {
     version: "0.10.1",
     hero: {

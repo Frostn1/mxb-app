@@ -1,8 +1,9 @@
 # Changelog
 
-## 2026-08-25
+## 2026-08-26 — v0.10.2 — Liveries that belong to a model, and a Windows that starts
 
 ### Added
+
 - **A model swap can own its liveries.** MX Bikes gives a bike one flat `paints/` folder and
   knows nothing about model swaps, so a Yami mesh running on a KTM offered every KTM livery
   alongside the Yami ones — a long list where most entries were drawn for a mesh that isn't
@@ -18,15 +19,25 @@
   - The Presets livery dropdown now offers only the liveries that suit the model the preset
     selects, so a preset pairs a model with a livery drawn for it.
 
+- **A Locker repair warning can be dismissed.** The banner for a bike whose setup files an
+  old swap moved away sat at the top of the Locker with no way to put it down, so anyone who
+  had decided to leave that bike alone read the same three lines every visit. Each one now
+  carries a ✕. Hiding is remembered per bike *and* per set of missing files, so the same bike
+  breaking a different way still speaks up, and a bike you repair — then break again later —
+  warns afresh rather than staying quietly hidden.
+
 ### Fixed
+
 - **Liveries that came in with a model pack were invisible.** A model swap that shipped its
   own `paints/` folder left its liveries inside the swap folder once the app filed it away —
   somewhere the game never reads and no scan of ours ever looked. They were installed,
   unusable and unlistable. Opening that model's livery picker now adopts them as its own,
   which is also what makes them work.
+
 - **A livery inside a model swap was filed under the wrong owner.** The Library attributed it
   to the swap folder rather than to the bike, so it landed in a bucket no bike id ever
   matched — and a preset share code built from that bike silently shipped without the livery.
+
 - **MXB App wouldn't start at all on a freshly installed Windows,** closing the moment it
   launched with "the application was unable to start correctly (0xc000007b)" — no window, no
   log, nothing to send in. The app needs Microsoft's Visual C++ 2015–2022 (x64) runtime and
@@ -36,6 +47,7 @@
   already carried could never fire — it was on the wrong side of the door. The installer now
   checks for that runtime and puts it in before it writes the app, and tells you which one is
   missing if it can't.
+
 - **A `msvcr90.dll` in the game folder that the app wouldn't remove is no longer a silent
   crash.** A loose VC9 CRT beside `mxbikes.exe` aborts the game with *"R6034 — An application
   has made an attempt to load the C runtime library incorrectly"* the moment anything
@@ -46,18 +58,17 @@
   from somewhere else (a mod archive extracted into the game folder is the reported one), a PC
   with no VC90 installed at all, where nothing can ever match and even our own copy is
   stranded, and a file the running game is holding open.
+
 - **The app now says so, and offers the fix.** A file it won't delete on its own gets a red
   bar naming it, and a button that renames it to `msvcr90.dll.disabled` — Windows resolves an
   import by exact filename, so the rename is what defuses it, and a file somebody put there on
   purpose survives the decision. Automatic removal is unchanged: still only ever a copy this
   app can prove it made. The press is what settles provenance for everything else. When the
   game is holding the file, the bar says to close it first rather than failing at a button.
+
 - **"Repair runtimes" reports the same thing**, so a repair that installed everything and still
   found the reason the game won't start says that instead of "everything was already in place".
 
-## 2026-08-22
-
-### Fixed
 - **An install blocked by antivirus reported a bare "os error 2".** When a security product
   blocks a freshly downloaded mod file in the temp folder, the app's check for it asked the
   wrong question — it tested only whether the file still had a directory entry, which a
@@ -66,6 +77,17 @@
   the mod were broken. The check now tries to read the file the same way the copy does, so a
   blocked install names the file, says whether it was removed or locked, and points at the
   folder to add an exclusion for.
+
+- **A share code could point outside the mods folder.** Every path a preset or file-share
+  code carries is joined onto your mods root on import, and the first one picks the type
+  folder outright — so a code written by hand with `../` in it could write into the game
+  folder itself rather than into `mods/`. Nothing this app has ever produced looks like that,
+  but a code arrives as text from someone else, so every path is now checked when the code is
+  decoded and a bad one is refused at the door rather than failing partway through an install.
+  Zip extraction is swept for links that point out of the staging folder — the same sweep 7z
+  and rar archives already got — and a filename handed over by a remote server can no longer
+  name the staging folder's parent.
+
 - **Paint sync published the wrong bike's livery.** Liveries were matched by filename alone,
   so a rider with `Race.pnt` on two bikes published whichever the folder walk reached first —
   and the file carried that bike's install path, so everyone on the grid saw it land on the
@@ -73,19 +95,12 @@
   livery missing from that bike is reported as missing rather than borrowed from another one.
   The same mismatch made the live-reload watcher watch another bike's file, so a paint edited
   mid-session could refresh late or not at all.
+
 - **Helmet, goggle, boot and protection paints were never shared.** Gear paints that sit
   inside their model's folder were being folded into that folder — correct for a preset zip,
   which carries the folder whole, but a publish uploads paint files one at a time and skips
   folders, so those paints silently went nowhere. Gear paints now publish alongside bike
   liveries; preset bundles still pack the folder once.
-
-### Added
-- **A Locker repair warning can be dismissed.** The banner for a bike whose setup files an
-  old swap moved away sat at the top of the Locker with no way to put it down, so anyone who
-  had decided to leave that bike alone read the same three lines every visit. Each one now
-  carries a ✕. Hiding is remembered per bike *and* per set of missing files, so the same bike
-  breaking a different way still speaks up, and a bike you repair — then break again later —
-  warns afresh rather than staying quietly hidden.
 
 ## 2026-08-21 — v0.10.1 — Mods you deleted, remembered — and a crash we caused, undone
 

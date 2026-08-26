@@ -1303,6 +1303,20 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0102.hero.title":
+    "Des décos qui appartiennent au modèle qui les porte",
+  "showcase.v0102.hero.body":
+    "MX Bikes ne donne à une moto qu'un seul dossier paints et ignore tout des changements de modèle : un mesh Yami sur une KTM proposait donc aussi toutes les décos KTM. Chaque modèle du Locker a désormais un bouton palette — cochez les décos dessinées pour lui et ce seront les seules proposées, y compris dans le sélecteur de peintures de MX Bikes.",
+  "showcase.v0102.packs":
+    "Les décos livrées dans un pack de modèle étaient installées mais invisibles. Ouvrir le sélecteur de ce modèle les lui attribue, et c'est précisément ce qui les rend utilisables.",
+  "showcase.v0102.presets":
+    "La liste des décos dans Presets ne propose plus que celles qui conviennent au modèle choisi par le preset.",
+  "showcase.v0102.vcredist":
+    "Sur un Windows fraîchement réinstallé, l'app se fermait dès son lancement, sans fenêtre ni journal. L'installateur met maintenant le runtime Visual C++ de Microsoft en place avant d'écrire l'app.",
+  "showcase.v0102.msvcr90":
+    "Un msvcr90.dll resté sur place que l'app ne supprime pas d'elle-même n'est plus un plantage silencieux : elle nomme le fichier et propose de le désactiver en un clic.",
+  "showcase.v0102.paintsync":
+    "La synchro des peintures envoyait la déco de la mauvaise moto quand deux motos partageaient un nom de peinture — et les peintures de casque, masque, bottes et protections n'étaient jamais partagées.",
   "showcase.v0101.hero.title":
     "Ta bibliothèque se souvient de ce que tu as supprimé",
   "showcase.v0101.hero.body":

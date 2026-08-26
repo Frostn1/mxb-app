@@ -1294,6 +1294,20 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0102.hero.title":
+    "Livree che appartengono al modello che le indossa",
+  "showcase.v0102.hero.body":
+    "MX Bikes dà a una moto una sola cartella paints e non sa nulla dei cambi di modello, così una mesh Yami su una KTM proponeva anche tutte le livree KTM. Ogni modello nel Locker ha ora un pulsante tavolozza: spunta le livree disegnate per lui e saranno le uniche che offre, anche nel selettore di vernici di MX Bikes.",
+  "showcase.v0102.packs":
+    "Le livree arrivate dentro un pacchetto modello erano installate ma invisibili. Aprire il selettore di quel modello le fa sue, ed è proprio questo a renderle utilizzabili.",
+  "showcase.v0102.presets":
+    "Il menu delle livree in Presets propone solo quelle adatte al modello scelto dal preset.",
+  "showcase.v0102.vcredist":
+    "Su un Windows appena reinstallato l'app si chiudeva appena avviata, senza finestra e senza log. L'installer ora mette il runtime Visual C++ di Microsoft prima di scrivere l'app.",
+  "showcase.v0102.msvcr90":
+    "Un msvcr90.dll rimasto lì che l'app non elimina da sola non è più un crash silenzioso: nomina il file e propone di disattivarlo con una pressione.",
+  "showcase.v0102.paintsync":
+    "La sincronizzazione delle vernici inviava la livrea della moto sbagliata quando due moto condividevano il nome di una vernice, e le vernici di casco, maschera, stivali e protezioni non venivano mai condivise.",
   "showcase.v0101.hero.title":
     "La libreria si ricorda cosa hai cancellato",
   "showcase.v0101.hero.body":
