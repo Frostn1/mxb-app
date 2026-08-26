@@ -68,19 +68,6 @@ const AREA_LABEL: Record<string, TKey> = {
   goggles: "paints.kind.goggles",
 };
 
-/**
- * Labels for the folders that hang off a rider profile, where the folder name alone would
- * collide with a gear area's.
- *
- * MX Bikes has goggles in two places and they are genuinely different destinations: a pair
- * bought with a helmet lives in `helmets/<helmet>/goggles`, and a pair that came with the rider
- * lives in `riders/<profile>/goggles`. Both are offered — two buttons reading "Goggles" would
- * be a coin toss over which folder a paint lands in.
- */
-const EXTRA_LABEL: Record<string, TKey> = {
-  goggles: "paints.kind.profileGoggles",
-};
-
 /** Which `RiderTargets` list holds the models of a gear folder. */
 const AREA_TARGETS: Record<string, keyof RiderTargets> = {
   helmets: "helmets",
@@ -152,13 +139,15 @@ export function kindsFor(game: GameInfo): PaintKindDef[] {
     }
   }
   kinds.push({ id: "kit", label: label(RIDERS), area: RIDERS, sub: "paints" });
-  for (const extra of game.riderProfileExtras) {
-    kinds.push({
-      id: `extra:${extra}`,
-      label: EXTRA_LABEL[extra] ?? label(extra),
-      area: RIDERS,
-      sub: extra,
-    });
+  // A profile's extras, minus the ones a gear area already offers under the same name.
+  //
+  // MX Bikes keeps goggles in two places — bought with a helmet, and shipped with the rider —
+  // and both are real folders, but two buttons reading "Goggles" is a coin toss over which one
+  // a paint lands in. The helmet's is the one anybody means: it's where a goggle mod installs,
+  // and where every goggle paint in the shop is filed. Gloves have no such twin, so they stay.
+  const offered = new Set(kinds.map((k) => k.sub));
+  for (const extra of game.riderProfileExtras.filter((e) => !offered.has(e))) {
+    kinds.push({ id: `extra:${extra}`, label: label(extra), area: RIDERS, sub: extra });
   }
   return kinds;
 }

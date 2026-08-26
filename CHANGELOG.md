@@ -47,6 +47,28 @@
   paints nothing, which is only discovered in game. That boots mod now offers `fox` and
   `fox_n`, as it always should have. The same lookup answers whether a bike exists at all when
   it's installed as a bare `.pkz`, so a model-swap preview for one resolves too.
+- **A rider kit or a pair of gloves had no sheet names to start from.** `Rider+` and
+  `Rider+RolledUp` ship their `paints/` and `gloves/` folders empty on purpose — the kits
+  installed under the stock rider are the ones meant to be worn on them, which is already how
+  the preview dresses one. The Designer didn't know that, so painting for either profile began
+  with an empty expected-names line and nothing to create sheets from, and gloves had no source
+  of names at all. Both now read the stock profile's paints: `rider`, `rider_n`, `rider_r` for
+  a kit, `gloves`, `gloves_n`, `gloves_r` for gloves.
+- **Picking a rider profile could hang the Designer for a minute and a half.** With no paints
+  of its own to read, the app fell back to walking the profile's mesh for texture names — and
+  those two files are 67 MB each. Where iCloud or OneDrive had evicted them, asking what a
+  profile expects quietly kicked off a 134 MB download and answered 84 seconds later. Sheet
+  names are a convenience; an evicted mesh is now left alone and the paints answer instead, in
+  about a tenth of a second. The preview still fetches the model when it draws it, where the
+  wait buys a picture.
+
+### Removed
+
+- **The second "Goggles" destination.** The Studio offered goggles twice — the pair bought with
+  a helmet, and a pair shipped with the rider profile — and two buttons with the same word on
+  them is a coin toss over which folder a paint lands in. The helmet's is the one anybody means:
+  it's where a goggle mod installs and where every goggle paint in the shop is filed. Gloves,
+  which have no twin, are untouched.
 
 ## 2026-08-26 — v0.10.2 — Liveries that belong to a model, and a Windows that starts
 
