@@ -5954,8 +5954,6 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
-        // The one thing voice needs and cannot yet work out for itself.
-        voice::session::set_current_server(&address);
         publish_paints_soon(&app, &cfg, None);
         live_sync_session(&app, Some(address.clone()));
         // We know exactly where they're going, so this syncs that server alone.

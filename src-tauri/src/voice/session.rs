@@ -10,12 +10,15 @@
 //!
 //! ## Knowing which server
 //!
-//! Today the answer comes from us: the app launched the game with `-directconnect`, so it
-//! knows. A rider who picks a server from the game's own browser is invisible to us until
-//! FrostMod reports it — the RE is settled (an import hook on `recvfrom`; the connect-string
-//! buffer only ever holds what the command line put there) and it is the next phase. Until
-//! then [`set_current_server`] is the one place that knowledge enters, and there will be
-//! exactly one more caller of it.
+//! FrostMod tells us. `EventInit` hands the plugin `m_szServerName`, and that name is the
+//! room key — the only identifier every rider on a server has. An address reaches only the
+//! riders whose app launched the game; anyone who picked the server from the game's own
+//! browser never sees one, and a key half the grid cannot compute is a room that splits in
+//! two without anybody noticing.
+//!
+//! So voice needs FrostMod running, which the app already installs and arms for every
+//! session. Without it there is no server name, and without a server name there is nothing
+//! to join — reported as such rather than guessed at.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -24,6 +27,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 use super::engine::{self, Status};
+use super::gamesession::{GameSession, Reader};
 use super::signal;
 
 /// How often to reconcile "where the rider is" with "where voice is connected".
@@ -37,9 +41,6 @@ const POLL: Duration = Duration::from_secs(5);
 /// indicator tracks speech rather than trailing it.
 const STATUS_POLL: Duration = Duration::from_millis(150);
 
-/// The server the game is on, as best we know. Empty when it isn't on one.
-static CURRENT_SERVER: Mutex<String> = Mutex::new(String::new());
-
 /// Whether the supervisor has been started, so a second call is a no-op rather than a second
 /// loop fighting the first over the same engine.
 static SUPERVISING: AtomicBool = AtomicBool::new(false);
@@ -48,6 +49,8 @@ static SUPERVISING: AtomicBool = AtomicBool::new(false);
 #[derive(Default)]
 pub struct Session {
     running: Mutex<Option<Running>>,
+    /// Holds FrostMod's shared block open across polls.
+    game: Reader,
 }
 
 struct Running {
@@ -99,17 +102,6 @@ impl Session {
     }
 }
 
-/// Tell voice which server the game is on. Empty means "not on one".
-pub fn set_current_server(address: &str) {
-    if let Ok(mut current) = CURRENT_SERVER.lock() {
-        *current = address.trim().to_string();
-    }
-}
-
-fn current_server() -> String {
-    CURRENT_SERVER.lock().map(|s| s.clone()).unwrap_or_default()
-}
-
 /// Start the standing watcher. Call once, from `setup`.
 pub fn start(app: &AppHandle) {
     if SUPERVISING.swap(true, Ordering::SeqCst) {
@@ -150,36 +142,31 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
     let session = app_session(app)?;
     let cfg = crate::config::load_or_detect(app).unwrap_or_default();
 
-    // Off, or the game is gone: whatever is running should not be.
-    if !cfg.voice_enabled || !crate::gameproc::is_game_running() {
-        if session.server().is_some() {
-            session.stop();
-            set_current_server("");
-        }
-        return Ok(());
-    }
-
-    let address = current_server();
-    if address.is_empty() {
-        // On a server we can't name yet. Nothing to join — and nothing to apologise for
-        // until FrostMod can tell us (see the module docs).
+    // Off, or the game is not on a server we can name: whatever is running should not be.
+    // A rider in the menus, in a replay, or testing alone has nobody to talk to.
+    let game = cfg.voice_enabled.then(|| session.game.read()).flatten();
+    let Some(game) = game.filter(GameSession::on_a_server) else {
         if session.server().is_some() {
             session.stop();
         }
         return Ok(());
-    }
+    };
 
-    // The same key paint sync uses, so both features agree on what "this server" means and a
-    // registered server is recognised however its address was written.
-    let registry = crate::paintsync::registry(None).await.unwrap_or_default();
-    let key = crate::paintsync::server_key_for(&registry, &address);
+    // The server name, as every rider on that server sees it. Trimmed and case-folded so
+    // one server is one room however its name is punctuated on the day.
+    let key = room_key(&game.server_name);
 
     if session.server().as_deref() == Some(key.as_str()) {
-        // Already connected here. Keep presence fresh — it is what the room checks on the
-        // way in, and a reconnect after a blip must not be turned away.
+        // Already here. Keep presence fresh — it is what the room checks on the way in, so
+        // a reconnect after a blip must not be turned away — and pass on a race number that
+        // has arrived since we joined, which is what places this rider on the grid.
         if let Ok((token, _)) = signal::ensure_account(&cfg).await {
             let _ = crate::paintsync::report_presence(&token, &key).await;
         }
+        session.send(engine::Command::Rider {
+            rider_name: game.rider_name.clone(),
+            race_num: game.race_num_for_room(),
+        });
         return Ok(());
     }
 
@@ -209,18 +196,31 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
     let handle = engine::start(engine::Config {
         token,
         server_key: key.clone(),
-        rider_name: signal::rider_name(&cfg),
-        // Zero until FrostMod says otherwise: a rider in the room but not yet on the grid.
-        race_num: 0,
+        // The name the game knows this rider by, which is what other riders will see.
+        rider_name: if game.rider_name.trim().is_empty() {
+            signal::rider_name(&cfg)
+        } else {
+            game.rider_name.clone()
+        },
+        race_num: game.race_num_for_room(),
         input_device: cfg.voice_input_device.clone(),
         output_device: cfg.voice_output_device.clone(),
         input_gain: cfg.voice_input_gain,
         output_volume: cfg.voice_output_volume,
         stun_servers: stun_servers(),
     });
-    log::info!("[voice] joining the room for {key}");
+    log::info!("[voice] joining the room for \"{}\"", game.server_name);
     session.set(key, handle);
     Ok(())
+}
+
+/// The room key for a server name.
+///
+/// Folded so that trailing spaces or a change of capitalisation cannot split one server's
+/// riders into two rooms. Not hashed: the key is also what the app shows the player, and a
+/// name they recognise is worth more than an opaque id.
+pub fn room_key(server_name: &str) -> String {
+    server_name.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
 /// Where to ask what this machine looks like from outside.
@@ -245,11 +245,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remembers_the_server_it_was_told_about() {
-        set_current_server("  203.0.113.10:54210 ");
-        assert_eq!(current_server(), "203.0.113.10:54210");
-        set_current_server("");
-        assert_eq!(current_server(), "");
+    fn one_server_is_one_room_however_its_name_is_written() {
+        // Every rider on a server computes this from the same `EventInit` string, so the
+        // only way they end up apart is if this function disagrees with itself.
+        let expected = "frost racing eu";
+        for name in ["Frost Racing EU", "frost racing eu", "  Frost Racing EU  ", "Frost  Racing\tEU"] {
+            assert_eq!(room_key(name), expected, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn different_servers_stay_different_rooms() {
+        assert_ne!(room_key("Frost Racing EU"), room_key("Frost Racing US"));
     }
 
     #[test]
