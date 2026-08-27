@@ -234,6 +234,7 @@ export const de: Translation = {
   "pose.bike": "Motorrad",
   "pose.quick": "Schnelle Posen",
   "pose.quickHint": "Jede kommt zur Pose hinzu, sie lassen sich also stapeln. Feinschliff unten.",
+  "pose.dragHint": "Zieh an den Punkten am Fahrer, um ein Glied zu bewegen — gedreht wird das Gelenk über dem, das du greifst. Die Regler sind für Drehung und genaue Werte.",
   "pose.reset": "Zurücksetzen",
   "pose.group.torso": "Rumpf und Kopf",
   "pose.group.arms": "Arme",

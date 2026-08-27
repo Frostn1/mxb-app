@@ -224,6 +224,7 @@ export const en = {
   "pose.bike": "Bike",
   "pose.quick": "Quick moves",
   "pose.quickHint": "Each one adds to the pose, so they stack. Fine-tune below.",
+  "pose.dragHint": "Drag the dots on the rider to move a limb — the joint above the one you grab does the turning. The sliders are for twist and exact numbers.",
   "pose.reset": "Reset",
   "pose.group.torso": "Torso and head",
   "pose.group.arms": "Arms",
