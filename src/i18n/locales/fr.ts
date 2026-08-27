@@ -1387,6 +1387,18 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0110.hero.title":
+    "Attrapez le pilote et positionnez-le",
+  "showcase.v0110.hero.body":
+    "Attrapez les articulations du pilote dans l'aperçu 3D et déplacez-le : mains, coudes, hanches, pieds. Les poses rapides se cumulent, les curseurs affinent, et Position de pilotage l'assoit sur la moto. Aperçu seulement : le jeu n'est pas touché.",
+  "showcase.v0110.designer":
+    "Miroir d'un calque à travers la moto, sélection multiple, magnétisme au glisser, retournement et positions saisies au chiffre.",
+  "showcase.v0110.wheels":
+    "Les motos s'affichent avec leurs roues, et vous choisissez les pneus sur lesquels elles reposent.",
+  "showcase.v0110.speed":
+    "Les circuits s'affichent sept fois plus vite, les motos s'ouvrent en 127 ms au lieu de 201, et les mods s'installent deux à deux.",
+  "showcase.v0110.swaps":
+    "Déplacez un jeu de modèles vers une autre moto ou supprimez-le, et voyez n'importe quel swap en 3D depuis la Bibliothèque.",
   "showcase.v0102.hero.title":
     "Des décos qui appartiennent au modèle qui les porte",
   "showcase.v0102.hero.body":
