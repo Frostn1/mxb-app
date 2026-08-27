@@ -410,7 +410,7 @@ function firstOrigin(bones: Bone[], names: string[]): THREE.Vector3 | null {
  * settles the question on its own.
  */
 function facingFromFeet(
-  nodes: { positions: number[] }[],
+  nodes: { positions: ArrayLike<number> }[],
   f: THREE.Vector3,
   up: THREE.Vector3,
   ankle: THREE.Vector3,
@@ -474,7 +474,7 @@ function facingFromThumb(bones: Bone[], f: THREE.Vector3, up: THREE.Vector3): nu
  */
 export function riderFrame(
   bones: Bone[],
-  body?: { positions: number[] }[] | null,
+  body?: { positions: ArrayLike<number> }[] | null,
 ): RiderFrame | null {
   if (!bones.length) return null;
   const leftHip = originOf(bones, "riderRIG_LeftHip");

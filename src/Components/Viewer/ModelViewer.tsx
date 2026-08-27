@@ -620,16 +620,16 @@ function useNodeGeometries(nodes: EdfNode[], skin?: Skin | null) {
       const g = new THREE.BufferGeometry();
       g.setAttribute(
         "position",
-        new THREE.Float32BufferAttribute(Float32Array.from(n.positions), 3),
+        new THREE.Float32BufferAttribute(n.positions, 3),
       );
       if (n.uvs.length)
-        g.setAttribute("uv", new THREE.Float32BufferAttribute(Float32Array.from(n.uvs), 2));
+        g.setAttribute("uv", new THREE.Float32BufferAttribute(n.uvs, 2));
       if (n.normals.length)
         g.setAttribute(
           "normal",
-          new THREE.Float32BufferAttribute(Float32Array.from(n.normals), 3),
+          new THREE.Float32BufferAttribute(n.normals, 3),
         );
-      g.setIndex(n.indices);
+      g.setIndex(new THREE.Uint32BufferAttribute(n.indices, 1));
       if (!n.normals.length) g.computeVertexNormals();
       // Material groups so a multi-submesh node can wear one texture per submesh.
       n.submeshes.forEach((sm, i) => g.addGroup(sm.triStart * 3, sm.triCount * 3, i));

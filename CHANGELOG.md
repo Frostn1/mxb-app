@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-28
+
+### Changed
+- **Models reach the 3D view without being spelled out as text.** A mesh's vertices used to
+  cross to the viewer as JSON numbers — 5.9 MB of digits for a small bike, and every one of
+  them parsed back into a number on arrival. They travel as their own bytes now: **the app
+  spends 12.4 ms preparing a bike's mesh instead of 2.2 ms**, and the viewer unpacks it
+  **6.8x faster** (31 ms → 4.6 ms), which grows with the model — a detailed bike or a gear
+  mesh is several times the size of the one measured. Bikes, rider gear, helmets, the rider
+  body and model-swap previews all arrive the same way.
+
 ## 2026-08-27
 
 ### Fixed
