@@ -1387,6 +1387,12 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0111.hero.title":
+    "Les modèles protégés s'ouvrent en 3D",
+  "showcase.v0111.hero.body":
+    "Un modèle acheté chez un créateur livre son maillage scellé, et la visionneuse ne pouvait pas le lire : « Voir en 3D » annonçait un modèle sans maillage lisible, alors qu'il fonctionne parfaitement en jeu. Il s'ouvre désormais comme n'importe quelle moto.",
+  "showcase.v0111.messages":
+    "Si une moto refuse toujours de s'ouvrir, l'app indique la vraie panne au lieu d'accuser la synchronisation cloud à chaque fois.",
   "showcase.v0110.hero.title":
     "Attrapez le pilote et positionnez-le",
   "showcase.v0110.hero.body":

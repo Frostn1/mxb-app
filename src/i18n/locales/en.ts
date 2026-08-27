@@ -1357,6 +1357,12 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0111.hero.title":
+    "Protected model swaps open in 3D",
+  "showcase.v0111.hero.body":
+    "A model bought from a creator ships its mesh sealed, and the viewer couldn't read it — View 3D said the swap held no readable mesh, on a model that runs perfectly in game. It opens now, like any other bike.",
+  "showcase.v0111.messages":
+    "When a bike still won't open, the app names the fault it actually hit instead of blaming cloud sync for everything.",
   "showcase.v0110.hero.title":
     "Take hold of the rider and pose him",
   "showcase.v0110.hero.body":

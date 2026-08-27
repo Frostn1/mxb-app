@@ -1376,6 +1376,12 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0111.hero.title":
+    "Trocas de modelo protegidas abrem em 3D",
+  "showcase.v0111.hero.body":
+    "Um modelo comprado de um criador vem com a malha selada, e o visualizador não conseguia lê-la — ao tocar em Ver em 3D, dizia que a troca não tinha nenhuma malha legível, mesmo funcionando perfeitamente no jogo. Agora ela abre como qualquer outra moto.",
+  "showcase.v0111.messages":
+    "Se uma moto ainda não abrir, o app diz qual foi a falha de verdade em vez de culpar a sincronização na nuvem por tudo.",
   "showcase.v0110.hero.title":
     "Pegue o piloto e posicione-o",
   "showcase.v0110.hero.body":

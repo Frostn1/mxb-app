@@ -1396,6 +1396,12 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0111.hero.title":
+    "Geschützte Modell-Swaps öffnen sich in 3D",
+  "showcase.v0111.hero.body":
+    "Ein bei einem Creator gekauftes Modell liefert sein Mesh versiegelt aus, und der Viewer konnte es nicht lesen — „In 3D ansehen“ meldete, der Swap enthalte kein lesbares Mesh, obwohl er im Spiel einwandfrei läuft. Jetzt öffnet er sich wie jedes andere Bike.",
+  "showcase.v0111.messages":
+    "Lässt sich ein Bike trotzdem nicht öffnen, nennt die App den tatsächlichen Fehler, statt alles der Cloud-Synchronisierung anzulasten.",
   "showcase.v0110.hero.title":
     "Nimm den Fahrer und bring ihn in Position",
   "showcase.v0110.hero.body":

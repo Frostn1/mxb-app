@@ -1378,6 +1378,12 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0111.hero.title":
+    "I model swap protetti si aprono in 3D",
+  "showcase.v0111.hero.body":
+    "Un modello acquistato da un creator arriva con la mesh sigillata e il visualizzatore non riusciva a leggerla: premendo Vedi in 3D diceva che lo swap non conteneva alcuna mesh leggibile, pur funzionando benissimo in gioco. Ora si apre come qualsiasi altra moto.",
+  "showcase.v0111.messages":
+    "Se una moto continua a non aprirsi, l'app dice qual è davvero il problema invece di dare sempre la colpa alla sincronizzazione cloud.",
   "showcase.v0110.hero.title":
     "Afferra il pilota e mettilo in posa",
   "showcase.v0110.hero.body":

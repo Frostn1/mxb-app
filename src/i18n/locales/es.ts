@@ -1383,6 +1383,12 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0111.hero.title":
+    "Los cambios de modelo protegidos se abren en 3D",
+  "showcase.v0111.hero.body":
+    "Un modelo comprado a un creador trae su malla sellada y el visor no podía leerla: al pulsar Ver en 3D decía que el modelo no tenía ninguna malla legible, aunque funciona perfectamente en el juego. Ahora se abre como cualquier otra moto.",
+  "showcase.v0111.messages":
+    "Si una moto sigue sin abrirse, la app dice qué ha fallado en realidad en vez de culpar siempre a la sincronización en la nube.",
   "showcase.v0110.hero.title":
     "Agarra al piloto y colócalo",
   "showcase.v0110.hero.body":
