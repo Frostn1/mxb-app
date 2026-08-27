@@ -3,6 +3,11 @@
 ## 2026-08-26
 
 ### Fixed
+- **The model-swap badge squeezed a bike's name off its card.** Sitting in the row beside the
+  name, it competed with it for width — and the name is what gave, collapsing to nothing on
+  the one bike that had swaps. It now sits under the name instead, where nothing else is
+  fighting for the space.
+
 - **The Library's model-swap badge never appeared.** A bike is listed in the Library as its
   `<Bike>.pkz` archive, so the row's name carries the extension, while a model swap is keyed by
   the bike folder beside it — the two never matched, and the badge was invisible on every bike.
