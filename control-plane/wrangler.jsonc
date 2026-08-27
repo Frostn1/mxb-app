@@ -52,6 +52,15 @@
     }
   ],
 
+  // One voice room per game server, addressed by the same server key paint sync already
+  // computes. Naming the object creates it, and it goes away when the last rider leaves —
+  // which is the entire lifecycle. It stores nothing: peers live on their own hibernating
+  // sockets, so an idle room costs nothing and there is no state to reconcile.
+  "durable_objects": {
+    "bindings": [{ "name": "VOICE_ROOMS", "class_name": "VoiceRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VoiceRoom"] }],
+
   // Paints are content-addressed by SHA-256, so an upload of a paint someone else already
   // shared is a no-op and every rider on a server pulls the same object.
   "r2_buckets": [

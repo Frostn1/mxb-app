@@ -54,6 +54,8 @@ import {
   setExperimental,
   type ExperimentalState,
   voiceDevices,
+  voiceMute,
+  voiceStatus,
   setVoiceEnabled,
   setVoiceInputDevice,
   setVoiceOutputDevice,
@@ -62,10 +64,12 @@ import {
   voiceMeterStart,
   voiceMeterStop,
   voiceTestOutput,
+  onVoiceStatus,
   onVoiceInputLevel,
   onVoicePtt,
   setVoiceToggleToTalk,
   type VoiceDevices,
+  type VoiceStatus,
 } from "../../api/mods";
 import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
@@ -524,6 +528,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // Whether the mic key currently has the mic open. Shown because in toggle mode there is
   // nothing physical to tell you — you can walk away from a latched-open microphone.
   const [micOpen, setMicOpen] = useState(false);
+  // Who else is in voice. Pushed from the engine, so this is live without polling.
+  const [voice, setVoice] = useState<VoiceStatus>({
+    joined: false,
+    server: "",
+    peers: [],
+    error: null,
+  });
 
   const refreshDevices = useCallback(async () => {
     try {
@@ -560,6 +571,25 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     let un: (() => void) | undefined;
     void onVoicePtt(setMicOpen).then((f) => (un = f));
     return () => un?.();
+  }, []);
+
+  // The room, as it changes. Asked once for the first paint, then pushed — a rider joining
+  // mid-session should appear without the page having to ask.
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void voiceStatus().then(setVoice).catch(() => {});
+    void onVoiceStatus(setVoice).then((f) => (un = f));
+    return () => un?.();
+  }, []);
+
+  const toggleMute = useCallback((peerId: string, muted: boolean) => {
+    // Optimistic: the engine is authoritative, but its next status push is up to 20 ms away
+    // and a mute button that lags is a mute button people press twice.
+    setVoice((v) => ({
+      ...v,
+      peers: v.peers.map((p) => (p.peerId === peerId ? { ...p, muted } : p)),
+    }));
+    void voiceMute(peerId, muted);
   }, []);
 
   // Navigating to another section closes the meter with it. The state that drives it lives
@@ -1257,6 +1287,79 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               </Callout>
             )}
 
+            {/* The room. Nothing here is a control except mute: joining happens because
+                the rider is on a server, which is the whole point of the feature. */}
+            {voiceEnabled && (
+              <div className="space-y-2 rounded-md border border-border/60 p-3">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      voice.joined ? "bg-success" : "bg-foreground/25",
+                    )}
+                  />
+                  <span className="text-[12.5px] text-foreground/85">
+                    {voice.joined ? t("voice.inRoom", { server: voice.server }) : t("voice.notConnected")}
+                  </span>
+                </div>
+
+                {voice.error && (
+                  <Callout tone="warning" title={t("voice.stopped")}>
+                    {voice.error}
+                  </Callout>
+                )}
+
+                {voice.peers.length === 0 ? (
+                  <p className="text-[12px] leading-relaxed text-muted-foreground">
+                    {t("voice.notConnectedDesc")}
+                  </p>
+                ) : (
+                  <ul className="space-y-1">
+                    {voice.peers.map((peer) => (
+                      <li key={peer.peerId} className="flex items-center gap-2">
+                        {/* Talking is the one thing worth seeing at a glance, so it is a
+                            colour change on the row rather than an icon to look for. */}
+                        <span
+                          className={cn(
+                            "size-1.5 shrink-0 rounded-full",
+                            !peer.connected
+                              ? "bg-foreground/25"
+                              : peer.talking
+                                ? "bg-success"
+                                : "bg-foreground/40",
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            "flex-1 truncate text-[12.5px]",
+                            peer.muted ? "text-muted-foreground line-through" : "text-foreground/85",
+                          )}
+                        >
+                          {peer.riderName || t("voice.unnamedRider")}
+                          {peer.raceNum > 0 && (
+                            <span className="ml-1.5 text-muted-foreground">#{peer.raceNum}</span>
+                          )}
+                        </span>
+                        {!peer.connected && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {t("voice.connecting")}
+                          </span>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[11px]"
+                          onClick={() => toggleMute(peer.peerId, !peer.muted)}
+                        >
+                          {peer.muted ? t("voice.unmute") : t("voice.mute")}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <div className="h-px bg-border" />
 
             {/* Microphone. "" is a real, selectable value — it means "follow whatever
@@ -1417,12 +1520,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
                 disabled={!voiceEnabled}
               />
             </div>
-
-            {/* Says what does and doesn't work today. A settings page that looks complete
-                while the feature can't reach anyone is the worse failure. */}
-            <Callout tone="info" title={t("voice.notConnected")}>
-              {t("voice.notConnectedDesc")}
-            </Callout>
           </Section>
           )}
 

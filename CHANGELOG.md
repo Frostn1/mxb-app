@@ -51,6 +51,15 @@
 ## 2026-08-26
 
 ### Added
+- **Voice chat, on any server, with nothing to set up.** Turn it on, pick a microphone, and
+  that is the whole of it: joining a server puts you in voice with everyone else there who
+  has the app. There is no second program to install, no account to create, no code to share
+  and nothing for the server owner to run — it works the same on a server we host and on one
+  that appeared this morning. Your voice goes straight to the other riders rather than
+  through us, so it costs nothing to provide and nobody is relaying what you say. Push to
+  talk by default, with the mic key you already set. Settings shows who is in the room, who
+  is talking, and a mute button for anyone you would rather not hear.
+
 - **The Pose tab can take a photograph.** Five backdrops to stand a rider against — studio,
   white, daylight, sunset and dusk, each with its own light and ground — a clean frame that
   hides the grab dots and the on-canvas panels, and a Save photo button that writes a PNG at
