@@ -27,6 +27,19 @@ import {
 /** How big a dot is on screen: a fraction of its distance from the camera, so zoom is moot. */
 const DOT_SIZE = 0.011;
 
+/**
+ * How much of the cursor's travel the limb takes.
+ *
+ * One-to-one read as twitchy: a joint near the pivot turns a long way for a short drag, and
+ * the whole 60° of a bone can go by in a couple of centimetres of mouse. At half speed the dot
+ * trails the cursor a little and the limb still reaches anywhere — each frame solves again
+ * from wherever the dot now is, so a drag that keeps going keeps turning.
+ */
+const DRAG_GAIN = 0.5;
+
+/** With Shift held, for the last degree or two. */
+const FINE_GAIN = 0.15;
+
 interface Placed {
   /** The bone a drag turns, and the bone the dot rides, as indexes into the rig. */
   turns: number;
@@ -44,12 +57,15 @@ export function PoseHandles({
   bones,
   pose,
   onPose,
+  onGrab,
 }: {
   /** The live bone tree, in rig order — the same one the body is drawn from. */
   order: THREE.Bone[];
   bones: Bone[];
   pose: RiderPose;
   onPose: (pose: RiderPose) => void;
+  /** The bone a drag has just taken hold of — the one whose turn it writes. */
+  onGrab?: (bone: string) => void;
 }) {
   const placed = useMemo<Placed[]>(() => {
     const at = (name: string) => bones.findIndex((b) => b.name === name);
@@ -135,6 +151,8 @@ export function PoseHandles({
       // and a pointer can move more often than that.
       rides.updateWorldMatrix(true, false);
       from.copy(h.offset).applyMatrix4(rides.matrixWorld);
+      // Part of the way to the cursor, not all of it — see DRAG_GAIN.
+      to.lerpVectors(from, to, ev.shiftKey ? FINE_GAIN : DRAG_GAIN);
       const next = turnToward(order, bones, live.current, h.name, from, to);
       if (next === live.current) return;
       live.current = next;
@@ -183,6 +201,7 @@ export function PoseHandles({
           onPointerDown={(e: ThreeEvent<PointerEvent>) => {
             e.stopPropagation();
             setHeld(i);
+            onGrab?.(h.name);
           }}
           onPointerOver={(e: ThreeEvent<PointerEvent>) => {
             e.stopPropagation();

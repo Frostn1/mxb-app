@@ -9,6 +9,7 @@ import Designer from "./Designer/Designer";
 import PaintStudio from "../PaintStudio/PaintStudio";
 import RiderStudio from "../Rider/RiderStudio";
 import PoseStudio from "../Rider/PoseStudio";
+import RiderKitProvider from "../Rider/RiderKit";
 
 /**
  * The Studio: everything that makes something, under one tab.
@@ -115,25 +116,26 @@ export default function Studio({
           />
         </Pane>
       )}
-      {hasRider && visited.has("rider") && (
-        <Pane active={tab === "rider"}>
-          <RiderStudio
-            initialLoadout={riderPreset}
-            initialBike={riderBike}
-            onLoaded={onRiderPresetLoaded}
-          />
-        </Pane>
-      )}
-      {/* Same handoff as the Rider sub-view: whichever of the two is open takes the preset,
-          and both being mounted is fine — `onLoaded` clears it once. */}
-      {hasRider && visited.has("pose") && (
-        <Pane active={tab === "pose"}>
-          <PoseStudio
-            initialLoadout={riderPreset}
-            initialBike={riderBike}
-            onLoaded={onRiderPresetLoaded}
-          />
-        </Pane>
+      {/* Rider and Pose are two views of one kit, so the kit lives above both of them and a
+          preset is handed to it rather than to whichever sub-view happens to be mounted.
+          Still only paid for by someone who opens one of the two. */}
+      {hasRider && (visited.has("rider") || visited.has("pose")) && (
+        <RiderKitProvider
+          initialLoadout={riderPreset}
+          initialBike={riderBike}
+          onLoaded={onRiderPresetLoaded}
+        >
+          {visited.has("rider") && (
+            <Pane active={tab === "rider"}>
+              <RiderStudio />
+            </Pane>
+          )}
+          {visited.has("pose") && (
+            <Pane active={tab === "pose"}>
+              <PoseStudio />
+            </Pane>
+          )}
+        </RiderKitProvider>
       )}
     </div>
   );
