@@ -340,6 +340,12 @@ pub struct BikeRig {
     pub rake: f32,
     pub front_axle: Option<[f32; 3]>,
     pub rear_axle: Option<[f32; 3]>,
+    /// Where a rider sits, from the .geom's `seat_height_ref`. `None` when it names none.
+    ///
+    /// A setup reference rather than a point on the mesh, but it is the bike's own statement
+    /// of where the seat is and it is written in the same frame as every mount above — which
+    /// is what lets the viewer stand a rider on it instead of guessing at a height.
+    pub seat: Option<[f32; 3]>,
 }
 
 impl BikeRig {
@@ -350,6 +356,7 @@ impl BikeRig {
         self.steer_head = v_sub(self.steer_head, c);
         self.front_axle = self.front_axle.map(|p| v_sub(p, c));
         self.rear_axle = self.rear_axle.map(|p| v_sub(p, c));
+        self.seat = self.seat.map(|p| v_sub(p, c));
     }
 
     /// Follow the mesh into three.js' frame — see [`to_right_handed`], which must have been
@@ -365,6 +372,9 @@ impl BikeRig {
             p[0] = -p[0];
         }
         if let Some(p) = self.rear_axle.as_mut() {
+            p[0] = -p[0];
+        }
+        if let Some(p) = self.seat.as_mut() {
             p[0] = -p[0];
         }
     }
@@ -400,6 +410,9 @@ pub fn assemble_bike(nodes: &mut [EdfNode], geom_bytes: &[u8]) -> Option<BikeRig
         rake,
         front_axle: axles.map(|(f, _)| f),
         rear_axle: axles.map(|(_, r)| r),
+        // In the chassis' own frame, like `chassis_steer` and `chassis_rsusp_min` beside it,
+        // so it needs no carrying down a fork or a swingarm the way the axles do.
+        seat: g.get("seat_height_ref").copied(),
     };
 
     for n in nodes.iter_mut() {
@@ -1557,7 +1570,9 @@ fn rig_parents(names: &[String]) -> Vec<Option<usize>> {
                 return None;
             }
             // Climb past ancestors this model doesn't bind to.
-            let mut want = named_parent(&stems[i]);
+            let named = named_parent(&stems[i]);
+            let known = named.is_some();
+            let mut want = named;
             for _ in 0..8 {
                 match want {
                     None => break,
@@ -1567,7 +1582,17 @@ fn rig_parents(names: &[String]) -> Vec<Option<usize>> {
                     },
                 }
             }
-            Some(i - 1)
+            // The rig names this joint's parent and this model binds none of that chain —
+            // `default_mx_c` binds the limbs and no spine at all. Then it is a root of its
+            // own, not whatever happens to sit before it in the file: hanging the right leg
+            // off the left one's twist bone makes one hip drag the whole body behind it.
+            // A stem the naming rules don't recognise is somebody's own bone, and the file's
+            // depth-first order is still the best guess there.
+            if known {
+                None
+            } else {
+                Some(i - 1)
+            }
         })
         .collect()
 }
@@ -2061,7 +2086,8 @@ front_upper = 0, -0.4032, -0.0026\n\
 fwheel = 0, -0.2046, 0.0147\n\
 rsusp_joint = 0, 0.0004, 0.0558\n\
 rwheel_min = 0, 0.0118, -0.4985\n\
-rwheel_max = 0, 0.0122, -0.5359\n";
+rwheel_max = 0, 0.0122, -0.5359\n\
+seat_height_ref = 0, 0.9115, -0.1674\n";
 
     /// A node of loose points, already in its part's local frame — the shape `assemble_bike`
     /// mounts. What comes back is where those points landed.
@@ -2125,6 +2151,36 @@ rwheel_max = 0, 0.0122, -0.5359\n";
             rig.pivot,
             vertex(&nodes[1], 0)
         );
+    }
+
+    /// Where a rider sits. The .geom is the only thing that says — nothing in the mesh marks
+    /// a seat — and it is written in the chassis' own frame, so a chassis vertex sitting on
+    /// `seat_height_ref` has to come back sitting on `rig.seat`. Off by the centring shift,
+    /// a rider stood on it would float somewhere over the bike.
+    #[test]
+    fn the_seat_lands_where_the_geom_puts_it() {
+        let g = parse_geom(CR250_GEOM);
+        let seat = g["seat_height_ref"];
+        let mut nodes = [mount_node("chassis", &[[0.0, 0.0, 0.0], [0.0, 1.2, 0.9], seat])];
+        let rig = assemble_bike(&mut nodes, CR250_GEOM).expect("assembled");
+        let at = rig.seat.expect("the .geom names a seat");
+        assert!(close(vertex(&nodes[0], 2), at, 1e-4), "seat {at:?} left the mesh");
+        // And it is a seat: above both axles, and between them rather than out past a wheel.
+        let (front, rear) = (rig.front_axle.expect("front"), rig.rear_axle.expect("rear"));
+        assert!(at[1] > front[1] + 0.3 && at[1] > rear[1] + 0.3, "seat {at:?} is not above the axles");
+        assert!(at[2] < front[2] && at[2] > rear[2], "seat {at:?} is not between the wheels");
+    }
+
+    /// A .geom with no seat line leaves it unset rather than dropping a rider on the origin.
+    #[test]
+    fn a_geom_with_no_seat_says_so() {
+        let trimmed: Vec<u8> = CR250_GEOM
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.starts_with(b"seat_height_ref"))
+            .flat_map(|l| l.iter().copied().chain(std::iter::once(b'\n')))
+            .collect();
+        let mut nodes = [mount_node("chassis", &[[0.0, 0.0, 0.0], [0.0, 1.2, 0.9]])];
+        assert_eq!(assemble_bike(&mut nodes, &trimmed).expect("assembled").seat, None);
     }
 
     /// …and the same again through the mirror into three.js' frame.
@@ -2579,6 +2635,49 @@ rwheel_max = 0, -0.001, -0.5683\n";
     }
 
     #[test]
+    fn a_limb_whose_chain_is_unbound_is_its_own_root() {
+        // `default_mx_c` binds the arms and legs and no spine at all. Every chain root then
+        // names a parent that isn't there, and hanging it off the bone before it in the file
+        // built a fake tree — the right leg off the left leg's twist, the arms off the right
+        // leg — where turning one hip dragged the whole body behind it.
+        let at = |x: f32, z: f32| Some(bind_at(x, 0.0, z));
+        let bytes = rig_file(&[
+            bone_block("riderRIG_LeftHip", None, &[0], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_LeftKnee", at(0.085, -0.864), &[1], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_LeftHipTwist2", at(0.138, -0.503), &[2], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_RightHip", at(0.113, -0.678), &[3], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_RightKnee", at(-0.085, -0.864), &[4], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_LeftCollar", at(-0.138, -0.503), &[5], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_LeftShoulder", at(-0.019, -1.368), &[6], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_Spare", at(-0.183, -1.311), &[7], [0.0; 3], [0.0; 3]),
+        ]);
+        let rig = parse_skeleton(&bytes);
+        let at_name = |n: &str| rig.iter().position(|b| b.name == n).expect(n);
+        let parent = |n: &str| rig[at_name(n)].parent.map(|p| rig[p].name.clone());
+        assert_eq!(parent("riderRIG_LeftKnee").as_deref(), Some("riderRIG_LeftHip"));
+        assert_eq!(parent("riderRIG_RightKnee").as_deref(), Some("riderRIG_RightHip"));
+        assert_eq!(parent("riderRIG_LeftShoulder").as_deref(), Some("riderRIG_LeftCollar"));
+        // The three the model gives no ancestor for stand on their own.
+        assert_eq!(parent("riderRIG_LeftHip"), None);
+        assert_eq!(parent("riderRIG_RightHip"), None, "a leg does not hang off the other leg");
+        assert_eq!(parent("riderRIG_LeftCollar"), None, "nor an arm off a leg");
+    }
+
+    #[test]
+    fn a_bone_nobody_names_still_hangs_off_the_one_before_it() {
+        // A mod rig with a bone of its own invention: the file is depth-first, so the bone
+        // before it is the best guess there is, and that is still what it gets.
+        let bytes = rig_file(&[
+            bone_block("riderRIG_Pelvis", None, &[0], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_Cape", Some(bind_at(0.0, 0.0, -0.887)), &[1], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_Spare", Some(bind_at(0.0, 0.1, -1.2)), &[2], [0.0; 3], [0.0; 3]),
+        ]);
+        let rig = parse_skeleton(&bytes);
+        assert_eq!(rig[1].name, "riderRIG_Cape");
+        assert_eq!(rig[1].parent, Some(0));
+    }
+
+    #[test]
     fn a_bone_that_binds_nothing_is_left_out() {
         // The ankles and every `_end` marker carry a local matrix and no inverse bind: they
         // belong to the boots, not to this mesh, so they are not bones the body can be posed by.
@@ -2878,7 +2977,10 @@ rwheel_max = 0, -0.001, -0.5683\n";
         // it is and the whole body draws folded into the origin.
         let names: std::collections::HashSet<&str> = rig.iter().map(|b| b.name.as_str()).collect();
         assert_eq!(names.len(), rig.len(), "the rig is in here more than once");
-        assert_eq!(rig.iter().filter(|b| b.parent.is_none()).count(), 1, "one root, no more");
+        // A model that binds the whole rig has one root; one that binds only its limbs has a
+        // root per chain (see `a_limb_whose_chain_is_unbound_is_its_own_root`). What must hold
+        // either way is that every bone reaches a root without going round.
+        assert!(rig.iter().any(|b| b.parent.is_none()), "at least one root");
         for (i, b) in rig.iter().enumerate() {
             assert!(b.parent.is_none_or(|p| p < i), "{} hangs off a later bone", b.name);
         }

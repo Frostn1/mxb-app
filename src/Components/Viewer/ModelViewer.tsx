@@ -12,15 +12,21 @@ import {
   buildSkeleton,
   isRestPose,
   NO_POSE,
+  riderFrame,
+  toMatrix,
   type RiderPose,
 } from "../../lib/riderPose";
 import { PoseHandles } from "./PoseHandles";
 import { textureBytes } from "../../api/mods";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
+import { sceneOf, skyTexture, type SceneId } from "../../lib/viewerScene";
 
-/** `both` draws the bike and the rider in one scene — see {@link SideBySide}. */
-export type ViewerMode = "bike" | "rider" | "both";
+/**
+ * `both` draws the bike and the rider in one scene, side by side — see {@link SideBySide};
+ * `onBike` draws the same two with the rider sat on the seat — see {@link OnBike}.
+ */
+export type ViewerMode = "bike" | "rider" | "both" | "onBike";
 
 /**
  * Pull a texture's pixels over the binary IPC channel and wrap them in a `DataTexture`.
@@ -909,17 +915,54 @@ const GEAR_BONES = [
   ["riderRIG_RightKneeTwist", "riderRIG_RightKnee"],
 ] as const;
 
+/**
+ * The mean of two bone deltas, for a piece of kit that rides both.
+ *
+ * A boots mod that ships one node holding both feet can't follow two knees exactly. Halfway
+ * between them is right for a symmetric move — which is what every ready-made leg move is —
+ * and beats the alternative, which was for those boots to stay behind while the legs left.
+ */
+function meanDelta(a: THREE.Matrix4 | null, b: THREE.Matrix4 | null): THREE.Matrix4 | null {
+  if (!a || !b) return a ?? b;
+  const [pa, qa, sa] = [new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3()];
+  const [pb, qb, sb] = [new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3()];
+  a.decompose(pa, qa, sa);
+  b.decompose(pb, qb, sb);
+  return new THREE.Matrix4().compose(
+    pa.lerp(pb, 0.5),
+    qa.slerp(qb, 0.5),
+    sa.lerp(sb, 0.5),
+  );
+}
+
+/**
+ * Which way along X the rider's own left is, read off the rig.
+ *
+ * Not always `+1`: the rigs the game ships aren't in the same orientation as each other, and
+ * a rig may reach the viewer mirrored. Assuming it put every boot on the wrong leg for half
+ * the riders installed, so the boot that followed a knee followed the other one's.
+ */
+function leftIsPositiveX(rig?: Bone[]): boolean {
+  const at = (n: string) => rig?.find((b) => b.name === n);
+  const [left, right] = [at("riderRIG_LeftHip"), at("riderRIG_RightHip")];
+  if (!left || !right) return true;
+  return left.bind[3] >= right.bind[3];
+}
+
 function RiderComposite({
   parts,
   overrides,
   pose = NO_POSE,
   onPose,
+  onGrab,
 }: {
   parts: RiderPart[];
   overrides?: Map<string, THREE.Texture>;
   pose?: RiderPose;
   /** Given, the rider wears grab handles and a drag writes back through this. */
   onPose?: (pose: RiderPose) => void;
+  /** Which bone a drag has just taken hold of, so a caller can show its sliders. */
+  onGrab?: (bone: string) => void;
 }) {
   const byPart = (p: RiderPart["part"]) => parts.find((x) => x.part === p);
   const body = byPart("body");
@@ -968,6 +1011,7 @@ function RiderComposite({
   const posing = !!onPose || !isRestPose(pose);
   const built = usePosedRig(posing ? rig : undefined, pose);
   const [headAt, chestAt, leftFootAt, rightFootAt] = useBoneDeltas(built, rig, pose, GEAR_BONES);
+  const hand = leftIsPositiveX(rig) ? 1 : -1;
 
   if (solo) return <RiderGearSolo part={solo} overrides={overrides} />;
 
@@ -979,7 +1023,13 @@ function RiderComposite({
         <RiderBody suit={suit} gloves={gloves} showHead={!hasHelmet} />
       )}
       {!!onPose && !!built && !!rig?.length && (
-        <PoseHandles order={built.order} bones={rig} pose={pose} onPose={onPose} />
+        <PoseHandles
+          order={built.order}
+          bones={rig}
+          pose={pose}
+          onPose={onPose}
+          onGrab={onGrab}
+        />
       )}
       {hasHelmet && (
         <PosedGroup matrix={headAt}>
@@ -1008,7 +1058,9 @@ function RiderComposite({
           />
         </PosedGroup>
       )}
-      {/* Two feet as separate nodes → split left/right; a single-node boot renders centred. */}
+      {/* Two feet as separate nodes → split left/right; a single-node boot renders centred.
+          `side` is the rider's own left/right; `hand` turns that into a direction along X,
+          which is not the same thing on every rig. */}
       {!!boots?.nodes.length &&
         (boots!.nodes.length === 2 ? (
           bootSides(boots!).map(({ node, side }, i) => (
@@ -1016,25 +1068,28 @@ function RiderComposite({
               <RiderGearMesh
                 overrides={overrides}
                 part={{ ...boots!, nodes: [node] }}
-                anchor={[cx + side * legX, footY, bootZ]}
+                anchor={[cx + side * hand * legX, footY, bootZ]}
                 target={bootTarget}
                 rot={BOOT_ROT}
                 pitch={hasBody ? BOOT_PITCH : 0}
-                yaw={hasBody ? side * BOOT_SPLAY : 0}
+                yaw={hasBody ? side * hand * BOOT_SPLAY : 0}
                 alignY={hasBody ? "top" : "center"}
               />
             </PosedGroup>
           ))
         ) : (
-          <RiderGearMesh
-          overrides={overrides}
-            part={boots!}
-            anchor={[cx, footY, bootZ]}
-            target={bootTarget}
-            rot={BOOT_ROT}
-            pitch={hasBody ? BOOT_PITCH : 0}
-            alignY={hasBody ? "top" : "center"}
-          />
+          // One node holding both feet still has to travel when the legs do — see `meanDelta`.
+          <PosedGroup matrix={meanDelta(leftFootAt, rightFootAt)}>
+            <RiderGearMesh
+              overrides={overrides}
+              part={boots!}
+              anchor={[cx, footY, bootZ]}
+              target={bootTarget}
+              rot={BOOT_ROT}
+              pitch={hasBody ? BOOT_PITCH : 0}
+              alignY={hasBody ? "top" : "center"}
+            />
+          </PosedGroup>
         ))}
     </group>
   );
@@ -1468,6 +1523,7 @@ function SideBySide({
   pose,
   riderPose,
   onRiderPose,
+  onGrab,
   place,
 }: {
   nodes: EdfNode[];
@@ -1481,6 +1537,8 @@ function SideBySide({
   riderPose?: RiderPose;
   /** Given, the rider wears grab handles and a drag writes back through this. */
   onRiderPose?: (pose: RiderPose) => void;
+  /** Which bone a drag has just taken hold of. */
+  onGrab?: (bone: string) => void;
   /** Where each half has been moved to, on top of the arrangement below. */
   place?: Record<PlaceTarget, Placement>;
 }) {
@@ -1518,6 +1576,7 @@ function SideBySide({
             overrides={overrides}
             pose={riderPose}
             onPose={onRiderPose}
+            onGrab={onGrab}
           />
         </Placed>
       </group>
@@ -1525,8 +1584,153 @@ function SideBySide({
   );
 }
 
+/**
+ * Where the rider's weight goes: the underside of the pelvis, in the rider's own frame.
+ *
+ * The pelvis bone carries a box covering the slice of body it moves, so the bottom of that box
+ * is where a seat would touch. Read off the model, because a rider is whatever height its
+ * author made it.
+ */
+function seatContact(bones: Bone[], up: THREE.Vector3): THREE.Vector3 | null {
+  const pelvis =
+    bones.find((b) => b.name === "riderRIG_Pelvis") ??
+    bones.find((b) => b.name === "riderRIG_LeftHip");
+  if (!pelvis) return null;
+  const bind = toMatrix(pelvis.bind);
+  const at = new THREE.Vector3(pelvis.bind[3], pelvis.bind[7], pelvis.bind[11]);
+  const { aabbLo: lo, aabbHi: hi } = pelvis;
+  let drop = 0;
+  const corner = new THREE.Vector3();
+  for (const x of [lo[0], hi[0]]) {
+    for (const y of [lo[1], hi[1]]) {
+      for (const z of [lo[2], hi[2]]) {
+        const d = corner.set(x, y, z).applyMatrix4(bind).sub(at).dot(up);
+        if (d < drop) drop = d;
+      }
+    }
+  }
+  return at.addScaledVector(up, drop);
+}
+
+/**
+ * The rider stood upright, facing the way the bike does, with their seat on the bike's.
+ *
+ * Worked out rather than eyeballed: the bike's `.geom` names `seat_height_ref`, and the rider's
+ * own up and forward come off its rig, so the two only have to be brought into one frame. Null
+ * when either half won't say — a bike whose `.geom` names no seat, or a rig with no hips — and
+ * then the pair falls back to standing side by side, which is honest about not knowing.
+ */
+function seatTransform(
+  parts: RiderPart[],
+  seat: Vec3,
+  drop: number,
+): THREE.Matrix4 | null {
+  const body = parts.find((p) => p.part === "body" && p.nodes.length);
+  const bones = body?.skeleton;
+  if (!bones?.length) return null;
+  const rf = riderFrame(bones, body?.nodes);
+  if (!rf) return null;
+  const contact = seatContact(bones, rf.up);
+  if (!contact) return null;
+  // The rider's (forward, up) onto the bike's (+Z, +Y). Both triples are built by a cross
+  // product, so both turn the same way round and what comes out is a rotation, not a mirror.
+  const b3 = new THREE.Vector3().crossVectors(rf.forward, rf.up);
+  const from = new THREE.Matrix4().makeBasis(rf.forward, rf.up, b3);
+  const to = new THREE.Matrix4().makeBasis(
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(0, 0, 1).cross(new THREE.Vector3(0, 1, 0)),
+  );
+  const turn = to.multiply(from.transpose());
+  // Sit *on* the seat rather than with the hip joint in it — the reference is the top of the
+  // seat, and a rider's weight is carried a little way into it.
+  const at = new THREE.Vector3(seat[0], seat[1] + drop, seat[2]);
+  return new THREE.Matrix4()
+    .makeTranslation(at.x, at.y, at.z)
+    .multiply(turn)
+    .multiply(new THREE.Matrix4().makeTranslation(-contact.x, -contact.y, -contact.z));
+}
+
+/** How far into the seat the rider settles, in metres. */
+const SEAT_SINK = -0.02;
+
+/**
+ * Bike and rider in one scene, the rider sitting on it.
+ *
+ * The bike stands on the ground exactly as it does beside the rider; only the rider moves, on
+ * to the seat the bike's own `.geom` names. Nothing is scaled — both meshes come out of the
+ * game in metres — so how the two sizes look against each other is how they really are.
+ *
+ * The rider is still standing until somebody bends the legs: this puts them where they belong,
+ * and the Pose tab's "Sit on bike" is what folds them round the machine.
+ */
+function OnBike({
+  nodes,
+  textures,
+  highlight,
+  parts,
+  overrides,
+  rig,
+  pose,
+  riderPose,
+  onRiderPose,
+  onGrab,
+  place,
+  seat,
+}: {
+  nodes: EdfNode[];
+  textures: Map<string, THREE.Texture>;
+  highlight?: Int32Array | null;
+  parts: RiderPart[];
+  overrides?: Map<string, THREE.Texture>;
+  rig?: BikeRig | null;
+  pose?: BikePose;
+  riderPose?: RiderPose;
+  onRiderPose?: (pose: RiderPose) => void;
+  onGrab?: (bone: string) => void;
+  place?: Record<PlaceTarget, Placement>;
+  /** The bike's seat, in the frame its vertices came back in. */
+  seat: Vec3;
+}) {
+  const at = useMemo(() => {
+    const bike = partBounds(nodes);
+    // Dropped onto y = 0, like every other arrangement, so the ground shadow means something.
+    const lift: Vec3 = [0, -bike.lo[1], 0];
+    const seated = seatTransform(parts, seat, SEAT_SINK);
+    return { lift, seated, bikePivot: spinPivot(bike) };
+  }, [nodes, parts, seat]);
+
+  return (
+    <group position={at.lift}>
+      <Placed at={place?.bike} pivot={at.bikePivot}>
+        <EdfMesh
+          nodes={nodes}
+          textures={textures}
+          highlight={highlight}
+          rig={rig}
+          pose={pose}
+        />
+      </Placed>
+      {/* The placement sliders sit outside the seating, so "up" and "turn" still mean up and
+          turn in the scene rather than in whatever frame the rider was authored in. Turning
+          is about the seat, which is where a rider pivots. */}
+      <Placed at={place?.rider} pivot={seat}>
+        <PosedGroup matrix={at.seated}>
+          <RiderComposite
+            parts={parts}
+            overrides={overrides}
+            pose={riderPose}
+            onPose={onRiderPose}
+            onGrab={onGrab}
+          />
+        </PosedGroup>
+      </Placed>
+    </group>
+  );
+}
+
 /** How much of the scene the camera has to take in. */
-type Framing = "default" | "solo" | "pair";
+type Framing = "default" | "solo" | "pair" | "onBike";
 
 // Default camera looks down over a bike/rider; a solo gear item gets a level, closer view,
 // and a bike-plus-rider pair is roughly twice as wide, so it starts further back.
@@ -1544,7 +1748,10 @@ function CameraRig({ frame }: { frame: Framing }) {
         ? [1.25, 0.35, 1.7]
         : frame === "pair"
           ? [3.9, 2.2, 4.8]
-          : [2.6, 1.8, 3.2];
+          : frame === "onBike"
+            ? // A rider on a bike is one object about a bike and a half wide, not two of them.
+              [3.1, 1.9, 3.9]
+            : [2.6, 1.8, 3.2];
     camera.position.set(x, y, z);
     camera.updateProjectionMatrix();
     if (controls) {
@@ -1803,6 +2010,67 @@ function ControlsHint({ tight }: { tight?: boolean }) {
   );
 }
 
+/** Renders one frame at `scale`× the canvas and hands back its PNG bytes. */
+export type CaptureFn = (scale?: number) => Uint8Array | null;
+
+/** The bytes behind a `data:image/png;base64,…`. */
+function fromDataUrl(url: string): Uint8Array {
+  const bin = atob(url.slice(url.indexOf(",") + 1));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * The way a photo gets out of the canvas.
+ *
+ * Rendered on demand at whatever size is asked for rather than read off the panel: a preview
+ * is a few hundred pixels wide, and a shot worth keeping is not. The renderer is put back the
+ * way it was before this returns, so the panel on screen is never left at the wrong size.
+ */
+function CaptureBridge({ onReady }: { onReady?: (capture: CaptureFn | null) => void }) {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const camera = useThree((s) => s.camera);
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    if (!onReady) return;
+    const shoot: CaptureFn = (scale = 2) => {
+      const was = gl.getSize(new THREE.Vector2());
+      const dpr = gl.getPixelRatio();
+      try {
+        // `updateStyle: false` — the canvas keeps the size it has on the page, so nothing
+        // jumps while the shot is taken.
+        gl.setPixelRatio(1);
+        gl.setSize(Math.round(was.x * scale), Math.round(was.y * scale), false);
+        gl.render(scene, camera);
+        // `toDataURL` rather than `toBlob`: putting the canvas back its old size below wipes
+        // what was just drawn, and only the synchronous one is certain to have read it first.
+        return fromDataUrl(gl.domElement.toDataURL("image/png"));
+      } catch (e) {
+        console.error("[viewer] capture failed:", e);
+        return null;
+      } finally {
+        gl.setPixelRatio(dpr);
+        gl.setSize(was.x, was.y, false);
+        invalidate();
+      }
+    };
+    onReady(shoot);
+    return () => onReady(null);
+  }, [gl, scene, camera, invalidate, onReady]);
+  return null;
+}
+
+/** The backdrop, as the scene's background rather than as geometry — see {@link skyTexture}. */
+function Sky({ scene }: { scene: ReturnType<typeof sceneOf> }) {
+  const flat = scene.sky[0] === scene.sky[1];
+  const tex = useMemo(() => (flat ? null : skyTexture(scene)), [flat, scene]);
+  useEffect(() => () => tex?.dispose(), [tex]);
+  if (!tex) return <color attach="background" args={[scene.sky[0]]} />;
+  return <primitive attach="background" object={tex} />;
+}
+
 /** Asks for one frame whenever `token` changes. Nothing else in the scene re-renders. */
 function FrameOnChange({ token }: { token?: number }) {
   const invalidate = useThree((s) => s.invalidate);
@@ -1865,6 +2133,27 @@ export interface ModelViewerProps {
    * through this. The Pose studio passes it; nothing else does, so nowhere else grows dots.
    */
   onRiderPose?: (pose: RiderPose) => void;
+  /**
+   * Which bone a drag has just taken hold of.
+   *
+   * The Pose studio uses it to open that joint's sliders: a dot on a wrist is a fine way in,
+   * but it says nothing about where the numbers behind it live.
+   */
+  onPoseGrab?: (bone: string) => void;
+  /** Which backdrop to stand the model against. Absent is the studio the viewer always drew. */
+  scene?: SceneId;
+  /**
+   * Photo mode: the model and the backdrop, and nothing else.
+   *
+   * Hides the grab dots, the panels and the hint. Somebody framing a shot doesn't want the
+   * scaffolding in it, and the dots in particular sit *through* the body on purpose.
+   */
+  photo?: boolean;
+  /**
+   * Handed a function that renders one frame at `scale` and returns it as a PNG, or null when
+   * the canvas goes away. The caller keeps it and calls it when someone asks for a photo.
+   */
+  onCaptureReady?: (capture: CaptureFn | null) => void;
   /** Offer the pose panel. Off by default: a preview nobody is posing shouldn't grow chrome. */
   poseControls?: boolean;
   /**
@@ -1891,12 +2180,21 @@ export function ModelViewer({
   rig,
   riderPose,
   onRiderPose,
+  onPoseGrab,
+  scene,
+  photo = false,
+  onCaptureReady,
   poseControls = false,
   placeControls = false,
   loading = false,
   noStandIn = false,
   className,
 }: ModelViewerProps) {
+  // Photo mode takes the dots away by not handing the rider anything to write a pose back
+  // through — the handles exist only where a caller asked to edit one.
+  const poseEdit = photo ? undefined : onRiderPose;
+  const onGrab = photo ? undefined : onPoseGrab;
+  const look = useMemo(() => sceneOf(scene), [scene]);
   const map = useDataTexture(texture);
   const texMap = useTextureMapWith(textures, overrides);
   // The stance the bike is drawn in until someone moves a slider. Held as "no answer yet"
@@ -1924,12 +2222,18 @@ export function ModelViewer({
   const showBike = mode !== "rider" && !!nodes?.length;
   const showRider = mode !== "bike" && !!riderParts?.length;
   const pair = showBike && showRider;
+  // Sitting the rider on the bike needs the bike to say where its seat is and the rider to
+  // have a rig to be sat by. Either missing leaves the two standing side by side rather than
+  // guessing a height or dropping a body on the origin.
+  const canSeat =
+    !!rig?.seat && !!riderParts?.some((p) => p.part === "body" && p.skeleton?.length);
+  const seat = mode === "onBike" && pair && canSeat ? rig!.seat : null;
   const hasReal = showBike && !showRider;
   const hasRider = showRider && !showBike;
   // A single gear item (no body) is a small centred object — frame it level.
   const gearSolo =
     hasRider && !riderParts!.some((p) => p.part === "body" && p.nodes.length);
-  const frame: Framing = pair ? "pair" : gearSolo ? "solo" : "default";
+  const frame: Framing = seat ? "onBike" : pair ? "pair" : gearSolo ? "solo" : "default";
   // The models a solo view has to turn about — the pair works its own out, since it measures
   // both to lay them out anyway.
   const soloPivot = useMemo(() => {
@@ -1956,6 +2260,10 @@ export function ModelViewer({
           // 2× on a retina panel quadruples the pixels for a preview-sized model.
           dpr={[1, 1.5]}
           camera={{ position: [2.6, 1.8, 3.2], fov: 42 }}
+          // Kept so a photo can be read back off the canvas. Costs a buffer that isn't
+          // discarded after compositing, which on a viewer that only draws on demand is
+          // nothing next to having no way to save what's on screen.
+          gl={{ preserveDrawingBuffer: true }}
           onCreated={({ gl, invalidate }) => {
             // A lost GPU context otherwise leaves a black canvas; preventDefault lets the browser restore it.
             gl.domElement.addEventListener(
@@ -1971,23 +2279,39 @@ export function ModelViewer({
             gl.domElement.addEventListener("webglcontextrestored", () => invalidate(), false);
           }}
         >
-          <color attach="background" args={["#0e0f13"]} />
+          <Sky scene={look} />
           <FrameOnChange token={frameToken} />
           <CameraRig frame={frame} />
-          <ambientLight intensity={0.75} />
+          <CaptureBridge onReady={onCaptureReady} />
+          <ambientLight intensity={look.ambient} />
           {/* Even sky/ground fill so matte paint reads its true colour. */}
-          <hemisphereLight args={[0xffffff, 0x555a66, 0.7]} />
+          <hemisphereLight args={[look.hemi.sky, look.hemi.ground, look.hemi.intensity]} />
           <directionalLight
-            position={[4, 6, 3]}
-            intensity={1.25}
+            position={look.key.at}
+            intensity={look.key.intensity}
             castShadow
             shadow-mapSize={[1024, 1024]}
           />
-          <directionalLight position={[-4, 2, -3]} intensity={0.55} />
+          <directionalLight position={[-4, 2, -3]} intensity={look.back} />
           {/* Front fill from the camera side so the front of the kit isn't in shadow. */}
-          <directionalLight position={[0, 1.5, 5]} intensity={0.5} />
+          <directionalLight position={[0, 1.5, 5]} intensity={look.front} />
           <Center>
-            {pair ? (
+            {seat ? (
+              <OnBike
+                nodes={nodes!}
+                textures={texMap}
+                highlight={highlight}
+                parts={riderParts!}
+                overrides={overrides}
+                rig={rig}
+                pose={pose}
+                riderPose={riderPose}
+                onRiderPose={poseEdit}
+                onGrab={onGrab}
+                place={place}
+                seat={seat}
+              />
+            ) : pair ? (
               <SideBySide
                 nodes={nodes!}
                 textures={texMap}
@@ -1997,7 +2321,8 @@ export function ModelViewer({
                 rig={rig}
                 pose={pose}
                 riderPose={riderPose}
-                onRiderPose={onRiderPose}
+                onRiderPose={poseEdit}
+                onGrab={onGrab}
                 place={place}
               />
             ) : hasReal ? (
@@ -2016,7 +2341,8 @@ export function ModelViewer({
                   parts={riderParts!}
                   overrides={overrides}
                   pose={riderPose}
-                  onPose={onRiderPose}
+                  onPose={poseEdit}
+                  onGrab={onGrab}
                 />
               </Placed>
             ) : loading || noStandIn ? null : mode === "bike" ? (
@@ -2027,11 +2353,19 @@ export function ModelViewer({
           </Center>
           <ContactShadows
             position={[0, -0.01, 0]}
-            opacity={0.5}
+            opacity={look.shadow}
             scale={8}
             blur={2.4}
             far={4}
           />
+          {/* Below the contact shadow, which is what keeps it out of the shadow's own render:
+              that camera looks up from its plane, so anything under it isn't in the shot. */}
+          {look.ground && (
+            <mesh position={[0, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+              <circleGeometry args={[9, 64]} />
+              <meshStandardMaterial color={look.ground} roughness={0.95} metalness={0} />
+            </mesh>
+          )}
           <OrbitControls
             makeDefault
             enablePan
@@ -2044,10 +2378,10 @@ export function ModelViewer({
           />
         </Canvas>
       </ErrorBoundary>
-      {!loading && <ControlsHint tight={placeControls || poseControls} />}
+      {!loading && !photo && <ControlsHint tight={placeControls || poseControls} />}
       {/* One stack, so the two panels line up on the same edge whether both are offered or
           only one — placement above, because moving a model comes before fussing its joints. */}
-      {!loading && (placeControls || poseControls) && (
+      {!loading && !photo && (placeControls || poseControls) && (
         <div className="absolute bottom-2 right-2 flex flex-col items-end gap-1.5">
           {placeControls && placeTargets.length > 0 && (
             <PlaceControls

@@ -478,9 +478,9 @@ pub async fn import(
         "",
         BUNDLE_SLUG,
         install::OnConflict::Keep,
-        // Staged under our own temp dir, so this could consume it — left alone for now to
-        // keep the change to the mod-install path it was measured on.
-        install::Staging::Preserve,
+        // Staged under our own `work`, deleted at the end of this function. Files the
+        // receiver already has are skipped and simply go with it.
+        install::Staging::Consume,
     )?;
 
     presets::save_preset(presets_dir, preset.clone())?;

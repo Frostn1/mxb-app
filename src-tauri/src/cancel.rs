@@ -1,8 +1,14 @@
 //! Abort flags for in-flight installs, keyed by mod slug.
 //!
 //! Keyed by slug because that is already how an install identifies itself on the wire — the
-//! `install-progress` event carries nothing else ([`crate::install`]) — and because the frontend
-//! drains its queue strictly one at a time, so a slug is never ambiguous.
+//! `install-progress` event carries nothing else ([`crate::install`]).
+//!
+//! Several installs now run at once, so "a slug is never ambiguous" is no longer free: it is
+//! upheld by the queue, which will not start a job whose slug is already running (`pump` in
+//! `Context/Install.tsx`). Two overlapping jobs under one slug would share this flag *and*
+//! their progress events — cancelling one would stop the other, and their bars would report
+//! into each other. Anything that lets a slug run twice at once has to give the backend a
+//! per-job id first.
 //!
 //! The flag is looked up by slug at each check point rather than threaded through as a parameter.
 //! That keeps [`crate::install::download`] signature-compatible with [`crate::shop_fetch::download`],

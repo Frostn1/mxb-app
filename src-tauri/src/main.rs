@@ -1199,6 +1199,45 @@ async fn paint_studio_stage(request: tauri::ipc::Request<'_>) -> Result<String, 
     .map_err(|e| format!("paint_studio_stage task failed: {e}"))?
 }
 
+/// Write a photo of the 3D preview to a path the user picked in a save dialog.
+///
+/// Raw body and a header, for the same reason [`paint_studio_stage`] takes one: a 4K frame is
+/// megabytes and JSON would send it as a list of numbers. The path is percent-encoded, because
+/// a header has to be ASCII and a Windows user's pictures folder is under their name.
+///
+/// Nothing is resolved or relocated here — the dialog already asked, and the file goes exactly
+/// where it said. A `.png` is enforced so a typed name can't quietly write PNG bytes to
+/// something that isn't one.
+#[tauri::command]
+async fn photo_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err("photo_save expects the PNG bytes as the request body".into());
+    };
+    let raw = request
+        .headers()
+        .get("x-dest")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let dest = percent_encoding::percent_decode_str(raw).decode_utf8_lossy().into_owned();
+    if dest.is_empty() {
+        return Err("photo_save needs a destination".into());
+    }
+    let png = png.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut path = std::path::PathBuf::from(&dest);
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) {
+            path.set_extension("png");
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{dir:?}: {e}"))?;
+        }
+        std::fs::write(&path, &png).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("photo_save task failed: {e}"))?
+}
+
 /// The file a save would write, resolved but not written — so the UI can ask before
 /// replacing a paint that's already there.
 #[tauri::command]
@@ -2052,6 +2091,16 @@ fn build_bike_model(
         .iter()
         .flat_map(|p| p.textures.iter().map(|t| t.token.as_str()))
         .collect();
+    // The phase split, on stdout, for the `bike_load_timing` diagnostic — `log` has no
+    // subscriber under `cargo test`, and this is the breakdown that says where to optimise.
+    if std::env::var_os("MXB_PHASE_TIMES").is_some() {
+        println!(
+            "  parse mesh           {:>9.2?}\n  decode paints        {:>9.2?}  ({} paint(s), {base_count} base tex)",
+            t_parse - t_read,
+            t_textures - t_parse,
+            paints.len(),
+        );
+    }
     log::info!(
         "load_bike_model {label}: {} paint(s) + {base_count} base tex | read {t_read:?}, parse {:?}, decode {:?}, total {:?} | {} distinct texture(s), {:.1} MB resident in the texture store",
         paints.len(),
@@ -7655,6 +7704,7 @@ fn main() {
             paint_studio_load,
             paint_studio_pixels,
             paint_studio_stage,
+            photo_save,
             paint_studio_target,
             paint_studio_save,
             paint_studio_extract,
@@ -9211,8 +9261,126 @@ mod viewer_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Every base texture a bike decodes, with its source size and what it cost.
+    ///
+    /// `MXB_REAL_PKZ=<bike.pkz> cargo test bike_texture_costs -- --ignored --nocapture`
     #[test]
-    #[ignore]
+    #[ignore = "needs a real bike — set MXB_REAL_PKZ"]
+    fn bike_texture_costs() {
+        let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
+            eprintln!("set MXB_REAL_PKZ to run");
+            return;
+        };
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("gather");
+
+        println!("\n  source            decode    src px      -> stored");
+        let mut total = std::time::Duration::ZERO;
+        for (name, data) in &files {
+            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+            if let Some(stem) = bn.strip_suffix(".tga") {
+                let t = std::time::Instant::now();
+                let tex = super::paint::decode_image(stem, data);
+                let d = t.elapsed();
+                total += d;
+                if let Some(tex) = tex {
+                    println!("  {stem:<16}{d:>9.2?}  {:>6}KB  -> {}x{}",
+                             data.len() / 1024, tex.width, tex.height);
+                }
+            } else if bn.ends_with(".edf") {
+                let t = std::time::Instant::now();
+                let texs = super::paint::extract_edf_textures(data);
+                let d = t.elapsed();
+                total += d;
+                println!("  {bn:<16}{d:>9.2?}  {:>6}KB  -> {} embedded texture(s)",
+                         data.len() / 1024, texs.len());
+                for tex in &texs {
+                    println!("      {:<12}            -> {}x{}", tex.name, tex.width, tex.height);
+                }
+            }
+        }
+        println!("\n  base textures total {total:.2?}\n");
+    }
+
+    /// Where a bike view's time goes, uncached.
+    ///
+    /// `MXB_REAL_PKZ=<bike.pkz> cargo test bike_load_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs a real bike — set MXB_REAL_PKZ"]
+    fn bike_load_timing() {
+        let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
+            eprintln!("set MXB_REAL_PKZ to run");
+            return;
+        };
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        println!("\n  {path}  ({:.1} MB)", size as f64 / 1e6);
+
+        // The archive read, split out from everything downstream of it.
+        let t = std::time::Instant::now();
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("gather");
+        let read = t.elapsed();
+        let bytes: usize = files.iter().map(|(_, d)| d.len()).sum();
+        drop(files);
+
+        // Cold: the cache is what a second open gets, and it is not what anyone complains about.
+        let t = std::time::Instant::now();
+        let m = super::load_bike_model_blocking(path.clone(), None).expect("load bike");
+        let cold = t.elapsed();
+        println!("  read archive         {read:>9.2?}  ({:.1} MB inflated)", bytes as f64 / 1e6);
+
+        let t = std::time::Instant::now();
+        let _ = super::load_bike_model_blocking(path, None).expect("load bike");
+        let warm = t.elapsed();
+
+        let t = std::time::Instant::now();
+        let json = serde_json::to_string(&m.nodes).unwrap();
+        let encode = t.elapsed();
+
+        let sheets: usize = m.paints.iter().map(|p| p.textures.len()).sum();
+        println!("  load, cold           {cold:>9.2?}");
+        println!("  load, cached         {warm:>9.2?}");
+        println!("  mesh -> JSON         {encode:>9.2?}  ({:.1} MB of text to the webview)",
+                 json.len() as f64 / 1e6);
+        println!("  {} paint(s), {sheets} sheet(s) — pixels stay in the texture store\n",
+                 m.paints.len());
+    }
+
+    /// What the mesh costs to hand the webview.
+    ///
+    /// `MXB_REAL_PKZ=<bike.pkz> cargo test bike_mesh_payload -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs a real bike — set MXB_REAL_PKZ"]
+    fn bike_mesh_payload() {
+        let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
+            eprintln!("set MXB_REAL_PKZ to run");
+            return;
+        };
+        let m = super::load_bike_model_blocking(path, None).expect("load bike");
+
+        let verts: usize = m.nodes.iter().map(|n| n.positions.len() / 3).sum();
+        let tris: usize = m.nodes.iter().map(|n| n.indices.len() / 3).sum();
+        let floats: usize = m
+            .nodes
+            .iter()
+            .map(|n| n.positions.len() + n.uvs.len() + n.normals.len())
+            .sum();
+        let ints: usize = m.nodes.iter().map(|n| n.indices.len()).sum();
+
+        let t = std::time::Instant::now();
+        let json = serde_json::to_string(&m.nodes).unwrap();
+        let encode = t.elapsed();
+
+        // What the same numbers weigh as raw little-endian, which is what a binary channel
+        // would carry and what the webview can adopt without parsing.
+        let binary = floats * 4 + ints * 4;
+
+        println!("\n  {} nodes, {verts} vertices, {tris} triangles", m.nodes.len());
+        println!("  JSON   {:>9.1} MB  encoded in {encode:.2?}", json.len() as f64 / 1e6);
+        println!("  binary {:>9.1} MB", binary as f64 / 1e6);
+        println!("  ratio  {:>9.1}x\n", json.len() as f64 / binary as f64);
+    }
+
+    #[test]
+    #[ignore = "needs a real bike — set MXB_REAL_PKZ"]
     fn bike_model_from_pkz() {
         let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
             eprintln!("set MXB_REAL_PKZ to run");
@@ -9697,6 +9865,37 @@ mod viewer_tests {
         assert_eq!(nodes[2].submeshes[0].texture.as_deref(), Some("hide"));
         // An untextured material, and an id past the end of the table, both still render.
         assert_eq!(nodes[2].submeshes[1].texture.as_deref(), Some("rider"));
+    }
+
+    /// Investigation aid: a rider's rig as JSON, in the frame the viewer draws it in.
+    ///
+    /// The two turns `body_rig` puts a rig through are what make the difference between this
+    /// and `edf::tests::rig_dump`, and they are what the front end's ready-made moves are
+    /// stated against — so this is the shape to check those against.
+    ///
+    /// `MXB_EDF_FILE=…/rider.edf cargo test rig_json -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn rig_json() {
+        let Ok(path) = std::env::var("MXB_EDF_FILE") else {
+            eprintln!("set MXB_EDF_FILE to run");
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read edf");
+        let mut rig = super::edf::parse_skeleton(&bytes);
+        super::edf::transform_skeleton(&mut rig, [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for b in rig.iter() {
+            let o = b.origin();
+            for a in 0..3 {
+                lo[a] = lo[a].min(o[a]);
+                hi[a] = hi[a].max(o[a]);
+            }
+        }
+        if super::body_is_z_up([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]) {
+            super::edf::transform_skeleton(&mut rig, super::BODY_STAND_UP);
+        }
+        println!("{}", serde_json::to_string(&rig).expect("serialise"));
     }
 
     /// The bug this replaced: material indices count into the model's own texture list, and

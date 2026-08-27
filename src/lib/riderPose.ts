@@ -361,63 +361,317 @@ export function boneLabel(name: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
 }
 
-// ── Ready-made moves ─────────────────────────────────────────────────────────
+// ── The rider's own axes ─────────────────────────────────────────────────────
 
-export type QuickMoveId = "legsWide" | "legsNarrow" | "leftLegForward" | "elbowsUp" | "leanIn";
+/**
+ * Which way is up, left and forward *on this rider*, and how long a thigh is.
+ *
+ * Read off the model rather than written down, because there is nothing to write down: the
+ * rigs the game ships aren't even in the same orientation as each other (`default_mx_c` is
+ * turned half a turn about its up axis relative to `default_sm`), a rig may reach the viewer
+ * mirrored, and a bone's own axes are whatever the author left them as. Every ready-made move
+ * below is stated in these, so the same move means the same thing on every model.
+ */
+export interface RiderFrame {
+  up: THREE.Vector3;
+  /** The rider's own left, not the screen's. */
+  left: THREE.Vector3;
+  forward: THREE.Vector3;
+  /** Hip to knee, in metres — the unit the moves are measured in, so a tall rig moves further. */
+  leg: number;
+}
 
-export interface QuickMove {
-  id: QuickMoveId;
-  /** Added to whatever the pose already holds, so two moves can be stacked. */
-  turns: Record<string, [number, number, number]>;
+/** A rider the ready-made moves can be stated against: its rig, and the axes read off it. */
+export interface PosableRig {
+  bones: Bone[];
+  frame: RiderFrame;
+}
+
+/** A bone's rest position in model space, or null if the model doesn't bind it. */
+function originOf(bones: Bone[], name: string): THREE.Vector3 | null {
+  const b = bones.find((x) => x.name === name);
+  return b ? new THREE.Vector3(b.bind[3], b.bind[7], b.bind[11]) : null;
+}
+
+/** The first of `names` this model binds. */
+function firstOrigin(bones: Bone[], names: string[]): THREE.Vector3 | null {
+  for (const n of names) {
+    const at = originOf(bones, n);
+    if (at) return at;
+  }
+  return null;
 }
 
 /**
- * The moves the rig can actually make, as turns on real bones.
+ * Which way the rider faces, as ±1 along `f`, or 0 when the body doesn't say.
  *
- * Deliberately small: a hip swings out on one axis and forward on another, and naming those
- * two "wider" and "one leg forward" is most of what anyone wants from a leg. Everything finer
- * is a slider away in the bone list.
+ * A foot is the one part of a standing body that is plainly asymmetric about its joint —
+ * around 20 cm of it in front of the ankle and 6 cm behind — so the lowest slice of the mesh
+ * settles the question on its own.
+ */
+function facingFromFeet(
+  nodes: { positions: number[] }[],
+  f: THREE.Vector3,
+  up: THREE.Vector3,
+  ankle: THREE.Vector3,
+): number {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const n of nodes) {
+    for (let i = 0; i < n.positions.length; i += 3) {
+      const t = n.positions[i] * up.x + n.positions[i + 1] * up.y + n.positions[i + 2] * up.z;
+      if (t < lo) lo = t;
+      if (t > hi) hi = t;
+    }
+  }
+  if (!(hi > lo)) return 0;
+  const cut = lo + (hi - lo) * 0.06;
+  const at = ankle.dot(f);
+  let toe = 0;
+  let heel = 0;
+  for (const n of nodes) {
+    for (let i = 0; i < n.positions.length; i += 3) {
+      const t = n.positions[i] * up.x + n.positions[i + 1] * up.y + n.positions[i + 2] * up.z;
+      if (t > cut) continue;
+      const d = n.positions[i] * f.x + n.positions[i + 1] * f.y + n.positions[i + 2] * f.z - at;
+      if (d > toe) toe = d;
+      if (-d > heel) heel = -d;
+    }
+  }
+  if (toe > heel * 1.35) return 1;
+  if (heel > toe * 1.35) return -1;
+  return 0;
+}
+
+/**
+ * The same question from the rig alone: a thumb points the way its owner does.
+ *
+ * Only asked when the mesh didn't answer — a rider authored already sitting on a bike has its
+ * feet under it, and then the hands are the better witness.
+ */
+function facingFromThumb(bones: Bone[], f: THREE.Vector3, up: THREE.Vector3): number {
+  const wrist = originOf(bones, "riderRIG_LeftWrist");
+  const thumb = firstOrigin(bones, [
+    "riderRIG_LeftThumb3",
+    "riderRIG_LeftThumb2",
+    "riderRIG_LeftThumb1",
+  ]);
+  if (!wrist || !thumb) return 0;
+  const d = thumb.clone().sub(wrist);
+  d.addScaledVector(up, -d.dot(up));
+  const len = d.length();
+  if (len < 1e-4) return 0;
+  const along = d.dot(f) / len;
+  return Math.abs(along) > 0.4 ? Math.sign(along) : 0;
+}
+
+/**
+ * Read {@link RiderFrame} off a rig, with the body mesh to settle which way it faces.
+ *
+ * Null when the model binds too little to say — a rig with no hips or no spine is one the
+ * ready-made moves can't be stated in, and offering them anyway would move something at
+ * random.
+ */
+export function riderFrame(
+  bones: Bone[],
+  body?: { positions: number[] }[] | null,
+): RiderFrame | null {
+  if (!bones.length) return null;
+  const leftHip = originOf(bones, "riderRIG_LeftHip");
+  const rightHip = originOf(bones, "riderRIG_RightHip");
+  if (!leftHip || !rightHip) return null;
+  const hips = leftHip.clone().add(rightHip).multiplyScalar(0.5);
+  const pelvis = originOf(bones, "riderRIG_Pelvis") ?? hips;
+  const head = firstOrigin(bones, [
+    "riderRIG_Head",
+    "riderRIG_Neck1",
+    "riderRIG_Spine4",
+    "riderRIG_LeftCollar",
+  ]);
+  if (!head) return null;
+  const up = head.clone().sub(pelvis);
+  if (up.lengthSq() < 1e-8) return null;
+  up.normalize();
+  const left = leftHip.clone().sub(rightHip);
+  left.addScaledVector(up, -left.dot(up));
+  if (left.lengthSq() < 1e-8) return null;
+  left.normalize();
+  const forward = new THREE.Vector3().crossVectors(up, left).normalize();
+
+  const leftKnee = originOf(bones, "riderRIG_LeftKnee");
+  const rightKnee = originOf(bones, "riderRIG_RightKnee");
+  const thigh = leftKnee
+    ? leftKnee.distanceTo(leftHip)
+    : rightKnee
+      ? rightKnee.distanceTo(rightHip)
+      : head.distanceTo(pelvis) * 0.6;
+
+  // The knee stands over the ankle on a standing rider, which is the reference the foot test
+  // measures its toe and heel from.
+  const ankle = leftKnee ?? rightKnee ?? hips;
+  const sign =
+    (body?.length ? facingFromFeet(body, forward, up, ankle) : 0) ||
+    facingFromThumb(bones, forward, up);
+  if (sign < 0) forward.negate();
+  return { up, left, forward, leg: thigh || 0.36 };
+}
+
+// ── Ready-made moves ─────────────────────────────────────────────────────────
+
+export type QuickMoveId =
+  | "legsWide"
+  | "legsNarrow"
+  | "leftLegForward"
+  | "elbowsUp"
+  | "leanIn"
+  | "sitOnBike";
+
+/** One joint sent somewhere, and the bone whose turn takes it there. */
+export interface QuickStep {
+  /** The bone the turn is written on — the joint the limb swings about. */
+  turns: string;
+  /** The bone that has to travel. */
+  moves: string;
+  /** Take the far end of `moves`' own box rather than its joint — see {@link boneTip}. */
+  tip?: boolean;
+  /** How far it travels, in thigh-lengths, along the rider's own axes. */
+  by: { up?: number; left?: number; forward?: number };
+}
+
+export interface QuickMove {
+  id: QuickMoveId;
+  steps: QuickStep[];
+}
+
+/**
+ * The moves, as places to send a joint.
+ *
+ * Not as degrees: degrees are read in a bone's own frame, and nothing says that frame is
+ * squared up with the body — which is how "legs wider" came to pull them in on some models
+ * and shorten them on others. "Send the knee 22 cm to the rider's own left" only has the one
+ * meaning, and {@link turnToward} — the same solver a drag uses — works out the turn.
  */
 export const QUICK_MOVES: QuickMove[] = [
   {
     id: "legsWide",
-    turns: { riderRIG_LeftHip: [0, 0, 12], riderRIG_RightHip: [0, 0, -12] },
+    steps: [
+      { turns: "riderRIG_LeftHip", moves: "riderRIG_LeftKnee", by: { left: 0.24 } },
+      { turns: "riderRIG_RightHip", moves: "riderRIG_RightKnee", by: { left: -0.24 } },
+    ],
   },
   {
     id: "legsNarrow",
-    turns: { riderRIG_LeftHip: [0, 0, -8], riderRIG_RightHip: [0, 0, 8] },
+    steps: [
+      { turns: "riderRIG_LeftHip", moves: "riderRIG_LeftKnee", by: { left: -0.18 } },
+      { turns: "riderRIG_RightHip", moves: "riderRIG_RightKnee", by: { left: 0.18 } },
+    ],
   },
   {
     id: "leftLegForward",
-    turns: { riderRIG_LeftHip: [-14, 0, 0], riderRIG_RightHip: [10, 0, 0] },
+    steps: [
+      { turns: "riderRIG_LeftHip", moves: "riderRIG_LeftKnee", by: { forward: 0.3 } },
+      { turns: "riderRIG_RightHip", moves: "riderRIG_RightKnee", by: { forward: -0.22 } },
+    ],
   },
   {
     id: "elbowsUp",
-    turns: {
-      riderRIG_LeftShoulder: [0, 0, -14],
-      riderRIG_RightShoulder: [0, 0, 14],
-      riderRIG_LeftElbow: [0, 0, -8],
-      riderRIG_RightElbow: [0, 0, 8],
-    },
+    steps: [
+      {
+        turns: "riderRIG_LeftShoulder",
+        moves: "riderRIG_LeftElbow",
+        by: { up: 0.22, left: 0.14 },
+      },
+      {
+        turns: "riderRIG_RightShoulder",
+        moves: "riderRIG_RightElbow",
+        by: { up: 0.22, left: -0.14 },
+      },
+    ],
   },
   {
     id: "leanIn",
-    turns: { riderRIG_Spine2: [-8, 0, 0], riderRIG_Spine3: [-6, 0, 0], riderRIG_Neck1: [8, 0, 0] },
+    steps: [
+      { turns: "riderRIG_Spine2", moves: "riderRIG_Neck1", by: { forward: 0.18 } },
+      // Back the other way, so leaning in doesn't take the rider's eyes off the track.
+      { turns: "riderRIG_Neck1", moves: "riderRIG_Head", by: { forward: -0.07 } },
+    ],
+  },
+  {
+    // Thighs forward and apart, shins folded back under: a straddle, which is what makes the
+    // on-bike view worth looking at before anyone touches a slider.
+    id: "sitOnBike",
+    steps: [
+      {
+        turns: "riderRIG_LeftHip",
+        moves: "riderRIG_LeftKnee",
+        by: { forward: 0.6, left: 0.3, up: 0.12 },
+      },
+      {
+        turns: "riderRIG_RightHip",
+        moves: "riderRIG_RightKnee",
+        by: { forward: 0.6, left: -0.3, up: 0.12 },
+      },
+      {
+        turns: "riderRIG_LeftKnee",
+        moves: "riderRIG_LeftKnee",
+        tip: true,
+        by: { forward: -0.6, left: 0.12 },
+      },
+      {
+        turns: "riderRIG_RightKnee",
+        moves: "riderRIG_RightKnee",
+        tip: true,
+        by: { forward: -0.6, left: -0.12 },
+      },
+      { turns: "riderRIG_Spine2", moves: "riderRIG_Neck1", by: { forward: 0.16 } },
+    ],
   },
 ];
 
-/** Stack a ready-made move onto a pose, clamped to the same limits the sliders use. */
-export function applyQuickMove(pose: RiderPose, move: QuickMove): RiderPose {
-  const out: RiderPose = { ...pose };
-  for (const [bone, turn] of Object.entries(move.turns)) {
-    const at = turnOf(out, bone);
-    out[bone] = [
-      clampTurn(at[0] + turn[0]),
-      clampTurn(at[1] + turn[1]),
-      clampTurn(at[2] + turn[2]),
-    ];
+/**
+ * Can this model make this move?
+ *
+ * A rig that binds no spine — `default_mx_c` is one — has nothing to lean, and a button that
+ * silently does nothing is worse than one that isn't offered.
+ */
+export function canMove(move: QuickMove, bones: Bone[]): boolean {
+  const has = (name: string) => bones.some((b) => b.name === name);
+  return move.steps.some((s) => has(s.turns) && has(s.moves));
+}
+
+/**
+ * Stack a ready-made move onto a pose.
+ *
+ * Each step is solved against the rig as the steps before it have left it, so a move that
+ * folds a shin under a thigh reads the thigh where it now is. Bones the model doesn't bind
+ * are skipped rather than guessed at, so a rig with no spine still gets its legs moved.
+ */
+export function applyQuickMove(
+  pose: RiderPose,
+  move: QuickMove,
+  bones: Bone[],
+  frame: RiderFrame,
+): RiderPose {
+  const { order } = buildSkeleton(bones);
+  let out = pose;
+  applyPose(order, out);
+  for (const step of move.steps) {
+    const on = bones.findIndex((b) => b.name === step.moves);
+    if (on < 0 || bones.findIndex((b) => b.name === step.turns) < 0) continue;
+    const local = step.tip
+      ? new THREE.Vector3(...boneTip(bones, on))
+      : new THREE.Vector3(0, 0, 0);
+    order[on].updateWorldMatrix(true, false);
+    const from = local.applyMatrix4(order[on].matrixWorld);
+    const to = from
+      .clone()
+      .addScaledVector(frame.up, (step.by.up ?? 0) * frame.leg)
+      .addScaledVector(frame.left, (step.by.left ?? 0) * frame.leg)
+      .addScaledVector(frame.forward, (step.by.forward ?? 0) * frame.leg);
+    out = turnToward(order, bones, out, step.turns, from, to);
+    applyPose(order, out);
   }
-  return trimPose(out);
+  return out;
 }
 
 /** How far one bone may be turned. Past this a rider stops looking like one. */
