@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import {
   Search,
   RefreshCw,
@@ -133,9 +133,14 @@ interface RowAction {
 function LibraryCardBody({
   item,
   typeIcon: TypeIcon,
+  footer,
 }: {
   item: LibraryEntry;
   typeIcon: LucideIcon;
+  /** Rendered under the subtitle, inside the name column. Anything put in the row *beside*
+   *  the name competes with it for width, and the name is what loses — it collapsed to
+   *  nothing the moment a second control landed next to "View in 3D". */
+  footer?: ReactNode;
 }) {
   const t = useT();
   const cacheKey = metaKey(item);
@@ -222,6 +227,7 @@ function LibraryCardBody({
         <span className="truncate text-[11px] text-muted-foreground" title={subtitle}>
           {subtitle}
         </span>
+        {footer}
       </div>
     </>
   );
@@ -234,7 +240,16 @@ function LibraryCardBody({
  * for two views to disagree about which model is live. Mirrors the Locker's own vocabulary —
  * same icons, same states — so a variant reads the same wherever you meet it.
  */
-function ModelSwapList({ variants, t }: { variants: ModelVariant[]; t: TFunc }) {
+function ModelSwapList({
+  variants,
+  t,
+  onPreview,
+}: {
+  variants: ModelVariant[];
+  t: TFunc;
+  /** Undefined when this build can't draw bike geometry — then no row offers a preview. */
+  onPreview?: (variant: string) => void;
+}) {
   return (
     <ul
       onClick={(e) => e.stopPropagation()}
@@ -267,6 +282,21 @@ function ModelSwapList({ variants, t }: { variants: ModelVariant[]; t: TFunc }) 
                   ? t("library.modelIncomplete")
                   : t("swaps.fileCount", { count: v.fileCount })}
           </span>
+          {/* A set with a mesh can be drawn; so can Stock, which shows the packed model the
+              loose files are covering. A "no model" set has nothing to show. */}
+          {onPreview && (v.valid || v.name.toLowerCase() === "stock") && (
+            <button
+              title={t("locker.preview3d", { name: v.name })}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreview(v.name);
+              }}
+              className="flex flex-none cursor-default items-center gap-1 rounded px-1 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-primary"
+            >
+              <Box className="size-3" />
+              {t("locker.view3d")}
+            </button>
+          )}
         </li>
       ))}
     </ul>
@@ -488,6 +518,9 @@ export default function Library({
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<LibraryEntry | null>(null);
   const [view3d, setView3d] = useState<LibraryEntry | null>(null);
+  // A model swap being previewed in 3D, by bike + variant. Separate from `view3d`, which is
+  // keyed by library entry: a swap has no entry of its own to point at.
+  const [swapView, setSwapView] = useState<{ bike: string; variant: string } | null>(null);
   const [moveTarget, setMoveTarget] = useState<LibraryEntry | null>(null);
   // Model swaps per bike folder, for the expandable row on a bike card. Bikes only — no
   // other mod type has them — and read-only: switching stays in the Locker.
@@ -1083,34 +1116,39 @@ export default function Library({
                                 )}
                               </span>
                             )}
-                            <LibraryCardBody item={item} typeIcon={Icon} />
-                            {showModels && (
-                              <button
-                                title={t("library.modelsHint")}
-                                aria-expanded={swapsOpen}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenSwaps((prev) => {
-                                    const next = new Set(prev);
-                                    if (!next.delete(item.path)) next.add(item.path);
-                                    return next;
-                                  });
-                                }}
-                                className={cn(
-                                  "flex flex-none cursor-default items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[11px] font-semibold transition-colors hover:bg-foreground/[0.06]",
-                                  swapsOpen ? "text-primary" : "text-faint hover:text-primary",
-                                )}
-                              >
-                                <Layers className="size-3.5" />
-                                {t("library.models", { count: models!.variants.length })}
-                                <ChevronDown
-                                  className={cn(
-                                    "size-3 transition-transform",
-                                    swapsOpen && "rotate-180",
-                                  )}
-                                />
-                              </button>
-                            )}
+                            <LibraryCardBody
+                              item={item}
+                              typeIcon={Icon}
+                              footer={
+                                showModels ? (
+                                  <button
+                                    title={t("library.modelsHint")}
+                                    aria-expanded={swapsOpen}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenSwaps((prev) => {
+                                        const next = new Set(prev);
+                                        if (!next.delete(item.path)) next.add(item.path);
+                                        return next;
+                                      });
+                                    }}
+                                    className={cn(
+                                      "-ml-1 mt-0.5 flex w-fit max-w-full cursor-default items-center gap-1 truncate rounded px-1 py-0.5 text-[10.5px] font-semibold transition-colors hover:bg-foreground/[0.06]",
+                                      swapsOpen ? "text-primary" : "text-faint hover:text-primary",
+                                    )}
+                                  >
+                                    <Layers className="size-3 flex-none" />
+                                    {t("library.models", { count: models!.variants.length })}
+                                    <ChevronDown
+                                      className={cn(
+                                        "size-3 flex-none transition-transform",
+                                        swapsOpen && "rotate-180",
+                                      )}
+                                    />
+                                  </button>
+                                ) : undefined
+                              }
+                            />
                             {!selectMode && canView3d && (
                               <button
                                 title={t("library.quick3d")}
@@ -1152,7 +1190,16 @@ export default function Library({
                             )}
                             </div>
                             {showModels && swapsOpen && (
-                              <ModelSwapList variants={models!.variants} t={t} />
+                              <ModelSwapList
+                                variants={models!.variants}
+                                t={t}
+                                onPreview={
+                                  bikePreview
+                                    ? (variant) =>
+                                        setSwapView({ bike: models!.bike, variant })
+                                    : undefined
+                                }
+                              />
                             )}
                           </div>
                         </ContextMenuTrigger>
@@ -1238,6 +1285,12 @@ export default function Library({
         </>
       )}
 
+      <ViewerDialog
+        open={swapView !== null}
+        onOpenChange={(o) => !o && setSwapView(null)}
+        title={swapView ? `${swapView.bike} · ${swapView.variant}` : undefined}
+        modelSwap={swapView ?? undefined}
+      />
       <ViewerDialog
         open={Boolean(view3d)}
         onOpenChange={(o) => !o && setView3d(null)}
