@@ -562,7 +562,7 @@ export default function Library({
     let alive = true;
     void scanModelSwaps()
       .then((rows) => {
-        if (alive) setSwaps(new Map(rows.map((r) => [r.bike, r])));
+        if (alive) setSwaps(new Map(rows.map((r) => [r.bike.toLowerCase(), r])));
       })
       .catch(() => {});
     return () => {
@@ -1050,7 +1050,7 @@ export default function Library({
                     // A bike's model swaps. The Locker always lists the active set as a row
                     // of its own, so a bike with nothing to switch between still reports one
                     // variant — only two or more is a choice worth a badge.
-                    const models = swaps.get(item.name);
+                    const models = swaps.get(displayName(item.name).toLowerCase());
                     const showModels = !selectMode && (models?.variants.length ?? 0) > 1;
                     const swapsOpen = openSwaps.has(item.path);
                     return (
