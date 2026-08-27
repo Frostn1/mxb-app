@@ -2091,6 +2091,16 @@ fn build_bike_model(
         .iter()
         .flat_map(|p| p.textures.iter().map(|t| t.token.as_str()))
         .collect();
+    // The phase split, on stdout, for the `bike_load_timing` diagnostic — `log` has no
+    // subscriber under `cargo test`, and this is the breakdown that says where to optimise.
+    if std::env::var_os("MXB_PHASE_TIMES").is_some() {
+        println!(
+            "  parse mesh           {:>9.2?}\n  decode paints        {:>9.2?}  ({} paint(s), {base_count} base tex)",
+            t_parse - t_read,
+            t_textures - t_parse,
+            paints.len(),
+        );
+    }
     log::info!(
         "load_bike_model {label}: {} paint(s) + {base_count} base tex | read {t_read:?}, parse {:?}, decode {:?}, total {:?} | {} distinct texture(s), {:.1} MB resident in the texture store",
         paints.len(),
@@ -9222,6 +9232,86 @@ mod viewer_tests {
 
     #[test]
     #[ignore]
+    /// Where a bike view's time goes, uncached.
+    ///
+    /// `MXB_REAL_PKZ=<bike.pkz> cargo test bike_load_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs a real bike — set MXB_REAL_PKZ"]
+    fn bike_load_timing() {
+        let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
+            eprintln!("set MXB_REAL_PKZ to run");
+            return;
+        };
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        println!("\n  {path}  ({:.1} MB)", size as f64 / 1e6);
+
+        // The archive read, split out from everything downstream of it.
+        let t = std::time::Instant::now();
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("gather");
+        let read = t.elapsed();
+        let bytes: usize = files.iter().map(|(_, d)| d.len()).sum();
+        drop(files);
+
+        // Cold: the cache is what a second open gets, and it is not what anyone complains about.
+        let t = std::time::Instant::now();
+        let m = super::load_bike_model_blocking(path.clone(), None).expect("load bike");
+        let cold = t.elapsed();
+        println!("  read archive         {read:>9.2?}  ({:.1} MB inflated)", bytes as f64 / 1e6);
+
+        let t = std::time::Instant::now();
+        let _ = super::load_bike_model_blocking(path, None).expect("load bike");
+        let warm = t.elapsed();
+
+        let t = std::time::Instant::now();
+        let json = serde_json::to_string(&m.nodes).unwrap();
+        let encode = t.elapsed();
+
+        let sheets: usize = m.paints.iter().map(|p| p.textures.len()).sum();
+        println!("  load, cold           {cold:>9.2?}");
+        println!("  load, cached         {warm:>9.2?}");
+        println!("  mesh -> JSON         {encode:>9.2?}  ({:.1} MB of text to the webview)",
+                 json.len() as f64 / 1e6);
+        println!("  {} paint(s), {sheets} sheet(s) — pixels stay in the texture store\n",
+                 m.paints.len());
+    }
+
+    /// What the mesh costs to hand the webview.
+    ///
+    /// `MXB_REAL_PKZ=<bike.pkz> cargo test bike_mesh_payload -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs a real bike — set MXB_REAL_PKZ"]
+    fn bike_mesh_payload() {
+        let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
+            eprintln!("set MXB_REAL_PKZ to run");
+            return;
+        };
+        let m = super::load_bike_model_blocking(path, None).expect("load bike");
+
+        let verts: usize = m.nodes.iter().map(|n| n.positions.len() / 3).sum();
+        let tris: usize = m.nodes.iter().map(|n| n.indices.len() / 3).sum();
+        let floats: usize = m
+            .nodes
+            .iter()
+            .map(|n| n.positions.len() + n.uvs.len() + n.normals.len())
+            .sum();
+        let ints: usize = m.nodes.iter().map(|n| n.indices.len()).sum();
+
+        let t = std::time::Instant::now();
+        let json = serde_json::to_string(&m.nodes).unwrap();
+        let encode = t.elapsed();
+
+        // What the same numbers weigh as raw little-endian, which is what a binary channel
+        // would carry and what the webview can adopt without parsing.
+        let binary = floats * 4 + ints * 4;
+
+        println!("\n  {} nodes, {verts} vertices, {tris} triangles", m.nodes.len());
+        println!("  JSON   {:>9.1} MB  encoded in {encode:.2?}", json.len() as f64 / 1e6);
+        println!("  binary {:>9.1} MB", binary as f64 / 1e6);
+        println!("  ratio  {:>9.1}x\n", json.len() as f64 / binary as f64);
+    }
+
+    #[test]
+    #[ignore = "needs a real bike — set MXB_REAL_PKZ"]
     fn bike_model_from_pkz() {
         let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
             eprintln!("set MXB_REAL_PKZ to run");

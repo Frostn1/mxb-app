@@ -50,16 +50,19 @@ export default function DownloadQueue({ collapsed }: { collapsed: boolean }) {
   const t = useT();
   const { active, queued, cancel } = useInstall();
 
-  const installing = active && IN_PROGRESS.has(active.stage) ? active : null;
-  const pct =
-    installing?.total && installing.received
-      ? Math.round((installing.received / installing.total) * 100)
-      : undefined;
+  const installing = active.filter((a) => IN_PROGRESS.has(a.stage));
+  // The collapsed card summarises: several transfers share one bar, so it follows the one
+  // furthest along — the next thing to finish is the useful thing to watch.
+  const lead =
+    installing.length > 0
+      ? installing.reduce((a, b) => (progressOf(b) > progressOf(a) ? b : a))
+      : null;
+  const pct = lead ? pctOf(lead) : undefined;
 
   // Nothing moving and nothing waiting: no card, exactly as before.
-  if (!installing && queued.length === 0) return null;
+  if (installing.length === 0 && queued.length === 0) return null;
 
-  const total = (installing ? 1 : 0) + queued.length;
+  const total = installing.length + queued.length;
 
   return (
     <Popover>
@@ -82,9 +85,11 @@ export default function DownloadQueue({ collapsed }: { collapsed: boolean }) {
           >
             <div className="flex items-baseline justify-between gap-2">
               <span className="truncate text-[11.5px] font-semibold text-foreground/85">
-                {installing
-                  ? t("sidebar.installing", { name: displayName(installing.title) })
-                  : t("downloads.title")}
+                {installing.length > 1
+                  ? t("sidebar.installingCount", { count: installing.length })
+                  : lead
+                    ? t("sidebar.installing", { name: displayName(lead.title) })
+                    : t("downloads.title")}
               </span>
               {pct !== undefined && (
                 <span className="flex-none text-[10.5px] text-muted-foreground">{pct}%</span>
@@ -114,45 +119,9 @@ export default function DownloadQueue({ collapsed }: { collapsed: boolean }) {
           <span className="text-[12px] font-bold">{t("downloads.title")}</span>
         </div>
         <div className="flex max-h-[320px] flex-col overflow-y-auto py-1.5">
-          {installing && (
-            <div className="flex flex-col gap-1.5 px-3.5 py-2">
-              <div className="flex items-start gap-2">
-                <span className="min-w-0 flex-1 truncate text-[12px] font-semibold">
-                  {displayName(installing.title)}
-                </span>
-                {cancellable(installing) && (
-                  <CancelButton
-                    label={t("downloads.cancel")}
-                    onClick={() => cancel(installing.key)}
-                  />
-                )}
-              </div>
-              <div className="flex items-baseline justify-between gap-2 text-[10.5px] text-muted-foreground">
-                <span className="truncate">
-                  {installing.cancelling
-                    ? t("downloads.cancelling")
-                    : t(STAGE_LABEL[installing.stage] ?? "downloads.stageDownloading")}
-                </span>
-                {installing.received !== undefined && (
-                  <span className="flex-none tabular-nums">
-                    {installing.total
-                      ? `${formatBytes(installing.received)} / ${formatBytes(installing.total)}`
-                      : formatBytes(installing.received)}
-                  </span>
-                )}
-              </div>
-              <div className="h-[3px] overflow-hidden rounded-full bg-foreground/[0.08]">
-                <div
-                  className={cn(
-                    "h-full rounded-full bg-primary transition-[width]",
-                    pct === undefined &&
-                      "w-1/3 animate-[frost-indeterminate_1.2s_ease-in-out_infinite]",
-                  )}
-                  style={pct !== undefined ? { width: `${pct}%` } : undefined}
-                />
-              </div>
-            </div>
-          )}
+          {installing.map((it) => (
+            <RunningRow key={it.key} item={it} onCancel={() => cancel(it.key)} />
+          ))}
 
           {queued.map((q) => (
             <QueuedRow key={q.key} item={q} onCancel={() => cancel(q.key)} />
@@ -160,6 +129,56 @@ export default function DownloadQueue({ collapsed }: { collapsed: boolean }) {
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** 0–1, for picking which transfer the collapsed card follows. Unknown counts as nothing. */
+function progressOf(it: ActiveInstall): number {
+  return it.total && it.received ? it.received / it.total : 0;
+}
+
+function pctOf(it: ActiveInstall): number | undefined {
+  return it.total && it.received ? Math.round((it.received / it.total) * 100) : undefined;
+}
+
+function RunningRow({ item, onCancel }: { item: ActiveInstall; onCancel: () => void }) {
+  const t = useT();
+  const pct = pctOf(item);
+  return (
+    <div className="flex flex-col gap-1.5 px-3.5 py-2">
+      <div className="flex items-start gap-2">
+        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold">
+          {displayName(item.title)}
+        </span>
+        {cancellable(item) && (
+          <CancelButton label={t("downloads.cancel")} onClick={onCancel} />
+        )}
+      </div>
+      <div className="flex items-baseline justify-between gap-2 text-[10.5px] text-muted-foreground">
+        <span className="truncate">
+          {item.cancelling
+            ? t("downloads.cancelling")
+            : t(STAGE_LABEL[item.stage] ?? "downloads.stageDownloading")}
+        </span>
+        {item.received !== undefined && (
+          <span className="flex-none tabular-nums">
+            {item.total
+              ? `${formatBytes(item.received)} / ${formatBytes(item.total)}`
+              : formatBytes(item.received)}
+          </span>
+        )}
+      </div>
+      <div className="h-[3px] overflow-hidden rounded-full bg-foreground/[0.08]">
+        <div
+          className={cn(
+            "h-full rounded-full bg-primary transition-[width]",
+            pct === undefined &&
+              "w-1/3 animate-[frost-indeterminate_1.2s_ease-in-out_infinite]",
+          )}
+          style={pct !== undefined ? { width: `${pct}%` } : undefined}
+        />
+      </div>
+    </div>
   );
 }
 

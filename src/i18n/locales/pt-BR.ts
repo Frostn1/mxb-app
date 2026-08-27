@@ -62,6 +62,7 @@ export const ptBR: Translation = {
   "nav.settings": "Configurações",
 
   "sidebar.installing": "Instalando “{{name}}”",
+  "sidebar.installingCount": "Instalando {{count}} mods",
   "sidebar.queued": "+{{count}} na fila",
   "sidebar.expand": "Expandir a barra lateral",
   "sidebar.collapse": "Recolher a barra lateral",

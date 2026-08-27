@@ -64,6 +64,7 @@ export const de: Translation = {
   "nav.settings": "Einstellungen",
 
   "sidebar.installing": "„{{name}}“ wird installiert",
+  "sidebar.installingCount": "{{count}} Mods werden installiert",
   "sidebar.queued": "+{{count}} in der Warteschlange",
   "sidebar.expand": "Seitenleiste ausklappen",
   "sidebar.collapse": "Seitenleiste einklappen",

@@ -295,7 +295,16 @@ pub async fn import(
     let mods_dir = library::mods_subdir(&cfg.mods_path, "mods");
     // The archive is a `mods/` tree, which routes as a merge — the type folder is only a
     // fallback for shapes this never produces, but naming the real one keeps the log honest.
-    install::place_mod(&extracted, &mods_dir, &type_folder(&share.items), "", SLUG)?;
+    // Staged under our own `work`, deleted on the next line — nothing else reads it.
+    install::place_mod_with(
+        &extracted,
+        &mods_dir,
+        &type_folder(&share.items),
+        "",
+        SLUG,
+        install::OnConflict::Overwrite,
+        install::Staging::Consume,
+    )?;
 
     let _ = std::fs::remove_dir_all(&work);
     install::notify_frostmod(app, SLUG);

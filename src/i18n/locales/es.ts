@@ -59,6 +59,7 @@ export const es: Translation = {
   "nav.settings": "Ajustes",
 
   "sidebar.installing": "Instalando «{{name}}»",
+  "sidebar.installingCount": "Instalando {{count}} mods",
   "sidebar.queued": "+{{count}} en cola",
   "sidebar.expand": "Expandir la barra lateral",
   "sidebar.collapse": "Contraer la barra lateral",

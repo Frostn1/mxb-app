@@ -58,6 +58,7 @@ export const en = {
   "nav.settings": "Settings",
 
   "sidebar.installing": "Installing “{{name}}”",
+  "sidebar.installingCount": "Installing {{count}} mods",
   "sidebar.queued": "+{{count}} queued",
   "sidebar.expand": "Expand the sidebar",
   "sidebar.collapse": "Collapse the sidebar",

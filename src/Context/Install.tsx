@@ -125,14 +125,34 @@ interface QueueItem {
   params: StartParams | null;
   resolve?: PendingInstall["resolve"];
   preparing?: boolean;
+  /** `resolve` already in flight, started before this item's turn came. See `prefetch`. */
+  resolving?: Promise<ResolvedInstall | null>;
 }
 
+/**
+ * How many installs transfer at once.
+ *
+ * Not about multiplying throughput: a single MediaFire connection measured at 25–34 MB/s,
+ * more than a typical home line carries, and splitting one file across parallel range
+ * requests bought 1.00x at eight lanes. What this buys is the line not sitting idle while a
+ * mod resolves its link or unpacks — a second or three per mod, which is all there is to win.
+ * Two lanes cover that; more would only divide the same pipe further and make the first mod
+ * in a batch land later.
+ */
+const MAX_CONCURRENT = 2;
+
+/** How far ahead of the running jobs to resolve download links. See `prefetch`. */
+const PREFETCH_AHEAD = 2;
+
 interface InstallContextValue {
-  /** The single in-flight (or just-finished) install, or `null`. */
-  active: ActiveInstall | null;
-  /** Everything waiting behind the active one, in the order it will run. */
+  /** Everything in flight or just finished, oldest first. */
+  active: ActiveInstall[];
+  /** The in-flight install for one mod, which is what its own page shows. At most one, since
+   *  the queue never runs the same slug twice at once. */
+  activeFor: (slug: string) => ActiveInstall | null;
+  /** Everything waiting behind the running ones, in the order it will run. */
   queued: QueuedInstall[];
-  /** Number of installs waiting behind the active one (bulk quick-install). */
+  /** Number of installs still waiting (bulk quick-install). */
   queueLength: number;
   /** Drop an install by `key`: a queued one never starts, the active one is stopped mid-transfer.
    *  A no-op once the bytes are down — extraction and placement can't be interrupted safely. */
@@ -163,7 +183,7 @@ export function InstallProvider({
   onOpenMod?: (target: ModTarget) => void;
   children: ReactNode;
 }) {
-  const [active, setActive] = useState<ActiveInstall | null>(null);
+  const [active, setActive] = useState<ActiveInstall[]>([]);
   // Mirrors `queueRef` for rendering. The ref stays the source of truth — `pump` shifts off it
   // synchronously — but a ref is invisible to React, so the panel reads this copy.
   const [queued, setQueued] = useState<QueuedInstall[]>([]);
@@ -180,27 +200,35 @@ export function InstallProvider({
   const { note } = useDownloads();
   const noteRef = useRef(note);
   noteRef.current = note;
-  const clearTimer = useRef<number | null>(null);
-  // Installs run one at a time (the engine handles a single transfer); extra
-  // requests wait in this queue and are drained sequentially.
+  const clearTimers = useRef<Map<string, number>>(new Map());
+  // Waiting installs, in the order they will run.
   const queueRef = useRef<QueueItem[]>([]);
-  const runningRef = useRef(false);
-  // What the queue is draining right now, so `enqueue` can turn a repeat request away.
-  const activeKeyRef = useRef<string | null>(null);
-  // The same job in full, so `cancel` has its slug without depending on `active` state.
-  const runningParamsRef = useRef<StartParams | null>(null);
-  // The key the user asked to cancel, so `run` can tell a stop it was asked for from a genuine
+  // How many `pump` loops are draining the queue — one per lane, up to `MAX_CONCURRENT`.
+  const lanesRef = useRef(0);
+  // What the queue is running right now, so `enqueue` can turn a repeat request away.
+  const activeKeysRef = useRef<Set<string>>(new Set());
+  // The slugs those jobs are under. The backend keys both cancellation and progress by slug
+  // (see `cancel.rs`), so two jobs sharing one must never overlap — `pump` skips past them.
+  const activeSlugsRef = useRef<Set<string>>(new Set());
+  // Each running job in full, so `cancel` has its slug without depending on `active` state.
+  const runningParamsRef = useRef<Map<string, StartParams>>(new Map());
+  // Keys the user asked to cancel, so `run` can tell a stop it was asked for from a genuine
   // failure and skip the red toast.
-  const cancelledKeyRef = useRef<string | null>(null);
+  const cancelledKeysRef = useRef<Set<string>>(new Set());
   // `run`'s retry buttons enqueue rather than re-run, but `enqueue` is defined further
   // down (it needs `pump`, which needs `run`). A ref breaks the cycle without costing
   // `run` its empty dep list.
   const enqueueRef = useRef<((params: StartParams) => void) | null>(null);
 
-  useEffect(
-    () => () => {
-      if (clearTimer.current) window.clearTimeout(clearTimer.current);
-    },
+  useEffect(() => {
+    const timers = clearTimers.current;
+    return () => timers.forEach((id) => window.clearTimeout(id));
+  }, []);
+
+  /** Update one running install in place, by key. */
+  const patch = useCallback(
+    (key: string, f: (cur: ActiveInstall) => ActiveInstall) =>
+      setActive((cur) => cur.map((it) => (it.key === key ? f(it) : it))),
     [],
   );
 
@@ -220,8 +248,16 @@ export function InstallProvider({
   const run = useCallback(async (params: StartParams) => {
     const { slug, title, subpath, destFolder, source } = params;
     const key = installKey(params);
-    if (clearTimer.current) window.clearTimeout(clearTimer.current);
-    setActive({ ...params, key, stage: "resolving", frostmod: null });
+    const pending = clearTimers.current.get(key);
+    if (pending !== undefined) {
+      window.clearTimeout(pending);
+      clearTimers.current.delete(key);
+    }
+    // Replace a finished card for the same job (a retry) rather than stacking a second one.
+    setActive((cur) => [
+      ...cur.filter((it) => it.key !== key),
+      { ...params, key, stage: "resolving" as InstallStage, frostmod: null },
+    ]);
 
     // FrostMod's reload event can land just before the install call resolves;
     // stash the outcome so the success toast can mention it.
@@ -230,27 +266,23 @@ export function InstallProvider({
     // big the download was, and a failed one leaves nothing at all.
     let bytes: number | null = null;
 
+    // Matched on slug because that is all the backend's event carries. Safe with several
+    // installs in flight only because `pump` refuses to run one slug twice at once.
     const unlisten = await onInstallProgress((p) => {
       if (p.slug !== slug) return;
       if (p.total) bytes = p.total;
-      setActive((cur) =>
-        cur && cur.slug === slug
-          ? {
-              ...cur,
-              stage: p.stage,
-              received: p.received,
-              total: p.total,
-              message: p.message,
-            }
-          : cur,
-      );
+      patch(key, (cur) => ({
+        ...cur,
+        stage: p.stage,
+        received: p.received,
+        total: p.total,
+        message: p.message,
+      }));
     });
     const unlistenFrost = await onFrostmodReload((p) => {
       if (p.slug !== slug) return;
       frostOutcome = p.outcome;
-      setActive((cur) =>
-        cur && cur.slug === slug ? { ...cur, frostmod: p.outcome } : cur,
-      );
+      patch(key, (cur) => ({ ...cur, frostmod: p.outcome }));
     });
 
     /** One record per finished attempt, whichever way it went. */
@@ -277,9 +309,7 @@ export function InstallProvider({
       } else {
         await importFile(source.path, subpath, destFolder);
       }
-      setActive((cur) =>
-        cur && cur.slug === slug ? { ...cur, stage: "done" } : cur,
-      );
+      patch(key, (cur) => ({ ...cur, stage: "done" }));
       remember("installed", null);
       onInstalledRef.current?.();
       toast.success(tRef.current("install.installed", { title }), {
@@ -289,25 +319,27 @@ export function InstallProvider({
             : tRef.current("install.addedDesc"),
       });
       // Auto-retire the sidebar/detail card a few seconds after success.
-      clearTimer.current = window.setTimeout(() => {
-        setActive((cur) =>
-          cur && cur.slug === slug && cur.stage === "done" ? null : cur,
-        );
-      }, 5000);
+      clearTimers.current.set(
+        key,
+        window.setTimeout(() => {
+          clearTimers.current.delete(key);
+          setActive((cur) =>
+            cur.filter((it) => !(it.key === key && it.stage === "done")),
+          );
+        }, 5000),
+      );
     } catch (e) {
       // A stop the user asked for isn't a failure: retire the card quietly rather than leaving
       // a red error and a Retry button behind. Note this only runs when the backend actually
       // unwound — an install that finished before the cancel landed took the success path above,
       // which is the honest outcome, since the mod really is installed.
-      if (cancelledKeyRef.current === key) {
-        setActive((cur) => (cur && cur.key === key ? null : cur));
+      if (cancelledKeysRef.current.has(key)) {
+        setActive((cur) => cur.filter((it) => it.key !== key));
         toast.info(tRef.current("install.cancelled", { title }));
         return;
       }
       const message = String(e);
-      setActive((cur) =>
-        cur && cur.slug === slug ? { ...cur, stage: "error", message } : cur,
-      );
+      patch(key, (cur) => ({ ...cur, stage: "error", message }));
       remember("failed", message);
       // Retry goes through `enqueue`, never straight to `run`: a second impatient click used
       // to start a *parallel* run of the same job.
@@ -331,62 +363,119 @@ export function InstallProvider({
         { duration: Infinity },
       );
     } finally {
-      if (cancelledKeyRef.current === key) cancelledKeyRef.current = null;
+      cancelledKeysRef.current.delete(key);
       unlisten();
       unlistenFrost();
     }
+  }, [patch]);
+
+  /**
+   * Start resolving the next few pending jobs before their turn comes.
+   *
+   * A quick-installed mod arrives knowing only its slug; its download link and destination
+   * come from fetching the mod's page, measured at roughly 900 ms. Doing that when the job
+   * reaches the front means the connection sits idle for it, once per mod. Started here, it
+   * overlaps whatever is transferring, and by the time a lane frees up the answer is waiting.
+   *
+   * Fire-and-forget by design: `pump` awaits the same promise, and a rejection is handled
+   * there. The `catch` only stops an unhandled rejection while nothing is awaiting it yet.
+   */
+  const prefetch = useCallback(() => {
+    let started = 0;
+    for (const item of queueRef.current) {
+      if (started >= PREFETCH_AHEAD) break;
+      if (item.params || !item.resolve) continue;
+      if (!item.resolving) {
+        item.resolving = item.resolve();
+        item.resolving.catch(() => {});
+      }
+      started += 1;
+    }
   }, []);
 
-  // Drain the queue sequentially — one install fully finishes before the next
-  // starts, so `active` always reflects the single in-flight transfer.
+  /**
+   * Drain the queue, up to [`MAX_CONCURRENT`] jobs at once.
+   *
+   * Each call runs one lane and returns when it can find nothing more to do, so the number of
+   * live `pump` calls is the number of transfers in flight. A job whose slug is already
+   * running is stepped over rather than waited on — the backend keys cancellation and progress
+   * by slug, so two jobs sharing one would report into each other.
+   */
   const pump = useCallback(async () => {
-    if (runningRef.current) return;
-    runningRef.current = true;
+    if (lanesRef.current >= MAX_CONCURRENT) return;
+    lanesRef.current += 1;
     try {
-      while (queueRef.current.length) {
-        // The head is read, not shifted: a job still being resolved stays in the queue, so it
-        // keeps its row in the panel — and its X — while its page is fetched.
-        const head = queueRef.current[0];
+      for (;;) {
+        prefetch();
+        // Not necessarily the head: skip anything whose slug is already in flight.
+        const head = queueRef.current.find((q) => !activeSlugsRef.current.has(q.slug));
+        if (!head) return;
+
+        // Claimed before the first `await` so a second lane can't take the same job.
+        activeSlugsRef.current.add(head.slug);
         let params = head.params;
-        if (!params) {
-          head.preparing = true;
-          syncQueue();
-          try {
-            const resolved = await head.resolve!();
-            if (resolved) {
-              const { url, host, ...rest } = resolved;
-              params = { ...rest, source: { kind: "download", url, host } };
-            }
-          } catch {
-            // The caller reports its own failures; there's simply nothing to install.
-            params = null;
-          }
-          head.preparing = false;
-        }
-        // Gone from the queue means cancelled while it resolved — drop it on the way back.
-        const at = queueRef.current.indexOf(head);
-        if (at < 0) continue;
-        queueRef.current.splice(at, 1);
-        syncQueue();
-        if (!params) continue;
-        const key = installKey(params);
-        // A pending job only learns its destination here, so this is the first moment its real
-        // key exists — and the first chance to see it's the same job as something already
-        // queued. (Nothing can be *running*: this loop is the only thing that runs installs.)
-        if (key !== head.key && queueRef.current.some((q) => q.key === key)) continue;
-        activeKeyRef.current = key;
-        runningParamsRef.current = params;
         try {
-          await run(params);
+          if (!params) {
+            head.preparing = true;
+            syncQueue();
+            try {
+              // Memoised onto the item, not just awaited: the job stays in the queue while it
+              // resolves, so another lane's `prefetch` would otherwise see it as unresolved
+              // and fetch the same mod page a second time.
+              head.resolving ??= head.resolve!();
+              const resolved = await head.resolving;
+              if (resolved) {
+                const { url, host, ...rest } = resolved;
+                params = { ...rest, source: { kind: "download", url, host } };
+              }
+            } catch {
+              // The caller reports its own failures; there's simply nothing to install.
+              params = null;
+            }
+            head.preparing = false;
+          }
+
+          // Gone from the queue means cancelled while it resolved — drop it on the way back.
+          const at = queueRef.current.indexOf(head);
+          if (at < 0) continue;
+          queueRef.current.splice(at, 1);
+          syncQueue();
+          if (!params) continue;
+
+          const key = installKey(params);
+          // A pending job only learns its destination here, so this is the first moment its
+          // real key exists — and the first chance to see it is the same job as something
+          // already queued or running.
+          if (
+            key !== head.key &&
+            (activeKeysRef.current.has(key) ||
+              queueRef.current.some((q) => q.key === key))
+          ) {
+            continue;
+          }
+
+          activeKeysRef.current.add(key);
+          runningParamsRef.current.set(key, params);
+          try {
+            await run(params);
+          } finally {
+            activeKeysRef.current.delete(key);
+            runningParamsRef.current.delete(key);
+          }
         } finally {
-          activeKeyRef.current = null;
-          runningParamsRef.current = null;
+          activeSlugsRef.current.delete(head.slug);
         }
       }
     } finally {
-      runningRef.current = false;
+      lanesRef.current -= 1;
     }
-  }, [run, syncQueue]);
+  }, [prefetch, run, syncQueue]);
+
+  /** Open as many lanes as there is work and headroom for. */
+  const pumpAll = useCallback(() => {
+    const want = Math.min(MAX_CONCURRENT, queueRef.current.length);
+    for (let i = lanesRef.current; i < want; i += 1) void pump();
+  }, [pump]);
 
   const enqueue = useCallback(
     (params: StartParams) => {
@@ -398,7 +487,7 @@ export function InstallProvider({
       // Keyed on the destination as well as the mod: installing one livery onto two
       // different bikes is two real installs and both belong in the queue.
       const key = installKey(params);
-      if (activeKeyRef.current === key) return;
+      if (activeKeysRef.current.has(key)) return;
       if (queueRef.current.some((q) => q.key === key)) return;
       queueRef.current.push({
         key,
@@ -408,9 +497,9 @@ export function InstallProvider({
         params,
       });
       syncQueue();
-      void pump();
+      pumpAll();
     },
-    [pump, syncQueue],
+    [pumpAll, syncQueue],
   );
   enqueueRef.current = enqueue;
 
@@ -428,9 +517,9 @@ export function InstallProvider({
         resolve: p.resolve,
       });
       syncQueue();
-      void pump();
+      pumpAll();
     },
-    [pump, syncQueue],
+    [pumpAll, syncQueue],
   );
 
   const cancel = useCallback(
@@ -443,17 +532,17 @@ export function InstallProvider({
         syncQueue();
         return;
       }
-      const running = runningParamsRef.current;
-      if (!running || installKey(running) !== key) return;
-      cancelledKeyRef.current = key;
-      setActive((cur) => (cur && cur.key === key ? { ...cur, cancelling: true } : cur));
+      const running = runningParamsRef.current.get(key);
+      if (!running) return;
+      cancelledKeysRef.current.add(key);
+      patch(key, (cur) => ({ ...cur, cancelling: true }));
       // The install command rejects once the transfer loop notices, and `run`'s catch takes it
       // from there. Nothing to await: a failure here just means it stops the ordinary way.
       // Read off the ref rather than `active` so this callback doesn't churn on every progress
       // tick — the panel's buttons would rebuild 60 times a download.
       void cancelInstall(running.slug).catch(() => {});
     },
-    [syncQueue],
+    [patch, syncQueue],
   );
 
   const startInstall: InstallContextValue["startInstall"] = useCallback(
@@ -473,11 +562,21 @@ export function InstallProvider({
     [enqueue],
   );
 
-  const clear = useCallback(() => setActive(null), []);
+  /** Retire the finished cards, leaving anything still transferring alone. */
+  const clear = useCallback(
+    () => setActive((cur) => cur.filter((it) => it.stage !== "done" && it.stage !== "error")),
+    [],
+  );
+
+  const activeFor = useCallback(
+    (slug: string) => active.find((it) => it.slug === slug) ?? null,
+    [active],
+  );
 
   const value = useMemo(
     () => ({
       active,
+      activeFor,
       queued,
       queueLength: queued.length,
       cancel,
@@ -489,6 +588,7 @@ export function InstallProvider({
     }),
     [
       active,
+      activeFor,
       queued,
       cancel,
       startInstall,
