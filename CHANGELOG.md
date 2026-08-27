@@ -2,6 +2,21 @@
 
 ## 2026-08-26
 
+### Changed
+- **Installing a downloaded mod is faster, and the app stays responsive while it happens.**
+  Every byte used to be written to disk three times — the archive, the unpacked copy, then a
+  third copy into the mods folder — for files that were deleted moments later. The last of
+  those is now a move, so on one drive it costs nothing; a mods folder on a different drive
+  falls back to the copy, retries and all. Unpacking also no longer runs on the app's async
+  runtime, where a big track pinned a worker for the whole of it. Everything that installs
+  from somewhere we don't own — a folder you dropped in — still copies, untouched.
+
+- **A download that goes silent now resumes instead of hanging.** Only the connection was
+  given a timeout, so a host that accepted the socket and then stopped sending sat there
+  forever: the resume machinery only wakes on an error, and silence never was one. Thirty
+  seconds of nothing is now treated as a broken transfer and picked back up where it stalled.
+  Uploads are deliberately exempt — their response doesn't arrive until the last byte is sent.
+
 ### Fixed
 - **The rider came apart in every 3D preview.** The rig `rider.edf` carries is stored once per
   level of detail — the game's own riders hold three copies of the same 64 bones — and the app

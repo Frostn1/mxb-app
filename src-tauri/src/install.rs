@@ -93,12 +93,28 @@ pub(crate) fn staging_dir(tag: &str) -> PathBuf {
     ))
 }
 
-pub(crate) fn build_client() -> anyhow::Result<Client> {
-    Ok(Client::builder()
+fn client_builder() -> reqwest::ClientBuilder {
+    Client::builder()
         .user_agent(UA)
         .connect_timeout(Duration::from_secs(15))
         .cookie_store(true)
-        .build()?)
+}
+
+pub(crate) fn build_client() -> anyhow::Result<Client> {
+    Ok(client_builder().build()?)
+}
+
+/// How long a transfer may go silent before we call it dead. Resets on every read, so a
+/// slow host trickling bytes is never touched.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// [`build_client`] with a read timeout, for fetching mod archives.
+///
+/// [`download`]'s resume loop only wakes when the stream *errors*, and a silent socket never
+/// does — so without this a host that stops sending hangs forever. Not on [`build_client`]
+/// itself: an upload sees no response until its last byte is sent, which looks identical.
+pub(crate) fn build_download_client() -> anyhow::Result<Client> {
+    Ok(client_builder().read_timeout(READ_TIMEOUT).build()?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -111,7 +127,7 @@ pub async fn add_to_library(
     subpath: &str,
     dest_folder: &str,
 ) -> anyhow::Result<()> {
-    let client = build_client()?;
+    let client = build_download_client()?;
 
     // MEGA is end-to-end encrypted — no direct URL; use the fetch-and-decrypt path.
     let h = host.to_lowercase();
@@ -153,7 +169,33 @@ pub async fn download_and_place(
             return Err(e);
         }
     };
-    extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
+    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder).await
+}
+
+/// [`extract_and_place`] on a blocking thread.
+///
+/// Unpacking a track is minutes of synchronous disk work, and inline on an `async` command it
+/// pins a runtime worker for all of it. The shop and import commands already spawn it; the
+/// site download was the one that didn't.
+async fn extract_and_place_blocking(
+    app: &AppHandle,
+    cfg: &AppConfig,
+    slug: &str,
+    archive: PathBuf,
+    work: PathBuf,
+    subpath: &str,
+    dest_folder: &str,
+) -> anyhow::Result<()> {
+    let app = app.clone();
+    let cfg = cfg.clone();
+    let slug = slug.to_string();
+    let subpath = subpath.to_string();
+    let dest_folder = dest_folder.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("install task failed: {e}"))?
 }
 
 /// Extract a downloaded archive and place it. `pub(crate)` for the shop, whose bytes come
@@ -185,15 +227,29 @@ pub(crate) fn extract_and_place(
 
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
     let type_folder = subpath.rsplit(['/', '\\']).next().unwrap_or("tracks");
-    place_mod(&extracted, &mods_dir, type_folder, dest_folder, slug)?;
 
-    // Record which bikes got a sound so the Library can tell them from stock (best-effort).
-    if type_folder.eq_ignore_ascii_case("bikes") {
-        let bikes = sound_bikes_in(&extracted);
-        if !bikes.is_empty() {
-            if let Ok(dir) = app.path().app_local_data_dir() {
-                let _ = crate::soundmods::record(&dir, &bikes, slug);
-            }
+    // Read before the placement, because it walks the staged tree and `Consume` empties it.
+    // Still recorded after, so a failed install badges nothing (best-effort either way).
+    let bikes = if type_folder.eq_ignore_ascii_case("bikes") {
+        sound_bikes_in(&extracted)
+    } else {
+        Vec::new()
+    };
+
+    place_mod_with(
+        &extracted,
+        &mods_dir,
+        type_folder,
+        dest_folder,
+        slug,
+        OnConflict::Overwrite,
+        // Everything under `work` is ours and is deleted a few lines down.
+        Staging::Consume,
+    )?;
+
+    if !bikes.is_empty() {
+        if let Ok(dir) = app.path().app_local_data_dir() {
+            let _ = crate::soundmods::record(&dir, &bikes, slug);
         }
     }
 
@@ -223,7 +279,7 @@ async fn download_mega_and_place(
             return Err(e);
         }
     };
-    extract_and_place(app, cfg, slug, &archive, &work, subpath, dest_folder)
+    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder).await
 }
 
 pub(crate) async fn download_mega(
@@ -1621,6 +1677,21 @@ pub(crate) enum OnConflict {
     Keep,
 }
 
+/// Whether a placement may take the source files away with it.
+///
+/// A downloaded mod is already on disk twice — the archive and the unpacked copy, both in a
+/// staging directory we delete moments later. Copying a third time is the slowest part of an
+/// install once the bytes are down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Staging {
+    /// The source is ours and about to be deleted, so a file may be *moved* into place — on
+    /// one volume that's a rename, and no bytes move.
+    Consume,
+    /// The source has to survive. The dropzone is why this is the default: it installs a
+    /// folder straight from wherever the user keeps it.
+    Preserve,
+}
+
 pub(crate) fn place_mod(
     extracted: &Path,
     mods_dir: &Path,
@@ -1628,9 +1699,18 @@ pub(crate) fn place_mod(
     dest_folder: &str,
     slug: &str,
 ) -> anyhow::Result<usize> {
-    place_mod_with(extracted, mods_dir, type_folder, dest_folder, slug, OnConflict::Overwrite)
+    place_mod_with(
+        extracted,
+        mods_dir,
+        type_folder,
+        dest_folder,
+        slug,
+        OnConflict::Overwrite,
+        Staging::Preserve,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn place_mod_with(
     extracted: &Path,
     mods_dir: &Path,
@@ -1638,10 +1718,11 @@ pub(crate) fn place_mod_with(
     dest_folder: &str,
     slug: &str,
     on_conflict: OnConflict,
+    staging: Staging,
 ) -> anyhow::Result<usize> {
     let route = plan_placement(extracted, mods_dir, type_folder, dest_folder, slug);
     guard_placement(mods_dir, &route.placement)?;
-    apply(&route.placement, on_conflict).inspect_err(|e| {
+    apply(&route.placement, on_conflict, staging).inspect_err(|e| {
         // The one place every install — download, import, drop — funnels through, so one
         // log line here covers all three. Without it a failed install left no trace at all
         // beyond a toast the player had already dismissed by the time they reported it.
@@ -1722,7 +1803,11 @@ fn guard_placement(mods_dir: &Path, placement: &Placement) -> anyhow::Result<()>
     Ok(())
 }
 
-fn apply(placement: &Placement, on_conflict: OnConflict) -> anyhow::Result<usize> {
+fn apply(
+    placement: &Placement,
+    on_conflict: OnConflict,
+    staging: Staging,
+) -> anyhow::Result<usize> {
     for root in roots_for(placement) {
         std::fs::create_dir_all(&root)
             .with_context(|| format!("creating {}", root.display()))?;
@@ -1741,6 +1826,12 @@ fn apply(placement: &Placement, on_conflict: OnConflict) -> anyhow::Result<usize
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        // Only ever a shortcut: a cross-drive move fails, so does a held file, and both fall
+        // through to `copy_staged` — which is where the wait-out-the-scanner retry lives.
+        if staging == Staging::Consume && std::fs::rename(src, dst).is_ok() {
+            written += 1;
+            continue;
         }
         copy_staged(src, dst)?;
         written += 1;
@@ -2686,6 +2777,83 @@ mod tests {
         std::fs::write(mods.join("tracks/track.pkz"), b"old").unwrap();
 
         let placed = place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"new");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The saving itself: the file lands without its bytes being written again, so the
+    /// staged copy is gone rather than duplicated.
+    #[test]
+    fn consuming_a_staged_tree_moves_the_files() {
+        let root = place_tmp("consume");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"bytes").unwrap();
+
+        let mods = root.join("mods");
+        let placed = place_mod_with(
+            &ex,
+            &mods,
+            "tracks",
+            "",
+            "slug",
+            OnConflict::Overwrite,
+            Staging::Consume,
+        )
+        .unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"bytes");
+        assert!(!ex.join("track.pkz").exists(), "the staged copy was moved, not copied");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The dropzone installs from the user's own folder, so the default must not touch it.
+    #[test]
+    fn preserving_leaves_the_source_alone() {
+        let root = place_tmp("preserve");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"bytes").unwrap();
+
+        let mods = root.join("mods");
+        let placed = place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
+
+        assert_eq!(placed, 1);
+        assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"bytes");
+        assert_eq!(
+            std::fs::read(ex.join("track.pkz")).unwrap(),
+            b"bytes",
+            "the user's own copy is still theirs"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Re-installing is how a player updates a mod, so the rename has to replace the
+    /// destination rather than fail on it.
+    #[test]
+    fn consuming_overwrites_an_existing_file() {
+        let root = place_tmp("consume-overwrite");
+        let ex = root.join("ex");
+        std::fs::create_dir_all(&ex).unwrap();
+        std::fs::write(ex.join("track.pkz"), b"new").unwrap();
+
+        let mods = root.join("mods");
+        std::fs::create_dir_all(mods.join("tracks")).unwrap();
+        std::fs::write(mods.join("tracks/track.pkz"), b"old").unwrap();
+
+        let placed = place_mod_with(
+            &ex,
+            &mods,
+            "tracks",
+            "",
+            "slug",
+            OnConflict::Overwrite,
+            Staging::Consume,
+        )
+        .unwrap();
 
         assert_eq!(placed, 1);
         assert_eq!(std::fs::read(mods.join("tracks/track.pkz")).unwrap(), b"new");

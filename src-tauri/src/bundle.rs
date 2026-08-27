@@ -478,6 +478,9 @@ pub async fn import(
         "",
         BUNDLE_SLUG,
         install::OnConflict::Keep,
+        // Staged under our own temp dir, so this could consume it — left alone for now to
+        // keep the change to the mod-install path it was measured on.
+        install::Staging::Preserve,
     )?;
 
     presets::save_preset(presets_dir, preset.clone())?;
@@ -933,6 +936,7 @@ mod tests {
             "",
             "slug",
             install::OnConflict::Keep,
+            install::Staging::Preserve,
         )
         .unwrap();
 
