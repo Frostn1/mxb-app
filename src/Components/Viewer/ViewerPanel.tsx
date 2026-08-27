@@ -7,6 +7,7 @@ import { Dialog, DialogContent } from "../ui/dialog";
 import { ModelViewer, type ViewerMode } from "./ModelViewer";
 import { loadRiderModel, previewModelSwap } from "../../api/mods";
 import type { BikeModel, Loadout, PaintTexture, RiderPart } from "../../types";
+import type { RiderPose } from "../../lib/riderPose";
 import { useT } from "../../i18n/context";
 import { TyresPicker } from "./TyresPicker";
 import { useTyresPick } from "./tyresPick";
@@ -29,6 +30,11 @@ interface ViewerPanelProps {
    */
   bikeVariant?: string;
   hiddenParts?: RiderPart["part"][];
+  /**
+   * The rider's pose — a turn per bone. Absent draws the body as the model was authored,
+   * which is what every caller but the Pose studio wants.
+   */
+  riderPose?: RiderPose;
   className?: string;
 }
 
@@ -77,6 +83,7 @@ export function ViewerPanel({
   bikeId,
   bikeVariant,
   hiddenParts,
+  riderPose,
   className,
 }: ViewerPanelProps) {
   const t = useT();
@@ -318,7 +325,13 @@ export function ViewerPanel({
         <div className="relative min-h-[280px] flex-1">
           {/* Both panels are a single collapsed row until someone opens one, so the inline
               canvas only gives up its corner to a person who asked for it. */}
-          <ModelViewer {...view} poseControls placeControls className="absolute inset-0" />
+          <ModelViewer
+            {...view}
+            riderPose={riderPose}
+            poseControls
+            placeControls
+            className="absolute inset-0"
+          />
           {overlay}
         </div>
       </div>
@@ -339,7 +352,13 @@ export function ViewerPanel({
             </div>
           </div>
           <div className="relative min-h-0 flex-1">
-            <ModelViewer {...view} poseControls placeControls className="absolute inset-0" />
+            <ModelViewer
+              {...view}
+              riderPose={riderPose}
+              poseControls
+              placeControls
+              className="absolute inset-0"
+            />
             {overlay}
           </div>
         </DialogContent>

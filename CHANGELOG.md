@@ -8,6 +8,22 @@
   the bike folder beside it — the two never matched, and the badge was invisible on every bike.
 
 ### Added
+- **Pose the rider.** A new **Pose** view in the Studio opens on a preset as it stands — bike,
+  model swap, rider, gear and paints, all read-only — and lets you move the rider's limbs:
+  where the hands sit, how far the legs are spread, one leg forward, elbows up, lean in. Quick
+  moves stack, and every joint has bend/twist/splay sliders under Torso, Arms, Hands and Legs.
+  The pose is remembered per rider profile on this machine, and **Reset** returns the model
+  exactly as it was authored.
+
+  This reads the skeleton `rider.edf` has carried all along and nobody was using: 98 named
+  bones, of which 65 bind the mesh. The file stores no vertex weights — the game rebuilds the
+  binding at load — so the app rebuilds it too, from the per-bone boxes the file *does* carry
+  plus the distance to the limb each bone actually swings. Helmet, boots and body armour ride
+  along on the bones their own `gfx.cfg` names, so the kit follows the pose.
+
+  Preview only, deliberately: MX Bikes takes a rider's posture from its riding style, an
+  animation set in `mods/rider/animations`, and nothing here writes to the game.
+
 - **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
   needs wheel meshes and axles to measure against; a model that ships neither fell back to the
   authored frame, which carries no suspension travel at all — so the bike stood with its shock

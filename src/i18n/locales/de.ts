@@ -55,6 +55,7 @@ export const de: Translation = {
   "nav.locker": "Spind",
   "nav.presets": "Presets",
   "nav.rider": "Fahrer",
+  "nav.pose": "Pose",
   "nav.designer": "Designer",
   "nav.paints": "Designs",
   "nav.studio": "Studio",
@@ -224,6 +225,28 @@ export const de: Translation = {
   "slotGroup.rider": "Fahrer",
   "slotGroup.head": "Kopf",
   "slotGroup.body": "Körper",
+
+
+  // ── Pose studio ────────────────────────────────────────────────────────────
+  "pose.help": "Bring den Fahrer in Position — wo die Hände sitzen, wie weit die Beine stehen, ein Bein nach vorn. Nur für die Vorschau; MX Bikes nimmt die Haltung aus dem Fahrstil.",
+  "pose.showing": "Angezeigt",
+  "pose.none": "—",
+  "pose.bike": "Motorrad",
+  "pose.quick": "Schnelle Posen",
+  "pose.quickHint": "Jede kommt zur Pose hinzu, sie lassen sich also stapeln. Feinschliff unten.",
+  "pose.reset": "Zurücksetzen",
+  "pose.group.torso": "Rumpf und Kopf",
+  "pose.group.arms": "Arme",
+  "pose.group.hands": "Hände",
+  "pose.group.legs": "Beine",
+  "pose.move.legsWide": "Beine weiter",
+  "pose.move.legsNarrow": "Beine enger",
+  "pose.move.leftLegForward": "Linkes Bein vor",
+  "pose.move.elbowsUp": "Ellbogen hoch",
+  "pose.move.leanIn": "Nach vorn lehnen",
+  "pose.axis.bend": "Beugen",
+  "pose.axis.twist": "Drehen",
+  "pose.axis.splay": "Spreizen",
 
   // ── Fahrer-Studio ──────────────────────────────────────────────────────────
   "rider.help":

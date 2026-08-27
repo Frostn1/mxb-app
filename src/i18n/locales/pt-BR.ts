@@ -53,6 +53,7 @@ export const ptBR: Translation = {
   "nav.locker": "Armário",
   "nav.presets": "Presets",
   "nav.rider": "Piloto",
+  "nav.pose": "Pose",
   "nav.designer": "Designer",
   "nav.paints": "Pinturas",
   "nav.studio": "Studio",
@@ -220,6 +221,28 @@ export const ptBR: Translation = {
   "slotGroup.rider": "Piloto",
   "slotGroup.head": "Cabeça",
   "slotGroup.body": "Corpo",
+
+
+  // ── Pose studio ────────────────────────────────────────────────────────────
+  "pose.help": "Coloque o piloto em posição — onde ficam as mãos, a abertura das pernas, uma perna à frente. Só a prévia; o MX Bikes tira a postura do estilo de pilotagem.",
+  "pose.showing": "Mostrando",
+  "pose.none": "—",
+  "pose.bike": "Moto",
+  "pose.quick": "Poses rápidas",
+  "pose.quickHint": "Cada uma soma à pose, então elas se acumulam. Ajuste abaixo.",
+  "pose.reset": "Redefinir",
+  "pose.group.torso": "Tronco e cabeça",
+  "pose.group.arms": "Braços",
+  "pose.group.hands": "Mãos",
+  "pose.group.legs": "Pernas",
+  "pose.move.legsWide": "Pernas mais abertas",
+  "pose.move.legsNarrow": "Pernas mais juntas",
+  "pose.move.leftLegForward": "Perna esquerda à frente",
+  "pose.move.elbowsUp": "Cotovelos altos",
+  "pose.move.leanIn": "Inclinar-se",
+  "pose.axis.bend": "Flexão",
+  "pose.axis.twist": "Torção",
+  "pose.axis.splay": "Abertura",
 
   // ── Estúdio do piloto ──────────────────────────────────────────────────────
   "rider.help":

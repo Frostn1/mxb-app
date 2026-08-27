@@ -52,6 +52,7 @@ export const fr: Translation = {
   "nav.locker": "Casier",
   "nav.presets": "Presets",
   "nav.rider": "Pilote",
+  "nav.pose": "Posture",
   "nav.designer": "Designer",
   "nav.paints": "Décos",
   "nav.studio": "Studio",
@@ -221,6 +222,28 @@ export const fr: Translation = {
   "slotGroup.rider": "Pilote",
   "slotGroup.head": "Tête",
   "slotGroup.body": "Corps",
+
+
+  // ── Pose studio ────────────────────────────────────────────────────────────
+  "pose.help": "Place le pilote — où sont les mains, l'écartement des jambes, une jambe en avant. L'aperçu seulement ; MX Bikes tire la posture du style de pilotage.",
+  "pose.showing": "Affiché",
+  "pose.none": "—",
+  "pose.bike": "Moto",
+  "pose.quick": "Postures rapides",
+  "pose.quickHint": "Chacune s'ajoute à la posture, elles se cumulent. Ajuste en dessous.",
+  "pose.reset": "Réinitialiser",
+  "pose.group.torso": "Buste et tête",
+  "pose.group.arms": "Bras",
+  "pose.group.hands": "Mains",
+  "pose.group.legs": "Jambes",
+  "pose.move.legsWide": "Jambes plus écartées",
+  "pose.move.legsNarrow": "Jambes plus serrées",
+  "pose.move.leftLegForward": "Jambe gauche en avant",
+  "pose.move.elbowsUp": "Coudes hauts",
+  "pose.move.leanIn": "Se pencher",
+  "pose.axis.bend": "Flexion",
+  "pose.axis.twist": "Rotation",
+  "pose.axis.splay": "Écartement",
 
   // ── Studio pilote ──────────────────────────────────────────────────────────
   "rider.help":

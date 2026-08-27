@@ -50,6 +50,7 @@ export const it: Translation = {
   "nav.locker": "Armadietto",
   "nav.presets": "Preset",
   "nav.rider": "Pilota",
+  "nav.pose": "Posa",
   "nav.designer": "Designer",
   "nav.paints": "Livree",
   "nav.studio": "Studio",
@@ -217,6 +218,28 @@ export const it: Translation = {
   "slotGroup.rider": "Pilota",
   "slotGroup.head": "Testa",
   "slotGroup.body": "Corpo",
+
+
+  // ── Pose studio ────────────────────────────────────────────────────────────
+  "pose.help": "Metti il pilota in posizione — dove stanno le mani, quanto sono aperte le gambe, una gamba avanti. Solo l'anteprima; MX Bikes prende la postura dallo stile di guida.",
+  "pose.showing": "In mostra",
+  "pose.none": "—",
+  "pose.bike": "Moto",
+  "pose.quick": "Pose rapide",
+  "pose.quickHint": "Ognuna si somma alla posa, quindi si accumulano. Rifinisci sotto.",
+  "pose.reset": "Reimposta",
+  "pose.group.torso": "Busto e testa",
+  "pose.group.arms": "Braccia",
+  "pose.group.hands": "Mani",
+  "pose.group.legs": "Gambe",
+  "pose.move.legsWide": "Gambe più aperte",
+  "pose.move.legsNarrow": "Gambe più chiuse",
+  "pose.move.leftLegForward": "Gamba sinistra avanti",
+  "pose.move.elbowsUp": "Gomiti alti",
+  "pose.move.leanIn": "Sporgersi",
+  "pose.axis.bend": "Flessione",
+  "pose.axis.twist": "Torsione",
+  "pose.axis.splay": "Apertura",
 
   // ── Studio pilota ──────────────────────────────────────────────────────────
   "rider.help":
