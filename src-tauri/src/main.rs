@@ -1843,6 +1843,26 @@ fn load_bike_model_blocking(
     build_bike_model(&source, key, files, installed, tyres, pick, t0)
 }
 
+/// Why a bike came back with nothing to draw, in words the player can act on.
+///
+/// Three unrelated faults land here and they want three different answers: a mesh that never
+/// arrived, a mesh whose bytes aren't a mesh, and a mesh that read but wouldn't come apart.
+/// Blaming cloud sync for all three sent a player hunting through their OneDrive settings for
+/// what turned out to be a protected model the viewer wasn't unwrapping.
+fn no_mesh_reason(label: &str, meshes: &[(&str, &[u8])]) -> String {
+    if meshes.iter().all(|(_, b)| b.is_empty()) {
+        return format!(
+            "{label} holds no readable mesh — if the file is cloud-synced, it may not be fully downloaded yet"
+        );
+    }
+    if !meshes.iter().any(|(_, b)| edf::is_edf(b)) {
+        return format!(
+            "{label}'s mesh didn't decode — the file may be damaged, or protected in a way this version can't open"
+        );
+    }
+    format!("{label}'s mesh read but no parts came out of it — the model may be built in a way the viewer doesn't handle yet")
+}
+
 /// Turn a bike's files into the viewer's model: resolve each part's mesh through the
 /// `.hrc`s, bind its textures, decode the paints. Shared by a bike loaded from disk and a
 /// model-swap preview assembled in memory — `label` only names it in the log.
@@ -1995,12 +2015,21 @@ fn build_bike_model(
     }
     // Nothing to draw. Returning a model with no nodes is worse than failing: the viewer reads
     // it as a successful load and puts its stand-in bike on screen, which reads as "this is your
-    // bike" rather than "none of this bike arrived". A cloud-synced archive that hasn't been
-    // downloaded lands here — every entry reads short, so the `.edf` never appears.
+    // bike" rather than "none of this bike arrived".
     if nodes.is_empty() {
-        return Err(format!(
-            "{label} holds no readable mesh — if the file is cloud-synced, it may not be fully downloaded yet"
-        ));
+        let mut meshes: Vec<(&str, &[u8])> =
+            edfs.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+        meshes.sort_unstable_by_key(|(n, _)| *n);
+        // What the bytes were is the whole question, and until now this path said nothing at
+        // all — a report of it could only be guessed at.
+        for (name, bytes) in &meshes {
+            log::warn!(
+                "[viewer] {label}: {name} read as {} byte(s), header {}",
+                bytes.len(),
+                if edf::is_edf(bytes) { "ok — but nothing parsed out of it" } else { "not a mesh" }
+            );
+        }
+        return Err(no_mesh_reason(label, &meshes));
     }
     let t_parse = t0.elapsed();
 
@@ -2512,10 +2541,22 @@ fn compact_to_submeshes(n: &mut edf::EdfNode) {
     n.indices = indices;
 }
 
+/// One of a bike's loose files, unwrapped if it arrived sealed.
+///
+/// A protected model installed loose ships its `.edf` sealed, the same way a locked archive
+/// is. Read plainly the bytes reach the parser as an opaque blob, fail its header check, and
+/// a bike that runs perfectly in game reads here as having no mesh at all. Gear and paints
+/// have always been read this way; bikes hadn't been.
+fn read_bike_file(path: &std::path::Path) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(pkz::read_sidecar_blob(&bytes).unwrap_or(bytes))
+}
+
 fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     use anyhow::{bail, Context};
     if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("edf")) {
         let bytes = std::fs::read(p).with_context(|| format!("read {p:?}"))?;
+        let bytes = pkz::read_sidecar_blob(&bytes).unwrap_or(bytes);
         return Ok(vec![("model.edf".to_string(), bytes)]);
     }
     if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pkz")) {
@@ -2527,7 +2568,7 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
             let path = entry?.path();
             let name = path.file_name().and_then(|n| n.to_str()).map(str::to_string);
             if path.is_file() && name.as_deref().is_some_and(wanted_bike_file) {
-                if let (Some(name), Ok(bytes)) = (name, std::fs::read(&path)) {
+                if let (Some(name), Some(bytes)) = (name, read_bike_file(&path)) {
                     loose.push((name, bytes));
                 }
             }
@@ -2539,6 +2580,9 @@ fn gather_bike_files(p: &std::path::Path) -> anyhow::Result<Vec<(String, Vec<u8>
         overlay_files(&mut out, loose);
         // A mesh of any name will do — `model.edf` is the convention, not a rule.
         if !out.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+            if awaiting_download(&[p]) {
+                bail!("this bike's files are still in the cloud — download them and try again");
+            }
             bail!("no .edf mesh for bike folder {p:?}");
         }
         return Ok(out);
@@ -2567,7 +2611,7 @@ fn read_named(dir: &std::path::Path, names: &[String]) -> Vec<(String, Vec<u8>)>
     names
         .iter()
         .filter(|n| wanted_bike_file(n))
-        .filter_map(|n| std::fs::read(dir.join(n)).ok().map(|b| (n.clone(), b)))
+        .filter_map(|n| read_bike_file(&dir.join(n)).map(|b| (n.clone(), b)))
         .collect()
 }
 
@@ -2594,12 +2638,39 @@ fn packed_bike(bike_dir: &std::path::Path) -> Option<std::path::PathBuf> {
 fn packed_layer(bike_dir: &std::path::Path) -> Vec<(String, Vec<u8>)> {
     let Some(pkz) = packed_bike(bike_dir) else { return Vec::new() };
     match pkz::read_selected(&pkz, wanted_bike_file) {
-        Ok(files) => files,
+        // An archive can hold sealed entries of its own — unwrap them the same way a loose
+        // file is unwrapped, so where a mod ships its mesh can't decide whether it draws.
+        Ok(files) => files
+            .into_iter()
+            .map(|(n, d)| {
+                let d = pkz::read_sidecar_blob(&d).unwrap_or(d);
+                (n, d)
+            })
+            .collect(),
         Err(e) => {
             log::warn!("[viewer] couldn't read {pkz:?} ({e:#}) — drawing the loose files alone");
             Vec::new()
         }
     }
+}
+
+/// Whether a bike's files are still waiting on the cloud to hand them over.
+///
+/// A placeholder OneDrive or iCloud hasn't fetched is indistinguishable from a mod with
+/// nothing in it, so "there's no mesh here" is the wrong thing to tell someone whose mesh is
+/// simply still in the cloud. Asked of the metadata only — `stat` never triggers a download.
+fn awaiting_download(dirs: &[&std::path::Path]) -> bool {
+    dirs.iter().any(|dir| {
+        if packed_bike(dir).is_some_and(|p| cloudfiles::is_placeholder(&p)) {
+            return true;
+        }
+        std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
+            let p = e.path();
+            p.is_file()
+                && e.file_name().to_str().is_some_and(wanted_bike_file)
+                && cloudfiles::is_placeholder(&p)
+        })
+    })
 }
 
 /// The bytes behind a `PreviewSet`: the packed bike, with the loose files that stay laid
@@ -2616,6 +2687,9 @@ fn gather_preview_files(
     overlay_files(&mut out, read_named(&set.bike_dir, &set.root_keep));
     overlay_files(&mut out, read_named(&set.variant_dir, &set.variant_files));
     if !out.iter().any(|(n, _)| bikefiles::is_mesh(n)) {
+        if awaiting_download(&[&set.bike_dir, &set.variant_dir]) {
+            bail!("this model's files are still in the cloud — download them and try again");
+        }
         bail!("this model has no mesh to show — the bike would have no model at all");
     }
     Ok(out)
@@ -10457,6 +10531,62 @@ mod viewer_tests {
         assert!(!part.nodes.is_empty(), "it draws something");
         assert!(!part.textures.is_empty(), "and it is textured");
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod no_mesh_tests {
+    use super::no_mesh_reason;
+
+    /// An `.edf` long enough to clear the header check — the shape of a mesh that read fine.
+    fn a_mesh() -> Vec<u8> {
+        let mut b = b"EDF\0".to_vec();
+        b.resize(128, 0);
+        b
+    }
+
+    // A cloud placeholder that was never fetched: the entry is there and empty. This is the
+    // only case the old wording was right about, and it keeps it.
+    #[test]
+    fn a_mesh_that_never_arrived_points_at_cloud_sync() {
+        let msg = no_mesh_reason("Bike · Stock", &[("model.edf", b"")]);
+        assert!(msg.contains("cloud-synced"), "{msg}");
+    }
+
+    // The report this came from: a protected model that runs perfectly in game, on a machine
+    // with no cloud sync anywhere near it. Bytes arrived, they just weren't a mesh — sending
+    // that player to their OneDrive settings is the one thing the message must not do.
+    #[test]
+    fn a_mesh_that_isnt_a_mesh_is_not_blamed_on_cloud_sync() {
+        let msg = no_mesh_reason("Bike · MySwap", &[("model.edf", &[0xfe, 0x9c, 0xa5, 0x6a])]);
+        assert!(!msg.contains("cloud"), "{msg}");
+        assert!(msg.contains("didn't decode"), "{msg}");
+    }
+
+    // A real `.edf` the parser walked and found nothing in. Nothing the player can fix, so
+    // the message says where the fault is rather than sending them looking.
+    #[test]
+    fn a_real_mesh_that_parsed_to_nothing_says_so() {
+        let mesh = a_mesh();
+        let msg = no_mesh_reason("Bike · MySwap", &[("model.edf", &mesh)]);
+        assert!(msg.contains("no parts came out of it"), "{msg}");
+    }
+
+    // One good mesh among several is still a bike that should have drawn — the parser gap is
+    // the fault worth naming, not the empty sibling beside it.
+    #[test]
+    fn one_readable_mesh_decides_the_answer() {
+        let mesh = a_mesh();
+        let msg = no_mesh_reason("Bike · MySwap", &[("fwheel.edf", b""), ("model.edf", &mesh)]);
+        assert!(msg.contains("no parts came out of it"), "{msg}");
+    }
+
+    // The header check itself: sealed bytes and a truncated file both fail it, a mesh doesn't.
+    #[test]
+    fn only_a_real_header_reads_as_a_mesh() {
+        assert!(crate::edf::is_edf(&a_mesh()));
+        assert!(!crate::edf::is_edf(b"EDF\0"), "long enough to match, too short to parse");
+        assert!(!crate::edf::is_edf(&[0xfe, 0x9c, 0xa5, 0x6a, 0, 0, 0, 0]));
     }
 }
 

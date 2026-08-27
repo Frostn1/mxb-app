@@ -208,6 +208,12 @@ pub fn header_aabb(b: &[u8]) -> Option<([f32; 3], [f32; 3])> {
         .then_some((lo, hi))
 }
 
+/// Whether these bytes are an `.edf` at all. A file that arrives sealed, damaged or half
+/// downloaded fails here, before any of the parse below is worth attempting.
+pub fn is_edf(b: &[u8]) -> bool {
+    b.len() >= HEADER_START + 8 && &b[0..4] == b"EDF\0"
+}
+
 // Parse an .edf into its renderable mesh nodes (highest-detail LOD of each part).
 pub fn parse(b: &[u8]) -> Vec<EdfNode> {
     parse_impl(b, &[], false)
@@ -233,7 +239,7 @@ pub fn parse_with_levels(b: &[u8], level0: &[String]) -> Vec<EdfNode> {
 
 fn parse_impl(b: &[u8], level0: &[String], node_matrix_once: bool) -> Vec<EdfNode> {
     let n = b.len();
-    if n < HEADER_START + 8 || &b[0..4] != b"EDF\0" {
+    if !is_edf(b) {
         return Vec::new();
     }
     let mut nodes = Vec::new();
