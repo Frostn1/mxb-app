@@ -1353,6 +1353,8 @@ export const it: Translation = {
   "voice.connecting": "connessione…",
   "voice.mute": "Muto",
   "voice.unmute": "Riattiva",
+  "voice.proximity": "Senti i piloti da dove si trovano",
+  "voice.proximityDesc": "Un pilota accanto a te è forte e dal suo lato; uno a due curve di distanza è debole. Disattivalo per sentire tutti allo stesso volume. Torna da solo al volume piatto quando il gioco non comunica le posizioni.",
 
   "overlay.pressKeys": "Premi i tasti…",
   "overlay.needModifier": "Aggiungi un modificatore",

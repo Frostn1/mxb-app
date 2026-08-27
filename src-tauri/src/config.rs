@@ -117,6 +117,13 @@ pub struct AppConfig {
     pub voice_input_gain: f32,
     /// Playback volume for other riders, 0..1.
     pub voice_output_volume: f32,
+    /// Hear each rider from where they actually are on the track, rather than everyone flat
+    /// and equally loud. On by default: it is the reason to use this over a Discord call,
+    /// and it degrades to flat on its own when the game isn't reporting positions.
+    ///
+    /// A config written before this existed has no such key, and the container's `default`
+    /// gives it `true` — an upgrade turns proximity on rather than leaving it off silently.
+    pub voice_proximity: bool,
     /// The app version whose release showcase has already been shown. Blank means the
     /// install predates the showcase — an upgrade, so the newest showcase is due.
     /// A *fresh* install is stamped with the running version at setup (see
@@ -248,6 +255,7 @@ impl Default for AppConfig {
             voice_toggle_to_talk: false,
             voice_input_gain: 1.0,
             voice_output_volume: 1.0,
+            voice_proximity: true,
             seen_version: String::new(),
             servers: Vec::new(),
             experimental: false,

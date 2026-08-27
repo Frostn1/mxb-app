@@ -207,6 +207,7 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
         output_device: cfg.voice_output_device.clone(),
         input_gain: cfg.voice_input_gain,
         output_volume: cfg.voice_output_volume,
+        proximity: cfg.voice_proximity,
         stun_servers: stun_servers(),
     });
     log::info!("[voice] joining the room for \"{}\"", game.server_name);

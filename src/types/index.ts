@@ -130,6 +130,8 @@ export interface Config {
   voiceInputGain?: number;
   /** Playback volume for other riders, 0..1. */
   voiceOutputVolume?: number;
+  /** Place each rider where they are on the track. Defaults to on. */
+  voiceProximity?: boolean;
   /** App version whose release showcase has been seen. Blank on an install that
    *  predates the showcase, which is what marks it as an upgrade worth telling. */
   seenVersion?: string;

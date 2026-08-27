@@ -1362,6 +1362,8 @@ export const fr: Translation = {
   "voice.connecting": "connexion…",
   "voice.mute": "Couper",
   "voice.unmute": "Réactiver",
+  "voice.proximity": "Entends les pilotes d'où ils sont",
+  "voice.proximityDesc": "Un pilote à côté de toi est fort et de ce côté ; un pilote à deux virages est faible. Désactive-le pour entendre tout le monde au même volume. Revient tout seul au son plat quand le jeu ne donne pas les positions.",
 
   "overlay.pressKeys": "Appuie sur les touches…",
   "overlay.needModifier": "Ajoute un modificateur",

@@ -1371,6 +1371,8 @@ export const de: Translation = {
   "voice.connecting": "verbinde…",
   "voice.mute": "Stumm",
   "voice.unmute": "Laut",
+  "voice.proximity": "Fahrer von dort hören, wo sie sind",
+  "voice.proximityDesc": "Ein Fahrer neben dir ist laut und auf seiner Seite; einer zwei Kurven zurück ist leise. Ausschalten, um alle gleich laut zu hören. Fällt von selbst auf flach zurück, wenn das Spiel keine Positionen meldet.",
 
   "overlay.pressKeys": "Tasten drücken…",
   "overlay.needModifier": "Modifikator hinzufügen",

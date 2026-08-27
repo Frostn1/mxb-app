@@ -31,8 +31,10 @@ use serde::Serialize;
 
 use super::codec::{Decoder, Encoder};
 use super::frame::Frame;
+use super::gamesession::{GameSession, Reader};
 use super::jitter::{Jitter, Play};
 use super::mesh::{Mesh, MeshEvent};
+use super::proximity::{self, Listener, Placement};
 use super::ring::Ring;
 use super::signal::{Peer, Room, RoomCommand, RoomEvent};
 use super::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE};
@@ -48,6 +50,10 @@ const TALKING_HOLD: Duration = Duration::from_millis(250);
 /// Audio buffered for playback. Six frames is 120 ms of slack against the two device clocks
 /// drifting apart; beyond that the delay would be audible.
 const PLAYBACK_RING_FRAMES: usize = 6;
+
+/// Playback is interleaved stereo: proximity puts a rider on the side they are actually on,
+/// which is most of what makes it useful.
+const CHANNELS: usize = 2;
 
 /// Captured audio waiting to be encoded. Small on purpose: old microphone audio is worthless,
 /// and letting it pile up would mean transmitting the past.
@@ -126,6 +132,9 @@ pub struct Config {
     pub output_device: String,
     pub input_gain: f32,
     pub output_volume: f32,
+    /// Place each rider where they are on the track. Off means everyone is heard flat and
+    /// equally loud, which is also what happens when the game isn't telling us positions.
+    pub proximity: bool,
     pub stun_servers: Vec<SocketAddr>,
 }
 
@@ -177,6 +186,12 @@ struct Talker {
     connected: bool,
     muted: bool,
     last_frame: Option<Instant>,
+    /// Where this voice currently sits, glided toward where it should be. Held per talker
+    /// because it has to move smoothly *through* frames, not be recomputed from scratch.
+    placement: Placement,
+    /// Whether the game agrees this rider is on the grid. A peer nobody's game has heard of
+    /// is not played — see the roster gate in `mix`.
+    on_the_grid: bool,
 }
 
 fn run(
@@ -190,8 +205,13 @@ fn run(
     let mut mesh = Mesh::new(&config.stun_servers)?;
     let room = Room::join(&config.token, &config.server_key, &config.rider_name, config.race_num)?;
 
+    // Its own reader rather than the supervisor's: this is read every frame and the
+    // supervisor's is read every few seconds, and a shared lock between the two would put
+    // the audio loop behind a network call.
+    let game = Reader::default();
+
     let capture = Ring::new(FRAME_SAMPLES * CAPTURE_RING_FRAMES);
-    let playback = Ring::new(FRAME_SAMPLES * PLAYBACK_RING_FRAMES);
+    let playback = Ring::new(FRAME_SAMPLES * CHANNELS * PLAYBACK_RING_FRAMES);
     // Built here, on this thread, and dropped here: a `cpal::Stream` is not `Send`, so the
     // thread that opens the microphone is the thread that has to close it.
     let _input = open_input(&config, capture.clone())?;
@@ -209,7 +229,8 @@ fn run(
     let mut next_frame = Instant::now();
     let mut frame_pcm = vec![0f32; FRAME_SAMPLES];
     let mut frame_i16 = vec![0i16; FRAME_SAMPLES];
-    let mut mixed = vec![0f32; FRAME_SAMPLES];
+    // Interleaved stereo, so one push carries both ears of one frame.
+    let mut mixed = vec![0f32; FRAME_SAMPLES * CHANNELS];
     let mut wire = Vec::with_capacity(256);
 
     set_joined(status, true);
@@ -305,6 +326,12 @@ fn run(
                 next_frame = Instant::now();
             }
 
+            // Where everyone is, this frame. `None` means the game isn't telling us —
+            // FrostMod not running, or not in a session — and everything below degrades to
+            // flat audio rather than to silence.
+            let scene = config.proximity.then(|| game.read()).flatten();
+            let listener = scene.as_ref().and_then(my_listener);
+
             // Send.
             let transmitting = super::devices::transmitting();
             if transmitting && !was_transmitting {
@@ -328,7 +355,28 @@ fn run(
                             opus,
                         }
                         .encode(&mut wire);
-                        mesh.broadcast(&wire);
+                        match (listener, scene.as_ref()) {
+                            // The cull: a rider who could not hear us is not sent to. This
+                            // is what keeps a full grid affordable — nineteen streams
+                            // becomes the three or four riders actually near you.
+                            (Some(listener), Some(scene)) => {
+                                for (peer_id, race_num) in talkers
+                                    .values()
+                                    .map(|t| (t.peer.peer_id.clone(), t.peer.race_num))
+                                {
+                                    match rider_at(scene, race_num) {
+                                        Some((x, z)) if proximity::in_range(listener, x, z) => {
+                                            mesh.send_to(&peer_id, &wire)
+                                        }
+                                        // Nobody the game knows about: send anyway rather
+                                        // than silence someone the grid hasn't listed yet.
+                                        None => mesh.send_to(&peer_id, &wire),
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            _ => mesh.broadcast(&wire),
+                        }
                         seq = seq.wrapping_add(1);
                     }
                     Err(e) => log::debug!("[voice] {e}"),
@@ -336,10 +384,27 @@ fn run(
             }
             was_transmitting = transmitting;
 
-            // Receive: one frame from every talker, summed.
+            // Receive: one frame from every talker, placed where they are, summed.
             mixed.iter_mut().for_each(|s| *s = 0.0);
             let mut any = false;
             for talker in talkers.values_mut() {
+                // Where this voice should sit, and whether the game has heard of them.
+                let (target, on_the_grid) = match (listener, scene.as_ref()) {
+                    (Some(listener), Some(scene)) => match rider_at(scene, talker.peer.race_num) {
+                        Some((x, z)) => (proximity::place(listener, x, 0.0, z), true),
+                        None => (Placement::FLAT, false),
+                    },
+                    // No scene: everyone flat, and the gate cannot be applied.
+                    _ => (Placement::FLAT, true),
+                };
+                talker.on_the_grid = on_the_grid;
+                // Glide even when idle, so a voice that starts again after a pause opens at
+                // the volume it should be rather than sliding up from where it stopped.
+                talker.placement = Placement {
+                    left: proximity::glide(talker.placement.left, target.left),
+                    right: proximity::glide(talker.placement.right, target.right),
+                };
+
                 let decoded = match talker.jitter.pop() {
                     Play::Frame(opus) => talker.decoder.decode(opus).ok(),
                     Play::Conceal => talker.decoder.conceal().ok(),
@@ -350,11 +415,20 @@ fn run(
                 if talker.muted {
                     continue;
                 }
+                // The roster gate. A peer whose race number is not on this rider's own copy
+                // of the grid is not played — the control plane cannot prove anyone is on a
+                // server it doesn't run, but the game can, and it is the game we believe.
+                //
+                // Only applied when the grid is known: no scene means no gate, or a rider
+                // without FrostMod would hear nobody at all.
+                if scene.is_some() && !talker.on_the_grid {
+                    continue;
+                }
                 any = true;
-                // Per-rider gain is 1.0 today. Phase 4 makes it a function of how far away
-                // they are, which is the only change this line needs.
-                for (out, sample) in mixed.iter_mut().zip(pcm.iter()) {
-                    *out += *sample as f32 / i16::MAX as f32;
+                for (i, sample) in pcm.iter().enumerate() {
+                    let mono = *sample as f32 / i16::MAX as f32;
+                    mixed[i * CHANNELS] += mono * talker.placement.left;
+                    mixed[i * CHANNELS + 1] += mono * talker.placement.right;
                 }
             }
             if any {
@@ -377,6 +451,28 @@ fn run(
     Ok(())
 }
 
+/// Us, as the audio scene sees us: where we are and which way we are pointing.
+///
+/// `None` until the game has told us our own race number and put us in the rider table.
+/// Everything that needs a listener degrades to flat rather than guessing at one.
+fn my_listener(scene: &GameSession) -> Option<Listener> {
+    let me = scene.riders.iter().find(|r| r.race_num == scene.race_num)?;
+    Some(Listener { x: me.x, y: me.y, z: me.z, yaw_deg: me.yaw_deg })
+}
+
+/// Where a rider is, by race number. `None` means the game has not listed them, which is
+/// what the roster gate turns on.
+fn rider_at(scene: &GameSession, race_num: u16) -> Option<(f32, f32)> {
+    if race_num == 0 {
+        return None;
+    }
+    scene
+        .riders
+        .iter()
+        .find(|r| r.race_num == race_num as i32)
+        .map(|r| (r.x, r.z))
+}
+
 fn new_talker(peer: Peer) -> Talker {
     Talker {
         peer,
@@ -391,6 +487,8 @@ fn new_talker(peer: Peer) -> Talker {
         connected: false,
         muted: false,
         last_frame: None,
+        placement: Placement::FLAT,
+        on_the_grid: false,
     }
 }
 
@@ -535,14 +633,31 @@ fn open_output(config: &Config, ring: Arc<Ring>) -> Result<cpal::Stream, String>
         .build_output_stream(
             &supported.config(),
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                // The ring holds interleaved stereo; the device may want one channel or
+                // eight. Arithmetic on a fixed buffer only — no allocation, no lock.
                 let frames = data.len() / channels.max(1);
-                let mut mono = [0f32; 2048];
-                let take = frames.min(mono.len());
-                ring.pop(&mut mono[..take]);
+                let mut stereo = [0f32; 2048];
+                let take = (frames * CHANNELS).min(stereo.len()) / CHANNELS;
+                ring.pop(&mut stereo[..take * CHANNELS]);
+
                 for (i, out) in data.chunks_mut(channels).enumerate() {
-                    let sample = if i < take { mono[i] } else { 0.0 };
-                    for slot in out.iter_mut() {
-                        *slot = sample;
+                    let (left, right) = if i < take {
+                        (stereo[i * CHANNELS], stereo[i * CHANNELS + 1])
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    match channels {
+                        // Mono output: fold the image back down rather than dropping an ear.
+                        1 => out[0] = (left + right) * 0.5,
+                        _ => {
+                            out[0] = left;
+                            out[1] = right;
+                            // Surround: the extra channels stay quiet. Voice belongs in
+                            // front of you, not behind you and in the subwoofer.
+                            for slot in out.iter_mut().skip(2) {
+                                *slot = 0.0;
+                            }
+                        }
                     }
                 }
             },
@@ -600,6 +715,55 @@ impl Resampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voice::gamesession::Rider;
+
+    fn rider(race_num: i32, x: f32, z: f32) -> Rider {
+        Rider { race_num, x, y: 0.0, z, yaw_deg: 0.0, crashed: false, name: format!("#{race_num}") }
+    }
+
+    fn a_grid() -> GameSession {
+        GameSession {
+            server_name: "Frost Racing EU".into(),
+            race_num: 7,
+            riders: vec![rider(7, 0.0, 0.0), rider(22, 10.0, 0.0)],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_listener_is_our_own_rider() {
+        let scene = GameSession { riders: vec![rider(7, 1.0, 2.0), rider(22, 9.0, 9.0)], ..a_grid() };
+        let me = my_listener(&scene).expect("a listener");
+        assert_eq!((me.x, me.z), (1.0, 2.0), "should be rider 7, not the first in the list");
+    }
+
+    #[test]
+    fn there_is_no_listener_until_we_are_on_the_grid() {
+        // Between joining the room and the game listing us. Everything degrades to flat
+        // rather than placing voices around a listener we invented.
+        let waiting = GameSession { race_num: -1, ..a_grid() };
+        assert!(my_listener(&waiting).is_none());
+        let not_listed = GameSession { race_num: 99, ..a_grid() };
+        assert!(my_listener(&not_listed).is_none());
+    }
+
+    #[test]
+    fn a_peer_is_found_by_race_number() {
+        assert_eq!(rider_at(&a_grid(), 22), Some((10.0, 0.0)));
+    }
+
+    #[test]
+    fn a_peer_the_game_has_never_heard_of_is_not_placed() {
+        // This is the roster gate: nothing the control plane says can put someone on this
+        // grid, so a stranger claiming race 55 is neither placed nor played.
+        assert_eq!(rider_at(&a_grid(), 55), None);
+    }
+
+    #[test]
+    fn a_peer_with_no_race_number_yet_is_not_placed() {
+        // Zero is "in the room but not on track" — a real state, not a rider at race 0.
+        assert_eq!(rider_at(&a_grid(), 0), None);
+    }
 
     #[test]
     fn a_matching_rate_passes_audio_through_untouched() {

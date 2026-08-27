@@ -1333,6 +1333,8 @@ export const en = {
   "voice.connecting": "connecting…",
   "voice.mute": "Mute",
   "voice.unmute": "Unmute",
+  "voice.proximity": "Hear riders from where they are",
+  "voice.proximityDesc": "A rider beside you is loud and on that side; one two corners back is faint. Turn it off to hear everyone flat and equally loud. Falls back to flat on its own when the game isn't reporting positions.",
   "overlay.pressKeys": "Press keys…",
   "overlay.needModifier": "Add a modifier",
   "overlay.needModifierDesc": "Hold Ctrl, Alt or Shift so the shortcut can't fire while you type.",

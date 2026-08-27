@@ -56,6 +56,7 @@ import {
   voiceDevices,
   voiceMute,
   voiceStatus,
+  setVoiceProximity,
   setVoiceEnabled,
   setVoiceInputDevice,
   setVoiceOutputDevice,
@@ -467,6 +468,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const voiceGain = config.voiceInputGain ?? 1;
   const voiceToggle = config.voiceToggleToTalk ?? false;
   const voiceVolume = config.voiceOutputVolume ?? 1;
+  const voiceProximity = config.voiceProximity ?? true;
 
   // What the overlay is doing right now: is the game up, does something else own the
   // screen, and did the hotkey actually bind. A shortcut that never registered has
@@ -603,6 +605,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     try {
       await setVoiceEnabled(v);
       if (!v) setMicTesting(false);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("voice.registerFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
+  const toggleProximity = async (v: boolean) => {
+    try {
+      await setVoiceProximity(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("voice.registerFailed"), { description: String(e) });
@@ -1279,6 +1291,17 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               label={t("voice.enable")}
               checked={voiceEnabled}
               onChange={toggleVoice}
+            />
+
+            {/* The reason to use this over a call with your mates. Off is a real choice —
+                a race director wants everyone equally loud — so it is a switch, not a
+                property of the feature. */}
+            <ToggleRow
+              label={t("voice.proximity")}
+              desc={t("voice.proximityDesc")}
+              checked={voiceProximity}
+              onChange={toggleProximity}
+              disabled={!voiceEnabled}
             />
 
             {devices?.error && (

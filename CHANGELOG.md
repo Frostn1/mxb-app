@@ -13,6 +13,21 @@
 
 ## 2026-08-27
 
+### Added
+- **You hear each rider from where they actually are.** A rider alongside you is loud and on
+  that side; one two corners back is faint; one across the circuit isn't there at all. You
+  end up knowing where people are without looking, which is the thing a Discord call can
+  never do — it has no idea who is on the track. Volume falls off the way sound does rather
+  than in a straight line, and the image follows your heading, so a rider on your left stays
+  on your left through a corner. Turn it off in Settings to hear everyone flat and equally
+  loud, and it falls back to flat by itself whenever the game isn't reporting positions.
+
+- **You only hear people your own game says are on the grid.** Voice is open to anyone with
+  the app, so someone could tell our servers they are on yours. Your copy of the race entry
+  list is the thing that decides who is audible, and nothing said over the network can add a
+  name to it.
+
+
 ### Fixed
 - **Opening a bike in 3D was doing half its work for nothing.** Every texture packed inside a
   model was run through a resize on the way in — including the ones that were already the
