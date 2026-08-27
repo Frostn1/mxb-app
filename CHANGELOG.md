@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-08-27
+
+### Changed
+- **A track's 3D view appears about seven times faster.** The fine terrain is a 2048×2048
+  grid — four million vertices — and three.js worked out its lighting the general way, by
+  walking all 8.4 million triangles and accumulating a normal onto each corner. A height grid
+  doesn't need the general way: the ground is a function of x and y, so its slope comes
+  straight from the neighbouring samples. Measured on the same mesh, that took building the
+  view from 622 ms to 84 ms, with the two agreeing to within 0.02° — the same picture, drawn
+  without the wait. Nothing about the terrain's detail changed.
+
+- **Four mods install two at a time instead of one after another.** Downloading was never
+  what made a batch slow: a single MediaFire connection measured at 25–34 MB/s, more than a
+  typical home line carries, and splitting one file across eight parallel connections was
+  worth exactly nothing. What cost time was the line sitting idle between mods, while one
+  resolved its link or unpacked. Two now overlap, and the next few links are looked up ahead
+  of their turn rather than when their turn arrives.
+
+- **MediaFire links resolve about a third of a second quicker.** The app asked MediaFire's
+  API for a download link first and scraped the page only if that failed. Across eight real
+  tracks the API refused every one, and the scrape rescued all eight — so the first request
+  was pure delay. The page is asked first now; the API stays behind it, still the route that
+  survives the page being redesigned.
+
+- **Preset bundles, shared files and picked files place the same cheap way downloads do.**
+  They all unpack to a folder that is deleted moments later, so their files are moved into
+  place rather than copied a second time.
+
 ## 2026-08-26
 
 ### Changed

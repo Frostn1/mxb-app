@@ -82,7 +82,7 @@ interface MyDownloadsProps {
 export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
   const t = useT();
   const { game } = useConfig();
-  const { active, startShopInstall } = useInstall();
+  const { activeFor, startShopInstall } = useInstall();
 
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [items, setItems] = useState<ShopItem[]>([]);
@@ -333,9 +333,26 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
     [game.id],
   );
 
-  /** Completion of the active install, when it reported a length. */
-  const activeProgress =
-    active && active.total ? (active.received ?? 0) / active.total : null;
+  /** The install running for one of a purchase's files, and how far along it is. Several
+   *  installs can be in flight now, so this is asked per purchase rather than once. */
+  const installOf = useCallback(
+    (files: ShopItem[]) => {
+      for (const f of files) {
+        const it = activeFor(f.slug);
+        if (it) return it;
+      }
+      return null;
+    },
+    [activeFor],
+  );
+
+  const progressOf = useCallback(
+    (files: ShopItem[]) => {
+      const it = installOf(files);
+      return it && it.total ? (it.received ?? 0) / it.total : null;
+    },
+    [installOf],
+  );
 
   /** The purchase waiting on the destination dialog, with everything the dialog needs. */
   const [pending, setPending] = useState<{
@@ -498,8 +515,8 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
         owned={{
           files: open.files,
           installed: open.installed,
-          busy: open.files.some((f) => f.slug === active?.slug),
-          progress: activeProgress,
+          busy: installOf(open.files) != null,
+          progress: progressOf(open.files),
           disabled: false,
           onInstall: (file) => install(open, file),
         }}
@@ -630,8 +647,8 @@ export default function MyDownloads({ refreshKey }: MyDownloadsProps) {
               <PurchaseCard
                 key={p.product}
                 purchase={p}
-                busy={p.files.some((f) => f.slug === active?.slug)}
-                progress={activeProgress}
+                busy={installOf(p.files) != null}
+                progress={progressOf(p.files)}
                 disabled={false}
                 onInstall={(file) => install(p, file)}
                 // Only a purchase the catalog lists has a detail page to open.

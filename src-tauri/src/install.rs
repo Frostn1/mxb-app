@@ -420,7 +420,17 @@ pub fn import_file(
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "import".to_string());
-    place_mod(&extracted, &mods_dir, type_folder, dest_folder, &slug)?;
+    // `extracted` sits under `work`, which is deleted below — the picked file itself is never
+    // touched, only the copy `extract_archive` just made of it.
+    place_mod_with(
+        &extracted,
+        &mods_dir,
+        type_folder,
+        dest_folder,
+        &slug,
+        OnConflict::Overwrite,
+        Staging::Consume,
+    )?;
 
     let _ = std::fs::remove_dir_all(&work);
 
@@ -473,12 +483,15 @@ fn mediafire_api(path: &str, query: &str) -> String {
 
 /// Resolve a MediaFire share to something [`download`] can stream.
 ///
-/// The file page is a moving target — MediaFire has reshaped it repeatedly, and every
-/// reshape broke installs the same way, with "couldn't find the MediaFire download link"
-/// on links that were perfectly fine in a browser. So the page is no longer the first
-/// thing we ask. MediaFire's own API answers the same question from the share's quick key
-/// under a versioned contract; scraping stays behind it, for links whose key we can't read
-/// and for the day the API stops answering.
+/// Both routes are kept, because each has been the working one: the API doesn't care what the
+/// file page looks like this month, and the page doesn't care what MediaFire has decided
+/// anonymous callers may have.
+///
+/// The page goes first because the API is currently the one that doesn't answer. Measured
+/// across eight real tracks, `file/get_links.php` refused every one with "Insufficient
+/// Permissions" and the scrape rescued all eight — so asking the API first was ~320 ms of
+/// guaranteed-useless round trip on every install. It stays as the fallback: it costs nothing
+/// while the page keeps parsing, and it is still the route that survives a reshape.
 async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String> {
     // Already a CDN link — mod pages do occasionally list one. Nothing to resolve.
     if is_mediafire_direct(url) {
@@ -489,12 +502,6 @@ async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String>
     // nothing, and reported the link as broken.
     if let Some(folder) = mediafire_folder_key(url) {
         return resolve_mediafire_folder(client, &folder).await;
-    }
-
-    if let Some(key) = mediafire_quick_key(url) {
-        if let Some(direct) = mediafire_api_link(client, &key).await? {
-            return Ok(direct);
-        }
     }
 
     let html = client
@@ -512,16 +519,28 @@ async fn resolve_mediafire(client: &Client, url: &str) -> anyhow::Result<String>
         .text()
         .await?;
 
-    // The refusal check runs only once parsing has come up empty, never ahead of it: it
+    if let Some(direct) = parse_mediafire_link(&html) {
+        return Ok(direct);
+    }
+
+    // The page didn't parse. Ask the API before giving up — and let its refusal speak, since
+    // "this file is password protected" beats "couldn't find the download link".
+    if let Some(key) = mediafire_quick_key(url) {
+        if let Some(direct) = mediafire_api_link(client, &key).await? {
+            return Ok(direct);
+        }
+    }
+
+    // The refusal check runs only once both have come up empty, never ahead of them: it
     // matches on the page's raw source, and an error string sitting in a *working* page's
     // JavaScript would otherwise condemn a file that was about to download fine.
-    parse_mediafire_link(&html).ok_or_else(|| {
-        anyhow::anyhow!(mediafire_page_error(&html).unwrap_or_else(|| {
+    Err(anyhow::anyhow!(mediafire_page_error(&html).unwrap_or_else(
+        || {
             "Couldn't find the MediaFire download link — open the mod page to download it \
              manually."
                 .to_string()
-        }))
-    })
+        }
+    )))
 }
 
 /// Ask the API for a share's direct link.

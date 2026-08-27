@@ -25,8 +25,9 @@ const COARSE_DIM = 128;
 const FINE_DIM = 2048;
 
 /** The surface picture's longest edge. Matches the masks' own 2048, so the surface is drawn
- *  at the resolution the track painted it rather than at half of it. A track's own is rarely bigger, and past this the
- *  picture costs more to move than it adds to a terrain drawn at 320 samples across. */
+ *  at the resolution the track painted it rather than at half of it, and matches the terrain
+ *  grid it lies across. A track's own is rarely bigger, and past this the picture costs more
+ *  to move than it adds. */
 const OVERVIEW_DIM = 2048;
 
 /** Metres. Below this, `[info] length` is a placeholder rather than a lap. */

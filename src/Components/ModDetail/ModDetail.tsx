@@ -128,8 +128,8 @@ export default function ModDetail({
   // so a user the catalog refused once had no way back short of leaving the page.
   const [reloadKey, setReloadKey] = useState(0);
 
-  const { active, startInstall, startImport } = useInstall();
-  const myActive = active && active.slug === slug ? active : null;
+  const { activeFor, startInstall, startImport } = useInstall();
+  const myActive = activeFor(slug);
 
   useEffect(() => {
     let cancelled = false;
