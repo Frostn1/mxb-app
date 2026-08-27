@@ -2042,9 +2042,14 @@ fn bind_textures(
     gfx: &std::collections::HashMap<String, cfg::GfxPart>,
     node_part: &std::collections::HashMap<String, String>,
 ) {
-    // A bike embeds every texture it draws, its stock livery included, so it declares
-    // nothing beyond them.
-    let colors = edf::declared_colors(edf_bytes, &[]);
+    // Which list this mesh's material indices count. A mesh whose materials never use the
+    // second texture slot is read exactly as it always was; only one that does — a mod
+    // shipping companion maps, unreadable until now — gets the companion-aware list.
+    let colors = if edf::uses_companion_slots(edf_bytes) {
+        edf::bike_material_slots(edf_bytes)
+    } else {
+        edf::declared_colors(edf_bytes, &[])
+    };
 
     for n in nodes.iter_mut() {
         let part = node_part.get(&n.name.to_ascii_lowercase());
@@ -8501,6 +8506,7 @@ mod deep_link_tests {
 mod viewer_tests {
     use std::path::{Path, PathBuf};
 
+
     fn copy_tree(src: &Path, dst: &Path) {
         std::fs::create_dir_all(dst).unwrap();
         for e in std::fs::read_dir(src).unwrap().flatten() {
@@ -8620,6 +8626,61 @@ mod viewer_tests {
         assert!(named(&files, "gfx.cfg").is_some(), "packed gfx.cfg comes through");
         assert!(named(&files, "wheel.geom").is_some(), "packed .geom comes through");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A mod mesh that ships companion maps used to render entirely grey: its material
+    /// tables were thrown out because `w13` was assumed to be padding, and even read back they
+    /// index a list `declared_colors` doesn't build — one that counts the sheets the mesh
+    /// declares but never embeds. `polarm` is the proof: nothing embeds it, and it is the only
+    /// candidate for the `Polar + Mount` submesh.
+    ///
+    /// Pinned against parts whose names name their own sheet, so a wrong index space can't
+    /// pass. Needs the real tree — no synthetic `.edf` exercises this.
+    ///
+    /// MXB_REAL_BIKES=~/Documents/PiBoSo/"MX Bikes" \
+    ///   cargo test a_companion_shipping_mesh_binds_every_part -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn a_companion_shipping_mesh_binds_every_part() {
+        let Ok(src_root) = std::env::var("MXB_REAL_BIKES") else {
+            eprintln!("set MXB_REAL_BIKES to run");
+            return;
+        };
+        let dir = Path::new(&src_root)
+            .join("mods")
+            .join("bikes")
+            .join("MX1OEM_2023_KTM_450_SX-F");
+        if !crate::bikefiles::dir_has_mesh(&dir) {
+            eprintln!("no extracted mesh at {dir:?} — skipping");
+            return;
+        }
+        let m = super::load_bike_model_blocking(dir.to_string_lossy().to_string(), None)
+            .expect("the bike loads");
+        let bound: Vec<(String, String)> = m
+            .nodes
+            .iter()
+            .flat_map(|n| n.submeshes.iter().map(|s| {
+                (s.name.clone(), s.texture.clone().unwrap_or_default())
+            }))
+            .collect();
+        for (part, sheet) in [
+            ("LUXON LMM.001", "luxlmm"),
+            ("pedale_low", "HHpedal"),
+            ("pedale_low.002", "HHshifter"),
+            ("tank_low", "rmxtank"),
+            ("L master cyl.002", "asv"),
+            ("ODI Grips+bar end", "ODIGRIPBAREND"),
+            ("Polar + Mount", "polarm"),
+            ("levers", "arclever"),
+        ] {
+            let got = bound.iter().find(|(n, _)| n == part).map(|(_, t)| t.as_str());
+            assert_eq!(got, Some(sheet), "{part} should wear {sheet}");
+        }
+        assert!(
+            bound.iter().all(|(_, t)| !t.is_empty()),
+            "every submesh should be bound: {:?}",
+            bound.iter().filter(|(_, t)| t.is_empty()).collect::<Vec<_>>(),
+        );
     }
 
     /// The contract behind the Locker's 3D preview: what it shows is what applying the
