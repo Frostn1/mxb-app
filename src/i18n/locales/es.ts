@@ -240,7 +240,7 @@ export const es: Translation = {
   "pose.move.leftLegForward": "Pierna izquierda adelante",
   "pose.move.elbowsUp": "Codos arriba",
   "pose.move.leanIn": "Inclinarse",
-  "pose.move.sitOnBike": "Sentarse en la moto",
+  "pose.move.ride": "Posición de pilotaje",
   "pose.axis.bend": "Flexión",
   "pose.axis.twist": "Giro",
   "pose.axis.splay": "Apertura",

@@ -50,7 +50,25 @@
 
 ## 2026-08-26
 
+### Fixed
+- **The rider sat on the bike backwards, and stood bolt upright while he did it.** The Pose
+  tab worked out which way a rider faces by looking for the toes in the lowest slice of his
+  body — and a rider body has no feet: the ankles and toes belong to the boots, and the mesh
+  stops at the sock. So it was reading the bottom of a shin, calling it a toe, and turning
+  him a half-turn round on the seat. He now faces the front, and so do **Lean in** and **Left
+  leg forward**, which were quietly leaning and stepping backwards for the same reason.
+
 ### Changed
+- **On the bike, the rider now sits on it.** He settles up the seat towards the tank rather
+  than on the setup reference in the middle of it, leans into the bars, puts both hands on
+  the grips — read off the bike's own handlebar, so they land on the bars of whatever is
+  under him — and folds his knees round the machine with his boots on the pegs. **Riding
+  position** replaces "Sit on bike" in the ready-made moves, and it is applied for you the
+  first time a bike appears under an unposed rider.
+- **Joints bend as far as the joint allows.** Every bone was capped at 60°, which is a broken
+  neck and half a knee: nobody could fold a leg under a bike, because the cap cut the whole
+  turn back until its stiffest axis fitted. Hips, knees, shoulders and elbows now reach 135°,
+  wrists and collars 70°, and the neck and head stay at 45°.
 - **Voice now works whichever way you joined a server.** It used to start only when the app
   itself launched the game at a server, which left out everyone who picks one from the game's
   own browser — and quietly kept you in the old room if you moved servers without quitting.

@@ -243,7 +243,7 @@ export const fr: Translation = {
   "pose.move.leftLegForward": "Jambe gauche en avant",
   "pose.move.elbowsUp": "Coudes hauts",
   "pose.move.leanIn": "Se pencher",
-  "pose.move.sitOnBike": "Assis sur la moto",
+  "pose.move.ride": "Position de pilotage",
   "pose.axis.bend": "Flexion",
   "pose.axis.twist": "Rotation",
   "pose.axis.splay": "Écartement",

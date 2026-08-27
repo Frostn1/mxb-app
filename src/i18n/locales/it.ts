@@ -239,7 +239,7 @@ export const it: Translation = {
   "pose.move.leftLegForward": "Gamba sinistra avanti",
   "pose.move.elbowsUp": "Gomiti alti",
   "pose.move.leanIn": "Sporgersi",
-  "pose.move.sitOnBike": "Seduto in sella",
+  "pose.move.ride": "Posizione di guida",
   "pose.axis.bend": "Flessione",
   "pose.axis.twist": "Torsione",
   "pose.axis.splay": "Apertura",
