@@ -77,6 +77,7 @@ import {
 } from "./categories";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import LibraryDetail from "./LibraryDetail";
+import { ModelSwapActions } from "../Locker/ModelSwapActions";
 import { ShareDialog, ImportShareDialog } from "./ShareDialogs";
 import FindAgainDialog from "./FindAgainDialog";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
@@ -241,14 +242,19 @@ function LibraryCardBody({
  * same icons, same states — so a variant reads the same wherever you meet it.
  */
 function ModelSwapList({
+  bike,
   variants,
   t,
   onPreview,
+  onChanged,
 }: {
+  bike: string;
   variants: ModelVariant[];
   t: TFunc;
   /** Undefined when this build can't draw bike geometry — then no row offers a preview. */
   onPreview?: (variant: string) => void;
+  /** A model moved or went to the Trash — rescan. */
+  onChanged: () => void;
 }) {
   return (
     <ul
@@ -297,6 +303,7 @@ function ModelSwapList({
               {t("locker.view3d")}
             </button>
           )}
+          <ModelSwapActions bike={bike} variant={v} onChanged={onChanged} />
         </li>
       ))}
     </ul>
@@ -1191,8 +1198,10 @@ export default function Library({
                             </div>
                             {showModels && swapsOpen && (
                               <ModelSwapList
+                                bike={models!.bike}
                                 variants={models!.variants}
                                 t={t}
+                                onChanged={onChanged}
                                 onPreview={
                                   bikePreview
                                     ? (variant) =>

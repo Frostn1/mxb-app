@@ -41,6 +41,7 @@ import type {
 } from "../../types";
 import RegisterSwapsDialog from "./RegisterSwapsDialog";
 import AssignPaintsDialog from "./AssignPaintsDialog";
+import { ModelSwapActions } from "./ModelSwapActions";
 import { ViewerDialog } from "../Viewer/ViewerDialog";
 import { useConfig } from "../../Context/Config";
 import { Trans } from "../../i18n";
@@ -435,6 +436,7 @@ export default function Locker() {
                 }
                 onBind={onBind}
                 onUnbind={onUnbind}
+                onChanged={() => void load()}
               />
             ))}
           </div>
@@ -483,6 +485,7 @@ function BikeCard({
   onAssignPaints,
   onBind,
   onUnbind,
+  onChanged,
 }: {
   row: Row;
   busy: boolean;
@@ -494,6 +497,8 @@ function BikeCard({
   onAssignPaints: (models: BikeModels, model: string) => void;
   onBind: (bike: string, model: string, sound: string) => void;
   onUnbind: (bike: string, model: string, sound: string) => void;
+  /** A model set moved or went to the Trash — rescan. */
+  onChanged: () => void;
 }) {
   const t = useT();
   const { bike, models, sounds } = row;
@@ -540,6 +545,7 @@ function BikeCard({
                   ? () => onPreview(bike, v.name)
                   : undefined
               }
+              manage={{ bike, onChanged }}
               paintCount={v.paints.length}
               onAssignPaints={() => onAssignPaints(models, v.name)}
             />
@@ -622,6 +628,7 @@ function VariantButton({
   onPreview,
   paintCount = 0,
   onAssignPaints,
+  manage,
 }: {
   variant: ModelVariant | SoundVariant;
   kind: "model" | "sound";
@@ -635,6 +642,8 @@ function VariantButton({
   paintCount?: number;
   /** Choose which liveries belong to this model. Models only. */
   onAssignPaints?: () => void;
+  /** Move / delete this model set. Models only — a sound set is managed elsewhere. */
+  manage?: { bike: string; onChanged: () => void };
 }) {
   const t = useT();
   // A model row named "Stock" is the game's own model, packed in the bike's `.pkz` —
@@ -764,6 +773,14 @@ function VariantButton({
           <Box className="size-3.5" />
           {t("locker.view3d")}
         </button>
+      )}
+      {manage && kind === "model" && (
+        <ModelSwapActions
+          bike={manage.bike}
+          variant={v as ModelVariant}
+          onChanged={manage.onChanged}
+          className="px-1.5 py-1.5"
+        />
       )}
     </div>
   );
