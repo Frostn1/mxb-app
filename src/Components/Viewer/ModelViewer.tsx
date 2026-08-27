@@ -12,8 +12,7 @@ import {
   buildSkeleton,
   isRestPose,
   NO_POSE,
-  riderFrame,
-  toMatrix,
+  seatTransform,
   type RiderPose,
 } from "../../lib/riderPose";
 import { PoseHandles } from "./PoseHandles";
@@ -1585,76 +1584,6 @@ function SideBySide({
 }
 
 /**
- * Where the rider's weight goes: the underside of the pelvis, in the rider's own frame.
- *
- * The pelvis bone carries a box covering the slice of body it moves, so the bottom of that box
- * is where a seat would touch. Read off the model, because a rider is whatever height its
- * author made it.
- */
-function seatContact(bones: Bone[], up: THREE.Vector3): THREE.Vector3 | null {
-  const pelvis =
-    bones.find((b) => b.name === "riderRIG_Pelvis") ??
-    bones.find((b) => b.name === "riderRIG_LeftHip");
-  if (!pelvis) return null;
-  const bind = toMatrix(pelvis.bind);
-  const at = new THREE.Vector3(pelvis.bind[3], pelvis.bind[7], pelvis.bind[11]);
-  const { aabbLo: lo, aabbHi: hi } = pelvis;
-  let drop = 0;
-  const corner = new THREE.Vector3();
-  for (const x of [lo[0], hi[0]]) {
-    for (const y of [lo[1], hi[1]]) {
-      for (const z of [lo[2], hi[2]]) {
-        const d = corner.set(x, y, z).applyMatrix4(bind).sub(at).dot(up);
-        if (d < drop) drop = d;
-      }
-    }
-  }
-  return at.addScaledVector(up, drop);
-}
-
-/**
- * The rider stood upright, facing the way the bike does, with their seat on the bike's.
- *
- * Worked out rather than eyeballed: the bike's `.geom` names `seat_height_ref`, and the rider's
- * own up and forward come off its rig, so the two only have to be brought into one frame. Null
- * when either half won't say — a bike whose `.geom` names no seat, or a rig with no hips — and
- * then the pair falls back to standing side by side, which is honest about not knowing.
- */
-function seatTransform(
-  parts: RiderPart[],
-  seat: Vec3,
-  drop: number,
-): THREE.Matrix4 | null {
-  const body = parts.find((p) => p.part === "body" && p.nodes.length);
-  const bones = body?.skeleton;
-  if (!bones?.length) return null;
-  const rf = riderFrame(bones, body?.nodes);
-  if (!rf) return null;
-  const contact = seatContact(bones, rf.up);
-  if (!contact) return null;
-  // The rider's (forward, up) onto the bike's (+Z, +Y). Both triples are built by a cross
-  // product, so both turn the same way round and what comes out is a rotation, not a mirror.
-  const b3 = new THREE.Vector3().crossVectors(rf.forward, rf.up);
-  const from = new THREE.Matrix4().makeBasis(rf.forward, rf.up, b3);
-  const to = new THREE.Matrix4().makeBasis(
-    new THREE.Vector3(0, 0, 1),
-    new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 0, 1).cross(new THREE.Vector3(0, 1, 0)),
-  );
-  const turn = to.multiply(from.transpose());
-  // Sit *on* the seat rather than with the hip joint in it — the reference is the top of the
-  // seat, and a rider's weight is carried a little way into it.
-  const at = new THREE.Vector3(seat[0], seat[1] + drop, seat[2]);
-  return new THREE.Matrix4()
-    .makeTranslation(at.x, at.y, at.z)
-    .multiply(turn)
-    .multiply(new THREE.Matrix4().makeTranslation(-contact.x, -contact.y, -contact.z));
-}
-
-/** How far into the seat the rider settles, in metres. */
-const SEAT_SINK = -0.02;
-
-/**
  * Bike and rider in one scene, the rider sitting on it.
  *
  * The bike stands on the ground exactly as it does beside the rider; only the rider moves, on
@@ -1696,9 +1625,9 @@ function OnBike({
     const bike = partBounds(nodes);
     // Dropped onto y = 0, like every other arrangement, so the ground shadow means something.
     const lift: Vec3 = [0, -bike.lo[1], 0];
-    const seated = seatTransform(parts, seat, SEAT_SINK);
+    const seated = seatTransform(parts, seat, rig ?? null);
     return { lift, seated, bikePivot: spinPivot(bike) };
-  }, [nodes, parts, seat]);
+  }, [nodes, parts, seat, rig]);
 
   return (
     <group position={at.lift}>

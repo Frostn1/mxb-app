@@ -242,7 +242,7 @@ export const ptBR: Translation = {
   "pose.move.leftLegForward": "Perna esquerda à frente",
   "pose.move.elbowsUp": "Cotovelos altos",
   "pose.move.leanIn": "Inclinar-se",
-  "pose.move.sitOnBike": "Sentar na moto",
+  "pose.move.ride": "Posição de pilotagem",
   "pose.axis.bend": "Flexão",
   "pose.axis.twist": "Torção",
   "pose.axis.splay": "Abertura",
@@ -1344,7 +1344,13 @@ export const ptBR: Translation = {
   "voice.deviceGone": "Esse dispositivo não está conectado",
   "voice.noDevices": "Nenhum dispositivo de áudio encontrado",
   "voice.notConnected": "Ainda não conectado a ninguém",
-  "voice.notConnectedDesc": "Estas configurações controlam seu próprio microfone e fone, e os botões de teste já funcionam. Falar de verdade com outros pilotos precisa do servidor de voz, que ainda não existe — nada aqui é transmitido.",
+  "voice.notConnectedDesc": "A voz começa sozinha quando você entra em um servidor — nada para configurar, nada para baixar e nada que o servidor precise rodar. Qualquer pessoa lá com o app aparece aqui.",
+  "voice.inRoom": "Em voz em {{server}}",
+  "voice.stopped": "Voz interrompida",
+  "voice.unnamedRider": "Piloto",
+  "voice.connecting": "conectando…",
+  "voice.mute": "Silenciar",
+  "voice.unmute": "Reativar",
 
   "overlay.pressKeys": "Aperte as teclas…",
   "overlay.needModifier": "Adicione um modificador",
@@ -1370,6 +1376,18 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0110.hero.title":
+    "Pegue o piloto e posicione-o",
+  "showcase.v0110.hero.body":
+    "Pegue as articulações do piloto na prévia 3D e mova-o: mãos, cotovelos, quadris, pés. Os movimentos rápidos se acumulam, os controles ajustam e Posição de pilotagem o senta na moto. Apenas prévia: o jogo não é alterado.",
+  "showcase.v0110.designer":
+    "Espelhe uma camada através da moto, selecione várias de uma vez, encaixe ao arrastar, inverta e digite posições exatas.",
+  "showcase.v0110.wheels":
+    "As motos aparecem com suas rodas, e você escolhe em quais pneus elas ficam.",
+  "showcase.v0110.speed":
+    "As pistas desenham sete vezes mais rápido, as motos abrem em 127 ms em vez de 201, e os mods instalam dois por vez.",
+  "showcase.v0110.swaps":
+    "Mova um conjunto de modelos para outra moto ou exclua-o, e veja qualquer swap em 3D pela Biblioteca.",
   "showcase.v0102.hero.title":
     "Pinturas que pertencem ao modelo que as veste",
   "showcase.v0102.hero.body":

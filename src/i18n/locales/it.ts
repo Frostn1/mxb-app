@@ -239,7 +239,7 @@ export const it: Translation = {
   "pose.move.leftLegForward": "Gamba sinistra avanti",
   "pose.move.elbowsUp": "Gomiti alti",
   "pose.move.leanIn": "Sporgersi",
-  "pose.move.sitOnBike": "Seduto in sella",
+  "pose.move.ride": "Posizione di guida",
   "pose.axis.bend": "Flessione",
   "pose.axis.twist": "Torsione",
   "pose.axis.splay": "Apertura",
@@ -1346,7 +1346,13 @@ export const it: Translation = {
   "voice.deviceGone": "Quel dispositivo non è collegato",
   "voice.noDevices": "Nessun dispositivo audio trovato",
   "voice.notConnected": "Non ancora connesso a nessuno",
-  "voice.notConnectedDesc": "Queste impostazioni controllano il tuo microfono e le tue cuffie, e i pulsanti di prova funzionano già. Per parlare davvero con gli altri piloti serve il server vocale, che non è ancora pronto: qui non viene trasmesso nulla.",
+  "voice.notConnectedDesc": "La voce si attiva da sola quando entri in un server: niente da configurare, niente da scaricare e niente da far girare al server. Chiunque altro sia lì con l'app compare qui.",
+  "voice.inRoom": "In voce su {{server}}",
+  "voice.stopped": "Voce interrotta",
+  "voice.unnamedRider": "Pilota",
+  "voice.connecting": "connessione…",
+  "voice.mute": "Muto",
+  "voice.unmute": "Riattiva",
 
   "overlay.pressKeys": "Premi i tasti…",
   "overlay.needModifier": "Aggiungi un modificatore",
@@ -1372,6 +1378,18 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0110.hero.title":
+    "Afferra il pilota e mettilo in posa",
+  "showcase.v0110.hero.body":
+    "Afferra le articolazioni del pilota nell'anteprima 3D e muovilo: mani, gomiti, fianchi, piedi. Le pose rapide si sommano, i cursori rifiniscono e Posizione di guida lo fa sedere sulla moto. Solo anteprima: il gioco non viene toccato.",
+  "showcase.v0110.designer":
+    "Specchia un livello attraverso la moto, selezionane più insieme, aggancia trascinando, capovolgi e digita posizioni esatte.",
+  "showcase.v0110.wheels":
+    "Le moto vengono mostrate con le loro ruote, e scegli tu su quali gomme poggiano.",
+  "showcase.v0110.speed":
+    "Le piste si disegnano sette volte più veloci, le moto si aprono in 127 ms invece di 201, e i mod si installano a due a due.",
+  "showcase.v0110.swaps":
+    "Sposta un set di modelli su un'altra moto o eliminalo, e guarda qualsiasi swap in 3D dalla Libreria.",
   "showcase.v0102.hero.title":
     "Livree che appartengono al modello che le indossa",
   "showcase.v0102.hero.body":

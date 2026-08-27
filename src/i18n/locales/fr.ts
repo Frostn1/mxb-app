@@ -243,7 +243,7 @@ export const fr: Translation = {
   "pose.move.leftLegForward": "Jambe gauche en avant",
   "pose.move.elbowsUp": "Coudes hauts",
   "pose.move.leanIn": "Se pencher",
-  "pose.move.sitOnBike": "Assis sur la moto",
+  "pose.move.ride": "Position de pilotage",
   "pose.axis.bend": "Flexion",
   "pose.axis.twist": "Rotation",
   "pose.axis.splay": "Écartement",
@@ -1355,7 +1355,13 @@ export const fr: Translation = {
   "voice.deviceGone": "Ce périphérique n'est pas connecté",
   "voice.noDevices": "Aucun périphérique audio trouvé",
   "voice.notConnected": "Pas encore connecté à qui que ce soit",
-  "voice.notConnectedDesc": "Ces réglages contrôlent ton propre micro et ton casque, et les boutons de test fonctionnent déjà. Parler réellement aux autres pilotes nécessite le serveur vocal, qui n'existe pas encore — rien n'est transmis ici.",
+  "voice.notConnectedDesc": "La voix démarre toute seule quand tu rejoins un serveur : rien à configurer, rien à télécharger et rien à faire tourner côté serveur. Tous ceux qui y sont avec l'app apparaissent ici.",
+  "voice.inRoom": "En vocal sur {{server}}",
+  "voice.stopped": "Vocal arrêté",
+  "voice.unnamedRider": "Pilote",
+  "voice.connecting": "connexion…",
+  "voice.mute": "Couper",
+  "voice.unmute": "Réactiver",
 
   "overlay.pressKeys": "Appuie sur les touches…",
   "overlay.needModifier": "Ajoute un modificateur",
@@ -1381,6 +1387,18 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0110.hero.title":
+    "Attrapez le pilote et positionnez-le",
+  "showcase.v0110.hero.body":
+    "Attrapez les articulations du pilote dans l'aperçu 3D et déplacez-le : mains, coudes, hanches, pieds. Les poses rapides se cumulent, les curseurs affinent, et Position de pilotage l'assoit sur la moto. Aperçu seulement : le jeu n'est pas touché.",
+  "showcase.v0110.designer":
+    "Miroir d'un calque à travers la moto, sélection multiple, magnétisme au glisser, retournement et positions saisies au chiffre.",
+  "showcase.v0110.wheels":
+    "Les motos s'affichent avec leurs roues, et vous choisissez les pneus sur lesquels elles reposent.",
+  "showcase.v0110.speed":
+    "Les circuits s'affichent sept fois plus vite, les motos s'ouvrent en 127 ms au lieu de 201, et les mods s'installent deux à deux.",
+  "showcase.v0110.swaps":
+    "Déplacez un jeu de modèles vers une autre moto ou supprimez-le, et voyez n'importe quel swap en 3D depuis la Bibliothèque.",
   "showcase.v0102.hero.title":
     "Des décos qui appartiennent au modèle qui les porte",
   "showcase.v0102.hero.body":

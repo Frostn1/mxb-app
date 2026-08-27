@@ -236,7 +236,7 @@ export const en = {
   "pose.move.leftLegForward": "Left leg forward",
   "pose.move.elbowsUp": "Elbows up",
   "pose.move.leanIn": "Lean in",
-  "pose.move.sitOnBike": "Sit on bike",
+  "pose.move.ride": "Riding position",
   "pose.axis.bend": "Bend",
   "pose.axis.twist": "Twist",
   "pose.axis.splay": "Splay",
@@ -1297,8 +1297,8 @@ export const en = {
   "overlay.fullscreenNowDesc": "The overlay still opens — the game is simply drawn over it. Switch to borderless or windowed in Options → Video.",
   "overlay.notWorking": "Pressed it and nothing happened?",
   "overlay.notWorkingDesc": "Check the shortcut above: another app may already own that combo, and picking a free one is what fixes it.",
-  // Voice chat — devices and levels. The transport that carries this to other riders
-  // isn't built yet; `voice.notConnected*` is what says so on the page.
+  // Voice chat — devices, levels, and who is in the room. Joining is not a control: the
+  // app is in voice because the rider is on a server, which is what these strings say.
   "voice.section": "Voice chat",
   "voice.enable": "Enable voice chat",
   "voice.microphone": "Microphone",
@@ -1326,7 +1326,13 @@ export const en = {
   "voice.deviceGone": "That device isn't connected",
   "voice.noDevices": "No audio devices found",
   "voice.notConnected": "Not connected to anyone yet",
-  "voice.notConnectedDesc": "These settings control your own microphone and headset, and the test buttons work today. Actually talking to other riders needs the voice server, which isn't built yet — nothing here transmits.",
+  "voice.notConnectedDesc": "Voice starts on its own when you join a server — there's nothing to set up, nothing to download, and nothing for the server to run. Anyone else on it with the app shows up here.",
+  "voice.inRoom": "In voice on {{server}}",
+  "voice.stopped": "Voice stopped",
+  "voice.unnamedRider": "Rider",
+  "voice.connecting": "connecting…",
+  "voice.mute": "Mute",
+  "voice.unmute": "Unmute",
   "overlay.pressKeys": "Press keys…",
   "overlay.needModifier": "Add a modifier",
   "overlay.needModifierDesc": "Hold Ctrl, Alt or Shift so the shortcut can't fire while you type.",
@@ -1351,6 +1357,18 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0110.hero.title":
+    "Take hold of the rider and pose him",
+  "showcase.v0110.hero.body":
+    "Grab the rider's joints in the 3D preview and move him — hands, elbows, hips, feet. Quick moves stack, sliders fine-tune, and Riding position sits him on the bike. Preview only: nothing is written to the game.",
+  "showcase.v0110.designer":
+    "Mirror a layer through the bike, select several at once, snap while dragging, flip, and type exact positions.",
+  "showcase.v0110.wheels":
+    "Bikes render with their wheels on, and you choose which tyres they stand on.",
+  "showcase.v0110.speed":
+    "Tracks draw seven times faster, bikes open in 127 ms instead of 201, and mods install two at a time.",
+  "showcase.v0110.swaps":
+    "Move a model set to another bike or delete it, and view any swap in 3D from the Library.",
   "showcase.v0102.hero.title":
     "Liveries that belong to the model wearing them",
   "showcase.v0102.hero.body":

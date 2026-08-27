@@ -1,8 +1,38 @@
 # Changelog
 
-## 2026-08-29
+## Unannounced — voice chat
+
+Kept out of the release notes on purpose: voice is off by default and has not yet been
+tried on a live server with a real grid on it. Both entries fold into the notes of
+whichever release turns it on.
+
+### Added
+
+- **Voice chat, on any server, with nothing to set up.** Turn it on, pick a microphone, and
+  that is the whole of it: joining a server puts you in voice with everyone else there who
+  has the app. There is no second program to install, no account to create, no code to share
+  and nothing for the server owner to run — it works the same on a server we host and on one
+  that appeared this morning. Your voice goes straight to the other riders rather than
+  through us, so it costs nothing to provide and nobody is relaying what you say. Push to
+  talk by default, with the mic key you already set. Settings shows who is in the room, who
+  is talking, and a mute button for anyone you would rather not hear.
+
+### Changed
+
+- **Voice now works whichever way you joined a server.** It used to start only when the app
+  itself launched the game at a server, which left out everyone who picks one from the game's
+  own browser — and quietly kept you in the old room if you moved servers without quitting.
+  FrostMod knows which server the game is on and now says so, so voice follows you. It also
+  knows your race number, which is what will place your voice on the track when proximity
+  lands. Riders are grouped by the server's own name, because that is the one thing everyone
+  on it sees the same — an address only reaches the people whose app launched the game, and
+  half a grid in one room and half in another is the failure that looks like nothing is
+  wrong.
+
+## 2026-08-28
 
 ### Fixed
+
 - **Protected model swaps wouldn't open in the 3D viewer.** A model bought from a creator ships
   its mesh sealed, and the viewer handed those bytes straight to the parser — which found no
   mesh header and reported the bike as empty. The result was *"holds no readable mesh"* on a
@@ -14,228 +44,53 @@
   now says what actually happened, and the failure writes the mesh names, sizes and headers it
   saw to the log, which it never did before.
 
-## 2026-08-28
-
-### Changed
-- **Models reach the 3D view without being spelled out as text.** A mesh's vertices used to
-  cross to the viewer as JSON numbers — 5.9 MB of digits for a small bike, and every one of
-  them parsed back into a number on arrival. They travel as their own bytes now: **the app
-  spends 12.4 ms preparing a bike's mesh instead of 2.2 ms**, and the viewer unpacks it
-  **6.8x faster** (31 ms → 4.6 ms), which grows with the model — a detailed bike or a gear
-  mesh is several times the size of the one measured. Bikes, rider gear, helmets, the rider
-  body and model-swap previews all arrive the same way.
-
-## 2026-08-27
-
-### Fixed
-- **Opening a bike in 3D was doing half its work for nothing.** Every texture packed inside a
-  model was run through a resize on the way in — including the ones that were already the
-  size the viewer wants, which is how bike sheets are almost always authored. Resampling a
-  1024×1024 sheet to 1024×1024 is pure cost, eight times over on a typical bike. Skipped now,
-  the same way loose paints have always skipped it: **opening a bike goes from 201 ms to
-  127 ms**, and the sheets are a touch sharper for never having been resampled. Rider gear,
-  helmets and model swaps read their textures the same way and all get the same back.
-
-### Changed
-- **A track's 3D view appears about seven times faster.** The fine terrain is a 2048×2048
-  grid — four million vertices — and three.js worked out its lighting the general way, by
-  walking all 8.4 million triangles and accumulating a normal onto each corner. A height grid
-  doesn't need the general way: the ground is a function of x and y, so its slope comes
-  straight from the neighbouring samples. Measured on the same mesh, that took building the
-  view from 622 ms to 84 ms, with the two agreeing to within 0.02° — the same picture, drawn
-  without the wait. Nothing about the terrain's detail changed.
-
-- **Four mods install two at a time instead of one after another.** Downloading was never
-  what made a batch slow: a single MediaFire connection measured at 25–34 MB/s, more than a
-  typical home line carries, and splitting one file across eight parallel connections was
-  worth exactly nothing. What cost time was the line sitting idle between mods, while one
-  resolved its link or unpacked. Two now overlap, and the next few links are looked up ahead
-  of their turn rather than when their turn arrives.
-
-- **MediaFire links resolve about a third of a second quicker.** The app asked MediaFire's
-  API for a download link first and scraped the page only if that failed. Across eight real
-  tracks the API refused every one, and the scrape rescued all eight — so the first request
-  was pure delay. The page is asked first now; the API stays behind it, still the route that
-  survives the page being redesigned.
-
-- **Preset bundles, shared files and picked files place the same cheap way downloads do.**
-  They all unpack to a folder that is deleted moments later, so their files are moved into
-  place rather than copied a second time.
-
-## 2026-08-26
+## 2026-08-27 — v0.11.0 — Pose the rider, and a Designer that handles layers
 
 ### Added
+
+- **Pose the rider.** A new **Pose** view in the Studio opens on a preset as it stands — bike,
+  model swap, rider, gear and paints — and lets you move the rider's limbs: where the hands sit,
+  how far the legs are spread, one leg forward, elbows up, lean in. Quick moves stack, and every
+  joint has bend/twist/splay sliders under Torso, Arms, Hands and Legs. Hips, knees, shoulders
+  and elbows reach 135°, wrists and collars 70°, the neck and head 45° — enough to fold a leg
+  under a bike. The kit on show is the one the Rider tab has, so a look composed next door is the
+  look being posed. The pose is remembered per rider profile on this machine, and **Reset**
+  returns the model exactly as it was authored.
+
+  **On bike** puts the rider on the machine rather than beside it, worked out rather than
+  eyeballed: he settles up the seat towards the tank, leans into the bars, puts both hands on the
+  grips — read off the bike's own handlebar, so they land on the bars of whatever is under him —
+  and folds his knees round the machine with his boots on the pegs. **Riding position** is
+  applied for you the first time a bike appears under an unposed rider, and a bike whose setup
+  file names no seat says so on the button rather than guessing a height.
+
+  This reads the skeleton `rider.edf` has carried all along and nobody was using: 98 named bones,
+  of which 64 bind the mesh. The file stores no vertex weights — the game rebuilds the binding at
+  load — so the app rebuilds it too, from the per-bone boxes the file *does* carry plus the
+  distance to the limb each bone actually swings. Helmet, boots and body armour ride along on the
+  bones their own `gfx.cfg` names, so the kit follows the pose.
+
+  Preview only, deliberately: MX Bikes takes a rider's posture from its riding style, an
+  animation set in `mods/rider/animations`, and nothing here writes to the game.
+
+- **Take hold of the rider and move him.** The Pose view puts a dot on each of the rider's joints
+  in the 3D preview — head, back, shoulders, elbows, hands, hips and feet. Grab one and the limb
+  swings to follow the cursor the way it does in Pivot: the joint above the dot you are holding is
+  the one that turns, so pulling a hand bends the forearm about the elbow and pulling a foot bends
+  the shin about the knee. A drag turns in the plane you are looking at, so orbit the camera to
+  reach the other way. Push a joint past its stop and it comes to rest on the way to the cursor
+  rather than snapping somewhere else, and dragging back to where you started returns the model
+  exactly as it was authored. A drag moves at half the cursor's pace, and finer with Shift held.
+
+  A drag writes the same pose the sliders do, so the two mix freely and quick moves still stack on
+  top. The sliders are still there for the two things a drag can't say — twist about a bone's own
+  length, and an exact number — but the groups start closed now, since the dots are the way in.
+
 - **The Pose tab can take a photograph.** Five backdrops to stand a rider against — studio,
   white, daylight, sunset and dusk, each with its own light and ground — a clean frame that
   hides the grab dots and the on-canvas panels, and a Save photo button that writes a PNG at
   twice the size of the panel it was framed in. Open the preview full screen first for a
   bigger one. Nothing is downloaded for any of it.
-
-- **The rider can sit on the bike.** A new "On bike" view in the Pose tab puts the two
-  together instead of side by side, worked out rather than eyeballed: the bike's own setup
-  file names where its seat is, the rider's up and forward are read off its rig, and the two
-  are brought into one frame. The placement sliders still nudge either half from there. A bike
-  whose setup file names no seat says so on the button rather than guessing a height. There's
-  a new "Sit on bike" ready-made move to fold the legs round it.
-
-### Changed
-- **The Pose tab shows the kit the Rider tab has.** The two used to keep separate copies and
-  only ever agreed when Presets handed them the same thing at the same moment, so a look
-  composed next door was not the look being posed. One kit now sits above both tabs: every
-  pick, paint and show-on-model toggle is on screen in both.
-
-- **Dragging a limb is half as fast, and finer with Shift held.** One-to-one with the cursor
-  meant a joint near its pivot swung the whole 60° in a couple of centimetres of mouse. A drag
-  still reaches anywhere — it solves again from wherever the dot now is — it just stops
-  snapping away.
-
-- **Installing a downloaded mod is faster, and the app stays responsive while it happens.**
-  Every byte used to be written to disk three times — the archive, the unpacked copy, then a
-  third copy into the mods folder — for files that were deleted moments later. The last of
-  those is now a move, so on one drive it costs nothing; a mods folder on a different drive
-  falls back to the copy, retries and all. Unpacking also no longer runs on the app's async
-  runtime, where a big track pinned a worker for the whole of it. Everything that installs
-  from somewhere we don't own — a folder you dropped in — still copies, untouched.
-
-- **A download that goes silent now resumes instead of hanging.** Only the connection was
-  given a timeout, so a host that accepted the socket and then stopped sending sat there
-  forever: the resume machinery only wakes on an error, and silence never was one. Thirty
-  seconds of nothing is now treated as a broken transfer and picked back up where it stalled.
-  Uploads are deliberately exempt — their response doesn't arrive until the last byte is sent.
-
-### Fixed
-- **The ready-made poses did the opposite of what they said.** Each was a fixed turn in
-  degrees on a bone's own axes, and a bone's axes are whatever its author left them as — so
-  "Legs wider" pulled the game's main rider's knees from 28 cm apart to 13, while widening
-  another model's, and "Left leg forward" moved neither knee forward at all. A move is now a
-  place to send a joint — "the knee, 9 cm to the rider's own left" — solved with the same
-  machinery a drag uses, against axes read off the model itself. Checked against both riders
-  the game ships (`scripts/pose-moves-check.mjs`). A move a model can't make — leaning, on a
-  rig that binds no spine — isn't offered rather than doing nothing when clicked.
-
-- **Boots stayed behind when the legs moved.** A boots mod shipping both feet as one mesh was
-  never carried by the pose at all; it now travels with the knees. And which foot went on
-  which leg assumed the rider's left was always the same way along X, which is false on half
-  the models installed — including one of the game's own — so a boot sat on one leg and
-  followed the other's. Read off the rig now.
-
-- **One hip dragged the whole body on riders that bind only their limbs.** The game's
-  `default_mx_c` rider carries the arms and legs and no spine, and every chain whose parent was
-  missing was hung off whatever bone happened to precede it in the file — the right leg off the
-  left leg's twist, both arms off the right leg. Turning one hip swung all of it. Those chains
-  now stand on their own.
-
-- **The rider came apart in every 3D preview.** The rig `rider.edf` carries is stored once per
-  level of detail — the game's own riders hold three copies of the same 64 bones — and the app
-  read all of them. Every bone then had two namesakes to hang off, the skeleton closed into a
-  cycle, and the bones caught inside one never got placed at all: the body folded into a heap
-  and its gear went with it, in the plain Rider view as much as in Pose. Only the first copy is
-  read now, the one that goes with the mesh being drawn, and a bone may only hang off one the
-  file has already listed, so a rig can never close on itself. The viewer also draws the skinned
-  body **only** while something is actually posed — at rest it is the same rigid mesh it was
-  before posing existed, so the rest of the app can't be spoiled by a rig it reads wrongly.
-
-- **A model swap rendered as a plain white bike.** A mesh that ships companion sheets
-  (`_n`/`_s`/`_r`) writes a second texture index into each material record, in a field the app
-  required to be zero — so every material table was thrown out and every part fell through to
-  bare grey. Read back, those indices count a list the app wasn't building either: one that
-  includes the companion maps *and* the sheets a mesh declares but never embeds. Both are fixed,
-  and a bike whose materials don't use that second slot — every stock bike — is read exactly as
-  it was before. The KTM 450's swap goes from nothing bound to all 31 parts on their right
-  sheets: the Pro Taper bars, the ARC levers and calipers, the ODI grips, the Hammerhead pedal
-  and shifter, and the Polar mount, which is painted by a sheet the mesh never embeds at all.
-
-- **The model-swap badge squeezed a bike's name off its card.** Sitting in the row beside the
-  name, it competed with it for width — and the name is what gave, collapsing to nothing on
-  the one bike that had swaps. It now sits under the name instead, where nothing else is
-  fighting for the space.
-
-- **The Library's model-swap badge never appeared.** A bike is listed in the Library as its
-  `<Bike>.pkz` archive, so the row's name carries the extension, while a model swap is keyed by
-  the bike folder beside it — the two never matched, and the badge was invisible on every bike.
-
-### Added
-- **Take hold of the rider and move him.** The Pose view now puts a dot on each of the rider's
-  joints in the 3D preview — head, back, shoulders, elbows, hands, hips and feet. Grab one and
-  the limb swings to follow the cursor the way it does in Pivot: the joint above the dot you
-  are holding is the one that turns, so pulling a hand bends the forearm about the elbow and
-  pulling a foot bends the shin about the knee. A drag turns in the plane you are looking at,
-  so orbit the camera to reach the other way. Push a joint past its stop and it comes to rest
-  on the way to the cursor rather than snapping somewhere else, and dragging back to where you
-  started returns the model exactly as it was authored.
-
-  A drag writes the same pose the sliders do, so the two mix freely and quick moves still
-  stack on top. The sliders are still there for the two things a drag can't say — twist about
-  a bone's own length, and an exact number — but the groups start closed now, since the dots
-  are the way in.
-
-- **Move a model swap to another bike, or delete it.** Every model set now carries its own
-  menu, in the Locker and on the Library's bike cards alike. **Move** asks which bike to send it
-  to and, when the model owns liveries, which of those travel with it — off by default, because
-  a paint is drawn for one bike's layout and rarely fits another; anything left behind stays put
-  rather than being thrown away. **Delete** sends the set to the Trash, so a model you can't
-  download again is recoverable, and leaves the bike's liveries alone. Neither is offered for
-  the model currently on the bike: its files are loose at the bike root, so moving them would
-  take the bike's live model out from under it — switch to another model first.
-
-- **View a model swap in 3D straight from the Library.** Each variant in a bike card's model
-  list now carries its own **View 3D**, drawing the bike as that swap would leave it — the
-  same preview the Locker offers, without having to go there to find it. Nothing on disk
-  moves. Sets with no mesh have nothing to draw and don't offer it.
-
-- **Pose the rider.** A new **Pose** view in the Studio opens on a preset as it stands — bike,
-  model swap, rider, gear and paints, all read-only — and lets you move the rider's limbs:
-  where the hands sit, how far the legs are spread, one leg forward, elbows up, lean in. Quick
-  moves stack, and every joint has bend/twist/splay sliders under Torso, Arms, Hands and Legs.
-  The pose is remembered per rider profile on this machine, and **Reset** returns the model
-  exactly as it was authored.
-
-  This reads the skeleton `rider.edf` has carried all along and nobody was using: 98 named
-  bones, of which 64 bind the mesh. The file stores no vertex weights — the game rebuilds the
-  binding at load — so the app rebuilds it too, from the per-bone boxes the file *does* carry
-  plus the distance to the limb each bone actually swings. Helmet, boots and body armour ride
-  along on the bones their own `gfx.cfg` names, so the kit follows the pose.
-
-  Preview only, deliberately: MX Bikes takes a rider's posture from its riding style, an
-  animation set in `mods/rider/animations`, and nothing here writes to the game.
-
-- **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
-  needs wheel meshes and axles to measure against; a model that ships neither fell back to the
-  authored frame, which carries no suspension travel at all — so the bike stood with its shock
-  apparently collapsed. The rear now defaults to 140 mm of drop instead. Bikes the solve *can*
-  answer for are unaffected, and **Reset** still puts a bike back exactly as authored.
-
-- **See a bike's model swaps without leaving the Library.** A bike card now carries a
-  **models** badge when there is more than one model set installed, and opening it lists them
-  in place — the active one ticked, an incomplete set flagged, a "no model" set marked, and a
-  file count for the rest. It reads the same vocabulary as the Locker, so a variant looks the
-  same wherever you meet it. Deliberately read-only: the Locker stays the one place that moves
-  files, so two views can never disagree about which model is live.
-- **Move the bike and the rider around in the Rider tab.** The pair stood where the viewer put
-  them — shoulder to shoulder, a fixed gap apart — which is the one arrangement nobody was
-  composing for. A **Placement** panel now moves either model: side, up, forward and turn, in
-  metres and degrees, so the rider can stand at the bike's shoulder, sit on it, or face the
-  camera with the bike behind them. **Reset** puts the pair back the way it opened.
-- **The bike's pose panel, in the Rider tab.** Rear, Front, Steering and Level wheels were in
-  the library's viewer and the expanded preview only; the tab where a look is actually built
-  now carries them too, in the panel beside the pickers.
-- **A 3D preview you can drag wider.** The Rider tab's preview was a fixed 420px onto a bike
-  and a rider side by side. Drag the handle on its left edge to give it as much of the tab as
-  you want — double-click to put it back — and the width is remembered per machine.
-
-- **Stand a bike the way you want to see it.** The 3D preview drew every bike in the frame it
-  was *authored* in, which is not a stance it ever holds on the ground — a `.geom` carries no
-  suspension travel at all, and ride height falls out of physics the viewer doesn't run. So
-  bikes stood with the shock apparently collapsed and the rear wheel riding high. The preview
-  now knows the bike's own joints and lets you move them: **Rear** swings the swingarm about
-  its pivot, **Front** slides the fork up its own raked axis, **Steering** turns the bars and
-  the front wheel with them, all in millimetres and degrees of the real thing.
-  - **Level wheels** solves the rear for you — both tyres touching the same ground, measured
-    at the contact patches rather than the axles, since a 21" front and a 19" rear aren't level
-    when their axles are. A bike wearing wheels is drawn that way to begin with, so it stands
-    right without anyone touching a slider; **Reset** puts it back as authored.
-  - The panel is in the expanded preview and the full-screen viewer. A bike whose `.geom`
-    names no mounts has no joints to move and renders exactly as it did before.
 
 - **Mirror a layer to the other side of the bike.** Place a decal on the right shroud, hit
   Mirror, and a copy lands at the same spot on the left one. The place is worked out from the
@@ -248,37 +103,23 @@
     part of the model with nothing at its reflection, or no model loaded at all.
   - Where the far side isn't unwrapped as a true reflection, the placement is still made and
     flagged as close rather than exact.
+
 - **The layer handling that was missing.** Duplicate (⌘D), copy and paste (⌘C/⌘V, across
   sheets too), Delete, and arrow-key nudging — one pixel, or ten with Shift.
+
 - **Several layers at once.** Shift-click to add, drag over empty canvas to lasso, ⌘A for the
   lot. Group them with ⌘G and they move, scale and clip as one; Alt-click reaches inside a
   group for a single layer.
+
 - **Snapping while dragging.** Layers catch on the sheet's centre lines and edges, on the box
   of whatever part they're clipped to, and on each other's edges and middles, with a line drawn
   to show what was caught. Hold Alt to place freely.
+
 - **Flip a layer** left-to-right or top-to-bottom, from the inspector or the new right-click
   menu on the canvas.
+
 - **Type a position and size.** X, Y, size and angle now have boxes as well as sliders, and
   they track the drag — placing a plate number no longer means nudging it by eye.
-
-- **The bike now stands next to the rider in the Studio preview.** The 3D panel in Studio →
-  Rider only ever drew the rider, so the bike half of a look — its livery and its model swap —
-  was invisible until you were in-game. The panel now draws both in one scene, at their real
-  sizes, and the Rider tab gains a bike picker with the livery and model-swap slots beside it.
-  A preset opened with "View in Rider" brings its bike along, so it arrives fully dressed.
-  The Bike / Rider / Both toggle picks what's on screen; either half stays up while the other
-  one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
-
-
-- **Pick which tyres a bike is previewed on.** A bike's `gfx.cfg` names exactly one tyre
-  pack, so seeing it on another was impossible — the preview fitted what the file said and
-  that was that. A **Tyres** picker now sits beside the livery one in all three previews (the
-  Viewer, the Rider tab and the Designer), listing what's installed under `mods/tyres`. It
-  substitutes the name the wheels are looked up under and nothing else: no file is renamed,
-  no mod is touched, and the bike's own `gfx.cfg` still reads exactly as the game reads it.
-  The choice is remembered, and it's one choice — pick it in the Viewer and the Designer
-  agrees. Picking a pack that isn't installed leaves the bike on its own rather than taking
-  its wheels off.
 
 - **Bikes render with their wheels on.** The 3D preview drew the frame, the forks, the
   swingarm and the bars, then stopped — every bike stood on bare fork tips and a swingarm
@@ -297,19 +138,157 @@
   - A bike whose tyres mod isn't installed — or whose `.geom` names no axles — renders
     exactly as it did before.
 
+- **Pick which tyres a bike is previewed on.** A bike's `gfx.cfg` names exactly one tyre
+  pack, so seeing it on another was impossible — the preview fitted what the file said and
+  that was that. A **Tyres** picker now sits beside the livery one in all three previews (the
+  Viewer, the Rider tab and the Designer), listing what's installed under `mods/tyres`. It
+  substitutes the name the wheels are looked up under and nothing else: no file is renamed,
+  no mod is touched, and the bike's own `gfx.cfg` still reads exactly as the game reads it.
+  The choice is remembered, and it's one choice — pick it in the Viewer and the Designer
+  agrees. Picking a pack that isn't installed leaves the bike on its own rather than taking
+  its wheels off.
+
+- **Stand a bike the way you want to see it.** The 3D preview drew every bike in the frame it
+  was *authored* in, which is not a stance it ever holds on the ground — a `.geom` carries no
+  suspension travel at all, and ride height falls out of physics the viewer doesn't run. So
+  bikes stood with the shock apparently collapsed and the rear wheel riding high. The preview
+  now knows the bike's own joints and lets you move them: **Rear** swings the swingarm about
+  its pivot, **Front** slides the fork up its own raked axis, **Steering** turns the bars and
+  the front wheel with them, all in millimetres and degrees of the real thing.
+  - **Level wheels** solves the rear for you — both tyres touching the same ground, measured
+    at the contact patches rather than the axles, since a 21" front and a 19" rear aren't level
+    when their axles are. A bike wearing wheels is drawn that way to begin with, so it stands
+    right without anyone touching a slider; **Reset** puts it back as authored.
+  - The panel is in the expanded preview and the full-screen viewer. A bike whose `.geom`
+    names no mounts has no joints to move and renders exactly as it did before.
+
+- **The bike's pose panel, in the Rider tab.** Rear, Front, Steering and Level wheels were in
+  the library's viewer and the expanded preview only; the tab where a look is actually built
+  now carries them too, in the panel beside the pickers.
+
+- **The bike now stands next to the rider in the Studio preview.** The 3D panel in Studio →
+  Rider only ever drew the rider, so the bike half of a look — its livery and its model swap —
+  was invisible until you were in-game. The panel now draws both in one scene, at their real
+  sizes, and the Rider tab gains a bike picker with the livery and model-swap slots beside it.
+  A preset opened with "View in Rider" brings its bike along, so it arrives fully dressed.
+  The Bike / Rider / Both toggle picks what's on screen; either half stays up while the other
+  one re-reads, and a bike that won't resolve says so instead of quietly leaving the rider alone.
+
+- **Move the bike and the rider around in the Rider tab.** The pair stood where the viewer put
+  them — shoulder to shoulder, a fixed gap apart — which is the one arrangement nobody was
+  composing for. A **Placement** panel now moves either model: side, up, forward and turn, in
+  metres and degrees, so the rider can stand at the bike's shoulder, sit on it, or face the
+  camera with the bike behind them. **Reset** puts the pair back the way it opened.
+
+- **A 3D preview you can drag wider.** The Rider tab's preview was a fixed 420px onto a bike
+  and a rider side by side. Drag the handle on its left edge to give it as much of the tab as
+  you want — double-click to put it back — and the width is remembered per machine.
+
+- **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
+  needs wheel meshes and axles to measure against; a model that ships neither fell back to the
+  authored frame, which carries no suspension travel at all — so the bike stood with its shock
+  apparently collapsed. The rear now defaults to 140 mm of drop instead. Bikes the solve *can*
+  answer for are unaffected, and **Reset** still puts a bike back exactly as authored.
+
+- **Move a model swap to another bike, or delete it.** Every model set now carries its own
+  menu, in the Locker and on the Library's bike cards alike. **Move** asks which bike to send it
+  to and, when the model owns liveries, which of those travel with it — off by default, because
+  a paint is drawn for one bike's layout and rarely fits another; anything left behind stays put
+  rather than being thrown away. **Delete** sends the set to the Trash, so a model you can't
+  download again is recoverable, and leaves the bike's liveries alone. Neither is offered for
+  the model currently on the bike: its files are loose at the bike root, so moving them would
+  take the bike's live model out from under it — switch to another model first.
+
+- **View a model swap in 3D straight from the Library.** Each variant in a bike card's model
+  list now carries its own **View 3D**, drawing the bike as that swap would leave it — the
+  same preview the Locker offers, without having to go there to find it. Nothing on disk
+  moves. Sets with no mesh have nothing to draw and don't offer it.
+
+- **See a bike's model swaps without leaving the Library.** A bike card now carries a
+  **models** badge when there is more than one model set installed, and opening it lists them
+  in place — the active one ticked, an incomplete set flagged, a "no model" set marked, and a
+  file count for the rest. It reads the same vocabulary as the Locker, so a variant looks the
+  same wherever you meet it. Deliberately read-only: the Locker stays the one place that moves
+  files, so two views can never disagree about which model is live.
+
 ### Changed
-- Settings → Supporters lists **Bøddi** in place of **Thomas**.
+
+- **Models reach the 3D view without being spelled out as text.** A mesh's vertices used to
+  cross to the viewer as JSON numbers — 5.9 MB of digits for a small bike, and every one of
+  them parsed back into a number on arrival. They travel as their own bytes now: **the app
+  spends 12.4 ms preparing a bike's mesh instead of 2.2 ms**, and the viewer unpacks it
+  **6.8x faster** (31 ms → 4.6 ms), which grows with the model — a detailed bike or a gear
+  mesh is several times the size of the one measured. Bikes, rider gear, helmets, the rider
+  body and model-swap previews all arrive the same way.
+
+- **A track's 3D view appears about seven times faster.** The fine terrain is a 2048×2048
+  grid — four million vertices — and three.js worked out its lighting the general way, by
+  walking all 8.4 million triangles and accumulating a normal onto each corner. A height grid
+  doesn't need the general way: the ground is a function of x and y, so its slope comes
+  straight from the neighbouring samples. Measured on the same mesh, that took building the
+  view from 622 ms to 84 ms, with the two agreeing to within 0.02° — the same picture, drawn
+  without the wait. Nothing about the terrain's detail changed.
+
+- **Four mods install two at a time instead of one after another.** Downloading was never
+  what made a batch slow: a single MediaFire connection measured at 25–34 MB/s, more than a
+  typical home line carries, and splitting one file across eight parallel connections was
+  worth exactly nothing. What cost time was the line sitting idle between mods, while one
+  resolved its link or unpacked. Two now overlap, and the next few links are looked up ahead
+  of their turn rather than when their turn arrives.
+
+- **Installing a downloaded mod is faster, and the app stays responsive while it happens.**
+  Every byte used to be written to disk three times — the archive, the unpacked copy, then a
+  third copy into the mods folder — for files that were deleted moments later. The last of
+  those is now a move, so on one drive it costs nothing; a mods folder on a different drive
+  falls back to the copy, retries and all. Unpacking also no longer runs on the app's async
+  runtime, where a big track pinned a worker for the whole of it. Everything that installs
+  from somewhere we don't own — a folder you dropped in — still copies, untouched.
+
+- **MediaFire links resolve about a third of a second quicker.** The app asked MediaFire's
+  API for a download link first and scraped the page only if that failed. Across eight real
+  tracks the API refused every one, and the scrape rescued all eight — so the first request
+  was pure delay. The page is asked first now; the API stays behind it, still the route that
+  survives the page being redesigned.
+
+- **Preset bundles, shared files and picked files place the same cheap way downloads do.**
+  They all unpack to a folder that is deleted moments later, so their files are moved into
+  place rather than copied a second time.
+
+- **A download that goes silent now resumes instead of hanging.** Only the connection was
+  given a timeout, so a host that accepted the socket and then stopped sending sat there
+  forever: the resume machinery only wakes on an error, and silence never was one. Thirty
+  seconds of nothing is now treated as a broken transfer and picked back up where it stalled.
+  Uploads are deliberately exempt — their response doesn't arrive until the last byte is sent.
 
 - **The Rider tab's bike picker is searchable.** It was a plain dropdown, which is a long
   scroll past dozens of bikes for a name you already know. It's now the same searchable
   field as the Paint and Model swap slots beside it — type to filter. Unlike those, it
   won't take a name you made up or an empty value, because neither is a bike.
+
 - **The Rider preview starts from the stock model.** With no model swap picked it drew
   whatever swap happened to be on the bike, so the same look rendered differently on
   everyone's machine. It now draws the game's own model unless you pick one — for a bike
   whose files are all packed that was already what you were seeing, so nothing changes there.
 
 ### Fixed
+
+- **Opening a bike in 3D was doing half its work for nothing.** Every texture packed inside a
+  model was run through a resize on the way in — including the ones that were already the
+  size the viewer wants, which is how bike sheets are almost always authored. Resampling a
+  1024×1024 sheet to 1024×1024 is pure cost, eight times over on a typical bike. Skipped now,
+  the same way loose paints have always skipped it: **opening a bike goes from 201 ms to
+  127 ms**, and the sheets are a touch sharper for never having been resampled. Rider gear,
+  helmets and model swaps read their textures the same way and all get the same back.
+
+- **A model swap rendered as a plain white bike.** A mesh that ships companion sheets
+  (`_n`/`_s`/`_r`) writes a second texture index into each material record, in a field the app
+  required to be zero — so every material table was thrown out and every part fell through to
+  bare grey. Read back, those indices count a list the app wasn't building either: one that
+  includes the companion maps *and* the sheets a mesh declares but never embeds. Both are fixed,
+  and a bike whose materials don't use that second slot — every stock bike — is read exactly as
+  it was before. The KTM 450's swap goes from nothing bound to all 31 parts on their right
+  sheets: the Pro Taper bars, the ARC levers and calipers, the ODI grips, the Hammerhead pedal
+  and shifter, and the Polar mount, which is painted by a sheet the mesh never embeds at all.
 
 - **A model swap previewed as a white bike in pieces.** A model set is a mesh and little
   else — the `.geom` that mounts the parts to each other, the `gfx.cfg` and `.hrc`s that say
@@ -320,6 +299,7 @@
   with the loose files over it and the swap's over those — the order the game itself reads a
   bike in. The same skip was on the ordinary load path, so an extracted bike whose `.geom`
   stayed behind in its archive rendered unassembled too, swap or no swap.
+
 - **A model swap could carry off the bike's own setup files.** A variant folder holding copies
   of the `.hrc`s, `.cfg` or `.geom` — with no mesh of its own — made the swapper treat those
   files as the model's, so they were parked along with it and the bike was left a mesh with
@@ -337,6 +317,7 @@
   paints nothing, which is only discovered in game. That boots mod now offers `fox` and
   `fox_n`, as it always should have. The same lookup answers whether a bike exists at all when
   it's installed as a bare `.pkz`, so a model-swap preview for one resolves too.
+
 - **A rider kit or a pair of gloves had no sheet names to start from.** `Rider+` and
   `Rider+RolledUp` ship their `paints/` and `gloves/` folders empty on purpose — the kits
   installed under the stock rider are the ones meant to be worn on them, which is already how
@@ -344,6 +325,7 @@
   with an empty expected-names line and nothing to create sheets from, and gloves had no source
   of names at all. Both now read the stock profile's paints: `rider`, `rider_n`, `rider_r` for
   a kit, `gloves`, `gloves_n`, `gloves_r` for gloves.
+
 - **Picking a rider profile could hang the Designer for a minute and a half.** With no paints
   of its own to read, the app fell back to walking the profile's mesh for texture names — and
   those two files are 67 MB each. Where iCloud or OneDrive had evicted them, asking what a
@@ -351,14 +333,6 @@
   names are a convenience; an evicted mesh is now left alone and the paints answer instead, in
   about a tenth of a second. The preview still fetches the model when it draws it, where the
   wait buys a picture.
-
-
-- **A square where each brake disc should be.** A wheel's front disc, rear disc and sprocket
-  are drawn as a masked square on a flat quad — two thirds of `fdisc` is fully transparent —
-  and the bike preview had never needed to cut a mask out before, so each one arrived as the
-  square. The mask is honoured now, but only where a sheet's alpha actually varies: a bike's
-  `w_plate` carries an alpha channel nobody filled in, transparent on every pixel, and
-  treating that as a mask would have erased the number plates instead.
 
 ### Removed
 

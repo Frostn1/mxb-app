@@ -20,6 +20,9 @@ declare global {
     /** Discord webhook the supporter announcements are posted to. A credential in itself:
      *  anyone holding the URL can post to that channel. */
     DISCORD_DONATION_WEBHOOK_URL?: string;
+    /** Keys the daily digest of a signup's IP address. Without it the digest is a plain
+     *  hash, which is reversible for IPv4 — set it before open signup carries real load. */
+    IP_HASH_SECRET?: string;
   }
 }
 

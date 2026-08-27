@@ -87,8 +87,10 @@ fi
 
 if [ "$SUMMARY" -eq 1 ]; then
   body="$(printf '%s\n' "$body" | awk '
-    # A sub-bullet elaborates the item above it, so it goes with the detail.
-    /^[[:space:]]+[-*] /                { next }
+    # A sub-bullet elaborates the item above it, so it goes with the detail — and so does
+    # a continuation paragraph, which --fold leaves indented rather than joining to its
+    # bullet. Both are the explanation, which is exactly what a summary drops.
+    /^[[:space:]]+/                     { next }
     # Keep the bold headline the bullet opens with; drop the explanation after it.
     match($0, /^- \*\*[^*]+\*\*/)       { print substr($0, 1, RLENGTH); next }
                                         { print }

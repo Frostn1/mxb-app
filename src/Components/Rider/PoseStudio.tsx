@@ -23,7 +23,7 @@ import {
   isRestPose,
   NO_POSE,
   QUICK_MOVES,
-  TURN_LIMIT,
+  turnLimit,
   turnOf,
   withTurn,
   type BoneGroupId,
@@ -54,7 +54,7 @@ const MOVE_LABEL: Record<QuickMoveId, TKey> = {
   leftLegForward: "pose.move.leftLegForward",
   elbowsUp: "pose.move.elbowsUp",
   leanIn: "pose.move.leanIn",
-  sitOnBike: "pose.move.sitOnBike",
+  ride: "pose.move.ride",
 };
 
 const SCENE_LABEL: Record<SceneId, TKey> = {
@@ -137,6 +137,22 @@ export default function PoseStudio() {
   useEffect(() => setPose(readSaved(profile)), [profile]);
   useEffect(() => writeSaved(profile, pose), [profile, pose]);
 
+  // A rider sat on a bike is sitting on it: put him in a riding position the first time one
+  // arrives under him, rather than stood bolt upright waiting for somebody to press a button.
+  // Once per rider and bike, and marked before it runs, so Reset means reset — this must not
+  // fire again the moment the pose it seeded is cleared.
+  const seeded = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${profile}|${bike}`;
+    if (!rig?.mount || seeded.current === key) return;
+    seeded.current = key;
+    const ride = QUICK_MOVES.find((m) => m.id === "ride");
+    if (!ride) return;
+    setPose((p) =>
+      isRestPose(p) ? applyQuickMove(p, ride, rig.bones, rig.frame, rig.mount) : p,
+    );
+  }, [profile, bike, rig]);
+
   const bikeVariant = useMemo(
     () => loadout.modelSwap || pickedModel(bike, loadout, scans),
     [bike, loadout, scans],
@@ -146,7 +162,7 @@ export default function PoseStudio() {
   const turn = useCallback((bone: string, at: 0 | 1 | 2, deg: number) => {
     setPose((p) => {
       const next = turnOf(p, bone);
-      next[at] = clampTurn(deg);
+      next[at] = clampTurn(deg, turnLimit(bone));
       return withTurn(p, bone, next);
     });
   }, []);
@@ -294,10 +310,11 @@ export default function PoseStudio() {
                 variant="outline"
                 className="h-7 px-2.5 text-[11px]"
                 // A move is a place to send a joint, so it needs the rig to say where that
-                // is — and a rig that binds no spine has nothing to lean.
-                disabled={!rig || !canMove(m, rig.bones)}
+                // is — a rig that binds no spine has nothing to lean — and the riding
+                // position needs the bike, to say where its bars and pegs are.
+                disabled={!rig || !canMove(m, rig.bones, rig.mount)}
                 onClick={() =>
-                  rig && setPose((p) => applyQuickMove(p, m, rig.bones, rig.frame))
+                  rig && setPose((p) => applyQuickMove(p, m, rig.bones, rig.frame, rig.mount))
                 }
               >
                 {t(MOVE_LABEL[m.id])}
@@ -349,8 +366,8 @@ export default function PoseStudio() {
                       <Row key={a.at} label={t(a.label)}>
                         <Slider
                           value={turnOf(pose, bone)[a.at]}
-                          min={-TURN_LIMIT}
-                          max={TURN_LIMIT}
+                          min={-turnLimit(bone)}
+                          max={turnLimit(bone)}
                           step={1}
                           onChange={(v) => turn(bone, a.at, v)}
                           format={(v) => `${v}°`}

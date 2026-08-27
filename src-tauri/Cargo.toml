@@ -3,7 +3,7 @@
 # whatever cargo called it. Cargo target names can't hold a space, so this is as close as
 # it gets. The description is what Windows Task Manager shows in its Processes tab.
 name = "mxb-app"
-version = "0.10.2"
+version = "0.11.0"
 description = "MXB App — MX Bikes mod manager"
 authors = ["Frost"]
 edition = "2021"
@@ -120,6 +120,23 @@ tauri-plugin-deep-link = "2.4.9"
 # `cargo check --target x86_64-pc-windows-gnu` before raising this; a macOS build won't
 # catch it, and a Windows-first app can't ship without it.
 cpal = "0.15"
+
+# The rest of voice: the codec, the peer-to-peer transport, and the socket that introduces
+# two apps to each other.
+#
+# `str0m` is sans-IO WebRTC — we own the UDP socket and the loop, it owns ICE, DTLS and the
+# data channel. `rust-crypto` rather than the default backend so there is no OpenSSL or
+# aws-lc to build: the whole stack cross-compiles to Windows with nothing installed.
+str0m = { version = "0.23", default-features = false, features = ["rust-crypto"] }
+# libopus, vendored and built from source by `opusic-sys` — no system library to find.
+opus = "0.4"
+# Signalling is one long-lived WebSocket carrying a few KB per join, so it is the blocking
+# client on its own thread rather than an async one: the voice subsystem is threads and
+# channels throughout (see `Monitor`), and a second runtime would buy nothing.
+tungstenite = { version = "0.24", default-features = false, features = [
+    "handshake",
+    "rustls-tls-webpki-roots",
+] }
 
 # Only for putting a mod back after an uninstall. `trash` calls `trashItemAtURL` but throws
 # away the destination it reports, and the Trash folder can't simply be read back — macOS
