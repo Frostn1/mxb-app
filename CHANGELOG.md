@@ -13,6 +13,11 @@
   the bike folder beside it — the two never matched, and the badge was invisible on every bike.
 
 ### Added
+- **View a model swap in 3D straight from the Library.** Each variant in a bike card's model
+  list now carries its own **View 3D**, drawing the bike as that swap would leave it — the
+  same preview the Locker offers, without having to go there to find it. Nothing on disk
+  moves. Sets with no mesh have nothing to draw and don't offer it.
+
 - **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
   needs wheel meshes and axles to measure against; a model that ships neither fell back to the
   authored frame, which carries no suspension travel at all — so the bike stood with its shock
