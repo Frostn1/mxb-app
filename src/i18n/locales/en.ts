@@ -1357,6 +1357,18 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0110.hero.title":
+    "Take hold of the rider and pose him",
+  "showcase.v0110.hero.body":
+    "Grab the rider's joints in the 3D preview and move him — hands, elbows, hips, feet. Quick moves stack, sliders fine-tune, and Riding position sits him on the bike. Preview only: nothing is written to the game.",
+  "showcase.v0110.designer":
+    "Mirror a layer through the bike, select several at once, snap while dragging, flip, and type exact positions.",
+  "showcase.v0110.wheels":
+    "Bikes render with their wheels on, and you choose which tyres they stand on.",
+  "showcase.v0110.speed":
+    "Tracks draw seven times faster, bikes open in 127 ms instead of 201, and mods install two at a time.",
+  "showcase.v0110.swaps":
+    "Move a model set to another bike or delete it, and view any swap in 3D from the Library.",
   "showcase.v0102.hero.title":
     "Liveries that belong to the model wearing them",
   "showcase.v0102.hero.body":

@@ -1396,6 +1396,18 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0110.hero.title":
+    "Nimm den Fahrer und bring ihn in Position",
+  "showcase.v0110.hero.body":
+    "Greife in der 3D-Vorschau die Gelenke des Fahrers und bewege ihn — Hände, Ellbogen, Hüften, Füße. Schnelle Posen stapeln sich, Regler justieren fein, und Sitzposition setzt ihn aufs Motorrad. Nur Vorschau: Im Spiel wird nichts verändert.",
+  "showcase.v0110.designer":
+    "Spiegle eine Ebene durch das Motorrad, wähle mehrere zugleich, raste beim Ziehen ein, klappe um und tippe exakte Positionen ein.",
+  "showcase.v0110.wheels":
+    "Motorräder werden mit ihren Rädern dargestellt, und du wählst, auf welchen Reifen sie stehen.",
+  "showcase.v0110.speed":
+    "Strecken zeichnen siebenmal schneller, Motorräder öffnen in 127 ms statt 201, und Mods installieren zu zweit.",
+  "showcase.v0110.swaps":
+    "Verschiebe ein Modellset auf ein anderes Motorrad oder lösche es, und sieh dir jeden Swap in 3D aus der Bibliothek an.",
   "showcase.v0102.hero.title":
     "Lackierungen gehören dem Modell, das sie trägt",
   "showcase.v0102.hero.body":

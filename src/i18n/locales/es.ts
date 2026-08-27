@@ -1383,6 +1383,18 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0110.hero.title":
+    "Agarra al piloto y colócalo",
+  "showcase.v0110.hero.body":
+    "Agarra las articulaciones del piloto en la vista 3D y muévelo: manos, codos, caderas, pies. Los movimientos rápidos se acumulan, los deslizadores afinan y Posición de pilotaje lo sienta en la moto. Solo vista previa: no se toca el juego.",
+  "showcase.v0110.designer":
+    "Refleja una capa a través de la moto, selecciona varias a la vez, ajusta al arrastrar, voltea y escribe posiciones exactas.",
+  "showcase.v0110.wheels":
+    "Las motos se muestran con sus ruedas, y tú eliges sobre qué neumáticos se apoyan.",
+  "showcase.v0110.speed":
+    "Los circuitos se dibujan siete veces más rápido, las motos abren en 127 ms en vez de 201, y los mods se instalan de dos en dos.",
+  "showcase.v0110.swaps":
+    "Mueve un set de modelo a otra moto o bórralo, y mira cualquier swap en 3D desde la Biblioteca.",
   "showcase.v0102.hero.title":
     "Decoraciones que pertenecen al modelo que las lleva",
   "showcase.v0102.hero.body":

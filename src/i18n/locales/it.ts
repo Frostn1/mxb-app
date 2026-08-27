@@ -1378,6 +1378,18 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0110.hero.title":
+    "Afferra il pilota e mettilo in posa",
+  "showcase.v0110.hero.body":
+    "Afferra le articolazioni del pilota nell'anteprima 3D e muovilo: mani, gomiti, fianchi, piedi. Le pose rapide si sommano, i cursori rifiniscono e Posizione di guida lo fa sedere sulla moto. Solo anteprima: il gioco non viene toccato.",
+  "showcase.v0110.designer":
+    "Specchia un livello attraverso la moto, selezionane più insieme, aggancia trascinando, capovolgi e digita posizioni esatte.",
+  "showcase.v0110.wheels":
+    "Le moto vengono mostrate con le loro ruote, e scegli tu su quali gomme poggiano.",
+  "showcase.v0110.speed":
+    "Le piste si disegnano sette volte più veloci, le moto si aprono in 127 ms invece di 201, e i mod si installano a due a due.",
+  "showcase.v0110.swaps":
+    "Sposta un set di modelli su un'altra moto o eliminalo, e guarda qualsiasi swap in 3D dalla Libreria.",
   "showcase.v0102.hero.title":
     "Livree che appartengono al modello che le indossa",
   "showcase.v0102.hero.body":
