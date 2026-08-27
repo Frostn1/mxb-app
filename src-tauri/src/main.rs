@@ -9267,7 +9267,22 @@ mod viewer_tests {
                 }
             }
         }
-        println!("\n  base textures total {total:.2?}\n");
+        println!("\n  base textures total {total:.2?}");
+
+        // The other half of the parse phase: the geometry in the same files.
+        let mut mesh = std::time::Duration::ZERO;
+        for (name, data) in &files {
+            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+            if !bn.ends_with(".edf") {
+                continue;
+            }
+            let t = std::time::Instant::now();
+            let nodes = super::edf::parse(data);
+            let d = t.elapsed();
+            mesh += d;
+            println!("  parse {bn:<20}{d:>9.2?}  -> {} node(s)", nodes.len());
+        }
+        println!("  mesh parse total    {mesh:.2?}\n");
     }
 
     /// Where a bike view's time goes, uncached.

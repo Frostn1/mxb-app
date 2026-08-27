@@ -472,7 +472,11 @@ export function previewModelSwap(
   variant: string,
   tyres?: string,
 ): Promise<BikeModel> {
-  return invoke<BikeModel>("preview_model_swap", { bike, variant, tyres: tyres || null });
+  return invoke<BikeModel>("preview_model_swap", {
+    bike,
+    variant,
+    tyres: tyres || null,
+  }).then(reviveMesh);
 }
 
 /**
@@ -715,16 +719,76 @@ export function unpackPkz(path: string, outDir: string): Promise<string[]> {
  * name that isn't installed falls back to the bike's own rather than losing the wheels.
  * Omit it (or pass `""`) for whatever the bike itself asks for.
  */
+/**
+ * Turn a mesh's base64 bulk arrays back into typed arrays, in place.
+ *
+ * The backend sends `positions`/`uvs`/`normals`/`indices` as base64 of their raw bytes
+ * rather than as JSON numbers — see `EdfNode` in `edf.rs` for why. Everything downstream
+ * reads them by index and by `.length`, which a typed array answers exactly as an array did,
+ * so this is the only place that knows the difference.
+ *
+ * Walks the payload rather than naming a path into it, because five commands return meshes
+ * under four different shapes, and a sixth would otherwise arrive silently broken.
+ */
+function reviveMesh<T>(value: T): T {
+  const seen = new Set<object>();
+  const walk = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    const o = v as Record<string, unknown>;
+    if (typeof o.positions === "string") {
+      o.positions = f32(o.positions);
+      o.uvs = f32(o.uvs as string);
+      o.normals = f32(o.normals as string);
+      o.indices = u32(o.indices as string);
+      // `submeshes` and the rest still need walking — a node can hold further meshes.
+    }
+    Object.values(o).forEach(walk);
+  };
+  walk(value);
+  return value;
+}
+
+/** Base64 → bytes. `atob` is the fastest thing the webview offers for this. */
+function bytesOf(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** The buffer from `bytesOf` is freshly allocated, so it starts aligned and a view is free.
+ *  A length that isn't a whole number of values means a truncated payload — hand back an
+ *  empty array, which every consumer already handles, rather than throwing. */
+function f32(b64: string): Float32Array {
+  const b = bytesOf(b64);
+  if (b.byteLength % 4) return new Float32Array(0);
+  return new Float32Array(b.buffer, 0, b.byteLength / 4);
+}
+
+function u32(b64: string): Uint32Array {
+  const b = bytesOf(b64);
+  if (b.byteLength % 4) return new Uint32Array(0);
+  return new Uint32Array(b.buffer, 0, b.byteLength / 4);
+}
+
 export function loadBikeModel(source: string, tyres?: string): Promise<BikeModel> {
-  return invoke<BikeModel>("load_bike_model", { source, tyres: tyres || null });
+  return invoke<BikeModel>("load_bike_model", { source, tyres: tyres || null }).then(
+    reviveMesh,
+  );
 }
 
 export function loadRiderModel(loadout: Loadout): Promise<RiderModel> {
-  return invoke<RiderModel>("load_rider_model", { loadout });
+  return invoke<RiderModel>("load_rider_model", { loadout }).then(reviveMesh);
 }
 
 export function loadRiderBodyModel(profile: string): Promise<EdfNode[]> {
-  return invoke<EdfNode[]>("load_rider_body_model", { profile });
+  return invoke<EdfNode[]>("load_rider_body_model", { profile }).then(reviveMesh);
 }
 
 export function loadGearModel(
@@ -743,7 +807,7 @@ export function loadGearModel(
     goggles,
     stock,
     stockGoggles,
-  });
+  }).then(reviveMesh);
 }
 
 export function listGearPaints(path: string): Promise<GearPaints> {
@@ -761,7 +825,7 @@ export function loadStockGearModel(
   part: RiderPart["part"],
   paintPath?: string,
 ): Promise<RiderPart> {
-  return invoke<RiderPart>("load_stock_gear_model", { part, paintPath });
+  return invoke<RiderPart>("load_stock_gear_model", { part, paintPath }).then(reviveMesh);
 }
 
 /** Move an installed mod file into a different folder (relative to the type dir). */

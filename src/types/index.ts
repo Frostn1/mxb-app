@@ -357,13 +357,13 @@ export interface Submesh {
 export interface EdfNode {
   name: string;
   /** `3 * vertexCount` — positions (local space). */
-  positions: number[];
+  positions: Float32Array;
   /** `2 * vertexCount` — uv0 per vertex (empty if none). */
-  uvs: number[];
+  uvs: Float32Array;
   /** `3 * vertexCount` — normals per vertex (empty if none). */
-  normals: number[];
+  normals: Float32Array;
   /** `3 * triangleCount` — u32 indices, a plain triangle list. */
-  indices: number[];
+  indices: Uint32Array;
   /** Material groups over the kept triangle list (empty if not resolved). */
   submeshes: Submesh[];
   texture: string | null;

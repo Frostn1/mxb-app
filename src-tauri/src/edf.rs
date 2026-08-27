@@ -24,14 +24,50 @@ pub struct Submesh {
     pub mat: Option<u32>,
 }
 
+/// A mesh's bulk arrays, base64'd rather than written out as JSON numbers.
+///
+/// Tauri hands a command's return value to the webview as JSON, and a float spelled out as
+/// text costs about fifteen characters and a parse. A real bike is a few hundred thousand of
+/// them: measured at 5.9 MB of text for a small one, 12 ms to encode here and ~20 ms for the
+/// webview to `JSON.parse` — and 147 ms of parsing alone for a mesh eight times the size,
+/// which an ordinary detailed bike or a gear mesh reaches.
+///
+/// Base64 of the raw little-endian bytes is 4/3 of the binary size instead of ~10x, and the
+/// webview adopts it into a typed array with one decode rather than parsing every number.
+/// `src/api/mods.ts` does that decode, so nothing downstream sees a string.
+mod mesh_b64 {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use serde::Serializer;
+
+    pub fn f32s<S: Serializer>(v: &[f32], s: S) -> Result<S::Ok, S::Error> {
+        let mut bytes = Vec::with_capacity(v.len() * 4);
+        for f in v {
+            bytes.extend_from_slice(&f.to_le_bytes());
+        }
+        s.serialize_str(&STANDARD.encode(&bytes))
+    }
+
+    pub fn u32s<S: Serializer>(v: &[u32], s: S) -> Result<S::Ok, S::Error> {
+        let mut bytes = Vec::with_capacity(v.len() * 4);
+        for n in v {
+            bytes.extend_from_slice(&n.to_le_bytes());
+        }
+        s.serialize_str(&STANDARD.encode(&bytes))
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EdfNode {
     pub name: String,
+    #[serde(serialize_with = "mesh_b64::f32s")]
     pub positions: Vec<f32>, // 3 * vcount, local space
-    pub uvs: Vec<f32>,       // 2 * vcount
-    pub normals: Vec<f32>,   // 3 * vcount
-    pub indices: Vec<u32>,   // 3 * kept triangles
+    #[serde(serialize_with = "mesh_b64::f32s")]
+    pub uvs: Vec<f32>, // 2 * vcount
+    #[serde(serialize_with = "mesh_b64::f32s")]
+    pub normals: Vec<f32>, // 3 * vcount
+    #[serde(serialize_with = "mesh_b64::u32s")]
+    pub indices: Vec<u32>, // 3 * kept triangles
     pub submeshes: Vec<Submesh>,
     pub texture: Option<String>, // node-wide texture, used when submeshes is empty
     // True once positions are in the part's .geom LOCAL frame rather than raw authored space.
@@ -1835,6 +1871,49 @@ fn rigid_inverse(m: &Mat4) -> Mat4 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The mesh arrays cross as base64 of their raw bytes, and the webview reads them back as
+    /// typed arrays. A silent mismatch here would not fail anything — it would draw a bike
+    /// made of noise — so the round trip is asserted rather than assumed.
+    #[test]
+    fn mesh_arrays_survive_the_base64_round_trip() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+        let node = EdfNode {
+            name: "part".into(),
+            // Values a naive encoder gets wrong: negatives, fractions, and a payload length
+            // that isn't a multiple of three.
+            positions: vec![0.0, -1.5, 2.25, f32::MIN_POSITIVE, -0.1, 1e6],
+            uvs: vec![0.0, 1.0, 0.5, 0.25],
+            normals: vec![0.0, 1.0, 0.0],
+            indices: vec![0, 1, 2, u32::MAX],
+            submeshes: Vec::new(),
+            texture: None,
+            placed: false,
+            materials: Vec::new(),
+        };
+
+        let v: serde_json::Value = serde_json::from_str(&serde_json::to_string(&node).unwrap())
+            .unwrap();
+
+        let floats = |key: &str| -> Vec<f32> {
+            let b = STANDARD.decode(v[key].as_str().unwrap()).unwrap();
+            b.chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+                .collect()
+        };
+        assert_eq!(floats("positions"), node.positions);
+        assert_eq!(floats("uvs"), node.uvs);
+        assert_eq!(floats("normals"), node.normals);
+
+        let idx: Vec<u32> = STANDARD
+            .decode(v["indices"].as_str().unwrap())
+            .unwrap()
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
+            .collect();
+        assert_eq!(idx, node.indices);
+    }
 
     /// A record that claims to be a small texture but whose payload inflates to far more than
     /// that. Everything past `width * height * 4` was always thrown away — the bug was that it
