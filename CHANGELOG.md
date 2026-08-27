@@ -3,6 +3,16 @@
 ## 2026-08-26
 
 ### Fixed
+- **The rider came apart in every 3D preview.** The rig `rider.edf` carries is stored once per
+  level of detail — the game's own riders hold three copies of the same 64 bones — and the app
+  read all of them. Every bone then had two namesakes to hang off, the skeleton closed into a
+  cycle, and the bones caught inside one never got placed at all: the body folded into a heap
+  and its gear went with it, in the plain Rider view as much as in Pose. Only the first copy is
+  read now, the one that goes with the mesh being drawn, and a bone may only hang off one the
+  file has already listed, so a rig can never close on itself. The viewer also draws the skinned
+  body **only** while something is actually posed — at rest it is the same rigid mesh it was
+  before posing existed, so the rest of the app can't be spoiled by a rig it reads wrongly.
+
 - **The model-swap badge squeezed a bike's name off its card.** Sitting in the row beside the
   name, it competed with it for width — and the name is what gave, collapsing to nothing on
   the one bike that had swaps. It now sits under the name instead, where nothing else is
@@ -26,7 +36,7 @@
   exactly as it was authored.
 
   This reads the skeleton `rider.edf` has carried all along and nobody was using: 98 named
-  bones, of which 65 bind the mesh. The file stores no vertex weights — the game rebuilds the
+  bones, of which 64 bind the mesh. The file stores no vertex weights — the game rebuilds the
   binding at load — so the app rebuilds it too, from the per-bone boxes the file *does* carry
   plus the distance to the limb each bone actually swings. Helmet, boots and body armour ride
   along on the bones their own `gfx.cfg` names, so the kit follows the pose.

@@ -1326,9 +1326,9 @@ fn submesh_transform(
 /// game references those names itself, in each rider's `gfx.cfg`, to hang the helmet off the
 /// head and the boots off the knees.
 ///
-/// Only the bones the mesh actually binds to are returned: 65 of the 98. The rest are markers
-/// — every `_end` tip, and the ankles and toes, which belong to the boots rather than the body
-/// and so carry no region of this mesh.
+/// Only the bones the mesh actually binds to are returned: 64 of the 98 on the riders the game
+/// ships. The rest are markers — every `_end` tip, and the ankles and toes, which belong to the
+/// boots rather than the body and so carry no region of this mesh.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Bone {
@@ -1396,12 +1396,22 @@ pub fn parse_skeleton(b: &[u8]) -> Vec<Bone> {
         }
     }
     // Pair each name with the record that follows it, and keep the bones that bind.
+    //
+    // Stop at the first name that comes round again. The game's own riders store the whole rig
+    // once per level of detail — `default_mx` and `default_sm` both hold three copies of the
+    // same 64 bones, each with its own boxes — and the first copy is the one that goes with the
+    // LOD0 mesh the viewer draws. Reading past it gave every bone two namesakes to hang off,
+    // and the tree built from the names below closed into a cycle.
     let mut names = Vec::new();
     let mut binds = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for pair in blocks.windows(2) {
         let (Some(inv_bind), name) = (pair[1].inv_bind, &pair[0].next_name) else {
             continue;
         };
+        if !seen.insert(name.clone()) {
+            break;
+        }
         names.push(name.clone());
         binds.push((inv_bind, pair[1].aabb_lo, pair[1].aabb_hi));
     }
@@ -1528,8 +1538,11 @@ fn bone_name(b: &[u8], o: usize) -> Option<String> {
 /// and `gfx.cfg` spells several of them out, so the naming is a contract rather than a habit.
 /// A bone whose named parent isn't in the list — the ankles and the `_end` markers are dropped
 /// before this runs — climbs to the nearest named ancestor that is. Anything the rules don't
-/// recognise falls back to the bone listed before it, which can't cycle: the file lists a rig
-/// depth-first, so a parent always precedes its children.
+/// recognise falls back to the bone listed before it.
+///
+/// Only a bone earlier in the list is ever taken as a parent. The file lists a rig depth-first,
+/// so that holds of every real one, and insisting on it is what keeps the result a tree: a bone
+/// inside a cycle hangs off no root, and nothing ever works out where it is.
 fn rig_parents(names: &[String]) -> Vec<Option<usize>> {
     let stems: Vec<String> = names.iter().map(|n| bone_stem(n).to_ascii_lowercase()).collect();
     let index: std::collections::HashMap<&str, usize> =
@@ -1545,7 +1558,7 @@ fn rig_parents(names: &[String]) -> Vec<Option<usize>> {
                 match want {
                     None => break,
                     Some(ref w) => match index.get(w.as_str()) {
-                        Some(&p) if p != i => return Some(p),
+                        Some(&p) if p < i => return Some(p),
                         _ => want = named_parent(w),
                     },
                 }
@@ -2519,6 +2532,49 @@ rwheel_max = 0, -0.001, -0.5683\n";
     }
 
     #[test]
+    fn the_rig_is_read_once_however_many_copies_the_file_holds() {
+        // The game's riders store the whole rig once per level of detail, back to back and with
+        // slightly different boxes. Reading past the first copy gave every bone a namesake to
+        // hang off and closed the tree into a cycle: a bone inside one reaches no root, so
+        // nothing works out where it is and the body collapses into the origin.
+        let copy = |lo: [f32; 3], hi: [f32; 3]| {
+            vec![
+                bone_block("riderRIG_Pelvis", None, &[0], [0.0; 3], [0.0; 3]),
+                bone_block("riderRIG_LeftHip", Some(bind_at(0.0, 0.9, 0.0)), &[1], lo, hi),
+                bone_block("riderRIG_LeftKnee", Some(bind_at(0.1, 0.5, 0.0)), &[2], lo, hi),
+                bone_block("riderRIG_Spine1", Some(bind_at(0.1, 0.2, 0.0)), &[3], lo, hi),
+            ]
+        };
+        let mut blocks = copy([-0.1, -0.1, -0.1], [0.1, 0.1, 0.1]);
+        blocks.extend(copy([-0.2, -0.2, -0.2], [0.2, 0.2, 0.2]));
+        let rig = parse_skeleton(&rig_file(&blocks));
+        assert_eq!(
+            rig.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
+            ["riderRIG_Pelvis", "riderRIG_LeftHip", "riderRIG_LeftKnee"],
+            "a second copy of the rig is not more bones"
+        );
+        // The copy that survives is the first — the one that goes with the LOD0 mesh.
+        assert_eq!(rig[1].aabb_hi, [0.1, 0.1, 0.1]);
+    }
+
+    #[test]
+    fn a_bone_hangs_off_one_the_file_has_already_listed() {
+        // Depth-first order means a parent always precedes its child, so a name-matched parent
+        // that comes later is a misread — and taking it would be a cycle.
+        let bytes = rig_file(&[
+            bone_block("riderRIG_Pelvis", None, &[0], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_LeftKnee", Some(bind_at(0.0, 0.9, 0.0)), &[1], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_LeftHip", Some(bind_at(0.1, 0.5, 0.0)), &[2], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_Head", Some(bind_at(0.1, 0.2, 0.0)), &[3], [0.0; 3], [0.0; 3]),
+        ]);
+        let rig = parse_skeleton(&bytes);
+        assert_eq!(rig[0].parent, None, "only the first bone is parentless");
+        for (i, b) in rig.iter().enumerate() {
+            assert!(b.parent.is_none_or(|p| p < i), "{} hangs off a later bone", b.name);
+        }
+    }
+
+    #[test]
     fn a_bone_that_binds_nothing_is_left_out() {
         // The ankles and every `_end` marker carry a local matrix and no inverse bind: they
         // belong to the boots, not to this mesh, so they are not bones the body can be posed by.
@@ -2812,6 +2868,17 @@ rwheel_max = 0, -0.001, -0.5683\n";
         let verts: usize = nodes.iter().map(|n| n.positions.len() / 3).sum();
         assert_eq!(skin.weights.len(), verts * SKIN_BONES_PER_VERTEX);
 
+        // The rig has to be a tree, and each bone in it once: the file holds a copy per level
+        // of detail, and reading two of them gives every bone a namesake to hang off. That
+        // closes a cycle, and a bone inside one hangs off no root — so nothing works out where
+        // it is and the whole body draws folded into the origin.
+        let names: std::collections::HashSet<&str> = rig.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names.len(), rig.len(), "the rig is in here more than once");
+        assert_eq!(rig.iter().filter(|b| b.parent.is_none()).count(), 1, "one root, no more");
+        for (i, b) in rig.iter().enumerate() {
+            assert!(b.parent.is_none_or(|p| p < i), "{} hangs off a later bone", b.name);
+        }
+
         let mut used = std::collections::HashSet::new();
         let mut shared = 0usize;
         for v in 0..verts {
@@ -2833,6 +2900,9 @@ rwheel_max = 0, -0.001, -0.5683\n";
         assert!(shared * 4 > verts, "hardly any vertex is shared — the seams will tear");
 
         // Left stays left: no vertex on one side of the body may be pulled by the other's arm.
+        // One run of x across every node, in the order the skin was built in.
+        let xs: Vec<f32> =
+            nodes.iter().flat_map(|n| n.positions.chunks_exact(3).map(|v| v[0])).collect();
         let at = |n: &str| rig.iter().position(|b| b.name == n);
         if let (Some(l), Some(r)) = (at("riderRIG_LeftWrist"), at("riderRIG_RightWrist")) {
             for (side, other) in [(l, r), (r, l)] {
@@ -2842,7 +2912,7 @@ rwheel_max = 0, -0.001, -0.5683\n";
                             .any(|s| skin.indices[v * SKIN_BONES_PER_VERTEX + s] as usize == side
                                 && skin.weights[v * SKIN_BONES_PER_VERTEX + s] > 0.2)
                     })
-                    .map(|v| nodes[0].positions[v * 3])
+                    .map(|v| xs[v])
                     .collect();
                 if reach.is_empty() {
                     continue;
