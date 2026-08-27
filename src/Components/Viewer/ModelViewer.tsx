@@ -10,6 +10,7 @@ import {
   applyPose,
   boneDelta,
   buildSkeleton,
+  isRestPose,
   NO_POSE,
   type RiderPose,
 } from "../../lib/riderPose";
@@ -686,9 +687,11 @@ function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THRE
 /**
  * The rider's body.
  *
- * With a rig and a skin it draws as a skinned mesh, so a turn at the hip carries the thigh
- * with it. Without one — a model whose `.edf` carries no skeleton — it draws exactly as it
- * did before, rigid, which is also what happens when nobody is posing.
+ * A pose draws it as a skinned mesh, so a turn at the hip carries the thigh with it. Nothing
+ * else does: at rest — which is every view but the Pose studio, and the Pose studio before
+ * anybody has moved anything — it is the same rigid mesh it was before posing existed, on the
+ * same code path, so a rig this viewer reads wrongly can only ever spoil the one view that
+ * asked for it.
  */
 function RiderBodyMesh({
   part,
@@ -701,7 +704,7 @@ function RiderBodyMesh({
 }) {
   const tex = useTextureMapWith(part.textures, overrides);
   const rig = part.skeleton;
-  const skin = rig?.length ? part.skin : null;
+  const skin = rig?.length && !isRestPose(pose) ? part.skin : null;
   const geoms = useNodeGeometries(part.nodes, skin);
   // One material per submesh; a node with no submesh table takes a single suit material.
   const mats = useMemo(
@@ -782,7 +785,8 @@ function useBoneDeltas(
   wanted: readonly (readonly string[])[],
 ): (THREE.Matrix4 | null)[] {
   return useMemo(() => {
-    if (!rig?.length) return wanted.map(() => null);
+    // Nothing to follow at rest, and no reason to build a rig to find that out.
+    if (!rig?.length || isRestPose(pose)) return wanted.map(() => null);
     const built = buildSkeleton(rig);
     applyPose(built.order, pose);
     return wanted.map(
