@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import {
   Search,
   RefreshCw,
@@ -133,9 +133,14 @@ interface RowAction {
 function LibraryCardBody({
   item,
   typeIcon: TypeIcon,
+  footer,
 }: {
   item: LibraryEntry;
   typeIcon: LucideIcon;
+  /** Rendered under the subtitle, inside the name column. Anything put in the row *beside*
+   *  the name competes with it for width, and the name is what loses — it collapsed to
+   *  nothing the moment a second control landed next to "View in 3D". */
+  footer?: ReactNode;
 }) {
   const t = useT();
   const cacheKey = metaKey(item);
@@ -222,6 +227,7 @@ function LibraryCardBody({
         <span className="truncate text-[11px] text-muted-foreground" title={subtitle}>
           {subtitle}
         </span>
+        {footer}
       </div>
     </>
   );
@@ -1083,34 +1089,39 @@ export default function Library({
                                 )}
                               </span>
                             )}
-                            <LibraryCardBody item={item} typeIcon={Icon} />
-                            {showModels && (
-                              <button
-                                title={t("library.modelsHint")}
-                                aria-expanded={swapsOpen}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenSwaps((prev) => {
-                                    const next = new Set(prev);
-                                    if (!next.delete(item.path)) next.add(item.path);
-                                    return next;
-                                  });
-                                }}
-                                className={cn(
-                                  "flex flex-none cursor-default items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[11px] font-semibold transition-colors hover:bg-foreground/[0.06]",
-                                  swapsOpen ? "text-primary" : "text-faint hover:text-primary",
-                                )}
-                              >
-                                <Layers className="size-3.5" />
-                                {t("library.models", { count: models!.variants.length })}
-                                <ChevronDown
-                                  className={cn(
-                                    "size-3 transition-transform",
-                                    swapsOpen && "rotate-180",
-                                  )}
-                                />
-                              </button>
-                            )}
+                            <LibraryCardBody
+                              item={item}
+                              typeIcon={Icon}
+                              footer={
+                                showModels ? (
+                                  <button
+                                    title={t("library.modelsHint")}
+                                    aria-expanded={swapsOpen}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenSwaps((prev) => {
+                                        const next = new Set(prev);
+                                        if (!next.delete(item.path)) next.add(item.path);
+                                        return next;
+                                      });
+                                    }}
+                                    className={cn(
+                                      "-ml-1 mt-0.5 flex w-fit max-w-full cursor-default items-center gap-1 truncate rounded px-1 py-0.5 text-[10.5px] font-semibold transition-colors hover:bg-foreground/[0.06]",
+                                      swapsOpen ? "text-primary" : "text-faint hover:text-primary",
+                                    )}
+                                  >
+                                    <Layers className="size-3 flex-none" />
+                                    {t("library.models", { count: models!.variants.length })}
+                                    <ChevronDown
+                                      className={cn(
+                                        "size-3 flex-none transition-transform",
+                                        swapsOpen && "rotate-180",
+                                      )}
+                                    />
+                                  </button>
+                                ) : undefined
+                              }
+                            />
                             {!selectMode && canView3d && (
                               <button
                                 title={t("library.quick3d")}
