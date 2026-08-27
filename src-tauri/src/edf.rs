@@ -604,10 +604,14 @@ fn valid_material_record(b: &[u8], o: usize, textures: usize) -> bool {
     if (1..7).any(|k| !(f(k) > 0.0 && f(k) <= 1.0)) {
         return false;
     }
-    if w(8) != 0 || w(9) != 0 || w(10) != 0 || w(12) != 0 || w(13) != 0 {
+    if w(8) != 0 || w(9) != 0 || w(10) != 0 || w(12) != 0 {
         return false;
     }
-    w(11) as usize <= textures
+    // w11 is the colour texture (1-based, 0 for none); w13 the companion beside it, likewise
+    // 0 where there is none. PiBoSo's own bikes leave w13 zero, so it read as padding — but a
+    // mod that ships `_n`/`_s`/`_r` sheets fills it in, and demanding zero threw out the whole
+    // table with it, leaving every submesh unbound and the bike grey.
+    w(11) as usize <= textures && w(13) as usize <= textures
 }
 
 /// One node's material table: LOCAL material id -> position in the model's declared colour
@@ -2860,4 +2864,176 @@ rwheel_max = 0, -0.001, -0.5683\n";
         }
     }
 
+}
+
+/// Does this mesh's material tables use the second texture slot?
+///
+/// The discriminator between the two index spaces below. PiBoSo's own bikes leave `w13` zero
+/// on every record; a mod that ships companion maps fills it in. Meshes that don't use it keep
+/// the reading they've always had, so this can only ever change a mesh that was unreadable
+/// before.
+pub fn uses_companion_slots(b: &[u8]) -> bool {
+    let textures = embedded_textures(b).len();
+    for (_, start) in node_starts(b) {
+        for count in 1..=MAX_MATERIALS {
+            let Some(o) = start.checked_sub(4 + MAT_STRIDE * count) else { break };
+            if u32le(b, o) as usize != count {
+                continue;
+            }
+            if (0..count).all(|k| valid_material_record(b, o + 4 + MAT_STRIDE * k, textures)) {
+                if (0..count).any(|k| u32le(b, o + 4 + MAT_STRIDE * k + 52) != 0) {
+                    return true;
+                }
+                break;
+            }
+        }
+    }
+    false
+}
+
+/// `(name, offset of its vertex-count word)` for every node the scanner accepts — the same
+/// walk `parse_impl` does, without building the meshes.
+fn node_starts(b: &[u8]) -> Vec<(String, usize)> {
+    let n = b.len();
+    let mut out = Vec::new();
+    if n < HEADER_START + 8 || &b[0..4] != b"EDF\0" {
+        return out;
+    }
+    let mut o = HEADER_START;
+    while o + 8 <= n {
+        let vc = u32le(b, o) as usize;
+        if (8..=MAX_COUNT).contains(&vc) && o + 4 + vc * STRIDE + 8 <= n {
+            let vs = o + 4;
+            if [0usize, 1, 2, vc / 2, vc - 1].iter().all(|&i| finite_pos(b, vs + i * 12)) {
+                let ic = vs + vc * STRIDE;
+                let tc = u32le(b, ic) as usize;
+                if (1..=MAX_COUNT).contains(&tc) && ic + 8 + tc * 12 <= n {
+                    let ok = (0..tc * 3).all(|t| (u32le(b, ic + 4 + t * 4) as usize) < vc);
+                    let iend = ic + 8 + tc * 12;
+                    if let (true, Some(name)) = (ok, plausible_name(b, iend)) {
+                        out.push((name, o));
+                        o = iend;
+                        continue;
+                    }
+                }
+            }
+        }
+        o += 1;
+    }
+    out
+}
+
+/// The texture list a **bike** material's index counts, for a mesh that uses companion slots.
+///
+/// Not [`declared_colors`], which keeps one slot per colour sheet. That is right for gear and
+/// right for any mesh whose materials leave `w13` zero. A mod bike is different: it declares
+/// companion maps and, crucially, sheets it never embeds at all, and those hold slots too.
+/// Counting only the colour sheets slid every material down by a growing amount, so a silencer
+/// came out wearing the tank's paint and most parts bound to nothing.
+///
+/// The rule, checked against twelve parts of the KTM 450's swap mesh whose names name their own
+/// sheet (`LUXON LMM` -> `luxlmm`, `Polar + Mount` -> `polarm`, `levers` -> `arclever`): walk
+/// the declarations in file order; each family contributes its colour sheet, then its `_r` if
+/// one is declared. `_n` and `_s` never take a slot, and a family with no colour sheet of its
+/// own contributes nothing.
+pub fn bike_material_slots(b: &[u8]) -> Vec<String> {
+    let declared = declared_names(b);
+    let with_colour: std::collections::HashSet<String> = declared
+        .iter()
+        .filter(|n| family_stem(n) == n.to_ascii_lowercase())
+        .map(|n| n.to_ascii_lowercase())
+        .collect();
+    let mut out: Vec<String> = Vec::new();
+    for name in &declared {
+        if !with_colour.contains(&family_stem(name)) {
+            continue;
+        }
+        let takes_a_slot =
+            name.to_ascii_lowercase() == family_stem(name) || family_stem(name) != name.to_ascii_lowercase() && name.to_ascii_lowercase().ends_with("_r");
+        if takes_a_slot && !out.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
+fn family_stem(n: &str) -> String {
+    for suf in ["_n", "_s", "_r"] {
+        if let Some(base) = n.strip_suffix(suf) {
+            return base.to_ascii_lowercase();
+        }
+    }
+    n.to_ascii_lowercase()
+}
+
+/// Every texture name the model writes in the clear, in file order — embedded or not.
+///
+/// A name only counts where it sits outside every texture payload, preceded by the zero high
+/// byte of the word in front of it and terminated by a zero, as [`declaration_offset`]
+/// requires — so a string inside compressed pixels can't invent a slot. The file is still full
+/// of short delimited scraps that look like names, so a candidate also has to be corroborated:
+/// embedded, or one of several in its family, or written like a sheet name by hand. Without
+/// that an eight-character scrap took a slot and every part after it bound one sheet late.
+fn declared_names(b: &[u8]) -> Vec<String> {
+    let embedded = embedded_textures(b);
+    let ok_char = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'-';
+    let mut hits: Vec<(usize, String)> = Vec::new();
+    for t in &embedded {
+        let at = declaration_offset(b, &t.name, &embedded).unwrap_or(t.data_off);
+        hits.push((at, t.name.clone()));
+    }
+    let mut i = 1usize;
+    while i + 3 < b.len() {
+        if b[i - 1] != 0 || !ok_char(b[i]) {
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        while j < b.len() && ok_char(b[j]) && j - i < 64 {
+            j += 1;
+        }
+        if !(5..=63).contains(&(j - i)) || b.get(j) != Some(&0) {
+            i += 1;
+            continue;
+        }
+        let name = String::from_utf8_lossy(&b[i..j]).to_string();
+        let in_pixels = embedded.iter().any(|t| i >= t.data_off && i < t.data_off + t.data_len);
+        if !in_pixels && name.chars().any(|c| c.is_ascii_alphabetic()) && !is_part_name(&name) {
+            hits.push((i, name));
+        }
+        i = j + 1;
+    }
+    hits.sort_by_key(|(at, _)| *at);
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let names: Vec<String> = hits
+        .into_iter()
+        .filter(|(_, n)| seen.insert(n.to_ascii_lowercase()))
+        .map(|(_, n)| n)
+        .collect();
+
+    let embedded_stems: std::collections::HashSet<String> =
+        embedded.iter().map(|t| family_stem(&t.name)).collect();
+    let mut family: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for n in &names {
+        *family.entry(family_stem(n)).or_default() += 1;
+    }
+    names
+        .into_iter()
+        .filter(|n| {
+            let stem = family_stem(n);
+            embedded_stems.contains(&stem)
+                || family.get(&stem).copied().unwrap_or(0) > 1
+                || (stem == n.to_ascii_lowercase()
+                    && !n.chars().any(|c| c.is_ascii_uppercase())
+                    && n.len() >= 5)
+        })
+        .collect()
+}
+
+/// The `.hrc` part names, which share the declaration encoding and are never textures.
+fn is_part_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "chassis" | "steer" | "fsusp" | "rsusp" | "swingarm" | "fwheel" | "rwheel" | "rwheela"
+    )
 }
