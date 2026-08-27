@@ -6243,6 +6243,18 @@ fn set_voice_levels(
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Hear riders from where they are on the track, or flat.
+///
+/// Takes effect on the next session rather than mid-race: the engine reads it when it joins,
+/// and a rider is far more likely to be flipping this while parked in the menus than while
+/// racing. The setting is what persists; the switch is not a live mixer control.
+#[tauri::command]
+fn set_voice_proximity(app: tauri::AppHandle, proximity: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.voice_proximity = proximity;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 /// Who is in voice on this server right now, and who is talking.
 ///
 /// The panel also gets this pushed as a `voice-status` event; this is for the first paint,
@@ -7768,6 +7780,7 @@ fn main() {
             voice_devices,
             voice_status,
             voice_mute,
+            set_voice_proximity,
             set_voice_enabled,
             set_preview_tyres,
             set_voice_input_device,

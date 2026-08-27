@@ -1351,6 +1351,8 @@ export const ptBR: Translation = {
   "voice.connecting": "conectando…",
   "voice.mute": "Silenciar",
   "voice.unmute": "Reativar",
+  "voice.proximity": "Ouça cada piloto de onde ele está",
+  "voice.proximityDesc": "Um piloto ao seu lado soa alto e desse lado; um a duas curvas soa fraco. Desligue para ouvir todos no mesmo volume. Volta sozinho ao som plano quando o jogo não informa as posições.",
 
   "overlay.pressKeys": "Aperte as teclas…",
   "overlay.needModifier": "Adicione um modificador",

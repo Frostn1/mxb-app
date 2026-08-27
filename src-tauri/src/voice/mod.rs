@@ -30,6 +30,8 @@
 //! - [`ring`] — the lock-free handoff to the audio callback, which may not wait for anything.
 //! - [`mesh`] — the peers themselves: one UDP socket, one `Rtc` per peer, demultiplexed by
 //!   remote address.
+//! - [`proximity`] — where a voice comes from: distance to volume, bearing to stereo, and
+//!   the range check that doubles as the send-side cull.
 //! - [`engine`] — the loop that owns all of the above and runs on its own thread.
 //! - [`session`] — the supervisor that joins and leaves as the rider moves between servers,
 //!   so none of this is ever something they have to do.
@@ -48,6 +50,7 @@ pub mod frame;
 pub mod gamesession;
 pub mod jitter;
 pub mod mesh;
+pub mod proximity;
 pub mod ring;
 pub mod session;
 pub mod signal;

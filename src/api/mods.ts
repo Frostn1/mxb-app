@@ -2107,6 +2107,11 @@ export function setVoiceLevels(inputGain: number, outputVolume: number): Promise
   return invoke<void>("set_voice_levels", { inputGain, outputVolume });
 }
 
+/** Hear riders from where they are on the track, or flat. Applies to the next session. */
+export function setVoiceProximity(proximity: boolean): Promise<void> {
+  return invoke<void>("set_voice_proximity", { proximity });
+}
+
 /** Open the mic and start the level meter. Resolves to a warning when the saved device
  *  is gone and we fell back to the default — the unplugged-headset case. */
 export function voiceMeterStart(): Promise<string | null> {
