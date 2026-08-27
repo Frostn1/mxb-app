@@ -633,6 +633,65 @@ fn model_refresh_cmd(
     Some(frostmod::signal_refresh_model(bike))
 }
 
+/// The bike folders a model set could be moved to.
+#[tauri::command]
+async fn bike_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(modelswap::bike_folders(&cfg.mods_path))
+    })
+    .await
+    .map_err(|e| format!("bike_folders task failed: {e}"))?
+}
+
+/// The liveries a model owns outright — what a move offers to take with it.
+#[tauri::command]
+async fn model_swap_liveries(
+    app: tauri::AppHandle,
+    bike: String,
+    variant: String,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        Ok(modelswap::liveries_owned_by(&cfg.mods_path, &bike, &variant))
+    })
+    .await
+    .map_err(|e| format!("model_swap_liveries task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn move_model_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    variant: String,
+    to_bike: String,
+    carry: Vec<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        modelswap::move_model_swap(&cfg.mods_path, &bike, &variant, &to_bike, &carry)
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("move_model_swap task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn delete_model_swap(
+    app: tauri::AppHandle,
+    bike: String,
+    variant: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+        modelswap::delete_model_swap(&cfg.mods_path, &bike, &variant)
+            .map(|_| ())
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("delete_model_swap task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn apply_model_swap(
     app: tauri::AppHandle,
@@ -7577,6 +7636,10 @@ fn main() {
             scan_bike_targets,
             scan_model_swaps,
             apply_model_swap,
+            bike_folders,
+            model_swap_liveries,
+            move_model_swap,
+            delete_model_swap,
             list_bike_liveries,
             set_model_paints,
             scan_sound_swaps,
