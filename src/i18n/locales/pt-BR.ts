@@ -230,6 +230,7 @@ export const ptBR: Translation = {
   "pose.bike": "Moto",
   "pose.quick": "Poses rápidas",
   "pose.quickHint": "Cada uma soma à pose, então elas se acumulam. Ajuste abaixo.",
+  "pose.dragHint": "Arraste os pontos no piloto para mover um membro — quem gira é a articulação acima da que você pega. Os controles são para a torção e os valores exatos.",
   "pose.reset": "Redefinir",
   "pose.group.torso": "Tronco e cabeça",
   "pose.group.arms": "Braços",

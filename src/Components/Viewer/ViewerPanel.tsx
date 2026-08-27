@@ -35,6 +35,11 @@ interface ViewerPanelProps {
    * which is what every caller but the Pose studio wants.
    */
   riderPose?: RiderPose;
+  /**
+   * Given, the rider wears a grab handle at each joint and dragging one writes a pose back
+   * through this. Only the Pose studio passes it.
+   */
+  onRiderPose?: (pose: RiderPose) => void;
   className?: string;
 }
 
@@ -84,6 +89,7 @@ export function ViewerPanel({
   bikeVariant,
   hiddenParts,
   riderPose,
+  onRiderPose,
   className,
 }: ViewerPanelProps) {
   const t = useT();
@@ -328,6 +334,7 @@ export function ViewerPanel({
           <ModelViewer
             {...view}
             riderPose={riderPose}
+            onRiderPose={onRiderPose}
             poseControls
             placeControls
             className="absolute inset-0"
@@ -355,6 +362,7 @@ export function ViewerPanel({
             <ModelViewer
               {...view}
               riderPose={riderPose}
+              onRiderPose={onRiderPose}
               poseControls
               placeControls
               className="absolute inset-0"

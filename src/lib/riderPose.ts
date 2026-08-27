@@ -140,6 +140,167 @@ export function boneDelta(
   return order[at].matrixWorld.clone().multiply(rest.invert());
 }
 
+// ── Grabbing the rider ───────────────────────────────────────────────────────
+
+/**
+ * A grab point on the rider.
+ *
+ * `on` is the bone the dot rides, `turns` is the bone a drag swings — the joint above it. That
+ * is what makes a drag read the way it does in Pivot: you take hold of the wrist and the
+ * forearm rotates about the elbow, so the thing under the cursor is the thing that moves.
+ */
+export interface PoseHandle {
+  /** The bone whose turn a drag writes. */
+  turns: string;
+  /** The bone the dot rides. */
+  on: string;
+  /** Sit at the far end of `on`'s own box rather than at its joint — see [[boneTip]]. */
+  tip?: boolean;
+}
+
+const SIDES = ["Left", "Right"] as const;
+
+/**
+ * Where the dots go.
+ *
+ * Fourteen of them, at the joints somebody moving a rider actually reaches for. A chain's last
+ * bone — the hand, the shin, the head — has no joint below it to grab, so its dot sits at the
+ * end of its own box instead. Everything the sliders cover and this doesn't (the collars, twist
+ * about a bone's own axis) is still a slider away.
+ */
+export const POSE_HANDLES: PoseHandle[] = [
+  { turns: "riderRIG_Head", on: "riderRIG_Head", tip: true },
+  { turns: "riderRIG_Neck1", on: "riderRIG_Head" },
+  { turns: "riderRIG_Spine3", on: "riderRIG_Spine4" },
+  { turns: "riderRIG_Spine1", on: "riderRIG_Spine2" },
+  ...SIDES.flatMap((s) => [
+    { turns: `riderRIG_${s}Shoulder`, on: `riderRIG_${s}Elbow` },
+    { turns: `riderRIG_${s}Elbow`, on: `riderRIG_${s}Wrist` },
+    { turns: `riderRIG_${s}Wrist`, on: `riderRIG_${s}Wrist`, tip: true },
+    { turns: `riderRIG_${s}Hip`, on: `riderRIG_${s}Knee` },
+    { turns: `riderRIG_${s}Knee`, on: `riderRIG_${s}Knee`, tip: true },
+  ]),
+];
+
+/**
+ * The far end of a bone, in its own space.
+ *
+ * Every bone carries a box covering the slice of mesh it moves, so the end of the limb is the
+ * centre of whichever face of that box sits furthest from the joint the bone hangs off — the
+ * foot on a shin, the fingers on a hand. Read off the model rather than written down, so it
+ * lands in the right place on a rig with different proportions.
+ */
+export function boneTip(bones: Bone[], at: number): [number, number, number] {
+  const bone = bones[at];
+  const { aabbLo: lo, aabbHi: hi } = bone;
+  const mid: [number, number, number] = [
+    (lo[0] + hi[0]) / 2,
+    (lo[1] + hi[1]) / 2,
+    (lo[2] + hi[2]) / 2,
+  ];
+  const parent = bone.parent === null || bone.parent === undefined ? at : bone.parent;
+  const from = new THREE.Vector3().setFromMatrixPosition(toMatrix(bones[parent].bind));
+  const bind = toMatrix(bone.bind);
+  let best = mid;
+  let far = -1;
+  for (let axis = 0; axis < 3; axis++) {
+    for (const end of [lo[axis], hi[axis]]) {
+      const face: [number, number, number] = [...mid];
+      face[axis] = end;
+      const d = new THREE.Vector3(...face).applyMatrix4(bind).distanceTo(from);
+      if (d > far) {
+        far = d;
+        best = face;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The pose that swings `turns` so the point at `from` lands on `to`.
+ *
+ * Both points are in world space, which is where a pointer lands. The turn is measured from
+ * the model as authored rather than from wherever the last move left the bone: composing one
+ * short turn onto another is path-dependent, and a limb dragged out and back would come home
+ * pointing the right way but rolled about its own length. Measured from rest, the same place
+ * on screen always means the same pose, and dragging back to where you started is rest again.
+ *
+ * Worked out as matrices rather than quaternions because the rig is mirrored on the way in —
+ * a bone's world matrix is left-handed, and its "rotation" alone is not the whole story. What
+ * comes back is the same `[bend, twist, splay]` in degrees the sliders write, so a drag and a
+ * slider are two ways of saying one thing.
+ */
+export function turnToward(
+  order: THREE.Bone[],
+  bones: Bone[],
+  pose: RiderPose,
+  turns: string,
+  from: THREE.Vector3,
+  to: THREE.Vector3,
+): RiderPose {
+  const at = bones.findIndex((b) => b.name === turns);
+  if (at < 0) return pose;
+  const bone = order[at];
+  const rest = bone.userData.restQuaternion as THREE.Quaternion | undefined;
+  if (!rest) return pose;
+  // Where the dot sits in the turned bone's own frame — the same whatever this bone's turn is,
+  // which is what lets the swing below be measured from rest.
+  const held = from
+    .clone()
+    .applyMatrix4(new THREE.Matrix4().copy(bone.matrixWorld).invert());
+  // This bone as authored, with every other bone left where the pose has put it.
+  const asAuthored = new THREE.Matrix4().compose(bone.position, rest, bone.scale);
+  if (bone.parent) asAuthored.premultiply(bone.parent.matrixWorld);
+  const pivot = new THREE.Vector3().setFromMatrixPosition(asAuthored);
+  const was = held.clone().applyMatrix4(asAuthored).sub(pivot);
+  const wants = to.clone().sub(pivot);
+  // A drag that lands on the joint itself says nothing about which way to point.
+  if (was.lengthSq() < 1e-8 || wants.lengthSq() < 1e-8) return pose;
+  const swing = new THREE.Quaternion().setFromUnitVectors(was.normalize(), wants.normalize());
+  // About the joint, so the bone stays where it is and only turns.
+  const about = new THREE.Matrix4()
+    .makeTranslation(pivot.x, pivot.y, pivot.z)
+    .multiply(new THREE.Matrix4().makeRotationFromQuaternion(swing))
+    .multiply(new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z));
+  const local = new THREE.Matrix4();
+  if (bone.parent) local.copy(bone.parent.matrixWorld).invert();
+  local.multiply(about).multiply(asAuthored);
+  const turned = new THREE.Quaternion();
+  local.decompose(new THREE.Vector3(), turned, new THREE.Vector3());
+  // `applyPose` composes the turn after the rest, so this is what it has to be handed.
+  return withTurn(pose, turns, shortenToLimit(rest.clone().invert().multiply(turned)));
+}
+
+/**
+ * A turn as three degrees, cut back along its own arc until every axis is inside the stop.
+ *
+ * Not one axis at a time: clipping bend and splay separately points the limb somewhere nobody
+ * asked for, and a drag that goes too far should stop short on the way to the cursor rather
+ * than fly off. Bisection because the three Euler angles don't grow evenly along the arc, so
+ * there is no closed form to scale by.
+ */
+function shortenToLimit(turn: THREE.Quaternion): [number, number, number] {
+  const scratch = new THREE.Euler();
+  const q = new THREE.Quaternion();
+  const worst = (t: number) => {
+    scratch.setFromQuaternion(q.identity().slerp(turn, t), "XYZ");
+    return Math.max(Math.abs(scratch.x), Math.abs(scratch.y), Math.abs(scratch.z)) / DEG;
+  };
+  let far = 1;
+  if (worst(1) > TURN_LIMIT) {
+    let near = 0;
+    for (let i = 0; i < 16; i++) {
+      const mid = (near + far) / 2;
+      if (worst(mid) > TURN_LIMIT) far = mid;
+      else near = mid;
+    }
+    far = near;
+  }
+  worst(far);
+  return [clampTurn(scratch.x / DEG), clampTurn(scratch.y / DEG), clampTurn(scratch.z / DEG)];
+}
+
 // ── Which bones a person would want to move ──────────────────────────────────
 
 export type BoneGroupId = "torso" | "arms" | "hands" | "legs";

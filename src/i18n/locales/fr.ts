@@ -231,6 +231,7 @@ export const fr: Translation = {
   "pose.bike": "Moto",
   "pose.quick": "Postures rapides",
   "pose.quickHint": "Chacune s'ajoute à la posture, elles se cumulent. Ajuste en dessous.",
+  "pose.dragHint": "Fais glisser les points sur le pilote pour bouger un membre — c'est l'articulation au-dessus de celle que tu attrapes qui tourne. Les curseurs servent à la torsion et aux valeurs exactes.",
   "pose.reset": "Réinitialiser",
   "pose.group.torso": "Buste et tête",
   "pose.group.arms": "Bras",

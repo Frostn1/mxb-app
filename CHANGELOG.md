@@ -48,6 +48,20 @@
   the bike folder beside it — the two never matched, and the badge was invisible on every bike.
 
 ### Added
+- **Take hold of the rider and move him.** The Pose view now puts a dot on each of the rider's
+  joints in the 3D preview — head, back, shoulders, elbows, hands, hips and feet. Grab one and
+  the limb swings to follow the cursor the way it does in Pivot: the joint above the dot you
+  are holding is the one that turns, so pulling a hand bends the forearm about the elbow and
+  pulling a foot bends the shin about the knee. A drag turns in the plane you are looking at,
+  so orbit the camera to reach the other way. Push a joint past its stop and it comes to rest
+  on the way to the cursor rather than snapping somewhere else, and dragging back to where you
+  started returns the model exactly as it was authored.
+
+  A drag writes the same pose the sliders do, so the two mix freely and quick moves still
+  stack on top. The sliders are still there for the two things a drag can't say — twist about
+  a bone's own length, and an exact number — but the groups start closed now, since the dots
+  are the way in.
+
 - **Move a model swap to another bike, or delete it.** Every model set now carries its own
   menu, in the Locker and on the Library's bike cards alike. **Move** asks which bike to send it
   to and, when the model owns liveries, which of those travel with it — off by default, because

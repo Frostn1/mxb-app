@@ -104,7 +104,9 @@ export default function PoseStudio({
   const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
   const [bike, setBike] = useState("");
   const [pose, setPose] = useState<RiderPose>(NO_POSE);
-  const [open, setOpen] = useState<BoneGroupId | null>("legs");
+  // Closed to start: the dots on the rider are the way in, and a wall of sliders reads as the
+  // opposite of that.
+  const [open, setOpen] = useState<BoneGroupId | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -209,6 +211,10 @@ export default function PoseStudio({
           </p>
         </section>
 
+        <p className="-mb-1 text-[10px] leading-snug text-muted-foreground">
+          {t("pose.dragHint")}
+        </p>
+
         {BONE_GROUPS.map((g) => (
           <section key={g.id} className="rounded-lg border border-border">
             <button
@@ -253,6 +259,7 @@ export default function PoseStudio({
           bikeId={showBike ? bike : undefined}
           bikeVariant={bikeVariant}
           riderPose={pose}
+          onRiderPose={setPose}
           className="h-full"
         />
       </div>
