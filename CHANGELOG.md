@@ -29,7 +29,7 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
-## 2026-08-28
+## 2026-08-28 — v0.11.1 — Protected model swaps open in 3D
 
 ### Fixed
 
