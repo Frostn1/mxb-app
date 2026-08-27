@@ -13,6 +13,16 @@
   body **only** while something is actually posed — at rest it is the same rigid mesh it was
   before posing existed, so the rest of the app can't be spoiled by a rig it reads wrongly.
 
+- **A model swap rendered as a plain white bike.** A mesh that ships companion sheets
+  (`_n`/`_s`/`_r`) writes a second texture index into each material record, in a field the app
+  required to be zero — so every material table was thrown out and every part fell through to
+  bare grey. Read back, those indices count a list the app wasn't building either: one that
+  includes the companion maps *and* the sheets a mesh declares but never embeds. Both are fixed,
+  and a bike whose materials don't use that second slot — every stock bike — is read exactly as
+  it was before. The KTM 450's swap goes from nothing bound to all 31 parts on their right
+  sheets: the Pro Taper bars, the ARC levers and calipers, the ODI grips, the Hammerhead pedal
+  and shifter, and the Polar mount, which is painted by a sheet the mesh never embeds at all.
+
 - **The model-swap badge squeezed a bike's name off its card.** Sitting in the row beside the
   name, it competed with it for width — and the name is what gave, collapsing to nothing on
   the one bike that had swaps. It now sits under the name instead, where nothing else is
