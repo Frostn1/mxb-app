@@ -2,7 +2,31 @@
 
 ## 2026-08-26
 
+### Added
+- **The Pose tab can take a photograph.** Five backdrops to stand a rider against — studio,
+  white, daylight, sunset and dusk, each with its own light and ground — a clean frame that
+  hides the grab dots and the on-canvas panels, and a Save photo button that writes a PNG at
+  twice the size of the panel it was framed in. Open the preview full screen first for a
+  bigger one. Nothing is downloaded for any of it.
+
+- **The rider can sit on the bike.** A new "On bike" view in the Pose tab puts the two
+  together instead of side by side, worked out rather than eyeballed: the bike's own setup
+  file names where its seat is, the rider's up and forward are read off its rig, and the two
+  are brought into one frame. The placement sliders still nudge either half from there. A bike
+  whose setup file names no seat says so on the button rather than guessing a height. There's
+  a new "Sit on bike" ready-made move to fold the legs round it.
+
 ### Changed
+- **The Pose tab shows the kit the Rider tab has.** The two used to keep separate copies and
+  only ever agreed when Presets handed them the same thing at the same moment, so a look
+  composed next door was not the look being posed. One kit now sits above both tabs: every
+  pick, paint and show-on-model toggle is on screen in both.
+
+- **Dragging a limb is half as fast, and finer with Shift held.** One-to-one with the cursor
+  meant a joint near its pivot swung the whole 60° in a couple of centimetres of mouse. A drag
+  still reaches anywhere — it solves again from wherever the dot now is — it just stops
+  snapping away.
+
 - **Installing a downloaded mod is faster, and the app stays responsive while it happens.**
   Every byte used to be written to disk three times — the archive, the unpacked copy, then a
   third copy into the mods folder — for files that were deleted moments later. The last of
@@ -18,6 +42,27 @@
   Uploads are deliberately exempt — their response doesn't arrive until the last byte is sent.
 
 ### Fixed
+- **The ready-made poses did the opposite of what they said.** Each was a fixed turn in
+  degrees on a bone's own axes, and a bone's axes are whatever its author left them as — so
+  "Legs wider" pulled the game's main rider's knees from 28 cm apart to 13, while widening
+  another model's, and "Left leg forward" moved neither knee forward at all. A move is now a
+  place to send a joint — "the knee, 9 cm to the rider's own left" — solved with the same
+  machinery a drag uses, against axes read off the model itself. Checked against both riders
+  the game ships (`scripts/pose-moves-check.mjs`). A move a model can't make — leaning, on a
+  rig that binds no spine — isn't offered rather than doing nothing when clicked.
+
+- **Boots stayed behind when the legs moved.** A boots mod shipping both feet as one mesh was
+  never carried by the pose at all; it now travels with the knees. And which foot went on
+  which leg assumed the rider's left was always the same way along X, which is false on half
+  the models installed — including one of the game's own — so a boot sat on one leg and
+  followed the other's. Read off the rig now.
+
+- **One hip dragged the whole body on riders that bind only their limbs.** The game's
+  `default_mx_c` rider carries the arms and legs and no spine, and every chain whose parent was
+  missing was hung off whatever bone happened to precede it in the file — the right leg off the
+  left leg's twist, both arms off the right leg. Turning one hip swung all of it. Those chains
+  now stand on their own.
+
 - **The rider came apart in every 3D preview.** The rig `rider.edf` carries is stored once per
   level of detail — the game's own riders hold three copies of the same 64 bones — and the app
   read all of them. Every bone then had two namesakes to hang off, the skeleton closed into a
