@@ -418,6 +418,13 @@ export interface BikeRig {
   /** Where the wheels ride. Null when the `.geom` names no axles. */
   frontAxle: Vec3 | null;
   rearAxle: Vec3 | null;
+  /**
+   * Where a rider sits, from the `.geom`'s `seat_height_ref`. Null when it names none.
+   *
+   * The bike's own statement of where its seat is — nothing in the mesh marks one — in the
+   * same frame as the axles above, which is what lets the viewer stand a rider on it.
+   */
+  seat: Vec3 | null;
 }
 
 export interface BikeModel {

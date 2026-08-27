@@ -650,6 +650,19 @@ export function paintStudioStage(name: string, png: ArrayBuffer): Promise<string
   });
 }
 
+/**
+ * Write a photo of the 3D preview to a path the user picked in a save dialog.
+ *
+ * Same shape as {@link paintStudioStage} and for the same reason: a 4K frame is megabytes, so
+ * the PNG is the request body and the destination rides in a header — percent-encoded, since
+ * a header is ASCII and a pictures folder is usually under somebody's name.
+ */
+export function photoSave(dest: string, png: ArrayBuffer): Promise<string> {
+  return invoke<string>("photo_save", png, {
+    headers: { "x-dest": encodeURIComponent(dest) },
+  });
+}
+
 /** The file a save would write, resolved but not written — so we can ask before replacing. */
 export function paintStudioTarget(
   fileName: string,

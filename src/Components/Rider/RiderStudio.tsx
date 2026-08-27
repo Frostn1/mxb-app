@@ -5,28 +5,20 @@ import { useT, type TKey } from "../../i18n/context";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
-import type { Loadout, RiderPart } from "../../types";
+import type { RiderPart } from "../../types";
 import {
   presetsSave,
-  scanBikeTargets,
   scanGearRepairs,
   repairGear,
   type GearRepair,
 } from "../../api/mods";
 import { ViewerPanel } from "../Viewer/ViewerPanel";
 import { SlotField } from "../Presets/SlotField";
-import {
-  SLOTS,
-  SLOT_GROUPS,
-  EMPTY_LOADOUT,
-  loadScans,
-  pickedModel,
-  type Scans,
-  type SlotDef,
-} from "../../lib/presets";
+import { SLOTS, SLOT_GROUPS, pickedModel, type SlotDef } from "../../lib/presets";
 import { useGearPaints } from "../../lib/useGearPaints";
 import { useConfig } from "../../Context/Config";
 import { Combobox } from "../ui/combobox";
+import { useRiderKit } from "./RiderKitContext";
 
 const RIDER_GROUPS = SLOT_GROUPS.filter((g) => g.id !== "bike");
 
@@ -59,35 +51,26 @@ const TOGGLES: { part: RiderPart["part"]; label: TKey }[] = [
   { part: "boots", label: "category.boots" },
 ];
 
-interface RiderStudioProps {
-  initialLoadout?: Loadout | null;
-  /** The bike the incoming preset was built against, so the pair view opens on it. */
-  initialBike?: string | null;
-  onLoaded?: () => void;
-}
-
-export default function RiderStudio({
-  initialLoadout,
-  initialBike,
-  onLoaded,
-}: RiderStudioProps) {
+export default function RiderStudio() {
   const t = useT();
   // A build with no geometry decoder can't draw a real bike, and a cartoon stand-in next to
   // a real rider reads as the preset having resolved to that. Rider only there, as before.
   const { bikePreview } = useConfig();
-  const [scans, setScans] = useState<Scans | null>(null);
-  const [loadout, setLoadout] = useState<Loadout>(EMPTY_LOADOUT);
-  // The bike the loadout's paint and model swap are read against. Not part of a loadout —
-  // a preset dresses whichever bike it's applied to — so it's picked here.
-  const [bikes, setBikes] = useState<string[]>([]);
-  const [bike, setBike] = useState("");
+  // The kit itself is held above this tab and the Pose tab, so the two show one rider.
+  const {
+    scans,
+    bikes,
+    loadout,
+    setSlot,
+    bike,
+    setBike,
+    hidden,
+    toggleHidden,
+    reload,
+    error,
+  } = useRiderKit();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  // Nothing hidden to start. Protection used to be, back when it came out of the loader as
-  // a grey blob scaled to the whole torso — with the piece drawn as authored there's no
-  // reason to hide the slot the rider tab is most often opened for.
-  const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
-  const [error, setError] = useState<string | null>(null);
   // Gear the game can't reach where it was installed — loose in an area root, or packaged and
   // buried a folder deep. See `gearrepair` on the Rust side. Surfaced here because this is the
   // tab where the damage shows: the model is missing from its picker, or listed under the
@@ -135,26 +118,6 @@ export default function RiderStudio({
     return () => ro.disconnect();
   }, [widen, previewW]);
 
-  const setSlot = useCallback((key: keyof Loadout, value: string) => {
-    setLoadout((prev) => ({ ...prev, [key]: value }));
-  }, []);
-
-  const toggle = useCallback((part: RiderPart["part"]) => {
-    setHidden((prev) =>
-      prev.includes(part) ? prev.filter((p) => p !== part) : [...prev, part],
-    );
-  }, []);
-
-  useEffect(() => {
-    if (initialLoadout) {
-      setLoadout(initialLoadout);
-      // The handed-over bike wins even before the scan lands — the picker below keeps a
-      // value it doesn't recognise rather than snapping to the first installed bike.
-      if (initialBike) setBike(initialBike);
-      onLoaded?.();
-    }
-  }, [initialLoadout, initialBike, onLoaded]);
-
   const onSave = useCallback(async () => {
     const nm = name.trim();
     if (!nm) {
@@ -174,33 +137,19 @@ export default function RiderStudio({
   }, [name, loadout, t]);
 
   const load = useCallback(async () => {
-    setError(null);
-    try {
-      const sc = await loadScans();
-      setScans(sc);
-      // Kit, gloves and profile goggles are all looked up by rider profile. Presets gets
-      // one for free from the captured loadout; a fresh Rider tab has none, which left
-      // those slots empty. Seed the first installed profile unless one is already set.
-      setLoadout((prev) =>
-        prev.rider || !sc.riderProfiles.length ? prev : { ...prev, rider: sc.riderProfiles[0] },
-      );
-      // Every bike a paint can be installed for, plus the ids read out of the profiles —
-      // the OEM bikes only exist inside the locked archive, so a profile is the only place
-      // their id can be found until someone installs a paint for one.
-      const bs = await scanBikeTargets().catch(() => [] as string[]);
-      setBikes(bs);
-      setBike((b) => (b || bs[0] || ""));
-    } catch (e) {
-      setError(String(e));
-    }
+    await reload();
     // Never fatal: a mods folder that can't be inspected for this is still a mods folder,
     // and the tab has to open either way.
     setRepairs(await scanGearRepairs().catch(() => []));
-  }, []);
+  }, [reload]);
 
+  // Only the repairs on mount — the kit above this tab has already scanned the mods folder,
+  // and doing it again here would read the whole thing twice every time the tab is opened.
   useEffect(() => {
-    void load();
-  }, [load]);
+    void scanGearRepairs()
+      .then(setRepairs)
+      .catch(() => setRepairs([]));
+  }, []);
 
   const onRepair = useCallback(
     async (r: GearRepair) => {
@@ -334,7 +283,7 @@ export default function RiderStudio({
             </span>
             {TOGGLES.map(({ part, label }) => (
               <label key={part} className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                <Switch checked={!hidden.includes(part)} onCheckedChange={() => toggle(part)} />
+                <Switch checked={!hidden.includes(part)} onCheckedChange={() => toggleHidden(part)} />
                 {t(label)}
               </label>
             ))}

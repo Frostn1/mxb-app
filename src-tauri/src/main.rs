@@ -1199,6 +1199,45 @@ async fn paint_studio_stage(request: tauri::ipc::Request<'_>) -> Result<String, 
     .map_err(|e| format!("paint_studio_stage task failed: {e}"))?
 }
 
+/// Write a photo of the 3D preview to a path the user picked in a save dialog.
+///
+/// Raw body and a header, for the same reason [`paint_studio_stage`] takes one: a 4K frame is
+/// megabytes and JSON would send it as a list of numbers. The path is percent-encoded, because
+/// a header has to be ASCII and a Windows user's pictures folder is under their name.
+///
+/// Nothing is resolved or relocated here — the dialog already asked, and the file goes exactly
+/// where it said. A `.png` is enforced so a typed name can't quietly write PNG bytes to
+/// something that isn't one.
+#[tauri::command]
+async fn photo_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err("photo_save expects the PNG bytes as the request body".into());
+    };
+    let raw = request
+        .headers()
+        .get("x-dest")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let dest = percent_encoding::percent_decode_str(raw).decode_utf8_lossy().into_owned();
+    if dest.is_empty() {
+        return Err("photo_save needs a destination".into());
+    }
+    let png = png.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut path = std::path::PathBuf::from(&dest);
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) {
+            path.set_extension("png");
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{dir:?}: {e}"))?;
+        }
+        std::fs::write(&path, &png).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("photo_save task failed: {e}"))?
+}
+
 /// The file a save would write, resolved but not written — so the UI can ask before
 /// replacing a paint that's already there.
 #[tauri::command]
@@ -7626,6 +7665,7 @@ fn main() {
             paint_studio_load,
             paint_studio_pixels,
             paint_studio_stage,
+            photo_save,
             paint_studio_target,
             paint_studio_save,
             paint_studio_extract,
@@ -9666,6 +9706,37 @@ mod viewer_tests {
         assert_eq!(nodes[2].submeshes[0].texture.as_deref(), Some("hide"));
         // An untextured material, and an id past the end of the table, both still render.
         assert_eq!(nodes[2].submeshes[1].texture.as_deref(), Some("rider"));
+    }
+
+    /// Investigation aid: a rider's rig as JSON, in the frame the viewer draws it in.
+    ///
+    /// The two turns `body_rig` puts a rig through are what make the difference between this
+    /// and `edf::tests::rig_dump`, and they are what the front end's ready-made moves are
+    /// stated against — so this is the shape to check those against.
+    ///
+    /// `MXB_EDF_FILE=…/rider.edf cargo test rig_json -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn rig_json() {
+        let Ok(path) = std::env::var("MXB_EDF_FILE") else {
+            eprintln!("set MXB_EDF_FILE to run");
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read edf");
+        let mut rig = super::edf::parse_skeleton(&bytes);
+        super::edf::transform_skeleton(&mut rig, [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for b in rig.iter() {
+            let o = b.origin();
+            for a in 0..3 {
+                lo[a] = lo[a].min(o[a]);
+                hi[a] = hi[a].max(o[a]);
+            }
+        }
+        if super::body_is_z_up([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]) {
+            super::edf::transform_skeleton(&mut rig, super::BODY_STAND_UP);
+        }
+        println!("{}", serde_json::to_string(&rig).expect("serialise"));
     }
 
     /// The bug this replaced: material indices count into the model's own texture list, and
