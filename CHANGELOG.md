@@ -29,6 +29,21 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
+## 2026-08-28
+
+### Fixed
+
+- **Protected model swaps wouldn't open in the 3D viewer.** A model bought from a creator ships
+  its mesh sealed, and the viewer handed those bytes straight to the parser — which found no
+  mesh header and reported the bike as empty. The result was *"holds no readable mesh"* on a
+  model that runs perfectly in game. Bike files are now unwrapped the way gear and paints
+  always have been, loose files and packed entries alike.
+- **One failure message was blaming cloud sync for everything.** Three unrelated faults reached
+  it — a file that never finished downloading, a mesh that didn't decode, and a mesh that read
+  but held no parts — and all three sent players hunting through their OneDrive settings. Each
+  now says what actually happened, and the failure writes the mesh names, sizes and headers it
+  saw to the log, which it never did before.
+
 ## 2026-08-27 — v0.11.0 — Pose the rider, and a Designer that handles layers
 
 ### Added
