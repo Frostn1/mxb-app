@@ -5905,6 +5905,8 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        // The one thing voice needs and cannot yet work out for itself.
+        voice::session::set_current_server(&address);
         publish_paints_soon(&app, &cfg, None);
         live_sync_session(&app, Some(address.clone()));
         // We know exactly where they're going, so this syncs that server alone.
@@ -6112,14 +6114,18 @@ fn voice_devices() -> voice::Devices {
 fn set_voice_enabled(
     app: tauri::AppHandle,
     monitor: State<voice::Monitor>,
+    session: State<voice::session::Session>,
     enabled: bool,
 ) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.voice_enabled = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-    // Turning voice off must close the microphone, not just stop transmitting from it.
+    // Turning voice off must close the microphone, not just stop transmitting from it — and
+    // it must do so now. The supervisor would notice within a few seconds, which is the
+    // wrong answer to "I turned it off, is my mic still open?".
     if !enabled {
         monitor.stop();
+        session.leave();
     }
     overlay::register(&app, &cfg)
 }
@@ -6177,13 +6183,32 @@ fn set_voice_toggle_to_talk(app: tauri::AppHandle, toggle: bool) -> Result<(), S
 #[tauri::command]
 fn set_voice_levels(
     app: tauri::AppHandle,
+    session: State<voice::session::Session>,
     input_gain: f32,
     output_volume: f32,
 ) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.voice_input_gain = input_gain.clamp(0.0, 4.0);
     cfg.voice_output_volume = output_volume.clamp(0.0, 1.0);
+    // Straight through to a running session as well as to disk: dragging the volume slider
+    // while people are talking should change what you hear, not what you hear next time.
+    session.send(voice::engine::Command::Volume(cfg.voice_output_volume));
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Who is in voice on this server right now, and who is talking.
+///
+/// The panel also gets this pushed as a `voice-status` event; this is for the first paint,
+/// before anything has changed.
+#[tauri::command]
+fn voice_status(session: State<voice::session::Session>) -> voice::engine::Status {
+    session.status()
+}
+
+/// Silence one rider, for as long as this session lasts.
+#[tauri::command]
+fn voice_mute(session: State<voice::session::Session>, peer_id: String, muted: bool) {
+    session.send(voice::engine::Command::Mute { peer_id, muted });
 }
 
 /// Open the mic and start reporting its level as `voice-input-level`.
@@ -7347,6 +7372,7 @@ fn main() {
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
         .manage(voice::Monitor::default())
+        .manage(voice::session::Session::default())
         .setup(|app| {
             log::info!("MXB App {} starting", env!("CARGO_PKG_VERSION"));
 
@@ -7541,6 +7567,9 @@ fn main() {
             // Notice the game starting (Steam or Play button) to re-arm FrostMod for the
             // session and check the mods folder is really on disk.
             sessionwatch::start(handle);
+            // Voice follows the rider onto whatever server they join, and off it again.
+            // There is nothing to press: the supervisor is the whole of "joining a room".
+            voice::session::start(handle);
             shop_session::load_session(handle);
             shop_catalog_session::load(handle);
             mxb_session::load(handle);
@@ -7689,6 +7718,8 @@ fn main() {
             set_overlay_enabled,
             set_overlay_hotkey,
             voice_devices,
+            voice_status,
+            voice_mute,
             set_voice_enabled,
             set_preview_tyres,
             set_voice_input_device,

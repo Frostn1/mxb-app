@@ -1,10 +1,9 @@
 //! Microphone and speaker plumbing for in-game voice.
 //!
 //! This is the device half of voice chat: which microphone we listen to, which output the
-//! other riders come out of, how loud, and the key that opens the mic. There is no codec
-//! and no network here yet — those land with the voice room on `mxb-agent`. What this
-//! module gives the player is the part they have to get right *before* any of that can
-//! help them: proof that the app can hear them, and proof they'll hear everyone else.
+//! other riders come out of, how loud, and the key that opens the mic. What it gives the
+//! player is the part they have to get right *before* any of the rest can help them: proof
+//! that the app can hear them, and proof they'll hear everyone else.
 //!
 //! Two deliberate choices:
 //!
@@ -127,7 +126,7 @@ fn collect<I: Iterator<Item = cpal::Device>>(list: Option<I>, default: Option<&s
 /// `wanted` blank → the system default, which is the setting's whole meaning. A name we
 /// can't find → the default too, but the caller is told, because a player who picked a
 /// specific headset needs to know they're not on it.
-fn resolve(wanted: &str, input: bool) -> Result<(cpal::Device, Option<String>), String> {
+pub(super) fn resolve(wanted: &str, input: bool) -> Result<(cpal::Device, Option<String>), String> {
     let host = cpal::default_host();
     let default = || {
         if input { host.default_input_device() } else { host.default_output_device() }

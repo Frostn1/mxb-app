@@ -2057,6 +2057,44 @@ export function onVoicePtt(cb: (down: boolean) => void): Promise<UnlistenFn> {
   return listen<boolean>("voice-ptt", (e) => cb(e.payload));
 }
 
+/** One other rider in voice on this server. */
+export type VoicePeer = {
+  peerId: string;
+  /** What they call themselves in game. A label — never trusted as an identity. */
+  riderName: string;
+  /** Their race number, or 0 before they are on the grid. */
+  raceNum: number;
+  /** The direct connection to them is up. False while it is still being made, and for
+   *  anyone whose router we cannot get through to. */
+  connected: boolean;
+  talking: boolean;
+  muted: boolean;
+};
+
+export type VoiceStatus = {
+  joined: boolean;
+  /** The server this room belongs to. */
+  server: string;
+  peers: VoicePeer[];
+  /** Why voice isn't working, when it isn't. */
+  error: string | null;
+};
+
+/** Who is in voice right now. The panel also gets these pushed; this is the first paint. */
+export function voiceStatus(): Promise<VoiceStatus> {
+  return invoke<VoiceStatus>("voice_status");
+}
+
+/** Silence one rider for the rest of this session. */
+export function voiceMute(peerId: string, muted: boolean): Promise<void> {
+  return invoke<void>("voice_mute", { peerId, muted });
+}
+
+/** Fires whenever the room changes — someone joined, left, started or stopped talking. */
+export function onVoiceStatus(cb: (status: VoiceStatus) => void): Promise<UnlistenFn> {
+  return listen<VoiceStatus>("voice-status", (e) => cb(e.payload));
+}
+
 /** Toggle watching the mods folder to reload the game on external changes. */
 export function setWatchModsReload(enabled: boolean): Promise<void> {
   return invoke<void>("set_watch_mods_reload", { enabled });

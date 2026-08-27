@@ -299,3 +299,12 @@ export function isServerKey(value: unknown): value is string {
   return !/[\u0000-\u001f\u007f]/.test(key);
 }
 
+
+/**
+ * How long a presence heartbeat counts for before the rider is treated as gone.
+ *
+ * Shared rather than per-caller: the paint roster and the voice room both decide who is on a
+ * server from the same rows, and two answers to "is this rider still here" would be one bug
+ * waiting for the day the numbers drifted apart.
+ */
+export const PRESENCE_TTL_MS = 10 * 60 * 1000;

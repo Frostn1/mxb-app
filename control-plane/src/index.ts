@@ -39,14 +39,22 @@ import {
   isSlot,
   MAX_BOOTSTRAP_LOG,
   MAX_PAINT_BYTES,
+  PRESENCE_TTL_MS,
 } from "./validate";
+import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
+import { VoiceRoom } from "./voiceroom";
 
 interface Account {
   id: string;
   rider_name: string;
   steam_id: string | null;
   guid: string | null;
+  /** `invited` (an invite code was claimed) or `device` (self-serve, voice only). */
+  kind: string;
 }
+
+// The runtime finds a Durable Object class by its export from the entry module.
+export { VoiceRoom };
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -72,7 +80,9 @@ export default {
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      Promise.all([reapIdleServers(env), advanceImageBuild(env)]).then(() => undefined),
+      Promise.all([reapIdleServers(env), advanceImageBuild(env), pruneDeviceClaims(env)]).then(
+        () => undefined,
+      ),
     );
   },
 } satisfies ExportedHandler<Env>;
@@ -109,6 +119,11 @@ async function route(request: Request, env: Env): Promise<Response> {
   // Steam sign-in will replace the invite code without changing anything downstream.
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
 
+  // Self-serve signup, no invite. Voice is the reason this exists: a rider on a community
+  // server has nobody to talk to unless the people beside them can sign up too. The account
+  // it mints can report presence and join a voice room and nothing else — see `invitedOnly`.
+  if (method === "POST" && path === "/v1/account") return claimDeviceAccount(request, env);
+
   // The server list is public, and has to be: it is what the app's join picker offers, and
   // requiring a token meant a player who hadn't enrolled was shown an empty box asking for
   // an IP address — the exact question the registry exists to answer. Nothing here is
@@ -132,12 +147,23 @@ async function route(request: Request, env: Env): Promise<Response> {
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
+  // Open to every account, self-serve ones included: who you are, where you are, and the
+  // voice room for the server you said you are on.
   if (method === "GET" && path === "/v1/me") return me(account, env);
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
+  if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
+  if (method === "GET" && path === "/v1/voice/ice") return iceServers();
+  if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
+
+  // Everything past here needs an invite. The gate is the *position* rather than a check
+  // repeated on each route, so a route added below inherits it and one added above is a
+  // deliberate decision to open it up.
+  const gate = invitedOnly(account);
+  if (gate) return gate;
+
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
-  if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
   if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
@@ -157,6 +183,22 @@ async function route(request: Request, env: Env): Promise<Response> {
   return json(404, { error: "no such endpoint" });
 }
 
+/**
+ * Forget yesterday's signup counters.
+ *
+ * The counter only ever answers "how many today", so a row from last week is a record of an
+ * address we said we had no use for. Swept on the same cron as the idle servers.
+ */
+async function pruneDeviceClaims(env: Env): Promise<void> {
+  const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  try {
+    await env.DB.prepare("DELETE FROM device_claims WHERE day < ?").bind(cutoff).run();
+  } catch (err) {
+    // A sweep that fails is tomorrow's sweep's problem, not this invocation's.
+    console.error(JSON.stringify({ msg: "device claim sweep failed", error: String(err) }));
+  }
+}
+
 async function authenticate(request: Request, env: Env): Promise<Account | null> {
   const token = bearer(request.headers.get("Authorization"));
   if (!token) return null;
@@ -164,7 +206,7 @@ async function authenticate(request: Request, env: Env): Promise<Account | null>
   // of a secret in our code to leak timing.
   const hash = await hashToken(token);
   return await env.DB.prepare(
-    "SELECT id, rider_name, steam_id, guid FROM accounts WHERE token_hash = ?",
+    "SELECT id, rider_name, steam_id, guid, kind FROM accounts WHERE token_hash = ?",
   )
     .bind(hash)
     .first<Account>();
@@ -216,6 +258,18 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   // The only time the token is ever visible. It is stored as a digest, so it cannot be
   // shown again and a database leak yields nothing presentable.
   return json(201, { accountId: id, token, riderName: (riderName as string).trim() });
+}
+
+/**
+ * Refuse anything a self-serve account has no business doing.
+ *
+ * Voice is open to everyone with the app; publishing paints, registering a server and
+ * provisioning one are not, and none of them was ever written with an anonymous caller in
+ * mind. Called once, at the point in the route table where the open endpoints end.
+ */
+function invitedOnly(account: Account): Response | null {
+  if (account.kind === "invited") return null;
+  return json(403, { error: "that needs an invite" });
 }
 
 /**
@@ -1289,8 +1343,6 @@ async function connectedCount(
   }
 }
 
-/** How long a presence heartbeat counts for before the rider is treated as gone. */
-const PRESENCE_TTL_MS = 10 * 60 * 1000;
 
 /**
  * "I am on this server."
