@@ -242,7 +242,7 @@ export const ptBR: Translation = {
   "pose.move.leftLegForward": "Perna esquerda à frente",
   "pose.move.elbowsUp": "Cotovelos altos",
   "pose.move.leanIn": "Inclinar-se",
-  "pose.move.sitOnBike": "Sentar na moto",
+  "pose.move.ride": "Posição de pilotagem",
   "pose.axis.bend": "Flexão",
   "pose.axis.twist": "Torção",
   "pose.axis.splay": "Abertura",

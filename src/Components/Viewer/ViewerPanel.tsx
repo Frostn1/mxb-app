@@ -16,7 +16,7 @@ import { Dialog, DialogContent } from "../ui/dialog";
 import { ModelViewer, type CaptureFn, type ViewerMode } from "./ModelViewer";
 import { loadRiderModel, previewModelSwap } from "../../api/mods";
 import type { BikeModel, Loadout, PaintTexture, RiderPart } from "../../types";
-import { riderFrame, type PosableRig, type RiderPose } from "../../lib/riderPose";
+import { riderFrame, riderMount, type PosableRig, type RiderPose } from "../../lib/riderPose";
 import type { SceneId } from "../../lib/viewerScene";
 import { useT } from "../../i18n/context";
 import { TyresPicker } from "./TyresPicker";
@@ -275,15 +275,19 @@ export function ViewerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [withBike, bikeId, bikeVariant, tyresPick.tyres]);
 
-  // The rig the ready-made moves are stated against. Read here because this is where the
-  // rider model is: the studio next door only ever sees a loadout.
+  // The rig the ready-made moves are stated against, and the bike they reach for. Read here
+  // because this is where both models are: the studio next door only ever sees a loadout.
   useEffect(() => {
     if (!onRiderRig) return;
     const body = riderParts?.find((p) => p.part === "body" && p.nodes.length);
     const bones = body?.skeleton;
-    const frame = bones?.length ? riderFrame(bones, body?.nodes) : null;
-    onRiderRig(bones?.length && frame ? { bones, frame } : null);
-  }, [riderParts, onRiderRig]);
+    const frame = bones?.length ? riderFrame(bones) : null;
+    const mount =
+      riderParts && bikeModel && mode === "onBike"
+        ? riderMount(riderParts, bikeModel.nodes, bikeModel.rig)
+        : null;
+    onRiderRig(bones?.length && frame ? { bones, frame, mount } : null);
+  }, [riderParts, bikeModel, mode, onRiderRig]);
 
   // One way to take a photo, whichever canvas is up. The expanded dialog wins when it is
   // open — it is the bigger frame, and the one somebody opened to compose a shot in.

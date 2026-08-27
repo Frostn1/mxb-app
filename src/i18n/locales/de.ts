@@ -246,7 +246,7 @@ export const de: Translation = {
   "pose.move.leftLegForward": "Linkes Bein vor",
   "pose.move.elbowsUp": "Ellbogen hoch",
   "pose.move.leanIn": "Nach vorn lehnen",
-  "pose.move.sitOnBike": "Aufs Motorrad setzen",
+  "pose.move.ride": "Sitzposition",
   "pose.axis.bend": "Beugen",
   "pose.axis.twist": "Drehen",
   "pose.axis.splay": "Spreizen",

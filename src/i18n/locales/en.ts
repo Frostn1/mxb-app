@@ -236,7 +236,7 @@ export const en = {
   "pose.move.leftLegForward": "Left leg forward",
   "pose.move.elbowsUp": "Elbows up",
   "pose.move.leanIn": "Lean in",
-  "pose.move.sitOnBike": "Sit on bike",
+  "pose.move.ride": "Riding position",
   "pose.axis.bend": "Bend",
   "pose.axis.twist": "Twist",
   "pose.axis.splay": "Splay",
