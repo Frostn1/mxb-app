@@ -2,6 +2,11 @@
 
 ## 2026-08-26
 
+### Fixed
+- **The Library's model-swap badge never appeared.** A bike is listed in the Library as its
+  `<Bike>.pkz` archive, so the row's name carries the extension, while a model swap is keyed by
+  the bike folder beside it — the two never matched, and the badge was invisible on every bike.
+
 ### Added
 - **A bike with no wheels to solve against now stands on its suspension.** "Level wheels"
   needs wheel meshes and axles to measure against; a model that ships neither fell back to the
