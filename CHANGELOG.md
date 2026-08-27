@@ -50,6 +50,18 @@
 
 ## 2026-08-26
 
+### Changed
+- **Voice now works whichever way you joined a server.** It used to start only when the app
+  itself launched the game at a server, which left out everyone who picks one from the game's
+  own browser — and quietly kept you in the old room if you moved servers without quitting.
+  FrostMod knows which server the game is on and now says so, so voice follows you. It also
+  knows your race number, which is what will place your voice on the track when proximity
+  lands. Riders are grouped by the server's own name, because that is the one thing everyone
+  on it sees the same — an address only reaches the people whose app launched the game, and
+  half a grid in one room and half in another is the failure that looks like nothing is
+  wrong.
+
+
 ### Added
 - **Voice chat, on any server, with nothing to set up.** Turn it on, pick a microphone, and
   that is the whole of it: joining a server puts you in voice with everyone else there who

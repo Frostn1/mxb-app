@@ -23,6 +23,8 @@
 //!   pipe and a dropped frame must not become a click.
 //! - [`signal`] — the control-plane end: claim an account if this app doesn't have one, join
 //!   the room for the server we're on, and relay ICE.
+//! - [`gamesession`] — which server the game is on and where every rider is, read out of
+//!   FrostMod's shared block. The app cannot see any of it for itself.
 //! - [`stun`] — what this socket looks like from outside, without which two riders behind
 //!   home routers can describe themselves to each other and still never connect.
 //! - [`ring`] — the lock-free handoff to the audio callback, which may not wait for anything.
@@ -43,6 +45,7 @@ pub mod codec;
 pub mod devices;
 pub mod engine;
 pub mod frame;
+pub mod gamesession;
 pub mod jitter;
 pub mod mesh;
 pub mod ring;
