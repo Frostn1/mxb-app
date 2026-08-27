@@ -2,6 +2,15 @@
 
 ## 2026-08-27
 
+### Fixed
+- **Opening a bike in 3D was doing half its work for nothing.** Every texture packed inside a
+  model was run through a resize on the way in — including the ones that were already the
+  size the viewer wants, which is how bike sheets are almost always authored. Resampling a
+  1024×1024 sheet to 1024×1024 is pure cost, eight times over on a typical bike. Skipped now,
+  the same way loose paints have always skipped it: **opening a bike goes from 201 ms to
+  127 ms**, and the sheets are a touch sharper for never having been resampled. Rider gear,
+  helmets and model swaps read their textures the same way and all get the same back.
+
 ### Changed
 - **A track's 3D view appears about seven times faster.** The fine terrain is a 2048×2048
   grid — four million vertices — and three.js worked out its lighting the general way, by
