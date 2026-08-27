@@ -63,6 +63,10 @@ export function toMatrix(m: number[]): THREE.Matrix4 {
  *
  * Each bone's *local* transform is its rest placement seen from its parent, so the tree at
  * rest reproduces the bind matrices exactly and an unposed body draws as it always did.
+ *
+ * A bone is only ever hung off one earlier in the list — the rig comes back depth-first, so
+ * that holds of every real one. It has to be a tree: a bone inside a cycle hangs off no root,
+ * nothing ever works out where it is, and every vertex it holds is pulled into the origin.
  */
 export function buildSkeleton(bones: Bone[]): {
   roots: THREE.Bone[];
@@ -74,16 +78,15 @@ export function buildSkeleton(bones: Bone[]): {
   bones.forEach((b, i) => {
     const bone = made[i];
     bone.name = b.name;
+    const parent = b.parent !== null && b.parent !== undefined && b.parent < i ? b.parent : null;
     const world = toMatrix(b.bind);
     const local =
-      b.parent === null || b.parent === undefined
-        ? world
-        : toMatrix(bones[b.parent].bind).invert().multiply(world);
+      parent === null ? world : toMatrix(bones[parent].bind).invert().multiply(world);
     local.decompose(bone.position, bone.quaternion, bone.scale);
     // Kept so a pose can turn the bone without losing the rest it turns from.
     bone.userData.restQuaternion = bone.quaternion.clone();
-    if (b.parent === null || b.parent === undefined) roots.push(bone);
-    else made[b.parent].add(bone);
+    if (parent === null) roots.push(bone);
+    else made[parent].add(bone);
   });
   const skeleton = new THREE.Skeleton(
     made,

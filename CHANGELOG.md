@@ -18,6 +18,16 @@
   Uploads are deliberately exempt — their response doesn't arrive until the last byte is sent.
 
 ### Fixed
+- **The rider came apart in every 3D preview.** The rig `rider.edf` carries is stored once per
+  level of detail — the game's own riders hold three copies of the same 64 bones — and the app
+  read all of them. Every bone then had two namesakes to hang off, the skeleton closed into a
+  cycle, and the bones caught inside one never got placed at all: the body folded into a heap
+  and its gear went with it, in the plain Rider view as much as in Pose. Only the first copy is
+  read now, the one that goes with the mesh being drawn, and a bone may only hang off one the
+  file has already listed, so a rig can never close on itself. The viewer also draws the skinned
+  body **only** while something is actually posed — at rest it is the same rigid mesh it was
+  before posing existed, so the rest of the app can't be spoiled by a rig it reads wrongly.
+
 - **A model swap rendered as a plain white bike.** A mesh that ships companion sheets
   (`_n`/`_s`/`_r`) writes a second texture index into each material record, in a field the app
   required to be zero — so every material table was thrown out and every part fell through to
@@ -38,6 +48,15 @@
   the bike folder beside it — the two never matched, and the badge was invisible on every bike.
 
 ### Added
+- **Move a model swap to another bike, or delete it.** Every model set now carries its own
+  menu, in the Locker and on the Library's bike cards alike. **Move** asks which bike to send it
+  to and, when the model owns liveries, which of those travel with it — off by default, because
+  a paint is drawn for one bike's layout and rarely fits another; anything left behind stays put
+  rather than being thrown away. **Delete** sends the set to the Trash, so a model you can't
+  download again is recoverable, and leaves the bike's liveries alone. Neither is offered for
+  the model currently on the bike: its files are loose at the bike root, so moving them would
+  take the bike's live model out from under it — switch to another model first.
+
 - **View a model swap in 3D straight from the Library.** Each variant in a bike card's model
   list now carries its own **View 3D**, drawing the bike as that swap would leave it — the
   same preview the Locker offers, without having to go there to find it. Nothing on disk
@@ -51,7 +70,7 @@
   exactly as it was authored.
 
   This reads the skeleton `rider.edf` has carried all along and nobody was using: 98 named
-  bones, of which 65 bind the mesh. The file stores no vertex weights — the game rebuilds the
+  bones, of which 64 bind the mesh. The file stores no vertex weights — the game rebuilds the
   binding at load — so the app rebuilds it too, from the per-bone boxes the file *does* carry
   plus the distance to the limb each bone actually swings. Helmet, boots and body armour ride
   along on the bones their own `gfx.cfg` names, so the kit follows the pose.
