@@ -9230,8 +9230,46 @@ mod viewer_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Every base texture a bike decodes, with its source size and what it cost.
+    ///
+    /// `MXB_REAL_PKZ=<bike.pkz> cargo test bike_texture_costs -- --ignored --nocapture`
     #[test]
-    #[ignore]
+    #[ignore = "needs a real bike — set MXB_REAL_PKZ"]
+    fn bike_texture_costs() {
+        let Ok(path) = std::env::var("MXB_REAL_PKZ") else {
+            eprintln!("set MXB_REAL_PKZ to run");
+            return;
+        };
+        let files = super::gather_bike_files(std::path::Path::new(&path)).expect("gather");
+
+        println!("\n  source            decode    src px      -> stored");
+        let mut total = std::time::Duration::ZERO;
+        for (name, data) in &files {
+            let bn = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+            if let Some(stem) = bn.strip_suffix(".tga") {
+                let t = std::time::Instant::now();
+                let tex = super::paint::decode_image(stem, data);
+                let d = t.elapsed();
+                total += d;
+                if let Some(tex) = tex {
+                    println!("  {stem:<16}{d:>9.2?}  {:>6}KB  -> {}x{}",
+                             data.len() / 1024, tex.width, tex.height);
+                }
+            } else if bn.ends_with(".edf") {
+                let t = std::time::Instant::now();
+                let texs = super::paint::extract_edf_textures(data);
+                let d = t.elapsed();
+                total += d;
+                println!("  {bn:<16}{d:>9.2?}  {:>6}KB  -> {} embedded texture(s)",
+                         data.len() / 1024, texs.len());
+                for tex in &texs {
+                    println!("      {:<12}            -> {}x{}", tex.name, tex.width, tex.height);
+                }
+            }
+        }
+        println!("\n  base textures total {total:.2?}\n");
+    }
+
     /// Where a bike view's time goes, uncached.
     ///
     /// `MXB_REAL_PKZ=<bike.pkz> cargo test bike_load_timing -- --ignored --nocapture`

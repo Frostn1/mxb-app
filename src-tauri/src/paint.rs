@@ -381,6 +381,19 @@ pub fn extract_edf_textures_where(
         .filter(|t| want(&t.name))
         .filter_map(|t| {
             let rgba = crate::edf::inflate_texture(edf, t)?;
+            // Same rejection `RgbaImage::from_raw` performed: a plane whose pixels don't
+            // match its dimensions is dropped rather than stored at the wrong size.
+            if rgba.len() != (t.width as usize) * (t.height as usize) * 4 {
+                return None;
+            }
+            // Already within the budget — store the pixels as they are. `thumbnail` resizes
+            // whatever it is given, and bike sheets are authored at exactly `MAX_EDGE`, so
+            // this used to resample 1024² to 1024² once per sheet: 78 ms of the 120 ms a
+            // bike spent on textures, for pixels that came out identical. [`into_texture`]
+            // has always had this guard; this path was missing it.
+            if t.width.max(t.height) <= MAX_EDGE {
+                return Some(store_rgba(&t.name, t.width, t.height, rgba));
+            }
             let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
                 t.width, t.height, rgba,
             )?);
