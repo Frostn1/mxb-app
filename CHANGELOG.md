@@ -13,6 +13,16 @@
 
 ## 2026-08-27
 
+### Fixed
+- **Testing the microphone did nothing on macOS.** The app never told macOS what it wanted a
+  microphone for, and macOS refuses one on those terms — silently. The permission prompt
+  never appeared, the stream opened, and not a single sample was ever delivered, so the
+  level bar sat at zero looking like a bug in the app. It now says what it wants the
+  microphone for, so macOS asks you. If the microphone is opened and still sends nothing,
+  the mic test says so and tells you where to look, instead of leaving you watching a bar
+  that will never move.
+
+
 ### Added
 - **You hear each rider from where they actually are.** A rider alongside you is loud and on
   that side; one two corners back is faint; one across the circuit isn't there at all. You

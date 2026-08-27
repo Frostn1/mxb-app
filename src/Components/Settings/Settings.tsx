@@ -64,6 +64,7 @@ import {
   setVoiceLevels,
   voiceMeterStart,
   voiceMeterStop,
+  onVoiceInputDead,
   voiceTestOutput,
   onVoiceStatus,
   onVoiceInputLevel,
@@ -556,12 +557,20 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   useEffect(() => {
     if (!micTesting) return;
     let un: (() => void) | undefined;
+    let unDead: (() => void) | undefined;
     void onVoiceInputLevel(({ rms }) => setMicLevel(rms)).then((f) => (un = f));
+    // A bar that never moves is the same picture whether the mic is muted or the OS is
+    // refusing us. This is the engine telling us which, so the page can say it.
+    void onVoiceInputDead((message) => {
+      toast.error(t("voice.micFailed"), { description: message, duration: 12000 });
+      setMicTesting(false);
+    }).then((f) => (unDead = f));
     return () => {
       un?.();
+      unDead?.();
       void voiceMeterStop();
     };
-  }, [micTesting]);
+  }, [micTesting, t]);
 
   useEffect(() => {
     return () => {

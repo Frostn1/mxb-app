@@ -33,6 +33,13 @@ const TEST_TONE_MS: u64 = 600;
 /// A polite 440 Hz at low amplitude — this plays into a headset someone is wearing.
 const TEST_TONE_ADSR_PEAK: f32 = 0.18;
 
+/// How long the meter waits for the microphone to deliver anything at all before saying so.
+///
+/// Not silence — a muted mic is silence and that is fine. This is *no callbacks*, which
+/// means the operating system opened a stream it never intends to feed. Long enough that a
+/// slow device isn't accused, short enough that nobody is left watching a dead bar.
+const NO_AUDIO_AFTER: Duration = Duration::from_millis(1500);
+
 /// One selectable audio device.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -150,6 +157,69 @@ pub(super) fn resolve(wanted: &str, input: bool) -> Result<(cpal::Device, Option
     Ok((default().ok_or_else(|| no_device_msg(input))?, None))
 }
 
+// ---------------------------------------------------------------------------------------
+// Permission
+// ---------------------------------------------------------------------------------------
+
+/// Whether the operating system will actually let us open the microphone.
+///
+/// This exists because the failure it catches is invisible. On macOS an app without
+/// permission still gets a stream from cpal — `build_input_stream` succeeds, `play`
+/// succeeds, and then not one sample is ever delivered. Every symptom points at our code
+/// and none of them is our code, so the meter has to be able to say "the OS is refusing"
+/// rather than sitting at zero looking broken.
+///
+/// `Ok(())` covers "granted" and "not asked yet": the prompt appears by itself the first
+/// time the microphone is opened, so not-yet-asked is a stream away from granted.
+#[cfg(target_os = "macos")]
+pub(super) fn permission() -> Result<(), String> {
+    use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+
+    // SAFETY: a class method on a framework class, taking a framework constant. The static
+    // is `Option` because the symbol could in principle be absent; treat that as "can't
+    // tell", which is the same as not-yet-asked.
+    let status = unsafe {
+        let Some(audio) = AVMediaTypeAudio else { return Ok(()) };
+        AVCaptureDevice::authorizationStatusForMediaType(audio)
+    };
+
+    match status {
+        AVAuthorizationStatus::Denied => Err("macOS is blocking the microphone for MXB App. \
+            Open System Settings → Privacy & Security → Microphone and switch MXB App on."
+            .to_string()),
+        AVAuthorizationStatus::Restricted => Err("This Mac does not allow microphone access \
+            for MXB App — usually a Screen Time or device-management restriction."
+            .to_string()),
+        // Authorized, or NotDetermined: opening the stream is what raises the prompt.
+        _ => Ok(()),
+    }
+}
+
+/// Everywhere else the operating system either asks on its own or does not gate the
+/// microphone at all, and a stream that fails does so loudly.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn permission() -> Result<(), String> {
+    Ok(())
+}
+
+/// What to say when the microphone was opened and then never produced a sample.
+///
+/// The cause is nearly always the operating system, and on macOS it is nearly always
+/// permission — including the case `permission()` cannot see, where the app is running
+/// unbundled from a terminal and macOS attributes the request to the terminal instead.
+fn dead_microphone_msg() -> String {
+    if cfg!(target_os = "macos") {
+        "The microphone opened but isn't sending any audio. On macOS that is almost always \
+         permission: check System Settings → Privacy & Security → Microphone. If this is a \
+         development build, the permission belongs to the terminal you launched it from."
+            .to_string()
+    } else {
+        "The microphone opened but isn't sending any audio. Check it isn't muted or in use \
+         by another app, and try picking it explicitly above."
+            .to_string()
+    }
+}
+
 fn no_device_msg(input: bool) -> String {
     if input {
         "No microphone is available.".to_string()
@@ -178,6 +248,9 @@ impl Monitor {
         self.stop();
 
         let (tx, rx) = mpsc::channel::<()>();
+        // Asked before anything is opened: a refusal here is the one failure that would
+        // otherwise look exactly like success.
+        permission()?;
         // Built here rather than on the thread so a bad device reports an error to the
         // caller, instead of the UI starting a meter that silently never ticks.
         let (device, warning) = resolve(device, true)?;
@@ -266,12 +339,25 @@ fn run_meter<R: Runtime>(
     let _ = ready.send(Ok(()));
 
     let tick = Duration::from_millis(1000 / METER_HZ);
+    // Whether the microphone has ever handed us a single sample. An open stream that never
+    // calls back is what "the mic test does nothing" actually is, on every platform and for
+    // every reason — permission refused, a device that vanished, a driver that gave up —
+    // and it is indistinguishable from working until somebody says so.
+    let started_at = std::time::Instant::now();
+    let mut heard_anything = false;
+    let mut reported_silence = false;
+
     loop {
         match stop.recv_timeout(tick) {
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
         let n = samples.swap(0, Ordering::Relaxed);
+        heard_anything |= n > 0;
+        if !heard_anything && !reported_silence && started_at.elapsed() > NO_AUDIO_AFTER {
+            reported_silence = true;
+            let _ = app.emit("voice-input-dead", dead_microphone_msg());
+        }
         let s = f32::from_bits(sum_sq.swap(0.0f32.to_bits(), Ordering::Relaxed));
         let p = f32::from_bits(peak.swap(0.0f32.to_bits(), Ordering::Relaxed));
         let rms = if n > 0 { (s / n as f32).sqrt() } else { 0.0 };

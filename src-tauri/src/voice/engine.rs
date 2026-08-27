@@ -581,6 +581,10 @@ fn publish_status(status: &Arc<Mutex<Status>>, server: &str, talkers: &HashMap<S
 
 /// Open the microphone, converting whatever it gives us to 48 kHz mono on the way in.
 fn open_input(config: &Config, ring: Arc<Ring>) -> Result<cpal::Stream, String> {
+    // The same check the meter makes, for the same reason: without permission the stream
+    // opens and stays silent, and the rider would be transmitting nothing to a room that
+    // looks perfectly healthy.
+    super::devices::permission()?;
     let (device, warning) = super::devices::resolve(&config.input_device, true)?;
     if let Some(warning) = warning {
         log::info!("[voice] {warning}");

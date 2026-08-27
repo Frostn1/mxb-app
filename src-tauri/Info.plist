@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the bundle's Info.plist by Tauri at build time.
+
+  macOS refuses the microphone outright to an app that does not say what it wants one for,
+  and refuses it *silently*: the permission prompt never appears, the stream opens, and not
+  one sample is ever delivered. That reads as "the mic test is broken" rather than as an
+  operating system saying no, which is exactly what was reported.
+
+  The string is what the system shows in its prompt, so it is written for the person reading
+  it at that moment, not for us.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MXB App uses your microphone for in-game voice chat with the riders on your server. It is only open while voice chat is switched on, and nothing is ever recorded.</string>
+</dict>
+</plist>

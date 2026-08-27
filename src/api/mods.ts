@@ -2134,6 +2134,12 @@ export function onVoiceInputLevel(cb: (level: VoiceLevel) => void): Promise<Unli
   return listen<VoiceLevel>("voice-input-level", (e) => cb(e.payload));
 }
 
+/** Fires when the microphone was opened and then sent no audio at all — which is what
+ *  "the mic test does nothing" actually is. The payload says what to check. */
+export function onVoiceInputDead(cb: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>("voice-input-dead", (e) => cb(e.payload));
+}
+
 /** Fires on both edges of the push-to-talk key: `true` on press, `false` on release. */
 export function onVoicePtt(cb: (down: boolean) => void): Promise<UnlistenFn> {
   return listen<boolean>("voice-ptt", (e) => cb(e.payload));

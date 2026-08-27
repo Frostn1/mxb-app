@@ -145,6 +145,10 @@ tungstenite = { version = "0.24", default-features = false, features = [
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSFileManager", "NSURL", "NSError", "NSString"] }
+# Whether macOS has actually granted this app the microphone. cpal will happily open a
+# stream that never delivers a sample when it hasn't, which reads as "the mic test is
+# broken" rather than as "the OS is refusing" — so we ask, and say so.
+objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat"] }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
