@@ -1317,6 +1317,479 @@ fn submesh_transform(
     chain
 }
 
+// ── The rider's rig ───────────────────────────────────────────────────────────
+
+/// One bone of a rider's rig.
+///
+/// A rider `.edf` carries a skeleton alongside its mesh — 98 bones on every model the game
+/// ships or a modder builds on, named `riderRIG_Pelvis`, `riderRIG_LeftElbow` and so on. The
+/// game references those names itself, in each rider's `gfx.cfg`, to hang the helmet off the
+/// head and the boots off the knees.
+///
+/// Only the bones the mesh actually binds to are returned: 65 of the 98. The rest are markers
+/// — every `_end` tip, and the ankles and toes, which belong to the boots rather than the body
+/// and so carry no region of this mesh.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bone {
+    pub name: String,
+    /// Index into the same list. `None` for the root, and only for the root.
+    pub parent: Option<usize>,
+    /// Bone space → model space, at rest.
+    pub bind: Mat4,
+    /// Model space → bone space, at rest. Stored in the file; `bind` is derived from it.
+    pub inv_bind: Mat4,
+    /// The slice of the mesh this bone covers, **in bone space** — so it must be taken through
+    /// `bind` before it means anything in the model's frame.
+    pub aabb_lo: [f32; 3],
+    pub aabb_hi: [f32; 3],
+}
+
+impl Bone {
+    /// Where the bone sits at rest, in model space.
+    pub fn origin(&self) -> [f32; 3] {
+        [self.bind[3], self.bind[7], self.bind[11]]
+    }
+}
+
+// A record runs `[marker][matrix ×1 or ×2][index words][AABB]`, and the name of the bone it
+// belongs to sits *before* it — the name that trails a record is the next bone's. The marker
+// says how many matrices follow; with two, the second is the inverse bind.
+//
+// The index words are variable-length and not all zero at the end — `Rider+` ends every run
+// with three zero words, `Rider+RolledUp` puts a count in the last of them — so the record is
+// closed by finding the box instead: 24 bytes that read as a real AABB, immediately followed
+// by a name.
+const BONE_ONE_MATRIX: u32 = 0x1000;
+const BONE_AABB_BACK: usize = 24;
+// The longest index-word run seen is the root's, at 22 words.
+const BONE_FIELDS_MAX: usize = 200;
+
+struct BoneBlock {
+    /// The name that follows this record — which belongs to the *next* bone, not this one.
+    next_name: String,
+    inv_bind: Option<Mat4>,
+    aabb_lo: [f32; 3],
+    aabb_hi: [f32; 3],
+    name_end: usize,
+}
+
+/// Read the rig out of a rider `.edf`. Bikes and gear carry none, and give an empty list.
+///
+/// Bones come back in file order, which is depth-first from the root.
+pub fn parse_skeleton(b: &[u8]) -> Vec<Bone> {
+    if b.len() < HEADER_START || &b[0..4] != b"EDF\0" {
+        return Vec::new();
+    }
+    let mut blocks: Vec<BoneBlock> = Vec::new();
+    let mut o = 0usize;
+    while o + 16 <= b.len() {
+        match read_block(b, o) {
+            Some(bl) => {
+                o = bl.name_end;
+                blocks.push(bl);
+            }
+            // A name is variable-length, so the next record starts at no fixed step from
+            // this one — walk a byte at a time. The marker word turns nearly every offset
+            // away immediately.
+            None => o += 1,
+        }
+    }
+    // Pair each name with the record that follows it, and keep the bones that bind.
+    let mut names = Vec::new();
+    let mut binds = Vec::new();
+    for pair in blocks.windows(2) {
+        let (Some(inv_bind), name) = (pair[1].inv_bind, &pair[0].next_name) else {
+            continue;
+        };
+        names.push(name.clone());
+        binds.push((inv_bind, pair[1].aabb_lo, pair[1].aabb_hi));
+    }
+    let parents = rig_parents(&names);
+    names
+        .into_iter()
+        .zip(binds)
+        .zip(parents)
+        .map(|((name, (inv_bind, aabb_lo, aabb_hi)), parent)| Bone {
+            name,
+            parent,
+            bind: rigid_inverse(&inv_bind),
+            inv_bind,
+            aabb_lo,
+            aabb_hi,
+        })
+        .collect()
+}
+
+/// One record starting at `o`, or `None` if that isn't one.
+///
+/// Anchored on the marker word and the matrix that follows it, then read forward to the three
+/// zero words, the AABB and the name — the only combination that pins down a variable-length
+/// index run without guessing where it ends.
+fn read_block(b: &[u8], o: usize) -> Option<BoneBlock> {
+    let marker = u32le(b, o);
+    let two = match marker {
+        BONE_ONE_MATRIX => false,
+        0x1800 => true,
+        _ => return None,
+    };
+    let first = o + 4;
+    // The first matrix is the bone's own placement relative to its parent. It is never read —
+    // the inverse bind that follows already says where the bone is in the model — and it is
+    // deliberately *not* required to be rigid: `Rider+RolledUp` scales some of its bones, and
+    // insisting on a rigid one there threw away the whole rig.
+    if !affine_at(b, first) {
+        return None;
+    }
+    let inv_bind = if two { Some(read_mat4(b, first + 64)?) } else { None };
+    let fields = first + if two { 128 } else { 64 };
+    // Step over the index words: the name is the first thing that reads as one with three zero
+    // words and a finite AABB in front of it.
+    let mut step = 0usize;
+    while step <= BONE_FIELDS_MAX {
+        let name_off = fields + step + BONE_AABB_BACK;
+        if name_off >= b.len() {
+            return None;
+        }
+        if let Some(bone) = read_tail(b, name_off, inv_bind) {
+            return Some(bone);
+        }
+        step += 4;
+    }
+    None
+}
+
+/// The `[AABB][name]` that closes a record, read backwards from the name.
+fn read_tail(b: &[u8], name_off: usize, inv_bind: Option<Mat4>) -> Option<BoneBlock> {
+    let aabb = name_off.checked_sub(BONE_AABB_BACK)?;
+    let mut corner = [0f32; 6];
+    for (i, slot) in corner.iter_mut().enumerate() {
+        *slot = f32le(b, aabb + i * 4);
+        if !slot.is_finite() || slot.abs() > 10.0 {
+            return None;
+        }
+    }
+    // A box, not just six floats: the low corner is low on every axis. Index words that happen
+    // to read as small floats almost never do this, and a bone with no region reads all zeros,
+    // which passes.
+    if (0..3).any(|i| corner[i] > corner[i + 3]) {
+        return None;
+    }
+    let name = bone_name(b, name_off)?;
+    Some(BoneBlock {
+        name_end: name_off + name.len(),
+        next_name: name,
+        inv_bind,
+        aabb_lo: [corner[0], corner[1], corner[2]],
+        aabb_hi: [corner[3], corner[4], corner[5]],
+    })
+}
+
+/// Is there a placement matrix at `o` — finite, sane in size, bottom row `0, 0, 0, 1`?
+///
+/// Weaker than [`read_mat4`] on purpose: it admits a matrix that scales as well as turns.
+fn affine_at(b: &[u8], o: usize) -> bool {
+    if o + 64 > b.len() {
+        return false;
+    }
+    (0..16).all(|i| {
+        let v = f32le(b, o + i * 4);
+        v.is_finite() && v.abs() < 100.0
+    }) && (0..3).all(|i| f32le(b, o + 48 + i * 4) == 0.0)
+        && f32le(b, o + 60) == 1.0
+}
+
+/// A bone's name, NUL-terminated.
+///
+/// Not [`plausible_name`]: that caps at 31 characters, which is right for the mesh-node names
+/// it was written for and two characters short of `riderRIG_RightShoulderTwist1_end`. Reading
+/// the rig with that cap silently drops the two bones whose *records* those names close.
+fn bone_name(b: &[u8], o: usize) -> Option<String> {
+    if o >= b.len() || !b[o].is_ascii_alphabetic() {
+        return None;
+    }
+    let mut e = o;
+    while e < b.len() && e - o < 64 {
+        let c = b[e];
+        if c == 0 {
+            break;
+        }
+        if !(c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) {
+            return None;
+        }
+        e += 1;
+    }
+    (2..=63).contains(&(e - o)).then(|| String::from_utf8_lossy(&b[o..e]).into_owned())
+}
+
+/// Rebuild the bone tree from the names.
+///
+/// The rig is the game's own: every rider model carries the same bones under the same names,
+/// and `gfx.cfg` spells several of them out, so the naming is a contract rather than a habit.
+/// A bone whose named parent isn't in the list — the ankles and the `_end` markers are dropped
+/// before this runs — climbs to the nearest named ancestor that is. Anything the rules don't
+/// recognise falls back to the bone listed before it, which can't cycle: the file lists a rig
+/// depth-first, so a parent always precedes its children.
+fn rig_parents(names: &[String]) -> Vec<Option<usize>> {
+    let stems: Vec<String> = names.iter().map(|n| bone_stem(n).to_ascii_lowercase()).collect();
+    let index: std::collections::HashMap<&str, usize> =
+        stems.iter().enumerate().map(|(i, s)| (s.as_str(), i)).collect();
+    (0..names.len())
+        .map(|i| {
+            if i == 0 {
+                return None;
+            }
+            // Climb past ancestors this model doesn't bind to.
+            let mut want = named_parent(&stems[i]);
+            for _ in 0..8 {
+                match want {
+                    None => break,
+                    Some(ref w) => match index.get(w.as_str()) {
+                        Some(&p) if p != i => return Some(p),
+                        _ => want = named_parent(w),
+                    },
+                }
+            }
+            Some(i - 1)
+        })
+        .collect()
+}
+
+/// The part of a bone's name that describes the joint: `riderRIG_LeftKnee` → `LeftKnee`.
+fn bone_stem(name: &str) -> &str {
+    match name.to_ascii_lowercase().find("rig_") {
+        Some(at) => &name[at + 4..],
+        None => name,
+    }
+}
+
+/// The name of the bone this one hangs off, by the rig's own naming.
+fn named_parent(stem: &str) -> Option<String> {
+    // `LeftToe_end` hangs off `LeftToe`, and so does every other tip marker.
+    if let Some(base) = stem.strip_suffix("_end") {
+        return Some(base.to_string());
+    }
+    // `LeftHipTwist1` and `LeftKneeTwist` both hang off the joint they twist about.
+    if let Some(at) = stem.find("twist") {
+        return Some(stem[..at].to_string());
+    }
+    let (side, joint) = match stem.strip_prefix("left") {
+        Some(rest) => ("left", rest),
+        None => match stem.strip_prefix("right") {
+            Some(rest) => ("right", rest),
+            None => ("", stem),
+        },
+    };
+    // The links the rig's own numbering doesn't spell out.
+    let fixed = match joint {
+        "root" => return None,
+        "pelvis" => "root",
+        "spine1" => "pelvis",
+        "neck1" => "spine4",
+        "head" => "neck2",
+        "armour" => "spine4",
+        "collar" => "neck1",
+        "shoulder" => return Some(format!("{side}collar")),
+        "elbow" => return Some(format!("{side}shoulder")),
+        "wrist" => return Some(format!("{side}elbow")),
+        "hip" => "pelvis",
+        "knee" => return Some(format!("{side}hip")),
+        "ankle" => return Some(format!("{side}knee")),
+        "toe" => return Some(format!("{side}ankle")),
+        _ => "",
+    };
+    if !fixed.is_empty() {
+        return Some(fixed.to_string());
+    }
+    // Everything numbered counts down its own chain: `Spine3` → `Spine2`, `LeftIndex2` →
+    // `LeftIndex1`. The first link of a finger hangs off the wrist.
+    let digit = joint.chars().last().filter(char::is_ascii_digit)?;
+    let base = &joint[..joint.len() - 1];
+    if digit == '1' {
+        return matches!(base, "thumb" | "index" | "middle" | "ring" | "pink" | "pinky")
+            .then(|| format!("{side}wrist"));
+    }
+    let prev = (digit as u8 - 1) as char;
+    Some(format!("{side}{base}{prev}"))
+}
+
+/// Put every bone through the same orthogonal transform, in place.
+///
+/// Used to bring a rig into the frame the viewer draws its mesh in. Both turns the mesh takes
+/// go through here — the mirror into right-handed space and, for a Z-up model, the turn that
+/// stands it up — and the rig must take exactly the same ones, or the skeleton ends up
+/// mirrored, or lying beside a standing body. A mirror is allowed: `r` only has to be
+/// orthogonal, not a rotation, and the inverse bind is rebuilt from the result either way.
+///
+/// The bone-space boxes are left alone: they are already in each bone's own frame, which moves
+/// with it.
+pub fn transform_skeleton(bones: &mut [Bone], r: [[f32; 3]; 3]) {
+    for bone in bones.iter_mut() {
+        let m = bone.bind;
+        let mut out = [0f32; 16];
+        for i in 0..3 {
+            for j in 0..4 {
+                out[i * 4 + j] = (0..3).map(|k| r[i][k] * m[k * 4 + j]).sum();
+            }
+        }
+        out[15] = 1.0;
+        bone.bind = out;
+        bone.inv_bind = rigid_inverse(&out);
+    }
+}
+
+/// How many bones one vertex may be shared between. Four is what every engine that skins on
+/// the GPU settles on, and what three.js takes.
+pub const SKIN_BONES_PER_VERTEX: usize = 4;
+
+/// The mesh's binding to its rig: four bones and four weights for every vertex, in the same
+/// order as the node's `positions`.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Skin {
+    /// `4 * vertex count` indices into the bone list.
+    pub indices: Vec<u16>,
+    /// `4 * vertex count` weights, each vertex's four summing to 1.
+    pub weights: Vec<f32>,
+}
+
+/// Work out which bones move which vertices.
+///
+/// The file doesn't say. A rider `.edf` stores its rig and its mesh and nothing that joins
+/// them: there is no weight anywhere in the 72 bytes a vertex occupies, and no table beside
+/// the rig either — the game rebuilds the binding at load, and so must we.
+///
+/// What the file *does* give is a box per bone, in that bone's own space, covering the part of
+/// the mesh it is responsible for. Those boxes cover the body — barely a vertex in a thousand
+/// falls outside all of them — but they overlap far too much to name a bone on their own: nine
+/// vertices in ten sit inside three or more. So they are used as a filter rather than an
+/// answer, and the choice among the bones that claim a vertex is made on distance: to the limb
+/// each bone actually swings, which is the run from that bone to its children, so that the
+/// thigh follows the hip and the shin follows the knee.
+pub fn skin_mesh(nodes: &[EdfNode], bones: &[Bone]) -> Skin {
+    let verts: usize = nodes.iter().map(|n| n.positions.len() / 3).sum();
+    let mut skin = Skin {
+        indices: vec![0; verts * SKIN_BONES_PER_VERTEX],
+        weights: vec![0.0; verts * SKIN_BONES_PER_VERTEX],
+    };
+    if bones.is_empty() || verts == 0 {
+        // Nothing to bind to: hang the whole mesh off bone zero so it still draws.
+        for i in 0..verts {
+            skin.weights[i * SKIN_BONES_PER_VERTEX] = 1.0;
+        }
+        return skin;
+    }
+    let limbs = limb_segments(bones);
+    let mut v = 0usize;
+    for node in nodes {
+        for p in node.positions.chunks_exact(3) {
+            let point = [p[0], p[1], p[2]];
+            weigh_vertex(&point, bones, &limbs, &mut skin, v);
+            v += 1;
+        }
+    }
+    skin
+}
+
+/// The run of flesh each bone swings: from the bone to each of its children, or the bone
+/// itself where it has none.
+fn limb_segments(bones: &[Bone]) -> Vec<Vec<([f32; 3], [f32; 3])>> {
+    let mut out: Vec<Vec<([f32; 3], [f32; 3])>> = vec![Vec::new(); bones.len()];
+    for bone in bones.iter() {
+        if let Some(p) = bone.parent {
+            out[p].push((bones[p].origin(), bone.origin()));
+        }
+    }
+    for (i, segs) in out.iter_mut().enumerate() {
+        if segs.is_empty() {
+            let o = bones[i].origin();
+            segs.push((o, o));
+        }
+    }
+    out
+}
+
+/// Pick this vertex's four bones and their shares.
+fn weigh_vertex(
+    point: &[f32; 3],
+    bones: &[Bone],
+    limbs: &[Vec<([f32; 3], [f32; 3])>],
+    skin: &mut Skin,
+    v: usize,
+) {
+    // Closeness, not distance, so the sums below stay well behaved where a vertex sits exactly
+    // on a bone. 1 mm is finer than any rider mesh resolves.
+    const EPS: f32 = 1e-3;
+    let mut best: Vec<(usize, f32)> = Vec::new();
+    let mut fallback = (0usize, f32::MAX);
+    for (i, bone) in bones.iter().enumerate() {
+        let d = limbs[i]
+            .iter()
+            .map(|(a, b)| point_to_segment(point, a, b))
+            .fold(f32::MAX, f32::min);
+        if d < fallback.1 {
+            fallback = (i, d);
+        }
+        if !claims(bone, point) {
+            continue;
+        }
+        best.push((i, 1.0 / (d + EPS).powi(2)));
+    }
+    // A vertex no box claims — a thousandth of them — goes to the nearest limb outright.
+    if best.is_empty() {
+        best.push((fallback.0, 1.0));
+    }
+    best.sort_by(|a, b| b.1.total_cmp(&a.1));
+    best.truncate(SKIN_BONES_PER_VERTEX);
+    let total: f32 = best.iter().map(|(_, w)| w).sum();
+    let base = v * SKIN_BONES_PER_VERTEX;
+    for (slot, (i, w)) in best.iter().enumerate() {
+        skin.indices[base + slot] = *i as u16;
+        skin.weights[base + slot] = w / total;
+    }
+}
+
+/// Does this bone's own box cover the point? The box is in bone space, so the point goes
+/// through the inverse bind first.
+fn claims(bone: &Bone, point: &[f32; 3]) -> bool {
+    if bone.aabb_lo == bone.aabb_hi {
+        return false; // a bone with no region of its own claims nothing
+    }
+    let m = &bone.inv_bind;
+    (0..3).all(|a| {
+        let p = m[a * 4] * point[0] + m[a * 4 + 1] * point[1] + m[a * 4 + 2] * point[2] + m[a * 4 + 3];
+        p >= bone.aabb_lo[a] && p <= bone.aabb_hi[a]
+    })
+}
+
+fn point_to_segment(p: &[f32; 3], a: &[f32; 3], b: &[f32; 3]) -> f32 {
+    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+    let len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+    let t = if len2 <= f32::EPSILON {
+        0.0
+    } else {
+        ((ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2).clamp(0.0, 1.0)
+    };
+    let d = [ap[0] - ab[0] * t, ap[1] - ab[1] * t, ap[2] - ab[2] * t];
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+}
+
+/// The inverse of a rigid placement: transpose the rotation, and turn the translation back
+/// through it.
+fn rigid_inverse(m: &Mat4) -> Mat4 {
+    let t = [m[3], m[7], m[11]];
+    let mut out = [0f32; 16];
+    for i in 0..3 {
+        for j in 0..3 {
+            out[i * 4 + j] = m[j * 4 + i];
+        }
+        out[i * 4 + 3] = -(0..3).map(|k| m[k * 4 + i] * t[k]).sum::<f32>();
+    }
+    out[15] = 1.0;
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1959,4 +2432,432 @@ rwheel_max = 0, -0.001, -0.5683\n";
             assert!(verts >= 8 && tris >= 1);
         }
     }
+
+
+
+
+    // ── The rig ───────────────────────────────────────────────────────────────
+
+    /// One record: `[marker][matrix ×1 or ×2][index words][0, 0, 0][AABB][name]`. The name that
+    /// closes a record belongs to the *next* bone, which is why the builder takes it that way.
+    fn bone_block(
+        next_name: &str,
+        inv_bind: Option<[f32; 16]>,
+        words: &[u32],
+        lo: [f32; 3],
+        hi: [f32; 3],
+    ) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&(if inv_bind.is_some() { 0x1800u32 } else { 0x1000 }).to_le_bytes());
+        let local = placed(0.0, 0.0, 0.0);
+        for m in std::iter::once(local).chain(inv_bind) {
+            for f in m {
+                v.extend_from_slice(&f.to_le_bytes());
+            }
+        }
+        for w in words.iter().chain(&[0, 0, 0]) {
+            v.extend_from_slice(&w.to_le_bytes());
+        }
+        for f in lo.iter().chain(&hi) {
+            v.extend_from_slice(&f.to_le_bytes());
+        }
+        v.extend_from_slice(next_name.as_bytes());
+        v.push(0);
+        v
+    }
+
+    fn placed(x: f32, y: f32, z: f32) -> [f32; 16] {
+        [1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, y, 0.0, 0.0, 1.0, z, 0.0, 0.0, 0.0, 1.0]
+    }
+
+    /// A bone at `(x, y, z)` stores the transform that takes the model *into* its frame.
+    fn bind_at(x: f32, y: f32, z: f32) -> [f32; 16] {
+        placed(-x, -y, -z)
+    }
+
+    fn rig_file(blocks: &[Vec<u8>]) -> Vec<u8> {
+        let mut v = b"EDF\0".to_vec();
+        v.resize(HEADER_START, 0);
+        for b in blocks {
+            v.extend_from_slice(b);
+        }
+        v
+    }
+
+    #[test]
+    fn reads_the_rig() {
+        // Index-word runs of different lengths, because the real file has both. The first
+        // record belongs to the mesh node, so it carries no bind of its own.
+        let bytes = rig_file(&[
+            bone_block("riderRIG_Root", None, &[0, 1, 1], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_Pelvis", Some(bind_at(0.0, 0.0, 0.0)), &[1, 1, 2], [0.0; 3], [0.0; 3]),
+            bone_block(
+                "riderRIG_LeftHip",
+                Some(bind_at(0.0, 0.0, -0.887)),
+                &[2, 2, 3, 14],
+                [-0.11, -0.14, -0.10],
+                [0.14, 0.14, 0.13],
+            ),
+            bone_block(
+                "riderRIG_LeftKnee",
+                Some(bind_at(0.085, 0.0, -0.864)),
+                &[3, 1, 4],
+                [-0.13, -0.13, -0.16],
+                [0.24, 0.10, 0.16],
+            ),
+        ]);
+        let rig = parse_skeleton(&bytes);
+        let names: Vec<&str> = rig.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["riderRIG_Root", "riderRIG_Pelvis", "riderRIG_LeftHip"]);
+        assert_eq!(rig[0].parent, None, "only the root is parentless");
+        assert_eq!(rig[1].parent, Some(0), "the pelvis hangs off the root");
+        assert_eq!(rig[2].parent, Some(1), "and the hip off the pelvis");
+        // The bind is derived from the stored inverse, so a bone reports where it really is.
+        let hip = rig[2].origin();
+        assert!((hip[2] + 0.864).abs() < 1e-5 && (hip[0] - 0.085).abs() < 1e-5, "{hip:?}");
+        assert_eq!(rig[1].origin(), [0.0, 0.0, -0.887]);
+    }
+
+    #[test]
+    fn a_bone_that_binds_nothing_is_left_out() {
+        // The ankles and every `_end` marker carry a local matrix and no inverse bind: they
+        // belong to the boots, not to this mesh, so they are not bones the body can be posed by.
+        let bytes = rig_file(&[
+            bone_block("riderRIG_Pelvis", None, &[0], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_LeftAnkle", Some(bind_at(0.0, 0.0, -0.887)), &[1], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_LeftToe", None, &[2], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_Head", None, &[3], [0.0; 3], [0.0; 3]),
+        ]);
+        let rig = parse_skeleton(&bytes);
+        assert_eq!(
+            rig.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
+            ["riderRIG_Pelvis"],
+            "only the bone whose record carries an inverse bind survives"
+        );
+    }
+
+    #[test]
+    fn a_bike_has_no_rig() {
+        // Vertex and index soup must not read as bone records.
+        let mut v = b"EDF\0".to_vec();
+        v.resize(HEADER_START, 0);
+        for i in 0..4000u32 {
+            v.extend_from_slice(&(i as f32 * 0.001).to_le_bytes());
+        }
+        assert!(parse_skeleton(&v).is_empty());
+        assert!(parse_skeleton(b"not an edf").is_empty());
+    }
+
+    #[test]
+    fn the_rig_naming_is_the_hierarchy() {
+        let p = |s: &str| super::named_parent(s);
+        assert_eq!(p("root"), None);
+        assert_eq!(p("pelvis").as_deref(), Some("root"));
+        // Numbered chains count themselves down.
+        assert_eq!(p("spine3").as_deref(), Some("spine2"));
+        assert_eq!(p("spine1").as_deref(), Some("pelvis"));
+        assert_eq!(p("neck1").as_deref(), Some("spine4"));
+        assert_eq!(p("head").as_deref(), Some("neck2"));
+        // Arms, both sides, down to the fingers.
+        assert_eq!(p("leftshoulder").as_deref(), Some("leftcollar"));
+        assert_eq!(p("leftelbow").as_deref(), Some("leftshoulder"));
+        assert_eq!(p("leftwrist").as_deref(), Some("leftelbow"));
+        assert_eq!(p("rightindex1").as_deref(), Some("rightwrist"));
+        assert_eq!(p("rightindex3").as_deref(), Some("rightindex2"));
+        // Legs.
+        assert_eq!(p("lefthip").as_deref(), Some("pelvis"));
+        assert_eq!(p("leftknee").as_deref(), Some("lefthip"));
+        assert_eq!(p("leftankle").as_deref(), Some("leftknee"));
+        assert_eq!(p("lefttoe").as_deref(), Some("leftankle"));
+        // Markers and twist bones hang off what they mark and what they twist about.
+        assert_eq!(p("lefttoe_end").as_deref(), Some("lefttoe"));
+        assert_eq!(p("leftkneetwist").as_deref(), Some("leftknee"));
+        assert_eq!(p("lefthiptwist1").as_deref(), Some("lefthip"));
+        assert_eq!(p("leftshouldertwist2").as_deref(), Some("leftshoulder"));
+        assert_eq!(p("leftkneetwist_end").as_deref(), Some("leftkneetwist"));
+        // The body armour hangs off the upper spine, which is where `gfx.cfg` puts the neck brace.
+        assert_eq!(p("armour").as_deref(), Some("spine4"));
+    }
+
+    #[test]
+    fn standing_the_rig_up_turns_it_with_the_mesh() {
+        // The same turn `stand_body_upright` gives a Z-up body: x = -x, y = -z, z = -y.
+        let r = [[-1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]];
+        let mut rig = parse_skeleton(&rig_file(&[
+            bone_block("riderRIG_Root", None, &[0], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_Pelvis", Some(bind_at(0.0, 0.0, 0.0)), &[1], [0.0; 3], [0.0; 3]),
+            bone_block("riderRIG_Head", Some(bind_at(0.0, 0.0, -0.9)), &[2], [0.0; 3], [0.0; 3]),
+        ]));
+        transform_skeleton(&mut rig, r);
+        let o = rig[1].origin();
+        assert!((o[1] - 0.9).abs() < 1e-5, "the pelvis stands up at y=0.9, got {o:?}");
+        assert!(o[0].abs() < 1e-5 && o[2].abs() < 1e-5, "and nowhere else: {o:?}");
+        // The inverse was rebuilt from the turned bind, not carried over.
+        let back = super::rigid_inverse(&rig[1].bind);
+        assert!(rig[1].inv_bind.iter().zip(back).all(|(a, b)| (a - b).abs() < 1e-5));
+    }
+
+    /// Investigation aid: print a rider's rig.
+    /// MXB_EDF_FILE=~/…/rider.edf cargo test rig_dump -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn rig_dump() {
+        let path = std::env::var("MXB_EDF_FILE").expect("set MXB_EDF_FILE");
+        let bytes = std::fs::read(&path).expect("read edf");
+        let rig = parse_skeleton(&bytes);
+        eprintln!("bones: {}", rig.len());
+        for (i, b) in rig.iter().enumerate() {
+            let p = b.parent.map(|p| rig[p].name.as_str()).unwrap_or("—");
+            let o = b.origin();
+            eprintln!("{i:3} {:32} parent={:28} at ({:7.3},{:7.3},{:7.3})", b.name, p, o[0], o[1], o[2]);
+        }
+    }
+
+    /// The real rig, against the model on disk.
+    ///
+    /// Checks it three ways, because a skeleton that parses is not the same as a skeleton that
+    /// is *right*: the tree the game's own `gfx.cfg` implies, limb lengths that belong to a
+    /// person, and every joint landing inside the body it is supposed to move.
+    #[test]
+    #[ignore]
+    fn real_rider_rig() {
+        let Ok(path) = std::env::var("MXB_EDF_FILE") else {
+            eprintln!("set MXB_EDF_FILE to run");
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read edf");
+        let rig = parse_skeleton(&bytes);
+        let nodes = parse(&bytes);
+        eprintln!("{}: {} bones bind of the rig's 98", path, rig.len());
+        assert!(rig.len() >= 40, "a rider binds most of its rig, got {}", rig.len());
+        assert_eq!(rig[0].name, "riderRIG_Root");
+        assert_eq!(rig[0].parent, None);
+        assert!(rig[1..].iter().all(|b| b.parent.is_some()), "only the root is parentless");
+
+        let at = |n: &str| rig.iter().position(|b| b.name == n).unwrap_or_else(|| panic!("no {n}"));
+        let ancestors = |n: &str| {
+            let (mut out, mut k) = (Vec::new(), rig[at(n)].parent);
+            while let Some(i) = k {
+                assert!(out.len() < rig.len(), "{n} loops");
+                out.push(rig[i].name.clone());
+                k = rig[i].parent;
+            }
+            out
+        };
+        // `lefthand { refobj = LeftWrist; endeffector = LeftElbow; root = LeftShoulder }`.
+        let arm = ancestors("riderRIG_LeftWrist");
+        assert!(arm.contains(&"riderRIG_LeftElbow".to_string()), "{arm:?}");
+        assert!(arm.contains(&"riderRIG_LeftShoulder".to_string()), "{arm:?}");
+        for b in &rig[1..] {
+            let up = ancestors(&b.name);
+            assert_eq!(up.last().map(String::as_str), Some("riderRIG_Root"), "{} → {up:?}", b.name);
+        }
+
+        // Limbs the length a person's are.
+        let span = |a: &str, c: &str| {
+            let (x, y) = (rig[at(a)].origin(), rig[at(c)].origin());
+            ((x[0] - y[0]).powi(2) + (x[1] - y[1]).powi(2) + (x[2] - y[2]).powi(2)).sqrt()
+        };
+        for (a, c, lo, hi) in [
+            ("riderRIG_LeftHip", "riderRIG_LeftKnee", 0.30, 0.45),
+            ("riderRIG_LeftShoulder", "riderRIG_LeftElbow", 0.18, 0.32),
+            ("riderRIG_LeftElbow", "riderRIG_LeftWrist", 0.18, 0.32),
+        ] {
+            let d = span(a, c);
+            assert!((lo..hi).contains(&d), "{a} → {c} is {d:.3} m");
+        }
+        // Left and right are mirrors of each other.
+        for (l, r) in [("riderRIG_LeftHip", "riderRIG_RightHip"), ("riderRIG_LeftElbow", "riderRIG_RightElbow")] {
+            let (a, b) = (rig[at(l)].origin(), rig[at(r)].origin());
+            assert!((a[0] + b[0]).abs() < 1e-3, "{l}/{r} are not mirrored: {a:?} {b:?}");
+        }
+
+        // Every joint inside the body it moves.
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for n in &nodes {
+            for v in n.positions.chunks_exact(3) {
+                for a in 0..3 {
+                    lo[a] = lo[a].min(v[a]);
+                    hi[a] = hi[a].max(v[a]);
+                }
+            }
+        }
+        for b in &rig {
+            let o = b.origin();
+            for a in 0..3 {
+                assert!(
+                    o[a] >= lo[a] - 0.02 && o[a] <= hi[a] + 0.02,
+                    "{} sits outside the mesh on axis {a}: {o:?} vs {lo:?}..{hi:?}",
+                    b.name
+                );
+            }
+        }
+    }
+
+
+    // ── Skinning ──────────────────────────────────────────────────────────────
+
+    fn boxed(name: &str, at: [f32; 3], half: f32) -> Vec<u8> {
+        bone_block(
+            name,
+            Some(bind_at(at[0], at[1], at[2])),
+            &[0],
+            [-half, -half, -half],
+            [half, half, half],
+        )
+    }
+
+    fn node_of(points: &[[f32; 3]]) -> EdfNode {
+        EdfNode {
+            name: "body".into(),
+            positions: points.iter().flatten().copied().collect(),
+            uvs: vec![0.0; points.len() * 2],
+            normals: vec![0.0; points.len() * 3],
+            indices: vec![],
+            submeshes: vec![],
+            texture: None,
+            placed: false,
+            materials: vec![],
+        }
+    }
+
+    /// A two-link arm along X: shoulder at the origin, elbow at 1, wrist at 2. A name leads
+    /// its record, so each block carries the *next* bone's name — see `bone_block`.
+    fn arm_rig() -> Vec<Bone> {
+        let rig = parse_skeleton(&rig_file(&[
+            bone_block("riderRIG_LeftShoulder", None, &[0], [0.0; 3], [0.0; 3]),
+            boxed("riderRIG_LeftElbow", [0.0, 0.0, 0.0], 1.2),
+            boxed("riderRIG_LeftWrist", [1.0, 0.0, 0.0], 1.2),
+            boxed("riderRIG_LeftThumb1", [2.0, 0.0, 0.0], 1.2),
+        ]));
+        assert_eq!(
+            rig.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
+            ["riderRIG_LeftShoulder", "riderRIG_LeftElbow", "riderRIG_LeftWrist"]
+        );
+        assert_eq!(rig[0].origin(), [0.0, 0.0, 0.0]);
+        assert_eq!(rig[1].origin(), [1.0, 0.0, 0.0]);
+        rig
+    }
+
+    #[test]
+    fn every_vertex_is_bound_and_its_weights_add_up() {
+        let rig = arm_rig();
+        let nodes = [node_of(&[[0.2, 0.0, 0.0], [0.9, 0.1, 0.0], [1.5, 0.0, 0.0], [40.0, 40.0, 40.0]])];
+        let skin = skin_mesh(&nodes, &rig);
+        assert_eq!(skin.indices.len(), 4 * SKIN_BONES_PER_VERTEX);
+        for v in 0..4 {
+            let w: f32 = skin.weights[v * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX].iter().sum();
+            assert!((w - 1.0).abs() < 1e-5, "vertex {v} weights sum to {w}");
+            assert!(
+                skin.indices[v * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX]
+                    .iter()
+                    .all(|&i| (i as usize) < rig.len()),
+                "vertex {v} names a bone that isn't there"
+            );
+        }
+    }
+
+    #[test]
+    fn a_vertex_follows_the_limb_it_sits_on() {
+        let rig = arm_rig();
+        let shoulder = rig.iter().position(|b| b.name.ends_with("Shoulder")).unwrap();
+        let elbow = rig.iter().position(|b| b.name.ends_with("Elbow")).unwrap();
+        // Upper arm, forearm, and a point right on the elbow.
+        let nodes = [node_of(&[[0.5, 0.0, 0.0], [1.5, 0.0, 0.0], [1.0, 0.0, 0.0]])];
+        let skin = skin_mesh(&nodes, &rig);
+        let heaviest = |v: usize| {
+            let s = &skin.weights[v * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX];
+            let at = s.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
+            skin.indices[v * SKIN_BONES_PER_VERTEX + at] as usize
+        };
+        assert_eq!(heaviest(0), shoulder, "the upper arm swings from the shoulder");
+        assert_eq!(heaviest(1), elbow, "the forearm swings from the elbow");
+        // At the joint the vertex is shared rather than snapped to one side.
+        let at_joint = &skin.weights[2 * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX];
+        assert!(at_joint.iter().filter(|w| **w > 0.05).count() >= 2, "{at_joint:?}");
+    }
+
+    #[test]
+    fn a_far_vertex_still_lands_on_a_limb() {
+        // No box claims it, so it goes to the nearest limb outright rather than nowhere: a
+        // vertex bound to nothing would sit still while the rest of the body moved.
+        let rig = arm_rig();
+        let nodes = [node_of(&[[9.0, 9.0, 0.0]])];
+        let skin = skin_mesh(&nodes, &rig);
+        assert_eq!(skin.weights[0], 1.0);
+        assert!(skin.weights[1..SKIN_BONES_PER_VERTEX].iter().all(|w| *w == 0.0));
+        assert!((skin.indices[0] as usize) < rig.len());
+    }
+
+    #[test]
+    fn a_mesh_with_no_rig_still_draws() {
+        let nodes = [node_of(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])];
+        let skin = skin_mesh(&nodes, &[]);
+        assert_eq!(skin.weights[0], 1.0);
+        assert_eq!(skin.weights[SKIN_BONES_PER_VERTEX], 1.0);
+    }
+
+    /// The real body against its real rig.
+    #[test]
+    #[ignore]
+    fn real_rider_skin() {
+        let Ok(path) = std::env::var("MXB_EDF_FILE") else {
+            eprintln!("set MXB_EDF_FILE to run");
+            return;
+        };
+        let bytes = std::fs::read(&path).expect("read edf");
+        let rig = parse_skeleton(&bytes);
+        let nodes = parse(&bytes);
+        let skin = skin_mesh(&nodes, &rig);
+        let verts: usize = nodes.iter().map(|n| n.positions.len() / 3).sum();
+        assert_eq!(skin.weights.len(), verts * SKIN_BONES_PER_VERTEX);
+
+        let mut used = std::collections::HashSet::new();
+        let mut shared = 0usize;
+        for v in 0..verts {
+            let w = &skin.weights[v * SKIN_BONES_PER_VERTEX..][..SKIN_BONES_PER_VERTEX];
+            let total: f32 = w.iter().sum();
+            assert!((total - 1.0).abs() < 1e-4, "vertex {v} sums to {total}");
+            if w.iter().filter(|x| **x > 0.05).count() > 1 {
+                shared += 1;
+            }
+            for slot in 0..SKIN_BONES_PER_VERTEX {
+                if w[slot] > 0.0 {
+                    used.insert(skin.indices[v * SKIN_BONES_PER_VERTEX + slot]);
+                }
+            }
+        }
+        eprintln!("{verts} vertices, {} of the {} bones used, {shared} shared between bones", used.len(), rig.len());
+        // A skin that puts everything on one bone, or leaves limbs unbound, is not a skin.
+        assert!(used.len() > rig.len() / 2, "only {} bones move anything", used.len());
+        assert!(shared * 4 > verts, "hardly any vertex is shared — the seams will tear");
+
+        // Left stays left: no vertex on one side of the body may be pulled by the other's arm.
+        let at = |n: &str| rig.iter().position(|b| b.name == n);
+        if let (Some(l), Some(r)) = (at("riderRIG_LeftWrist"), at("riderRIG_RightWrist")) {
+            for (side, other) in [(l, r), (r, l)] {
+                let reach: Vec<f32> = (0..verts)
+                    .filter(|v| {
+                        (0..SKIN_BONES_PER_VERTEX)
+                            .any(|s| skin.indices[v * SKIN_BONES_PER_VERTEX + s] as usize == side
+                                && skin.weights[v * SKIN_BONES_PER_VERTEX + s] > 0.2)
+                    })
+                    .map(|v| nodes[0].positions[v * 3])
+                    .collect();
+                if reach.is_empty() {
+                    continue;
+                }
+                let x = rig[side].origin()[0];
+                let wrong = reach.iter().filter(|v| v.signum() != x.signum()).count();
+                assert!(
+                    wrong * 20 < reach.len().max(20),
+                    "{} pulls {wrong} of {} vertices from the other side",
+                    rig[side].name,
+                    reach.len()
+                );
+                let _ = other;
+            }
+        }
+    }
+
 }

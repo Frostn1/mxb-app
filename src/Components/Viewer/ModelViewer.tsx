@@ -5,7 +5,14 @@ import { ChevronDown, Move, Move3d, Rotate3d, SlidersHorizontal, ZoomIn } from "
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import { Row, Slider } from "@/Components/ui/controls";
-import type { BikeRig, EdfNode, PaintTexture, RiderPart, Vec3 } from "../../types";
+import type { BikeRig, Bone, EdfNode, PaintTexture, RiderPart, Skin, Vec3 } from "../../types";
+import {
+  applyPose,
+  boneDelta,
+  buildSkeleton,
+  NO_POSE,
+  type RiderPose,
+} from "../../lib/riderPose";
 import { textureBytes } from "../../api/mods";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
@@ -594,8 +601,13 @@ function straightenYaw(geom: THREE.BufferGeometry, rotM: THREE.Matrix4): number 
  * model does, so a paint switch has no business rebuilding vertex buffers and re-uploading
  * a whole bike to the GPU.
  */
-function useNodeGeometries(nodes: EdfNode[]) {
+/**
+ * `skin` binds the vertices to a rig. Its four-per-vertex arrays run across every node in
+ * order, so each node takes the slice that belongs to it.
+ */
+function useNodeGeometries(nodes: EdfNode[], skin?: Skin | null) {
   const geoms = useMemo(() => {
+    let vertsSoFar = 0;
     return nodes.map((n) => {
       const g = new THREE.BufferGeometry();
       g.setAttribute(
@@ -613,11 +625,25 @@ function useNodeGeometries(nodes: EdfNode[]) {
       if (!n.normals.length) g.computeVertexNormals();
       // Material groups so a multi-submesh node can wear one texture per submesh.
       n.submeshes.forEach((sm, i) => g.addGroup(sm.triStart * 3, sm.triCount * 3, i));
+      const count = n.positions.length / 3;
+      if (skin) {
+        const from = vertsSoFar * 4;
+        const to = from + count * 4;
+        g.setAttribute(
+          "skinIndex",
+          new THREE.Uint16BufferAttribute(Uint16Array.from(skin.indices.slice(from, to)), 4),
+        );
+        g.setAttribute(
+          "skinWeight",
+          new THREE.Float32BufferAttribute(Float32Array.from(skin.weights.slice(from, to)), 4),
+        );
+      }
+      vertsSoFar += count;
       g.computeBoundingBox();
       g.computeBoundingSphere();
       return g;
     });
-  }, [nodes]);
+  }, [nodes, skin]);
   useEffect(() => () => geoms.forEach((g) => g.dispose()), [geoms]);
   return geoms;
 }
@@ -657,15 +683,26 @@ function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THRE
   });
 }
 
+/**
+ * The rider's body.
+ *
+ * With a rig and a skin it draws as a skinned mesh, so a turn at the hip carries the thigh
+ * with it. Without one — a model whose `.edf` carries no skeleton — it draws exactly as it
+ * did before, rigid, which is also what happens when nobody is posing.
+ */
 function RiderBodyMesh({
   part,
   overrides,
+  pose = NO_POSE,
 }: {
   part: RiderPart;
   overrides?: Map<string, THREE.Texture>;
+  pose?: RiderPose;
 }) {
   const tex = useTextureMapWith(part.textures, overrides);
-  const geoms = useNodeGeometries(part.nodes);
+  const rig = part.skeleton;
+  const skin = rig?.length ? part.skin : null;
+  const geoms = useNodeGeometries(part.nodes, skin);
   // One material per submesh; a node with no submesh table takes a single suit material.
   const mats = useMemo(
     () =>
@@ -677,19 +714,101 @@ function RiderBodyMesh({
     [part, tex],
   );
   useEffect(() => () => mats.forEach((a) => a.forEach((m) => m.dispose())), [mats]);
+
+  const built = useMemo(() => (skin && rig?.length ? buildSkeleton(rig) : null), [rig, skin]);
+  useEffect(() => () => built?.skeleton.dispose(), [built]);
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    if (!built) return;
+    applyPose(built.order, pose);
+    // `frameloop="demand"`: turning bones mutates three.js objects and commits no React state
+    // of its own, so nothing would redraw.
+    invalidate();
+  }, [built, pose, invalidate]);
+
+  if (!built) {
+    return (
+      <group>
+        {geoms.map((g, i) => (
+          <mesh
+            key={i}
+            geometry={g}
+            material={mats[i].length === 1 ? mats[i][0] : mats[i]}
+            castShadow
+            receiveShadow
+          />
+        ))}
+      </group>
+    );
+  }
   return (
     <group>
+      {/* The bone tree lives in the scene beside the mesh it drives. */}
+      {built.roots.map((b, i) => (
+        <primitive key={i} object={b} />
+      ))}
       {geoms.map((g, i) => (
-        <mesh
+        <skinnedMesh
           key={i}
           geometry={g}
           material={mats[i].length === 1 ? mats[i][0] : mats[i]}
+          skeleton={built.skeleton}
+          // Bound with an identity matrix: the geometry is already in the frame the bind
+          // matrices are written in, so there is nothing to reconcile.
+          ref={(m: THREE.SkinnedMesh | null) => m?.bind(built.skeleton, new THREE.Matrix4())}
+          // A posed limb leaves the bounds the mesh was measured at, and would be culled.
+          frustumCulled={false}
           castShadow
           receiveShadow
         />
       ))}
     </group>
   );
+}
+
+/**
+ * Where each piece of gear's bone has travelled to.
+ *
+ * Gear is placed against the body's proportions, and that placement is tuned piece by piece.
+ * Rather than redo it against the rig, each piece keeps the placement it had and is moved by
+ * however far its bone has moved from rest — nothing at all until somebody poses the rider.
+ *
+ * One skeleton for all of them: building it per piece would make four bone trees where one
+ * will do, and they would all be answering the same question.
+ */
+function useBoneDeltas(
+  rig: Bone[] | undefined,
+  pose: RiderPose,
+  wanted: readonly (readonly string[])[],
+): (THREE.Matrix4 | null)[] {
+  return useMemo(() => {
+    if (!rig?.length) return wanted.map(() => null);
+    const built = buildSkeleton(rig);
+    applyPose(built.order, pose);
+    return wanted.map(
+      (names) => names.map((n) => boneDelta(built.order, rig, n)).find(Boolean) ?? null,
+    );
+  }, [rig, pose, wanted]);
+}
+
+/** Hold `children` wherever `matrix` puts them. A null matrix leaves them alone entirely. */
+function PosedGroup({
+  matrix,
+  children,
+}: {
+  matrix: THREE.Matrix4 | null;
+  children: React.ReactNode;
+}) {
+  const group = useRef<THREE.Group>(null);
+  useEffect(() => {
+    const g = group.current;
+    if (!g || !matrix) return;
+    g.matrixAutoUpdate = false;
+    g.matrix.copy(matrix);
+    g.updateMatrixWorld(true);
+  }, [matrix]);
+  if (!matrix) return <>{children}</>;
+  return <group ref={group}>{children}</group>;
 }
 
 function RiderGearSolo({
@@ -763,12 +882,27 @@ function RiderGearSolo({
   );
 }
 
+/**
+ * Which bone each piece of kit rides on, by the names the rider's own `gfx.cfg` gives them:
+ * `helmetlinkobj = riderRIG_Head`, `left/rightbootlinkobj = riderRIG_*KneeTwist`,
+ * `neckbracelinkobj = riderRIG_Spine4`. Each entry falls back down its own chain, since a
+ * model that binds fewer bones may not carry the first choice.
+ */
+const GEAR_BONES = [
+  ["riderRIG_Head", "riderRIG_Neck2", "riderRIG_Neck1"],
+  ["riderRIG_Spine4", "riderRIG_Spine3"],
+  ["riderRIG_LeftKneeTwist", "riderRIG_LeftKnee"],
+  ["riderRIG_RightKneeTwist", "riderRIG_RightKnee"],
+] as const;
+
 function RiderComposite({
   parts,
   overrides,
+  pose = NO_POSE,
 }: {
   parts: RiderPart[];
   overrides?: Map<string, THREE.Texture>;
+  pose?: RiderPose;
 }) {
   const byPart = (p: RiderPart["part"]) => parts.find((x) => x.part === p);
   const body = byPart("body");
@@ -810,54 +944,64 @@ function RiderComposite({
   // i.e. around the base of the neck.
   const protAnchor: [number, number, number] = b ? [cx, b.lo[1] + 0.74 * h, cz] : [0, 1.16, 0.03];
   const bootTarget = hasBody ? 0.44 * h : 0.32;
+  const [headAt, chestAt, leftFootAt, rightFootAt] = useBoneDeltas(
+    body?.skeleton,
+    pose,
+    GEAR_BONES,
+  );
 
   if (solo) return <RiderGearSolo part={solo} overrides={overrides} />;
 
   return (
     <group>
       {hasBody ? (
-        <RiderBodyMesh part={body!} overrides={overrides} />
+        <RiderBodyMesh part={body!} overrides={overrides} pose={pose} />
       ) : (
         <RiderBody suit={suit} gloves={gloves} showHead={!hasHelmet} />
       )}
       {hasHelmet && (
-        <RiderGearMesh
-          overrides={overrides}
-          part={helmet!}
-          anchor={helmetAnchor}
-          target={hasBody ? 0.38 * h : 0.52}
-          yaw={hasBody ? Math.PI : 0}
-          pitch={hasBody ? HELMET_PITCH : 0}
-          alignY={hasBody ? "bottom" : "center"}
-        />
+        <PosedGroup matrix={headAt}>
+          <RiderGearMesh
+            overrides={overrides}
+            part={helmet!}
+            anchor={helmetAnchor}
+            target={hasBody ? 0.38 * h : 0.52}
+            yaw={hasBody ? Math.PI : 0}
+            pitch={hasBody ? HELMET_PITCH : 0}
+            alignY={hasBody ? "bottom" : "center"}
+          />
+        </PosedGroup>
       )}
       {/* Native, not fitted: the protection slot spans a full chest protector and a thin
           necklace, and scaling each to one size inflated the chain to vest proportions and
           threw away the offset a piece like a chain or a hood hangs at deliberately. */}
       {!!protection?.nodes.length && (
-        <RiderGearMesh
-          overrides={overrides}
-          part={protection!}
-          anchor={protAnchor}
-          yaw={PROT_YAW}
-          fit="native"
-        />
+        <PosedGroup matrix={chestAt}>
+          <RiderGearMesh
+            overrides={overrides}
+            part={protection!}
+            anchor={protAnchor}
+            yaw={PROT_YAW}
+            fit="native"
+          />
+        </PosedGroup>
       )}
       {/* Two feet as separate nodes → split left/right; a single-node boot renders centred. */}
       {!!boots?.nodes.length &&
         (boots!.nodes.length === 2 ? (
           bootSides(boots!).map(({ node, side }, i) => (
-            <RiderGearMesh
-          overrides={overrides}
-              key={i}
-              part={{ ...boots!, nodes: [node] }}
-              anchor={[cx + side * legX, footY, bootZ]}
-              target={bootTarget}
-              rot={BOOT_ROT}
-              pitch={hasBody ? BOOT_PITCH : 0}
-              yaw={hasBody ? side * BOOT_SPLAY : 0}
-              alignY={hasBody ? "top" : "center"}
-            />
+            <PosedGroup key={i} matrix={side > 0 ? leftFootAt : rightFootAt}>
+              <RiderGearMesh
+                overrides={overrides}
+                part={{ ...boots!, nodes: [node] }}
+                anchor={[cx + side * legX, footY, bootZ]}
+                target={bootTarget}
+                rot={BOOT_ROT}
+                pitch={hasBody ? BOOT_PITCH : 0}
+                yaw={hasBody ? side * BOOT_SPLAY : 0}
+                alignY={hasBody ? "top" : "center"}
+              />
+            </PosedGroup>
           ))
         ) : (
           <RiderGearMesh
@@ -1300,6 +1444,7 @@ function SideBySide({
   overrides,
   rig,
   pose,
+  riderPose,
   place,
 }: {
   nodes: EdfNode[];
@@ -1309,6 +1454,8 @@ function SideBySide({
   overrides?: Map<string, THREE.Texture>;
   rig?: BikeRig | null;
   pose?: BikePose;
+  /** The rider's own pose — a turn per bone. Unrelated to the bike's `pose`. */
+  riderPose?: RiderPose;
   /** Where each half has been moved to, on top of the arrangement below. */
   place?: Record<PlaceTarget, Placement>;
 }) {
@@ -1341,7 +1488,7 @@ function SideBySide({
       </group>
       <group position={at.rider}>
         <Placed at={place?.rider} pivot={at.riderPivot}>
-          <RiderComposite parts={parts} overrides={overrides} />
+          <RiderComposite parts={parts} overrides={overrides} pose={riderPose} />
         </Placed>
       </group>
     </group>
@@ -1676,6 +1823,13 @@ export interface ModelViewerProps {
    * also what an unassembled bike gets, since there is nothing to pose a pile of loose parts.
    */
   rig?: BikeRig | null;
+  /**
+   * The rider's pose — a turn per bone of the body's rig, in degrees.
+   *
+   * Absent draws the rider exactly as the model was authored, which is what every view but
+   * the Pose studio wants.
+   */
+  riderPose?: RiderPose;
   /** Offer the pose panel. Off by default: a preview nobody is posing shouldn't grow chrome. */
   poseControls?: boolean;
   /**
@@ -1700,6 +1854,7 @@ export function ModelViewer({
   highlight,
   riderParts,
   rig,
+  riderPose,
   poseControls = false,
   placeControls = false,
   loading = false,
@@ -1805,6 +1960,7 @@ export function ModelViewer({
                 overrides={overrides}
                 rig={rig}
                 pose={pose}
+                riderPose={riderPose}
                 place={place}
               />
             ) : hasReal ? (
@@ -1819,7 +1975,7 @@ export function ModelViewer({
               </Placed>
             ) : hasRider ? (
               <Placed at={place.rider} pivot={soloPivot}>
-                <RiderComposite parts={riderParts!} overrides={overrides} />
+                <RiderComposite parts={riderParts!} overrides={overrides} pose={riderPose} />
               </Placed>
             ) : loading || noStandIn ? null : mode === "bike" ? (
               <BikeStandIn map={map} />

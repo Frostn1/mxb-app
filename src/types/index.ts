@@ -451,10 +451,37 @@ export interface BikeModel {
   rig: BikeRig | null;
 }
 
+/**
+ * One bone of a rider's rig, as `rider.edf` stores it, already turned into the frame the
+ * viewer draws the body in.
+ */
+export interface Bone {
+  /** The rig's own name, e.g. `riderRIG_LeftElbow`. The game references these in `gfx.cfg`. */
+  name: string;
+  /** Index into the same array. Null for the root, and only for the root. */
+  parent: number | null;
+  /** Bone space → model space at rest. Row-major, translation in the fourth column. */
+  bind: number[];
+  /** Model space → bone space at rest. */
+  invBind: number[];
+  /** The slice of the mesh this bone covers, in bone space. */
+  aabbLo: Vec3;
+  aabbHi: Vec3;
+}
+
+/** Which bones move which vertices: four of each per vertex, in `nodes` order. */
+export interface Skin {
+  indices: number[];
+  weights: number[];
+}
+
 export interface RiderPart {
   part: "body" | "helmet" | "boots" | "protection" | "suit" | "gloves";
   nodes: EdfNode[];
   textures: PaintTexture[];
+  /** Only the body carries a rig; gear is rigid and hangs off a bone. */
+  skeleton?: Bone[];
+  skin?: Skin | null;
 }
 
 /** The rider's real 3D preview, assembled from a loadout's installed gear + paints. */

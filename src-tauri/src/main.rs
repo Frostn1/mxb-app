@@ -2514,6 +2514,13 @@ struct RiderPart {
     part: String,
     nodes: Vec<edf::EdfNode>,
     textures: Vec<paint::PaintTexture>,
+    /// The body's rig, in the frame `nodes` came back in. Only the body has one — gear is
+    /// rigid and hangs off a bone rather than carrying any.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skeleton: Vec<edf::Bone>,
+    /// Which bones move which vertices. Empty unless `skeleton` is filled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skin: Option<edf::Skin>,
 }
 
 #[derive(serde::Serialize)]
@@ -2660,10 +2667,14 @@ fn load_rider_body(
         nodes.len(),
         textures.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
     );
+    let skeleton = body_rig(&src, profile);
+    let skin = (!skeleton.is_empty()).then(|| body_skin(&src, profile, &nodes, &skeleton));
     Some(RiderPart {
         part: "body".into(),
         nodes,
         textures,
+        skeleton,
+        skin,
     })
 }
 
@@ -2686,6 +2697,16 @@ fn load_rider_body(
 /// construction — they sit behind its centre. On the Z-up meshes a bare quarter turn puts
 /// them in front. Both halves are needed together: `y = -z, z = -y` on its own mirrors the
 /// mesh rather than turning it, which would swap the rider's left and right hands.
+/// The turn a Z-up body takes: a half turn about Y on top of a quarter turn about X.
+/// Named here because the rig has to take exactly the same one — see [`body_rig`].
+const BODY_STAND_UP: [[f32; 3]; 3] =
+    [[-1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]];
+
+/// Is this body authored Z-up — lying on its back, longest axis in Z?
+fn body_is_z_up(ext: [f32; 3]) -> bool {
+    ext[2] > ext[1] && ext[2] > ext[0]
+}
+
 fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
     for n in nodes.iter() {
@@ -2697,17 +2718,18 @@ fn stand_body_upright(nodes: &mut [edf::EdfNode]) {
         }
     }
     let ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
-    if ext[2] <= ext[1] || ext[2] <= ext[0] {
+    if !body_is_z_up(ext) {
         return;
     }
     for n in nodes.iter_mut() {
         for v in n.positions.chunks_exact_mut(3).chain(n.normals.chunks_exact_mut(3)) {
             let (x, y, z) = (v[0], v[1], v[2]);
-            v[0] = -x;
+            let r = BODY_STAND_UP;
             // Negated, not taken as-is: these meshes lie head-away, with the head at the
             // most negative Z, so this is what puts it at the top.
-            v[1] = -z;
-            v[2] = -y;
+            v[0] = r[0][0] * x + r[0][1] * y + r[0][2] * z;
+            v[1] = r[1][0] * x + r[1][1] * y + r[1][2] * z;
+            v[2] = r[2][0] * x + r[2][1] * y + r[2][2] * z;
         }
     }
     log::info!("[rider] body was authored Z-up ({ext:?}); stood it upright");
@@ -2797,6 +2819,74 @@ fn pkz_mesh_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<edf::EdfNode>>> {
 fn keep_lod0(nodes: &mut Vec<edf::EdfNode>) {
     let mut seen = std::collections::HashSet::new();
     nodes.retain(|n| n.name.is_empty() || seen.insert(n.name.clone()));
+}
+
+/// Rigs are tiny — 65 bones of two matrices each — so this holds more than the mesh cache.
+fn rig_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<edf::Bone>>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<lru::Lru<Vec<edf::Bone>>>> =
+        std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(MESH_CACHE_CAP * 2)))
+}
+
+/// A rider body's rig, in the same frame the viewer gets its mesh in, memoised.
+///
+/// The mesh takes two turns on the way out of the file — [`edf::to_right_handed`] mirrors X,
+/// then [`stand_body_upright`] stands a Z-up body up — and the rig has to take both, or the
+/// skeleton ends up mirrored or lying beside a standing body. Whether the second one applies
+/// is decided from the rig's own extents rather than the mesh's: both are authored in the
+/// same frame, so they agree, and asking the rig costs nothing where asking the mesh would
+/// mean parsing 67 MB a second time.
+fn body_rig(src: &BodySource, profile: &str) -> Vec<edf::Bone> {
+    let key = format!("rig:{}", src.cache_key(profile));
+    if let Some(r) = rig_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+        return r;
+    }
+    let mut rig = src.read(profile).map(|b| edf::parse_skeleton(&b)).unwrap_or_default();
+    if !rig.is_empty() {
+        edf::transform_skeleton(&mut rig, [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for b in rig.iter() {
+            let o = b.origin();
+            for a in 0..3 {
+                lo[a] = lo[a].min(o[a]);
+                hi[a] = hi[a].max(o[a]);
+            }
+        }
+        if body_is_z_up([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]) {
+            edf::transform_skeleton(&mut rig, BODY_STAND_UP);
+        }
+        log::info!("[rider] body '{profile}' rig: {} bones", rig.len());
+    }
+    if let Ok(mut c) = rig_cache().lock() {
+        c.insert(key, rig.clone());
+    }
+    rig
+}
+
+/// The body's binding to its rig, memoised. Working it out is quick — a third of a million
+/// point-to-segment distances — but it depends only on the model, and a loadout change must
+/// not pay for it again.
+fn body_skin(
+    src: &BodySource,
+    profile: &str,
+    nodes: &[edf::EdfNode],
+    rig: &[edf::Bone],
+) -> edf::Skin {
+    let key = format!("skin:{}", src.cache_key(profile));
+    if let Some(s) = skin_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+        return s;
+    }
+    let skin = edf::skin_mesh(nodes, rig);
+    if let Ok(mut c) = skin_cache().lock() {
+        c.insert(key, skin.clone());
+    }
+    skin
+}
+
+fn skin_cache() -> &'static std::sync::Mutex<lru::Lru<edf::Skin>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<lru::Lru<edf::Skin>>> =
+        std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(MESH_CACHE_CAP)))
 }
 
 fn cached_mesh(key: &str) -> Option<Vec<edf::EdfNode>> {
@@ -3034,6 +3124,8 @@ async fn load_stock_gear_model(
             part: spec.part.into(),
             nodes,
             textures,
+            skeleton: Vec::new(),
+        skin: None,
         })
     })
     .await
@@ -3463,7 +3555,7 @@ fn load_gear_model_blocking(
         goggle_side.primary,
         out.len(),
     );
-    Ok(RiderPart { part, nodes, textures: out })
+    Ok(RiderPart { part, nodes, textures: out, skeleton: Vec::new(), skin: None })
 }
 
 /// One file out of a gear folder or archive, by base name.
@@ -3946,6 +4038,8 @@ fn load_gear(
         part: spec.part.into(),
         nodes,
         textures,
+        skeleton: Vec::new(),
+        skin: None,
     })
 }
 
@@ -4106,6 +4200,8 @@ fn load_rider_paint(
         part: part.into(),
         nodes: Vec::new(),
         textures,
+        skeleton: Vec::new(),
+        skin: None,
     })
 }
 

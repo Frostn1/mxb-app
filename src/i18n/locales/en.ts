@@ -49,6 +49,7 @@ export const en = {
   "nav.locker": "Locker",
   "nav.presets": "Presets",
   "nav.rider": "Rider",
+  "nav.pose": "Pose",
   "nav.designer": "Designer",
   "nav.paints": "Paints",
   "nav.studio": "Studio",
@@ -214,6 +215,28 @@ export const en = {
   "slotGroup.rider": "Rider",
   "slotGroup.head": "Head",
   "slotGroup.body": "Body",
+
+
+  // ── Pose studio ────────────────────────────────────────────────────────────
+  "pose.help": "Stand the rider in a position — where the hands sit, how the legs are spread, one leg forward. The preview only; MX Bikes takes a rider's posture from its riding style.",
+  "pose.showing": "Showing",
+  "pose.none": "—",
+  "pose.bike": "Bike",
+  "pose.quick": "Quick moves",
+  "pose.quickHint": "Each one adds to the pose, so they stack. Fine-tune below.",
+  "pose.reset": "Reset",
+  "pose.group.torso": "Torso and head",
+  "pose.group.arms": "Arms",
+  "pose.group.hands": "Hands",
+  "pose.group.legs": "Legs",
+  "pose.move.legsWide": "Legs wider",
+  "pose.move.legsNarrow": "Legs closer",
+  "pose.move.leftLegForward": "Left leg forward",
+  "pose.move.elbowsUp": "Elbows up",
+  "pose.move.leanIn": "Lean in",
+  "pose.axis.bend": "Bend",
+  "pose.axis.twist": "Twist",
+  "pose.axis.splay": "Splay",
 
   // ── Rider studio ───────────────────────────────────────────────────────────
   "rider.help":
