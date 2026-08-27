@@ -849,6 +849,166 @@ pub fn preview_set(mods_path: &str, bike: &str, variant: &str) -> anyhow::Result
     Ok(PreviewSet { bike_dir: root, root_keep, variant_dir: target_dir, variant_files, paints })
 }
 
+/// The liveries `variant` owns outright — what a move would offer to take with it.
+///
+/// Its own claims only, never the bike's unclaimed ones: those belong to the bike, and a model
+/// leaving is no reason to take them off it.
+pub fn liveries_owned_by(mods_path: &str, bike: &str, variant: &str) -> Vec<String> {
+    load_paint_assignments(mods_path, bike)
+        .into_iter()
+        .find(|(v, _)| v.eq_ignore_ascii_case(variant))
+        .map(|(_, p)| p)
+        .unwrap_or_default()
+}
+
+/// The bike folders a model could move to.
+pub fn bike_folders(mods_path: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Ok(rd) = fs::read_dir(bikes_root(mods_path)) {
+        for e in rd.flatten() {
+            if e.path().is_dir() {
+                if let Some(n) = e.file_name().to_str() {
+                    out.push(n.to_string());
+                }
+            }
+        }
+    }
+    // A bike installed as a bare `<Bike>.pkz` has no folder yet; it is still a destination,
+    // and applying a swap there creates the folder the same way installing a paint would.
+    if let Ok(rd) = fs::read_dir(bikes_root(mods_path)) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("pkz")) {
+                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                    if !contains_ci(&out, stem) {
+                        out.push(stem.to_string());
+                    }
+                }
+            }
+        }
+    }
+    out.sort_by_key(|s| s.to_lowercase());
+    out
+}
+
+/// Why a variant can't be moved or deleted, or `None` when it can.
+///
+/// The active set is the one case that matters: its files are loose at the bike root, not in
+/// its folder — only a manifest is left behind — so moving or deleting the folder would take
+/// the bike's live model out from under it and leave the folder's contents behind. Stock is
+/// not a folder at all.
+fn refuse_reason(mods_path: &str, bike: &str, variant: &str) -> Option<String> {
+    if variant.eq_ignore_ascii_case(STOCK) {
+        return Some("Stock isn't a model set — there's nothing on disk to move or delete".into());
+    }
+    if variant.eq_ignore_ascii_case(&current_active(mods_path, bike)) {
+        return Some(format!(
+            "'{variant}' is the active model — switch the bike to another model first"
+        ));
+    }
+    None
+}
+
+/// Move a model set to another bike, optionally taking some of its liveries along.
+///
+/// Liveries are opt-in per move because a `.pnt` is cut for one bike's UV layout: carrying one
+/// to a bike it wasn't drawn for fits about as well as the wrong decal sheet. Whatever isn't
+/// carried stays where it is and simply loses its claim — nothing is deleted.
+pub fn move_model_swap(
+    mods_path: &str,
+    from_bike: &str,
+    variant: &str,
+    to_bike: &str,
+    carry: &[String],
+) -> anyhow::Result<()> {
+    if !is_simple_name(from_bike) || !is_simple_name(to_bike) || !is_simple_name(variant) {
+        anyhow::bail!("invalid bike or model name");
+    }
+    if from_bike.eq_ignore_ascii_case(to_bike) {
+        anyhow::bail!("'{to_bike}' is where that model already is");
+    }
+    if !contains_ci(&bike_folders(mods_path), to_bike) {
+        anyhow::bail!("bike '{to_bike}' not found");
+    }
+    if let Some(why) = refuse_reason(mods_path, from_bike, variant) {
+        anyhow::bail!("{why}");
+    }
+    let src = variant_dir(mods_path, from_bike, variant);
+    if !dir_exists(&src) {
+        anyhow::bail!("model '{variant}' not found on {from_bike}");
+    }
+    let dst = variant_dir(mods_path, to_bike, variant);
+    if dir_exists(&dst) {
+        anyhow::bail!("'{to_bike}' already has a model called '{variant}'");
+    }
+
+    // Liveries first: once the folder has moved, the record that says which are its own is
+    // gone with it, and a half-done move is worse than one that never started.
+    let from_shelf = shelf_dir(mods_path, from_bike);
+    let from_paints = paints_dir(mods_path, from_bike);
+    let to_shelf = shelf_dir(mods_path, to_bike);
+    let mut carried: Vec<String> = Vec::new();
+    for base in carry {
+        let (dir, file) = match livery_file(&from_shelf, base) {
+            Some(f) => (from_shelf.clone(), f),
+            None => match livery_file(&from_paints, base) {
+                Some(f) => (from_paints.clone(), f),
+                None => continue,
+            },
+        };
+        if move_livery(&dir, &to_shelf, &file) {
+            carried.push(base.clone());
+        }
+    }
+
+    if !move_dir(&src, &dst) {
+        // Put back whatever already travelled, so a failed move leaves no trace.
+        for base in &carried {
+            if let Some(f) = livery_file(&to_shelf, base) {
+                move_livery(&to_shelf, &from_shelf, &f);
+            }
+        }
+        anyhow::bail!("couldn't move '{variant}' — is a file in use?");
+    }
+
+    let mut from_assign = load_paint_assignments(mods_path, from_bike);
+    from_assign.retain(|v, _| !v.eq_ignore_ascii_case(variant));
+    save_paint_assignments(mods_path, from_bike, &from_assign)?;
+    if !carried.is_empty() {
+        let mut to_assign = load_paint_assignments(mods_path, to_bike);
+        to_assign.entry(variant.to_string()).or_default().extend(carried);
+        save_paint_assignments(mods_path, to_bike, &to_assign)?;
+    }
+    reconcile_paints(mods_path, from_bike);
+    reconcile_paints(mods_path, to_bike);
+    Ok(())
+}
+
+/// Send a model set to the Trash. Its liveries stay on the bike, unclaimed — a livery is the
+/// player's work and outlives whichever model happened to claim it.
+pub fn delete_model_swap(
+    mods_path: &str,
+    bike: &str,
+    variant: &str,
+) -> anyhow::Result<crate::library::TrashedAt> {
+    if !is_simple_name(bike) || !is_simple_name(variant) {
+        anyhow::bail!("invalid bike or model name");
+    }
+    if let Some(why) = refuse_reason(mods_path, bike, variant) {
+        anyhow::bail!("{why}");
+    }
+    let dir = variant_dir(mods_path, bike, variant);
+    if !dir_exists(&dir) {
+        anyhow::bail!("model '{variant}' not found");
+    }
+    let trashed = crate::library::move_to_trash(&dir)?;
+    let mut assign = load_paint_assignments(mods_path, bike);
+    assign.retain(|v, _| !v.eq_ignore_ascii_case(variant));
+    save_paint_assignments(mods_path, bike, &assign)?;
+    reconcile_paints(mods_path, bike);
+    Ok(trashed)
+}
+
 /// A bike whose setup files (`.hrc`/`.cfg`/`.geom`) were carried off into a swap folder
 /// by a version that treated the whole folder as the model set. The game can't see such
 /// a bike at all until they're back at the root.
@@ -1656,6 +1816,125 @@ mod tests {
         apply_model_swap(mp, "KTM450", ORIGINAL).unwrap();
         let at_root = names_at(&bike_dir(mp, "KTM450"));
         assert!(contains_ci(&at_root, "chassis.hrc"), "restored on the way back: {at_root:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_model_moves_to_another_bike() {
+        let root = tmp("move-swap");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        make_bike(mp, "YZ450", "model.edf");
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+
+        move_model_swap(mp, "KTM450", "Factory", "YZ450", &[]).unwrap();
+
+        assert!(!variant_dir(mp, "KTM450", "Factory").exists(), "gone from the old bike");
+        assert!(
+            file_exists(&variant_dir(mp, "YZ450", "Factory").join("model.edf")),
+            "arrived on the new one",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The active set's files are loose at the bike root, not in its folder. Moving or
+    /// deleting the folder would take the bike's live model out from under it.
+    #[test]
+    fn the_active_model_can_be_neither_moved_nor_deleted() {
+        let root = tmp("move-active");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        make_bike(mp, "YZ450", "model.edf");
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        apply_model_swap(mp, "KTM450", "Factory").unwrap();
+
+        assert!(move_model_swap(mp, "KTM450", "Factory", "YZ450", &[]).is_err());
+        assert!(delete_model_swap(mp, "KTM450", "Factory").is_err());
+        assert!(delete_model_swap(mp, "KTM450", STOCK).is_err(), "Stock is not a folder");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_move_refuses_to_write_over_a_model_of_the_same_name() {
+        let root = tmp("move-collide");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        make_bike(mp, "YZ450", "model.edf");
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        touch(&variant_dir(mp, "YZ450", "Factory").join("model.edf"));
+
+        assert!(move_model_swap(mp, "KTM450", "Factory", "YZ450", &[]).is_err());
+        assert!(variant_dir(mp, "KTM450", "Factory").exists(), "the source is untouched");
+        assert!(move_model_swap(mp, "KTM450", "Factory", "Ghost", &[]).is_err(), "no such bike");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Carried liveries travel; the rest stay put and merely lose their claim. A `.pnt` is cut
+    /// for one bike's layout, so taking them is opt-in — but never deleting them is not.
+    #[test]
+    fn a_move_carries_only_the_liveries_it_is_told_to() {
+        let root = tmp("move-liveries");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        make_bike(mp, "YZ450", "model.edf");
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        touch(&paints_dir(mp, "KTM450").join("Redbud.pnt"));
+        touch(&paints_dir(mp, "KTM450").join("Unadilla.pnt"));
+        assign(mp, "KTM450", "Factory", &["Redbud", "Unadilla"]);
+
+        move_model_swap(mp, "KTM450", "Factory", "YZ450", &["Redbud".to_string()]).unwrap();
+
+        let landed = shelved_liveries(mp, "YZ450");
+        assert!(landed.contains(&"Redbud".to_string()), "carried: {landed:?}");
+        let left = bike_liveries(mp, "KTM450");
+        assert!(left.contains(&"Unadilla".to_string()), "left behind, not deleted: {left:?}");
+        assert!(!left.contains(&"Redbud".to_string()), "the carried one really left");
+        // Nothing on the old bike still claims the model that left.
+        assert!(
+            !load_paint_assignments(mp, "KTM450").keys().any(|v| v == "Factory"),
+            "the old claim is dropped",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn deleting_a_model_leaves_its_liveries_on_the_bike() {
+        let root = tmp("delete-swap");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        touch(&paints_dir(mp, "KTM450").join("Redbud.pnt"));
+        assign(mp, "KTM450", "Factory", &["Redbud"]);
+
+        delete_model_swap(mp, "KTM450", "Factory").unwrap();
+
+        assert!(!variant_dir(mp, "KTM450", "Factory").exists(), "the set is gone");
+        assert!(
+            bike_liveries(mp, "KTM450").contains(&"Redbud".to_string()),
+            "the livery is the player's work and stays",
+        );
+        assert!(
+            !load_paint_assignments(mp, "KTM450").keys().any(|v| v == "Factory"),
+            "no record of a model that isn't there",
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_moved_model_can_be_moved_back() {
+        let root = tmp("move-round-trip");
+        let mp = root.to_str().unwrap();
+        make_bike(mp, "KTM450", "model.edf");
+        make_bike(mp, "YZ450", "model.edf");
+        touch(&variant_dir(mp, "KTM450", "Factory").join("model.edf"));
+        let before = names_at(&bike_dir(mp, "KTM450"));
+
+        move_model_swap(mp, "KTM450", "Factory", "YZ450", &[]).unwrap();
+        move_model_swap(mp, "YZ450", "Factory", "KTM450", &[]).unwrap();
+
+        assert_eq!(names_at(&bike_dir(mp, "KTM450")), before, "the bike is as it was");
+        assert!(file_exists(&variant_dir(mp, "KTM450", "Factory").join("model.edf")));
+        assert!(!variant_dir(mp, "YZ450", "Factory").exists(), "nothing left behind");
         let _ = fs::remove_dir_all(&root);
     }
 

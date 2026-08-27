@@ -424,6 +424,36 @@ export function scanBikeTargets(): Promise<string[]> {
   return invoke<string[]>("scan_bike_targets");
 }
 
+/** The bike folders a model set could be moved to. */
+export function bikeFolders(): Promise<string[]> {
+  return invoke<string[]>("bike_folders");
+}
+
+/** The liveries a model owns outright — what a move offers to take with it. */
+export function modelSwapLiveries(bike: string, variant: string): Promise<string[]> {
+  return invoke<string[]>("model_swap_liveries", { bike, variant });
+}
+
+/**
+ * Move a model set to another bike, carrying the named liveries with it.
+ *
+ * Liveries are opt-in because a `.pnt` is cut for one bike's UV layout. Whatever isn't
+ * carried stays on the old bike and simply loses its claim — nothing is deleted.
+ */
+export function moveModelSwap(
+  bike: string,
+  variant: string,
+  toBike: string,
+  carry: string[],
+): Promise<void> {
+  return invoke<void>("move_model_swap", { bike, variant, toBike, carry });
+}
+
+/** Send a model set to the Trash. Its liveries stay on the bike, unclaimed. */
+export function deleteModelSwap(bike: string, variant: string): Promise<void> {
+  return invoke<void>("delete_model_swap", { bike, variant });
+}
+
 export function scanModelSwaps(): Promise<BikeModels[]> {
   return invoke<BikeModels[]>("scan_model_swaps");
 }

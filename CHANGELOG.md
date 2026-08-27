@@ -23,6 +23,15 @@
   the bike folder beside it — the two never matched, and the badge was invisible on every bike.
 
 ### Added
+- **Move a model swap to another bike, or delete it.** Every model set now carries its own
+  menu, in the Locker and on the Library's bike cards alike. **Move** asks which bike to send it
+  to and, when the model owns liveries, which of those travel with it — off by default, because
+  a paint is drawn for one bike's layout and rarely fits another; anything left behind stays put
+  rather than being thrown away. **Delete** sends the set to the Trash, so a model you can't
+  download again is recoverable, and leaves the bike's liveries alone. Neither is offered for
+  the model currently on the bike: its files are loose at the bike root, so moving them would
+  take the bike's live model out from under it — switch to another model first.
+
 - **View a model swap in 3D straight from the Library.** Each variant in a bike card's model
   list now carries its own **View 3D**, drawing the bike as that swap would leave it — the
   same preview the Locker offers, without having to go there to find it. Nothing on disk
