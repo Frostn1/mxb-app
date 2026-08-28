@@ -54,6 +54,8 @@ whichever release turns it on.
   file gets. An ordinary single-mod download is untouched — it installs exactly as before,
   with nothing extra to click.
 
+- **Sly** credited on Settings → Supporters.
+
 ### Fixed
 
 - **A paint that ships a separate file per bike now installs the right one.** Some pages offer
