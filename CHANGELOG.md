@@ -29,7 +29,7 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
-## 2026-08-29
+## 2026-08-29 — v0.11.2 — Install a pack one bike at a time, and a preview that fills the window
 
 ### Added
 
@@ -63,6 +63,14 @@ whichever release turns it on.
 
 - **Sly** credited on Settings → Supporters.
 
+### Changed
+
+- **`MXB_SAFE_GRAPHICS=1` now works on Windows too.** It takes the GPU out of the app's
+  browser, the same lever it already pulled on Linux — the thing to try when a window comes
+  up black and stays that way. The app also records how far the page got loading, and which
+  graphics settings were in force, so the next report of a blank window can be read straight
+  from the log instead of guessed at.
+
 ### Fixed
 
 - **A paint that ships a separate file per bike now installs the right one.** Some pages offer
@@ -79,10 +87,6 @@ whichever release turns it on.
   53 OEM bikes installed that was 18.9 seconds of nothing happening before the sheet drew, on
   every single drop. It is 1.2 seconds now. The same read backs the bike pickers throughout
   the app, so they all get quicker.
-
-## 2026-08-28
-
-### Fixed
 
 - **The 3D viewer no longer hoards a bike's textures each time it redraws one.** Two things
   asking for the same bike at the same moment — a preview panel and a dialog drawing it
@@ -104,14 +108,6 @@ whichever release turns it on.
   hidden until it has actually drawn something, anything that shows it early gets a real
   Windows title bar to close it by, and a window that never drew closes for good rather than
   hiding in the tray. Reported by a player who found it after booting their PC.
-
-### Changed
-
-- **`MXB_SAFE_GRAPHICS=1` now works on Windows too.** It takes the GPU out of the app's
-  browser, the same lever it already pulled on Linux — the thing to try when a window comes
-  up black and stays that way. The app also records how far the page got loading, and which
-  graphics settings were in force, so the next report of a blank window can be read straight
-  from the log instead of guessed at.
 
 ## 2026-08-28 — v0.11.1 — Protected model swaps open in 3D
 

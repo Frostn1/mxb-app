@@ -1383,6 +1383,20 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0112.hero.title":
+    "Un pacchetto di moto si installa come le moto che contiene",
+  "showcase.v0112.hero.body":
+    "Il pacchetto OEM sono 54 macchine in un archivio da 3,8 GB, e finora arrivava come una sola riga con scritto \u201cCartella mods\u201d: tutto o niente. Ora \u00e8 elencato per com'\u00e8 fatto: ogni moto col suo nome e la sua classe, con la casella. Prendi le quattro con cui corri e lascia le altre cinquanta.",
+  "showcase.v0112.fullscreen":
+    "L'anteprima 3D del Designer si apre a schermo intero: un pulsante riempie la finestra con il modello che stai dipingendo.",
+  "showcase.v0112.review":
+    "Un download che si rivela contenere pi\u00f9 mod si ferma e ti mostra cosa c'\u00e8 dentro prima che qualcosa finisca nella cartella mods.",
+  "showcase.v0112.paint":
+    "Una livrea che offre un file per macchina installa ora quello della moto che hai scelto, non il primo della pagina.",
+  "showcase.v0112.speed":
+    "Il foglio di revisione si apre in circa un secondo con le moto OEM installate, dove prima ci metteva quasi venti.",
+  "showcase.v0112.window":
+    "Una finestra nera all'avvio non pu\u00f2 pi\u00f9 intrappolarti: resta nascosta finch\u00e9 non ha disegnato qualcosa e ha sempre un modo per essere chiusa.",
   "showcase.v0111.hero.title":
     "I model swap protetti si aprono in 3D",
   "showcase.v0111.hero.body":
