@@ -573,6 +573,7 @@ export const es: Translation = {
   "installDialog.directFastest": "Directo · el más rápido",
   "installDialog.direct": "Directo",
   "installDialog.recommendedBadge": "Recomendado",
+  "installDialog.matchedBadge": "Tu moto",
   "installDialog.browserBadge": "Navegador",
   "installDialog.serverBadge": "Servidor",
   "installDialog.serverBuildNote": "Compilación para servidor dedicado — no sirve para jugar",

@@ -15,13 +15,18 @@ import { labelOf } from "../../i18n/core";
 import { Badge } from "@/Components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
+  bikeNamesFromDest,
+  bikeOfDest,
+  bikeVariants,
   defaultMirrorIndex,
+  destForVariant,
   installsOutsideMods,
   isBlockedDownload,
   isServerOnly,
   pickDownloadForBike,
   playableMirrors,
   sortMirrors,
+  variantForBike,
   type DestOption,
   type ModType,
 } from "../../api/mods";
@@ -121,15 +126,28 @@ export default function InstallDialog({
     }
   }, [open, mirrors]);
 
-  // Sound mods: the chosen bike (the folder value, minus any `/paints`) decides
-  // which *download* to grab — the links are per-bike, not mirrors of one file.
-  const bikeName = sound ? folder.replace(/[/\\]paints$/i, "") : "";
+  // The bikes this picker can install to, for reading the downloads against.
+  const bikeNames = useMemo(
+    () => (modType.id === "bikes" ? bikeNamesFromDest(destOptions) : []),
+    [modType.id, destOptions],
+  );
+  // A page that offers one file per bike rather than mirrors of one — the author labels the
+  // blocks `250f` and `125t` and the site flags both as the default.
+  const variants = useMemo(() => bikeVariants(mirrors, bikeNames), [mirrors, bikeNames]);
+  // Sound packs are per-bike by category; a livery has to be read off its own downloads.
+  const perBike = sound || variants.perBike;
+
+  // The chosen bike (the folder value, minus any `/paints`) decides which *download* to
+  // grab, since the links are per-bike rather than mirrors of one file.
+  const bikeName = perBike ? bikeOfDest(folder) : "";
   useEffect(() => {
-    if (!sound || !bikeName) return;
-    const picked = pickDownloadForBike(mirrors, bikeName);
+    if (!perBike || !bikeName) return;
+    const picked = sound
+      ? pickDownloadForBike(mirrors, bikeName)
+      : variantForBike(mirrors, variants, bikeName);
     const idx = picked ? mirrors.indexOf(picked) : -1;
     if (idx >= 0) setMirrorIdx(idx);
-  }, [sound, bikeName, mirrors]);
+  }, [perBike, sound, bikeName, mirrors, variants]);
 
   const folderLabel = useMemo(() => {
     if (creating && newFolder.trim()) return newFolder.trim();
@@ -219,10 +237,22 @@ export default function InstallDialog({
   const serverOnly = isServerOnly(mirrors);
   const mainList = serverOnly ? mirrors : playable;
 
-  // Show every option for sound mods (each is a different bike, not a mirror);
+  // Show every option when they're per-bike files (each is a different bike, not a mirror);
   // otherwise list the first few and fold the rest away.
-  const shownMirrors = mirrorsOpen || sound ? mainList : mainList.slice(0, MIRRORS_SHOWN);
+  const shownMirrors = mirrorsOpen || perBike ? mainList : mainList.slice(0, MIRRORS_SHOWN);
   const hiddenCount = mainList.length - shownMirrors.length;
+
+  /**
+   * Picking a per-bike file moves the destination to the bike it's for — the mismatch this
+   * whole path exists to prevent is just as easy to create from the link side.
+   */
+  const chooseMirror = (idx: number) => {
+    setMirrorIdx(idx);
+    if (!perBike || sound || creating) return;
+    if (variants.bikes[idx]?.has(bikeName)) return;
+    const dest = destForVariant(variants, idx, suggestions);
+    if (dest) setFolder(dest);
+  };
 
   const renderMirror = (m: DownloadOption) => {
     const idx = mirrors.indexOf(m);
@@ -233,12 +263,20 @@ export default function InstallDialog({
     // build the parser had to guess at.
     const fileLabel =
       m.label && m.label.toLowerCase() !== m.host.toLowerCase() ? m.label : "";
+    // Whether this file is the one for the bike being installed to. A sound pack is judged
+    // by what the matcher settled on; a per-bike page says outright which bike each file is
+    // for, so its rows are judged by that rather than by which one happens to be selected.
+    const forThisBike = sound ? on : !!variants.bikes[idx]?.has(bikeName);
+    // With no bike picked yet — the destination is still the bikes root — there is nothing to
+    // match against, and calling every file "different" would be answering a question nobody
+    // asked. Those rows read as they always have until a bike is chosen.
+    const saysWhichBike = perBike && (sound || !!bikeName);
     const note = blocked
       ? t("installDialog.opensInBrowser")
       : m.isServer
         ? t("installDialog.serverBuildNote")
-        : sound
-          ? on
+        : saysWhichBike
+          ? forThisBike
             ? t("installDialog.matchedBike")
             : t("installDialog.differentBike")
           : m.isDefault
@@ -247,7 +285,7 @@ export default function InstallDialog({
     return (
       <button
         key={`${m.url}-${idx}`}
-        onClick={() => setMirrorIdx(idx)}
+        onClick={() => chooseMirror(idx)}
         className={cn(
           "flex cursor-default items-center gap-[11px] rounded-[9px] border bg-background px-3 py-2.5 text-left transition-colors",
           on ? "border-primary/50" : "border-input hover:border-white/20",
@@ -274,6 +312,15 @@ export default function InstallDialog({
           <Badge variant="warning" className="flex-none">
             {t("installDialog.browserBadge")}
           </Badge>
+        ) : saysWhichBike ? (
+          // Every block on a per-bike page carries the site's "Default" flag, so the badge
+          // that meant "this is the one" said it about both files. Which bike it's for is
+          // the thing worth flagging instead.
+          forThisBike ? (
+            <Badge variant="success" className="flex-none border-primary/35 text-primary">
+              {t("installDialog.matchedBadge")}
+            </Badge>
+          ) : null
         ) : m.isDefault ? (
           <Badge variant="success" className="flex-none border-primary/35 text-primary">
             {t("installDialog.recommendedBadge")}
@@ -429,7 +476,7 @@ export default function InstallDialog({
           {mirrors.length > 0 && (
             <section className="flex flex-col gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[1.2px] text-faint">
-                {sound
+                {perBike
                   ? t("installDialog.downloadPerBike")
                   : t("installDialog.downloadFrom")}
               </span>

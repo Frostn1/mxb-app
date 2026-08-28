@@ -581,6 +581,7 @@ export const de: Translation = {
   "installDialog.directFastest": "Direkt · am schnellsten",
   "installDialog.direct": "Direkt",
   "installDialog.recommendedBadge": "Empfohlen",
+  "installDialog.matchedBadge": "Dein Motorrad",
   "installDialog.browserBadge": "Browser",
   "installDialog.serverBadge": "Server",
   "installDialog.serverBuildNote": "Build für dedizierte Server — nicht zum Spielen",

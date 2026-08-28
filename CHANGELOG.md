@@ -29,7 +29,7 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
-## 2026-08-28
+## 2026-08-29
 
 ### Added
 
@@ -56,6 +56,14 @@ whichever release turns it on.
 
 ### Fixed
 
+- **A paint that ships a separate file per bike now installs the right one.** Some pages offer
+  one download per machine the paint fits — *pitfactory 250f pub* beside *pitfactory 125t pub* —
+  and mark **both** as the recommended file. Nothing about that says "different file" to a picker
+  built for mirrors, so it took the first one and put the 250's paint in the 125's folder. Those
+  pages are now read for what they are: every file is listed rather than folded away, the one for
+  the bike you picked is the one flagged, and choosing a different file moves the destination to
+  the bike that file is for. One-click installs from Browse follow the same match, so they stop
+  quietly grabbing the wrong machine's paint.
 - **The review sheet took twenty seconds to open, for anyone with the OEM bikes installed.**
   Every drop reads the bikes already in your folder so it can offer them as destinations, and
   each bike was opened twice over to get its name — 310 ms a bike where 14 ms would do. With

@@ -567,6 +567,7 @@ export const en = {
   "installDialog.directFastest": "Direct · fastest",
   "installDialog.direct": "Direct",
   "installDialog.recommendedBadge": "Recommended",
+  "installDialog.matchedBadge": "Your bike",
   "installDialog.browserBadge": "Browser",
   "installDialog.serverBadge": "Server",
   "installDialog.serverBuildNote": "Dedicated server build — not for playing",
