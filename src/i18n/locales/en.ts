@@ -567,6 +567,7 @@ export const en = {
   "installDialog.directFastest": "Direct · fastest",
   "installDialog.direct": "Direct",
   "installDialog.recommendedBadge": "Recommended",
+  "installDialog.matchedBadge": "Your bike",
   "installDialog.browserBadge": "Browser",
   "installDialog.serverBadge": "Server",
   "installDialog.serverBuildNote": "Dedicated server build — not for playing",
@@ -627,6 +628,7 @@ export const en = {
   "modDetail.addedToLibrary": "Added to your library",
   "modDetail.extracting": "Extracting…",
   "modDetail.addingToLibrary": "Adding to library…",
+  "modDetail.chooseWhatToInstall": "Choose what to install",
   "modDetail.resolving": "Resolving download…",
   "modDetail.finishInBrowser": "Finish in your browser",
   "modDetail.viewOnSite": "View on {{site}}",
@@ -1204,6 +1206,7 @@ export const en = {
   "downloads.stageDownloading": "Downloading",
   "downloads.stageExtracting": "Extracting",
   "downloads.stagePlacing": "Installing",
+  "downloads.stageReview": "Waiting for you",
 
   // ── Downloads (history) ────────────────────────────────────────────────────
   "downloads.help":
@@ -1575,6 +1578,8 @@ export const en = {
   "drop.scanning": "Working out what this is…",
   "drop.found_one": "Found {{count}} item",
   "drop.found_other": "Found {{count}} items",
+  "drop.selectAll": "Select all",
+  "drop.selectNone": "Select none",
   "drop.reviewHint": "Check the destinations, then install.",
   "drop.install_one": "Install {{count}}",
   "drop.install_other": "Install {{count}}",
@@ -1609,6 +1614,7 @@ export const en = {
   "drop.kind.bikePaint": "Paint",
   "drop.kind.soundSet": "Sound",
   "drop.kind.riderGear": "Rider gear",
+  "drop.kind.tyres": "Tyres",
   "drop.kind.reshadePreset": "ReShade preset",
   "drop.kind.unknown": "Unknown",
   "drop.reason.modsTree": "Contains a full mods folder",
@@ -1623,6 +1629,7 @@ export const en = {
   "drop.reason.riderTexture": "Paints the rider body — an outfit",
   "drop.reason.gearTexture": "Paints a piece of rider gear",
   "drop.reason.reshadePreset": "Lists ReShade techniques",
+  "drop.reason.packLayout": "Filed here by the pack it came in",
   "drop.reason.unrecognised": "Not recognised — you'll need to place it",
 
   // ── Import (the same install flow, reached by picking instead of dropping) ──

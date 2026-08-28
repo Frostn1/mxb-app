@@ -577,6 +577,7 @@ export const fr: Translation = {
   "installDialog.directFastest": "Direct · le plus rapide",
   "installDialog.direct": "Direct",
   "installDialog.recommendedBadge": "Recommandé",
+  "installDialog.matchedBadge": "Votre moto",
   "installDialog.browserBadge": "Navigateur",
   "installDialog.serverBadge": "Serveur",
   "installDialog.serverBuildNote": "Version serveur dédié — pas pour jouer",
@@ -637,6 +638,7 @@ export const fr: Translation = {
   "modDetail.addedToLibrary": "Ajouté à votre bibliothèque",
   "modDetail.extracting": "Extraction…",
   "modDetail.addingToLibrary": "Ajout à la bibliothèque…",
+  "modDetail.chooseWhatToInstall": "Choisissez quoi installer",
   "modDetail.resolving": "Résolution du téléchargement…",
   "modDetail.finishInBrowser": "Terminez dans votre navigateur",
   "modDetail.viewOnSite": "Voir sur {{site}}",
@@ -1233,6 +1235,7 @@ export const fr: Translation = {
   "downloads.stageDownloading": "Téléchargement",
   "downloads.stageExtracting": "Extraction",
   "downloads.stagePlacing": "Installation",
+  "downloads.stageReview": "En attente de vous",
 
   // ── Téléchargements (historique) ───────────────────────────────────────────
   "downloads.help":
@@ -1605,6 +1608,8 @@ export const fr: Translation = {
   "drop.scanning": "Analyse en cours…",
   "drop.found_one": "{{count}} élément trouvé",
   "drop.found_other": "{{count}} éléments trouvés",
+  "drop.selectAll": "Tout sélectionner",
+  "drop.selectNone": "Tout désélectionner",
   "drop.reviewHint": "Vérifiez les destinations, puis installez.",
   "drop.install_one": "Installer {{count}}",
   "drop.install_other": "Installer {{count}}",
@@ -1639,6 +1644,7 @@ export const fr: Translation = {
   "drop.kind.bikePaint": "Déco",
   "drop.kind.soundSet": "Son",
   "drop.kind.riderGear": "Équipement",
+  "drop.kind.tyres": "Pneus",
   "drop.kind.reshadePreset": "Préréglage ReShade",
   "drop.kind.unknown": "Inconnu",
   "drop.reason.modsTree": "Contient un dossier mods complet",
@@ -1653,6 +1659,7 @@ export const fr: Translation = {
   "drop.reason.riderTexture": "Peint le corps du pilote — une tenue",
   "drop.reason.gearTexture": "Peint un élément d'équipement",
   "drop.reason.reshadePreset": "Liste des techniques ReShade",
+  "drop.reason.packLayout": "Rangé ici par le pack",
   "drop.reason.unrecognised": "Non reconnu — à vous de le placer",
 
   // ── Import (le même flux que le dépôt, en le sélectionnant) ────────────────

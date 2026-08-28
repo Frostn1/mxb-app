@@ -572,6 +572,7 @@ export const it: Translation = {
   "installDialog.directFastest": "Diretto · il più veloce",
   "installDialog.direct": "Diretto",
   "installDialog.recommendedBadge": "Consigliato",
+  "installDialog.matchedBadge": "La tua moto",
   "installDialog.browserBadge": "Browser",
   "installDialog.serverBadge": "Server",
   "installDialog.serverBuildNote": "Build per server dedicato — non per giocare",
@@ -632,6 +633,7 @@ export const it: Translation = {
   "modDetail.addedToLibrary": "Aggiunta alla tua libreria",
   "modDetail.extracting": "Estrazione…",
   "modDetail.addingToLibrary": "Aggiunta alla libreria…",
+  "modDetail.chooseWhatToInstall": "Scegli cosa installare",
   "modDetail.resolving": "Risoluzione del download…",
   "modDetail.finishInBrowser": "Completa nel browser",
   "modDetail.viewOnSite": "Apri su {{site}}",
@@ -1225,6 +1227,7 @@ export const it: Translation = {
   "downloads.stageDownloading": "Download in corso",
   "downloads.stageExtracting": "Estrazione",
   "downloads.stagePlacing": "Installazione",
+  "downloads.stageReview": "In attesa di te",
 
   // ── Download (cronologia) ──────────────────────────────────────────────────
   "downloads.help":
@@ -1596,6 +1599,8 @@ export const it: Translation = {
   "drop.scanning": "Sto capendo di cosa si tratta…",
   "drop.found_one": "Trovato {{count}} elemento",
   "drop.found_other": "Trovati {{count}} elementi",
+  "drop.selectAll": "Seleziona tutto",
+  "drop.selectNone": "Deseleziona tutto",
   "drop.reviewHint": "Controlla le destinazioni, poi installa.",
   "drop.install_one": "Installa {{count}}",
   "drop.install_other": "Installa {{count}}",
@@ -1630,6 +1635,7 @@ export const it: Translation = {
   "drop.kind.bikePaint": "Grafica",
   "drop.kind.soundSet": "Suono",
   "drop.kind.riderGear": "Attrezzatura",
+  "drop.kind.tyres": "Pneumatici",
   "drop.kind.reshadePreset": "Preset ReShade",
   "drop.kind.unknown": "Sconosciuto",
   "drop.reason.modsTree": "Contiene una cartella mods completa",
@@ -1644,6 +1650,7 @@ export const it: Translation = {
   "drop.reason.riderTexture": "Colora il corpo del pilota — una tuta",
   "drop.reason.gearTexture": "Colora un pezzo di attrezzatura",
   "drop.reason.reshadePreset": "Elenca tecniche ReShade",
+  "drop.reason.packLayout": "Collocato qui dal pacchetto",
   "drop.reason.unrecognised": "Non riconosciuto — dovrai collocarlo tu",
 
   // ── Import (lo stesso flusso del rilascio, ma scegliendo) ──────────────────

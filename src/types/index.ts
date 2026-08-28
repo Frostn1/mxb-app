@@ -646,6 +646,9 @@ export type DropKind =
   | "bikePaint"
   | "soundSet"
   | "riderGear"
+  /** A tyre set (`mods/tyres`). Only ever comes out of a split pack — on its own a tyre
+   *  package says too little to be recognised. */
+  | "tyres"
   | "reshadePreset"
   | "unknown";
 
@@ -663,6 +666,8 @@ export type DropReason =
   | "riderTexture"
   | "gearTexture"
   | "reshadePreset"
+  /** The pack it arrived in filed it here. */
+  | "packLayout"
   | "unrecognised";
 
 export interface DropChoice {
@@ -818,6 +823,9 @@ export type InstallStage =
   | "downloading"
   | "extracting"
   | "placing"
+  /** The download held several mods and the user is picking which of them to install.
+   *  Nothing is written yet, and the queue lane has already moved on. */
+  | "review"
   | "done"
   | "error";
 

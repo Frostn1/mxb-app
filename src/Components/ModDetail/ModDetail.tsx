@@ -84,6 +84,9 @@ function stageIndex(stage: InstallStage): number {
       return 2;
     case "placing":
       return 3;
+    // The bytes are down and classified; what is left is the user's decision, not ours.
+    case "review":
+      return 3;
     case "done":
       return 4;
     default:
@@ -589,9 +592,11 @@ function InstallProgress({
         ? t("update.downloading")
         : stage === "extracting"
           ? t("modDetail.extracting")
-          : stage === "placing"
-            ? t("modDetail.addingToLibrary")
-            : t("modDetail.resolving");
+          : stage === "review"
+            ? t("modDetail.chooseWhatToInstall")
+            : stage === "placing"
+              ? t("modDetail.addingToLibrary")
+              : t("modDetail.resolving");
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
