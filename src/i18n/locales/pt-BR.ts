@@ -1381,6 +1381,20 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0112.hero.title":
+    "Um pacote de motos instala como as motos que h\u00e1 dentro dele",
+  "showcase.v0112.hero.body":
+    "O pacote OEM s\u00e3o 54 m\u00e1quinas em um arquivo de 3,8 GB, e at\u00e9 agora chegava como uma \u00fanica linha escrita \u201cPasta de mods\u201d \u2014 tudo ou nada. Agora ele aparece do jeito que \u00e9 feito: cada moto com seu nome e sua classe de verdade, com uma caixinha. Pegue as quatro em que voc\u00ea corre e deixe as outras cinquenta.",
+  "showcase.v0112.fullscreen":
+    "A pr\u00e9-visualiza\u00e7\u00e3o 3D do Designer abre em tela cheia \u2014 um bot\u00e3o preenche a janela com o modelo que voc\u00ea est\u00e1 pintando.",
+  "showcase.v0112.review":
+    "Um download que acaba trazendo v\u00e1rios mods para e mostra o que h\u00e1 dentro antes que qualquer coisa chegue \u00e0 sua pasta de mods.",
+  "showcase.v0112.paint":
+    "Uma pintura que oferece um arquivo por m\u00e1quina agora instala o da moto que voc\u00ea escolheu, e n\u00e3o o primeiro da p\u00e1gina.",
+  "showcase.v0112.speed":
+    "A folha de revis\u00e3o abre em cerca de um segundo com as motos OEM instaladas, onde antes levava quase vinte.",
+  "showcase.v0112.window":
+    "Uma janela preta na inicializa\u00e7\u00e3o n\u00e3o consegue mais prender voc\u00ea: ela fica escondida at\u00e9 ter desenhado algo e sempre tem como ser fechada.",
   "showcase.v0111.hero.title":
     "Trocas de modelo protegidas abrem em 3D",
   "showcase.v0111.hero.body":

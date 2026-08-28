@@ -1392,6 +1392,20 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0112.hero.title":
+    "Un pack de motos s'installe comme les motos qu'il contient",
+  "showcase.v0112.hero.body":
+    "Le pack OEM, c'est 54 machines dans une archive de 3,8 Go, et il arrivait jusqu'ici sous la forme d'une seule ligne intitul\u00e9e \u00ab\u00a0Dossier mods\u00a0\u00bb\u00a0: tout ou rien. Il est maintenant list\u00e9 tel qu'il est fait\u00a0: chaque moto avec son vrai nom et sa cat\u00e9gorie, et sa case \u00e0 cocher. Prends les quatre que tu pilotes et laisse les cinquante autres.",
+  "showcase.v0112.fullscreen":
+    "L'aper\u00e7u 3D du Designer s'ouvre en plein \u00e9cran\u00a0: un bouton remplit la fen\u00eatre avec le mod\u00e8le que tu es en train de peindre.",
+  "showcase.v0112.review":
+    "Un t\u00e9l\u00e9chargement qui contient plusieurs mods s'arr\u00eate et te montre ce qu'il y a dedans avant que quoi que ce soit n'atteigne ton dossier mods.",
+  "showcase.v0112.paint":
+    "Un paint qui propose un fichier par machine installe d\u00e9sormais celui de la moto choisie, et non le premier de la page.",
+  "showcase.v0112.speed":
+    "La fiche de v\u00e9rification s'ouvre en une seconde environ avec les motos OEM install\u00e9es, l\u00e0 o\u00f9 elle prenait pr\u00e8s de vingt.",
+  "showcase.v0112.window":
+    "Une fen\u00eatre noire au d\u00e9marrage ne peut plus te bloquer\u00a0: elle reste cach\u00e9e tant qu'elle n'a rien dessin\u00e9, et il y a toujours de quoi la fermer.",
   "showcase.v0111.hero.title":
     "Les modèles protégés s'ouvrent en 3D",
   "showcase.v0111.hero.body":
