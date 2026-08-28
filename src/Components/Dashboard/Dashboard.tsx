@@ -153,10 +153,12 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
     <TourContext.Provider value={{ startTour }}>
     {/* Outside the installers: both of them write to the history, and the sidebar reads it. */}
     <DownloadsProvider>
+    {/* Above the installer, not below it: a *download* stages a plan too now — a pack like
+        the OEM bikes arrives as fifty-five mods in one archive — so `InstallProvider` has to
+        be able to hand one over. It wraps the views for the same reason it always did: a drop
+        anywhere in the window and the Shop's purchases grid both finish in this one sheet. */}
+    <DropReviewProvider onInstalled={onInstalled}>
     <InstallProvider onInstalled={onInstalled} onOpenMod={openModTarget}>
-      {/* Wraps the views because two of them stage plans: a drop anywhere in the window, and
-          the Shop's purchases grid. Both finish in the one review sheet this renders. */}
-      <DropReviewProvider onInstalled={onInstalled}>
       {/* Mounted here rather than in `App` so a drop only works once the app is set up —
           there is nowhere to install to before the MX Bikes folder is known. The overlay
           window renders its own tree and deliberately gets no drop target. */}
@@ -237,8 +239,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           onOpenSettings={openSettingsSection}
         />
       )}
-      </DropReviewProvider>
-    </InstallProvider>
+      </InstallProvider>
+    </DropReviewProvider>
     </DownloadsProvider>
     </TourContext.Provider>
   );

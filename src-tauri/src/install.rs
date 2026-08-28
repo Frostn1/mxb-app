@@ -126,7 +126,7 @@ pub async fn add_to_library(
     host: &str,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Placed> {
     let client = build_download_client()?;
 
     // MEGA is end-to-end encrypted — no direct URL; use the fetch-and-decrypt path.
@@ -156,7 +156,7 @@ pub async fn download_and_place(
     direct_url: &str,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Placed> {
     let work = staging_dir("dl");
     std::fs::create_dir_all(&work)?;
 
@@ -169,7 +169,7 @@ pub async fn download_and_place(
             return Err(e);
         }
     };
-    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder).await
+    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder, Packs::Offer).await
 }
 
 /// [`extract_and_place`] on a blocking thread.
@@ -177,6 +177,7 @@ pub async fn download_and_place(
 /// Unpacking a track is minutes of synchronous disk work, and inline on an `async` command it
 /// pins a runtime worker for all of it. The shop and import commands already spawn it; the
 /// site download was the one that didn't.
+#[allow(clippy::too_many_arguments)]
 async fn extract_and_place_blocking(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -185,21 +186,56 @@ async fn extract_and_place_blocking(
     work: PathBuf,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
+    packs: Packs,
+) -> anyhow::Result<Placed> {
     let app = app.clone();
     let cfg = cfg.clone();
     let slug = slug.to_string();
     let subpath = subpath.to_string();
     let dest_folder = dest_folder.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder)
+        extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder, packs)
     })
     .await
     .map_err(|e| anyhow::anyhow!("install task failed: {e}"))?
 }
 
+/// Whether a download that turns out to hold several mods should be offered for review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Packs {
+    /// Offer it, and let the user pick which of them to install.
+    Offer,
+    /// Place it whole. The shop takes this: a purchase is one product rather than a
+    /// community pack of fifty, and that path deletes its own staging directory the moment
+    /// this call returns — which a review, still pointing into it, would need kept.
+    PlaceWhole,
+}
+
+/// What an install did once the archive was open.
+#[derive(Debug, Clone)]
+pub(crate) enum Placed {
+    /// Installed, the ordinary outcome.
+    Done,
+    /// The archive turned out to hold several mods, and the user is being asked which of
+    /// them they want. Nothing has been written; the plan owns the staging directory from
+    /// here and frees it on commit or cancel.
+    Review { plan: crate::dropzone::DropPlan },
+}
+
+impl Placed {
+    /// The plan the caller has to put up for review, if any. `None` is an ordinary install
+    /// that is already finished.
+    pub(crate) fn review(self) -> Option<crate::dropzone::DropPlan> {
+        match self {
+            Placed::Done => None,
+            Placed::Review { plan } => Some(plan),
+        }
+    }
+}
+
 /// Extract a downloaded archive and place it. `pub(crate)` for the shop, whose bytes come
 /// through a WebView rather than `reqwest` but which finishes exactly the same way.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn extract_and_place(
     app: &AppHandle,
     cfg: &AppConfig,
@@ -208,11 +244,32 @@ pub(crate) fn extract_and_place(
     work: &Path,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
+    packs: Packs,
+) -> anyhow::Result<Placed> {
     emit(app, slug, "extracting", None, None);
     let extracted = work.join("extracted");
     std::fs::create_dir_all(&extracted)?;
     extract_archive(archive, &extracted)?;
+
+    // A pack is several mods in one download, and only now — with the archive open — can it
+    // be seen to be one. Hand it to the review sheet rather than placing 3.8 GB of bikes the
+    // user was never shown. An ordinary single-mod download answers `None` and carries on.
+    if packs == Packs::Offer && !crate::reshade::is_reshade_subpath(subpath) {
+        let name = archive
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| slug.to_string());
+        match crate::dropzone::plan_extracted(&cfg.mods_path, &extracted, work.to_path_buf(), &name)
+        {
+            Ok(Some(plan)) => {
+                emit(app, slug, "review", None, None);
+                return Ok(Placed::Review { plan });
+            }
+            Ok(None) => {}
+            // Never fail an install over the offer to split it — place it whole instead.
+            Err(e) => log::warn!("could not offer {slug} as a pack: {e:#}"),
+        }
+    }
 
     emit(app, slug, "placing", None, None);
 
@@ -222,7 +279,7 @@ pub(crate) fn extract_and_place(
         crate::reshade::install_extracted(&extracted, &cfg.reshade_dir())?;
         let _ = std::fs::remove_dir_all(work);
         emit(app, slug, "done", None, None);
-        return Ok(());
+        return Ok(Placed::Done);
     }
 
     let mods_dir = crate::library::mods_subdir(&cfg.mods_path, "mods");
@@ -257,7 +314,7 @@ pub(crate) fn extract_and_place(
     emit(app, slug, "done", None, None);
 
     notify_frostmod(app, slug);
-    Ok(())
+    Ok(Placed::Done)
 }
 
 async fn download_mega_and_place(
@@ -268,7 +325,7 @@ async fn download_mega_and_place(
     url: &str,
     subpath: &str,
     dest_folder: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Placed> {
     let work = staging_dir("dl");
     std::fs::create_dir_all(&work)?;
 
@@ -279,7 +336,7 @@ async fn download_mega_and_place(
             return Err(e);
         }
     };
-    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder).await
+    extract_and_place_blocking(app, cfg, slug, archive, work, subpath, dest_folder, Packs::Offer).await
 }
 
 pub(crate) async fn download_mega(
@@ -1992,6 +2049,16 @@ fn walk_plain(
     wrap_loose: bool,
     out: &mut Vec<(PathBuf, PathBuf)>,
 ) {
+    // A single file is a unit in its own right. Every other caller hands this a directory —
+    // a staged archive, a dropped folder — but the dropzone splits a pack into the mods it
+    // holds (`dropzone::split_tree`), and one of those is a lone `.pkz` sitting among its
+    // fifty siblings. There is no folder to point at, and copying it into one to make a
+    // directory would mean 3.8 GB of staging for a pack this size.
+    if base.is_file() {
+        let name = base.file_name().unwrap_or_default();
+        out.push((base.to_path_buf(), type_dir.join(name)));
+        return;
+    }
     let Ok(rd) = std::fs::read_dir(base) else {
         return;
     };
@@ -3099,6 +3166,28 @@ mod tests {
         place_mod(&ex, &mods, "tracks", "", "slug").unwrap();
         assert!(mods.join("bikes/KTM.pkz").exists());
         assert!(mods.join("tracks/T.pkz").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A lone file is a placement in its own right — what the dropzone hands over when it
+    /// splits a pack into the mods inside it and one of those is a single `.pkz` among
+    /// fifty siblings. Its neighbours must not come with it.
+    #[test]
+    fn places_a_single_file_without_its_siblings() {
+        let root = place_tmp("onefile");
+        let ex = root.join("ex");
+        touch(&ex.join("MX1OEM_KTM.pkz"));
+        touch(&ex.join("MX2OEM_KTM.pkz"));
+        let mods = root.join("mods");
+
+        let wrote = place_mod(&ex.join("MX1OEM_KTM.pkz"), &mods, "bikes", "", "slug").unwrap();
+
+        assert_eq!(wrote, 1);
+        assert!(mods.join("bikes/MX1OEM_KTM.pkz").exists());
+        assert!(
+            !mods.join("bikes/MX2OEM_KTM.pkz").exists(),
+            "the sibling was not asked for"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -641,6 +641,7 @@ export const de: Translation = {
   "modDetail.addedToLibrary": "Zu deiner Bibliothek hinzugefügt",
   "modDetail.extracting": "Wird entpackt…",
   "modDetail.addingToLibrary": "Wird zur Bibliothek hinzugefügt…",
+  "modDetail.chooseWhatToInstall": "Wähle aus, was installiert wird",
   "modDetail.resolving": "Download wird aufgelöst…",
   "modDetail.finishInBrowser": "Im Browser abschließen",
   "modDetail.viewOnSite": "Auf {{site}} ansehen",
@@ -1242,6 +1243,7 @@ export const de: Translation = {
   "downloads.stageDownloading": "Wird heruntergeladen",
   "downloads.stageExtracting": "Wird entpackt",
   "downloads.stagePlacing": "Wird installiert",
+  "downloads.stageReview": "Wartet auf dich",
 
   // ── Downloads (Verlauf) ────────────────────────────────────────────────────
   "downloads.help":
@@ -1614,6 +1616,8 @@ export const de: Translation = {
   "drop.scanning": "Wird geprüft …",
   "drop.found_one": "{{count}} Element gefunden",
   "drop.found_other": "{{count}} Elemente gefunden",
+  "drop.selectAll": "Alle auswählen",
+  "drop.selectNone": "Keine auswählen",
   "drop.reviewHint": "Prüf die Ziele und installiere dann.",
   "drop.install_one": "{{count}} installieren",
   "drop.install_other": "{{count}} installieren",
@@ -1648,6 +1652,7 @@ export const de: Translation = {
   "drop.kind.bikePaint": "Lackierung",
   "drop.kind.soundSet": "Sound",
   "drop.kind.riderGear": "Fahrer-Ausrüstung",
+  "drop.kind.tyres": "Reifen",
   "drop.kind.reshadePreset": "ReShade-Preset",
   "drop.kind.unknown": "Unbekannt",
   "drop.reason.modsTree": "Enthält einen kompletten Mods-Ordner",
@@ -1662,6 +1667,7 @@ export const de: Translation = {
   "drop.reason.riderTexture": "Bemalt den Fahrerkörper — ein Outfit",
   "drop.reason.gearTexture": "Bemalt ein Teil der Fahrer-Ausrüstung",
   "drop.reason.reshadePreset": "Listet ReShade-Techniken auf",
+  "drop.reason.packLayout": "Vom Paket hier einsortiert",
   "drop.reason.unrecognised": "Nicht erkannt — du musst es zuordnen",
 
   // ── Import (derselbe Ablauf wie Ablegen, nur per Auswahl) ──────────────────

@@ -998,15 +998,28 @@ export function setLaunchAtStartup(enabled: boolean): Promise<void> {
   return invoke<void>("set_launch_at_startup", { enabled });
 }
 
-/** Kick off download → extract → place. Progress arrives via `onInstallProgress`. */
+/**
+ * Kick off download → extract → place. Progress arrives via `onInstallProgress`.
+ *
+ * Resolves to `null` when the mod is installed — the ordinary case. A download that turns
+ * out to hold *several* mods (the OEM bike pack is 54 bikes and a tyre set in one archive)
+ * resolves to a plan instead, with nothing yet written: put it up for review and finish it
+ * through `commitDrop`, or free the staged bytes with `cancelDrop`.
+ */
 export function addToLibrary(
   slug: string,
   url: string,
   host: string,
   subpath: string,
   destFolder: string,
-): Promise<void> {
-  return invoke<void>("add_to_library", { slug, url, host, subpath, destFolder });
+): Promise<DropPlan | null> {
+  return invoke<DropPlan | null>("add_to_library", {
+    slug,
+    url,
+    host,
+    subpath,
+    destFolder,
+  });
 }
 
 /** Stop the install in flight for `slug`. `false` when nothing is running under it — only the

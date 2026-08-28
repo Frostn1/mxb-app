@@ -4456,6 +4456,14 @@ fn read_paint_file(dir: &std::path::Path, paint: &str) -> Option<Vec<u8>> {
     std::fs::read(first).ok()
 }
 
+/// Download a mod and install it.
+///
+/// Answers `null` for the ordinary case — one mod, downloaded and placed. A download that
+/// turns out to be a *pack* (several mods in one self-describing tree, like the OEM bike
+/// pack's 54 bikes and its tyre set) answers with a plan instead, and nothing has been
+/// written yet: the caller puts it up for review and commits it through `commit_drop`,
+/// exactly as it would a dropped file. Until then the plan owns the staged bytes, and
+/// `cancel_drop` is what frees them.
 #[tauri::command]
 async fn add_to_library(
     app: tauri::AppHandle,
@@ -4464,11 +4472,12 @@ async fn add_to_library(
     host: String,
     subpath: String,
     dest_folder: String,
-) -> Result<(), String> {
+) -> Result<Option<dropzone::DropPlan>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let _cancel = cancel::begin(&slug);
     install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
         .await
+        .map(install::Placed::review)
         .map_err(|e| format!("{e:#}"))
 }
 
@@ -6587,8 +6596,17 @@ async fn shop_install(
         let cfg = cfg.clone();
         let slug = item.slug.clone();
         let work = work.clone();
-        move || install::extract_and_place(&app, &cfg, &slug, &archive, &work, &subpath, &dest_folder)
-            .map(|()| dest_folder)
+        move || install::extract_and_place(
+            &app,
+            &cfg,
+            &slug,
+            &archive,
+            &work,
+            &subpath,
+            &dest_folder,
+            install::Packs::PlaceWhole,
+        )
+        .map(|_| dest_folder)
     })
     .await
     .map_err(|e| format!("shop_install task failed: {e}"))?;

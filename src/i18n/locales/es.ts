@@ -633,6 +633,7 @@ export const es: Translation = {
   "modDetail.addedToLibrary": "Añadido a tu biblioteca",
   "modDetail.extracting": "Extrayendo…",
   "modDetail.addingToLibrary": "Añadiendo a la biblioteca…",
+  "modDetail.chooseWhatToInstall": "Elige qué instalar",
   "modDetail.resolving": "Resolviendo la descarga…",
   "modDetail.finishInBrowser": "Termina en tu navegador",
   "modDetail.viewOnSite": "Ver en {{site}}",
@@ -1230,6 +1231,7 @@ export const es: Translation = {
   "downloads.stageDownloading": "Descargando",
   "downloads.stageExtracting": "Extrayendo",
   "downloads.stagePlacing": "Instalando",
+  "downloads.stageReview": "Esperándote",
 
   // ── Descargas (historial) ──────────────────────────────────────────────────
   "downloads.help":
@@ -1601,6 +1603,8 @@ export const es: Translation = {
   "drop.scanning": "Viendo qué es esto…",
   "drop.found_one": "{{count}} elemento encontrado",
   "drop.found_other": "{{count}} elementos encontrados",
+  "drop.selectAll": "Seleccionar todo",
+  "drop.selectNone": "No seleccionar nada",
   "drop.reviewHint": "Revisa los destinos y luego instala.",
   "drop.install_one": "Instalar {{count}}",
   "drop.install_other": "Instalar {{count}}",
@@ -1635,6 +1639,7 @@ export const es: Translation = {
   "drop.kind.bikePaint": "Gráficos",
   "drop.kind.soundSet": "Sonido",
   "drop.kind.riderGear": "Equipación",
+  "drop.kind.tyres": "Neumáticos",
   "drop.kind.reshadePreset": "Ajuste de ReShade",
   "drop.kind.unknown": "Desconocido",
   "drop.reason.modsTree": "Contiene una carpeta mods completa",
@@ -1649,6 +1654,7 @@ export const es: Translation = {
   "drop.reason.riderTexture": "Pinta el cuerpo del piloto — una equipación",
   "drop.reason.gearTexture": "Pinta una pieza de equipación",
   "drop.reason.reshadePreset": "Enumera técnicas de ReShade",
+  "drop.reason.packLayout": "El paquete lo coloca aquí",
   "drop.reason.unrecognised": "No reconocido — tendrás que colocarlo tú",
 
   // ── Import (el mismo flujo que soltar, pero eligiendo) ─────────────────────
