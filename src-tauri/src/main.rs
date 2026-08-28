@@ -19,6 +19,7 @@ mod frostmod;
 mod frostmod_manage;
 mod game;
 mod gameproc;
+mod gate;
 mod gearrepair;
 mod heightfield;
 mod imgcache;
@@ -1087,12 +1088,22 @@ fn paint_cache() -> &'static std::sync::Mutex<lru::Lru<Vec<paint::PaintTexture>>
     CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(PAINT_CACHE_CAP)))
 }
 
+/// As [`cached_bike`], for the paints: looked up and released without holding the lock.
+fn cached_paint(key: &str) -> Option<Vec<paint::PaintTexture>> {
+    paint_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+}
+
 fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     let t0 = std::time::Instant::now();
     // Path *and* mtime, as the bike cache does, so a paint re-saved under the same name misses.
     let key = bike_cache_key(&path);
-    if let Some(t) = paint_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(t) = cached_paint(&key) {
         log::info!("unpack_paint {path}: cache hit ({:?})", t0.elapsed());
+        return Ok(t);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(t) = cached_paint(&key) {
+        log::info!("unpack_paint {path}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(t);
     }
 
@@ -1105,7 +1116,7 @@ fn unpack_paint_blocking(path: String) -> Result<Vec<paint::PaintTexture>, Strin
     );
     if let Ok(mut c) = paint_cache().lock() {
         // Cloning an entry copies names, sizes and tokens — never pixels, which stay in the
-        // texture store. The evicted paint's go with it; nothing else holds those tokens.
+        // texture store. The displaced paint's go with it; nothing else holds those tokens.
         if let Some(dropped) = c.insert(key, textures.clone()) {
             let tokens: Vec<String> = dropped.iter().map(|t| t.token.clone()).collect();
             texstore::release(&tokens);
@@ -1657,6 +1668,12 @@ fn bike_cache() -> &'static std::sync::Mutex<lru::Lru<BikeModel>> {
     CACHE.get_or_init(|| std::sync::Mutex::new(lru::Lru::new(BIKE_CACHE_CAP)))
 }
 
+/// The cached bike under `key`, if it's still resident. Taken and released in one step so
+/// no caller holds the cache lock while it waits on [`gate::enter`].
+fn cached_bike(key: &str) -> Option<BikeModel> {
+    bike_cache().lock().ok().and_then(|mut c| c.get(key).cloned())
+}
+
 fn mtime_nanos(path: &std::path::Path) -> u128 {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -1756,8 +1773,15 @@ fn preview_model_swap_blocking(
         tyres_stamp(&tyres),
         pick.as_deref().unwrap_or(""),
     );
-    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(m) = cached_bike(&key) {
         log::info!("preview_model_swap {label}: cache hit ({:?})", t0.elapsed());
+        return Ok(m);
+    }
+    // Somebody may already be building this exact preview — the panel and a dialog can both
+    // be drawing it. Wait for them and take their answer instead of paying a second time.
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        log::info!("preview_model_swap {label}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(m);
     }
 
@@ -1849,8 +1873,13 @@ fn load_bike_model_blocking(
         tyres.as_deref().map(tyres_stamp).unwrap_or(0),
         pick.as_deref().unwrap_or(""),
     );
-    if let Some(m) = bike_cache().lock().ok().and_then(|mut c| c.get(&key).cloned()) {
+    if let Some(m) = cached_bike(&key) {
         log::info!("load_bike_model {source}: cache hit ({:?})", t0.elapsed());
+        return Ok(m);
+    }
+    let _gate = gate::enter(&key);
+    if let Some(m) = cached_bike(&key) {
+        log::info!("load_bike_model {source}: cache hit, waited ({:?})", t0.elapsed());
         return Ok(m);
     }
 
@@ -2181,7 +2210,8 @@ fn build_bike_model(
 
     let model = BikeModel { nodes, paints, base: model_base, tyres, assembled, rig };
     if let Ok(mut c) = bike_cache().lock() {
-        // The evicted bike's pixels go with it — nothing else references them.
+        // The pixels of whatever this displaced go with it — evicted or replaced in place,
+        // nothing else references them; tokens are minted per build.
         if let Some(dropped) = c.insert(key, model.clone()) {
             texstore::release(&dropped.tokens());
         }
