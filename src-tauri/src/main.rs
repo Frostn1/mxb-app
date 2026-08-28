@@ -14,6 +14,7 @@ mod downloads;
 mod dropzone;
 mod edf;
 mod fileshare;
+mod firstpaint;
 mod frostmod;
 mod frostmod_manage;
 mod game;
@@ -85,7 +86,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 /// The app window, as opposed to the transient ones the app opens alongside it (the
 /// overlay, the mxb-mods.com clearance check, the shop login). `tauri.conf.json` declares
 /// it without an explicit label, which is Tauri's default of `main`.
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// The shop login WebView, opened on demand and closed once the session is captured.
 const SHOP_LOGIN_WINDOW: &str = "shop-login";
@@ -100,6 +101,21 @@ const SHOP_LOGIN_WINDOW: &str = "shop-login";
 /// silently did nothing.
 fn parks_in_tray(label: &str) -> bool {
     label == MAIN_WINDOW
+}
+
+/// Whether closing the main window should park it in the tray instead of ending the app.
+///
+/// `painted` is the one that isn't a preference: a window that never painted has no close
+/// button in it, so parking it leaves the player nothing — the process stays alive holding
+/// the single-instance guard, and the next launch hands the same dead window straight back.
+///
+/// Never parks on Linux: the tray runs through libayatana-appindicator, which doesn't
+/// deliver click events to Tauri and isn't present at all on a stock GNOME desktop, so
+/// hiding there can strand the window with no way back. Never in a dev build either, or a
+/// `tauri dev` run would linger in the tray and block the next one.
+fn parks_on_close(painted: bool, run_in_background: bool) -> bool {
+    let tray_can_restore = cfg!(not(target_os = "linux"));
+    painted && run_in_background && tray_can_restore && !cfg!(debug_assertions)
 }
 
 /// Whether a window may make this IPC call.
@@ -4970,8 +4986,18 @@ fn autostart_action(wanted: bool, enabled: bool, stale: bool) -> Autostart {
     }
 }
 
-fn show_main(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
+/// The frontend has drawn its first frame — see [`firstpaint`].
+#[tauri::command]
+fn window_painted(app: tauri::AppHandle) {
+    firstpaint::mark(&app);
+}
+
+pub(crate) fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        // Every path in — the tray, a second launch, the watchdog — can land here before
+        // the webview has painted, and an undecorated window with no frontend in it has
+        // nothing to close it by.
+        firstpaint::decorate_unpainted(&w);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -7371,14 +7397,31 @@ fn webview_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
 /// web process, and before any other thread exists — being `main`'s first statement gives
 /// both.
 fn prepare_webview_env() {
-    if !cfg!(target_os = "linux") {
-        return;
-    }
-    for (key, value) in webview_env_defaults(GraphicsEnv::read()) {
+    let env = GraphicsEnv::read();
+    let vars = if cfg!(target_os = "linux") {
+        webview_env_defaults(env)
+    } else if cfg!(windows) {
+        webview2_env_defaults(env)
+    } else {
+        Vec::new()
+    };
+    for (key, value) in vars {
         if std::env::var_os(key).is_none() {
             std::env::set_var(key, value);
         }
     }
+}
+
+/// The environment WebView2 should start under.
+///
+/// Nothing by default — WebView2 paints on virtually every Windows machine. `MXB_SAFE_GRAPHICS=1`
+/// takes the GPU out of it, which is the lever to pull for a window that came up black and
+/// stayed that way: a first frame that never arrives is the GPU path failing.
+fn webview2_env_defaults(env: GraphicsEnv) -> Vec<(&'static str, &'static str)> {
+    if !env.safe_mode {
+        return Vec::new();
+    }
+    vec![("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu")]
 }
 
 /// Whether this process is running under Wine — CrossOver, Whisky, Kegworks or plain Wine.
@@ -7532,12 +7575,24 @@ fn main() {
                 .filter(|w| w.label == MAIN_WINDOW)
             {
                 let mut builder =
-                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?;
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                        // Also what puts the window on screen: it is hidden until the
+                        // document is there to show, and a hidden webview never composites
+                        // — so waiting for a painted frame here would wait forever.
+                        .on_page_load(|window, payload| {
+                            log::info!("[startup] main window {:?}", payload.event());
+                            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                                firstpaint::loaded(window.app_handle());
+                            }
+                        });
                 if !drag_drop {
                     builder = builder.disable_drag_drop_handler();
                 }
                 builder.build()?;
             }
+            // The window is built hidden and revealed by `window_painted`; this is what
+            // rescues it when that never arrives.
+            firstpaint::arm(app.handle());
             // Cloudflare scores the User-Agent alongside the IP, and a cf_clearance is bound
             // to the UA that earned it — a log about a block should say which one was used.
             log::info!("{} user-agent: {}", mxb_session::site().domain, mxb_session::UA);
@@ -7555,6 +7610,12 @@ fn main() {
                     on("WEBKIT_DISABLE_DMABUF_RENDERER"),
                     on("WEBKIT_DISABLE_COMPOSITING_MODE"),
                     on("LIBGL_ALWAYS_SOFTWARE"),
+                );
+            }
+            if cfg!(windows) {
+                log::info!(
+                    "webview env: webview2_args={:?}",
+                    std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default(),
                 );
             }
             if let Ok(dir) = app.path().app_local_data_dir() {
@@ -7745,14 +7806,16 @@ fn main() {
                     return;
                 }
                 let cfg = config::load(window.app_handle()).unwrap_or_default();
-                // Never on Linux: the tray runs through libayatana-appindicator, which
-                // doesn't deliver click events to Tauri and isn't present at all on a
-                // stock GNOME desktop. Hiding there can strand the window with no way
-                // back, so closing closes.
-                let tray_can_restore = cfg!(not(target_os = "linux"));
-                if cfg.run_in_background && tray_can_restore && !cfg!(debug_assertions) {
+                let painted = firstpaint::painted();
+                if parks_on_close(painted, cfg.run_in_background) {
                     api.prevent_close();
                     let _ = window.hide();
+                } else if !painted {
+                    log::warn!(
+                        "[startup] closing a main window that never painted — quitting \
+                         rather than parking it in the tray"
+                    );
+                    frostmod_manage::stop(&window.app_handle().state::<FrostmodProcess>());
                 }
             }
         })
@@ -7762,6 +7825,7 @@ fn main() {
             // The macro is generic over the runtime; naming `Wry` here is what lets the
             // wrapper below infer what it is wrapping.
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            window_painted,
             is_configured,
             get_config,
             create_config,
@@ -8056,6 +8120,55 @@ mod webview_env_tests {
         let vars = defaults(GraphicsEnv::default());
         assert_eq!(vars.len(), 1);
         assert!(vars.contains_key("WEBKIT_DISABLE_DMABUF_RENDERER"));
+    }
+
+    /// WebView2 paints on virtually every Windows machine, and forcing software rendering
+    /// on all of them to cure the few would be a bad trade.
+    #[test]
+    fn windows_is_left_alone_unless_safe_graphics_is_asked_for() {
+        assert!(webview2_env_defaults(GraphicsEnv::default()).is_empty());
+    }
+
+    /// The lever support has to pull for a window that came up black and stayed black.
+    #[test]
+    fn safe_graphics_takes_the_gpu_out_of_webview2() {
+        let vars: HashMap<_, _> = webview2_env_defaults(GraphicsEnv {
+            safe_mode: true,
+            ..GraphicsEnv::default()
+        })
+        .into_iter()
+        .collect();
+        assert_eq!(
+            vars.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"),
+            Some(&"--disable-gpu"),
+        );
+    }
+}
+
+/// The window that never painted is the one these are for: it has no close button drawn
+/// in it, so whatever the player does next has to actually get rid of it.
+#[cfg(test)]
+mod close_behaviour_tests {
+    use super::*;
+
+    /// The whole bug: Alt+F4 on a black window parked it in the tray, the process stayed
+    /// alive holding the single-instance guard, and reopening the app called `show_main`
+    /// and handed the same dead window back. Task Manager was the only way out.
+    #[test]
+    fn a_window_that_never_painted_never_parks_in_the_tray() {
+        assert!(!parks_on_close(false, true));
+        assert!(!parks_on_close(false, false));
+    }
+
+    /// And the setting still means what it says for a window that works.
+    #[test]
+    fn a_painted_window_still_honours_run_in_background() {
+        // Release builds on Windows and macOS park; this test binary is neither, so the
+        // assertion is on the platform-and-build gate agreeing with itself rather than on
+        // a fixed answer.
+        let parks = cfg!(not(target_os = "linux")) && !cfg!(debug_assertions);
+        assert_eq!(parks_on_close(true, true), parks);
+        assert!(!parks_on_close(true, false), "turning it off always closes for real");
     }
 }
 

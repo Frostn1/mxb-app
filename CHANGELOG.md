@@ -73,6 +73,28 @@ whichever release turns it on.
   every single drop. It is 1.2 seconds now. The same read backs the bike pickers throughout
   the app, so they all get quicker.
 
+## 2026-08-28
+
+### Fixed
+
+- **A black window on startup can no longer trap you.** On a cold boot WebView2 sometimes
+  takes a long time to draw its first frame — and occasionally never draws one at all. The
+  app window appeared anyway, empty and black, and because our title bar is drawn by the
+  page there was no close button in it and no title bar to close it from. Alt+F4 only parked
+  it in the tray, where the process stayed alive and handed the same dead window back the
+  next time you opened the app; Task Manager was the only way out. The window now stays
+  hidden until it has actually drawn something, anything that shows it early gets a real
+  Windows title bar to close it by, and a window that never drew closes for good rather than
+  hiding in the tray. Reported by a player who found it after booting their PC.
+
+### Changed
+
+- **`MXB_SAFE_GRAPHICS=1` now works on Windows too.** It takes the GPU out of the app's
+  browser, the same lever it already pulled on Linux — the thing to try when a window comes
+  up black and stays that way. The app also records how far the page got loading, and which
+  graphics settings were in force, so the next report of a blank window can be read straight
+  from the log instead of guessed at.
+
 ## 2026-08-28 — v0.11.1 — Protected model swaps open in 3D
 
 ### Fixed
