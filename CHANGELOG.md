@@ -77,6 +77,17 @@ whichever release turns it on.
 
 ### Fixed
 
+- **The 3D viewer no longer hoards a bike's textures each time it redraws one.** Two things
+  asking for the same bike at the same moment — a preview panel and a dialog drawing it
+  together, or a picker that re-asks before the first answer lands — read and decoded it from
+  scratch twice over, and the copy that lost the race left its textures behind with nothing
+  able to free them. Three passes over one bike put 200 MB in the texture store and none of
+  it came back. Far enough down that road the store starts dropping its oldest textures to
+  stay under its ceiling, and the oldest can be the bike you are looking at — which is how
+  parts of a bike turn grey for no reason. Two callers that want the same bike now share one
+  read: the second waits for the first and takes its answer, so it arrives in milliseconds
+  instead of seconds. Found in a player's log.
+
 - **A black window on startup can no longer trap you.** On a cold boot WebView2 sometimes
   takes a long time to draw its first frame — and occasionally never draws one at all. The
   app window appeared anyway, empty and black, and because our title bar is drawn by the
