@@ -29,6 +29,19 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
+## 2026-08-29
+
+### Fixed
+
+- **A paint that ships a separate file per bike now installs the right one.** Some pages offer
+  one download per machine the paint fits — *pitfactory 250f pub* beside *pitfactory 125t pub* —
+  and mark **both** as the recommended file. Nothing about that says "different file" to a picker
+  built for mirrors, so it took the first one and put the 250's paint in the 125's folder. Those
+  pages are now read for what they are: every file is listed rather than folded away, the one for
+  the bike you picked is the one flagged, and choosing a different file moves the destination to
+  the bike that file is for. One-click installs from Browse follow the same match, so they stop
+  quietly grabbing the wrong machine's paint.
+
 ## 2026-08-28 — v0.11.1 — Protected model swaps open in 3D
 
 ### Fixed

@@ -1558,6 +1558,122 @@ export function isServerOnly(mirrors: DownloadOption[]): boolean {
   return mirrors.length > 0 && mirrors.every((m) => m.isServer);
 }
 
+/**
+ * The displacement-shaped numbers a piece of text carries — two or three digits, so a year
+ * can never pass for a machine ("2026 CLUBMX Redbud" names no bike). Whole runs only: `250`
+ * is in `CR250`, and is not in `2023` or `1250`.
+ */
+const displacements = (s: string): Set<string> =>
+  new Set(digitRuns(s).filter((n) => n.length >= 2 && n.length <= 3));
+
+/** `MX1OEM_2023_KTM_250_SX-F/paints` → `MX1OEM_2023_KTM_250_SX-F`. */
+export function bikeOfDest(dest: string): string {
+  return dest.replace(/[/\\]paints$/i, "");
+}
+
+/** The bikes a destination list offers, taken from the `<bike>/paints` entry each one gets. */
+export function bikeNamesFromDest(destOptions: DestOption[]): string[] {
+  const out = new Set<string>();
+  for (const o of destOptions) {
+    const m = /^(.+)[/\\]paints$/i.exec(o.value);
+    if (m) out.add(m[1]);
+  }
+  return [...out];
+}
+
+export interface BikeVariants {
+  /** The bikes each download names, in `mirrors` order. Empty where it names none. */
+  bikes: Set<string>[];
+  /**
+   * Whether these are per-bike *files* rather than mirrors of one — i.e. whether the file
+   * to grab depends on which bike it's being installed for.
+   */
+  perBike: boolean;
+}
+
+/**
+ * Which bike each download on a page is for, where the page has one file per bike.
+ *
+ * Authors label those blocks with the displacement and nothing else — `pitfactory 250f pub`
+ * beside `pitfactory 125t pub`, or plain `250` beside `450` — while the site flags *both* as
+ * the default file. Nothing about that says "different file" to a picker built for mirrors,
+ * so the first block wins and the 250's paint lands in the 125's folder.
+ *
+ * A number in a label only counts when a bike actually installed carries that same run of
+ * digits, which is what keeps a rider number ("Gieck 18") or a pack's name ("288essentials")
+ * from reading as a machine. The page then only counts as per-bike when *every* playable
+ * download names one and at least two of them disagree: pages that mix one paint with a
+ * couple of model-swap links, or offer the same paint per rider, are mirrors as far as this
+ * is concerned and keep the behaviour they had. Measured over 240 livery posts this picks out
+ * the 7 real cases among the 64 with more than one download, and nothing else.
+ */
+export function bikeVariants(mirrors: DownloadOption[], bikes: string[]): BikeVariants {
+  const bikeNums = bikes.map((b) => new Set(digitRuns(b)));
+  const sets = mirrors.map((m) => {
+    const want = displacements(m.label);
+    const out = new Set<string>();
+    if (want.size === 0) return out;
+    bikes.forEach((b, i) => {
+      for (const n of want)
+        if (bikeNums[i].has(n)) {
+          out.add(b);
+          break;
+        }
+    });
+    return out;
+  });
+
+  // Server builds are named after the bike too, but nobody rides one — they say nothing
+  // about whether the *playable* files differ.
+  const idx = mirrors.map((_, i) => i).filter((i) => !mirrors[i].isServer);
+  const disjoint = (a: Set<string>, b: Set<string>) => ![...a].some((v) => b.has(v));
+  const perBike =
+    idx.length >= 2 &&
+    idx.every((i) => sets[i].size > 0) &&
+    idx.some((i, n) => idx.slice(n + 1).some((j) => disjoint(sets[i], sets[j])));
+
+  return { bikes: sets, perBike };
+}
+
+/**
+ * The download meant for `bike`, or `null` when no block names it.
+ *
+ * The narrowest match wins: a file labelled for one bike beats one labelled for several.
+ */
+export function variantForBike(
+  mirrors: DownloadOption[],
+  variants: BikeVariants,
+  bike: string,
+): DownloadOption | null {
+  let best: DownloadOption | null = null;
+  let bestSize = Infinity;
+  for (let i = 0; i < mirrors.length; i++) {
+    const set = variants.bikes[i];
+    if (mirrors[i].isServer || !set?.has(bike) || set.size >= bestSize) continue;
+    best = mirrors[i];
+    bestSize = set.size;
+  }
+  return best;
+}
+
+/**
+ * The destination a per-bike download is asking for, out of the ones the post itself names,
+ * or `null` where that's ambiguous.
+ *
+ * A label reading `250` fits every 250 in the library, so only the post's own bikes can say
+ * which one was meant — and only when exactly one of them is on offer.
+ */
+export function destForVariant(
+  variants: BikeVariants,
+  index: number,
+  suggestions: string[],
+): string | null {
+  const set = variants.bikes[index];
+  if (!set) return null;
+  const hits = suggestions.filter((v) => set.has(bikeOfDest(v)));
+  return hits.length === 1 ? hits[0] : null;
+}
+
 export function pickDownloadForBike(
   mirrors: DownloadOption[],
   bikeName: string,
@@ -1571,6 +1687,9 @@ export function pickDownloadForBike(
   const want = tokens(bikeName);
   if (want.size === 0) return fallback();
 
+  // Deliberately word-matching only, no displacement pass: sound packs are labelled by
+  // brand ("Just KTM 250SX-F") and a bare 250 would hand a Honda the KTM's sound. A livery's
+  // per-bike files are read by {@link bikeVariants} instead, which has the bikes to check against.
   let best: { m: DownloadOption; score: number } | null = null;
   for (const m of pool) {
     const fname = m.url.split(/[/\\]/).pop() ?? "";
@@ -1727,6 +1846,19 @@ export async function resolveQuickInstall(
   );
   const destFolder = resolveInitialFolder(game, modType, options, guess, livery);
 
+  // A page with a file per bike has no single "the download": one click otherwise installs
+  // the 250's paint into the folder it just picked for the 125. The file follows the folder.
+  const variants =
+    modType.id === "bikes"
+      ? bikeVariants(mirrors, bikeNames(installed, bikeTargets))
+      : { bikes: [], perBike: false };
+  const match = variants.perBike
+    ? variantForBike(mirrors, variants, bikeOfDest(destFolder))
+    : null;
+  const file = match ?? primary;
+  if (isBlockedDownload(file))
+    return { ok: false, reason: "blocked", title: detail.title, host: file.host };
+
   return {
     ok: true,
     params: {
@@ -1734,8 +1866,8 @@ export async function resolveQuickInstall(
       title: detail.title,
       subpath: modType.installSubpath,
       destFolder,
-      url: primary.url,
-      host: primary.host,
+      url: file.url,
+      host: file.host,
     },
   };
 }
