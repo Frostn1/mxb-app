@@ -379,6 +379,8 @@ export const ptBR: Translation = {
   // ── Visualizador 3D ────────────────────────────────────────────────────────
   "viewer.preview3d": "Prévia 3D",
   "viewer.expand": "Expandir",
+  "viewer.fullscreen": "Tela cheia",
+  "viewer.exitFullscreen": "Sair da tela cheia",
   "viewer.paint": "Pintura",
   "viewer.tyres": "Pneus",
   "viewer.tyresOwn": "Os da moto",
