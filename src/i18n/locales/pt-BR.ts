@@ -575,6 +575,7 @@ export const ptBR: Translation = {
   "installDialog.directFastest": "Direto · o mais rápido",
   "installDialog.direct": "Direto",
   "installDialog.recommendedBadge": "Recomendado",
+  "installDialog.matchedBadge": "Sua moto",
   "installDialog.browserBadge": "Navegador",
   "installDialog.serverBadge": "Servidor",
   "installDialog.serverBuildNote": "Versão para servidor dedicado — não serve para jogar",
