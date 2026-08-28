@@ -21,6 +21,7 @@ import {
 } from "../api/mods";
 import type { DownloadSource, InstallStage, ReloadOutcome } from "../types";
 import { useDownloads } from "./Downloads";
+import { useDropReview } from "./DropReview";
 import { useT } from "../i18n/context";
 
 /** Where the bytes come from — a resolvable host, a file the user picked, or a shop purchase
@@ -198,6 +199,11 @@ export function InstallProvider({
   tRef.current = t;
   // Same reason: the history is written from inside `run`, which must not be rebuilt.
   const { note } = useDownloads();
+  // A download that turns out to be a pack is handed over rather than installed. Held in a
+  // ref for the same reason as the rest: `run` keeps its empty dep list.
+  const { reviewPlan } = useDropReview();
+  const reviewRef = useRef(reviewPlan);
+  reviewRef.current = reviewPlan;
   const noteRef = useRef(note);
   noteRef.current = note;
   const clearTimers = useRef<Map<string, number>>(new Map());
@@ -303,7 +309,16 @@ export function InstallProvider({
 
     try {
       if (source.kind === "download") {
-        await addToLibrary(slug, source.url, source.host, subpath, destFolder);
+        const pack = await addToLibrary(slug, source.url, source.host, subpath, destFolder);
+        if (pack) {
+          // Not one mod but several — a pack, and nothing has been written. The review sheet
+          // owns the staged bytes from here, and records its own history rows when the user
+          // commits, so this run is finished: the lane frees and the queue moves on. The card
+          // stays up saying what is waiting, because the sheet may be behind another one.
+          patch(key, (cur) => ({ ...cur, stage: "review" }));
+          reviewRef.current(pack);
+          return;
+        }
       } else if (source.kind === "shop") {
         await shopInstall(source.item, subpath, destFolder);
       } else {

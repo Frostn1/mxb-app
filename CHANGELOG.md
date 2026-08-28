@@ -31,6 +31,29 @@ whichever release turns it on.
 
 ## 2026-08-29
 
+### Added
+
+- **A bike pack installs as the bikes inside it.** The OEM bike pack is 54 machines and a
+  tyre set in one 3.8 GB archive, and until now it arrived as a single row reading "Mods
+  folder" — all of it or none of it, with no way to see what was in there. It is now listed
+  the way it is built: every bike by its real name and class (*KTM 450 SX-F 2023 · MX1 OEM*),
+  its size, and a checkbox. Take the four you race and leave the other fifty. **Select all**
+  and **Select none** sit in the header, because a fifty-five-row list is not a list you tick
+  by hand.
+
+  Where each piece goes is read from the pack itself rather than guessed at, which matters
+  more than it sounds: the tyre set that carries every one of those bikes' wheels is
+  described inside its own file exactly like a bike, and filing it under `mods/bikes` on that
+  evidence would take the wheels off all 54. A pack the app can't read confidently is left
+  exactly as it was — one row, installed whole — rather than split into pieces it would have
+  to guess destinations for.
+
+- **A pack you download is shown to you before it installs.** Downloads used to go straight
+  to disk, which for a pack meant 3.8 GB of bikes landing without anyone being asked. One
+  that turns out to hold several mods now stops and opens the same review sheet a dropped
+  file gets. An ordinary single-mod download is untouched — it installs exactly as before,
+  with nothing extra to click.
+
 ### Fixed
 
 - **A paint that ships a separate file per bike now installs the right one.** Some pages offer
@@ -41,6 +64,12 @@ whichever release turns it on.
   the bike you picked is the one flagged, and choosing a different file moves the destination to
   the bike that file is for. One-click installs from Browse follow the same match, so they stop
   quietly grabbing the wrong machine's paint.
+- **The review sheet took twenty seconds to open, for anyone with the OEM bikes installed.**
+  Every drop reads the bikes already in your folder so it can offer them as destinations, and
+  each bike was opened twice over to get its name — 310 ms a bike where 14 ms would do. With
+  53 OEM bikes installed that was 18.9 seconds of nothing happening before the sheet drew, on
+  every single drop. It is 1.2 seconds now. The same read backs the bike pickers throughout
+  the app, so they all get quicker.
 
 ## 2026-08-28 — v0.11.1 — Protected model swaps open in 3D
 
