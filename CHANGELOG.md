@@ -54,6 +54,13 @@ whichever release turns it on.
   file gets. An ordinary single-mod download is untouched — it installs exactly as before,
   with nothing extra to click.
 
+- **The Designer's 3D preview opens fullscreen.** The model sits in a column beside the
+  canvas — the right size while you are drawing on it, and far too small when you want to look
+  at what you have drawn. The button in its corner fills the window with it, with the same
+  tyre, gear and hide toggles it has in the panel; the button again or Escape puts it back.
+  The editor is untouched behind it — same sheets, same layers, nothing saved or reloaded to
+  take a proper look. Asked for by GalpinMX.
+
 - **Sly** credited on Settings → Supporters.
 
 ### Fixed

@@ -376,6 +376,8 @@ export const it: Translation = {
   // ── Visualizzatore 3D ──────────────────────────────────────────────────────
   "viewer.preview3d": "Anteprima 3D",
   "viewer.expand": "Ingrandisci",
+  "viewer.fullscreen": "Schermo intero",
+  "viewer.exitFullscreen": "Esci da schermo intero",
   "viewer.paint": "Grafica",
   "viewer.tyres": "Gomme",
   "viewer.tyresOwn": "Quelle della moto",

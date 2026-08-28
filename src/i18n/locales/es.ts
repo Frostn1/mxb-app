@@ -377,6 +377,8 @@ export const es: Translation = {
   // ── Visor 3D ───────────────────────────────────────────────────────────────
   "viewer.preview3d": "Vista previa 3D",
   "viewer.expand": "Ampliar",
+  "viewer.fullscreen": "Pantalla completa",
+  "viewer.exitFullscreen": "Salir de pantalla completa",
   "viewer.paint": "Gráficos",
   "viewer.tyres": "Neumáticos",
   "viewer.tyresOwn": "Los de la moto",

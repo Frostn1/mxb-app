@@ -1295,6 +1295,9 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!rootRef.current?.offsetParent) return;
+      // A modal over the editor — the fullscreen preview — owns the keyboard: a tool letter
+      // pressed while looking at the model would swap a brush nobody can see.
+      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
       const el = e.target as HTMLElement | null;
       if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {

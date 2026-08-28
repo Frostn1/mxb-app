@@ -383,6 +383,8 @@ export const de: Translation = {
   // ── 3D-Ansicht ─────────────────────────────────────────────────────────────
   "viewer.preview3d": "3D-Vorschau",
   "viewer.expand": "Vergrößern",
+  "viewer.fullscreen": "Vollbild",
+  "viewer.exitFullscreen": "Vollbild beenden",
   "viewer.paint": "Design",
   "viewer.tyres": "Reifen",
   "viewer.tyresOwn": "Die des Bikes",

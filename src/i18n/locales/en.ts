@@ -370,6 +370,8 @@ export const en = {
   // ── 3D viewer ──────────────────────────────────────────────────────────────
   "viewer.preview3d": "3D Preview",
   "viewer.expand": "Expand",
+  "viewer.fullscreen": "Fullscreen",
+  "viewer.exitFullscreen": "Exit fullscreen",
   "viewer.paint": "Paint",
   "viewer.tyres": "Tyres",
   "viewer.tyresOwn": "Bike's own",

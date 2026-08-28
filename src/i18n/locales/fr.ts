@@ -380,6 +380,8 @@ export const fr: Translation = {
   // ── Visualiseur 3D ─────────────────────────────────────────────────────────
   "viewer.preview3d": "Aperçu 3D",
   "viewer.expand": "Agrandir",
+  "viewer.fullscreen": "Plein écran",
+  "viewer.exitFullscreen": "Quitter le plein écran",
   "viewer.paint": "Déco",
   "viewer.tyres": "Pneus",
   "viewer.tyresOwn": "Ceux de la moto",
