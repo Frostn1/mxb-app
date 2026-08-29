@@ -66,6 +66,12 @@ whichever release turns it on.
   at: how many triangles it is and how big it is in metres. A published track comes apart into
   ten thousand of them, the largest five metres across.
 
+  Where a track's surfaces can't be read, its cut-outs are left out rather than drawn wrong. A
+  quarter of a map is foliage, crowd and netting — flat cards that are a tree only once an
+  alpha channel has cut the tree out of them, and drawn plain they are thousands of standing
+  sheets of paper hiding the track behind them. Tracks whose surfaces do read keep every one
+  of them.
+
   Ground colours are drier. A surface id names what the physics does, not what a track looks
   like, and a lawn green on a dry circuit was the loudest wrong thing on the screen — the same
   hues now sit closer to earth, so a surface a track named loosely reads as ground.

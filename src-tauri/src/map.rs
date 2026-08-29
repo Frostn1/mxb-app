@@ -375,6 +375,93 @@ pub struct MapObject {
     pub max: [f32; 3],
 }
 
+/// Drop the geometry that only makes sense with a picture on it.
+///
+/// A quarter to a third of a map is cut-out cards — foliage, crowd, netting — flat quads that
+/// are a tree only once an alpha channel has cut the tree out of them. Drawn plain they are
+/// standing sheets of paper, and there are thousands of them: they hide the track and read as
+/// a fault rather than as a limitation.
+///
+/// So on a map whose surfaces can't be bound, they come out. A card is a triangle standing
+/// near-vertical and tall enough not to be ground: measured against a track whose cut-outs
+/// are known, that test catches them at 71 % against 11 % of everything else, which is the
+/// separation that makes it worth doing at all.
+///
+/// Where the surfaces *do* bind, nothing is dropped — an alpha test draws them properly.
+pub fn without_cards(mesh: &MapMesh) -> MapMesh {
+    let tris = mesh.indices.len() / 3;
+    let vert = |i: u32| {
+        let o = i as usize * 3;
+        [
+            mesh.positions[o],
+            mesh.positions[o + 1],
+            mesh.positions[o + 2],
+        ]
+    };
+    let mut keep = Vec::with_capacity(tris);
+    for t in 0..tris {
+        let p = [
+            vert(mesh.indices[t * 3]),
+            vert(mesh.indices[t * 3 + 1]),
+            vert(mesh.indices[t * 3 + 2]),
+        ];
+        let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+        let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+        let n = [
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
+        ];
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        let upright = if len > 1e-9 { (n[1] / len).abs() } else { 1.0 };
+        let high = p[0][1].max(p[1][1]).max(p[2][1]);
+        let low = p[0][1].min(p[1][1]).min(p[2][1]);
+        keep.push(!(upright < 0.35 && high - low > 0.8));
+    }
+
+    // Triangles are already sorted by material, so filtering keeps that order and the groups
+    // only need recounting.
+    let mut indices = Vec::with_capacity(mesh.indices.len());
+    let mut groups: Vec<Group> = Vec::new();
+    let mut material_of_tri: Vec<u32> = Vec::new();
+    for g in &mesh.groups {
+        let start = (indices.len() / 3) as u32;
+        for t in g.tri_start..g.tri_start + g.tri_count {
+            if !keep.get(t as usize).copied().unwrap_or(false) {
+                continue;
+            }
+            let at = t as usize * 3;
+            indices.extend_from_slice(&mesh.indices[at..at + 3]);
+            material_of_tri.push(g.material);
+        }
+        let count = (indices.len() / 3) as u32 - start;
+        if count > 0 {
+            groups.push(Group {
+                material: g.material,
+                tri_start: start,
+                tri_count: count,
+            });
+        }
+    }
+
+    let (objects, object_of_tri) = split_into_objects(
+        mesh.vertex_count(),
+        &indices,
+        &material_of_tri,
+        &mesh.positions,
+    );
+    MapMesh {
+        positions: mesh.positions.clone(),
+        normals: mesh.normals.clone(),
+        uvs: mesh.uvs.clone(),
+        indices,
+        groups,
+        objects,
+        object_of_tri,
+        materials: mesh.materials,
+    }
+}
+
 /// Split the mesh into the pieces it is actually made of.
 ///
 /// Triangles that share a vertex belong to the same thing: the exporter welds a tent to
@@ -1152,6 +1239,39 @@ mod tests {
         );
         // The pixels are last, so the tail is exactly what went in.
         assert_eq!(&blob[blob.len() - 16..], &[7u8; 16]);
+    }
+
+    #[test]
+    fn cut_out_cards_come_out_and_the_ground_stays() {
+        // A flat ground quad and a standing card. Without a picture on it the card is a sheet
+        // of paper, so it goes; the ground it stands on does not.
+        let positions = vec![
+            0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 4.0, // ground, lying flat
+            1.0, 0.0, 1.0, 1.0, 3.0, 1.0, 2.0, 3.0, 1.0, // a card, standing three metres
+        ];
+        let mesh = MapMesh {
+            positions,
+            normals: vec![0.0; 18],
+            uvs: vec![0.0; 12],
+            indices: vec![0, 1, 2, 3, 4, 5],
+            groups: vec![Group {
+                material: 0,
+                tri_start: 0,
+                tri_count: 2,
+            }],
+            objects: Vec::new(),
+            object_of_tri: Vec::new(),
+            materials: 1,
+        };
+        let out = without_cards(&mesh);
+        assert_eq!(out.triangle_count(), 1, "the card goes, the ground stays");
+        assert_eq!(&out.indices[..], &[0, 1, 2]);
+        assert_eq!(out.groups.len(), 1);
+        assert_eq!(
+            out.groups[0].tri_count, 1,
+            "the group is recounted, not left stale"
+        );
+        assert_eq!(out.objects.len(), 1, "and the pieces are found again");
     }
 
     #[test]

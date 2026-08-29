@@ -25,8 +25,8 @@ use crate::map::{self, Group, MapMesh, MapTexture};
 // v2: the mesh gained UVs and material groups, and the surfaces travel with it.
 // v3: the mesh and the surfaces are cached apart, so the first can be served without the
 // second having been decoded at all.
-const MESH_CACHE: &str = "track-scenery-v3";
-const SURFACE_CACHE: &str = "track-surfaces-v3";
+const MESH_CACHE: &str = "track-scenery-v4";
+const SURFACE_CACHE: &str = "track-surfaces-v4";
 
 /// How many decoded scenery meshes to keep. Smaller than the terrain's: one of these is
 /// about 30 MB, against 16 for a terrain master.
@@ -69,6 +69,9 @@ pub struct SceneryInfo {
     /// Connected pieces the scenery comes apart into — one per tent, trailer or foliage card.
     #[serde(default)]
     pub objects: u32,
+    /// Whether the cut-out cards were left out because this map's surfaces can't be bound.
+    #[serde(default)]
+    pub cards_dropped: bool,
     /// One run of triangles per material: `[material, tri_start, tri_count]`.
     #[serde(default)]
     pub groups: Vec<[u32; 3]>,
@@ -649,7 +652,12 @@ fn decode_with_key(path: &Path, want_surfaces: bool, key: Option<&str>) -> Resul
             Some(m) => {
                 info.materials = m.materials;
                 info.entry = entry.clone();
-                mesh = m;
+                // A map whose surfaces can't be bound can't draw its cut-outs, and a foliage
+                // card without its alpha is a standing sheet of paper. Thousands of them hide
+                // the track. Drop them rather than show them wrong.
+                let bindable = !map::declared(&bytes).is_empty();
+                mesh = if bindable { m } else { map::without_cards(&m) };
+                info.cards_dropped = !bindable;
                 if want_surfaces {
                     textures = map::textures(&bytes, map::MAX_TEXTURE_DIM);
                 } else {
