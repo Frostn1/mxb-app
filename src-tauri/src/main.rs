@@ -1110,6 +1110,25 @@ async fn load_track_surfaces(
     .map_err(|e| format!("load_track_surfaces task failed: {e}"))
 }
 
+/// What a track wraps itself in — its sky, its backdrop, and the light it sits under.
+///
+/// A dome is a few hundred triangles carrying one very large picture, so this is cheap next
+/// to the scenery and is what stops a track ending at a hard edge with nothing beyond it.
+#[tauri::command]
+async fn load_track_backdrop(
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::backdrop(&path) {
+        Ok((amb, sky, back)) => tauri::ipc::Response::new(scenery::backdrop_blob(&amb, &sky, &back)),
+        Err(e) => {
+            log::debug!("[scenery] backdrop for {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_backdrop task failed: {e}"))
+}
+
 /// The models a track ships that a prop can be placed by name.
 #[tauri::command]
 async fn read_track_placeable(path: String) -> Result<Vec<String>, String> {
@@ -7889,6 +7908,7 @@ fn main() {
             save_track_props,
             read_track_placeable,
             load_track_prop,
+            load_track_backdrop,
             diagnose_track,
             unpack_paint,
             texture_bytes,

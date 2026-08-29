@@ -265,6 +265,186 @@ fn read_sounds(bytes: &[u8]) -> Vec<Placement> {
         .collect()
 }
 
+/// What a track puts around and above itself, and the light it does it under.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Ambience {
+    /// Direction the sun comes from, as the track states it.
+    pub sun: Option<[f32; 3]>,
+    /// Sky, sun and ambient colours, 0–1, from the track's first weather block.
+    pub sky_colour: Option<[f32; 3]>,
+    pub sun_colour: Option<[f32; 3]>,
+    pub ambient_colour: Option<[f32; 3]>,
+    /// Fog colour and density, which is most of how far a track feels.
+    pub fog_colour: Option<[f32; 3]>,
+    pub fog_density: Option<f32>,
+}
+
+fn rgb(node: &CfgNode, key: &str) -> Option<[f32; 3]> {
+    let b = node.block(key)?;
+    let f = |k: &str| b.get(k)?.trim().parse::<f32>().ok();
+    Some([f("red")?, f("green")?, f("blue")?])
+}
+
+/// Read a track's `.amb`: the models it wraps itself in, and the light it sits under.
+///
+/// Weather is a block per condition — `clear`, `cloudy` and the rest — carrying its own sky,
+/// sun and fog. The first one is taken: a viewer shows a track, not a forecast.
+fn ambience(
+    path: &Path,
+    names: &[String],
+    stem: &str,
+) -> (Ambience, Option<String>, Option<String>) {
+    let Some(entry) = entries_with_ext(names, "amb", stem).into_iter().next() else {
+        return (Ambience::default(), None, None);
+    };
+    let Ok(bytes) = crate::track::read_entry(path, &entry) else {
+        return (Ambience::default(), None, None);
+    };
+    let root = crate::cfg::parse(&bytes);
+
+    let sun = root.block("sun_position").and_then(|b| {
+        let f = |k: &str| b.get(k)?.trim().parse::<f32>().ok();
+        Some([f("x")?, f("y")?, f("z")?])
+    });
+    let mut amb = Ambience {
+        sun,
+        ..Ambience::default()
+    };
+    let background = root.get("background").map(|s| s.trim().to_string());
+
+    // The weather blocks are the ones carrying a sky; take the first that names one.
+    let mut sky = None;
+    for (_, w) in root.blocks.iter() {
+        let Some(model) = w.get("sky") else { continue };
+        sky = Some(model.trim().to_string());
+        amb.sky_colour = rgb(w, "sky_color");
+        amb.sun_colour = rgb(w, "sun_color");
+        amb.ambient_colour = rgb(w, "ambient");
+        if let Some(fog) = w.block("fog") {
+            amb.fog_colour = rgb(w, "fog");
+            amb.fog_density = fog.get("density").and_then(|v| v.trim().parse().ok());
+        }
+        break;
+    }
+    (amb, background, sky)
+}
+
+/// A track's sky and backdrop: the models it wraps itself in.
+///
+/// Both are ordinary `.edf`s named by the `.amb`, and both are small — a sky dome is a few
+/// hundred triangles carrying one very large picture. They are parsed at world scale: a dome
+/// reaches 1.5 km from its centre, and the bound that protects a bike parse throws the whole
+/// sky away. See [`crate::edf::parse_world`].
+pub fn backdrop(
+    path: &str,
+) -> Result<(
+    Ambience,
+    (MapMesh, Option<MapTexture>),
+    (MapMesh, Option<MapTexture>),
+)> {
+    let p = Path::new(path);
+    let names = crate::track::entry_names(p)?;
+    let stem = track_stem(p);
+    let (amb, background, sky) = ambience(p, &names, &stem);
+
+    // The picture a dome carries *is* the sky — twenty-two megabytes of it behind a few
+    // hundred triangles — so a flat colour in its place is a grey lid rather than a sky.
+    let load = |want: Option<String>| -> (MapMesh, Option<MapTexture>) {
+        let Some(want) = want else {
+            return (MapMesh::default(), None);
+        };
+        let found = names.iter().find(|n| {
+            n.rsplit('/')
+                .next()
+                .is_some_and(|b| b.eq_ignore_ascii_case(&want))
+        });
+        let Some(entry) = found else {
+            return (MapMesh::default(), None);
+        };
+        let Ok(bytes) = crate::track::read_entry(p, entry) else {
+            return (MapMesh::default(), None);
+        };
+        let mut mesh = MapMesh::default();
+        for node in crate::edf::parse_world(&bytes) {
+            if node.positions.is_empty() || node.indices.is_empty() {
+                continue;
+            }
+            let base = mesh.vertex_count() as u32;
+            let verts = node.positions.len() / 3;
+            mesh.positions.extend_from_slice(&node.positions);
+            if node.normals.len() == node.positions.len() {
+                mesh.normals.extend_from_slice(&node.normals);
+            } else {
+                mesh.normals.extend(std::iter::repeat(0.0).take(verts * 3));
+            }
+            if node.uvs.len() == verts * 2 {
+                mesh.uvs.extend_from_slice(&node.uvs);
+            } else {
+                mesh.uvs.extend(std::iter::repeat(0.0).take(verts * 2));
+            }
+            mesh.indices.extend(node.indices.iter().map(|i| i + base));
+        }
+
+        // The largest sheet in the file: a dome carries one picture and little else.
+        let picture = map::largest_picture(&bytes);
+        (mesh, picture)
+    };
+
+    Ok((amb, load(sky), load(background)))
+}
+
+/// Pack a track's sky, backdrop and light for the viewer.
+///
+/// ```text
+///  0  "FSKY"
+///  4  u16 version, u16 flags
+///  8  u32 json_len, then the ambience as JSON, padded to four bytes
+///     per mesh: u32 verts, u32 indices, u32 tex_width, u32 tex_height
+///     per mesh: positions, normals, uvs, indices, then its picture as RGBA
+/// ```
+pub fn backdrop_blob(
+    amb: &Ambience,
+    sky: &(MapMesh, Option<MapTexture>),
+    back: &(MapMesh, Option<MapTexture>),
+) -> Vec<u8> {
+    let head = serde_json::to_vec(amb).unwrap_or_default();
+    let mut out = Vec::new();
+    out.extend_from_slice(b"FSKY");
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&(head.len() as u32).to_le_bytes());
+    out.extend_from_slice(&head);
+    // Pad to a four-byte boundary so the arrays can be adopted as views.
+    while out.len() % 4 != 0 {
+        out.push(0);
+    }
+    for (m, t) in [sky, back] {
+        out.extend_from_slice(&(m.vertex_count() as u32).to_le_bytes());
+        out.extend_from_slice(&(m.indices.len() as u32).to_le_bytes());
+        let (w, h) = t.as_ref().map_or((0, 0), |t| (t.width, t.height));
+        out.extend_from_slice(&w.to_le_bytes());
+        out.extend_from_slice(&h.to_le_bytes());
+    }
+    for (m, t) in [sky, back] {
+        for v in m
+            .positions
+            .iter()
+            .chain(m.normals.iter())
+            .chain(m.uvs.iter())
+        {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for i in &m.indices {
+            out.extend_from_slice(&i.to_le_bytes());
+        }
+        if let Some(t) = t {
+            out.extend_from_slice(&t.rgba);
+        }
+    }
+    out
+}
+
 /// The `.edf` models a track ships, as names a prop can be placed by.
 ///
 /// A `.scr` places a prop by file name, so what a track already carries is what can be put
@@ -302,7 +482,7 @@ pub fn prop_mesh(path: &str, name: &str) -> Result<MapMesh> {
         })
         .ok_or_else(|| anyhow::anyhow!("{name} is not in this track"))?;
     let bytes = crate::track::read_entry(p, entry)?;
-    let nodes = crate::edf::parse(&bytes);
+    let nodes = crate::edf::parse_world(&bytes);
     if nodes.is_empty() {
         bail!("{name} has no mesh in it");
     }
@@ -509,7 +689,7 @@ fn bake_props(path: &Path, names: &[String], stem: &str, mesh: &mut MapMesh) -> 
             continue;
         };
         // Left in the game's frame: the viewer mirrors X once, over everything at once.
-        let nodes = crate::edf::parse(&edf_bytes);
+        let nodes = crate::edf::parse_world(&edf_bytes);
         if nodes.is_empty() {
             missing += 1;
             continue;
@@ -1221,6 +1401,44 @@ source1
         assert!(
             worst < 2.0,
             "marshal posts are {worst:.2} m off the terrain — the frames disagree"
+        );
+    }
+
+    /// What a track wraps itself in:
+    ///
+    /// ```text
+    /// FROST_TRACK="…/Millville" \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture backdrop_of_a_real_track
+    /// ```
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK"]
+    fn backdrop_of_a_real_track() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let (amb, sky, back) = backdrop(&path).expect("read the ambience");
+        println!(
+            "  sun {:?}  sky {:?}  fog {:?} @ {:?}",
+            amb.sun, amb.sky_colour, amb.fog_colour, amb.fog_density
+        );
+        for (what, (m, tex)) in [("sky", &sky), ("backdrop", &back)] {
+            if m.is_empty() {
+                println!("  {what}: none");
+                continue;
+            }
+            let (lo, hi) = m.bounds();
+            println!(
+                "  {what}: {} verts, {} tris, reaches {:.0} m, picture {}",
+                m.vertex_count(),
+                m.triangle_count(),
+                (hi[0] - lo[0]).max(hi[2] - lo[2]) / 2.0,
+                tex.as_ref().map_or("none".to_string(), |t| format!(
+                    "{}x{} {}",
+                    t.width, t.height, t.name
+                ))
+            );
+        }
+        assert!(
+            !sky.0.is_empty() || !back.0.is_empty(),
+            "a track wraps itself in something"
         );
     }
 

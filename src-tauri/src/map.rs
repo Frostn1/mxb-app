@@ -886,6 +886,36 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
         .collect()
 }
 
+/// The biggest picture inside a model file, reduced for the viewer.
+///
+/// A track's sky and backdrop keep their image inside the `.edf` rather than in the map's
+/// table, and those records use the same two header shapes — so they are read with the same
+/// scanner rather than the `.edf`'s own, which knows only one and finds the wrong sheet.
+pub fn largest_picture(b: &[u8]) -> Option<MapTexture> {
+    let (name, w, h, off, len) = colour_records(b, 0)
+        .into_iter()
+        .max_by_key(|(_, w, h, ..)| *w as u64 * *h as u64)?;
+    let rgba = inflate(b, off, len, w, h)?;
+    Some(reduced_texture(&name, w, h, rgba))
+}
+
+/// Turn already-inflated RGBA into a surface the viewer can hold: right way up, and small
+/// enough to keep. Used for the sky and backdrop, which come out of an `.edf` rather than the
+/// map's own table.
+pub fn reduced_texture(name: &str, w: u32, h: u32, mut rgba: Vec<u8>) -> MapTexture {
+    let alpha = cutout_fraction(&rgba) > CUTOUT_FRACTION;
+    flip_rows(&mut rgba, w, h);
+    let (rgba, w, h) = reduce(rgba, w, h, MAX_TEXTURE_DIM);
+    MapTexture {
+        material: 0,
+        name: name.to_string(),
+        width: w,
+        height: h,
+        alpha,
+        rgba,
+    }
+}
+
 /// A map's colour surfaces, one per material, inflated and reduced.
 ///
 /// Nothing in a material record points at a texture, so the binding is positional: the *k*-th

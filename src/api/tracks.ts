@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  TrackBackdrop,
   TrackInfo,
+  TrackMeshArrays,
   TrackOverview,
   TrackPlacement,
   TrackScenery,
@@ -269,6 +271,55 @@ export async function loadTrackSurfaces(path: string): Promise<TrackSceneryTextu
  */
 export function readTrackPlacements(path: string): Promise<TrackPlacement[]> {
   return invoke<TrackPlacement[]>("read_track_placements", { path });
+}
+
+/** `"FSKY"`, the backdrop blob's magic. */
+const BACKDROP_MAGIC = 0x594b5346;
+
+/**
+ * A track's sky, its backdrop, and the light it sits under.
+ *
+ * Cheap next to the scenery — a dome is a few hundred triangles carrying one very large
+ * picture — and it is what stops a track ending at a hard edge with nothing beyond it.
+ */
+export async function loadTrackBackdrop(path: string): Promise<TrackBackdrop | null> {
+  const buf = await invoke<ArrayBuffer>("load_track_backdrop", { path });
+  if (buf.byteLength === 0) return null;
+  const view = new DataView(buf);
+  if (view.getUint32(0, true) !== BACKDROP_MAGIC) {
+    throw new Error("track backdrop is not in the expected format");
+  }
+  const jsonLen = view.getUint32(8, true);
+  const light = JSON.parse(
+    new TextDecoder().decode(new Uint8Array(buf, 12, jsonLen)),
+  ) as Omit<TrackBackdrop, "sky" | "backdrop">;
+
+  let at = 12 + jsonLen;
+  at += (4 - (at % 4)) % 4; // the arrays are adopted as views, so they start aligned
+  // Four words per mesh: vertices, indices, and the size of the picture it carries.
+  const head: number[] = [];
+  for (let i = 0; i < 8; i += 1) head.push(view.getUint32(at + i * 4, true));
+  at += 32;
+
+  const take = (verts: number, indices: number, tw: number, th: number): TrackMeshArrays => {
+    const positions = new Float32Array(buf, at, verts * 3);
+    at += verts * 12;
+    const normals = new Float32Array(buf, at, verts * 3);
+    at += verts * 12;
+    const uvs = new Float32Array(buf, at, verts * 2);
+    at += verts * 8;
+    const idx = new Uint32Array(buf, at, indices);
+    at += indices * 4;
+    let picture: TrackMeshArrays["picture"] = null;
+    if (tw > 0 && th > 0) {
+      picture = { width: tw, height: th, pixels: new Uint8Array(buf, at, tw * th * 4) };
+      at += tw * th * 4;
+    }
+    return { positions, normals, uvs, indices: idx, picture };
+  };
+  const sky = take(head[0], head[1], head[2], head[3]);
+  const backdrop = take(head[4], head[5], head[6], head[7]);
+  return { ...light, sky, backdrop };
 }
 
 /** The models a track ships that a prop can be placed by name. */

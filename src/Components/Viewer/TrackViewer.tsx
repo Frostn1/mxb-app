@@ -5,6 +5,8 @@ import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import type {
+  TrackBackdrop,
+  TrackMeshArrays,
   TrackOverview,
   TrackPlacement,
   TrackScenery,
@@ -290,6 +292,142 @@ function toView(
     (wy - frame.midHeight) * frame.heightScale,
     wz * frame.unitsPerMetre - frame.originZ,
   ];
+}
+
+/**
+ * The sky overhead and the land beyond the track.
+ *
+ * Both are centred on the terrain rather than on their own origin: a track states them about
+ * its middle, and the viewer puts the middle of the terrain at the middle of the scene.
+ *
+ * Drawn unlit and behind everything. A dome is a picture of a sky, not a surface with one —
+ * shading it by a light the sky itself is supposed to be casting reads as a grey lid.
+ */
+function Surrounds({
+  backdrop,
+  terrain,
+}: {
+  backdrop: TrackBackdrop;
+  terrain: TrackTerrain;
+}) {
+  const geometries = useMemo(() => {
+    const frame = viewFrame(terrain);
+    // The middle of the terrain in world metres, which is where a track centres its sky.
+    const midX = ((terrain.width - 1) * terrain.metresPerSample) / 2;
+    const midZ = ((terrain.height - 1) * terrain.metresPerSample) / 2;
+    const build = (m: TrackMeshArrays, minReach = 0) => {
+      if (m.indices.length === 0) return null;
+      // Some domes are authored as a unit sphere for the game to scale, and drawn at their
+      // stated size they sit inside the terrain. Anything smaller than the track it is meant
+      // to enclose is blown up to enclose it.
+      let reach = 0;
+      for (let i = 0; i < m.positions.length; i += 3) {
+        const r = Math.hypot(m.positions[i], m.positions[i + 1], m.positions[i + 2]);
+        if (r > reach) reach = r;
+      }
+      const scale = minReach > 0 && reach > 1e-3 && reach < minReach ? minReach / reach : 1;
+      const out = new Float32Array(m.positions.length);
+      for (let i = 0; i < m.positions.length; i += 3) {
+        const [x, y, z] = toView(
+          frame,
+          m.positions[i] * scale + midX,
+          m.positions[i + 1] * scale,
+          m.positions[i + 2] * scale + midZ,
+        );
+        out[i] = x;
+        out[i + 1] = y;
+        out[i + 2] = z;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(out, 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(m.uvs, 2));
+      const idx = new Uint32Array(m.indices.length);
+      for (let t = 0; t < m.indices.length; t += 3) {
+        idx[t] = m.indices[t];
+        idx[t + 1] = m.indices[t + 2];
+        idx[t + 2] = m.indices[t + 1];
+      }
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
+      g.computeBoundingSphere();
+      return g;
+    };
+    // The sky has to clear the terrain it covers; the backdrop is stated in real metres.
+    const span = Math.max(terrain.width - 1, terrain.height - 1) * terrain.metresPerSample;
+    const picture = (m: TrackMeshArrays) => {
+      if (!m.picture) return null;
+      const t = new THREE.DataTexture(
+        m.picture.pixels,
+        m.picture.width,
+        m.picture.height,
+        THREE.RGBAFormat,
+      );
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapS = THREE.RepeatWrapping;
+      t.wrapT = THREE.ClampToEdgeWrapping;
+      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      t.generateMipmaps = true;
+      t.needsUpdate = true;
+      return t;
+    };
+    return {
+      sky: build(backdrop.sky, span * 1.6),
+      land: build(backdrop.backdrop),
+      skyMap: picture(backdrop.sky),
+      landMap: picture(backdrop.backdrop),
+    };
+  }, [backdrop, terrain]);
+
+  useEffect(
+    () => () => {
+      geometries.sky?.dispose();
+      geometries.land?.dispose();
+      geometries.skyMap?.dispose();
+      geometries.landMap?.dispose();
+    },
+    [geometries],
+  );
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => invalidate(), [geometries, invalidate]);
+
+  const sky = backdrop.skyColour;
+  const skyHex = sky
+    ? new THREE.Color(sky[0], sky[1], sky[2])
+    : new THREE.Color("#8fa6c4");
+  const fog = backdrop.fogColour;
+  const landHex = fog
+    ? new THREE.Color(fog[0], fog[1], fog[2]).lerp(new THREE.Color("#ffffff"), 0.15)
+    : new THREE.Color("#93a2ad");
+
+  return (
+    <group>
+      {geometries.sky && (
+        // Never occludes: the dome is the far wall of the scene, so it draws first and takes
+        // no part in depth.
+        <mesh geometry={geometries.sky} renderOrder={-2}>
+          <meshBasicMaterial
+            key={geometries.skyMap ? "sky-picture" : "sky-plain"}
+            map={geometries.skyMap ?? undefined}
+            color={geometries.skyMap ? "#ffffff" : skyHex}
+            side={THREE.BackSide}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
+      {geometries.land && (
+        <mesh geometry={geometries.land} renderOrder={-1}>
+          <meshBasicMaterial
+            key={geometries.landMap ? "land-picture" : "land-plain"}
+            map={geometries.landMap ?? undefined}
+            color={geometries.landMap ? "#ffffff" : landHex}
+            side={THREE.DoubleSide}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
+    </group>
+  );
 }
 
 function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGeometry {
@@ -772,6 +910,8 @@ interface TrackViewerProps {
   placements?: TrackPlacement[];
   /** Whether to draw either of the two above. */
   showObjects?: boolean;
+  /** The sky and land a track wraps itself in, and the light it states. */
+  backdrop?: TrackBackdrop | null;
   /** Told what a click on the scenery landed on, and when the selection clears. */
   onPick?: (piece: PickedPiece | null) => void;
   className?: string;
@@ -784,6 +924,7 @@ export function TrackViewer({
   surfaces = [],
   placements = [],
   showObjects = true,
+  backdrop = null,
   onPick,
   className,
 }: TrackViewerProps) {
@@ -812,7 +953,17 @@ export function TrackViewer({
             gl.domElement.addEventListener("webglcontextrestored", () => invalidate(), false);
           }}
         >
-          <color attach="background" args={["#0e0f13"]} />
+          {/* The track's own sky behind everything; the viewer's own dark ground only when a
+              track ships none. */}
+          <color
+            attach="background"
+            args={[
+              backdrop?.skyColour
+                ? `rgb(${backdrop.skyColour.map((c) => Math.round(c * 255)).join(",")})`
+                : "#0e0f13",
+            ]}
+          />
+          {terrain && backdrop && <Surrounds backdrop={backdrop} terrain={terrain} />}
           <ambientLight intensity={0.5} />
           {/* Sky above, warm bounce below — enough to keep hollows from going solid black. */}
           <hemisphereLight args={[0xdfe8ff, 0x4a4133, 0.8]} />
@@ -822,7 +973,11 @@ export function TrackViewer({
               The shadow camera is bounded to the terrain's own span, which is fixed however
               big the real track is, so the whole map fits one map at full precision. */}
           <directionalLight
-            position={[8, 6, 4]}
+            position={
+              backdrop?.sun
+                ? [backdrop.sun[0], Math.max(backdrop.sun[1], 1), backdrop.sun[2]]
+                : [8, 6, 4]
+            }
             intensity={1.15}
             castShadow
             // Four times the map over a box barely wider than the terrain: the tighter the

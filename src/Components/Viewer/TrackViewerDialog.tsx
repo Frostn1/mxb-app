@@ -6,6 +6,7 @@ import { TrackViewer, type PickedPiece } from "./TrackViewer";
 import {
   diagnoseTrack,
   loadTrackOverview,
+  loadTrackBackdrop,
   loadTrackScenery,
   loadTrackSurfaces,
   loadTrackTerrain,
@@ -16,6 +17,7 @@ import type {
   TrackInfo,
   TrackOverview,
   TrackPlacement,
+  TrackBackdrop,
   TrackScenery,
   TrackSceneryTexture,
   TrackTerrain,
@@ -63,6 +65,7 @@ export function TrackViewerDialog({
   const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [scenery, setScenery] = useState<TrackScenery | null>(null);
   const [surfaces, setSurfaces] = useState<TrackSceneryTexture[]>([]);
+  const [backdrop, setBackdrop] = useState<TrackBackdrop | null>(null);
   const [placements, setPlacements] = useState<TrackPlacement[]>([]);
   // On by default: the scenery is the difference between a shape and a place, and a track
   // that carries none simply has nothing to switch off.
@@ -92,6 +95,7 @@ export function TrackViewerDialog({
     setOverview(null);
     setScenery(null);
     setSurfaces([]);
+    setBackdrop(null);
     setPicked(null);
     setSceneryError(null);
     setPlacements([]);
@@ -110,6 +114,12 @@ export function TrackViewerDialog({
     // are up before the scenery they stand among.
     readTrackPlacements(path)
       .then((p) => alive && setPlacements(p))
+      .catch(() => {});
+
+    // The sky is a few hundred triangles, so it lands with the first pass rather than after
+    // the scenery — a track should never be on screen with nothing above it.
+    loadTrackBackdrop(path)
+      .then((b) => alive && setBackdrop(b))
       .catch(() => {});
 
     void (async () => {
@@ -269,6 +279,7 @@ export function TrackViewerDialog({
               overview={overview}
               scenery={scenery}
               surfaces={surfaces}
+              backdrop={backdrop}
               placements={placements}
               showObjects={showObjects}
               onPick={setPicked}

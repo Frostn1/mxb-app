@@ -66,6 +66,11 @@ whichever release turns it on.
   at: how many triangles it is and how big it is in metres. A published track comes apart into
   ten thousand of them, the largest five metres across.
 
+  A track now sits under its own sky. Every one ships a dome and a backdrop and names them in
+  its ambience file, and the viewer was throwing both away — a track ended at a hard edge with
+  black beyond it. They draw with the track's own picture on them, lit from where the track
+  says its sun is.
+
   Where a track's surfaces can't be read, its cut-outs are left out rather than drawn wrong. A
   quarter of a map is foliage, crowd and netting — flat cards that are a tree only once an
   alpha channel has cut the tree out of them, and drawn plain they are thousands of standing

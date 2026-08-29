@@ -688,6 +688,30 @@ export interface TrackSceneryTexture {
   pixels: Uint8Array<ArrayBuffer>;
 }
 
+/** A track's sky, its backdrop, and the light it sits under. */
+export interface TrackBackdrop {
+  /** Direction the sun comes from, as the track states it. */
+  sun: [number, number, number] | null;
+  skyColour: [number, number, number] | null;
+  sunColour: [number, number, number] | null;
+  ambientColour: [number, number, number] | null;
+  fogColour: [number, number, number] | null;
+  fogDensity: number | null;
+  /** The dome overhead, and the ring of land beyond the track. Either may be empty. */
+  sky: TrackMeshArrays;
+  backdrop: TrackMeshArrays;
+}
+
+/** Bare mesh arrays, in world metres. */
+export interface TrackMeshArrays {
+  positions: Float32Array;
+  normals: Float32Array;
+  uvs: Float32Array;
+  indices: Uint32Array;
+  /** The picture it carries. A sky dome is a few hundred triangles and one large image. */
+  picture: { width: number; height: number; pixels: Uint8Array<ArrayBuffer> } | null;
+}
+
 /** What a track pins to a point but ships no mesh for. Mirrors `scenery::Placement`. */
 export interface TrackPlacement {
   /** A key, not prose — the UI translates it. */
