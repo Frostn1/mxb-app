@@ -45,6 +45,10 @@ pub struct Placement {
     pub pos: [f32; 3],
     /// Degrees, where the file states one: a marshal's `long`, a camera's `rot`.
     pub heading: Option<f32>,
+    /// Full rotation in degrees, for the props that carry one. Kept apart from `heading` so
+    /// a prop can be written back exactly as it was placed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rot: Option<[f32; 3]>,
 }
 
 /// What a track's scenery amounts to, minus the geometry itself.
@@ -181,6 +185,7 @@ fn read_scr(bytes: &[u8]) -> Vec<(Placement, [f32; 3])> {
                     name,
                     pos,
                     heading: Some(rot[1]),
+                    rot: Some(rot),
                 },
                 rot,
             ))
@@ -205,6 +210,7 @@ fn read_marshals(bytes: &[u8]) -> Vec<Placement> {
                 name: name.clone(),
                 pos,
                 heading: node.get("long").and_then(|v| v.trim().parse().ok()),
+                rot: None,
             });
         }
     }
@@ -231,6 +237,7 @@ fn read_cameras(bytes: &[u8]) -> Vec<Placement> {
                 name: label,
                 pos,
                 heading: cam.get("rot").and_then(|v| v.trim().parse().ok()),
+                rot: None,
             });
         }
     }
@@ -249,9 +256,69 @@ fn read_sounds(bytes: &[u8]) -> Vec<Placement> {
                 name: s.get("data").unwrap_or("").trim().to_string(),
                 pos,
                 heading: None,
+                rot: None,
             })
         })
         .collect()
+}
+
+/// Write props back out in the format a track states them in.
+///
+/// The `.scr` is the one part of a track that says where a thing goes in plain text, and the
+/// game reads it at load — so it is where anything placed in the app has to end up. Written
+/// the way tracks write it: a numbered block per object, a tab of indent, and `rot` only when
+/// there is one, so a file that goes out looks like the files that come in.
+pub fn write_scr(props: &[Placement]) -> String {
+    let mut out = String::new();
+    let num = |v: f32| {
+        // Trim the trailing zeros a float would otherwise carry, the way the tracks do.
+        let s = format!("{v:.4}");
+        let s = s.trim_end_matches('0').trim_end_matches('.');
+        if s.is_empty() || s == "-0" {
+            "0".to_string()
+        } else {
+            s.to_string()
+        }
+    };
+    for (i, p) in props.iter().filter(|p| p.kind == "prop").enumerate() {
+        out.push_str(&format!("obj{i}\n{{\n"));
+        out.push_str(&format!("\tname = {}\n", p.name));
+        out.push_str(&format!(
+            "\tpos = {}, {}, {}\n",
+            num(p.pos[0]),
+            num(p.pos[1]),
+            num(p.pos[2])
+        ));
+        if let Some(r) = p.rot {
+            if r.iter().any(|v| *v != 0.0) {
+                out.push_str(&format!(
+                    "\trot = {}, {}, {}\n",
+                    num(r[0]),
+                    num(r[1]),
+                    num(r[2])
+                ));
+            }
+        }
+        out.push_str("}\n");
+    }
+    out
+}
+
+/// Save a track's props to a `.scr`.
+///
+/// Refuses to overwrite unless asked: a track's own file is the record of hours of placing
+/// things, and replacing it silently is not a thing an editor should be able to do by
+/// accident. The caller names the destination — nothing is written inside an archive.
+pub fn save_scr(target: &str, props: &[Placement], overwrite: bool) -> Result<()> {
+    let path = Path::new(target);
+    if path.exists() && !overwrite {
+        bail!("{target} already exists");
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, write_scr(props))?;
+    Ok(())
 }
 
 /// Every fixture a track pins to a point, without touching the `.map`.
@@ -913,6 +980,81 @@ source1
         // Negative coordinates are ordinary: background props stand outside the terrain.
         assert_eq!(objs[1].0.pos, [-412.0, 108.71, -381.0]);
         assert_eq!(objs[1].1, [0.0, 90.0, 0.0]);
+    }
+
+    #[test]
+    fn props_round_trip_through_the_scr() {
+        // What comes out has to read back as what went in — that is the whole contract of
+        // being able to place something and have the game load it.
+        let first = read_scr(SCR);
+        let placements: Vec<Placement> = first.iter().map(|(p, _)| p.clone()).collect();
+        let text = write_scr(&placements);
+        let again = read_scr(text.as_bytes());
+        assert_eq!(again.len(), first.len(), "same number of props");
+        for ((a, ar), (b, br)) in first.iter().zip(again.iter()) {
+            assert_eq!(a.name, b.name);
+            for k in 0..3 {
+                assert!((a.pos[k] - b.pos[k]).abs() < 1e-3, "{} moved", a.name);
+                assert!((ar[k] - br[k]).abs() < 1e-3, "{} turned", a.name);
+            }
+        }
+        // And it looks like a track's own file, not a serialiser's idea of one.
+        assert!(
+            text.starts_with("obj0\n{\n\tname = usa_flag.edf\n"),
+            "{text}"
+        );
+        assert!(text.contains("\tpos = 271.41, 59.2, 149.31\n"), "{text}");
+        // The first object has no rotation, so it states none.
+        assert!(
+            !text.split("obj1").next().unwrap().contains("rot ="),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn only_props_are_written() {
+        // Marshals and cameras live in their own files; a `.scr` that carried them would be
+        // a `.scr` the game reads as objects it can't load.
+        let mixed = vec![
+            Placement {
+                kind: "prop".into(),
+                name: "tent.edf".into(),
+                pos: [1.0, 2.0, 3.0],
+                heading: None,
+                rot: None,
+            },
+            Placement {
+                kind: "marshal".into(),
+                name: "marshal0".into(),
+                pos: [4.0, 5.0, 6.0],
+                heading: Some(90.0),
+                rot: None,
+            },
+        ];
+        let text = write_scr(&mixed);
+        assert!(text.contains("tent.edf"));
+        assert!(!text.contains("marshal"));
+        assert_eq!(text.matches("obj").count(), 1);
+    }
+
+    #[test]
+    fn saving_will_not_clobber_a_track() {
+        let dir = std::env::temp_dir().join(format!("frost-scr-{}", std::process::id()));
+        let file = dir.join("test.scr");
+        let props = vec![Placement {
+            kind: "prop".into(),
+            name: "flag.edf".into(),
+            pos: [1.0, 0.0, 2.0],
+            heading: None,
+            rot: None,
+        }];
+        save_scr(file.to_str().unwrap(), &props, false).expect("first write");
+        assert!(
+            save_scr(file.to_str().unwrap(), &props, false).is_err(),
+            "must refuse"
+        );
+        save_scr(file.to_str().unwrap(), &props, true).expect("overwrite when asked");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -66,6 +66,11 @@ whichever release turns it on.
   at: how many triangles it is and how big it is in metres. A published track comes apart into
   ten thousand of them, the largest five metres across.
 
+  Props can be written back out. A track's `.scr` is the one part of it that states where a
+  thing goes in plain text, and the game reads it at load — so it is where anything placed in
+  the app ends up. What goes out reads back as what went in, and an existing file is left alone
+  unless replacing it is asked for.
+
   A track carrying no scenery is left alone rather than reported as a failure; some ship none
   at all.
 

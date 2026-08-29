@@ -698,6 +698,8 @@ export interface TrackPlacement {
   pos: [number, number, number];
   /** Degrees, where the track states one. */
   heading: number | null;
+  /** Full rotation in degrees, for props that carry one — what a `.scr` writes back. */
+  rot?: [number, number, number] | null;
 }
 
 /** What the dropzone decided a dropped item is. Mirrors `dropzone::ContentKind`. */

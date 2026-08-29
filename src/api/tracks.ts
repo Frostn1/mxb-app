@@ -269,6 +269,21 @@ export function readTrackPlacements(path: string): Promise<TrackPlacement[]> {
 }
 
 /**
+ * Save a track's props to a `.scr` the game will load.
+ *
+ * The `.scr` states where a prop goes in plain text and the game reads it at load, so it is
+ * where anything placed in the app ends up. Nothing is written inside an archive, and an
+ * existing file is left alone unless `overwrite` says otherwise.
+ */
+export function saveTrackProps(
+  target: string,
+  props: TrackPlacement[],
+  overwrite = false,
+): Promise<void> {
+  return invoke<void>("save_track_props", { target, props, overwrite });
+}
+
+/**
  * A plain-text account of what a track's terrain looks like to the reader: its contents,
  * what its `.ini` claimed, every layout the probe considered, and what it settled on.
  *

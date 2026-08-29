@@ -1110,6 +1110,25 @@ async fn load_track_surfaces(
     .map_err(|e| format!("load_track_surfaces task failed: {e}"))
 }
 
+/// Save a track's props to a `.scr` the game will load.
+///
+/// The `.scr` is the one part of a track that states where a thing goes in plain text, so it
+/// is where anything placed in the app has to end up. Writes only where it is told, never
+/// inside an archive, and refuses to replace a file unless asked — a track's own `.scr` is
+/// the record of however long someone spent placing things.
+#[tauri::command]
+async fn save_track_props(
+    target: String,
+    props: Vec<scenery::Placement>,
+    overwrite: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::save_scr(&target, &props, overwrite).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("save_track_props task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn unpack_paint(path: String) -> Result<Vec<paint::PaintTexture>, String> {
     tauri::async_runtime::spawn_blocking(move || unpack_paint_blocking(path))
@@ -7840,6 +7859,7 @@ fn main() {
             load_track_scenery,
             load_track_surfaces,
             read_track_placements,
+            save_track_props,
             diagnose_track,
             unpack_paint,
             texture_bytes,
