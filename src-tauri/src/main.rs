@@ -1129,6 +1129,21 @@ async fn load_track_backdrop(
     .map_err(|e| format!("load_track_backdrop task failed: {e}"))
 }
 
+/// A tiling sheet of a track's own ground, for detail finer than its data carries.
+///
+/// A track states its surface at about a third of a metre per sample, and a viewer that lets
+/// you get close magnifies that into a blur. This puts the grain back.
+#[tauri::command]
+async fn load_track_ground(path: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let sheet = scenery::ground_detail(&path).ok().flatten();
+        let list: Vec<_> = sheet.into_iter().collect();
+        tauri::ipc::Response::new(map::surfaces_blob(&list))
+    })
+    .await
+    .map_err(|e| format!("load_track_ground task failed: {e}"))
+}
+
 /// The models a track ships that a prop can be placed by name.
 #[tauri::command]
 async fn read_track_placeable(path: String) -> Result<Vec<String>, String> {
@@ -7909,6 +7924,7 @@ fn main() {
             read_track_placeable,
             load_track_prop,
             load_track_backdrop,
+            load_track_ground,
             diagnose_track,
             unpack_paint,
             texture_bytes,

@@ -445,6 +445,37 @@ pub fn backdrop_blob(
     out
 }
 
+/// Words a track's own ground sheets are named with.
+///
+/// Not a guess at which cell uses which — that is the binding problem — but at which sheet is
+/// *ground at all*, which is a much easier question and the only one a detail layer asks.
+const GROUND_WORDS: [&str; 9] = [
+    "dirt", "soil", "mud", "sand", "gravel", "grass", "ground", "terrain", "loam",
+];
+
+/// A tiling sheet of the track's own ground, for detail closer than its data can carry.
+///
+/// A track states its surface at about a third of a metre per sample — the height grid and
+/// the coverage masks both — and a viewer that lets you get within a few centimetres magnifies
+/// that six times or more into a blur. Nothing in the file has finer detail *at a place*, but
+/// the ground sheets have plenty of it *as a material*, so one is tiled over the terrain to
+/// put grain back where interpolation took it out.
+pub fn ground_detail(path: &str) -> Result<Option<MapTexture>> {
+    let p = Path::new(path);
+    let names = crate::track::entry_names(p)?;
+    let stem = track_stem(p);
+    for entry in entries_with_ext(&names, "map", &stem) {
+        let Ok(bytes) = crate::track::read_entry(p, &entry) else {
+            continue;
+        };
+        if !map::is_map(&bytes) {
+            continue;
+        }
+        return Ok(map::ground_sheet(&bytes, &GROUND_WORDS));
+    }
+    Ok(None)
+}
+
 /// The `.edf` models a track ships, as names a prop can be placed by.
 ///
 /// A `.scr` places a prop by file name, so what a track already carries is what can be put

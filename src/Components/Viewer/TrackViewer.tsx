@@ -572,12 +572,19 @@ function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGe
   return geometry;
 }
 
+/** Metres one tile of the ground sheet covers. Small enough to read as grain up close,
+ *  large enough not to shimmer when the whole track is in frame. */
+const GROUND_TILE_METRES = 6;
+
 function TerrainMesh({
   terrain,
   overview,
+  ground,
 }: {
   terrain: TrackTerrain;
   overview: TrackOverview | null;
+  /** A tiling sheet of the track's own ground, multiplied in for close-up detail. */
+  ground: TrackSceneryTexture | null;
 }) {
   const geometry = useMemo(() => buildGeometry(terrain, overview != null), [terrain, overview]);
 
@@ -600,9 +607,37 @@ function TerrainMesh({
     return t;
   }, [overview]);
 
+  // The detail sheet, tiled. The surface picture says what the ground *is* at a third of a
+  // metre; this says what it is made of, at whatever resolution you care to look.
+  const detail = useMemo(() => {
+    if (!ground) return null;
+    const t = new THREE.DataTexture(
+      ground.pixels,
+      ground.width,
+      ground.height,
+      THREE.RGBAFormat,
+    );
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = THREE.RepeatWrapping;
+    t.wrapT = THREE.RepeatWrapping;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.generateMipmaps = true;
+    t.anisotropy = 8;
+    t.needsUpdate = true;
+    return t;
+  }, [ground]);
+
+  // How many times the sheet repeats across the whole grid.
+  const repeat = useMemo(() => {
+    const span = Math.max(terrain.width - 1, terrain.height - 1) * terrain.metresPerSample;
+    return Math.max(1, Math.round(span / GROUND_TILE_METRES));
+  }, [terrain]);
+
   // A grid this size is megabytes of GPU buffers, and the viewer replaces it every time the
   // detail level changes — without this each one would be leaked.
   useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(() => () => detail?.dispose(), [detail]);
   useEffect(() => () => texture?.dispose(), [texture]);
 
   // The canvas only draws when asked, and the map arrives well after the terrain settled —
@@ -626,11 +661,34 @@ function TerrainMesh({
           program it was built with — the terrain keeps its elevation ramp and never shows the
           picture at all. */}
       <meshStandardMaterial
-        key={texture ? "textured" : "plain"}
+        key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}`}
         map={texture ?? undefined}
         vertexColors
         roughness={0.95}
         metalness={0}
+        onBeforeCompile={(shader) => {
+          if (!detail) return;
+          shader.uniforms.groundMap = { value: detail };
+          shader.uniforms.groundRepeat = { value: repeat };
+          shader.fragmentShader = shader.fragmentShader
+            .replace(
+              "#include <common>",
+              `#include <common>
+               uniform sampler2D groundMap;
+               uniform float groundRepeat;`,
+            )
+            // After the base colour is settled, modulate it about its own mean so the sheet
+            // adds grain without shifting the ground's colour towards the sheet's.
+            .replace(
+              "#include <color_fragment>",
+              `#include <color_fragment>
+               {
+                 vec3 grain = texture2D(groundMap, vMapUv * groundRepeat).rgb;
+                 float lum = dot(grain, vec3(0.299, 0.587, 0.114));
+                 diffuseColor.rgb *= mix(1.0, lum * 2.0, 0.45);
+               }`,
+            );
+        }}
       />
     </mesh>
   );
@@ -956,6 +1014,8 @@ interface TrackViewerProps {
   showObjects?: boolean;
   /** The sky and land a track wraps itself in, and the light it states. */
   backdrop?: TrackBackdrop | null;
+  /** A tiling sheet of the track's own ground, for detail closer than its data carries. */
+  ground?: TrackSceneryTexture | null;
   /** Told what a click on the scenery landed on, and when the selection clears. */
   onPick?: (piece: PickedPiece | null) => void;
   className?: string;
@@ -969,6 +1029,7 @@ export function TrackViewer({
   placements = [],
   showObjects = true,
   backdrop = null,
+  ground = null,
   onPick,
   className,
 }: TrackViewerProps) {
@@ -1049,7 +1110,9 @@ export function TrackViewer({
             shadow-bias={-0.0006}
           />
           <directionalLight position={[-6, 3, -5]} intensity={0.4} />
-          {terrain && <TerrainMesh terrain={terrain} overview={overview} />}
+          {terrain && (
+            <TerrainMesh terrain={terrain} overview={overview} ground={ground} />
+          )}
           {terrain && showObjects && scenery && (
             <SceneryMesh
               scenery={scenery}

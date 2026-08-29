@@ -66,6 +66,12 @@ whichever release turns it on.
   at: how many triangles it is and how big it is in metres. A published track comes apart into
   ten thousand of them, the largest five metres across.
 
+  The ground keeps its detail when you get close to it. A track states its surface at about a
+  third of a metre per sample, height grid and surface picture alike, so anything nearer than
+  that was interpolation — a soft brown smear. The track's own ground sheet is now tiled over
+  the terrain and multiplied into it, which puts the grain back at whatever distance you care
+  to look from. It says what the ground is made of, not what is where.
+
   A track is lit and hazed the way it says it should be. Its ambience file states a sun
   colour, an ambient, and a fog — the viewer used one fixed rig for every track and ignored
   all of it. The haze is thinned to something a whole track can still be seen through: a

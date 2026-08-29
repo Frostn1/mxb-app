@@ -231,8 +231,11 @@ const SURFACES_MAGIC = 0x46525346;
  * inflate, and holding the shape of the track back for them is a second of empty canvas.
  * Empty when the track's surfaces can't be bound to its materials.
  */
-export async function loadTrackSurfaces(path: string): Promise<TrackSceneryTexture[]> {
-  const buf = await invoke<ArrayBuffer>("load_track_surfaces", { path });
+export async function loadTrackSurfaces(
+  path: string,
+  command = "load_track_surfaces",
+): Promise<TrackSceneryTexture[]> {
+  const buf = await invoke<ArrayBuffer>(command, { path });
   if (buf.byteLength === 0) return [];
 
   const view = new DataView(buf);
@@ -320,6 +323,18 @@ export async function loadTrackBackdrop(path: string): Promise<TrackBackdrop | n
   const sky = take(head[0], head[1], head[2], head[3]);
   const backdrop = take(head[4], head[5], head[6], head[7]);
   return { ...light, sky, backdrop };
+}
+
+/**
+ * A tiling sheet of the track's own ground.
+ *
+ * The surface picture and the height grid are both about a third of a metre per sample, so
+ * anything closer than that is interpolation. This is tiled over the terrain to put grain
+ * back — it says what the ground is made of, not what is where.
+ */
+export async function loadTrackGround(path: string): Promise<TrackSceneryTexture | null> {
+  const sheets = await loadTrackSurfaces(path, "load_track_ground");
+  return sheets[0] ?? null;
 }
 
 /** The models a track ships that a prop can be placed by name. */

@@ -886,6 +886,47 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
         .collect()
 }
 
+/// A sheet that looks like ground, for tiling over the terrain as detail.
+///
+/// The largest record whose name carries a ground word and which isn't a normal map. Order
+/// and binding don't come into it: this asks only "is this ground", which a name answers well
+/// enough, and a wrong answer costs grain rather than a wrong picture on a wrong object.
+pub fn ground_sheet(b: &[u8], words: &[&str]) -> Option<MapTexture> {
+    let (from, _) = texture_table(b)?;
+    let mut best: Option<(u64, String, u32, u32, usize, usize)> = None;
+    for (name, w, h, off, len) in colour_records(b, from) {
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with("_n_s") || lower.ends_with("_n") || lower == "env" {
+            continue;
+        }
+        if !words.iter().any(|word| lower.contains(word)) {
+            continue;
+        }
+        let area = w as u64 * h as u64;
+        if best.as_ref().is_none_or(|(a, ..)| area > *a) {
+            best = Some((area, name, w, h, off, len));
+        }
+    }
+    let (_, name, w, h, off, len) = best?;
+    let mut rgba = inflate(b, off, len, w, h)?;
+    // A sheet that turns out to be a cut-out is no use as ground — its holes would punch
+    // through the terrain.
+    if cutout_fraction(&rgba) > CUTOUT_FRACTION {
+        return None;
+    }
+    flip_rows(&mut rgba, w, h);
+    // Smaller than a surface: this tiles, so it needs frequency rather than extent.
+    let (rgba, w, h) = reduce(rgba, w, h, 512);
+    Some(MapTexture {
+        material: 0,
+        name,
+        width: w,
+        height: h,
+        alpha: false,
+        rgba,
+    })
+}
+
 /// The biggest picture inside a model file, reduced for the viewer.
 ///
 /// A track's sky and backdrop keep their image inside the `.edf` rather than in the map's

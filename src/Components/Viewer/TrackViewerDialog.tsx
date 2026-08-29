@@ -7,6 +7,7 @@ import {
   diagnoseTrack,
   loadTrackOverview,
   loadTrackBackdrop,
+  loadTrackGround,
   loadTrackScenery,
   loadTrackSurfaces,
   loadTrackTerrain,
@@ -66,6 +67,7 @@ export function TrackViewerDialog({
   const [scenery, setScenery] = useState<TrackScenery | null>(null);
   const [surfaces, setSurfaces] = useState<TrackSceneryTexture[]>([]);
   const [backdrop, setBackdrop] = useState<TrackBackdrop | null>(null);
+  const [ground, setGround] = useState<TrackSceneryTexture | null>(null);
   const [placements, setPlacements] = useState<TrackPlacement[]>([]);
   // On by default: the scenery is the difference between a shape and a place, and a track
   // that carries none simply has nothing to switch off.
@@ -96,6 +98,7 @@ export function TrackViewerDialog({
     setScenery(null);
     setSurfaces([]);
     setBackdrop(null);
+    setGround(null);
     setPicked(null);
     setSceneryError(null);
     setPlacements([]);
@@ -120,6 +123,12 @@ export function TrackViewerDialog({
     // the scenery — a track should never be on screen with nothing above it.
     loadTrackBackdrop(path)
       .then((b) => alive && setBackdrop(b))
+      .catch(() => {});
+
+    // One small sheet, so it lands early and the ground has grain from the first frame the
+    // terrain is up.
+    loadTrackGround(path)
+      .then((g) => alive && setGround(g))
       .catch(() => {});
 
     void (async () => {
@@ -280,6 +289,7 @@ export function TrackViewerDialog({
               scenery={scenery}
               surfaces={surfaces}
               backdrop={backdrop}
+              ground={ground}
               placements={placements}
               showObjects={showObjects}
               onPick={setPicked}
