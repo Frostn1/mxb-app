@@ -303,6 +303,53 @@ function toView(
  * Drawn unlit and behind everything. A dome is a picture of a sky, not a surface with one —
  * shading it by a light the sky itself is supposed to be casting reads as a grey lid.
  */
+/** A track's own colour, or a fallback, as something three.js can take. */
+function colourOf(c: [number, number, number] | null, fallback: string): THREE.Color {
+  return c ? new THREE.Color(c[0], c[1], c[2]) : new THREE.Color(fallback);
+}
+
+/**
+ * The haze a track states, thinned to something you can see a track through.
+ *
+ * A track's own density is written for a rider looking a few hundred metres down a straight;
+ * the viewer looks at all 550 m of the place at once, and at face value the far side vanishes.
+ * The colour and the *relative* thickness are the track's — a misty circuit still reads
+ * mistier than a dry one — while the depth it acts over is the view's.
+ */
+function TrackHaze({
+  backdrop,
+  terrain,
+}: {
+  backdrop: TrackBackdrop;
+  terrain: TrackTerrain;
+}) {
+  const scene = useThree((s) => s.scene);
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    const density = backdrop.fogDensity ?? 0;
+    if (density <= 0) {
+      scene.fog = null;
+      invalidate();
+      return;
+    }
+    const span = Math.max(terrain.width - 1, terrain.height - 1) * terrain.metresPerSample;
+    // Where the track's own haze would have swallowed a view this wide, hold it to a quarter
+    // of the way — enough to sit the far edge into the sky without hiding what is on it.
+    const swallow = 3 / Math.max(density, 1e-6); // metres to near-opaque at the stated density
+    const strength = Math.min(1, span / Math.max(swallow, 1));
+    const colour = colourOf(
+      backdrop.fogColour ?? backdrop.skyColour,
+      "#9fb0c4",
+    );
+    scene.fog = new THREE.Fog(colour, VIEW_SPAN * 0.55, VIEW_SPAN * (2.6 - strength * 1.2));
+    invalidate();
+    return () => {
+      scene.fog = null;
+    };
+  }, [backdrop, terrain, scene, invalidate]);
+  return null;
+}
+
 function Surrounds({
   backdrop,
   terrain,
@@ -390,14 +437,11 @@ function Surrounds({
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => invalidate(), [geometries, invalidate]);
 
-  const sky = backdrop.skyColour;
-  const skyHex = sky
-    ? new THREE.Color(sky[0], sky[1], sky[2])
-    : new THREE.Color("#8fa6c4");
-  const fog = backdrop.fogColour;
-  const landHex = fog
-    ? new THREE.Color(fog[0], fog[1], fog[2]).lerp(new THREE.Color("#ffffff"), 0.15)
-    : new THREE.Color("#93a2ad");
+  const skyHex = colourOf(backdrop.skyColour, "#8fa6c4");
+  const landHex = colourOf(backdrop.fogColour, "#93a2ad").lerp(
+    new THREE.Color("#ffffff"),
+    0.15,
+  );
 
   return (
     <group>
@@ -964,7 +1008,11 @@ export function TrackViewer({
             ]}
           />
           {terrain && backdrop && <Surrounds backdrop={backdrop} terrain={terrain} />}
-          <ambientLight intensity={0.5} />
+          {terrain && backdrop && <TrackHaze backdrop={backdrop} terrain={terrain} />}
+          <ambientLight
+            intensity={0.5}
+            color={colourOf(backdrop?.ambientColour ?? null, "#ffffff")}
+          />
           {/* Sky above, warm bounce below — enough to keep hollows from going solid black. */}
           <hemisphereLight args={[0xdfe8ff, 0x4a4133, 0.8]} />
           {/* Low and to one side: relief reads by its shadows, and an overhead key flattens
@@ -979,6 +1027,7 @@ export function TrackViewer({
                 : [8, 6, 4]
             }
             intensity={1.15}
+            color={colourOf(backdrop?.sunColour ?? null, "#ffffff")}
             castShadow
             // Four times the map over a box barely wider than the terrain: the tighter the
             // camera and the denser the map, the smaller a shadow texel is against the

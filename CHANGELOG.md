@@ -66,6 +66,13 @@ whichever release turns it on.
   at: how many triangles it is and how big it is in metres. A published track comes apart into
   ten thousand of them, the largest five metres across.
 
+  A track is lit and hazed the way it says it should be. Its ambience file states a sun
+  colour, an ambient, and a fog — the viewer used one fixed rig for every track and ignored
+  all of it. The haze is thinned to something a whole track can still be seen through: a
+  track's own figure is written for a rider looking down a straight, not for a view of the
+  entire place at once, so the colour and the relative thickness are the track's while the
+  depth it acts over is the view's.
+
   A track now sits under its own sky. Every one ships a dome and a backdrop and names them in
   its ambience file, and the viewer was throwing both away — a track ended at a hard edge with
   black beyond it. They draw with the track's own picture on them, lit from where the track
