@@ -29,6 +29,17 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
+## 2026-08-29
+
+### Changed
+
+- **The log now records which GPU the 3D views are drawing on.** Both viewers draw through
+  the graphics card, but a Windows machine with a driver Windows doesn't trust drops them to
+  a software renderer instead — same picture, a fraction of the speed — and nothing said so.
+  Opening a 3D view now writes the adapter it got into the app log, flagged as a warning when
+  it turns out to be software, so "the viewer is slow" can be answered from the log a player
+  already sends.
+
 ## 2026-08-29 — v0.11.2 — Install a pack one bike at a time, and a preview that fills the window
 
 ### Added

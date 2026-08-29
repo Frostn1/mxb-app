@@ -878,6 +878,17 @@ export function logsInfo(): Promise<LogsInfo> {
   return invoke<LogsInfo>("logs_info");
 }
 
+/**
+ * Write a line into MXB App's own log file from here.
+ *
+ * The webview's console goes nowhere a player can send us — only what Rust logs reaches
+ * the file behind Settings → Logs. Anything the frontend alone can see has to come back
+ * through this to survive a bug report.
+ */
+export function logClient(level: "info" | "warn" | "error", message: string): Promise<void> {
+  return invoke<void>("log_client", { level, message });
+}
+
 /** Open the folder a log set lives in, newest file selected where the OS can. */
 export function openLogsFolder(which: LogsKind): Promise<void> {
   return invoke<void>("open_logs_folder", { which });

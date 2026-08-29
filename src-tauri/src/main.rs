@@ -4687,6 +4687,24 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     library::reveal_in_explorer(&path).map_err(|e| format!("{e:#}"))
 }
 
+/// Put a line from the webview into the app's own log file.
+///
+/// `tauri_plugin_log` writes what Rust logs; nothing the frontend prints to its console
+/// reaches the file a player sends us. Facts only the webview knows — which GPU its WebGL
+/// context landed on, say — would otherwise be invisible in exactly the report that needs
+/// them.
+#[tauri::command]
+fn log_client(level: String, message: String) {
+    // A log line is not a transport for arbitrary payloads. Trim rather than reject: a
+    // truncated fact still reads, and a dropped one is a support thread that goes nowhere.
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => log::error!("[webview] {msg}"),
+        "warn" => log::warn!("[webview] {msg}"),
+        _ => log::info!("[webview] {msg}"),
+    }
+}
+
 /// Where MXB App's own logs are, where the game's are, and what's currently in each.
 ///
 /// Read fresh on every call rather than cached: the whole reason someone opens this is
@@ -7927,6 +7945,7 @@ fn main() {
             move_mod,
             uninstall_mod,
             reveal_in_explorer,
+            log_client,
             logs_info,
             share_logs,
             open_logs_folder,
