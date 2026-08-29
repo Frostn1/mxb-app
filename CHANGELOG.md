@@ -56,6 +56,15 @@ whichever release turns it on.
 
 - **Sly** credited on Settings → Supporters.
 
+### Changed
+
+- **The log now records which GPU the 3D views are drawing on.** Both viewers draw through
+  the graphics card, but a Windows machine with a driver Windows doesn't trust drops them to
+  a software renderer instead — same picture, a fraction of the speed — and nothing said so.
+  Opening a 3D view now writes the adapter it got into the app log, flagged as a warning when
+  it turns out to be software, so "the viewer is slow" can be answered from the log a player
+  already sends.
+
 ### Fixed
 
 - **A paint that ships a separate file per bike now installs the right one.** Some pages offer

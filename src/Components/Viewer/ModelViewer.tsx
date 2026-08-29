@@ -20,6 +20,7 @@ import { textureBytes } from "../../api/mods";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
 import { sceneOf, skyTexture, type SceneId } from "../../lib/viewerScene";
+import { reportRenderer } from "../../lib/glInfo";
 
 /**
  * `both` draws the bike and the rider in one scene, side by side — see {@link SideBySide};
@@ -2194,6 +2195,7 @@ export function ModelViewer({
           // nothing next to having no way to save what's on screen.
           gl={{ preserveDrawingBuffer: true }}
           onCreated={({ gl, invalidate }) => {
+            reportRenderer(gl, "model-viewer");
             // A lost GPU context otherwise leaves a black canvas; preventDefault lets the browser restore it.
             gl.domElement.addEventListener(
               "webglcontextlost",
