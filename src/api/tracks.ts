@@ -108,7 +108,7 @@ export async function loadTrackOverview(
 }
 
 /** Header bytes before the vertex data. Mirrors `map::SCENERY_HEADER`. */
-const SCENERY_HEADER = 48;
+const SCENERY_HEADER = 56;
 
 /** Bytes per entry in the blob's texture table. Mirrors `map::TEXTURE_ENTRY`. */
 const TEXTURE_ENTRY = 20;
@@ -142,15 +142,14 @@ function readSceneryBlob(buf: ArrayBuffer): TrackScenery | null {
   const vertexCount = view.getUint32(8, true);
   const indexCount = view.getUint32(12, true);
   const groupCount = view.getUint32(16, true);
-  const packed = view.getUint32(20, true);
-  const textureCount = packed & 0xffff;
-  // Top half: how many separable pieces the scenery comes apart into. Capped at 65535,
-  // which only a very dense track reaches and which is plenty to report.
-  const pieceCount = (packed >>> 16) & 0xffff;
+  const textureCount = view.getUint32(20, true);
+  // How many separable pieces the scenery comes apart into — a word of its own, because a
+  // dense track has more than sixty-five thousand of them.
+  const pieceCount = view.getUint32(24, true);
   if (indexCount === 0) return null;
 
   const bounds = Array.from({ length: 6 }, (_, i) =>
-    view.getFloat32(24 + i * 4, true),
+    view.getFloat32(32 + i * 4, true),
   ) as TrackScenery["bounds"];
 
   const positionsAt = SCENERY_HEADER;

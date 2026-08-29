@@ -66,9 +66,9 @@ whichever release turns it on.
   at: how many triangles it is and how big it is in metres. A published track comes apart into
   ten thousand of them, the largest five metres across.
 
-  And things can be put down. Pick one of the models the track ships, click the ground, and it
-  stands there — drawn where the file will say it goes, not approximately. Save writes the
-  `.scr` beside the track.
+  Ground colours are drier. A surface id names what the physics does, not what a track looks
+  like, and a lawn green on a dry circuit was the loudest wrong thing on the screen — the same
+  hues now sit closer to earth, so a surface a track named loosely reads as ground.
 
   Props can be written back out. A track's `.scr` is the one part of it that states where a
   thing goes in plain text, and the game reads it at load — so it is where anything placed in

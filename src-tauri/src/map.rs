@@ -788,7 +788,8 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
         return Vec::new();
     };
     let all = colour_records(b, from);
-    if !all.iter().any(|(n, ..)| is_colour_name(n)) {
+    let named = all.iter().filter(|(n, ..)| is_colour_name(n)).count();
+    if count == 0 || named * 4 < count * 3 {
         return Vec::new();
     }
     all.into_iter()
@@ -816,7 +817,11 @@ pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
         return Vec::new();
     };
     let all = colour_records(b, from);
-    if !all.iter().any(|(n, ..)| is_colour_name(n)) {
+    // The convention has to cover the map, not merely appear in it. One `_c` among fifty
+    // plainly-named sheets is a coincidence, and binding on it paints a single material and
+    // leaves the rest grey — which reads as broken rather than as undecided.
+    let named = all.iter().filter(|(n, ..)| is_colour_name(n)).count();
+    if count == 0 || named * 4 < count * 3 {
         return Vec::new();
     }
 
@@ -850,7 +855,7 @@ pub fn textures(b: &[u8], max_dim: u32) -> Vec<MapTexture> {
 
 /// Bytes before the vertex data in a scenery blob. Four-byte aligned so the app can adopt
 /// every array as a typed-array view rather than copying it.
-pub const SCENERY_HEADER: usize = 48;
+pub const SCENERY_HEADER: usize = 56;
 
 /// Bytes per entry in the blob's texture table.
 pub const TEXTURE_ENTRY: usize = 20;
@@ -861,8 +866,9 @@ pub const TEXTURE_ENTRY: usize = 20;
 ///  0  "FSCN"
 ///  4  u16 version, u16 flags
 ///  8  u32 vertex_count, u32 index_count, u32 group_count, u32 texture_count
-/// 24  f32[6] world bounds
-/// 48  positions  vc*12 | normals vc*12 | uvs vc*8 | indices ic*4
+/// 24  u32 piece_count, u32 reserved
+/// 32  f32[6] world bounds
+/// 56  positions  vc*12 | normals vc*12 | uvs vc*8 | indices ic*4
 ///     groups     gc*12  (material, tri_start, tri_count)
 ///     pieces     (ic/3)*4  which separable piece each triangle belongs to
 ///     textures   tc*20  (material, width, height, flags, byte_len), then the pixels
@@ -893,10 +899,11 @@ pub fn scenery_blob(mesh: &MapMesh, textures: &[MapTexture]) -> Vec<u8> {
     out.extend_from_slice(&vc.to_le_bytes());
     out.extend_from_slice(&ic.to_le_bytes());
     out.extend_from_slice(&(mesh.groups.len() as u32).to_le_bytes());
-    // Top half carries how many separable pieces the mesh came apart into; the low half is
-    // the surface count. Both fit, and it keeps the header the size the app already reads.
-    let packed = (textures.len() as u32 & 0xFFFF) | ((mesh.objects.len().min(0xFFFF) as u32) << 16);
-    out.extend_from_slice(&packed.to_le_bytes());
+    out.extend_from_slice(&(textures.len() as u32).to_le_bytes());
+    // A word of its own: a dense track has more than sixty-five thousand pieces, and a count
+    // that saturates is a number that lies.
+    out.extend_from_slice(&(mesh.objects.len() as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
     for v in lo.iter().chain(hi.iter()) {
         out.extend_from_slice(&v.to_le_bytes());
     }
@@ -1126,13 +1133,9 @@ mod tests {
         assert_eq!(u32le(&blob, 4) & 0xFFFF, 2, "version 2");
         assert_eq!(u32le(&blob, 8), 40, "vertex count");
         assert_eq!(u32le(&blob, 12), 36, "index count");
-        // One word carries both counts: surfaces low, separable pieces high.
-        assert_eq!(u32le(&blob, 20) & 0xFFFF, 1, "one surface");
-        assert_eq!(
-            u32le(&blob, 20) >> 16,
-            m.objects.len() as u32,
-            "and the piece count"
-        );
+        assert_eq!(u32le(&blob, 20), 1, "one surface");
+        // Its own word, so a dense track's count doesn't saturate.
+        assert_eq!(u32le(&blob, 24), m.objects.len() as u32, "the piece count");
         let groups = u32le(&blob, 16) as usize;
         assert_eq!(
             blob.len(),
