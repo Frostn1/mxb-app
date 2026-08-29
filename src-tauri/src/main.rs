@@ -1136,9 +1136,8 @@ async fn load_track_backdrop(
 #[tauri::command]
 async fn load_track_ground(path: String) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let sheet = scenery::ground_detail(&path).ok().flatten();
-        let list: Vec<_> = sheet.into_iter().collect();
-        tauri::ipc::Response::new(map::surfaces_blob(&list))
+        let sheets = scenery::ground_detail(&path).unwrap_or_default();
+        tauri::ipc::Response::new(map::surfaces_blob(&sheets))
     })
     .await
     .map_err(|e| format!("load_track_ground task failed: {e}"))

@@ -78,6 +78,20 @@ whichever release turns it on.
   the terrain and multiplied into it, which puts the grain back at whatever distance you care
   to look from. It says what the ground is made of, not what is where.
 
+  And where a track ships one, that grain has relief rather than being a picture of relief.
+  Half the tracks measured carry a normal map beside their ground sheet — the sheet that says
+  which way the surface faces rather than what colour it is — and it is now tiled with the
+  colour it belongs to and lit by the track's own sun, so a rut catches the light on the side
+  facing it. Gently: one sheet is standing in for every surface a track has.
+
+  Which sheet gets picked is read as words rather than letters. A track's ground was chosen by
+  looking for `dirt` or `sand` anywhere in a name, which on one track picked `logo-dirtmaster`
+  — a logo — and on another a sponsor's banner, and a near-flat sheet tiled over a track does
+  nothing at all. Names now split into their words however they were written, a word only
+  counts whole, and a name carrying `logo`, `banner`, `sign` or the like is not ground however
+  grounded the rest of it sounds. Seven of sixteen installed tracks now find their relief,
+  against three before.
+
   A track is lit and hazed the way it says it should be. Its ambience file states a sun
   colour, an ambient, and a fog — the viewer used one fixed rig for every track and ignored
   all of it. The haze is thinned to something a whole track can still be seen through: a

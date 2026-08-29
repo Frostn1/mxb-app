@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { cn } from "@/lib/utils";
 import type {
   TrackBackdrop,
+  TrackGround,
   TrackMeshArrays,
   TrackOverview,
   TrackPlacement,
@@ -591,7 +592,7 @@ function TerrainMesh({
   terrain: TrackTerrain;
   overview: TrackOverview | null;
   /** A tiling sheet of the track's own ground, multiplied in for close-up detail. */
-  ground: TrackSceneryTexture | null;
+  ground: TrackGround | null;
 }) {
   const geometry = useMemo(() => buildGeometry(terrain, overview != null), [terrain, overview]);
 
@@ -616,37 +617,52 @@ function TerrainMesh({
 
   // The detail sheet, tiled. The surface picture says what the ground *is* at a third of a
   // metre; this says what it is made of, at whatever resolution you care to look.
-  const detail = useMemo(() => {
-    if (!ground) return null;
-    const t = new THREE.DataTexture(
-      ground.pixels,
-      ground.width,
-      ground.height,
-      THREE.RGBAFormat,
-    );
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.wrapS = THREE.RepeatWrapping;
-    t.wrapT = THREE.RepeatWrapping;
-    t.minFilter = THREE.LinearMipmapLinearFilter;
-    t.magFilter = THREE.LinearFilter;
-    t.generateMipmaps = true;
-    t.anisotropy = 8;
-    t.needsUpdate = true;
-    return t;
-  }, [ground]);
-
   // How many times the sheet repeats across the whole grid.
   const repeat = useMemo(() => {
     const span = Math.max(terrain.width - 1, terrain.height - 1) * terrain.metresPerSample;
     return Math.max(1, Math.round(span / GROUND_TILE_METRES));
   }, [terrain]);
 
+  const tile = (
+    sheet: TrackSceneryTexture | null,
+    srgb: boolean,
+    repeats: number,
+  ): THREE.DataTexture | null => {
+    if (!sheet) return null;
+    const t = new THREE.DataTexture(
+      sheet.pixels,
+      sheet.width,
+      sheet.height,
+      THREE.RGBAFormat,
+    );
+    // A normal map is direction data, not a picture — read it linearly or the relief is wrong.
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = THREE.RepeatWrapping;
+    t.wrapT = THREE.RepeatWrapping;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.generateMipmaps = true;
+    t.anisotropy = 8;
+    t.repeat.set(repeats, repeats);
+    t.needsUpdate = true;
+    return t;
+  };
+
+  const { detail, relief } = useMemo(
+    () => ({
+      detail: tile(ground?.colour ?? null, true, repeat),
+      relief: tile(ground?.normal ?? null, false, repeat),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ground, repeat],
+  );
+
   // The sheet's own average brightness. Dividing by it is what makes this a *detail* layer:
   // the grain then averages to no change at all, so a dark sheet adds texture instead of
   // dragging the whole track darker — which is what tiling a dirt or grass sheet raw did.
   const meanLuma = useMemo(() => {
     if (!ground) return 1;
-    const px = ground.pixels;
+    const px = ground.colour.pixels;
     let total = 0;
     // Every sixteenth pixel: an average over a quarter of a million samples does not need
     // all of them, and this runs on the main thread while a track is opening.
@@ -661,7 +677,13 @@ function TerrainMesh({
   // A grid this size is megabytes of GPU buffers, and the viewer replaces it every time the
   // detail level changes — without this each one would be leaked.
   useEffect(() => () => geometry.dispose(), [geometry]);
-  useEffect(() => () => detail?.dispose(), [detail]);
+  useEffect(
+    () => () => {
+      detail?.dispose();
+      relief?.dispose();
+    },
+    [detail, relief],
+  );
   useEffect(() => () => texture?.dispose(), [texture]);
 
   // The canvas only draws when asked, and the map arrives well after the terrain settled —
@@ -685,8 +707,14 @@ function TerrainMesh({
           program it was built with — the terrain keeps its elevation ramp and never shows the
           picture at all. */}
       <meshStandardMaterial
-        key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}-${repeat}`}
+        key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}-${
+          relief ? "relief" : "smooth"
+        }-${repeat}`}
         map={texture ?? undefined}
+        normalMap={relief ?? undefined}
+        // Gentle: this is one ground sheet standing in for every surface a track has, so it
+        // should suggest a texture underfoot rather than emboss the whole place.
+        normalScale={new THREE.Vector2(0.45, 0.45)}
         vertexColors
         roughness={0.95}
         metalness={0}
@@ -1046,7 +1074,7 @@ interface TrackViewerProps {
   /** The sky and land a track wraps itself in, and the light it states. */
   backdrop?: TrackBackdrop | null;
   /** A tiling sheet of the track's own ground, for detail closer than its data carries. */
-  ground?: TrackSceneryTexture | null;
+  ground?: TrackGround | null;
   /** Told what a click on the scenery landed on, and when the selection clears. */
   onPick?: (piece: PickedPiece | null) => void;
   className?: string;

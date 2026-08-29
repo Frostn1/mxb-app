@@ -19,6 +19,7 @@ import type {
   TrackOverview,
   TrackPlacement,
   TrackBackdrop,
+  TrackGround,
   TrackScenery,
   TrackSceneryTexture,
   TrackTerrain,
@@ -67,7 +68,7 @@ export function TrackViewerDialog({
   const [scenery, setScenery] = useState<TrackScenery | null>(null);
   const [surfaces, setSurfaces] = useState<TrackSceneryTexture[]>([]);
   const [backdrop, setBackdrop] = useState<TrackBackdrop | null>(null);
-  const [ground, setGround] = useState<TrackSceneryTexture | null>(null);
+  const [ground, setGround] = useState<TrackGround | null>(null);
   const [placements, setPlacements] = useState<TrackPlacement[]>([]);
   // On by default: the scenery is the difference between a shape and a place, and a track
   // that carries none simply has nothing to switch off.

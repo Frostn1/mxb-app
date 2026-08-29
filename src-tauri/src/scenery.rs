@@ -464,7 +464,7 @@ const GROUND_WORDS: [&str; 9] = [
 /// that six times or more into a blur. Nothing in the file has finer detail *at a place*, but
 /// the ground sheets have plenty of it *as a material*, so one is tiled over the terrain to
 /// put grain back where interpolation took it out.
-pub fn ground_detail(path: &str) -> Result<Option<MapTexture>> {
+pub fn ground_detail(path: &str) -> Result<Vec<MapTexture>> {
     let p = Path::new(path);
     let names = crate::track::entry_names(p)?;
     let stem = track_stem(p);
@@ -475,9 +475,14 @@ pub fn ground_detail(path: &str) -> Result<Option<MapTexture>> {
         if !map::is_map(&bytes) {
             continue;
         }
-        return Ok(map::ground_sheet(&bytes, &GROUND_WORDS));
+        let Some(colour) = map::ground_sheet(&bytes, &GROUND_WORDS) else {
+            return Ok(Vec::new());
+        };
+        // Its normal map next, where the track ships one — the same sheet's relief.
+        let normal = map::ground_normal(&bytes, &colour.name, &GROUND_WORDS);
+        return Ok(std::iter::once(colour).chain(normal).collect());
     }
-    Ok(None)
+    Ok(Vec::new())
 }
 
 /// The `.edf` models a track ships, as names a prop can be placed by.
@@ -1449,22 +1454,48 @@ source1
     #[ignore = "needs a real track — set FROST_TRACK"]
     fn ground_sheet_of_a_real_track() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
-        match ground_detail(&path).expect("look for a ground sheet") {
-            Some(t) => {
-                let px: Vec<f32> = t
-                    .rgba
-                    .chunks_exact(4)
-                    .map(|p| {
-                        (p[0] as f32 * 0.299 + p[1] as f32 * 0.587 + p[2] as f32 * 0.114) / 255.0
+        let sheets = ground_detail(&path).expect("look for a ground sheet");
+        if sheets.is_empty() {
+            println!("  no ground sheet found");
+        }
+        // What the track calls its sheets, so a missing normal map can be told from a
+        // mis-named one.
+        let names = crate::track::entry_names(Path::new(&path)).unwrap_or_default();
+        let stem = track_stem(Path::new(&path));
+        for entry in entries_with_ext(&names, "map", &stem) {
+            if let Ok(bytes) = crate::track::read_entry(Path::new(&path), &entry) {
+                let all = crate::map::survey(&bytes);
+                let normals: Vec<&str> = all
+                    .iter()
+                    .map(|(n, ..)| n.as_str())
+                    .filter(|n| {
+                        let l = n.to_ascii_lowercase();
+                        GROUND_WORDS.iter().any(|w| l.contains(w))
                     })
                     .collect();
-                let mean = px.iter().sum::<f32>() / px.len().max(1) as f32;
                 println!(
-                    "  {} {}x{}  mean luminance {mean:.3}",
-                    t.name, t.width, t.height
+                    "  {} records, {} ground-named: {:?}",
+                    all.len(),
+                    normals.len(),
+                    &normals[..normals.len().min(14)]
                 );
             }
-            None => println!("  no ground sheet found"),
+            break;
+        }
+        for t in &sheets {
+            let px: Vec<f32> = t
+                .rgba
+                .chunks_exact(4)
+                .map(|p| (p[0] as f32 * 0.299 + p[1] as f32 * 0.587 + p[2] as f32 * 0.114) / 255.0)
+                .collect();
+            let mean = px.iter().sum::<f32>() / px.len().max(1) as f32;
+            println!(
+                "  {} {}x{}  mean luminance {mean:.3}  {}",
+                t.name,
+                t.width,
+                t.height,
+                if t.material == 1 { "(normal)" } else { "(colour)" }
+            );
         }
     }
 

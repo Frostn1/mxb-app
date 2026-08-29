@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   TrackBackdrop,
+  TrackGround,
   TrackInfo,
   TrackMeshArrays,
   TrackOverview,
@@ -332,9 +333,11 @@ export async function loadTrackBackdrop(path: string): Promise<TrackBackdrop | n
  * anything closer than that is interpolation. This is tiled over the terrain to put grain
  * back — it says what the ground is made of, not what is where.
  */
-export async function loadTrackGround(path: string): Promise<TrackSceneryTexture | null> {
+export async function loadTrackGround(path: string): Promise<TrackGround | null> {
   const sheets = await loadTrackSurfaces(path, "load_track_ground");
-  return sheets[0] ?? null;
+  if (sheets.length === 0) return null;
+  // The colour first, then its relief where the track ships one.
+  return { colour: sheets[0], normal: sheets[1] ?? null };
 }
 
 /** The models a track ships that a prop can be placed by name. */

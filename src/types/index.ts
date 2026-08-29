@@ -712,6 +712,18 @@ export interface TrackMeshArrays {
   picture: { width: number; height: number; pixels: Uint8Array<ArrayBuffer> } | null;
 }
 
+/**
+ * A tiling sheet of the track's own ground, and its relief.
+ *
+ * What the ground is made of, not what is where — tiled far finer than the third of a metre
+ * a track states its surface at.
+ */
+export interface TrackGround {
+  colour: TrackSceneryTexture;
+  /** Its normal map, where the track ships one under a ground name. */
+  normal: TrackSceneryTexture | null;
+}
+
 /** What a track pins to a point but ships no mesh for. Mirrors `scenery::Placement`. */
 export interface TrackPlacement {
   /** A key, not prose — the UI translates it. */

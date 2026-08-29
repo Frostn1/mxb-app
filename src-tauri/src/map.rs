@@ -891,17 +891,73 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
 /// The largest record whose name carries a ground word and which isn't a normal map. Order
 /// and binding don't come into it: this asks only "is this ground", which a name answers well
 /// enough, and a wrong answer costs grain rather than a wrong picture on a wrong object.
+/// Words that mark a sheet as something drawn *on* a track rather than the ground under it.
+/// A name is disqualified outright by one of these, however grounded the rest of it sounds —
+/// Abydos ships `logo-dirtmaster`, which is a logo.
+const NOT_GROUND: [&str; 27] = [
+    "logo", "banner", "sign", "signage", "arch", "flag", "board", "billboard", "tent", "decal",
+    "sticker", "poster", "sponsor", "truck", "bike", "wall", "fence", "gate", "tower", "screen",
+    "sky", "cloud", "tree", "leaf", "bark", "bale", "tyre",
+];
+
+/// The words a texture name is made of. Separators vary by author — `soil_dark_c`,
+/// `sand-dark`, `Dirt 2` — and digits never carry meaning, so everything but letters splits.
+fn name_words(name: &str) -> Vec<String> {
+    name.to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Whether the name says this record is a normal map. Written every way going: `Dirt2_n`,
+/// `soil_white_n_s`, `sand-dark-normal`.
+fn is_normal_name(name: &str) -> bool {
+    name_words(name)
+        .iter()
+        .any(|w| matches!(w.as_str(), "n" | "nrm" | "norm" | "normal" | "nor"))
+}
+
+/// How well a name states one of the ground words, lower being better, or `None` if it states
+/// none. Whole words rank ahead of every prefix match, which is what keeps `dirtmaster` from
+/// outranking `dirt` while still letting `Dirtplane` count as dirt.
+fn ground_rank(name: &str, words: &[&str]) -> Option<usize> {
+    let parts = name_words(name);
+    if parts.iter().any(|w| NOT_GROUND.contains(&w.as_str())) {
+        return None;
+    }
+    if let Some(i) = words.iter().position(|g| parts.iter().any(|w| w == g)) {
+        return Some(i);
+    }
+    words
+        .iter()
+        .position(|g| parts.iter().any(|w| w.starts_with(g)))
+        .map(|i| words.len() + i)
+}
+
+/// The name with its trailing role words removed, so a colour sheet and its normal map can be
+/// recognised as the same stem: `soil_dark_c` and `soil_dark_n_s` both reduce to `soil dark`.
+fn name_stem(name: &str) -> Vec<String> {
+    let mut parts = name_words(name);
+    while parts
+        .last()
+        .is_some_and(|w| matches!(w.as_str(), "c" | "a" | "d" | "s" | "n" | "col" | "color" | "colour" | "diff" | "nrm" | "norm" | "normal" | "nor"))
+    {
+        parts.pop();
+    }
+    parts
+}
+
 pub fn ground_sheet(b: &[u8], words: &[&str]) -> Option<MapTexture> {
     let (from, _) = texture_table(b)?;
     // Ranked by which word matched, then by size — the word says what kind of ground it is,
     // and only among equals does the bigger sheet win.
     let mut best: Option<(usize, u64, String, u32, u32, usize, usize)> = None;
     for (name, w, h, off, len) in colour_records(b, from) {
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with("_n_s") || lower.ends_with("_n") || lower == "env" {
+        if is_normal_name(&name) || name.eq_ignore_ascii_case("env") {
             continue;
         }
-        let Some(rank) = words.iter().position(|word| lower.contains(word)) else {
+        let Some(rank) = ground_rank(&name, words) else {
             continue;
         };
         let area = w as u64 * h as u64;
@@ -915,6 +971,7 @@ pub fn ground_sheet(b: &[u8], words: &[&str]) -> Option<MapTexture> {
     }
     let (_, _, name, w, h, off, len) = best?;
     let mut rgba = inflate(b, off, len, w, h)?;
+    let _ = &name;
     // A sheet that turns out to be a cut-out is no use as ground — its holes would punch
     // through the terrain.
     if cutout_fraction(&rgba) > CUTOUT_FRACTION {
@@ -933,7 +990,62 @@ pub fn ground_sheet(b: &[u8], words: &[&str]) -> Option<MapTexture> {
     })
 }
 
-/// The biggest picture inside a model file, reduced for the viewer.
+/// The normal map that goes with a ground sheet, if the track ships one.
+///
+/// Named on the sheet's own stem — `dirt` and `dirt_n`, `soil_dark_c` and `soil_dark_n_s`.
+/// Tiled with the colour it belongs to, it is what gives close ground relief instead of a
+/// flat picture of relief.
+pub fn ground_normal(b: &[u8], colour_name: &str, words: &[&str]) -> Option<MapTexture> {
+    let stem = name_stem(colour_name);
+    let (from, _) = texture_table(b)?;
+
+    // The sheet's own partner first. Tracks often don't ship one — Millville has `soil_dark_c`
+    // but its ground normals are `grass_n_s` and `soil_white_n_s` — and for a detail layer any
+    // ground's relief will do, so a ground-named normal is taken over none.
+    let records = colour_records(b, from);
+    let pick = records
+        .iter()
+        .find(|(n, ..)| is_normal_name(n) && name_stem(n) == stem)
+        .or_else(|| {
+            records
+                .iter()
+                .find(|(n, ..)| is_normal_name(n) && ground_rank(n, words).is_some())
+        })?;
+    let (name, w, h, off, len) = pick.clone();
+    let mut rgba = inflate(b, off, len, w, h)?;
+    // A tangent-space normal map sits around (128, 128, 255); anything else here is a colour
+    // sheet that happens to be named like one, and using it would light the ground by noise.
+    let texels = rgba.len() / 4;
+    if texels == 0 {
+        return None;
+    }
+    let mut sum = [0u64; 3];
+    for p in rgba.chunks_exact(4) {
+        for k in 0..3 {
+            sum[k] += p[k] as u64;
+        }
+    }
+    let mean = [
+        sum[0] as f32 / texels as f32,
+        sum[1] as f32 / texels as f32,
+        sum[2] as f32 / texels as f32,
+    ];
+    if mean[2] < 200.0 || (mean[0] - 128.0).abs() > 40.0 || (mean[1] - 128.0).abs() > 40.0 {
+        return None;
+    }
+    flip_rows(&mut rgba, w, h);
+    let (rgba, w, h) = reduce(rgba, w, h, 512);
+    Some(MapTexture {
+        material: 1,
+        name,
+        width: w,
+        height: h,
+        alpha: false,
+        rgba,
+    })
+}
+
+/// The biggest picture inside a model file, reduced for the viewer./// The biggest picture inside a model file, reduced for the viewer.
 ///
 /// A track's sky and backdrop keep their image inside the `.edf` rather than in the map's
 /// table, and those records use the same two header shapes — so they are read with the same
