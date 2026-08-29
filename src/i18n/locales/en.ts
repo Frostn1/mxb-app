@@ -370,6 +370,8 @@ export const en = {
   // ── 3D viewer ──────────────────────────────────────────────────────────────
   "viewer.preview3d": "3D Preview",
   "viewer.expand": "Expand",
+  "viewer.fullscreen": "Fullscreen",
+  "viewer.exitFullscreen": "Exit fullscreen",
   "viewer.paint": "Paint",
   "viewer.tyres": "Tyres",
   "viewer.tyresOwn": "Bike's own",
@@ -1360,6 +1362,20 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0112.hero.title":
+    "A bike pack installs as the bikes inside it",
+  "showcase.v0112.hero.body":
+    "The OEM pack is 54 machines in one 3.8 GB archive, and it used to arrive as a single row reading \u201cMods folder\u201d \u2014 all of it or none of it. It is now listed the way it is built: every bike by its real name and class, with a checkbox. Take the four you race and leave the other fifty.",
+  "showcase.v0112.fullscreen":
+    "The Designer's 3D preview opens fullscreen \u2014 one button fills the window with the model you are painting.",
+  "showcase.v0112.review":
+    "A download that turns out to hold several mods stops and shows you what is in it before anything reaches your mods folder.",
+  "showcase.v0112.paint":
+    "A paint that offers one file per machine now installs the one for the bike you picked, not the first on the page.",
+  "showcase.v0112.speed":
+    "The review sheet opens in about a second with the OEM bikes installed, where it used to take nearly twenty.",
+  "showcase.v0112.window":
+    "A black window on startup can no longer trap you: it stays hidden until it has drawn, and always has a way to close it.",
   "showcase.v0111.hero.title":
     "Protected model swaps open in 3D",
   "showcase.v0111.hero.body":

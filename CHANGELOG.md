@@ -31,6 +31,17 @@ whichever release turns it on.
 
 ## 2026-08-29
 
+### Changed
+
+- **The log now records which GPU the 3D views are drawing on.** Both viewers draw through
+  the graphics card, but a Windows machine with a driver Windows doesn't trust drops them to
+  a software renderer instead — same picture, a fraction of the speed — and nothing said so.
+  Opening a 3D view now writes the adapter it got into the app log, flagged as a warning when
+  it turns out to be software, so "the viewer is slow" can be answered from the log a player
+  already sends.
+
+## 2026-08-29 — v0.11.2 — Install a pack one bike at a time, and a preview that fills the window
+
 ### Added
 
 - **A bike pack installs as the bikes inside it.** The OEM bike pack is 54 machines and a
@@ -54,16 +65,22 @@ whichever release turns it on.
   file gets. An ordinary single-mod download is untouched — it installs exactly as before,
   with nothing extra to click.
 
+- **The Designer's 3D preview opens fullscreen.** The model sits in a column beside the
+  canvas — the right size while you are drawing on it, and far too small when you want to look
+  at what you have drawn. The button in its corner fills the window with it, with the same
+  tyre, gear and hide toggles it has in the panel; the button again or Escape puts it back.
+  The editor is untouched behind it — same sheets, same layers, nothing saved or reloaded to
+  take a proper look. Asked for by GalpinMX.
+
 - **Sly** credited on Settings → Supporters.
 
 ### Changed
 
-- **The log now records which GPU the 3D views are drawing on.** Both viewers draw through
-  the graphics card, but a Windows machine with a driver Windows doesn't trust drops them to
-  a software renderer instead — same picture, a fraction of the speed — and nothing said so.
-  Opening a 3D view now writes the adapter it got into the app log, flagged as a warning when
-  it turns out to be software, so "the viewer is slow" can be answered from the log a player
-  already sends.
+- **`MXB_SAFE_GRAPHICS=1` now works on Windows too.** It takes the GPU out of the app's
+  browser, the same lever it already pulled on Linux — the thing to try when a window comes
+  up black and stays that way. The app also records how far the page got loading, and which
+  graphics settings were in force, so the next report of a blank window can be read straight
+  from the log instead of guessed at.
 
 ### Fixed
 
@@ -81,10 +98,6 @@ whichever release turns it on.
   53 OEM bikes installed that was 18.9 seconds of nothing happening before the sheet drew, on
   every single drop. It is 1.2 seconds now. The same read backs the bike pickers throughout
   the app, so they all get quicker.
-
-## 2026-08-28
-
-### Fixed
 
 - **The 3D viewer no longer hoards a bike's textures each time it redraws one.** Two things
   asking for the same bike at the same moment — a preview panel and a dialog drawing it
@@ -106,14 +119,6 @@ whichever release turns it on.
   hidden until it has actually drawn something, anything that shows it early gets a real
   Windows title bar to close it by, and a window that never drew closes for good rather than
   hiding in the tray. Reported by a player who found it after booting their PC.
-
-### Changed
-
-- **`MXB_SAFE_GRAPHICS=1` now works on Windows too.** It takes the GPU out of the app's
-  browser, the same lever it already pulled on Linux — the thing to try when a window comes
-  up black and stays that way. The app also records how far the page got loading, and which
-  graphics settings were in force, so the next report of a blank window can be read straight
-  from the log instead of guessed at.
 
 ## 2026-08-28 — v0.11.1 — Protected model swaps open in 3D
 
