@@ -87,10 +87,22 @@ whichever release turns it on.
   Which sheet gets picked is read as words rather than letters. A track's ground was chosen by
   looking for `dirt` or `sand` anywhere in a name, which on one track picked `logo-dirtmaster`
   — a logo — and on another a sponsor's banner, and a near-flat sheet tiled over a track does
-  nothing at all. Names now split into their words however they were written, a word only
-  counts whole, and a name carrying `logo`, `banner`, `sign` or the like is not ground however
-  grounded the rest of it sounds. Seven of sixteen installed tracks now find their relief,
-  against three before.
+  nothing at all. Names now split into their words however they were written, capitals
+  included, a word only counts whole, and a name carrying `logo`, `banner`, `sign`, `marker`
+  or the like is not ground however grounded the rest of it sounds. A track may also name its
+  riding surface after itself — SandPoint calls it `track-dark` — which is now read as ground
+  where nothing better is offered. All sixteen installed tracks find their ground, against
+  thirteen before, three of which were finding the wrong thing; nine find its relief, against
+  three.
+
+  A track that states no surfaces at all is drawn in the colour of its ground rather than by
+  height. Two of the installed tracks ship no coverage data, so the viewer fell back to an
+  elevation ramp — green in the hollows through to white on the high ground, which on a sand
+  circuit is not a legend anybody asked for. Where the track's own ground sheet is known, its
+  average colour is used instead and the shape reads by its shading alone.
+
+  The ground sheet is cached with the rest. Finding it means inflating candidate sheets to
+  check a normal map really is one, and that was happening on every open.
 
   A track is lit and hazed the way it says it should be. Its ambience file states a sun
   colour, an ambient, and a fog — the viewer used one fixed rig for every track and ignored

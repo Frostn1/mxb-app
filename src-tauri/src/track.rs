@@ -967,6 +967,29 @@ mod tests {
             }
             None => println!("no surfaces in this track"),
         }
+        // `FROST_PNG=/tmp/surface.png` writes the picture out, which is the only way to see
+        // whether a track really is one flat colour or is being read as one.
+        if let (Ok(out), Some(b)) = (std::env::var("FROST_PNG"), build_surface_blob(path, 1024)) {
+            let w = u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize;
+            let h = u32::from_le_bytes(b[12..16].try_into().unwrap()) as usize;
+            let px = &b[TEXTURE_HEADER..];
+            let mut seen = std::collections::HashMap::new();
+            for q in px.chunks_exact(4) {
+                *seen.entry([q[0], q[1], q[2]]).or_insert(0usize) += 1;
+            }
+            let mut counts: Vec<_> = seen.into_iter().collect();
+            counts.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+            println!("  {} distinct colours, commonest:", counts.len());
+            for (c, n) in counts.iter().take(6) {
+                println!("    {c:?} {:.1}%", *n as f64 * 100.0 / (w * h) as f64);
+            }
+            let mut ppm = format!("P6\n{w} {h}\n255\n").into_bytes();
+            for q in px.chunks_exact(4) {
+                ppm.extend_from_slice(&q[..3]);
+            }
+            std::fs::write(&out, ppm).unwrap();
+            println!("  wrote {out}");
+        }
     }
 
     #[test]

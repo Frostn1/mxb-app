@@ -27,6 +27,9 @@ use crate::map::{self, Group, MapMesh, MapTexture};
 // second having been decoded at all.
 const MESH_CACHE: &str = "track-scenery-v4";
 const SURFACE_CACHE: &str = "track-surfaces-v4";
+/// The ground sheet and its normal map, cached apart again — two 512×512 sheets against the
+/// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
+const GROUND_CACHE: &str = "track-ground-v1";
 
 /// How many decoded scenery meshes to keep. Smaller than the terrain's: one of these is
 /// about 30 MB, against 16 for a terrain master.
@@ -453,8 +456,12 @@ pub fn backdrop_blob(
 /// Order matters. A detail layer wants the surface a track is mostly made of, and that is
 /// dirt: tiling `grass` over a dry circuit tints the whole place green, which is what picking
 /// merely the largest match did.
-const GROUND_WORDS: [&str; 9] = [
+const GROUND_WORDS: [&str; 10] = [
     "dirt", "soil", "terrain", "ground", "mud", "loam", "sand", "gravel", "grass",
+    // Last, and deliberately: a track that names its riding surface after itself —
+    // SandPoint's `track-dark`, `track-norm` — means the ground, but so many other things
+    // carry the word that it must never outrank a sheet that says what the ground is made of.
+    "track",
 ];
 
 /// A tiling sheet of the track's own ground, for detail closer than its data can carry.
@@ -823,6 +830,23 @@ pub fn load(app: &tauri::AppHandle, path: &str) -> Result<Scenery> {
         prune_cache(app, MESH_CACHE);
     }
     Ok(scenery)
+}
+
+/// A track's ground sheet and its normal map, cached apart from both.
+///
+/// The pick is a couple of megabytes but the search is not: it inflates candidate sheets to
+/// check that a normal map really is one. Cached, opening a track again costs a file read.
+pub fn load_ground(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTexture>> {
+    let key = cache_key(path)?;
+    if let Some(hit) = cache_file(app, &key, GROUND_CACHE).and_then(|f| read_surface_cache(&f)) {
+        return Ok(hit);
+    }
+    let sheets = ground_detail(path)?;
+    if let Some(f) = cache_file(app, &key, GROUND_CACHE) {
+        write_surface_cache(&f, &sheets);
+        prune_cache(app, GROUND_CACHE);
+    }
+    Ok(sheets)
 }
 
 /// A track's surfaces, cached apart from its mesh.
@@ -1479,6 +1503,8 @@ source1
                     normals.len(),
                     &normals[..normals.len().min(14)]
                 );
+                let every: Vec<&str> = all.iter().map(|(n, ..)| n.as_str()).collect();
+                println!("  all: {every:?}");
             }
             break;
         }

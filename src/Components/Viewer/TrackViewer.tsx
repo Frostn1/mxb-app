@@ -594,7 +594,10 @@ function TerrainMesh({
   /** A tiling sheet of the track's own ground, multiplied in for close-up detail. */
   ground: TrackGround | null;
 }) {
-  const geometry = useMemo(() => buildGeometry(terrain, overview != null), [terrain, overview]);
+  // A track with no surface data of its own still has ground: its sheet says what colour that
+  // is, so the elevation ramp is only reached for when a track states neither.
+  const tinted = overview != null || ground != null;
+  const geometry = useMemo(() => buildGeometry(terrain, tinted), [terrain, tinted]);
 
   // Built once per picture and handed to the GPU as-is. `sRGB` because it's artwork rather
   // than measurements: skipping that draws the whole track washed out.
@@ -660,19 +663,36 @@ function TerrainMesh({
   // The sheet's own average brightness. Dividing by it is what makes this a *detail* layer:
   // the grain then averages to no change at all, so a dark sheet adds texture instead of
   // dragging the whole track darker — which is what tiling a dirt or grass sheet raw did.
-  const meanLuma = useMemo(() => {
-    if (!ground) return 1;
+  // Its average colour too, which is what a track with no surface data of its own is drawn
+  // in: the ramp reported height as if it were material, so a sand circuit came out banded
+  // green-to-white. One honest colour beats a legend nobody asked for.
+  const { meanLuma, meanHex } = useMemo(() => {
+    if (!ground) return { meanLuma: 1, meanHex: "#ffffff" };
     const px = ground.colour.pixels;
     let total = 0;
+    const rgb = [0, 0, 0];
     // Every sixteenth pixel: an average over a quarter of a million samples does not need
     // all of them, and this runs on the main thread while a track is opening.
     let n = 0;
     for (let i = 0; i < px.length; i += 64) {
       total += (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) / 255;
+      for (let k = 0; k < 3; k += 1) rgb[k] += px[i + k];
       n += 1;
     }
-    return n > 0 ? Math.max(total / n, 0.02) : 1;
+    if (n === 0) return { meanLuma: 1, meanHex: "#ffffff" };
+    // Lifted towards white: the sheet's average is the colour of ground in shade, and the
+    // terrain is lit on top of it, so handing over the average raw draws the track too dark.
+    const c = new THREE.Color(
+      rgb[0] / n / 255,
+      rgb[1] / n / 255,
+      rgb[2] / n / 255,
+    ).convertSRGBToLinear();
+    return {
+      meanLuma: Math.max(total / n, 0.02),
+      meanHex: `#${c.lerp(new THREE.Color("#ffffff"), 0.35).getHexString()}`,
+    };
   }, [ground]);
+  const tint = overview ? "#ffffff" : meanHex;
 
   // A grid this size is megabytes of GPU buffers, and the viewer replaces it every time the
   // detail level changes — without this each one would be leaked.
@@ -710,6 +730,7 @@ function TerrainMesh({
         key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}-${
           relief ? "relief" : "smooth"
         }-${repeat}`}
+        color={tint}
         map={texture ?? undefined}
         normalMap={relief ?? undefined}
         // Gentle: this is one ground sheet standing in for every surface a track has, so it

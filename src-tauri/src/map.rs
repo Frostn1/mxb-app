@@ -894,20 +894,39 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
 /// Words that mark a sheet as something drawn *on* a track rather than the ground under it.
 /// A name is disqualified outright by one of these, however grounded the rest of it sounds —
 /// Abydos ships `logo-dirtmaster`, which is a logo.
-const NOT_GROUND: [&str; 27] = [
+const NOT_GROUND: [&str; 31] = [
     "logo", "banner", "sign", "signage", "arch", "flag", "board", "billboard", "tent", "decal",
     "sticker", "poster", "sponsor", "truck", "bike", "wall", "fence", "gate", "tower", "screen",
-    "sky", "cloud", "tree", "leaf", "bark", "bale", "tyre",
+    "sky", "cloud", "tree", "leaf", "bark", "bale", "tyre", "marker", "post", "cone", "arrow",
 ];
 
 /// The words a texture name is made of. Separators vary by author — `soil_dark_c`,
 /// `sand-dark`, `Dirt 2` — and digits never carry meaning, so everything but letters splits.
 fn name_words(name: &str) -> Vec<String> {
-    name.to_ascii_lowercase()
-        .split(|c: char| !c.is_ascii_alphabetic())
-        .filter(|w| !w.is_empty())
-        .map(str::to_string)
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let chars: Vec<char> = name.chars().collect();
+    let mut push = |w: &mut String| {
+        if !w.is_empty() {
+            out.push(std::mem::take(w));
+        }
+    };
+    for (i, &c) in chars.iter().enumerate() {
+        if !c.is_ascii_alphabetic() {
+            push(&mut word);
+            continue;
+        }
+        // A capital starts a word too — `RR_TrackMarker` is a marker, and reading it as one
+        // word `trackmarker` made it match `track` and pass as ground.
+        let after_lower = i > 0 && chars[i - 1].is_ascii_lowercase();
+        let before_lower = chars.get(i + 1).is_some_and(|n| n.is_ascii_lowercase());
+        if c.is_ascii_uppercase() && (after_lower || before_lower) {
+            push(&mut word);
+        }
+        word.push(c.to_ascii_lowercase());
+    }
+    push(&mut word);
+    out
 }
 
 /// Whether the name says this record is a normal map. Written every way going: `Dirt2_n`,
@@ -999,50 +1018,60 @@ pub fn ground_normal(b: &[u8], colour_name: &str, words: &[&str]) -> Option<MapT
     let stem = name_stem(colour_name);
     let (from, _) = texture_table(b)?;
 
-    // The sheet's own partner first. Tracks often don't ship one — Millville has `soil_dark_c`
-    // but its ground normals are `grass_n_s` and `soil_white_n_s` — and for a detail layer any
-    // ground's relief will do, so a ground-named normal is taken over none.
-    let records = colour_records(b, from);
-    let pick = records
-        .iter()
-        .find(|(n, ..)| is_normal_name(n) && name_stem(n) == stem)
-        .or_else(|| {
-            records
-                .iter()
-                .find(|(n, ..)| is_normal_name(n) && ground_rank(n, words).is_some())
-        })?;
-    let (name, w, h, off, len) = pick.clone();
-    let mut rgba = inflate(b, off, len, w, h)?;
-    // A tangent-space normal map sits around (128, 128, 255); anything else here is a colour
-    // sheet that happens to be named like one, and using it would light the ground by noise.
-    let texels = rgba.len() / 4;
-    if texels == 0 {
-        return None;
-    }
-    let mut sum = [0u64; 3];
-    for p in rgba.chunks_exact(4) {
-        for k in 0..3 {
-            sum[k] += p[k] as u64;
+    // The sheet's own partner first, then any ground's — tracks often ship no partner for the
+    // sheet that won (Millville has `soil_dark_c` but its normals are `grass_n_s` and
+    // `soil_white_n_s`), and for a detail layer any ground's relief will do.
+    let mut candidates: Vec<(usize, (String, u32, u32, usize, usize))> = colour_records(b, from)
+        .into_iter()
+        .filter(|(n, ..)| is_normal_name(n))
+        .filter_map(|r| {
+            if name_stem(&r.0) == stem {
+                Some((0, r))
+            } else {
+                ground_rank(&r.0, words).map(|k| (k + 1, r))
+            }
+        })
+        .collect();
+    candidates.sort_by_key(|(rank, _)| *rank);
+
+    // Each is only a candidate until its pixels agree: a tangent-space normal map sits around
+    // (128, 128, 255), and anything else here is a colour sheet named like one — lighting the
+    // ground by it would be lighting it with noise. Trying them in turn rather than testing
+    // only the first is what keeps one mis-named sheet from costing a track its relief.
+    for (_, (name, w, h, off, len)) in candidates {
+        let Some(mut rgba) = inflate(b, off, len, w, h) else {
+            continue;
+        };
+        let texels = rgba.len() / 4;
+        if texels == 0 {
+            continue;
         }
+        let mut sum = [0u64; 3];
+        for p in rgba.chunks_exact(4) {
+            for k in 0..3 {
+                sum[k] += p[k] as u64;
+            }
+        }
+        let mean = [
+            sum[0] as f32 / texels as f32,
+            sum[1] as f32 / texels as f32,
+            sum[2] as f32 / texels as f32,
+        ];
+        if mean[2] < 200.0 || (mean[0] - 128.0).abs() > 40.0 || (mean[1] - 128.0).abs() > 40.0 {
+            continue;
+        }
+        flip_rows(&mut rgba, w, h);
+        let (rgba, w, h) = reduce(rgba, w, h, 512);
+        return Some(MapTexture {
+            material: 1,
+            name,
+            width: w,
+            height: h,
+            alpha: false,
+            rgba,
+        });
     }
-    let mean = [
-        sum[0] as f32 / texels as f32,
-        sum[1] as f32 / texels as f32,
-        sum[2] as f32 / texels as f32,
-    ];
-    if mean[2] < 200.0 || (mean[0] - 128.0).abs() > 40.0 || (mean[1] - 128.0).abs() > 40.0 {
-        return None;
-    }
-    flip_rows(&mut rgba, w, h);
-    let (rgba, w, h) = reduce(rgba, w, h, 512);
-    Some(MapTexture {
-        material: 1,
-        name,
-        width: w,
-        height: h,
-        alpha: false,
-        rgba,
-    })
+    None
 }
 
 /// The biggest picture inside a model file, reduced for the viewer./// The biggest picture inside a model file, reduced for the viewer.
@@ -1253,6 +1282,55 @@ pub const SURFACES_HEADER: usize = 16;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// Ground words used to be looked for anywhere in a name, which is how Abydos's
+    /// `logo-dirtmaster` came to be its dirt and I40's `banner_lucasoil` its soil. Both are
+    /// near-flat pictures, so the detail layer they won did nothing at all.
+    #[test]
+    fn a_logo_is_not_the_ground_it_is_named_after() {
+        let words = ["dirt", "soil", "sand"];
+        assert_eq!(ground_rank("logo-dirtmaster", &words), None);
+        assert_eq!(ground_rank("banner_lucasoil", &words), None);
+        assert_eq!(ground_rank("RR_TrackMarker", &["track"]), None);
+    }
+
+    #[test]
+    fn a_whole_word_outranks_a_word_it_only_starts() {
+        let words = ["dirt", "sand"];
+        let whole = ground_rank("dry_dirt", &words).expect("dirt");
+        let prefix = ground_rank("Dirtplane", &words).expect("still dirt");
+        assert!(whole < prefix, "{whole} should beat {prefix}");
+        // And a later word said outright still loses to an earlier one said at all.
+        assert!(ground_rank("sand-dark", &words).expect("sand") > whole);
+    }
+
+    #[test]
+    fn a_name_is_read_however_its_author_wrote_it() {
+        assert_eq!(name_words("soil_dark_c"), ["soil", "dark", "c"]);
+        assert_eq!(name_words("sand-dark-normal"), ["sand", "dark", "normal"]);
+        assert_eq!(name_words("Dirt_2"), ["dirt"]);
+    }
+
+    #[test]
+    fn a_normal_map_says_so_in_any_of_the_ways_it_is_written() {
+        for n in ["Dirt2_n", "soil_white_n_s", "sand-dark-normal", "track-norm"] {
+            assert!(is_normal_name(n), "{n} is a normal map");
+        }
+        for n in ["grass", "sand-new-2", "dirtyconcrete", "banner_fmf"] {
+            assert!(!is_normal_name(n), "{n} is a picture");
+        }
+    }
+
+    /// What lets a sheet find its own partner rather than any old normal map.
+    #[test]
+    fn a_sheet_and_its_normal_reduce_to_the_same_stem() {
+        assert_eq!(name_stem("soil_dark_c"), name_stem("soil_dark_n_s"));
+        assert_eq!(name_stem("sand-dark"), name_stem("sand-dark-normal"));
+        assert_eq!(name_stem("dirt"), name_stem("dirt_n"));
+        assert_ne!(name_stem("soil_dark_c"), name_stem("soil_white_n_s"));
+    }
+
     use super::*;
 
     /// Build a `.map` byte-for-byte the way a real one is laid out.

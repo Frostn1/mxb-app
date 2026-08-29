@@ -1134,9 +1134,12 @@ async fn load_track_backdrop(
 /// A track states its surface at about a third of a metre per sample, and a viewer that lets
 /// you get close magnifies that into a blur. This puts the grain back.
 #[tauri::command]
-async fn load_track_ground(path: String) -> Result<tauri::ipc::Response, String> {
+async fn load_track_ground(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let sheets = scenery::ground_detail(&path).unwrap_or_default();
+        let sheets = scenery::load_ground(&app, &path).unwrap_or_default();
         tauri::ipc::Response::new(map::surfaces_blob(&sheets))
     })
     .await
