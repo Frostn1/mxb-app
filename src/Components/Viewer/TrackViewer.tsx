@@ -787,13 +787,12 @@ function buildSceneryGeometry(
     normals[o + 2] = scenery.normals[o + 2];
   }
 
-  const srcIndices = scenery.indices;
-  const indices = new Uint32Array(srcIndices.length);
-  for (let t = 0; t < srcIndices.length; t += 3) {
-    indices[t] = srcIndices[t];
-    indices[t + 1] = srcIndices[t + 2];
-    indices[t + 2] = srcIndices[t + 1];
-  }
+  // Kept as the map states it. `toView` mirrors X, and a mirror already reverses which side
+  // of a triangle you are looking at — so the game's own winding lands the right way round
+  // here without a swap, and swapping as well turns every face back to front. Drawn
+  // double-sided that shows up not as holes but as light: three.js flips a back face's
+  // normal, and a lit floor an acre across renders as if the sun were under it.
+  const indices = scenery.indices;
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));

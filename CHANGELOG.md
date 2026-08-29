@@ -104,6 +104,13 @@ whichever release turns it on.
   black beyond it. They draw with the track's own picture on them, lit from where the track
   says its sun is.
 
+  What stands on the track is lit from above rather than from below. Every piece of scenery
+  was being drawn back to front — the game's meshes are wound the other way round, and the
+  view already mirrors them, so reversing them again put every face the wrong way out. Drawn
+  double-sided that shows up not as holes but as light: the sun landed on the underside of
+  everything. Small props got away with it; a track that surrounds itself with landscape did
+  not, and Abydos's dunes drew as a black apron around the circuit. They are dunes now.
+
   Where a track's surfaces can't be read, its cut-outs are left out rather than drawn wrong. A
   quarter of a map is foliage, crowd and netting — flat cards that are a tree only once an
   alpha channel has cut the tree out of them, and drawn plain they are thousands of standing

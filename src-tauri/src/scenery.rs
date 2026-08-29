@@ -1525,10 +1525,24 @@ source1
                 m.vertex_count(),
                 m.triangle_count(),
                 (hi[0] - lo[0]).max(hi[2] - lo[2]) / 2.0,
-                tex.as_ref().map_or("none".to_string(), |t| format!(
-                    "{}x{} {}",
-                    t.width, t.height, t.name
-                ))
+                tex.as_ref().map_or("none".to_string(), |t| {
+                    let n = t.rgba.len() / 4;
+                    let lum: f64 = t
+                        .rgba
+                        .chunks_exact(4)
+                        .map(|q| {
+                            (q[0] as f64 * 0.299 + q[1] as f64 * 0.587 + q[2] as f64 * 0.114)
+                                / 255.0
+                        })
+                        .sum();
+                    format!(
+                        "{}x{} {} luma {:.3}",
+                        t.width,
+                        t.height,
+                        t.name,
+                        if n > 0 { lum / n as f64 } else { 0.0 }
+                    )
+                })
             );
         }
         assert!(
