@@ -95,6 +95,12 @@ whichever release turns it on.
   thirteen before, three of which were finding the wrong thing; nine find its relief, against
   three.
 
+  A track that states no surfaces of its own draws its terrain again. Tiling the ground sheet
+  over it read the coordinates three.js sets up for a surface picture — which a track without
+  one never has, so the shader failed to build and the terrain drew nothing while its scenery,
+  sky and markers all drew fine. The grain now carries its own coordinates and works with or
+  without a picture under it.
+
   A track that states no surfaces at all is drawn in the colour of its ground rather than by
   height. Two of the installed tracks ship no coverage data, so the viewer fell back to an
   elevation ramp — green in the hollows through to white on the high ground, which on a sand

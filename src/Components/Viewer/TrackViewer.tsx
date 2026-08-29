@@ -465,12 +465,17 @@ function Surrounds({
         </mesh>
       )}
       {geometries.land && (
+        // Behind everything, like the dome: a backdrop is what a track puts at its horizon,
+        // and some are authored as a shell that encloses the whole site rather than a ring
+        // around it. Writing depth, such a shell sits between the camera and the track and
+        // hides it — Sand Point opened as an empty blue sphere with the circuit inside it.
         <mesh geometry={geometries.land} renderOrder={-1}>
           <meshBasicMaterial
             key={geometries.landMap ? "land-picture" : "land-plain"}
             map={geometries.landMap ?? undefined}
             color={geometries.landMap ? "#ffffff" : landHex}
             side={THREE.DoubleSide}
+            depthWrite={false}
             toneMapped={false}
           />
         </mesh>
@@ -745,10 +750,26 @@ function TerrainMesh({
           shader.uniforms.groundRepeat = { value: repeat };
           shader.uniforms.groundMean = { value: meanLuma };
           shader.uniforms.groundStrength = { value: GROUND_STRENGTH };
+          // Its own varying rather than the map's. `vMapUv` exists only where three.js
+          // compiled in a `map`, so on a track that states no surfaces — no picture, so no
+          // map — this read a name the shader had never declared, the program failed to
+          // build, and the terrain drew nothing at all while everything around it drew fine.
+          shader.vertexShader = shader.vertexShader
+            .replace(
+              "#include <common>",
+              `#include <common>
+               varying vec2 vGroundUv;`,
+            )
+            .replace(
+              "#include <begin_vertex>",
+              `#include <begin_vertex>
+               vGroundUv = uv;`,
+            );
           shader.fragmentShader = shader.fragmentShader
             .replace(
               "#include <common>",
               `#include <common>
+               varying vec2 vGroundUv;
                uniform sampler2D groundMap;
                uniform float groundRepeat;
                uniform float groundMean;
@@ -760,7 +781,7 @@ function TerrainMesh({
               "#include <color_fragment>",
               `#include <color_fragment>
                {
-                 vec3 grain = texture2D(groundMap, vMapUv * groundRepeat).rgb;
+                 vec3 grain = texture2D(groundMap, vGroundUv * groundRepeat).rgb;
                  float lum = dot(grain, vec3(0.299, 0.587, 0.114));
                  // Around one, so the grain varies the ground without darkening it. Only the
                  // sheet's luminance is used — its hue is its own surface's, not this one's.

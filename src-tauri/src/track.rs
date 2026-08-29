@@ -931,6 +931,22 @@ mod tests {
     fn read_a_real_track() {
         let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK to a track .pkz/folder");
         println!("{}", diagnose(Path::new(&path)));
+        // What the viewer actually receives at its own detail level — a terrain whose info
+        // reads fine but whose heights come back empty draws nothing at all.
+        let want: u32 = std::env::var("FROST_DETAIL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(512);
+        match decode_master(Path::new(&path)) {
+            Ok(m) => {
+                let (w, h, heights) = resample(&m, want);
+                let finite = heights.iter().filter(|v| v.is_finite()).count();
+                let lo = heights.iter().cloned().fold(f32::INFINITY, f32::min);
+                let hi = heights.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                println!("view {w}x{h}: {} heights, {finite} finite, [{lo}, {hi}]", heights.len());
+            }
+            Err(e) => println!("no master: {e:#}"),
+        }
     }
 
     /// Point this at a real track to see the surfaces its height file paints:
