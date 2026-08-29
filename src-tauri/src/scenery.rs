@@ -29,7 +29,7 @@ const MESH_CACHE: &str = "track-scenery-v4";
 const SURFACE_CACHE: &str = "track-surfaces-v4";
 /// The ground sheet and its normal map, cached apart again — two 512×512 sheets against the
 /// surfaces' hundreds of megabytes, and finding them means reading the archive a third time.
-const GROUND_CACHE: &str = "track-ground-v1";
+const GROUND_CACHE: &str = "track-ground-v2";
 
 /// How many decoded scenery meshes to keep. Smaller than the terrain's: one of these is
 /// about 30 MB, against 16 for a terrain master.
