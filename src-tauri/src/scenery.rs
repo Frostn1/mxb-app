@@ -771,6 +771,27 @@ fn bake_props(path: &Path, names: &[String], stem: &str, mesh: &mut MapMesh) -> 
                     tri_count,
                 }),
             }
+            // A placed prop is one piece, and it has to be numbered like the rest: the blob
+            // carries one id per triangle, and leaving these out left the whole scenery
+            // short of ids — the viewer read past the end of it and drew none of it.
+            let mut min = [f32::INFINITY; 3];
+            let mut max = [f32::NEG_INFINITY; 3];
+            for v in mesh.positions[base as usize * 3..].chunks_exact(3) {
+                for axis in 0..3 {
+                    min[axis] = min[axis].min(v[axis]);
+                    max[axis] = max[axis].max(v[axis]);
+                }
+            }
+            let piece = mesh.objects.len() as u32;
+            mesh.objects.push(map::MapObject {
+                tri_start,
+                tri_count,
+                material: prop_material,
+                min,
+                max,
+            });
+            mesh.object_of_tri
+                .extend(std::iter::repeat(piece).take(tri_count as usize));
         }
         placed += 1;
     }
@@ -1577,6 +1598,75 @@ source1
         );
     }
 
+    /// The invariant the blob depends on, checked on the path that broke it: a placed prop
+    /// extends the mesh, and every triangle it adds needs a piece id like any other. Without
+    /// one the blob is short, the viewer reads past its end, and a track draws no scenery at
+    /// all — which is what Abydos did, sixteen thousand prop triangles short.
+    #[test]
+    fn a_placed_prop_is_numbered_like_the_rest_of_the_scenery() {
+        // One triangle of map scenery, already numbered as its own piece.
+        let mut mesh = MapMesh {
+            positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            normals: vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0],
+            uvs: vec![0.0; 6],
+            indices: vec![0, 1, 2],
+            groups: vec![Group {
+                material: 0,
+                tri_start: 0,
+                tri_count: 1,
+            }],
+            objects: vec![map::MapObject {
+                tri_start: 0,
+                tri_count: 1,
+                material: 0,
+                min: [0.0; 3],
+                max: [1.0; 3],
+            }],
+            object_of_tri: vec![0],
+            materials: 1,
+        };
+
+        // A prop of one triangle, placed the way `.scr` props are.
+        let pos = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0];
+        let nrm = vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0];
+        let base = mesh.vertex_count() as u32;
+        let tri_start = (mesh.indices.len() / 3) as u32;
+        place(&mut mesh, &pos, &nrm, [0.0; 3], [10.0, 0.0, 10.0]);
+        mesh.uvs.extend(std::iter::repeat(0.0).take(6));
+        mesh.indices.extend([0u32, 1, 2].iter().map(|i| i + base));
+        let tri_count = (mesh.indices.len() / 3) as u32 - tri_start;
+        let piece = mesh.objects.len() as u32;
+        mesh.objects.push(map::MapObject {
+            tri_start,
+            tri_count,
+            material: 1,
+            min: [10.0, 0.0, 10.0],
+            max: [12.0, 0.0, 12.0],
+        });
+        mesh.groups.push(Group {
+            material: 1,
+            tri_start,
+            tri_count,
+        });
+        mesh.object_of_tri
+            .extend(std::iter::repeat(piece).take(tri_count as usize));
+
+        assert_eq!(
+            mesh.object_of_tri.len(),
+            mesh.indices.len() / 3,
+            "one id per triangle, prop included"
+        );
+        let blob = map::scenery_blob(&mesh, &[]);
+        let vc = u32::from_le_bytes(blob[8..12].try_into().unwrap()) as usize;
+        let ic = u32::from_le_bytes(blob[12..16].try_into().unwrap()) as usize;
+        let gc = u32::from_le_bytes(blob[16..20].try_into().unwrap()) as usize;
+        assert_eq!(
+            blob.len(),
+            map::SCENERY_HEADER + vc * 32 + ic * 4 + gc * 12 + (ic / 3) * 4,
+            "the sections account for exactly the blob"
+        );
+    }
+
     /// What a real track offers to place, and whether one of them draws:
     ///
     /// ```text
@@ -1958,8 +2048,17 @@ source1
                 + s.info.vertex_count as usize * 32
                 + s.info.triangle_count as usize * 12
                 + s.mesh.groups.len() * 12
+                // One piece id per triangle. Leaving this out of the sum is what let a mesh
+                // short of ids ship — the viewer reads the sections back to back, so a blob
+                // that doesn't add up costs a track all of its scenery rather than its pieces.
+                + s.info.triangle_count as usize * 4
                 + s.textures.len() * crate::map::TEXTURE_ENTRY
                 + pixels
+        );
+        assert_eq!(
+            s.mesh.object_of_tri.len(),
+            s.mesh.indices.len() / 3,
+            "every triangle is numbered, placed props included"
         );
         assert!(s
             .mesh

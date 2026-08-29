@@ -95,6 +95,13 @@ whichever release turns it on.
   thirteen before, three of which were finding the wrong thing; nine find its relief, against
   three.
 
+  A track that places props of its own draws its scenery again. The props a `.scr` puts down
+  are added to the same mesh as the rest, but they were not being numbered as pieces — and the
+  viewer works out where the surfaces begin from the piece count, so a mesh short of ids reads
+  past its own end and is thrown away whole. Abydos was sixteen thousand prop triangles short
+  and drew nothing at all. Each placed prop is now a piece like any other, which is also what
+  makes it something you can point at.
+
   A track that states no surfaces of its own draws its terrain again. Tiling the ground sheet
   over it read the coordinates three.js sets up for a surface picture — which a track without
   one never has, so the shader failed to build and the terrain drew nothing while its scenery,

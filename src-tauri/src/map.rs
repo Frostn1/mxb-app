@@ -1183,6 +1183,15 @@ pub const TEXTURE_ENTRY: usize = 20;
 /// surfaces; as JSON numbers it would cost more to parse than the archive read that
 /// produced it.
 pub fn scenery_blob(mesh: &MapMesh, textures: &[MapTexture]) -> Vec<u8> {
+    // The reader walks the sections back to back and works out where the surfaces start from
+    // the triangle count, so a mesh carrying fewer piece ids than triangles doesn't lose the
+    // pieces — it loses the whole scenery. Appending a placed prop without numbering it was
+    // exactly that.
+    debug_assert_eq!(
+        mesh.object_of_tri.len(),
+        mesh.indices.len() / 3,
+        "one piece id per triangle"
+    );
     let (lo, hi) = mesh.bounds();
     let vc = mesh.vertex_count() as u32;
     let ic = mesh.indices.len() as u32;
