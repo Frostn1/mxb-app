@@ -1,15 +1,25 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Loader2, Mountain, X } from "lucide-react";
+import { Boxes, Check, Copy, Loader2, Mountain, X } from "lucide-react";
 import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
 import { Button } from "@/Components/ui/button";
-import { TrackViewer } from "./TrackViewer";
+import { TrackViewer, type PickedPiece } from "./TrackViewer";
 import {
   diagnoseTrack,
   loadTrackOverview,
+  loadTrackScenery,
+  loadTrackSurfaces,
   loadTrackTerrain,
   readTrackInfo,
+  readTrackPlacements,
 } from "../../api/tracks";
-import type { TrackInfo, TrackOverview, TrackTerrain } from "../../types";
+import type {
+  TrackInfo,
+  TrackOverview,
+  TrackPlacement,
+  TrackScenery,
+  TrackSceneryTexture,
+  TrackTerrain,
+} from "../../types";
 import { formatLength } from "../../lib/mods";
 import { useT } from "../../i18n/context";
 
@@ -51,10 +61,20 @@ export function TrackViewerDialog({
   const [info, setInfo] = useState<TrackInfo | null>(null);
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
+  const [scenery, setScenery] = useState<TrackScenery | null>(null);
+  const [surfaces, setSurfaces] = useState<TrackSceneryTexture[]>([]);
+  const [placements, setPlacements] = useState<TrackPlacement[]>([]);
+  // On by default: the scenery is the difference between a shape and a place, and a track
+  // that carries none simply has nothing to switch off.
+  const [showObjects, setShowObjects] = useState(true);
   // True only until the *coarse* pass lands — the refine that follows happens under a
   // terrain that is already up, and covering it with a spinner would be a step backwards.
   const [loading, setLoading] = useState(false);
   const [refining, setRefining] = useState(false);
+  // The surfaces are still inflating; the scenery is up but grey.
+  const [painting, setPainting] = useState(false);
+  // What the last click on the scenery landed on, so the panel can name it.
+  const [picked, setPicked] = useState<PickedPiece | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only fetched when a track fails, and only when asked for — it re-reads the archive.
   const [diagnosis, setDiagnosis] = useState<string | null>(null);
@@ -67,6 +87,10 @@ export function TrackViewerDialog({
     setInfo(null);
     setTerrain(null);
     setOverview(null);
+    setScenery(null);
+    setSurfaces([]);
+    setPicked(null);
+    setPlacements([]);
     setError(null);
     setDiagnosis(null);
     setCopied(false);
@@ -78,11 +102,20 @@ export function TrackViewerDialog({
       .then((i) => alive && setInfo(i))
       .catch(() => {});
 
+    // Kilobytes of cfg, so these land while the terrain is still being read — the markers
+    // are up before the scenery they stand among.
+    readTrackPlacements(path)
+      .then((p) => alive && setPlacements(p))
+      .catch(() => {});
+
     void (async () => {
       try {
         // Started before anything is awaited, so the archive read it needs overlaps the
         // terrain's rather than following it.
         const surface = loadTrackOverview(path, OVERVIEW_DIM).catch(() => null);
+        // The heaviest read in the view — most of a track's bulk is its `.map` — so it is
+        // started here and settled last, under a terrain that is already up.
+        const objects = loadTrackScenery(path).catch(() => null);
 
         const coarse = await loadTrackTerrain(path, COARSE_DIM);
         if (!alive) return;
@@ -96,6 +129,20 @@ export function TrackViewerDialog({
         const [fine, map] = await Promise.all([loadTrackTerrain(path, FINE_DIM), surface]);
         if (!alive) return;
         setOverview(map);
+        // Settled on its own: the scenery is a separate mesh, so it can arrive after the
+        // terrain has refined without either waiting on the other. Its surfaces are asked
+        // for only once the mesh is up, so the track is on screen — in outline — while the
+        // hundreds of megabytes behind its colours are still inflating.
+        void objects.then((s) => {
+          if (!alive) return;
+          setScenery(s);
+          if (!s) return;
+          setPainting(true);
+          loadTrackSurfaces(path)
+            .then((t) => alive && setSurfaces(t))
+            .catch(() => {})
+            .finally(() => alive && setPainting(false));
+        });
         // Only an upgrade: a backend that capped the master below the fine size would
         // otherwise have us swap a grid for an identical one and rebuild the mesh for free.
         if (fine.width > coarse.width) setTerrain(fine);
@@ -140,6 +187,30 @@ export function TrackViewerDialog({
 
   if (overview) rows.push([t("trackViewer.surface"), t("trackViewer.surfaceMasks")]);
 
+  const markerCount = placements.filter((p) => p.kind !== "prop").length;
+  const hasObjects = scenery != null || markerCount > 0;
+  if (scenery) {
+    rows.push([
+      t("trackViewer.scenery"),
+      t("trackViewer.sceneryTris", {
+        count: Math.round(scenery.indices.length / 3).toLocaleString(),
+      }),
+    ]);
+  }
+  if (scenery && scenery.pieceCount > 0) {
+    rows.push([t("trackViewer.pieces"), scenery.pieceCount.toLocaleString()]);
+  }
+  if (markerCount > 0) {
+    rows.push([t("trackViewer.fixtures"), String(markerCount)]);
+  }
+  if (picked) {
+    const [w, h, d] = picked.size.map((n) => (n < 10 ? n.toFixed(1) : Math.round(n)));
+    rows.push([
+      t("trackViewer.selected"),
+      `${picked.triangles.toLocaleString()} · ${w} × ${h} × ${d} m`,
+    ]);
+  }
+
   // Nothing to load rather than something that failed — worth saying plainly, since the
   // inventory can tell us before the terrain read even finishes.
   const noTerrain = info != null && !info.hasTerrain;
@@ -154,13 +225,27 @@ export function TrackViewerDialog({
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <Mountain className="h-4 w-4 flex-none text-muted-foreground" />
             <span className="truncate">{title ?? meta?.name ?? t("trackViewer.title")}</span>
-            {refining && (
+            {(refining || painting) && (
               <span className="flex-none text-[11px] font-normal text-muted-foreground">
-                {t("trackViewer.refining")}
+                {painting ? t("trackViewer.painting") : t("trackViewer.refining")}
               </span>
             )}
           </div>
           <div className="flex flex-none items-center gap-2">
+            {/* Only offered once there is something to draw. A track with no scenery and no
+                fixtures would otherwise get a control that does nothing. */}
+            {hasObjects && (
+              <Button
+                variant={showObjects ? "outline" : "ghost"}
+                size="sm"
+                className="h-7 gap-1.5 px-2 text-[12px]"
+                aria-pressed={showObjects}
+                onClick={() => setShowObjects((v) => !v)}
+              >
+                <Boxes className="size-3.5" />
+                {t("trackViewer.objects")}
+              </Button>
+            )}
             <DialogClose className="rounded-md p-1 text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
               <X className="size-4" />
               <span className="sr-only">{t("common.close")}</span>
@@ -173,6 +258,11 @@ export function TrackViewerDialog({
             <TrackViewer
               terrain={terrain}
               overview={overview}
+              scenery={scenery}
+              surfaces={surfaces}
+              placements={placements}
+              showObjects={showObjects}
+              onPick={setPicked}
               className="absolute inset-0"
             />
             {loading && !terrain && (

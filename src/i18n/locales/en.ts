@@ -1980,6 +1980,13 @@ export const en = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Elevation range",
+  "trackViewer.objects": "Objects",
+  "trackViewer.painting": "Painting…",
+  "trackViewer.scenery": "Scenery",
+  "trackViewer.sceneryTris": "{{count}} triangles",
+  "trackViewer.fixtures": "Marked fixtures",
+  "trackViewer.pieces": "Separable pieces",
+  "trackViewer.selected": "Selected piece",
   "trackViewer.noTerrain": "No terrain to show",
   "trackViewer.noTerrainHint":
     "This track's height data isn't in a layout the viewer can read yet.",

@@ -33,6 +33,42 @@ whichever release turns it on.
 
 ### Added
 
+- **The track viewer draws what stands on the track, not just the shape of it.** Until now a
+  track opened as bare ground: the right ruts, berms and jump faces, but nothing standing on
+  them, so a supercross floor and a national circuit read much the same. The viewer now draws
+  the track's scenery too — the tents and awnings, the hay bales and tyre walls, the banner
+  lines and fencing, the trailers in the paddock, and the landscape beyond the track's own
+  square — all in the places the track itself puts them. **Objects** in the header turns it
+  off again.
+
+  It also marks what a track places but ships no model for: every marshal post, every TV
+  camera and every crowd sound source, each as a pin standing on the ground where the track
+  states it. That the pins land on the ground rather than near it is the check that the
+  scenery is in the right place at all — a track states its marshals' heights, its terrain
+  states the ground's, and nothing makes the two agree except reading both correctly.
+
+  It is drawn in the track's own colours, not a flat grey: the `.map`'s surfaces come out
+  with it, so the tents are the tents and the dirt is the dirt. Foliage, crowd and fencing
+  are cut-outs rather than the solid slabs they would otherwise be — a track's own naming
+  says which surfaces carry a cut-out, and drawing those without one turns a treeline into a
+  wall and buries the track behind it.
+
+  It arrives in stages rather than all at once. The terrain draws first, then the scenery's
+  shape, then the colours on top of it — because pulling a track's map out of its archive is
+  nearly all of what a look at one costs, and the shape of the place is worth having on
+  screen while the hundreds of megabytes behind its colours are still being read. The header
+  says which stage is still running. Both halves are cached, so opening the same track again
+  skips the archive entirely.
+
+  Click anything standing on the track and it lights up on its own. The scenery arrives as one
+  mesh, but the things in it are separable — an exporter welds a tent to itself and to nothing
+  else — so the viewer recovers the pieces a track was built from and names the one you point
+  at: how many triangles it is and how big it is in metres. A published track comes apart into
+  ten thousand of them, the largest five metres across.
+
+  A track carrying no scenery is left alone rather than reported as a failure; some ship none
+  at all.
+
 - **A bike pack installs as the bikes inside it.** The OEM bike pack is 54 machines and a
   tyre set in one 3.8 GB archive, and until now it arrived as a single row reading "Mods
   folder" — all of it or none of it, with no way to see what was in there. It is now listed

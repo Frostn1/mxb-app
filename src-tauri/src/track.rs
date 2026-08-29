@@ -130,7 +130,7 @@ fn is_dir(path: &Path) -> bool {
 }
 
 /// Every entry name in a track, without inflating any of them.
-fn entry_names(path: &Path) -> Result<Vec<String>> {
+pub(crate) fn entry_names(path: &Path) -> Result<Vec<String>> {
     if is_dir(path) {
         let mut out = Vec::new();
         for entry in crate::linkwalk::walk_depth(path, 6)
@@ -150,7 +150,7 @@ fn entry_names(path: &Path) -> Result<Vec<String>> {
 }
 
 /// Pull one named entry's bytes out of a track.
-fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
+pub(crate) fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
     if is_dir(path) {
         return std::fs::read(path.join(name)).with_context(|| format!("read {name}"));
     }

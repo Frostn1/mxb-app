@@ -1,10 +1,16 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { Move, Rotate3d, ZoomIn } from "lucide-react";
 import * as THREE from "three";
 import { cn } from "@/lib/utils";
-import type { TrackOverview, TrackTerrain } from "../../types";
+import type {
+  TrackOverview,
+  TrackPlacement,
+  TrackScenery,
+  TrackSceneryTexture,
+  TrackTerrain,
+} from "../../types";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
 
@@ -242,15 +248,55 @@ function gridNormal(
  * relief is proportionate everywhere — a flat supercross floor still looks flatter than a
  * hillside, it is just not drawn so shallow that nothing casts a shadow.
  */
-function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGeometry {
-  const { width, height, heights, metresPerSample, minHeight, maxHeight } = terrain;
-
+/**
+ * How world metres become view units.
+ *
+ * Everything drawn in the scene goes through this one function — the terrain grid, the
+ * scenery standing on it, and the markers for what the track ships no mesh for. They are
+ * placed in the same world frame by the track itself, and the only way they stay in it is by
+ * being scaled and shifted by the same numbers.
+ */
+function viewFrame(terrain: TrackTerrain) {
+  const { width, height, metresPerSample, minHeight, maxHeight } = terrain;
   // Metres across the widest edge, and the units-per-metre that fits it to the view.
   const spanMetres = Math.max(width - 1, height - 1) * metresPerSample;
   const unitsPerMetre = spanMetres > 0 ? VIEW_SPAN / spanMetres : 1;
   const step = metresPerSample * unitsPerMetre;
+  return {
+    unitsPerMetre,
+    step,
+    midHeight: (minHeight + maxHeight) / 2,
+    // The Y scale heights go through, needed again to slope normals by the same amount.
+    heightScale: unitsPerMetre * RELIEF_EXAGGERATION,
+    originX: ((width - 1) * step) / 2,
+    originZ: ((height - 1) * step) / 2,
+  };
+}
 
-  const midHeight = (minHeight + maxHeight) / 2;
+/**
+ * Put one world-metre point where the terrain would put it.
+ *
+ * X is negated, the same conversion every model in the app goes through
+ * (`edf::to_right_handed`): the game's frame is left-handed and three.js's is not.
+ */
+function toView(
+  frame: ReturnType<typeof viewFrame>,
+  wx: number,
+  wy: number,
+  wz: number,
+): [number, number, number] {
+  return [
+    frame.originX - wx * frame.unitsPerMetre,
+    (wy - frame.midHeight) * frame.heightScale,
+    wz * frame.unitsPerMetre - frame.originZ,
+  ];
+}
+
+function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGeometry {
+  const { width, height, heights } = terrain;
+
+  const frame = viewFrame(terrain);
+  const { step, midHeight } = frame;
 
   // The ramp is spread over where the ground actually is, not over its extremes. A track's
   // full range is set by whatever sits at its edges — a boundary wall, a quarry face, one
@@ -269,12 +315,7 @@ function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGe
   const uvs = new Float32Array(count * 2);
   const colour = new THREE.Color();
 
-  // The Y scale the heights go through, needed again below to slope the normals by the same
-  // amount the ground is sloped.
-  const heightScale = unitsPerMetre * RELIEF_EXAGGERATION;
-
-  const originX = ((width - 1) * step) / 2;
-  const originZ = ((height - 1) * step) / 2;
+  const { heightScale, originX, originZ } = frame;
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -413,6 +454,291 @@ function TerrainMesh({
   );
 }
 
+/**
+ * The scenery, moved from world metres into the terrain's frame.
+ *
+ * Mirroring X reverses handedness, so two things have to follow it or the whole mesh is lit
+ * from inside: every normal's X flips with the positions, and every triangle is rewound.
+ * Rewinding happens within each triangle, never across them, so the material groups keep
+ * pointing at the triangles they were cut for.
+ *
+ * Heights go through the terrain's own exaggeration rather than true scale. A tent drawn at
+ * 1.5× is the price of a tent that stands on the ground instead of hovering over it or
+ * sinking into it, and the ground is what the view is about.
+ */
+function buildSceneryGeometry(
+  scenery: TrackScenery,
+  terrain: TrackTerrain,
+  slotOf: Map<number, number>,
+): THREE.BufferGeometry {
+  const frame = viewFrame(terrain);
+  const src = scenery.positions;
+  const count = src.length / 3;
+
+  const positions = new Float32Array(src.length);
+  const normals = new Float32Array(src.length);
+  for (let i = 0; i < count; i += 1) {
+    const o = i * 3;
+    const [x, y, z] = toView(frame, src[o], src[o + 1], src[o + 2]);
+    positions[o] = x;
+    positions[o + 1] = y;
+    positions[o + 2] = z;
+    normals[o] = -scenery.normals[o];
+    normals[o + 1] = scenery.normals[o + 1];
+    normals[o + 2] = scenery.normals[o + 2];
+  }
+
+  const srcIndices = scenery.indices;
+  const indices = new Uint32Array(srcIndices.length);
+  for (let t = 0; t < srcIndices.length; t += 3) {
+    indices[t] = srcIndices[t];
+    indices[t + 1] = srcIndices[t + 2];
+    indices[t + 2] = srcIndices[t + 1];
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(scenery.uvs, 2));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  // One draw range per material. The backend already sorted the triangles so each
+  // material's sit together, which is what keeps this to a few dozen groups.
+  for (const g of scenery.groups) {
+    const slot = slotOf.get(g.material);
+    if (slot == null) continue;
+    geometry.addGroup(g.triStart * 3, g.triCount * 3, slot);
+  }
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** How opaque a cut-out's alpha has to be to be drawn at all. */
+const CUTOUT_THRESHOLD = 0.5;
+
+/** What a click on the scenery landed on. */
+export interface PickedPiece {
+  id: number;
+  triangles: number;
+  /** Metres. */
+  size: [number, number, number];
+}
+
+function SceneryMesh({
+  scenery,
+  surfaces,
+  terrain,
+  onPick,
+}: {
+  scenery: TrackScenery;
+  surfaces: TrackSceneryTexture[];
+  terrain: TrackTerrain;
+  onPick?: (piece: PickedPiece | null) => void;
+}) {
+  const [picked, setPicked] = useState<number | null>(null);
+  // A material slot per surface, plus one plain slot at the end for the groups no surface
+  // covers — the `.scr` props, whose own sheets aren't read.
+  const { materials, slotOf } = useMemo(() => {
+    const slots = new Map<number, number>();
+    const list: THREE.Material[] = surfaces.map((t, i) => {
+      slots.set(t.material, i);
+      const map = new THREE.DataTexture(t.pixels, t.width, t.height, THREE.RGBAFormat);
+      map.colorSpace = THREE.SRGBColorSpace;
+      // The surfaces tile — a fence sheet repeats along its run — so anything but repeat
+      // wrapping smears the last pixel of the sheet across the whole length of it.
+      map.wrapS = THREE.RepeatWrapping;
+      map.wrapT = THREE.RepeatWrapping;
+      map.minFilter = THREE.LinearMipmapLinearFilter;
+      map.magFilter = THREE.LinearFilter;
+      map.generateMipmaps = true;
+      map.anisotropy = 4;
+      map.needsUpdate = true;
+      return new THREE.MeshStandardMaterial({
+        map,
+        roughness: 0.9,
+        metalness: 0,
+        // Cut-outs are drawn with an alpha test rather than blending: the shapes are
+        // foliage and crowd, which need to occlude each other correctly at any angle, and
+        // that is what a test gives and sorting-dependent blending does not.
+        alphaTest: t.alpha ? CUTOUT_THRESHOLD : 0,
+        // Much of this is single-sided cloth and card — banners, tent walls, leaf sheets —
+        // and culling back faces makes half of it vanish from one side.
+        side: THREE.DoubleSide,
+      });
+    });
+    const plain = new THREE.MeshStandardMaterial({
+      color: "#9a9384",
+      roughness: 0.9,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    });
+    const fallback = list.length;
+    list.push(plain);
+    for (const g of scenery.groups) {
+      if (!slots.has(g.material)) slots.set(g.material, fallback);
+    }
+    return { materials: list, slotOf: slots };
+  }, [scenery, surfaces]);
+
+  const geometry = useMemo(
+    () => buildSceneryGeometry(scenery, terrain, slotOf),
+    [scenery, terrain, slotOf],
+  );
+
+  // Tens of megabytes of GPU buffers and surfaces, replaced whenever the terrain's detail
+  // level changes — without this each pass would leak the last one's.
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(
+    () => () => {
+      for (const m of materials) {
+        const mat = m as THREE.MeshStandardMaterial;
+        mat.map?.dispose();
+        mat.dispose();
+      }
+    },
+    [materials],
+  );
+
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => invalidate(), [geometry, materials, invalidate]);
+
+  // The picked piece, as its own geometry — the triangles that share its id.
+  const outline = useMemo(() => {
+    if (picked == null || scenery.pieceOfTriangle.length === 0) return null;
+    const src = geometry.getIndex();
+    if (!src) return null;
+    const keep: number[] = [];
+    for (let t = 0; t < scenery.pieceOfTriangle.length; t += 1) {
+      if (scenery.pieceOfTriangle[t] !== picked) continue;
+      keep.push(src.getX(t * 3), src.getX(t * 3 + 1), src.getX(t * 3 + 2));
+    }
+    if (keep.length === 0) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", geometry.getAttribute("position"));
+    g.setIndex(keep);
+    g.computeBoundingSphere();
+    return g;
+  }, [picked, geometry, scenery.pieceOfTriangle]);
+
+  useEffect(() => () => outline?.dispose(), [outline]);
+
+  // Report what was picked, in metres, from the world positions rather than the view units.
+  useEffect(() => {
+    if (!onPick) return;
+    if (picked == null) {
+      onPick(null);
+      return;
+    }
+    let count = 0;
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (let t = 0; t < scenery.pieceOfTriangle.length; t += 1) {
+      if (scenery.pieceOfTriangle[t] !== picked) continue;
+      count += 1;
+      for (let k = 0; k < 3; k += 1) {
+        const v = scenery.indices[t * 3 + k] * 3;
+        for (let axis = 0; axis < 3; axis += 1) {
+          const p = scenery.positions[v + axis];
+          if (p < lo[axis]) lo[axis] = p;
+          if (p > hi[axis]) hi[axis] = p;
+        }
+      }
+    }
+    onPick({
+      id: picked,
+      triangles: count,
+      size: [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]],
+    });
+  }, [picked, scenery, onPick]);
+
+  return (
+    <>
+      {/* Casting but not receiving: these are small things on a big ground, and their shadows
+          are what place them on it, while shadows landing *on* them would cost a second pass
+          over the whole mesh to darken pixels a few metres across. */}
+      <mesh
+        geometry={geometry}
+        material={materials}
+        castShadow
+        onClick={(e) => {
+          e.stopPropagation();
+          const face = e.faceIndex;
+          if (face == null || scenery.pieceOfTriangle.length === 0) return;
+          const id = scenery.pieceOfTriangle[face];
+          setPicked((was) => (was === id ? null : id));
+        }}
+      />
+      {outline && (
+        <mesh geometry={outline} renderOrder={2}>
+          {/* Drawn over everything so a piece inside a crowd of others still reads. */}
+          <meshBasicMaterial
+            color="#ffb648"
+            wireframe
+            depthTest={false}
+            transparent
+            opacity={0.9}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
+    </>
+  );
+}
+
+/** What each kind of fixture is drawn in. Distinct hues rather than a ramp: these are
+ *  categories, not a quantity. */
+const MARKER_COLOURS: Record<TrackPlacement["kind"], string> = {
+  marshal: "#f0a63c",
+  camera: "#5fb2f0",
+  sound: "#b98cf0",
+  prop: "#8de08a",
+};
+
+/** View units. Fixed rather than scaled from metres so a marker stays legible on a 200 m
+ *  supercross floor and a 1 km circuit alike. */
+const MARKER_HEIGHT = 0.11;
+const MARKER_RADIUS = 0.016;
+
+/**
+ * Pins for what the track places but ships no mesh for — marshal posts, TV cameras, crowd
+ * sound. Props are left out: their meshes are in the scenery, so a pin would double them.
+ */
+function PlacementMarkers({
+  placements,
+  terrain,
+}: {
+  placements: TrackPlacement[];
+  terrain: TrackTerrain;
+}) {
+  const pins = useMemo(() => {
+    const frame = viewFrame(terrain);
+    return placements
+      .filter((p) => p.kind !== "prop")
+      .map((p, i) => ({
+        key: `${p.kind}-${i}`,
+        colour: MARKER_COLOURS[p.kind] ?? MARKER_COLOURS.prop,
+        at: toView(frame, p.pos[0], p.pos[1], p.pos[2]),
+      }));
+  }, [placements, terrain]);
+
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => invalidate(), [pins, invalidate]);
+
+  return (
+    <group>
+      {pins.map(({ key, colour, at }) => (
+        // The stated position is where the thing sits on the ground, so the pin is raised by
+        // half its length to stand on that point rather than be centred through it.
+        <mesh key={key} position={[at[0], at[1] + MARKER_HEIGHT / 2, at[2]]}>
+          <cylinderGeometry args={[MARKER_RADIUS, MARKER_RADIUS, MARKER_HEIGHT, 6]} />
+          {/* Unlit: a marker is an annotation, not part of the scene, and shading it would
+              let it disappear into a hillside at the wrong sun angle. */}
+          <meshBasicMaterial color={colour} toneMapped={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 /** Legend for the orbit gestures — the canvas gives no other clue that it can be moved.
  *  Same wording and placement as the model viewer's, so the two read as one control. */
 function ControlsHint() {
@@ -438,10 +764,29 @@ interface TrackViewerProps {
   terrain: TrackTerrain | null;
   /** The track's overview map, when it ships one that covers the same ground. */
   overview?: TrackOverview | null;
+  /** What stands on the ground, when the track's `.map` carries any. */
+  scenery?: TrackScenery | null;
+  /** The surfaces that paint it. Arrives after the mesh — until then it draws plain. */
+  surfaces?: TrackSceneryTexture[];
+  /** Marshal posts, TV cameras and sound sources — pinned points with no mesh. */
+  placements?: TrackPlacement[];
+  /** Whether to draw either of the two above. */
+  showObjects?: boolean;
+  /** Told what a click on the scenery landed on, and when the selection clears. */
+  onPick?: (piece: PickedPiece | null) => void;
   className?: string;
 }
 
-export function TrackViewer({ terrain, overview = null, className }: TrackViewerProps) {
+export function TrackViewer({
+  terrain,
+  overview = null,
+  scenery = null,
+  surfaces = [],
+  placements = [],
+  showObjects = true,
+  onPick,
+  className,
+}: TrackViewerProps) {
   return (
     <div className={cn("relative", className)}>
       <ErrorBoundary compact label="track-viewer">
@@ -501,6 +846,17 @@ export function TrackViewer({ terrain, overview = null, className }: TrackViewer
           />
           <directionalLight position={[-6, 3, -5]} intensity={0.4} />
           {terrain && <TerrainMesh terrain={terrain} overview={overview} />}
+          {terrain && showObjects && scenery && (
+            <SceneryMesh
+              scenery={scenery}
+              surfaces={surfaces}
+              terrain={terrain}
+              onPick={onPick}
+            />
+          )}
+          {terrain && showObjects && placements.length > 0 && (
+            <PlacementMarkers placements={placements} terrain={terrain} />
+          )}
           <OrbitControls
             makeDefault
             enablePan

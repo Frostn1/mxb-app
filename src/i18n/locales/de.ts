@@ -2024,6 +2024,13 @@ export const de: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Höhenunterschied",
+  "trackViewer.objects": "Objekte",
+  "trackViewer.painting": "Texturen…",
+  "trackViewer.scenery": "Kulisse",
+  "trackViewer.sceneryTris": "{{count}} Dreiecke",
+  "trackViewer.fixtures": "Markierte Punkte",
+  "trackViewer.pieces": "Einzelteile",
+  "trackViewer.selected": "Gewähltes Teil",
   "trackViewer.noTerrain": "Kein Gelände zum Anzeigen",
   "trackViewer.noTerrainHint":
     "Die Höhendaten dieser Strecke liegen in keinem Format vor, das der Betrachter bereits lesen kann.",

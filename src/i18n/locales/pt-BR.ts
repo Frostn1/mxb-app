@@ -2000,6 +2000,13 @@ export const ptBR: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Desnível",
+  "trackViewer.objects": "Objetos",
+  "trackViewer.painting": "Pintando…",
+  "trackViewer.scenery": "Cenário",
+  "trackViewer.sceneryTris": "{{count}} triângulos",
+  "trackViewer.fixtures": "Elementos marcados",
+  "trackViewer.pieces": "Peças separáveis",
+  "trackViewer.selected": "Peça selecionada",
   "trackViewer.noTerrain": "Nenhum terreno para mostrar",
   "trackViewer.noTerrainHint":
     "Os dados de altura desta pista não estão em um formato que o visualizador saiba ler ainda.",

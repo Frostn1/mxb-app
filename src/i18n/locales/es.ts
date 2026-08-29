@@ -2010,6 +2010,13 @@ export const es: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Desnivel",
+  "trackViewer.objects": "Objetos",
+  "trackViewer.painting": "Pintando…",
+  "trackViewer.scenery": "Escenografía",
+  "trackViewer.sceneryTris": "{{count}} triángulos",
+  "trackViewer.fixtures": "Elementos marcados",
+  "trackViewer.pieces": "Piezas separables",
+  "trackViewer.selected": "Pieza seleccionada",
   "trackViewer.noTerrain": "No hay terreno que mostrar",
   "trackViewer.noTerrainHint":
     "Los datos de altura de este circuito no están en un formato que el visor sepa leer todavía.",

@@ -27,6 +27,7 @@ mod library;
 mod linkwalk;
 mod logs;
 mod lru;
+mod map;
 mod memwatch;
 mod modelswap;
 mod mods;
@@ -48,6 +49,7 @@ mod sidecar;
 mod presets;
 mod paintsync;
 mod reshade;
+mod scenery;
 mod servers;
 mod sessionwatch;
 mod shop_catalog_session;
@@ -1049,6 +1051,63 @@ async fn load_track_overview(
     })
     .await
     .map_err(|e| format!("load_track_overview task failed: {e}"))
+}
+
+/// Where a track pins the things it ships no mesh for — marshal posts, TV cameras, crowd
+/// sound — plus the props its `.scr` places.
+///
+/// Split from the scenery mesh because it costs nothing: these files are kilobytes, so the
+/// viewer can mark them while the `.map` is still being read out of the archive.
+#[tauri::command]
+async fn read_track_placements(path: String) -> Result<Vec<scenery::Placement>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::read_placements(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placements task failed: {e}"))?
+}
+
+/// A track's scenery mesh — what stands on the ground the terrain grid describes.
+///
+/// Raw bytes for the same reason the terrain is: this is a few hundred thousand triangles,
+/// and as JSON numbers it would cost more to parse than the archive read that produced it.
+/// Empty rather than an error when a track carries no scenery, which is ordinary — the OEM
+/// drag strip declares none at all.
+#[tauri::command]
+async fn load_track_scenery(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load(&app, &path) {
+        Ok(s) => tauri::ipc::Response::new(scenery::blob(&s)),
+        Err(e) => {
+            log::debug!("[scenery] {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_scenery task failed: {e}"))
+}
+
+/// A track's surfaces, fetched after its mesh is already on screen.
+///
+/// The second half of a two-stage load: the mesh parses in milliseconds, while inflating a
+/// map's sheets is hundreds of megabytes of work. Splitting them is the difference between a
+/// track appearing at once and a second of empty canvas.
+#[tauri::command]
+async fn load_track_surfaces(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load_surfaces(&app, &path) {
+        Ok(t) => tauri::ipc::Response::new(scenery::surfaces_blob(&t)),
+        Err(e) => {
+            log::debug!("[scenery] surfaces for {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_surfaces task failed: {e}"))
 }
 
 #[tauri::command]
@@ -7778,6 +7837,9 @@ fn main() {
             read_track_info,
             load_track_terrain,
             load_track_overview,
+            load_track_scenery,
+            load_track_surfaces,
+            read_track_placements,
             diagnose_track,
             unpack_paint,
             texture_bytes,
