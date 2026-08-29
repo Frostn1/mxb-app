@@ -66,6 +66,12 @@ whichever release turns it on.
   at: how many triangles it is and how big it is in metres. A published track comes apart into
   ten thousand of them, the largest five metres across.
 
+  The ground keeps its own colour while it does. The grain is measured against the sheet's own
+  average brightness, so it varies the surface without dragging it darker — tiling a dirt or
+  grass sheet raw turned a dry circuit muddy — and only the sheet's luminance is used, never
+  its hue. A track with no dirt sheet of its own is left alone rather than tinted with
+  whatever else it had.
+
   The ground keeps its detail when you get close to it. A track states its surface at about a
   third of a metre per sample, height grid and surface picture alike, so anything nearer than
   that was interpolation — a soft brown smear. The track's own ground sheet is now tiled over

@@ -445,12 +445,16 @@ pub fn backdrop_blob(
     out
 }
 
-/// Words a track's own ground sheets are named with.
+/// Words a track's own ground sheets are named with, best first.
 ///
 /// Not a guess at which cell uses which — that is the binding problem — but at which sheet is
 /// *ground at all*, which is a much easier question and the only one a detail layer asks.
+///
+/// Order matters. A detail layer wants the surface a track is mostly made of, and that is
+/// dirt: tiling `grass` over a dry circuit tints the whole place green, which is what picking
+/// merely the largest match did.
 const GROUND_WORDS: [&str; 9] = [
-    "dirt", "soil", "mud", "sand", "gravel", "grass", "ground", "terrain", "loam",
+    "dirt", "soil", "terrain", "ground", "mud", "loam", "sand", "gravel", "grass",
 ];
 
 /// A tiling sheet of the track's own ground, for detail closer than its data can carry.
@@ -1433,6 +1437,35 @@ source1
             worst < 2.0,
             "marshal posts are {worst:.2} m off the terrain — the frames disagree"
         );
+    }
+
+    /// Which sheet a track's ground detail comes from:
+    ///
+    /// ```text
+    /// FROST_TRACK="…/track.pkz" \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture ground_sheet_of_a_real_track
+    /// ```
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK"]
+    fn ground_sheet_of_a_real_track() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        match ground_detail(&path).expect("look for a ground sheet") {
+            Some(t) => {
+                let px: Vec<f32> = t
+                    .rgba
+                    .chunks_exact(4)
+                    .map(|p| {
+                        (p[0] as f32 * 0.299 + p[1] as f32 * 0.587 + p[2] as f32 * 0.114) / 255.0
+                    })
+                    .collect();
+                let mean = px.iter().sum::<f32>() / px.len().max(1) as f32;
+                println!(
+                    "  {} {}x{}  mean luminance {mean:.3}",
+                    t.name, t.width, t.height
+                );
+            }
+            None => println!("  no ground sheet found"),
+        }
     }
 
     /// What a track wraps itself in:

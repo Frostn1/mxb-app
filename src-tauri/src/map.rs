@@ -893,21 +893,27 @@ pub fn declared(b: &[u8]) -> Vec<(String, u32, u32)> {
 /// enough, and a wrong answer costs grain rather than a wrong picture on a wrong object.
 pub fn ground_sheet(b: &[u8], words: &[&str]) -> Option<MapTexture> {
     let (from, _) = texture_table(b)?;
-    let mut best: Option<(u64, String, u32, u32, usize, usize)> = None;
+    // Ranked by which word matched, then by size — the word says what kind of ground it is,
+    // and only among equals does the bigger sheet win.
+    let mut best: Option<(usize, u64, String, u32, u32, usize, usize)> = None;
     for (name, w, h, off, len) in colour_records(b, from) {
         let lower = name.to_ascii_lowercase();
         if lower.ends_with("_n_s") || lower.ends_with("_n") || lower == "env" {
             continue;
         }
-        if !words.iter().any(|word| lower.contains(word)) {
+        let Some(rank) = words.iter().position(|word| lower.contains(word)) else {
             continue;
-        }
+        };
         let area = w as u64 * h as u64;
-        if best.as_ref().is_none_or(|(a, ..)| area > *a) {
-            best = Some((area, name, w, h, off, len));
+        let better = match &best {
+            None => true,
+            Some((r, a, ..)) => rank < *r || (rank == *r && area > *a),
+        };
+        if better {
+            best = Some((rank, area, name, w, h, off, len));
         }
     }
-    let (_, name, w, h, off, len) = best?;
+    let (_, _, name, w, h, off, len) = best?;
     let mut rgba = inflate(b, off, len, w, h)?;
     // A sheet that turns out to be a cut-out is no use as ground — its holes would punch
     // through the terrain.

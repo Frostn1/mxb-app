@@ -337,11 +337,15 @@ function TrackHaze({
     // of the way — enough to sit the far edge into the sky without hiding what is on it.
     const swallow = 3 / Math.max(density, 1e-6); // metres to near-opaque at the stated density
     const strength = Math.min(1, span / Math.max(swallow, 1));
-    const colour = colourOf(
-      backdrop.fogColour ?? backdrop.skyColour,
-      "#9fb0c4",
+    const colour = colourOf(backdrop.fogColour ?? backdrop.skyColour, "#9fb0c4");
+    // Held to the far edge. Anything nearer and the haze sits on the track itself, which
+    // washes out the ground the view is about — the whole terrain is only ten units across,
+    // and the camera watches it from about thirteen.
+    scene.fog = new THREE.Fog(
+      colour,
+      VIEW_SPAN * 1.5,
+      VIEW_SPAN * (6.5 - strength * 2.0),
     );
-    scene.fog = new THREE.Fog(colour, VIEW_SPAN * 0.55, VIEW_SPAN * (2.6 - strength * 1.2));
     invalidate();
     return () => {
       scene.fog = null;
@@ -574,7 +578,10 @@ function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGe
 
 /** Metres one tile of the ground sheet covers. Small enough to read as grain up close,
  *  large enough not to shimmer when the whole track is in frame. */
-const GROUND_TILE_METRES = 6;
+const GROUND_TILE_METRES = 4;
+
+/** How far the grain is allowed to swing the ground's brightness. */
+const GROUND_STRENGTH = 0.5;
 
 function TerrainMesh({
   terrain,
@@ -634,6 +641,23 @@ function TerrainMesh({
     return Math.max(1, Math.round(span / GROUND_TILE_METRES));
   }, [terrain]);
 
+  // The sheet's own average brightness. Dividing by it is what makes this a *detail* layer:
+  // the grain then averages to no change at all, so a dark sheet adds texture instead of
+  // dragging the whole track darker — which is what tiling a dirt or grass sheet raw did.
+  const meanLuma = useMemo(() => {
+    if (!ground) return 1;
+    const px = ground.pixels;
+    let total = 0;
+    // Every sixteenth pixel: an average over a quarter of a million samples does not need
+    // all of them, and this runs on the main thread while a track is opening.
+    let n = 0;
+    for (let i = 0; i < px.length; i += 64) {
+      total += (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) / 255;
+      n += 1;
+    }
+    return n > 0 ? Math.max(total / n, 0.02) : 1;
+  }, [ground]);
+
   // A grid this size is megabytes of GPU buffers, and the viewer replaces it every time the
   // detail level changes — without this each one would be leaked.
   useEffect(() => () => geometry.dispose(), [geometry]);
@@ -661,7 +685,7 @@ function TerrainMesh({
           program it was built with — the terrain keeps its elevation ramp and never shows the
           picture at all. */}
       <meshStandardMaterial
-        key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}`}
+        key={`${texture ? "textured" : "plain"}-${detail ? "grain" : "flat"}-${repeat}`}
         map={texture ?? undefined}
         vertexColors
         roughness={0.95}
@@ -670,12 +694,16 @@ function TerrainMesh({
           if (!detail) return;
           shader.uniforms.groundMap = { value: detail };
           shader.uniforms.groundRepeat = { value: repeat };
+          shader.uniforms.groundMean = { value: meanLuma };
+          shader.uniforms.groundStrength = { value: GROUND_STRENGTH };
           shader.fragmentShader = shader.fragmentShader
             .replace(
               "#include <common>",
               `#include <common>
                uniform sampler2D groundMap;
-               uniform float groundRepeat;`,
+               uniform float groundRepeat;
+               uniform float groundMean;
+               uniform float groundStrength;`,
             )
             // After the base colour is settled, modulate it about its own mean so the sheet
             // adds grain without shifting the ground's colour towards the sheet's.
@@ -685,7 +713,10 @@ function TerrainMesh({
                {
                  vec3 grain = texture2D(groundMap, vMapUv * groundRepeat).rgb;
                  float lum = dot(grain, vec3(0.299, 0.587, 0.114));
-                 diffuseColor.rgb *= mix(1.0, lum * 2.0, 0.45);
+                 // Around one, so the grain varies the ground without darkening it. Only the
+                 // sheet's luminance is used — its hue is its own surface's, not this one's.
+                 float f = clamp(lum / groundMean, 0.45, 1.9);
+                 diffuseColor.rgb *= mix(1.0, f, groundStrength);
                }`,
             );
         }}
