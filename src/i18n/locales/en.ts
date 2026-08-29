@@ -1987,6 +1987,11 @@ export const en = {
   "trackViewer.fixtures": "Marked fixtures",
   "trackViewer.pieces": "Separable pieces",
   "trackViewer.selected": "Selected piece",
+  "trackViewer.place": "Place a model",
+  "trackViewer.placePick": "Pick a model, then click the ground.",
+  "trackViewer.placeHint": "Click the ground to put it down.",
+  "trackViewer.placedCount": "{{count}} placed",
+  "trackViewer.saveProps": "Save .scr",
   "trackViewer.noTerrain": "No terrain to show",
   "trackViewer.noTerrainHint":
     "This track's height data isn't in a layout the viewer can read yet.",

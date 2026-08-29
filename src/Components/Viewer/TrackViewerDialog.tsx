@@ -2,15 +2,18 @@ import { useEffect, useState } from "react";
 import { Boxes, Check, Copy, Loader2, Mountain, X } from "lucide-react";
 import { Dialog, DialogClose, DialogContent } from "../ui/dialog";
 import { Button } from "@/Components/ui/button";
-import { TrackViewer, type PickedPiece } from "./TrackViewer";
+import { TrackViewer, type PickedPiece, type PlacedProp } from "./TrackViewer";
 import {
   diagnoseTrack,
   loadTrackOverview,
+  loadTrackProp,
   loadTrackScenery,
   loadTrackSurfaces,
   loadTrackTerrain,
   readTrackInfo,
+  readTrackPlaceable,
   readTrackPlacements,
+  saveTrackProps,
 } from "../../api/tracks";
 import type {
   TrackInfo,
@@ -21,6 +24,7 @@ import type {
   TrackTerrain,
 } from "../../types";
 import { formatLength } from "../../lib/mods";
+import { cn } from "@/lib/utils";
 import { useT } from "../../i18n/context";
 
 /**
@@ -75,6 +79,11 @@ export function TrackViewerDialog({
   const [painting, setPainting] = useState(false);
   // What the last click on the scenery landed on, so the panel can name it.
   const [picked, setPicked] = useState<PickedPiece | null>(null);
+  // The models this track can place, the one armed to go down next, and what's been put down.
+  const [models, setModels] = useState<string[]>([]);
+  const [arming, setArming] = useState<string | null>(null);
+  const [placed, setPlaced] = useState<PlacedProp[]>([]);
+  const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only fetched when a track fails, and only when asked for — it re-reads the archive.
   const [diagnosis, setDiagnosis] = useState<string | null>(null);
@@ -90,6 +99,10 @@ export function TrackViewerDialog({
     setScenery(null);
     setSurfaces([]);
     setPicked(null);
+    setModels([]);
+    setArming(null);
+    setPlaced([]);
+    setSaved(null);
     setPlacements([]);
     setError(null);
     setDiagnosis(null);
@@ -106,6 +119,12 @@ export function TrackViewerDialog({
     // are up before the scenery they stand among.
     readTrackPlacements(path)
       .then((p) => alive && setPlacements(p))
+      .catch(() => {});
+
+    // What this track can place. A `.scr` names a model by file, so the track's own are the
+    // ones that need nothing shipped beside them.
+    readTrackPlaceable(path)
+      .then((m) => alive && setModels(m))
       .catch(() => {});
 
     void (async () => {
@@ -263,6 +282,18 @@ export function TrackViewerDialog({
               placements={placements}
               showObjects={showObjects}
               onPick={setPicked}
+              placed={placed}
+              onGround={
+                arming
+                  ? (at) => {
+                      void loadTrackProp(path, arming).then((mesh) => {
+                        if (!mesh) return;
+                        setPlaced((was) => [...was, { name: arming, pos: at, mesh }]);
+                        setSaved(null);
+                      });
+                    }
+                  : undefined
+              }
               className="absolute inset-0"
             />
             {loading && !terrain && (
@@ -346,6 +377,84 @@ export function TrackViewerDialog({
                 </div>
               ))}
             </dl>
+
+            {/* Placing things. A `.scr` states a prop by model name and position, and the
+                game reads it at load — so what goes down here is what the track will have. */}
+            {models.length > 0 && (
+              <div className="mt-4 border-t border-border pt-3">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.9px] text-faint">
+                  {t("trackViewer.place")}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {models.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setArming((was) => (was === m ? null : m))}
+                      className={cn(
+                        "rounded border px-2 py-1 text-[11px] transition-colors",
+                        arming === m
+                          ? "border-primary bg-primary/15 text-foreground"
+                          : "border-border text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {m.replace(/\.edf$/i, "")}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                  {arming ? t("trackViewer.placeHint") : t("trackViewer.placePick")}
+                </p>
+                {placed.length > 0 && (
+                  <div className="mt-3 flex flex-col gap-2">
+                    <p className="text-[11px] text-foreground">
+                      {t("trackViewer.placedCount", { count: String(placed.length) })}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[11px]"
+                        onClick={() => {
+                          const target = `${path.replace(/\.pkz$/i, "")}.scr`;
+                          void saveTrackProps(
+                            target,
+                            placed.map((p) => ({
+                              kind: "prop" as const,
+                              name: p.name,
+                              pos: p.pos,
+                              heading: null,
+                              rot: p.rot ?? null,
+                            })),
+                            true,
+                          )
+                            .then(() => setSaved(target))
+                            .catch((e) =>
+                              setSaved(e instanceof Error ? e.message : String(e)),
+                            );
+                        }}
+                      >
+                        {t("trackViewer.saveProps")}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-[11px]"
+                        onClick={() => {
+                          setPlaced([]);
+                          setSaved(null);
+                        }}
+                      >
+                        {t("common.clear")}
+                      </Button>
+                    </div>
+                    {saved && (
+                      <p className="break-all text-[11px] text-muted-foreground">{saved}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* The height file has no documented layout, so what's on screen was worked out
                 from the data. Say so, rather than letting a guess pass for a reading. */}

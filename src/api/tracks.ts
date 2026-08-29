@@ -130,7 +130,11 @@ export async function loadTrackScenery(path: string): Promise<TrackScenery | nul
   const buf = await invoke<ArrayBuffer>("load_track_scenery", { path });
   // The track simply hasn't got any.
   if (buf.byteLength === 0) return null;
+  return readSceneryBlob(buf);
+}
 
+/** Unpack an `"FSCN"` blob — the scenery and a single prop arrive in the same shape. */
+function readSceneryBlob(buf: ArrayBuffer): TrackScenery | null {
   const view = new DataView(buf);
   if (buf.byteLength < SCENERY_HEADER || view.getUint32(0, true) !== SCENERY_MAGIC) {
     throw new Error("track scenery is not in the expected format");
@@ -266,6 +270,27 @@ export async function loadTrackSurfaces(path: string): Promise<TrackSceneryTextu
  */
 export function readTrackPlacements(path: string): Promise<TrackPlacement[]> {
   return invoke<TrackPlacement[]>("read_track_placements", { path });
+}
+
+/** The models a track ships that a prop can be placed by name. */
+export function readTrackPlaceable(path: string): Promise<string[]> {
+  return invoke<string[]>("read_track_placeable", { path });
+}
+
+/**
+ * One prop's mesh, in its own local frame.
+ *
+ * Fetched on its own rather than out of the scenery, because placing something means drawing
+ * it before it has been written anywhere. `null` when the model carries no geometry — a
+ * track's backdrop and sky are `.edf` files with nothing in them to put down.
+ */
+export async function loadTrackProp(
+  path: string,
+  name: string,
+): Promise<TrackScenery | null> {
+  const buf = await invoke<ArrayBuffer>("load_track_prop", { path, name });
+  if (buf.byteLength === 0) return null;
+  return readSceneryBlob(buf);
 }
 
 /**

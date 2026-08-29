@@ -2022,6 +2022,11 @@ export const fr: Translation = {
   "trackViewer.fixtures": "Éléments repérés",
   "trackViewer.pieces": "Éléments distincts",
   "trackViewer.selected": "Élément choisi",
+  "trackViewer.place": "Placer un modèle",
+  "trackViewer.placePick": "Choisis un modèle, puis clique au sol.",
+  "trackViewer.placeHint": "Clique au sol pour le poser.",
+  "trackViewer.placedCount": "{{count}} posés",
+  "trackViewer.saveProps": "Enregistrer le .scr",
   "trackViewer.noTerrain": "Aucun terrain à afficher",
   "trackViewer.noTerrainHint":
     "Les données d'altitude de ce circuit ne sont pas dans un format que la visionneuse sait encore lire.",

@@ -2007,6 +2007,11 @@ export const ptBR: Translation = {
   "trackViewer.fixtures": "Elementos marcados",
   "trackViewer.pieces": "Peças separáveis",
   "trackViewer.selected": "Peça selecionada",
+  "trackViewer.place": "Colocar um modelo",
+  "trackViewer.placePick": "Escolha um modelo e clique no chão.",
+  "trackViewer.placeHint": "Clique no chão para posicionar.",
+  "trackViewer.placedCount": "{{count}} colocados",
+  "trackViewer.saveProps": "Salvar .scr",
   "trackViewer.noTerrain": "Nenhum terreno para mostrar",
   "trackViewer.noTerrainHint":
     "Os dados de altura desta pista não estão em um formato que o visualizador saiba ler ainda.",

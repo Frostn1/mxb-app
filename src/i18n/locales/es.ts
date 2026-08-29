@@ -2017,6 +2017,11 @@ export const es: Translation = {
   "trackViewer.fixtures": "Elementos marcados",
   "trackViewer.pieces": "Piezas separables",
   "trackViewer.selected": "Pieza seleccionada",
+  "trackViewer.place": "Colocar un modelo",
+  "trackViewer.placePick": "Elige un modelo y haz clic en el suelo.",
+  "trackViewer.placeHint": "Haz clic en el suelo para colocarlo.",
+  "trackViewer.placedCount": "{{count}} colocados",
+  "trackViewer.saveProps": "Guardar .scr",
   "trackViewer.noTerrain": "No hay terreno que mostrar",
   "trackViewer.noTerrainHint":
     "Los datos de altura de este circuito no están en un formato que el visor sepa leer todavía.",

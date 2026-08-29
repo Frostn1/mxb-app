@@ -262,6 +262,73 @@ fn read_sounds(bytes: &[u8]) -> Vec<Placement> {
         .collect()
 }
 
+/// The `.edf` models a track ships, as names a prop can be placed by.
+///
+/// A `.scr` places a prop by file name, so what a track already carries is what can be put
+/// down again without shipping anything new beside it.
+pub fn placeable(path: &str) -> Result<Vec<String>> {
+    let names = crate::track::entry_names(Path::new(path))?;
+    let mut out: Vec<String> = names
+        .iter()
+        .filter(|n| {
+            n.rsplit('.')
+                .next()
+                .is_some_and(|e| e.eq_ignore_ascii_case("edf"))
+        })
+        .filter_map(|n| n.rsplit('/').next().map(str::to_string))
+        .collect();
+    out.sort_by_key(|n| n.to_ascii_lowercase());
+    out.dedup();
+    Ok(out)
+}
+
+/// One prop's mesh, in its own local frame, ready to be put somewhere.
+///
+/// Separate from the scenery pass: placing something means drawing it before it has been
+/// written anywhere, so the viewer needs the model on its own rather than baked into the
+/// track's mesh.
+pub fn prop_mesh(path: &str, name: &str) -> Result<MapMesh> {
+    let p = Path::new(path);
+    let names = crate::track::entry_names(p)?;
+    let entry = names
+        .iter()
+        .find(|n| {
+            n.rsplit('/')
+                .next()
+                .is_some_and(|b| b.eq_ignore_ascii_case(name))
+        })
+        .ok_or_else(|| anyhow::anyhow!("{name} is not in this track"))?;
+    let bytes = crate::track::read_entry(p, entry)?;
+    let nodes = crate::edf::parse(&bytes);
+    if nodes.is_empty() {
+        bail!("{name} has no mesh in it");
+    }
+    let mut mesh = MapMesh::default();
+    for node in &nodes {
+        if node.positions.is_empty() || node.indices.is_empty() {
+            continue;
+        }
+        let base = mesh.vertex_count() as u32;
+        let verts = node.positions.len() / 3;
+        mesh.positions.extend_from_slice(&node.positions);
+        if node.normals.len() == node.positions.len() {
+            mesh.normals.extend_from_slice(&node.normals);
+        } else {
+            mesh.normals.extend(std::iter::repeat(0.0).take(verts * 3));
+        }
+        if node.uvs.len() == verts * 2 {
+            mesh.uvs.extend_from_slice(&node.uvs);
+        } else {
+            mesh.uvs.extend(std::iter::repeat(0.0).take(verts * 2));
+        }
+        mesh.indices.extend(node.indices.iter().map(|i| i + base));
+    }
+    if mesh.is_empty() {
+        bail!("{name} has no drawable geometry");
+    }
+    Ok(mesh)
+}
+
 /// Write props back out in the format a track states them in.
 ///
 /// The `.scr` is the one part of a track that says where a thing goes in plain text, and the
@@ -1147,6 +1214,38 @@ source1
             worst < 2.0,
             "marshal posts are {worst:.2} m off the terrain — the frames disagree"
         );
+    }
+
+    /// What a real track offers to place, and whether one of them draws:
+    ///
+    /// ```text
+    /// FROST_TRACK="…/Millville.pkz" \
+    ///   cargo test --bin mxb-app -- --ignored --nocapture placeable_props_of_a_real_track
+    /// ```
+    #[test]
+    #[ignore = "needs a real track — set FROST_TRACK"]
+    fn placeable_props_of_a_real_track() {
+        let path = std::env::var("FROST_TRACK").expect("set FROST_TRACK");
+        let names = placeable(&path).expect("list the models");
+        println!("{} placeable models: {names:?}", names.len());
+        assert!(!names.is_empty(), "a track ships models to place");
+        for n in &names {
+            match prop_mesh(&path, n) {
+                Ok(m) => {
+                    let (lo, hi) = m.bounds();
+                    println!(
+                        "  {n:<28} {:>7} verts {:>7} tris  {:.1} x {:.1} x {:.1} m",
+                        m.vertex_count(),
+                        m.triangle_count(),
+                        hi[0] - lo[0],
+                        hi[1] - lo[1],
+                        hi[2] - lo[2]
+                    );
+                    assert!(m.indices.iter().all(|i| (*i as usize) < m.vertex_count()));
+                }
+                Err(e) => println!("  {n:<28} no mesh: {e}"),
+            }
+        }
     }
 
     /// Walk a folder of tracks and report what each one gives up, and how fast:

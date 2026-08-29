@@ -2010,6 +2010,11 @@ export const it: Translation = {
   "trackViewer.fixtures": "Elementi segnalati",
   "trackViewer.pieces": "Pezzi distinti",
   "trackViewer.selected": "Pezzo scelto",
+  "trackViewer.place": "Posiziona un modello",
+  "trackViewer.placePick": "Scegli un modello, poi clicca il terreno.",
+  "trackViewer.placeHint": "Clicca il terreno per posarlo.",
+  "trackViewer.placedCount": "{{count}} posizionati",
+  "trackViewer.saveProps": "Salva .scr",
   "trackViewer.noTerrain": "Nessun terreno da mostrare",
   "trackViewer.noTerrainHint":
     "I dati di altezza di questo tracciato non sono in un formato che il visualizzatore sa ancora leggere.",

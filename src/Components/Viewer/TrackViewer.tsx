@@ -292,6 +292,105 @@ function toView(
   ];
 }
 
+/** The inverse of [`toView`] — a point picked in the scene, back in world metres. */
+function fromView(
+  frame: ReturnType<typeof viewFrame>,
+  vx: number,
+  vy: number,
+  vz: number,
+): [number, number, number] {
+  return [
+    (frame.originX - vx) / frame.unitsPerMetre,
+    vy / frame.heightScale + frame.midHeight,
+    (vz + frame.originZ) / frame.unitsPerMetre,
+  ];
+}
+
+/** A prop put down on the track: a model, and where it goes in world metres. */
+export interface PlacedProp {
+  name: string;
+  pos: [number, number, number];
+  rot?: [number, number, number];
+  mesh: TrackScenery;
+}
+
+/**
+ * Props placed in the app, drawn where they will be written.
+ *
+ * Built in the terrain's frame like everything else, so what you see standing on the ground
+ * is where the `.scr` will put it.
+ */
+function PlacedProps({
+  props: placed,
+  terrain,
+}: {
+  props: PlacedProp[];
+  terrain: TrackTerrain;
+}) {
+  const geometries = useMemo(() => {
+    const frame = viewFrame(terrain);
+    return placed.map((p) => {
+      const [rx, ry, rz] = (p.rot ?? [0, 0, 0]).map((d) => (d * Math.PI) / 180);
+      const m = new THREE.Matrix4().makeRotationFromEuler(
+        new THREE.Euler(rx, ry, rz, "ZYX"),
+      );
+      const src = p.mesh.positions;
+      const out = new Float32Array(src.length);
+      const v = new THREE.Vector3();
+      for (let i = 0; i < src.length; i += 3) {
+        v.set(src[i], src[i + 1], src[i + 2]).applyMatrix4(m);
+        const [x, y, z] = toView(
+          frame,
+          v.x + p.pos[0],
+          v.y + p.pos[1],
+          v.z + p.pos[2],
+        );
+        out[i] = x;
+        out[i + 1] = y;
+        out[i + 2] = z;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(out, 3));
+      // Rewound for the mirrored X, same as the scenery.
+      const src_i = p.mesh.indices;
+      const idx = new Uint32Array(src_i.length);
+      for (let t = 0; t < src_i.length; t += 3) {
+        idx[t] = src_i[t];
+        idx[t + 1] = src_i[t + 2];
+        idx[t + 2] = src_i[t + 1];
+      }
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
+      g.computeVertexNormals();
+      g.computeBoundingSphere();
+      return g;
+    });
+  }, [placed, terrain]);
+
+  useEffect(
+    () => () => {
+      for (const g of geometries) g.dispose();
+    },
+    [geometries],
+  );
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => invalidate(), [geometries, invalidate]);
+
+  return (
+    <group>
+      {geometries.map((g, i) => (
+        <mesh key={`${placed[i].name}-${i}`} geometry={g} castShadow>
+          <meshStandardMaterial
+            color="#7fc8f0"
+            roughness={0.85}
+            metalness={0}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGeometry {
   const { width, height, heights } = terrain;
 
@@ -393,9 +492,12 @@ function buildGeometry(terrain: TrackTerrain, textured: boolean): THREE.BufferGe
 function TerrainMesh({
   terrain,
   overview,
+  onGround,
 }: {
   terrain: TrackTerrain;
   overview: TrackOverview | null;
+  /** Told where a click landed, in world metres, when the viewer is placing something. */
+  onGround?: (at: [number, number, number]) => void;
 }) {
   const geometry = useMemo(() => buildGeometry(terrain, overview != null), [terrain, overview]);
 
@@ -432,7 +534,19 @@ function TerrainMesh({
     // Both cast and receive: the terrain is the only thing in the scene, so every shadow it
     // shows is its own — a jump face darkening the ground in front of it, a berm shading its
     // own inside. That self-shadowing is most of what makes the relief read as ground.
-    <mesh geometry={geometry} castShadow receiveShadow>
+    <mesh
+      geometry={geometry}
+      castShadow
+      receiveShadow
+      onClick={
+        onGround &&
+        ((e) => {
+          e.stopPropagation();
+          const frame = viewFrame(terrain);
+          onGround(fromView(frame, e.point.x, e.point.y, e.point.z));
+        })
+      }
+    >
       {/* Flat-ish and unshiny: dirt, and it keeps the relief legible rather than glared out.
           Vertex colours stay on with a texture, because three.js multiplies the two: the
           surface keeps the colours the track states while the cavity shading underneath gives
@@ -774,6 +888,10 @@ interface TrackViewerProps {
   showObjects?: boolean;
   /** Told what a click on the scenery landed on, and when the selection clears. */
   onPick?: (piece: PickedPiece | null) => void;
+  /** Props put down in the app, drawn where they will be written. */
+  placed?: PlacedProp[];
+  /** Told where a click on the ground landed, in world metres. Set only while placing. */
+  onGround?: (at: [number, number, number]) => void;
   className?: string;
 }
 
@@ -785,6 +903,8 @@ export function TrackViewer({
   placements = [],
   showObjects = true,
   onPick,
+  placed = [],
+  onGround,
   className,
 }: TrackViewerProps) {
   return (
@@ -845,7 +965,12 @@ export function TrackViewer({
             shadow-bias={-0.0006}
           />
           <directionalLight position={[-6, 3, -5]} intensity={0.4} />
-          {terrain && <TerrainMesh terrain={terrain} overview={overview} />}
+          {terrain && (
+            <TerrainMesh terrain={terrain} overview={overview} onGround={onGround} />
+          )}
+          {terrain && placed.length > 0 && (
+            <PlacedProps props={placed} terrain={terrain} />
+          )}
           {terrain && showObjects && scenery && (
             <SceneryMesh
               scenery={scenery}

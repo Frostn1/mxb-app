@@ -2031,6 +2031,11 @@ export const de: Translation = {
   "trackViewer.fixtures": "Markierte Punkte",
   "trackViewer.pieces": "Einzelteile",
   "trackViewer.selected": "Gewähltes Teil",
+  "trackViewer.place": "Modell setzen",
+  "trackViewer.placePick": "Modell wählen, dann auf den Boden klicken.",
+  "trackViewer.placeHint": "Auf den Boden klicken zum Setzen.",
+  "trackViewer.placedCount": "{{count}} gesetzt",
+  "trackViewer.saveProps": ".scr speichern",
   "trackViewer.noTerrain": "Kein Gelände zum Anzeigen",
   "trackViewer.noTerrainHint":
     "Die Höhendaten dieser Strecke liegen in keinem Format vor, das der Betrachter bereits lesen kann.",

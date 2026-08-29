@@ -1110,6 +1110,33 @@ async fn load_track_surfaces(
     .map_err(|e| format!("load_track_surfaces task failed: {e}"))
 }
 
+/// The models a track ships that a prop can be placed by name.
+#[tauri::command]
+async fn read_track_placeable(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::placeable(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placeable task failed: {e}"))?
+}
+
+/// One prop's mesh, so it can be drawn where it is about to go.
+#[tauri::command]
+async fn load_track_prop(
+    path: String,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::prop_mesh(&path, &name) {
+        Ok(m) => tauri::ipc::Response::new(map::scenery_blob(&m, &[])),
+        Err(e) => {
+            log::debug!("[scenery] prop {name}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_prop task failed: {e}"))
+}
+
 /// Save a track's props to a `.scr` the game will load.
 ///
 /// The `.scr` is the one part of a track that states where a thing goes in plain text, so it
@@ -7860,6 +7887,8 @@ fn main() {
             load_track_surfaces,
             read_track_placements,
             save_track_props,
+            read_track_placeable,
+            load_track_prop,
             diagnose_track,
             unpack_paint,
             texture_bytes,
