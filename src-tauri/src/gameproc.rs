@@ -9,6 +9,20 @@ use crate::config::AppConfig;
 #[cfg(windows)]
 const LOADER_OFFSET: usize = 0x000e_cd00;
 
+/// Where the game holds the local player's own GUID: `mxbikes.exe` VA `0x140e5522c` minus
+/// the `0x140000000` image base.
+///
+/// The GUID is not in any file — it is derived from Steam at sign-in and only ever reaches
+/// disk as a side effect of online play — so a running game is the one place to read it. Both
+/// the profile screen's "show GUID" and its copy button read this same buffer.
+///
+/// Two ways this can be wrong, and both are handled by validating what comes back rather
+/// than trusting it: the buffer is empty until Steam has authenticated, and the offset moves
+/// whenever PiBoSo ships a build. A read that doesn't look like a GUID is reported as "not
+/// found", never as a GUID.
+#[cfg(windows)]
+const GUID_OFFSET: usize = 0x000e_5522c;
+
 /// The flag that makes a fresh game process connect straight to a server.
 ///
 /// Undocumented: PiBoSo's docs list only `-dedicated` and `-clientport`, but the argv
@@ -175,6 +189,13 @@ mod ffi {
         pub fn Module32First(snapshot: Handle, entry: *mut ModuleEntry32) -> i32;
         pub fn Module32Next(snapshot: Handle, entry: *mut ModuleEntry32) -> i32;
         pub fn OpenProcess(desired_access: u32, inherit: i32, process_id: u32) -> Handle;
+        pub fn ReadProcessMemory(
+            process: Handle,
+            address: *const c_void,
+            buffer: *mut c_void,
+            size: usize,
+            read: *mut usize,
+        ) -> i32;
         pub fn CreateRemoteThread(
             process: Handle,
             attrs: *mut c_void,
@@ -783,6 +804,62 @@ pub fn refresh_look() -> LiveRefresh {
         ffi::CloseHandle(proc);
         outcome
     }
+}
+
+/// The local player's own GUID, read out of the running game. `None` when the game isn't
+/// running, hasn't signed in yet, or this build's offset no longer points at a GUID.
+#[cfg(windows)]
+pub fn local_guid() -> Option<String> {
+    let pid = find_game_pid()?;
+    let base = module_base(pid)?;
+    let mut buf = [0u8; GUID_TEXT_LEN];
+
+    // SAFETY: opens the process for reading only, reads a fixed-size buffer at a fixed
+    // offset inside the module, and closes the handle on every path. The bytes are trusted
+    // only if the call reported reading all of them.
+    let read_ok = unsafe {
+        let proc = ffi::OpenProcess(
+            ffi::PROCESS_VM_READ | ffi::PROCESS_QUERY_INFORMATION,
+            0,
+            pid,
+        );
+        if proc.is_null() {
+            return None;
+        }
+        let mut got = 0usize;
+        let ok = ffi::ReadProcessMemory(
+            proc,
+            base.add(GUID_OFFSET) as *const std::os::raw::c_void,
+            buf.as_mut_ptr() as *mut std::os::raw::c_void,
+            buf.len(),
+            &mut got,
+        ) != 0
+            && got == buf.len();
+        ffi::CloseHandle(proc);
+        ok
+    };
+    read_ok.then_some(()).and_then(|()| valid_guid(&buf))
+}
+
+#[cfg(not(windows))]
+pub fn local_guid() -> Option<String> {
+    None
+}
+
+/// A GUID as the game prints it: 18 hex characters.
+#[cfg(any(windows, test))]
+const GUID_TEXT_LEN: usize = 18;
+
+/// Read `buf` as a GUID, or nothing.
+///
+/// All-zero is what the buffer holds before Steam has authenticated the player, and it is a
+/// value the format itself uses to mean "bound to nobody" — so it is a miss here, not a GUID
+/// worth handing to anyone.
+#[cfg(any(windows, test))]
+fn valid_guid(buf: &[u8]) -> Option<String> {
+    let s = std::str::from_utf8(buf).ok()?.to_ascii_uppercase();
+    let shaped = s.len() == GUID_TEXT_LEN && s.bytes().all(|b| b.is_ascii_hexdigit());
+    (shaped && s.bytes().any(|b| b != b'0')).then_some(s)
 }
 
 /// Under Wine the game is an ordinary macOS process whose argv still names the exe, so

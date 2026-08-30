@@ -1441,3 +1441,34 @@ export type ShopSort =
   | "priceDesc"
   | "onSale"
   | "nameAsc";
+
+/* ── Content lock ──────────────────────────────────────────────────────────────────── */
+
+/** One file a locking run would produce, or the reason it will be left alone. */
+export interface LockItem {
+  /** Where the file lands under each GUID folder — relative to the parent of the
+   *  selection it came from, so picking a folder keeps the folder. */
+  rel: string;
+  abs: string;
+  bytes: number;
+  /** A `.pkz` is locked as an archive; everything else as a single file. */
+  kind: "archive" | "file";
+  /** `null` when the file will be locked. */
+  skip: "junk" | "empty" | "protected" | null;
+}
+
+export interface LockOutcome {
+  guids: number;
+  files: number;
+  written: number;
+  skipped: number;
+  bytes: number;
+  outDir: string;
+}
+
+export interface LockProgress {
+  done: number;
+  total: number;
+  guid: string;
+  file: string;
+}
