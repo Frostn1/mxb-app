@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-30
+
+### Added
+
+- **Lock a mod to the people you made it for.** Studio has a new Protect tab: pick the files
+  you built — one at a time, or a whole mod folder — paste the GUIDs of the riders allowed to
+  load them, and you get a folder per rider with locked copies inside, ready to send out. A
+  `.pkz` is locked as an archive, so tracks and packaged bikes work the same as loose files.
+  Every copy is locked with its own key, so two riders can't tell they are holding the same
+  file. Your originals are only ever read — nothing is written over.
+- **Read your own GUID out of the game.** MX Bikes never writes your GUID to a file, so until
+  now the app had to wait for one of your servers to see you connect. The Protect tab reads it
+  from the running game instead, shows it, copies it, and claims it for your account — the
+  same GUID the Servers tab uses, so both places agree about who you are.
+
 ## Unannounced — voice chat
 
 Kept out of the release notes on purpose: voice is off by default and has not yet been

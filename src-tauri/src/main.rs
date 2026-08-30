@@ -48,6 +48,8 @@ mod pkz;
 mod proton;
 #[cfg(sidecar)]
 mod sidecar;
+#[cfg(sidecar)]
+mod sidecar_lock;
 mod presets;
 mod paintsync;
 mod reshade;
@@ -5118,6 +5120,77 @@ fn bike_preview_available() -> bool {
     cfg!(sidecar)
 }
 
+/// Whether this build can produce protected copies of a creator's files. Same shape as
+/// [`bike_preview_available`]: the optional local module carries the format, so a build
+/// without it hides the tool rather than offering one that can't do anything.
+#[tauri::command]
+fn content_lock_available() -> bool {
+    cfg!(sidecar)
+}
+
+/// What a run over `paths` would touch — every file under the selection, with the ones it
+/// would leave alone flagged and why. Folders are walked; a file is taken as itself.
+#[tauri::command]
+async fn content_lock_plan(paths: Vec<String>) -> Result<serde_json::Value, String> {
+    #[cfg(sidecar)]
+    {
+        let roots: Vec<std::path::PathBuf> =
+            paths.into_iter().map(std::path::PathBuf::from).collect();
+        let items = tauri::async_runtime::spawn_blocking(move || sidecar_lock::plan(&roots))
+            .await
+            .map_err(|e| format!("content_lock_plan task failed: {e}"))?
+            .map_err(|e| format!("{e:#}"))?;
+        return serde_json::to_value(items).map_err(|e| e.to_string());
+    }
+    #[cfg(not(sidecar))]
+    {
+        let _ = paths;
+        Err("this build can't lock content".into())
+    }
+}
+
+/// Write a copy of every file in `paths`, locked to each GUID in `guids`, under
+/// `out_dir/<GUID>/`. Reports progress on `content-lock://progress`.
+///
+/// The sources are only ever read. A creator's plaintext is the one thing they can't get
+/// back, so the tool that hands out locked copies is not also the tool that could eat the
+/// original.
+#[tauri::command]
+async fn content_lock_run(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    guids: Vec<String>,
+    out_dir: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(sidecar)]
+    {
+        let roots: Vec<std::path::PathBuf> =
+            paths.into_iter().map(std::path::PathBuf::from).collect();
+        let out = std::path::PathBuf::from(out_dir);
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            sidecar_lock::run(&app, &roots, &guids, &out)
+        })
+        .await
+        .map_err(|e| format!("content_lock_run task failed: {e}"))?
+        .map_err(|e| format!("{e:#}"))?;
+        return serde_json::to_value(outcome).map_err(|e| e.to_string());
+    }
+    #[cfg(not(sidecar))]
+    {
+        let _ = (app, paths, guids, out_dir);
+        Err("this build can't lock content".into())
+    }
+}
+
+/// This player's own MX Bikes GUID, read out of the running game.
+///
+/// `None` is the ordinary answer — the game isn't running, or hasn't reached Steam sign-in
+/// yet. See [`gameproc::local_guid`] for why it is never a guess.
+#[tauri::command]
+fn local_guid() -> Option<String> {
+    gameproc::local_guid()
+}
+
 /// The OS we're running on — `"windows"`, `"macos"`, `"linux"`.
 ///
 /// The frontend used to infer this from `navigator.userAgent`, which can tell a Mac from
@@ -8044,6 +8117,10 @@ fn main() {
             texture_bytes,
             watch_paint_files,
             unpack_pkz,
+            content_lock_available,
+            content_lock_plan,
+            content_lock_run,
+            local_guid,
             load_bike_model,
             preview_model_swap,
             load_rider_model,

@@ -57,6 +57,9 @@ import type {
   FileShare,
   GameId,
   GameInfo,
+  LockItem,
+  LockOutcome,
+  LockProgress,
 } from "../types";
 import type { TKey } from "../i18n";
 
@@ -300,6 +303,41 @@ export function setSeenVersion(version: string): Promise<void> {
  *  builds without the optional local module return false, so the UI hides it. */
 export function bikePreviewAvailable(): Promise<boolean> {
   return invoke<boolean>("bike_preview_available");
+}
+
+/* ── Content lock ──────────────────────────────────────────────────────────────────── */
+
+/** Whether this build can lock content. Same gate as the bike preview: without the
+ *  optional local module the Studio hides the tool rather than offering a dead one. */
+export function contentLockAvailable(): Promise<boolean> {
+  return invoke<boolean>("content_lock_available");
+}
+
+/** What a run would touch — folders walked, files taken as themselves, skips flagged. */
+export function contentLockPlan(paths: string[]): Promise<LockItem[]> {
+  return invoke<LockItem[]>("content_lock_plan", { paths });
+}
+
+/** Write a copy of every file locked to each GUID, under `outDir/<GUID>/`. Reads only:
+ *  the creator's originals are never touched. */
+export function contentLockRun(
+  paths: string[],
+  guids: string[],
+  outDir: string,
+): Promise<LockOutcome> {
+  return invoke<LockOutcome>("content_lock_run", { paths, guids, outDir });
+}
+
+export function onContentLockProgress(
+  cb: (p: LockProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<LockProgress>("content-lock://progress", (e) => cb(e.payload));
+}
+
+/** This player's own MX Bikes GUID, read out of the running game. `null` when the game
+ *  isn't running or hasn't signed in to Steam yet — the ordinary case, not an error. */
+export function localGuid(): Promise<string | null> {
+  return invoke<string | null>("local_guid");
 }
 
 /** The order a browse listing comes back in. Mirrors `ModSort` on the Rust side. */

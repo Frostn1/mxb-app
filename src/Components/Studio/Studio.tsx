@@ -4,11 +4,13 @@ import HelpHint from "../ui/help-hint";
 import { Segmented } from "../ui/segmented";
 import { useT } from "../../i18n/context";
 import { useConfig } from "../../Context/Config";
+import { contentLockAvailable } from "../../api/mods";
 import type { Loadout } from "../../types";
 import Designer from "./Designer/Designer";
 import PaintStudio from "../PaintStudio/PaintStudio";
 import RiderStudio from "../Rider/RiderStudio";
 import PoseStudio from "../Rider/PoseStudio";
+import Protect from "./Protect/Protect";
 import RiderKitProvider from "../Rider/RiderKit";
 
 /**
@@ -24,7 +26,7 @@ import RiderKitProvider from "../Rider/RiderKit";
  * first-run tour both need to open the Studio *at* a particular one.
  */
 
-export type StudioTab = "designer" | "paints" | "rider" | "pose";
+export type StudioTab = "designer" | "paints" | "rider" | "pose" | "protect";
 
 interface StudioProps {
   tab: StudioTab;
@@ -49,6 +51,14 @@ export default function Studio({
   // isn't offered there rather than being offered and empty. Designer and Paints both work
   // for either title: a `.pnt` is a `.pnt`.
   const hasRider = game.caps.viewer;
+  // Locking needs the optional local module, the same one the bike preview needs. Without
+  // it the tab would be a button that can only ever fail, so it isn't offered.
+  const [hasLock, setHasLock] = useState(false);
+  useEffect(() => {
+    contentLockAvailable()
+      .then(setHasLock)
+      .catch(() => {});
+  }, []);
   // Which sub-views have ever been opened. A tab is mounted on first visit and then kept —
   // see the note on `Pane` below — so this is what stops someone who never opens the Rider
   // paying for its geometry.
@@ -58,10 +68,12 @@ export default function Studio({
   const [handoff, setHandoff] = useState<string[] | null>(null);
   useEffect(() => setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab))), [tab]);
 
-  // Switching titles can take the Rider away underneath us.
+  // Switching titles can take the Rider away underneath us, and the lock tab only
+  // exists once the availability check has come back.
   useEffect(() => {
     if (!hasRider && (tab === "rider" || tab === "pose")) onTab("designer");
-  }, [hasRider, tab, onTab]);
+    if (!hasLock && tab === "protect") onTab("designer");
+  }, [hasRider, hasLock, tab, onTab]);
 
   // One help hint, on whichever sub-view is open. Each had its own before they shared a tab,
   // and three "?" icons for one screen would be three ways to ask the same question.
@@ -72,7 +84,9 @@ export default function Studio({
         ? { title: t("nav.paints"), body: t("paints.help") }
         : tab === "pose"
           ? { title: t("nav.pose"), body: t("pose.help") }
-          : { title: t("nav.rider"), body: t("rider.help") };
+          : tab === "protect"
+            ? { title: t("nav.protect"), body: t("protect.help") }
+            : { title: t("nav.rider"), body: t("rider.help") };
 
   return (
     <div className="flex h-full flex-col">
@@ -93,6 +107,7 @@ export default function Studio({
                   { value: "pose" as const, label: t("nav.pose") },
                 ]
               : []),
+            ...(hasLock ? [{ value: "protect" as const, label: t("nav.protect") }] : []),
           ]}
         />
       </header>
@@ -104,6 +119,11 @@ export default function Studio({
       {visited.has("designer") && (
         <Pane active={tab === "designer"}>
           <Designer incoming={handoff} onIncomingLoaded={() => setHandoff(null)} />
+        </Pane>
+      )}
+      {visited.has("protect") && hasLock && (
+        <Pane active={tab === "protect"}>
+          <Protect />
         </Pane>
       )}
       {visited.has("paints") && (

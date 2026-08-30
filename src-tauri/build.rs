@@ -12,6 +12,7 @@ fn main() {
         println!("cargo::rustc-cfg=sidecar");
     }
     println!("cargo::rerun-if-changed=src/sidecar.rs");
+    println!("cargo::rerun-if-changed=src/sidecar_lock.rs");
 
     shop_credentials();
     release_tag();
