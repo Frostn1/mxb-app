@@ -1,6 +1,7 @@
 # Changelog
 
-## 2026-08-30
+## 2026-08-30 — v0.12.0 — MXB Hub in the app, and a Designer that speaks Photoshop
+
 ### Added
 
 - **Browse and install from MXB Hub.** A new sidebar tab for the shop.mxb-hub.com
@@ -20,39 +21,6 @@
   now the app had to wait for one of your servers to see you connect. The Protect tab reads it
   from the running game instead, shows it, copies it, and claims it for your account — the
   same GUID the Servers tab uses, so both places agree about who you are.
-
-## Unannounced — voice chat
-
-Kept out of the release notes on purpose: voice is off by default and has not yet been
-tried on a live server with a real grid on it. Both entries fold into the notes of
-whichever release turns it on.
-
-### Added
-
-- **Voice chat, on any server, with nothing to set up.** Turn it on, pick a microphone, and
-  that is the whole of it: joining a server puts you in voice with everyone else there who
-  has the app. There is no second program to install, no account to create, no code to share
-  and nothing for the server owner to run — it works the same on a server we host and on one
-  that appeared this morning. Your voice goes straight to the other riders rather than
-  through us, so it costs nothing to provide and nobody is relaying what you say. Push to
-  talk by default, with the mic key you already set. Settings shows who is in the room, who
-  is talking, and a mute button for anyone you would rather not hear.
-
-### Changed
-
-- **Voice now works whichever way you joined a server.** It used to start only when the app
-  itself launched the game at a server, which left out everyone who picks one from the game's
-  own browser — and quietly kept you in the old room if you moved servers without quitting.
-  FrostMod knows which server the game is on and now says so, so voice follows you. It also
-  knows your race number, which is what will place your voice on the track when proximity
-  lands. Riders are grouped by the server's own name, because that is the one thing everyone
-  on it sees the same — an address only reaches the people whose app launched the game, and
-  half a grid in one room and half in another is the failure that looks like nothing is
-  wrong.
-
-## 2026-08-30
-
-### Added
 
 - **A mod's page now says who made it.** Open a track, a bike or a set of gear and the
   creator's name sits directly under the title, exactly as the site credits it. Click it to
@@ -108,6 +76,35 @@ whichever release turns it on.
   land. The first step tried is a wide one, and on a strip as thin as a seat's flank it ran off
   the panel and came back with a placement up to a third too big. A wide step is still what it
   reaches for first, but it now keeps looking when the answer doesn't read as a reflection.
+
+## Unannounced — voice chat
+
+Kept out of the release notes on purpose: voice is off by default and has not yet been
+tried on a live server with a real grid on it. Both entries fold into the notes of
+whichever release turns it on.
+
+### Added
+
+- **Voice chat, on any server, with nothing to set up.** Turn it on, pick a microphone, and
+  that is the whole of it: joining a server puts you in voice with everyone else there who
+  has the app. There is no second program to install, no account to create, no code to share
+  and nothing for the server owner to run — it works the same on a server we host and on one
+  that appeared this morning. Your voice goes straight to the other riders rather than
+  through us, so it costs nothing to provide and nobody is relaying what you say. Push to
+  talk by default, with the mic key you already set. Settings shows who is in the room, who
+  is talking, and a mute button for anyone you would rather not hear.
+
+### Changed
+
+- **Voice now works whichever way you joined a server.** It used to start only when the app
+  itself launched the game at a server, which left out everyone who picks one from the game's
+  own browser — and quietly kept you in the old room if you moved servers without quitting.
+  FrostMod knows which server the game is on and now says so, so voice follows you. It also
+  knows your race number, which is what will place your voice on the track when proximity
+  lands. Riders are grouped by the server's own name, because that is the one thing everyone
+  on it sees the same — an address only reaches the people whose app launched the game, and
+  half a grid in one room and half in another is the failure that looks like nothing is
+  wrong.
 
 ## 2026-08-29 — v0.11.3 — A track viewer that draws the whole track
 
