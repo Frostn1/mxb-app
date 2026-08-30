@@ -1392,6 +1392,18 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0113.hero.title":
+    "Chaque piste s\u2019ouvre comme le lieu qu\u2019elle est",
+  "showcase.v0113.hero.body":
+    "Une piste s\u2019ouvrait auparavant comme un sol nu \u2014 les orni\u00e8res, les virages relev\u00e9s et les faces de saut justes, mais rien dessus, si bien qu\u2019un supercross et un circuit national se ressemblaient. La visionneuse dessine d\u00e9sormais ce qu\u2019une piste pose sur elle-m\u00eame\u00a0: les tentes et les auvents, les bottes de paille et les murs de pneus, les lignes de banderoles et les barri\u00e8res, les remorques du paddock et le paysage au-del\u00e0 de son propre carr\u00e9.",
+  "showcase.v0113.sky":
+    "Une piste se tient sous son propre ciel, \u00e9clair\u00e9e et voil\u00e9e comme son propre fichier d\u2019ambiance le demande.",
+  "showcase.v0113.ground":
+    "Le sol garde son d\u00e9tail de pr\u00e8s \u2014 la terre de la piste elle-m\u00eame, avec un vrai relief quand elle fournit une carte de normales.",
+  "showcase.v0113.pick":
+    "Cliquez sur ce qui se dresse sur la piste et l\u2019objet s\u2019allume seul, nomm\u00e9 et mesur\u00e9.",
+  "showcase.v0113.speed":
+    "Cela arrive par \u00e9tapes \u2014 le terrain d\u2019abord, puis la forme du d\u00e9cor, puis ses couleurs \u2014 et rouvrir la m\u00eame piste \u00e9vite enti\u00e8rement l\u2019archive.",
   "showcase.v0112.hero.title":
     "Un pack de motos s'installe comme les motos qu'il contient",
   "showcase.v0112.hero.body":

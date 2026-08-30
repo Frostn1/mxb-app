@@ -29,7 +29,7 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
-## 2026-08-29
+## 2026-08-29 — v0.11.3 — A track viewer that draws the whole track
 
 ### Added
 
