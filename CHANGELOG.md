@@ -33,6 +33,12 @@ whichever release turns it on.
 
 ### Added
 
+- **A mod's page now says who made it.** Open a track, a bike or a set of gear and the
+  creator's name sits directly under the title, exactly as the site credits it. Click it to
+  open their page on the catalog, which is where the rest of their work is. The name is read
+  off the mod's own page rather than asked for over the catalog's API — the API stopped
+  answering who posted anything some time ago, which is why the browse cards have been
+  showing a date and nothing else.
 - **Start a paint from the bike's own plastics rather than from nothing.** The Designer could
   already show the texture a bike ships with faintly under your sheet, to draw against — but
   what people actually keep asking for is that picture itself, with a number on it and nothing
