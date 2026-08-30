@@ -29,6 +29,7 @@ mod library;
 mod linkwalk;
 mod logs;
 mod lru;
+mod map;
 mod memwatch;
 mod modelswap;
 mod mods;
@@ -50,6 +51,7 @@ mod sidecar;
 mod presets;
 mod paintsync;
 mod reshade;
+mod scenery;
 mod servers;
 mod sessionwatch;
 mod shop_catalog_session;
@@ -1066,6 +1068,145 @@ async fn load_track_overview(
     })
     .await
     .map_err(|e| format!("load_track_overview task failed: {e}"))
+}
+
+/// Where a track pins the things it ships no mesh for — marshal posts, TV cameras, crowd
+/// sound — plus the props its `.scr` places.
+///
+/// Split from the scenery mesh because it costs nothing: these files are kilobytes, so the
+/// viewer can mark them while the `.map` is still being read out of the archive.
+#[tauri::command]
+async fn read_track_placements(path: String) -> Result<Vec<scenery::Placement>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::read_placements(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placements task failed: {e}"))?
+}
+
+/// A track's scenery mesh — what stands on the ground the terrain grid describes.
+///
+/// Raw bytes for the same reason the terrain is: this is a few hundred thousand triangles,
+/// and as JSON numbers it would cost more to parse than the archive read that produced it.
+/// Empty rather than an error when a track carries no scenery, which is ordinary — the OEM
+/// drag strip declares none at all.
+#[tauri::command]
+async fn load_track_scenery(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load(&app, &path) {
+        Ok(s) => tauri::ipc::Response::new(scenery::blob(&s)),
+        Err(e) => {
+            log::debug!("[scenery] {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_scenery task failed: {e}"))
+}
+
+/// A track's surfaces, fetched after its mesh is already on screen.
+///
+/// The second half of a two-stage load: the mesh parses in milliseconds, while inflating a
+/// map's sheets is hundreds of megabytes of work. Splitting them is the difference between a
+/// track appearing at once and a second of empty canvas.
+#[tauri::command]
+async fn load_track_surfaces(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::load_surfaces(&app, &path) {
+        Ok(t) => tauri::ipc::Response::new(scenery::surfaces_blob(&t)),
+        Err(e) => {
+            log::debug!("[scenery] surfaces for {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_surfaces task failed: {e}"))
+}
+
+/// What a track wraps itself in — its sky, its backdrop, and the light it sits under.
+///
+/// A dome is a few hundred triangles carrying one very large picture, so this is cheap next
+/// to the scenery and is what stops a track ending at a hard edge with nothing beyond it.
+#[tauri::command]
+async fn load_track_backdrop(
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::backdrop(&path) {
+        Ok((amb, sky, back)) => tauri::ipc::Response::new(scenery::backdrop_blob(&amb, &sky, &back)),
+        Err(e) => {
+            log::debug!("[scenery] backdrop for {path}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_backdrop task failed: {e}"))
+}
+
+/// A tiling sheet of a track's own ground, for detail finer than its data carries.
+///
+/// A track states its surface at about a third of a metre per sample, and a viewer that lets
+/// you get close magnifies that into a blur. This puts the grain back.
+#[tauri::command]
+async fn load_track_ground(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let sheets = scenery::load_ground(&app, &path).unwrap_or_default();
+        tauri::ipc::Response::new(map::surfaces_blob(&sheets))
+    })
+    .await
+    .map_err(|e| format!("load_track_ground task failed: {e}"))
+}
+
+/// The models a track ships that a prop can be placed by name.
+#[tauri::command]
+async fn read_track_placeable(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::placeable(&path).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("read_track_placeable task failed: {e}"))?
+}
+
+/// One prop's mesh, so it can be drawn where it is about to go.
+#[tauri::command]
+async fn load_track_prop(
+    path: String,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || match scenery::prop_mesh(&path, &name) {
+        Ok(m) => tauri::ipc::Response::new(map::scenery_blob(&m, &[])),
+        Err(e) => {
+            log::debug!("[scenery] prop {name}: {e:#}");
+            tauri::ipc::Response::new(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("load_track_prop task failed: {e}"))
+}
+
+/// Save a track's props to a `.scr` the game will load.
+///
+/// The `.scr` is the one part of a track that states where a thing goes in plain text, so it
+/// is where anything placed in the app has to end up. Writes only where it is told, never
+/// inside an archive, and refuses to replace a file unless asked — a track's own `.scr` is
+/// the record of however long someone spent placing things.
+#[tauri::command]
+async fn save_track_props(
+    target: String,
+    props: Vec<scenery::Placement>,
+    overwrite: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        scenery::save_scr(&target, &props, overwrite).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("save_track_props task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -7890,6 +8031,14 @@ fn main() {
             read_track_info,
             load_track_terrain,
             load_track_overview,
+            load_track_scenery,
+            load_track_surfaces,
+            read_track_placements,
+            save_track_props,
+            read_track_placeable,
+            load_track_prop,
+            load_track_backdrop,
+            load_track_ground,
             diagnose_track,
             unpack_paint,
             texture_bytes,

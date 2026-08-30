@@ -638,6 +638,106 @@ export interface TrackTerrain {
   heights: Float32Array;
 }
 
+/**
+ * A track's scenery — what stands on the ground the terrain grid describes.
+ *
+ * Positions are world metres in the game's own left-handed frame, the same one the terrain
+ * grid is placed in, so the viewer mirrors X over both at once.
+ */
+export interface TrackScenery {
+  /** `3 * vertexCount`, world metres. */
+  positions: Float32Array;
+  /** `3 * vertexCount`, unit length. */
+  normals: Float32Array;
+  /** `2 * vertexCount`. Tiling, so these run well outside 0–1. */
+  uvs: Float32Array;
+  /** `3 * triangleCount`. Sorted so each material's triangles sit together. */
+  indices: Uint32Array;
+  /** One run of triangles per material. */
+  groups: TrackSceneryGroup[];
+  /** The surfaces the map paints those runs with. */
+  textures: TrackSceneryTexture[];
+  /**
+   * How many connected pieces the scenery comes apart into — one per tent, trailer or
+   * foliage card. The unit a designer picks, hides or moves.
+   */
+  pieceCount: number;
+  /** Which piece each triangle belongs to — turns a ray hit into a thing you can point at. */
+  pieceOfTriangle: Uint32Array;
+  /** World bounds, metres: `[minX, minY, minZ, maxX, maxY, maxZ]`. */
+  bounds: [number, number, number, number, number, number];
+}
+
+export interface TrackSceneryGroup {
+  material: number;
+  triStart: number;
+  triCount: number;
+}
+
+export interface TrackSceneryTexture {
+  /** Which material this paints. */
+  material: number;
+  width: number;
+  height: number;
+  /**
+   * An alpha cut-out — foliage, crowd, fencing. It has to be drawn with an alpha test:
+   * without one every leaf card is an opaque rectangle, and a treeline becomes a wall.
+   */
+  alpha: boolean;
+  /** `width * height * 4`, RGBA, first row first. */
+  pixels: Uint8Array<ArrayBuffer>;
+}
+
+/** A track's sky, its backdrop, and the light it sits under. */
+export interface TrackBackdrop {
+  /** Direction the sun comes from, as the track states it. */
+  sun: [number, number, number] | null;
+  skyColour: [number, number, number] | null;
+  sunColour: [number, number, number] | null;
+  ambientColour: [number, number, number] | null;
+  fogColour: [number, number, number] | null;
+  fogDensity: number | null;
+  /** The dome overhead, and the ring of land beyond the track. Either may be empty. */
+  sky: TrackMeshArrays;
+  backdrop: TrackMeshArrays;
+}
+
+/** Bare mesh arrays, in world metres. */
+export interface TrackMeshArrays {
+  positions: Float32Array;
+  normals: Float32Array;
+  uvs: Float32Array;
+  indices: Uint32Array;
+  /** The picture it carries. A sky dome is a few hundred triangles and one large image. */
+  picture: { width: number; height: number; pixels: Uint8Array<ArrayBuffer> } | null;
+}
+
+/**
+ * A tiling sheet of the track's own ground, and its relief.
+ *
+ * What the ground is made of, not what is where — tiled far finer than the third of a metre
+ * a track states its surface at.
+ */
+export interface TrackGround {
+  colour: TrackSceneryTexture;
+  /** Its normal map, where the track ships one under a ground name. */
+  normal: TrackSceneryTexture | null;
+}
+
+/** What a track pins to a point but ships no mesh for. Mirrors `scenery::Placement`. */
+export interface TrackPlacement {
+  /** A key, not prose — the UI translates it. */
+  kind: "prop" | "marshal" | "camera" | "sound";
+  /** The `.edf` for a prop, the `.wav` for a sound, otherwise the track's own name for it. */
+  name: string;
+  /** World metres, game frame. */
+  pos: [number, number, number];
+  /** Degrees, where the track states one. */
+  heading: number | null;
+  /** Full rotation in degrees, for props that carry one — what a `.scr` writes back. */
+  rot?: [number, number, number] | null;
+}
+
 /** What the dropzone decided a dropped item is. Mirrors `dropzone::ContentKind`. */
 export type DropKind =
   | "modsTree"
