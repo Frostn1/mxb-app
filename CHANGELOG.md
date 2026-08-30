@@ -39,6 +39,14 @@ whichever release turns it on.
   off the mod's own page rather than asked for over the catalog's API — the API stopped
   answering who posted anything some time ago, which is why the browse cards have been
   showing a date and nothing else.
+- **Start a paint from the bike's own plastics rather than from nothing.** The Designer could
+  already show the texture a bike ships with faintly under your sheet, to draw against — but
+  what people actually keep asking for is that picture itself, with a number on it and nothing
+  else changed. **Stock as base** paints it into the sheet at full strength, where it becomes
+  part of what gets saved instead of a guide that never is: put your number over it, save, and
+  the paint is the bike exactly as it came with your number on the shroud. A sheet nothing has
+  been done to yet also takes the texture's own size, so the bike's artwork is never resampled
+  onto a blank that happened to be a different one.
 
 ## 2026-08-29 — v0.11.3 — A track viewer that draws the whole track
 
