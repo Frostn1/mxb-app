@@ -1985,6 +1985,12 @@ export const it: Translation = {
     "Solo le moto sanno dire quali texture sono le loro. Un casco indossa la vernice con cui è arrivato, e quella non è un aspetto originale da ricalcare.",
   "designer.stockNoMatch":
     "Questo modello non porta una texture sua chiamata “{{name}}”, quindi non c'è nulla della moto da mostrare sotto questa planche.",
+  "designer.stockAsBase": "Originale come base",
+  "designer.stockAsBaseHint":
+    "Dipinge la texture della moto stessa in questa planche a piena intensità — l'aspetto originale come punto di partenza, a un numero di distanza dall'essere una vernice. A differenza del riferimento qui sopra, questa fa parte di ciò che salvi.",
+  "designer.stockAsBaseDone":
+    "Ora “{{name}}” contiene la texture della moto stessa — mettici il tuo numero e salva.",
+  "designer.stockReadFailed": "Impossibile leggere la texture “{{name}}” del modello.",
   "designer.uvMap": "Mappa UV",
   "designer.uvHint":
     "Mostra dove finiscono su questa planche le carene del modello, ognuna con il suo colore.",

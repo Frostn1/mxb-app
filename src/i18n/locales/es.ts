@@ -1992,6 +1992,12 @@ export const es: Translation = {
     "Solo las motos pueden decir qué texturas son suyas. Un casco lleva la pintura con la que vino, y eso no es un aspecto de fábrica que calcar.",
   "designer.stockNoMatch":
     "Este modelo no trae ninguna textura propia llamada “{{name}}”, así que no hay nada de la moto que mostrar bajo esta hoja.",
+  "designer.stockAsBase": "Fábrica como base",
+  "designer.stockAsBaseHint":
+    "Pinta la textura propia de la moto en esta hoja a plena intensidad — el aspecto de fábrica como punto de partida, a un número de ser una pintura. A diferencia de la referencia de arriba, esta sí forma parte de lo que guardas.",
+  "designer.stockAsBaseDone":
+    "“{{name}}” ya lleva la textura propia de la moto — ponle tu número y guarda.",
+  "designer.stockReadFailed": "No se pudo leer la textura “{{name}}” del modelo.",
   "designer.uvMap": "Mapa UV",
   "designer.uvHint":
     "Muestra dónde cae en esta hoja cada pieza del carenado del modelo, cada una con su color.",
