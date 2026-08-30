@@ -83,6 +83,26 @@ whichever release turns it on.
   anything has been drawn, nothing is thrown away without asking: a warning names the sheets
   the new model uses and waits for you to say switch.
 
+### Fixed
+
+- **Mirror now works on bodywork that is one piece, like a seat.** "Mirror to other side" asks
+  the model where the far side of a decal's spot actually is, and it used to ask by looking for
+  a triangle whose corners were the exact mirror image of the ones under the layer. Bikes
+  rarely oblige: a seat, a tank or a fender is modelled once as a single piece, so its left and
+  right halves are near-copies rather than vertex-exact mirrors — 2mm apart on a stock
+  CRF450R — and the mirror answered "the model has nothing at the reflection of this spot" over
+  most of the bike. On a stock YZ450F's plastics it could not mirror anything at all. It now
+  asks for the nearest bit of surface at the reflected place instead of an exact twin, which is
+  the same answer where the mesh does line up and a real one where it doesn't. Across six stock
+  bikes it went from mirroring a third of a sheet at best to nearly all of it, and every
+  placement lands on the panel the model puts there.
+
+- **A decal mirrored onto a narrow panel comes out the right size.** Working out which way the
+  far side runs means stepping a little way along the layer's own axes and seeing where those
+  land. The first step tried is a wide one, and on a strip as thin as a seat's flank it ran off
+  the panel and came back with a placement up to a third too big. A wide step is still what it
+  reaches for first, but it now keeps looking when the answer doesn't read as a reflection.
+
 ## 2026-08-29 — v0.11.3 — A track viewer that draws the whole track
 
 ### Added
