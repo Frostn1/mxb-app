@@ -22,6 +22,7 @@ mod gameproc;
 mod gate;
 mod gearrepair;
 mod heightfield;
+mod hub_clearance;
 mod hub_session;
 mod imgcache;
 mod install;
@@ -6713,27 +6714,65 @@ async fn shop_install(
 // the DOM, and no `with_clearance` wrapper: `reqwest` talks to it directly, browsing needs no
 // credential at all, and the only window ever opened is the sign-in one.
 
+/// Run a hub read, and if the store answers with its robot challenge, solve it and try again.
+///
+/// The sibling of [`with_clearance`] above, and the difference is where the browser comes in.
+/// mxb-mods.com's fix is to move the *request* into a WebView and keep it there for the
+/// session, because Cloudflare judges the client. SiteGround judges the request rate and hands
+/// out a cookie once its script has run — so the browser is needed exactly once, and every
+/// request after it is an ordinary one again.
+async fn with_hub_clearance<T, F, Fut>(
+    app: &tauri::AppHandle,
+    what: &str,
+    op: F,
+) -> Result<T, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let err = match op().await {
+        Ok(value) => return Ok(value),
+        Err(err) => err,
+    };
+    if err.downcast_ref::<mods::Blocked>().is_none() {
+        log::warn!("{what} failed and a browser wouldn't help: {err:#}");
+        return Err(format!("{err:#}"));
+    }
+    log::info!("{what} hit the MXB Hub robot challenge — answering it in a browser");
+    if let Err(e) = hub_clearance::earn(app).await {
+        return Err(format!("{e:#}"));
+    }
+    op().await.map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 async fn hub_search(
+    app: tauri::AppHandle,
     query: String,
     category_id: Option<u64>,
     page: u32,
     sort: mods::hub::HubSort,
     on_sale_only: bool,
 ) -> Result<mods::hub::HubPage, String> {
-    mods::hub::search(&query, category_id, page, sort, on_sale_only)
-        .await
-        .map_err(|e| format!("{e:#}"))
+    with_hub_clearance(&app, "hub search", || {
+        mods::hub::search(&query, category_id, page, sort, on_sale_only)
+    })
+    .await
 }
 
 #[tauri::command]
-async fn hub_categories() -> Result<Vec<mods::hub::HubCategory>, String> {
-    mods::hub::categories().await.map_err(|e| format!("{e:#}"))
+async fn hub_categories(
+    app: tauri::AppHandle,
+) -> Result<Vec<mods::hub::HubCategory>, String> {
+    with_hub_clearance(&app, "hub categories", mods::hub::categories).await
 }
 
 #[tauri::command]
-async fn hub_detail(id: u64) -> Result<mods::hub::HubModDetail, String> {
-    mods::hub::detail(id).await.map_err(|e| format!("{e:#}"))
+async fn hub_detail(
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<mods::hub::HubModDetail, String> {
+    with_hub_clearance(&app, "hub detail", || mods::hub::detail(id)).await
 }
 
 #[tauri::command]
@@ -6840,12 +6879,19 @@ async fn hub_my_downloads(
     app: tauri::AppHandle,
     state: State<'_, hub_session::HubSession>,
 ) -> Result<HubDownloads, String> {
-    let Some(client) = state.client() else {
+    if !state.logged_in() {
         return Err("Not signed in to MXB Hub.".to_string());
-    };
-    let mut items = mods::hubaccount::fetch_my_downloads(&app, &client)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
+    }
+    let mut items = with_hub_clearance(&app, "hub purchases", || {
+        // Re-read the client each attempt: answering the challenge rebuilds the signed-in one
+        // with the clearance folded in, and the stale handle would just be challenged again.
+        let client = state.client();
+        async {
+            let client = client.ok_or_else(|| anyhow::anyhow!("Not signed in to MXB Hub."))?;
+            mods::hubaccount::fetch_my_downloads(&app, &client).await
+        }
+    })
+    .await?;
 
     let listings = match mods::hubaccount::match_products(&items).await {
         Ok(found) => found,
@@ -6890,7 +6936,7 @@ async fn hub_install(
     subpath: String,
     dest_folder: String,
 ) -> Result<(), String> {
-    let Some(client) = state.client() else {
+    let Some(session) = state.client() else {
         return Err("Not signed in to MXB Hub.".to_string());
     };
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
@@ -6903,15 +6949,34 @@ async fn hub_install(
     std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
 
     let _cancel = cancel::begin(&item.slug);
-    let archive = match install::download(&app, &client, &item.slug, &item.download_url, &work).await
-    {
+
+    // Where the bytes come from decides both the client and whether the link needs resolving.
+    //
+    // A store-issued `?download_file=` URL is authorised by the user's session, so it is
+    // fetched with it and is already a file. A handed-off link — MediaFire and friends, which
+    // WooCommerce allows for any product and MXB Hub uses for a number of its free mods — is
+    // fetched with the ordinary download client instead: sending the user's store cookies to a
+    // third party would be wrong whichever way it turned out. It also has to be resolved
+    // first, because a MediaFire *folder* is a web page listing files, not a file.
+    let fetch = async {
+        if item.external {
+            let client = install::build_download_client()?;
+            install::emit_resolving(&app, &item.slug);
+            let direct = install::resolve_direct_url(&client, &item.download_url, &item.host)
+                .await?;
+            install::download(&app, &client, &item.slug, &direct, &work).await
+        } else {
+            // A dead cookie doesn't 401 here — WooCommerce answers a link it won't honour with
+            // an HTML page, which `install::download` reports as "a web page instead of a
+            // file". Left as it is rather than translated: guessing "session expired" from a
+            // content type would sign the user out on a server hiccup.
+            install::download(&app, &session, &item.slug, &item.download_url, &work).await
+        }
+    };
+    let archive = match fetch.await {
         Ok(path) => path,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
-            // A dead cookie doesn't 401 here — WooCommerce answers a download link it won't
-            // honour with an HTML page, which `install::download` reports as "a web page
-            // instead of a file". Left as it is rather than translated: guessing "session
-            // expired" from a content type would sign the user out on a server hiccup.
             return Err(format!("{e:#}"));
         }
     };
@@ -8584,6 +8649,7 @@ mod window_tests {
             shop_fetch::WINDOW,
             SHOP_LOGIN_WINDOW,
             HUB_LOGIN_WINDOW,
+            hub_clearance::WINDOW,
             overlay::LABEL, // handled earlier by its own branch, but never by this one
         ] {
             assert!(

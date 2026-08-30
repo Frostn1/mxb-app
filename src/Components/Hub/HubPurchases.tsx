@@ -23,6 +23,7 @@ import {
   hubMyDownloads,
   hubStatus,
   onHubAuth,
+  type HubItem,
 } from "../../api/hub";
 import {
   buildDestinations,
@@ -33,7 +34,6 @@ import {
   shopInstalledMap,
   type DestOption,
   type ModType,
-  type ShopItem,
 } from "../../api/mods";
 import { PURCHASE_SORTS, type PurchaseSort } from "../../api/shop";
 import type { HubCategory, HubMod } from "../../types";
@@ -69,6 +69,15 @@ import { cn } from "@/lib/utils";
 /** The pill for purchases the catalog no longer lists. */
 const OTHER_CATEGORY = -1;
 
+/**
+ * The shop's `Purchase`, with this store's file type.
+ *
+ * A `HubItem` is a `ShopItem` plus where its bytes live, so `PurchaseCard` takes one of these
+ * unchanged — the narrowing exists only so the install path below keeps the two fields it
+ * needs to route a MediaFire-hosted file correctly.
+ */
+type HubPurchase = Omit<Purchase, "files"> & { files: HubItem[] };
+
 interface HubPurchasesProps {
   /** Bumped after any install so the "Installed" badges re-scan. */
   refreshKey: number;
@@ -80,7 +89,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   const { activeFor, startHubInstall } = useInstall();
 
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
-  const [items, setItems] = useState<ShopItem[]>([]);
+  const [items, setItems] = useState<HubItem[]>([]);
   const [listings, setListings] = useState<Record<string, HubMod | null>>({});
   const [installedNames, setInstalledNames] = useState<string[]>([]);
   /** Product → the folders its install recorded. Exact, where the fuzzy match only guesses. */
@@ -192,7 +201,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   }, [refreshKey, installedBump, loggedIn, game.id]);
 
   /** Purchases, one entry per product, with the catalog and library joins applied. */
-  const purchases = useMemo<Purchase[]>(() => {
+  const purchases = useMemo<HubPurchase[]>(() => {
     const fuzzy = buildInstalledIndex(installedNames);
     // Both the file name and its stem: the library lists `X.pkz` while an archive that
     // extracts lands in a folder called `X`, and a record may name either.
@@ -202,7 +211,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
       onDisk.add(lower);
       onDisk.add(lower.replace(/\.(pkz|zip|rar|7z|pnt)$/, ""));
     }
-    const byProduct = new Map<string, ShopItem[]>();
+    const byProduct = new Map<string, HubItem[]>();
     for (const item of items) {
       const files = byProduct.get(item.product);
       if (files) files.push(item);
@@ -232,7 +241,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   }, [tree]);
 
   const rootsFor = useCallback(
-    (p: Purchase) =>
+    (p: HubPurchase) =>
       new Set(
         (p.listing?.categoryIds ?? [])
           .map((id) => rootOf.get(id))
@@ -260,7 +269,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
 
   /** What the grid actually shows: the toolbar applied. */
   const shown = useMemo(() => {
-    const matches = (p: Purchase) => {
+    const matches = (p: HubPurchase) => {
       if (notInstalledOnly && p.installed) return false;
       const roots = rootsFor(p);
       if (category === OTHER_CATEGORY) {
@@ -296,7 +305,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
 
   /** Which mod type a purchase is, from its catalog category. */
   const typeFor = useCallback(
-    (p: Purchase): ModType => {
+    (p: HubPurchase): ModType => {
       const names = (p.listing?.categoryNames ?? []).join(" ").toLowerCase();
       const types = modTypesFor(game.id);
       return (
@@ -309,7 +318,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   );
 
   const installOf = useCallback(
-    (files: ShopItem[]) => {
+    (files: HubItem[]) => {
       for (const f of files) {
         const it = activeFor(f.slug);
         if (it) return it;
@@ -320,7 +329,7 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   );
 
   const progressOf = useCallback(
-    (files: ShopItem[]) => {
+    (files: HubItem[]) => {
       const it = installOf(files);
       return it && it.total ? (it.received ?? 0) / it.total : null;
     },
@@ -328,8 +337,8 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
   );
 
   const [pending, setPending] = useState<{
-    purchase: Purchase;
-    file: ShopItem;
+    purchase: HubPurchase;
+    file: HubItem;
     modType: ModType;
     destOptions: DestOption[];
     suggestions: string[];
@@ -337,13 +346,13 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
     initialFolder: string;
   } | null>(null);
   /** Set instead of `pending` when the thing is already installed — confirm first. */
-  const [confirming, setConfirming] = useState<{ purchase: Purchase; file: ShopItem } | null>(
+  const [confirming, setConfirming] = useState<{ purchase: HubPurchase; file: HubItem } | null>(
     null,
   );
 
   /** Work out where a purchase could go, then let the user choose — Browse's flow exactly. */
   const askWhere = useCallback(
-    async (purchase: Purchase, file: ShopItem) => {
+    async (purchase: HubPurchase, file: HubItem) => {
       const modType = typeFor(purchase);
       const installedThere = await scanLibrary(modType.installSubpath).catch(() => []);
       const dest = buildDestinations(modType, purchase.product, installedThere);
@@ -364,10 +373,18 @@ export default function HubPurchases({ refreshKey }: HubPurchasesProps) {
     [game, typeFor],
   );
 
+  /**
+   * The card and the detail rail are the shop's, so they hand back a `ShopItem` — the widest
+   * thing they know about. The row is looked up again in the purchase it came from rather than
+   * asserted across, because everything below needs the two fields that says whether the file
+   * is the store's to serve, and a cast would only hide their absence until the download.
+   */
   const install = useCallback(
-    (purchase: Purchase, file: ShopItem) => {
-      if (purchase.installed) setConfirming({ purchase, file });
-      else void askWhere(purchase, file);
+    (purchase: HubPurchase, file: { id: number }) => {
+      const owned = purchase.files.find((f) => f.id === file.id) ?? purchase.files[0];
+      if (!owned) return;
+      if (purchase.installed) setConfirming({ purchase, file: owned });
+      else void askWhere(purchase, owned);
     },
     [askWhere],
   );

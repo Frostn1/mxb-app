@@ -19,7 +19,7 @@ import {
   shopInstall,
   type ShopItem,
 } from "../api/mods";
-import { hubInstall } from "../api/hub";
+import { hubInstall, type HubItem } from "../api/hub";
 import type { DownloadSource, InstallStage, ReloadOutcome } from "../types";
 import { useDownloads } from "./Downloads";
 import { useDropReview } from "./DropReview";
@@ -36,7 +36,7 @@ export type InstallSource =
   | { kind: "download"; url: string; host: string }
   | { kind: "import"; path: string }
   | { kind: "shop"; item: ShopItem }
-  | { kind: "hub"; item: ShopItem };
+  | { kind: "hub"; item: HubItem };
 
 interface StartParams {
   slug: string;
@@ -175,7 +175,7 @@ interface InstallContextValue {
   startPendingInstall: (p: PendingInstall) => void;
   /** A purchase from the shop, queued exactly like any other install. */
   startShopInstall: (p: Omit<StartParams, "source"> & { item: ShopItem }) => void;
-  startHubInstall: (p: Omit<StartParams, "source"> & { item: ShopItem }) => void;
+  startHubInstall: (p: Omit<StartParams, "source"> & { item: HubItem }) => void;
   /** Clear a finished (done/error) install card. */
   clear: () => void;
 }

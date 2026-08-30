@@ -23,6 +23,24 @@ import type { TKey } from "../i18n/core";
  * hide this half. Installing needs the user's own sign-in, and nothing else.
  */
 
+/**
+ * One purchased file. A `ShopItem` in shape, so the shop's purchase card and detail rail read
+ * it unchanged, plus the two things only this store needs.
+ *
+ * Declared here rather than in `types/` because `ShopItem` itself lives in `api/mods.ts`.
+ */
+export interface HubItem extends ShopItem {
+  /**
+   * The store handed this file off to somebody else. WooCommerce allows any URL as a
+   * product's file and MXB Hub uses that for a number of its free mods, which are MediaFire
+   * links. Those get resolved and fetched like any Browse download, and deliberately
+   * **without** the user's store session.
+   */
+  external: boolean;
+  /** The file host, when `external`. Empty otherwise. */
+  host: string;
+}
+
 /** Matches `PER_PAGE` in `src-tauri/src/mods/hub.rs`. */
 export const HUB_PAGE_SIZE = 24;
 
@@ -95,7 +113,7 @@ export function onHubAuth(handler: (ok: boolean) => void) {
  * lookup is exact and cheap enough to do on the same round trip.
  */
 export interface HubDownloads {
-  items: ShopItem[];
+  items: HubItem[];
   listings: (import("../types").HubMod | null)[];
 }
 
@@ -105,7 +123,7 @@ export function hubMyDownloads(): Promise<HubDownloads> {
 
 /** Download a file this account owns and install it where the caller chose. */
 export function hubInstall(
-  item: ShopItem,
+  item: HubItem,
   subpath: string,
   destFolder: string,
 ): Promise<void> {

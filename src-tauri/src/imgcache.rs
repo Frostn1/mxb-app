@@ -406,6 +406,12 @@ fn client_for(url: &str) -> Option<&'static reqwest::Client> {
         catalog(&MXB, &crate::mxb_session::MXB_SITE)
     } else if under(crate::mxb_session::GPB_SITE.domain) {
         catalog(&GPB, &crate::mxb_session::GPB_SITE)
+    } else if under("mxb-hub.com") {
+        // MXB Hub's images are behind the same rate-based robot challenge as its API, so they
+        // have to be fetched with the client that holds the clearance. Sending them through
+        // the store client below is what left the grid full of placeholder icons: every
+        // thumbnail came back as a 202 of challenge HTML.
+        crate::mods::hub::client().ok()
     } else {
         SHOP.get_or_init(|| crate::shop_catalog_session::client_builder().build().ok())
             .as_ref()
@@ -421,6 +427,15 @@ async fn fetch(url: &str) -> Option<Vec<u8>> {
         .send()
         .await
         .ok()?;
+    // A robot challenge is a `202` full of HTML, which `is_success` waves through — so
+    // without this the cache would happily store a web page under an image's name and keep
+    // serving it long after the challenge was cleared. Refused rather than retried: the
+    // catalog request alongside it is what triggers the handshake, and a page of thumbnails
+    // all trying to solve the same challenge is the request storm that caused it.
+    if crate::mods::hub::challenged(&resp) {
+        log::debug!("imgcache: {url} came back as a robot challenge — not caching it");
+        return None;
+    }
     if !resp.status().is_success() {
         return None;
     }

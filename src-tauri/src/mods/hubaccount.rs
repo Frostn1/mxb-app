@@ -56,8 +56,20 @@ pub struct HubItem {
     pub category_id: u32,
     /// Likewise `None` here and filled from the catalog, which is the only side that knows.
     pub author: Option<String>,
-    /// The signed WooCommerce download URL. Only ever an `https` URL on the store itself.
+    /// Where the file comes from. Either a signed WooCommerce `?download_file=` URL on the
+    /// store, or — see [`external`] — a link to a file host.
     pub download_url: String,
+    /// True when the store hands the file off to somebody else.
+    ///
+    /// WooCommerce lets a downloadable product's "file" be any URL, and MXB Hub uses that: a
+    /// number of the free mods are MediaFire links rather than uploads. It matters for two
+    /// reasons, which is why it is recorded rather than sniffed at install time. The URL has
+    /// to be *resolved* (a MediaFire folder is a web page, not a file), and it must be fetched
+    /// **without** the user's session — a store-issued link is the only kind that has any
+    /// business carrying their cookies.
+    pub external: bool,
+    /// The file host, for the resolver and for the download history. Empty when not external.
+    pub host: String,
 }
 
 /// Fetch and parse the signed-in account's downloads.
@@ -66,6 +78,16 @@ pub async fn fetch_my_downloads(app: &AppHandle, client: &Client) -> anyhow::Res
         .get(format!("{HUB_BASE}{DOWNLOADS_PATH}"))
         .send()
         .await?;
+    // The account page is behind the same rate-based robot challenge as everything else, and
+    // it arrives as a `202` of HTML — which parses to zero rows and would otherwise read as
+    // "you own nothing". Reported as the challenge it is, so the command layer answers it.
+    if super::hub::challenged(&resp) {
+        return Err(super::Blocked::new(
+            None,
+            "MXB Hub is asking the app to prove it isn't a robot.",
+        )
+        .into());
+    }
     let status = resp.status();
     let html = resp.text().await?;
 
@@ -155,6 +177,8 @@ struct Row {
     file_label: String,
     link: String,
     download_url: String,
+    external: bool,
+    host: String,
 }
 
 /// The themed table (and the `<ul>` some themes render instead): a product cell and a file
@@ -165,7 +189,14 @@ fn parse_table(doc: &Html) -> Vec<Row> {
         Err(_) => return vec![],
     };
     let product_sel = Selector::parse(".download-product, .woocommerce-table__product-name").unwrap();
-    let file_sel = Selector::parse("a[href*=\"download_file=\"]").unwrap();
+    // Deliberately wider than `download_file=`. A product whose file is hosted elsewhere links
+    // straight out to it, so keying on that parameter alone made those rows invisible — the
+    // mod simply wasn't in the grid, with nothing to say why.
+    let file_sel = Selector::parse(
+        "a.woocommerce-MyAccount-downloads-file[href], td.download-file a[href], \
+         .download-file a[href], a[href*=\"download_file=\"]",
+    )
+    .unwrap();
 
     let mut rows = Vec::new();
     for row in doc.select(&row_sel) {
@@ -178,7 +209,7 @@ fn parse_table(doc: &Html) -> Vec<Row> {
         // cell) is the copy that survives. An ancestor check here looked cheaper and was
         // wrong: every `<tr>` has a `<table>` above it that also contains the link, so it
         // rejected the entire table and quietly fell through to the text-only fallback.
-        let Some(download_url) = safe_download_url(anchor.value().attr("href").unwrap_or("")) else {
+        let Some(file) = download_link(anchor.value().attr("href").unwrap_or("")) else {
             continue;
         };
 
@@ -197,7 +228,9 @@ fn parse_table(doc: &Html) -> Vec<Row> {
             product,
             file_label: text(&anchor),
             link,
-            download_url,
+            download_url: file.url,
+            external: file.external,
+            host: file.host,
         });
     }
     rows
@@ -207,15 +240,20 @@ fn parse_table(doc: &Html) -> Vec<Row> {
 /// split — the link text becomes the name — but a grid of correctly-named, installable files
 /// beats an empty one.
 fn parse_any_links(doc: &Html) -> Vec<Row> {
-    let sel = Selector::parse("a[href*=\"download_file=\"]").unwrap();
+    let sel = Selector::parse(
+        "a.woocommerce-MyAccount-downloads-file[href], a[href*=\"download_file=\"]",
+    )
+    .unwrap();
     doc.select(&sel)
         .filter_map(|a| {
-            let download_url = safe_download_url(a.value().attr("href").unwrap_or(""))?;
+            let file = download_link(a.value().attr("href").unwrap_or(""))?;
             Some(Row {
                 product: String::new(),
                 file_label: text(&a),
                 link: String::new(),
-                download_url,
+                download_url: file.url,
+                external: file.external,
+                host: file.host,
             })
         })
         .collect()
@@ -266,6 +304,8 @@ fn finish(rows: Vec<Row>) -> Vec<HubItem> {
             image: None,
             category_id: 0,
             author: None,
+            external: row.external,
+            host: row.host.clone(),
             download_url: row.download_url.clone(),
         });
     }
@@ -336,16 +376,55 @@ fn text(el: &ElementRef) -> String {
         .join(" ")
 }
 
-/// A download URL we're willing to stream from: `https`, on the store, and carrying the
-/// `download_file` parameter that makes it a file rather than a page.
+/// One row's file, and whether the store is serving it or handing it off.
+struct FileLink {
+    url: String,
+    external: bool,
+    host: String,
+}
+
+/// What a download button on the account page points at.
 ///
-/// This is the one string on the page that becomes a network request with the user's session
-/// attached, so it is checked rather than trusted. A row pointing anywhere else is dropped.
-fn safe_download_url(raw: &str) -> Option<String> {
-    let url = on_the_store(raw)?;
-    url.query_pairs()
-        .any(|(k, _)| k == "download_file")
-        .then(|| url.to_string())
+/// Two shapes are legitimate, and they are *not* interchangeable:
+///
+///  - The store's own signed `?download_file=…&order=…&key=…` URL. Fetched with the user's
+///    session, because that is what authorises it.
+///  - A link to a file host, which WooCommerce allows for any downloadable product and which
+///    MXB Hub uses for a number of its free mods. Fetched with the ordinary download client
+///    and resolved first — a MediaFire *folder* is a web page listing files, not a file.
+///
+/// The distinction is the security-relevant part. Sending the user's store cookies to whatever
+/// third-party URL happens to be on the page is exactly the mistake to avoid, so the answer
+/// carries which kind it is rather than leaving the caller to guess from the host.
+///
+/// Anything that isn't `https` is refused outright, as is a store URL that is plainly a page
+/// rather than a file.
+fn download_link(raw: &str) -> Option<FileLink> {
+    let decoded = html_escape::decode_html_entities(raw.trim()).into_owned();
+    let url = reqwest::Url::parse(&decoded).ok()?;
+    if url.scheme() != "https" {
+        return None;
+    }
+    let host = url.host_str()?.to_ascii_lowercase();
+
+    if host == "mxb-hub.com" || host.ends_with(".mxb-hub.com") {
+        // On the store, only a signed file link counts. Without this the "View" and product
+        // links sitting in the same table would each be offered as a download.
+        return url
+            .query_pairs()
+            .any(|(k, _)| k == "download_file")
+            .then(|| FileLink {
+                url: url.to_string(),
+                external: false,
+                host: String::new(),
+            });
+    }
+
+    Some(FileLink {
+        url: url.to_string(),
+        external: true,
+        host,
+    })
 }
 
 fn safe_product_url(raw: &str) -> Option<String> {
@@ -505,32 +584,48 @@ mod tests {
         assert_eq!(items[1].slug, "paint-pkz-2");
     }
 
-    /// The security boundary: these URLs are fetched with the user's session attached.
+    /// The security boundary. A store link is fetched with the user's session attached; an
+    /// off-store one must never be, and the flag is what keeps those two apart.
     #[test]
-    fn only_signed_store_urls_are_downloadable() {
-        assert!(safe_download_url("https://shop.mxb-hub.com/?download_file=1&key=k").is_some());
+    fn store_links_and_handed_off_links_are_told_apart() {
+        let store = download_link("https://shop.mxb-hub.com/?download_file=1&key=k").unwrap();
+        assert!(!store.external);
+        assert!(store.host.is_empty());
+
+        // WooCommerce lets a product's file live anywhere, and MXB Hub uses that for some of
+        // its free mods. Kept, but marked — never fetched with the store's cookies.
+        let away = download_link("https://www.mediafire.com/folder/abc123/paint").unwrap();
+        assert!(away.external);
+        assert_eq!(away.host, "www.mediafire.com");
+
         for bad in [
-            // Right shape, wrong host.
-            "https://evil.com/?download_file=1&key=k",
-            "https://shop.mxb-hub.com.evil.com/?download_file=1",
-            // Right host, not a file.
+            // On the store, but a page rather than a file.
             "https://shop.mxb-hub.com/my-account/",
+            "https://shop.mxb-hub.com/product/a-paint/",
             // Not https.
-            "http://shop.mxb-hub.com/?download_file=1",
+            "http://www.mediafire.com/file/x",
             "javascript:alert(1)",
             "",
         ] {
-            assert!(safe_download_url(bad).is_none(), "{bad} must not be downloadable");
+            assert!(download_link(bad).is_none(), "{bad} must not be downloadable");
         }
     }
 
+    /// A free mod whose file is a MediaFire folder has to reach the grid. Dropping it — which
+    /// is what keying on `download_file=` alone did — loses the mod with nothing said.
     #[test]
-    fn a_row_pointing_off_the_store_is_dropped_not_rendered() {
+    fn an_external_file_still_produces_a_row() {
         let html = r#"<table><tr>
-            <td class="download-product">Trojan</td>
-            <td class="download-file"><a href="https://evil.com/?download_file=1">Free stuff</a></td>
+            <td class="download-product"><a href="https://shop.mxb-hub.com/product/red-bud-kxf-paint/">RED BUD KXF [PAINT]</a></td>
+            <td class="download-file"><a class="woocommerce-MyAccount-downloads-file"
+               href="https://www.mediafire.com/folder/abc123/redbud">RED BUD KXF</a></td>
         </tr></table>"#;
-        assert!(parse_downloads(html).is_empty());
+        let items = parse_downloads(html);
+        assert_eq!(items.len(), 1);
+        assert!(items[0].external);
+        assert_eq!(items[0].host, "www.mediafire.com");
+        assert_eq!(items[0].slug, "red-bud-kxf-paint");
+        assert_eq!(items[0].product, "RED BUD KXF [PAINT]");
     }
 
     #[test]

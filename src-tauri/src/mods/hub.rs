@@ -18,10 +18,13 @@
 //! are converted here, once, so nothing downstream has to remember that.
 
 use super::shop_catalog::{parse_date_str, safe_image_url, sanitize_html, ShopPrice};
-use crate::hub_session::HUB_BASE;
-use reqwest::Client;
+use super::Blocked;
+use crate::cookie_session;
+use crate::hub_session::{HUB_BASE, HUB_SITE};
+use reqwest::cookie::Jar;
+use reqwest::{Client, Response};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Matches `HUB_PAGE_SIZE` in `src/api/hub.ts`.
@@ -219,25 +222,78 @@ struct ApiDates {
 
 // ───────────────────────────────── the client ─────────────────────────────────
 
+/// The clearance jar.
+///
+/// Holds whatever cookies [`crate::hub_clearance`] earned in a real browser, and nothing else —
+/// this is emphatically *not* the signed-in jar. Keeping the two apart is what lets a catalog
+/// request stay anonymous: browsing must work whether or not anyone has ever signed in, and a
+/// public listing has no business carrying the user's session. The account half lives in
+/// [`crate::hub_session`], which gets its own copy of the same clearance.
+pub(crate) fn jar() -> &'static Arc<Jar> {
+    static JAR: std::sync::OnceLock<Arc<Jar>> = std::sync::OnceLock::new();
+    JAR.get_or_init(|| Arc::new(Jar::default()))
+}
+
+/// Take on a clearance earned in the WebView, so this client stops being challenged.
+pub fn adopt_clearance(cookies: &[(String, String)]) -> anyhow::Result<()> {
+    cookie_session::fill(jar(), &HUB_SITE, cookies)
+}
+
 /// One client for the session — connection reuse matters most for the search box, where a fast
 /// typist would otherwise pay a TLS handshake per debounced keystroke.
 ///
-/// Note what it is *not*: the signed-in client. This one carries no cookies at all, so a
-/// catalog request can never leak the user's session to the storefront, and browsing works
-/// whether or not anyone has ever signed in. The account half lives in [`crate::hub_session`].
-fn client() -> anyhow::Result<&'static Client> {
+/// Public because the image cache fetches this store's thumbnails with it: they are challenged
+/// by exactly the same filter as the API, so serving them through any other client means a
+/// grid of blank cards the moment the store decides we are a robot.
+pub fn client() -> anyhow::Result<&'static Client> {
     static CLIENT: std::sync::OnceLock<Result<Client, String>> = std::sync::OnceLock::new();
     CLIENT
         .get_or_init(|| {
-            Client::builder()
-                .user_agent(crate::shop_session::UA)
-                .connect_timeout(Duration::from_secs(15))
-                .timeout(Duration::from_secs(45))
+            cookie_session::client_builder(&HUB_SITE, jar().clone())
                 .build()
                 .map_err(|e| format!("{e:#}"))
         })
         .as_ref()
         .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// Whether this response is SiteGround's robot challenge rather than what we asked for.
+///
+/// The store is on SiteGround, whose bot protection fires on **request rate** — which is why
+/// it is invisible to a few hand probes and perfectly reproducible the moment a grid asks for
+/// twenty-four thumbnails at once. What comes back is a `202` carrying an HTML "Robot
+/// Challenge Screen" that computes a proof of work in a Web Worker, so no HTTP client can
+/// answer it; only a real browser can. Detected here so it surfaces as something the command
+/// layer can act on, rather than as "expected value at line 1 column 1".
+///
+/// Deliberately checked on the *response*, before the body is parsed: a challenge served in
+/// place of an image is a 202 full of HTML, and caching that would poison the thumbnail cache
+/// with a page.
+pub fn challenged(resp: &Response) -> bool {
+    if resp.headers().contains_key("sg-captcha") {
+        return true;
+    }
+    // A 202 for a GET is already odd; a 202 of HTML where JSON or an image was asked for is
+    // the challenge. Status alone is not enough — the header above is the reliable marker, and
+    // this is the belt to its braces.
+    let html = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("text/html"));
+    resp.status().as_u16() == 202 && html
+}
+
+/// The challenge as an error the command layer knows to run the handshake for.
+///
+/// `None` for the status, which is what [`Blocked::clearable`] reads as "a browser could fix
+/// this" — and here it genuinely can, because the challenge is solved by running its script.
+fn blocked() -> anyhow::Error {
+    Blocked::new(
+        None,
+        "MXB Hub is asking the app to prove it isn't a robot.",
+    )
+    .into()
 }
 
 fn store_api(path: &str) -> String {
@@ -272,6 +328,9 @@ pub async fn search(
     }
 
     let resp = req.send().await?;
+    if challenged(&resp) {
+        return Err(blocked());
+    }
     let status = resp.status();
     // Past the last page WooCommerce answers 400 `rest_post_invalid_page_number` rather than an
     // empty list. That is the end of the grid, not an error to put on screen.
@@ -314,6 +373,9 @@ pub async fn detail(id: u64) -> anyhow::Result<HubModDetail> {
         .get(store_api(&format!("products/{id}")))
         .send()
         .await?;
+    if challenged(&resp) {
+        return Err(blocked());
+    }
     if !resp.status().is_success() {
         anyhow::bail!("MXB Hub answered {} for product {id}", resp.status());
     }
@@ -361,6 +423,9 @@ pub async fn by_slugs(slugs: &[String]) -> anyhow::Result<Vec<HubMod>> {
         ])
         .send()
         .await?;
+    if challenged(&resp) {
+        return Err(blocked());
+    }
     if !resp.status().is_success() {
         anyhow::bail!("MXB Hub answered {} for a product lookup", resp.status());
     }
@@ -389,6 +454,9 @@ pub async fn categories() -> anyhow::Result<Vec<HubCategory>> {
         .query(&[("per_page", "100")])
         .send()
         .await?;
+    if challenged(&resp) {
+        return Err(blocked());
+    }
     if !resp.status().is_success() {
         anyhow::bail!("MXB Hub answered {} for the categories", resp.status());
     }
@@ -493,6 +561,9 @@ async fn fill_dates(items: &mut [HubMod]) {
             .send()
             .await
             .ok()?;
+        if challenged(&resp) {
+            return None;
+        }
         resp.json::<Vec<ApiDates>>().await.ok()
     }
     .await;

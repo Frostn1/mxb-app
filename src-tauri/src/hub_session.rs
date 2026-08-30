@@ -22,7 +22,7 @@ pub const HUB_BASE: &str = "https://shop.mxb-hub.com";
 /// The store is one host — `mxbhub.com` and `mxb-hub.com` both redirect here — so the cookie
 /// domain is the full subdomain rather than the registrable one. Scoping it wider would put
 /// the session cookie on requests to any other `mxb-hub.com` host we ever add.
-const SITE: Site = Site {
+pub const HUB_SITE: Site = Site {
     base: HUB_BASE,
     domain: "shop.mxb-hub.com",
     file: "hub_session.json",
@@ -59,13 +59,45 @@ impl HubSession {
 
 fn build_client(cookies: &Cookies) -> anyhow::Result<Client> {
     let jar = Arc::new(Jar::default());
-    cookie_session::fill(&jar, &SITE, cookies)?;
-    Ok(cookie_session::client_builder(&SITE, jar).build()?)
+    cookie_session::fill(&jar, &HUB_SITE, cookies)?;
+    Ok(cookie_session::client_builder(&HUB_SITE, jar).build()?)
+}
+
+/// Rebuild the signed-in client with a clearance folded in.
+///
+/// The account half is challenged by the same filter as the catalog, and the two keep separate
+/// jars — so a clearance earned for browsing has to be handed over explicitly or every
+/// purchases read after one goes on failing. Cookies captured from the WebView are a superset:
+/// the login cookie and the clearance arrive together.
+pub fn adopt_clearance(app: &AppHandle, cookies: &Cookies) {
+    let state = app.state::<HubSession>();
+    if !state.logged_in() {
+        return;
+    }
+    let Some(stored) = cookie_session::read(app, &HUB_SITE) else {
+        return;
+    };
+    let mut merged = stored;
+    for (name, value) in cookies {
+        if let Some(slot) = merged.iter_mut().find(|(n, _)| n == name) {
+            slot.1 = value.clone();
+        } else {
+            merged.push((name.clone(), value.clone()));
+        }
+    }
+    match build_client(&merged) {
+        Ok(client) => {
+            let _ = cookie_session::write(app, &HUB_SITE, &merged);
+            state.set(Some(client));
+            log::info!("folded an MXB Hub clearance into the signed-in session");
+        }
+        Err(e) => log::warn!("could not rebuild the MXB Hub session with a clearance: {e:#}"),
+    }
 }
 
 pub fn set_session(app: &AppHandle, cookies: Cookies) -> anyhow::Result<()> {
     let client = build_client(&cookies)?;
-    cookie_session::write(app, &SITE, &cookies)?;
+    cookie_session::write(app, &HUB_SITE, &cookies)?;
     app.state::<HubSession>().set(Some(client));
     Ok(())
 }
@@ -76,7 +108,7 @@ pub fn set_session(app: &AppHandle, cookies: Cookies) -> anyhow::Result<()> {
 /// would put a network call on the launch path. A dead cookie surfaces on the first read as the
 /// login form, which [`crate::mods::hubaccount`] turns into "sign in again".
 pub fn load_session(app: &AppHandle) {
-    let Some(cookies) = cookie_session::read(app, &SITE) else {
+    let Some(cookies) = cookie_session::read(app, &HUB_SITE) else {
         return;
     };
     if !is_authenticated(&cookies) {
@@ -95,7 +127,7 @@ pub fn load_session(app: &AppHandle) {
 /// Drop the session because the *store* said it is over — the downloads page came back as the
 /// login form. Nothing is revoked, because there is nothing left to revoke.
 pub fn forget(app: &AppHandle) {
-    cookie_session::remove(app, &SITE);
+    cookie_session::remove(app, &HUB_SITE);
     app.state::<HubSession>().set(None);
 }
 
@@ -108,7 +140,7 @@ pub fn forget(app: &AppHandle) {
 /// in the WebView's jar inert: the next sign-in lands on the login form, not on the account.
 pub async fn clear_session(app: &AppHandle) {
     let client = app.state::<HubSession>().client();
-    cookie_session::remove(app, &SITE);
+    cookie_session::remove(app, &HUB_SITE);
     app.state::<HubSession>().set(None);
 
     let Some(client) = client else { return };
@@ -121,7 +153,7 @@ pub async fn clear_session(app: &AppHandle) {
 }
 
 pub fn cookies_from_window(window: &WebviewWindow) -> Cookies {
-    cookie_session::cookies_from_window(window, &SITE)
+    cookie_session::cookies_from_window(window, &HUB_SITE)
 }
 
 pub fn is_authenticated(cookies: &[(String, String)]) -> bool {
@@ -173,7 +205,7 @@ mod tests {
         use reqwest::cookie::CookieStore;
 
         let jar = Jar::default();
-        cookie_session::fill(&jar, &SITE, &[("wordpress_logged_in_9f2".into(), "x".into())])
+        cookie_session::fill(&jar, &HUB_SITE, &[("wordpress_logged_in_9f2".into(), "x".into())])
             .unwrap();
 
         assert!(jar
