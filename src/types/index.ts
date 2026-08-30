@@ -188,6 +188,11 @@ export interface ModDetail {
   images: string[];
   /** e.g. "Beta 19", when the page states it. */
   version: string | null;
+  /** Who the catalog credits the mod to, from the byline on its page. `null` when the
+   *  page carries none — same meaning as `ModSummary.author`. */
+  author: string | null;
+  /** The author's profile page on the catalog, for the byline link. */
+  authorUrl: string | null;
   downloads: DownloadOption[];
   /**
    * The post's category names ("2023 KTM 450 SX-F OEM", "Liveries", "KTM"). A livery is

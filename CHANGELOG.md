@@ -29,6 +29,17 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
+## 2026-08-30
+
+### Added
+
+- **A mod's page now says who made it.** Open a track, a bike or a set of gear and the
+  creator's name sits directly under the title, exactly as the site credits it. Click it to
+  open their page on the catalog, which is where the rest of their work is. The name is read
+  off the mod's own page rather than asked for over the catalog's API — the API stopped
+  answering who posted anything some time ago, which is why the browse cards have been
+  showing a date and nothing else.
+
 ## 2026-08-29 — v0.11.3 — A track viewer that draws the whole track
 
 ### Added
