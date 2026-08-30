@@ -377,6 +377,8 @@ export const es: Translation = {
   // ── Visor 3D ───────────────────────────────────────────────────────────────
   "viewer.preview3d": "Vista previa 3D",
   "viewer.expand": "Ampliar",
+  "viewer.fullscreen": "Pantalla completa",
+  "viewer.exitFullscreen": "Salir de pantalla completa",
   "viewer.paint": "Gráficos",
   "viewer.tyres": "Neumáticos",
   "viewer.tyresOwn": "Los de la moto",
@@ -1386,6 +1388,20 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0112.hero.title":
+    "Un pack de motos se instala como las motos que lleva dentro",
+  "showcase.v0112.hero.body":
+    "El pack OEM son 54 m\u00e1quinas en un archivo de 3,8 GB, y hasta ahora llegaba como una sola fila que dec\u00eda \u00abCarpeta de mods\u00bb: todo o nada. Ahora aparece tal como est\u00e1 hecho: cada moto con su nombre y su clase reales, con su casilla. Coge las cuatro con las que corres y deja las otras cincuenta.",
+  "showcase.v0112.fullscreen":
+    "La vista 3D del Dise\u00f1ador se abre a pantalla completa: un bot\u00f3n llena la ventana con el modelo que est\u00e1s pintando.",
+  "showcase.v0112.review":
+    "Una descarga que resulta contener varios mods se detiene y te ense\u00f1a qu\u00e9 lleva dentro antes de que nada llegue a tu carpeta de mods.",
+  "showcase.v0112.paint":
+    "Un paint que ofrece un archivo por m\u00e1quina instala ahora el de la moto que elegiste, no el primero de la p\u00e1gina.",
+  "showcase.v0112.speed":
+    "La hoja de revisi\u00f3n se abre en aproximadamente un segundo con las motos OEM instaladas, cuando antes tardaba casi veinte.",
+  "showcase.v0112.window":
+    "Una ventana en negro al arrancar ya no puede atraparte: no aparece hasta haber dibujado algo y siempre tiene una forma de cerrarse.",
   "showcase.v0111.hero.title":
     "Los cambios de modelo protegidos se abren en 3D",
   "showcase.v0111.hero.body":

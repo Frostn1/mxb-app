@@ -16,6 +16,7 @@ import type {
 } from "../../types";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { useT } from "../../i18n/context";
+import { reportRenderer } from "../../lib/glInfo";
 
 /** The terrain is scaled to sit this many units across, whatever its real size. */
 const VIEW_SPAN = 10;
@@ -1146,6 +1147,7 @@ export function TrackViewer({
           dpr={[1, 1.5]}
           camera={{ position: [0, 7.5, 11], fov: 45, near: 0.01, far: 200 }}
           onCreated={({ gl, invalidate }) => {
+            reportRenderer(gl, "track-viewer");
             gl.domElement.addEventListener(
               "webglcontextlost",
               (e) => {

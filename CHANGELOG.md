@@ -154,6 +154,19 @@ whichever release turns it on.
   A track carrying no scenery is left alone rather than reported as a failure; some ship none
   at all.
 
+### Changed
+
+- **The log now records which GPU the 3D views are drawing on.** Both viewers draw through
+  the graphics card, but a Windows machine with a driver Windows doesn't trust drops them to
+  a software renderer instead — same picture, a fraction of the speed — and nothing said so.
+  Opening a 3D view now writes the adapter it got into the app log, flagged as a warning when
+  it turns out to be software, so "the viewer is slow" can be answered from the log a player
+  already sends.
+
+## 2026-08-29 — v0.11.2 — Install a pack one bike at a time, and a preview that fills the window
+
+### Added
+
 - **A bike pack installs as the bikes inside it.** The OEM bike pack is 54 machines and a
   tyre set in one 3.8 GB archive, and until now it arrived as a single row reading "Mods
   folder" — all of it or none of it, with no way to see what was in there. It is now listed
@@ -175,7 +188,22 @@ whichever release turns it on.
   file gets. An ordinary single-mod download is untouched — it installs exactly as before,
   with nothing extra to click.
 
+- **The Designer's 3D preview opens fullscreen.** The model sits in a column beside the
+  canvas — the right size while you are drawing on it, and far too small when you want to look
+  at what you have drawn. The button in its corner fills the window with it, with the same
+  tyre, gear and hide toggles it has in the panel; the button again or Escape puts it back.
+  The editor is untouched behind it — same sheets, same layers, nothing saved or reloaded to
+  take a proper look. Asked for by GalpinMX.
+
 - **Sly** credited on Settings → Supporters.
+
+### Changed
+
+- **`MXB_SAFE_GRAPHICS=1` now works on Windows too.** It takes the GPU out of the app's
+  browser, the same lever it already pulled on Linux — the thing to try when a window comes
+  up black and stays that way. The app also records how far the page got loading, and which
+  graphics settings were in force, so the next report of a blank window can be read straight
+  from the log instead of guessed at.
 
 ### Fixed
 
@@ -193,6 +221,27 @@ whichever release turns it on.
   53 OEM bikes installed that was 18.9 seconds of nothing happening before the sheet drew, on
   every single drop. It is 1.2 seconds now. The same read backs the bike pickers throughout
   the app, so they all get quicker.
+
+- **The 3D viewer no longer hoards a bike's textures each time it redraws one.** Two things
+  asking for the same bike at the same moment — a preview panel and a dialog drawing it
+  together, or a picker that re-asks before the first answer lands — read and decoded it from
+  scratch twice over, and the copy that lost the race left its textures behind with nothing
+  able to free them. Three passes over one bike put 200 MB in the texture store and none of
+  it came back. Far enough down that road the store starts dropping its oldest textures to
+  stay under its ceiling, and the oldest can be the bike you are looking at — which is how
+  parts of a bike turn grey for no reason. Two callers that want the same bike now share one
+  read: the second waits for the first and takes its answer, so it arrives in milliseconds
+  instead of seconds. Found in a player's log.
+
+- **A black window on startup can no longer trap you.** On a cold boot WebView2 sometimes
+  takes a long time to draw its first frame — and occasionally never draws one at all. The
+  app window appeared anyway, empty and black, and because our title bar is drawn by the
+  page there was no close button in it and no title bar to close it from. Alt+F4 only parked
+  it in the tray, where the process stayed alive and handed the same dead window back the
+  next time you opened the app; Task Manager was the only way out. The window now stays
+  hidden until it has actually drawn something, anything that shows it early gets a real
+  Windows title bar to close it by, and a window that never drew closes for good rather than
+  hiding in the tray. Reported by a player who found it after booting their PC.
 
 ## 2026-08-28 — v0.11.1 — Protected model swaps open in 3D
 

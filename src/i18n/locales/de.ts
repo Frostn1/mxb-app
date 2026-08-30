@@ -383,6 +383,8 @@ export const de: Translation = {
   // ── 3D-Ansicht ─────────────────────────────────────────────────────────────
   "viewer.preview3d": "3D-Vorschau",
   "viewer.expand": "Vergrößern",
+  "viewer.fullscreen": "Vollbild",
+  "viewer.exitFullscreen": "Vollbild beenden",
   "viewer.paint": "Design",
   "viewer.tyres": "Reifen",
   "viewer.tyresOwn": "Die des Bikes",
@@ -1399,6 +1401,20 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0112.hero.title":
+    "Ein Bike-Pack wird als die Bikes darin installiert",
+  "showcase.v0112.hero.body":
+    "Das OEM-Pack sind 54 Maschinen in einem 3,8-GB-Archiv, und bislang kam es als eine einzige Zeile mit der Aufschrift \u201eMods-Ordner\u201c \u2014 alles oder nichts. Jetzt steht es so da, wie es gebaut ist: jedes Bike mit echtem Namen und Klasse, mit Kontrollk\u00e4stchen. Nimm die vier, die du f\u00e4hrst, und lass die anderen f\u00fcnfzig liegen.",
+  "showcase.v0112.fullscreen":
+    "Die 3D-Vorschau im Designer \u00f6ffnet sich im Vollbild \u2014 ein Knopf f\u00fcllt das Fenster mit dem Modell, das du gerade lackierst.",
+  "showcase.v0112.review":
+    "Ein Download, der sich als mehrere Mods entpuppt, h\u00e4lt an und zeigt dir seinen Inhalt, bevor irgendetwas in deinem Mods-Ordner landet.",
+  "showcase.v0112.paint":
+    "Ein Paint mit einer Datei je Maschine installiert jetzt die f\u00fcr das gew\u00e4hlte Bike \u2014 nicht einfach die erste auf der Seite.",
+  "showcase.v0112.speed":
+    "Das Pr\u00fcffenster \u00f6ffnet sich mit installierten OEM-Bikes in etwa einer Sekunde statt in knapp zwanzig.",
+  "showcase.v0112.window":
+    "Ein schwarzes Fenster beim Start kann dich nicht mehr festsetzen: Es bleibt verborgen, bis es etwas gezeichnet hat, und l\u00e4sst sich immer schlie\u00dfen.",
   "showcase.v0111.hero.title":
     "Geschützte Modell-Swaps öffnen sich in 3D",
   "showcase.v0111.hero.body":

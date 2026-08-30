@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Box, Loader2, TriangleAlert } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Box, Loader2, Maximize2, Minimize2, TriangleAlert } from "lucide-react";
 import type * as THREE from "three";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogTitle } from "../../ui/dialog";
 import { ModelViewer } from "../../Viewer/ModelViewer";
 import { TyresPicker } from "../../Viewer/TyresPicker";
 import { useTyresPick } from "../../Viewer/tyresPick";
@@ -97,6 +98,27 @@ export function PreviewPanel({
   const [err, setErr] = useState<string | null>(null);
   const [hidden, setHidden] = useState<RiderPart["part"][]>([]);
   const [soloGear, setSoloGear] = useState(false);
+  // The same panel, drawn over the editor rather than beside it — see the render below.
+  const [full, setFull] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * A tab away from the Designer takes the fullscreen view with it.
+   *
+   * The Studio hides its panes rather than unmounting them, and this view is portalled to
+   * the document — so a Designer that went out of sight would leave its dialog covering
+   * whatever is now on screen.
+   */
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!full || !el) return;
+    // A pane switched away from is `display: none`, which reports a 0×0 box here.
+    const ro = new ResizeObserver(() => {
+      if (!el.offsetParent) setFull(false);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [full]);
 
   const isBike = isBikeKind(kind);
   const gearPart = gearPartOf(kind);
@@ -252,94 +274,146 @@ export function PreviewPanel({
   const unavailable = !game.caps.viewer || (isBike && !bikePreview);
   const why = !game.caps.viewer ? t("designer.noPreviewForGame") : t("designer.noBikePreview");
 
-  return (
-    <div
-      className={cn(
-        "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
-        className,
-      )}
-    >
-      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
-        <Box className="size-3.5 text-muted-foreground" />
-        {t("viewer.preview3d")}
-        {/* What you're looking at, and what's in the way of it. A kit is worn under a chest
-            protector, and judging a jersey you can only see half of is judging the protector. */}
-        {isBike && <TyresPicker pick={tyresPick} className="ml-auto" />}
-        {!isBike && (
-          <div className="ml-auto flex items-center gap-1">
-            {/* A helmet on a rider is a small thing across the canvas with half of it turned
-                away. This takes it off and fills the frame with it. The hide toggles go while
-                it's on — they'd be controls over a rider that isn't on screen. */}
-            {!!gearPart && !!model && (
+  /* What you're looking at, and what's in the way of it. A kit is worn under a chest
+     protector, and judging a jersey you can only see half of is judging the protector.
+
+     One set of controls for both sizes: the toggles are what the picture *is*, so a
+     fullscreen view that couldn't take the helmet off would be the smaller view. */
+  const controls = (
+    <>
+      {isBike && <TyresPicker pick={tyresPick} className="ml-auto" />}
+      {!isBike && (
+        <div className="ml-auto flex items-center gap-1">
+          {/* A helmet on a rider is a small thing across the canvas with half of it turned
+              away. This takes it off and fills the frame with it. The hide toggles go while
+              it's on — they'd be controls over a rider that isn't on screen. */}
+          {!!gearPart && !!model && (
+            <Chip
+              on={solo}
+              onClick={() => setSoloGear((s) => !s)}
+              title={t("designer.gearOnlyHint")}
+            >
+              {t("designer.gearOnly")}
+            </Chip>
+          )}
+          {!solo &&
+            HIDEABLE.map(({ part, label }) => (
               <Chip
-                on={solo}
-                onClick={() => setSoloGear((s) => !s)}
-                title={t("designer.gearOnlyHint")}
+                key={part}
+                on={!hidden.includes(part)}
+                onClick={() =>
+                  setHidden((h) =>
+                    h.includes(part) ? h.filter((p) => p !== part) : [...h, part],
+                  )
+                }
+                title={t(label)}
               >
-                {t("designer.gearOnly")}
+                {t(label)}
               </Chip>
-            )}
-            {!solo &&
-              HIDEABLE.map(({ part, label }) => (
-                <Chip
-                  key={part}
-                  on={!hidden.includes(part)}
-                  onClick={() =>
-                    setHidden((h) =>
-                      h.includes(part) ? h.filter((p) => p !== part) : [...h, part],
-                    )
-                  }
-                  title={t(label)}
-                >
-                  {t(label)}
-                </Chip>
-              ))}
-          </div>
-        )}
-        {loading && <Loader2 className="ml-1 size-3.5 animate-spin text-muted-foreground" />}
-      </div>
-      <div className="relative min-h-[240px] flex-1">
-        {unavailable ? (
-          <Message text={why} />
-        ) : soloEmpty && !loading ? (
-          <Message text={t("designer.noModelFound", { model })} />
-        ) : (
-          <>
-            <ModelViewer
-              mode={isBike ? "bike" : "rider"}
-              nodes={nodes}
-              highlight={highlight}
-              textures={textures}
-              riderParts={shownParts}
-              overrides={overrides}
-              frameToken={frameToken}
-              loading={loading}
-              // No stand-in body behind a solo piece: a rider that only appears when the gear
-              // fails to load reads as the gear, badly drawn.
-              noStandIn={solo}
-              className="absolute inset-0"
-            />
-            {/* The model on screen is the last one that loaded, so a failure has to keep
-                saying so rather than fading — otherwise it reads as "this is your paint". */}
-            {err && (
-              <div
-                title={err}
-                className="absolute right-2 top-2 flex max-w-[85%] items-center gap-1.5 rounded-md bg-destructive/90 px-2 py-1 text-[11px] text-destructive-foreground"
-              >
-                <TriangleAlert className="size-3.5 flex-none" />
-                <span className="truncate">{err}</span>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-      {/* Only true of the rider view. */}
-      {!!gearPart && !solo && (
-        <p className="border-t border-border px-3 py-1.5 text-[11px] leading-snug text-faint">
-          {t("designer.gearNote")}
-        </p>
+            ))}
+        </div>
       )}
-    </div>
+      {loading && <Loader2 className="ml-1 size-3.5 animate-spin text-muted-foreground" />}
+      {/* Not offered when there is nothing to draw: filling the window with the sentence
+          explaining why there's no preview is a bigger version of nothing. */}
+      {!unavailable && (
+        <button
+          type="button"
+          onClick={() => setFull((f) => !f)}
+          title={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
+          aria-label={t(full ? "viewer.exitFullscreen" : "viewer.fullscreen")}
+          className="ml-0.5 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+        </button>
+      )}
+    </>
+  );
+
+  const body = unavailable ? (
+    <Message text={why} />
+  ) : soloEmpty && !loading ? (
+    <Message text={t("designer.noModelFound", { model })} />
+  ) : (
+    <>
+      <ModelViewer
+        mode={isBike ? "bike" : "rider"}
+        nodes={nodes}
+        highlight={highlight}
+        textures={textures}
+        riderParts={shownParts}
+        overrides={overrides}
+        frameToken={frameToken}
+        loading={loading}
+        // No stand-in body behind a solo piece: a rider that only appears when the gear
+        // fails to load reads as the gear, badly drawn.
+        noStandIn={solo}
+        className="absolute inset-0"
+      />
+      {/* The model on screen is the last one that loaded, so a failure has to keep
+          saying so rather than fading — otherwise it reads as "this is your paint". */}
+      {err && (
+        <div
+          title={err}
+          className="absolute right-2 top-2 flex max-w-[85%] items-center gap-1.5 rounded-md bg-destructive/90 px-2 py-1 text-[11px] text-destructive-foreground"
+        >
+          <TriangleAlert className="size-3.5 flex-none" />
+          <span className="truncate">{err}</span>
+        </div>
+      )}
+    </>
+  );
+
+  // Only true of the rider view.
+  const note = !!gearPart && !solo && (
+    <p className="flex-none border-t border-border px-3 py-1.5 text-[11px] leading-snug text-faint">
+      {t("designer.gearNote")}
+    </p>
+  );
+
+  return (
+    <>
+      <div
+        ref={panelRef}
+        className={cn(
+          "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
+          className,
+        )}
+      >
+        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[12.5px] font-medium">
+          <Box className="size-3.5 text-muted-foreground" />
+          {t("viewer.preview3d")}
+          {controls}
+        </div>
+        {/* Empty while the fullscreen view has it: the canvas is moved rather than copied, so
+            there is only ever one model on a GPU and one camera to have turned. */}
+        <div className="relative min-h-[240px] flex-1">{!full && body}</div>
+        {note}
+      </div>
+
+      <Dialog open={full} onOpenChange={setFull}>
+        {/* Everything below the title bar rather than the whole screen: the window's own
+            minimise and close stay where they are, so filling the screen with a bike can
+            never be the thing that leaves someone without a way out. Escape closes it too. */}
+        <DialogContent
+          showClose={false}
+          // Nothing in here is typed into, so the focus ring the dialog would otherwise put
+          // on the first control reads as a stray selection over a picture.
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="left-0 top-[42px] flex h-[calc(100vh-42px)] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
+        >
+          <div className="flex flex-none items-center gap-2 border-b border-border px-3 py-2 text-[12.5px] font-medium">
+            <Box className="size-3.5 text-muted-foreground" />
+            <DialogTitle className="text-[12.5px] font-medium">
+              {t("viewer.preview3d")}
+            </DialogTitle>
+            {controls}
+          </div>
+          <div className="relative min-h-0 flex-1">{full && body}</div>
+          {note}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
