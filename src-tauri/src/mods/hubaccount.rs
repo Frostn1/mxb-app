@@ -160,7 +160,7 @@ struct Row {
 /// The themed table (and the `<ul>` some themes render instead): a product cell and a file
 /// cell, so the product name survives even when the link text is just "Download".
 fn parse_table(doc: &Html) -> Vec<Row> {
-    let row_sel = match Selector::parse("tr, li.woocommerce-MyAccount-downloads-file, li") {
+    let row_sel = match Selector::parse("tr, li") {
         Ok(sel) => sel,
         Err(_) => return vec![],
     };
@@ -240,22 +240,24 @@ fn finish(rows: Vec<Row>) -> Vec<HubItem> {
         }
     }
 
-    let mut items = Vec::new();
+    let mut items: Vec<HubItem> = Vec::new();
+    let mut slugs: HashSet<String> = HashSet::new();
     for row in rows {
         let multi = counts.get(row.product.as_str()).copied().unwrap_or(0) > 1;
-        let product = match (row.product.trim(), row.file_label.trim()) {
+        let label = row.file_label.trim();
+        let product = match (row.product.trim(), label) {
             ("", "") => "Untitled".to_string(),
             ("", label) => label.to_string(),
             (product, _) => product.to_string(),
         };
-        let title = match (row.product.trim().is_empty(), multi, row.file_label.trim()) {
+        let title = match (row.product.trim().is_empty(), multi, label) {
             (false, true, label) if !label.is_empty() => format!("{product} — {label}"),
             _ => product.clone(),
         };
 
         items.push(HubItem {
             id: items.len() as u64 + 1,
-            slug: slug_for(&row.link, &title),
+            slug: slug_for(&row.link, &product, label, multi, &mut slugs),
             title,
             product,
             file_label: row.file_label.trim().to_string(),
@@ -270,31 +272,45 @@ fn finish(rows: Vec<Row>) -> Vec<HubItem> {
     items
 }
 
-/// The product's own URL slug where the row linked to its page, else one made from the title.
+/// The product's own URL slug where the row linked to its page, else one made from its name.
 ///
 /// It has to be stable and unique per row: the install queue keys its cancel token, its staging
 /// directory and its progress card on this, so two purchases sharing a slug would cancel each
-/// other. A product with several files disambiguates on the file label, which is what the
-/// title already carries.
-fn slug_for(link: &str, title: &str) -> String {
-    let from_link = reqwest::Url::parse(link)
-        .ok()
-        .and_then(|u| {
-            u.path_segments()
-                .and_then(|s| s.filter(|p| !p.is_empty()).next_back())
-                .map(str::to_string)
-        })
-        .filter(|s| !s.is_empty() && s != "product");
+/// other's download. Two things can collide — a product that ships several files, and (in the
+/// text-only fallback) two rows whose link text happens to match — so the file label
+/// disambiguates the first and `seen` guarantees the rest.
+fn slug_for(
+    link: &str,
+    product: &str,
+    file_label: &str,
+    multi: bool,
+    seen: &mut HashSet<String>,
+) -> String {
+    let base = product_slug(link)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| slugify(product));
+    let base = if base.is_empty() {
+        "hub-download".to_string()
+    } else {
+        base
+    };
 
-    let base = slugify(title);
-    match from_link {
-        // Both, when the title said more than the product page can: the slug names the product
-        // and the title names the file within it.
-        Some(slug) if slugify(title) != slug => format!("{slug}-{base}"),
-        Some(slug) => slug,
-        None if base.is_empty() => "hub-download".to_string(),
-        None => base,
+    let mut slug = match (multi, slugify(file_label)) {
+        (true, label) if !label.is_empty() => format!("{base}-{label}"),
+        _ => base,
+    };
+    // Whatever is left over. A numeric suffix is ugly and never normally reached; two installs
+    // silently cancelling each other is worse.
+    if seen.contains(&slug) {
+        let stem = slug.clone();
+        let mut n = 2;
+        while seen.contains(&slug) {
+            slug = format!("{stem}-{n}");
+            n += 1;
+        }
     }
+    seen.insert(slug.clone());
+    slug
 }
 
 fn slugify(raw: &str) -> String {
@@ -455,7 +471,8 @@ mod tests {
         // Two files under one product: each keeps its own label, and its own identity.
         assert_eq!(items[1].title, "TLD SE5 [PSD] — SE5 PSD");
         assert_eq!(items[2].title, "TLD SE5 [PSD] — SE5 PNT");
-        assert_ne!(items[1].slug, items[2].slug, "two rows must not share a slug");
+        assert_eq!(items[1].slug, "tld-se5-psd-se5-psd");
+        assert_eq!(items[2].slug, "tld-se5-psd-se5-pnt");
     }
 
     #[test]
@@ -472,6 +489,20 @@ mod tests {
     fn a_repeated_file_appears_once() {
         let html = format!("{LIST}{LIST}");
         assert_eq!(parse_downloads(&html).len(), 1);
+    }
+
+    /// Two rows that name themselves identically still get their own identity — the install
+    /// queue keys its cancel token on this, so a collision means one download killing another.
+    #[test]
+    fn identical_rows_never_share_a_slug() {
+        let html = r#"<ul>
+          <li><a href="https://shop.mxb-hub.com/?download_file=1&amp;key=a">Paint.pkz</a></li>
+          <li><a href="https://shop.mxb-hub.com/?download_file=2&amp;key=b">Paint.pkz</a></li>
+        </ul>"#;
+        let items = parse_downloads(html);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].slug, "paint-pkz");
+        assert_eq!(items[1].slug, "paint-pkz-2");
     }
 
     /// The security boundary: these URLs are fetched with the user's session attached.

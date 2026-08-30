@@ -6764,10 +6764,9 @@ async fn hub_login(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let target = format!(
-        "{base}/my-account/?redirect={base}%2Fmy-account%2Fdownloads%2F",
-        base = hub_session::HUB_BASE
-    );
+    // The account page, plainly. It is both the login form when signed out and the proof of a
+    // sign-in when not, so there is nothing to redirect to and no parameter worth inventing.
+    let target = format!("{base}/my-account/", base = hub_session::HUB_BASE);
     let url = tauri::WebviewUrl::External(target.parse().map_err(|e| format!("{e}"))?);
     let window = tauri::WebviewWindowBuilder::new(&app, HUB_LOGIN_WINDOW, url)
         .title("Sign in to MXB Hub")
