@@ -1836,10 +1836,19 @@ export const it: Translation = {
 
   // ── Designer (l'editor a livelli) ─────────────────────────────────────────────
   "designer.help":
-    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Parti da una livrea installata per avere i nomi giusti dei fogli, dipingici sopra con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
+    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Scegli un modello e i suoi fogli ci sono già, con i nomi che lui usa — oppure parti da una livrea installata o da un file di Photoshop per portarti dietro il lavoro. Dipingi con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
   "designer.empty":
-    "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello — così ottieni i suoi fogli e i loro nomi — oppure aggiungine uno vuoto.",
+    "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello, apri un file di Photoshop per conservarne i livelli, oppure aggiungi un foglio vuoto.",
   "designer.startFromPaint": "Parti da una livrea…",
+  "designer.startFromPsd": "Parti da un PSD…",
+  "designer.exportPsd": "Esporta PSD",
+  "designer.exportPsdHint": "Salva ogni foglio come .psd a livelli, in una cartella scelta da te.",
+  "designer.exportedPsd_one": "1 foglio salvato in {{dir}}",
+  "designer.exportedPsd_other": "{{count}} fogli salvati in {{dir}}",
+  "designer.sheetsSwitched": "Passato ai fogli usati da {{dest}}.",
+  "designer.switchSheetsTitle": "Questi fogli sono di un altro modello",
+  "designer.switchSheetsBody": "{{dest}} usa {{names}}. Cambiando sostituisci tutti i fogli aperti.",
+  "designer.switchSheets": "Cambia fogli",
   "designer.blankSheet": "Foglio vuoto",
   "designer.addSheet": "Aggiungi un foglio",
   "designer.nothingToSave": "Ogni foglio è vuoto: disegna qualcosa prima di salvare.",

@@ -1835,10 +1835,19 @@ export const ptBR: Translation = {
 
   // ── Designer (o editor de camadas) ────────────────────────────────────────────
   "designer.help":
-    "Desenhe uma pintura nas folhas que o jogo realmente lê e veja no modelo enquanto trabalha. Comece de uma pintura instalada para acertar os nomes das folhas, pinte nela com pincel, gradiente ou formas, empilhe imagens e texto por cima e salve: o que sai é um .pnt que o jogo carrega, não uma exportação para converter.",
+    "Desenhe uma pintura nas folhas que o jogo realmente lê e veja no modelo enquanto trabalha. Escolha um modelo e as folhas dele já estão aí, com os nomes que ele usa — ou comece de uma pintura instalada ou de um arquivo do Photoshop para trazer o trabalho junto. Pinte com pincel, gradiente ou formas, empilhe imagens e texto por cima e salve: o que sai é um .pnt que o jogo carrega, não uma exportação para converter.",
   "designer.empty":
-    "Ainda não há nada para desenhar. Comece de uma pintura instalada para este modelo — assim você pega as folhas e os nomes delas — ou adicione uma em branco.",
+    "Ainda não há nada para desenhar. Comece de uma pintura instalada para este modelo, abra um arquivo do Photoshop para manter as camadas dele, ou adicione uma folha em branco.",
   "designer.startFromPaint": "Começar de uma pintura…",
+  "designer.startFromPsd": "Começar de um PSD…",
+  "designer.exportPsd": "Exportar PSD",
+  "designer.exportPsdHint": "Grava cada folha como um .psd com camadas, em uma pasta que você escolher.",
+  "designer.exportedPsd_one": "1 folha gravada em {{dir}}",
+  "designer.exportedPsd_other": "{{count}} folhas gravadas em {{dir}}",
+  "designer.sheetsSwitched": "Trocado para as folhas que {{dest}} usa.",
+  "designer.switchSheetsTitle": "Estas folhas são de outro modelo",
+  "designer.switchSheetsBody": "{{dest}} usa {{names}}. Trocar substitui todas as folhas abertas.",
+  "designer.switchSheets": "Trocar folhas",
   "designer.blankSheet": "Folha em branco",
   "designer.addSheet": "Adicionar uma folha",
   "designer.nothingToSave": "Todas as folhas estão vazias — desenhe algo antes de salvar.",
