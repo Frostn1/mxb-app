@@ -1953,6 +1953,12 @@ export const en = {
     "Only bikes can say which textures are their own. A helmet wears whichever paint it shipped with, and that isn't a stock look to trace.",
   "designer.stockNoMatch":
     "This model carries no texture of its own called “{{name}}”, so there's nothing of the bike's to show under this sheet.",
+  "designer.stockAsBase": "Stock as base",
+  "designer.stockAsBaseHint":
+    "Paint the bike's own texture into this sheet at full strength — the stock look as your starting point, a number away from being a paint. Unlike the reference above, this one is part of what you save.",
+  "designer.stockAsBaseDone":
+    "“{{name}}” now holds the bike's own texture — put your number on it and save.",
+  "designer.stockReadFailed": "Couldn't read the model's own “{{name}}” texture.",
   "designer.uvMap": "UV map",
   "designer.uvHint":
     "Show where the model's bodywork lands on this sheet, each piece in its own colour.",

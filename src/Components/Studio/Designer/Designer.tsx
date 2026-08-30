@@ -16,6 +16,7 @@ import {
   Link2Off,
   Loader2,
   PackageOpen,
+  PaintBucket,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -115,6 +116,18 @@ import type { EdfNode, PaintTexture } from "../../../types";
 
 /** A blank sheet's edge. Powers of two only — the backend would resize anything else. */
 const BLANK_SIZE = 2048;
+
+/**
+ * A stock texture's pixels, decoded, or null if they can't be had.
+ *
+ * Null covers both ends of it: the store evicts, and a rejected read is the same nothing to
+ * draw as a name that matched no texture at all.
+ */
+function stockBitmap(tex: PaintTexture): Promise<ImageBitmap | null> {
+  return textureBytes(tex.token)
+    .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
+    .catch(() => null);
+}
 
 /**
  * What was last copied, and the sheet it was cut from.
@@ -1471,6 +1484,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, [activeId, activeName, activeWidth, activeHeight, geometry, ghosts, parts, patchGhost]);
 
   /**
+   * The model's own texture for a sheet name, or null for a name it carries none of.
+   *
+   * The name is the whole binding here exactly as it is for the triangles — call a sheet
+   * `plastics` and it is the plastics, call it anything else and the model has nothing of its
+   * own to answer with.
+   */
+  const stockFor = useCallback(
+    (name: string): PaintTexture | null => {
+      const want = name.trim().toLowerCase();
+      return stockTextures.find((t) => t.name.trim().toLowerCase() === want) ?? null;
+    },
+    [stockTextures],
+  );
+
+  /**
    * Fetch the model's own texture for the active sheet, the same way and for the same reasons.
    *
    * Lazy and keyed on the name again — the name is what picks the texture out of the model,
@@ -1489,23 +1517,65 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     const key = `${activeId}:${activeName}`;
     if (stockFetch.current === key) return;
     stockFetch.current = key;
-    const want = activeName.trim().toLowerCase();
-    const tex = stockTextures.find((t) => t.name.trim().toLowerCase() === want);
+    const tex = stockFor(activeName);
     void (async () => {
-      // Null covers both "the model carries no such texture" and "the pixels are gone" — the
-      // store evicts, and a rejected read is the same nothing to draw as a name that missed.
-      const stock = tex
-        ? await textureBytes(tex.token)
-            .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
-            .catch(() => null)
-        : null;
+      const stock = tex ? await stockBitmap(tex) : null;
       // Written against the sheet it was asked *for*, not whichever is active now, and both
       // halves land together. So the worst a slow answer can do is describe a name the sheet
       // no longer has — which the guard above then notices, and asks again.
       patchGhost(activeId, (g) => ({ ...g, stock, stockFor: activeName }));
       if (stockFetch.current === key) stockFetch.current = null;
     })();
-  }, [activeId, activeName, ghosts, patchGhost, stockTextures]);
+  }, [activeId, activeName, ghosts, patchGhost, stockFor, stockTextures]);
+
+  /**
+   * Paint the model's own texture into the sheet, at full strength.
+   *
+   * The second thing here that touches a sheet, and the opposite of tracing: the stock plastics
+   * stop being something to draw *against* and become what is drawn. That is the whole of what
+   * most people are after — the bike as it ships, with their number on it — and until now the
+   * only route to it was to find the artwork outside the app, because a reference at 35% is
+   * deliberately not it. So this one is saved, and it goes through the history like any other
+   * edit to the sheet.
+   *
+   * The reference's copy is used when there is one, because it is the same texture read from
+   * the same store; the fetch is for the sheet whose ghost is switched off, since the button
+   * has to work without asking anyone to turn a guide on first.
+   */
+  const stockAsBase = useCallback(
+    async (sheetId: string) => {
+      const sheet = sheetsRef.current.find((s) => s.id === sheetId);
+      if (!sheet) return;
+      const tex = stockFor(sheet.name);
+      if (!tex) {
+        toast.error(t("designer.stockNoMatch", { name: sheet.name.trim() }));
+        return;
+      }
+      const held = ghostOf(sheetId);
+      const ready = held.stockFor === sheet.name ? held.stock : null;
+      setBusy(true);
+      const base = ready ?? (await stockBitmap(tex));
+      setBusy(false);
+      if (!base) {
+        toast.error(t("designer.stockReadFailed", { name: sheet.name.trim() }));
+        return;
+      }
+      patchSheet(sheetId, (s) => ({
+        ...s,
+        // The texture's own size, but only for a sheet nothing has been done to yet: a stock
+        // texture stretched onto a 2048 blank is the bike's artwork resampled for no reason,
+        // and resizing a sheet already drawn on would take every layer's placement with it.
+        ...(s.base || s.layers.length ? {} : { width: tex.width, height: tex.height }),
+        base,
+      }));
+      // The reference is drawn underneath the sheet, and the sheet is now the same picture —
+      // leaving it on would be showing the stock texture through the stock texture.
+      patchGhost(sheetId, (g) => ({ ...g, showStock: false }));
+      bump();
+      toast.success(t("designer.stockAsBaseDone", { name: sheet.name.trim() }));
+    },
+    [bump, ghostOf, patchGhost, patchSheet, stockFor, t],
+  );
 
   // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
   // sheet, so leaving them behind would keep a closed paint's pixels alive for the session.
@@ -1755,7 +1825,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               hasBase={!!active.base}
               hasGeometry={!!geometry}
               hasStock={!!stockTextures.length}
+              stockSheet={!!stockFor(active.name)}
+              busy={busy}
               onTrace={() => toggleTrace(active.id)}
+              onStockBase={() => void stockAsBase(active.id)}
               onChange={(fn) => patchGhost(active.id, fn)}
             />
           )}
@@ -2106,7 +2179,10 @@ function GhostPanel({
   hasBase,
   hasGeometry,
   hasStock,
+  stockSheet,
+  busy,
   onTrace,
+  onStockBase,
   onChange,
 }: {
   ghost: Ghost;
@@ -2116,7 +2192,12 @@ function GhostPanel({
   hasGeometry: boolean;
   /** Whether the model on screen can say which of its textures are its own — bikes can. */
   hasStock: boolean;
+  /** Whether it carries one under *this* sheet's name — what makes it something to paint on. */
+  stockSheet: boolean;
+  busy: boolean;
   onTrace: () => void;
+  /** Put that texture into the sheet for real, rather than faintly underneath it. */
+  onStockBase: () => void;
   onChange: (fn: (g: Ghost) => Ghost) => void;
 }) {
   const t = useT();
@@ -2200,6 +2281,30 @@ function GhostPanel({
           onClick={() => onChange((g) => ({ ...g, showWire: !g.showWire }))}
         />
       </div>
+
+      {/* Not a toggle and not part of the reference — what it puts in is the sheet itself, and
+          stays there through the save. It sits here because the picture it puts in is the one
+          the button above shows faintly, and wanting that at full strength with a number over
+          it is what a good half of the people who turn the reference on came for. */}
+      {hasStock && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mb-2 w-full min-w-0 justify-start"
+          disabled={!stockSheet || busy}
+          title={t(stockSheet ? "designer.stockAsBaseHint" : "designer.stockNoMatch", {
+            name: sheetName.trim(),
+          })}
+          onClick={onStockBase}
+        >
+          {busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <PaintBucket className="size-3.5" />
+          )}
+          <span className="truncate">{t("designer.stockAsBase")}</span>
+        </Button>
+      )}
 
       <Row label={t("designer.opacity")}>
         <Slider
