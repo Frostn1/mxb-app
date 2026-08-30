@@ -1388,6 +1388,18 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0113.hero.title":
+    "Cada pista se abre como el lugar que es",
+  "showcase.v0113.hero.body":
+    "Antes una pista se abr\u00eda como terreno desnudo: los surcos, peraltes y caras de salto correctos, pero nada encima, as\u00ed que un supercross y un circuito nacional se ve\u00edan casi igual. El visor ahora dibuja lo que la pista pone sobre s\u00ed misma: las carpas y toldos, las pacas de paja y muros de neum\u00e1ticos, las l\u00edneas de banderolas y el vallado, los remolques del paddock y el paisaje m\u00e1s all\u00e1 de su propio cuadrado.",
+  "showcase.v0113.sky":
+    "Una pista se sit\u00faa bajo su propio cielo, iluminada y con la bruma que indica su propio archivo de ambiente.",
+  "showcase.v0113.ground":
+    "El suelo conserva su detalle de cerca: la tierra de la propia pista, con relieve real cuando incluye un mapa de normales para ella.",
+  "showcase.v0113.pick":
+    "Haz clic en cualquier cosa que est\u00e9 sobre la pista y se ilumina por s\u00ed sola, con su nombre y su tama\u00f1o.",
+  "showcase.v0113.speed":
+    "Llega por etapas \u2014 primero el terreno, luego la forma de los objetos, luego sus colores \u2014 y volver a abrir la misma pista se salta el archivo por completo.",
   "showcase.v0112.hero.title":
     "Un pack de motos se instala como las motos que lleva dentro",
   "showcase.v0112.hero.body":
@@ -2032,6 +2044,18 @@ export const es: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Desnivel",
+  "trackViewer.objects": "Objetos",
+  "trackViewer.painting": "Pintando…",
+  "trackViewer.scenery": "Escenografía",
+  "trackViewer.sceneryTris": "{{count}} triángulos",
+  "trackViewer.fixtures": "Elementos marcados",
+  "trackViewer.pieces": "Piezas separables",
+  "trackViewer.selected": "Pieza seleccionada",
+  "trackViewer.place": "Colocar un modelo",
+  "trackViewer.placePick": "Elige un modelo y haz clic en el suelo.",
+  "trackViewer.placeHint": "Haz clic en el suelo para colocarlo.",
+  "trackViewer.placedCount": "{{count}} colocados",
+  "trackViewer.saveProps": "Guardar .scr",
   "trackViewer.noTerrain": "No hay terreno que mostrar",
   "trackViewer.noTerrainHint":
     "Los datos de altura de este circuito no están en un formato que el visor sepa leer todavía.",

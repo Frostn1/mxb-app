@@ -1383,6 +1383,18 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0113.hero.title":
+    "Ogni pista si apre come il luogo che \u00e8",
+  "showcase.v0113.hero.body":
+    "Prima una pista si apriva come terreno nudo \u2014 i solchi, i paraboliche e le facce dei salti giusti, ma nulla sopra, cos\u00ec che un supercross e un circuito nazionale si somigliavano. Il visualizzatore ora disegna ci\u00f2 che una pista mette su di s\u00e9: le tende e le tettoie, le balle di paglia e i muri di gomme, le linee di striscioni e le recinzioni, i rimorchi del paddock e il paesaggio oltre il suo stesso quadrato.",
+  "showcase.v0113.sky":
+    "Una pista sta sotto il proprio cielo, illuminata e velata come dice il suo file di ambiente.",
+  "showcase.v0113.ground":
+    "Il terreno mantiene il dettaglio da vicino \u2014 la terra della pista stessa, con vero rilievo dove ne fornisce una normal map.",
+  "showcase.v0113.pick":
+    "Clicca qualsiasi cosa in piedi sulla pista e si illumina da sola, con nome e misure.",
+  "showcase.v0113.speed":
+    "Arriva a fasi \u2014 prima il terreno, poi la forma degli oggetti, poi i loro colori \u2014 e riaprire la stessa pista salta del tutto l\u2019archivio.",
   "showcase.v0112.hero.title":
     "Un pacchetto di moto si installa come le moto che contiene",
   "showcase.v0112.hero.body":
@@ -2025,6 +2037,18 @@ export const it: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Dislivello",
+  "trackViewer.objects": "Oggetti",
+  "trackViewer.painting": "Texture…",
+  "trackViewer.scenery": "Scenografia",
+  "trackViewer.sceneryTris": "{{count}} triangoli",
+  "trackViewer.fixtures": "Elementi segnalati",
+  "trackViewer.pieces": "Pezzi distinti",
+  "trackViewer.selected": "Pezzo scelto",
+  "trackViewer.place": "Posiziona un modello",
+  "trackViewer.placePick": "Scegli un modello, poi clicca il terreno.",
+  "trackViewer.placeHint": "Clicca il terreno per posarlo.",
+  "trackViewer.placedCount": "{{count}} posizionati",
+  "trackViewer.saveProps": "Salva .scr",
   "trackViewer.noTerrain": "Nessun terreno da mostrare",
   "trackViewer.noTerrainHint":
     "I dati di altezza di questo tracciato non sono in un formato che il visualizzatore sa ancora leggere.",
