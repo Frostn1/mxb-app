@@ -1814,10 +1814,19 @@ export const en = {
 
   // ── Designer (the layer editor) ───────────────────────────────────────────────
   "designer.help":
-    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Start from an installed paint to get the sheet names right, paint on it with a brush, a gradient or a shape, stack images and text on top, then save — what comes out is a .pnt the game loads, not an export to convert.",
+    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Pick a model and its sheets are already there under the names it binds — or start from an installed paint or a Photoshop file to bring artwork with you. Paint with a brush, a gradient or a shape, stack images and text on top, then save: what comes out is a .pnt the game loads, not an export to convert.",
   "designer.empty":
-    "Nothing to draw on yet. Start from a paint installed for this model to get its real sheets and their names, or add a blank one.",
+    "Nothing to draw on yet. Start from a paint installed for this model, open a Photoshop file to keep its layers, or add a blank sheet.",
   "designer.startFromPaint": "Start from a paint…",
+  "designer.startFromPsd": "Start from a PSD…",
+  "designer.exportPsd": "Export PSD",
+  "designer.exportPsdHint": "Write every sheet out as a layered .psd, into a folder you pick.",
+  "designer.exportedPsd_one": "Wrote 1 sheet to {{dir}}",
+  "designer.exportedPsd_other": "Wrote {{count}} sheets to {{dir}}",
+  "designer.sheetsSwitched": "Switched to the sheets {{dest}} uses.",
+  "designer.switchSheetsTitle": "These sheets are for another model",
+  "designer.switchSheetsBody": "{{dest}} uses {{names}}. Switching replaces every sheet you have open.",
+  "designer.switchSheets": "Switch sheets",
   "designer.blankSheet": "Blank sheet",
   "designer.addSheet": "Add a sheet",
   "designer.nothingToSave": "Every sheet is empty — draw something before saving.",

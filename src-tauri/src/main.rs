@@ -1406,6 +1406,80 @@ async fn photo_save(request: tauri::ipc::Request<'_>) -> Result<String, String> 
     .map_err(|e| format!("photo_save task failed: {e}"))?
 }
 
+/// How big a `.psd` this will open. A 4096² sheet with a couple of dozen layers is well
+/// inside this; the cap exists so a mistyped path at a 4 GB video doesn't try to cross the
+/// IPC channel as one allocation.
+const PSD_LIMIT: u64 = 512 * 1024 * 1024;
+
+/// The bytes of a `.psd`, for the Designer to take apart in the webview.
+///
+/// Parsing happens up there rather than here, because that is where the pixels have to end
+/// up: a layer becomes an `ImageBitmap` on a canvas, and a Rust-side decode would only mean
+/// re-encoding every layer to cross back. So this is the whole of the backend's part —
+/// hand over the file.
+///
+/// Restricted to the two Photoshop extensions on purpose. Nothing else has any business
+/// being read wholesale into the webview, and a command that would do it for any path is a
+/// wider door than this feature needs.
+#[tauri::command]
+async fn psd_read(path: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::path::PathBuf::from(&path);
+        let ok = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb"));
+        if !ok {
+            return Err(format!("{path:?} is not a .psd"));
+        }
+        let len = std::fs::metadata(&path).map_err(|e| format!("{path:?}: {e}"))?.len();
+        if len > PSD_LIMIT {
+            return Err(format!("{path:?} is {} MB — too large to open", len / (1024 * 1024)));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(tauri::ipc::Response::new(bytes))
+    })
+    .await
+    .map_err(|e| format!("psd_read task failed: {e}"))?
+}
+
+/// Write one sheet's `.psd` to a path the user picked.
+///
+/// Same shape as [`photo_save`], and for the same reason: a 4096² document with its layers
+/// still separate runs to tens of megabytes, so the file is the request body and the
+/// destination rides in a percent-encoded header.
+///
+/// Nothing is resolved or relocated — the dialog already asked. The extension is enforced so
+/// a typed name can't leave PSD bytes in a file Photoshop won't offer to open.
+#[tauri::command]
+async fn psd_save(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(psd) = request.body() else {
+        return Err("psd_save expects the PSD bytes as the request body".into());
+    };
+    let raw = request
+        .headers()
+        .get("x-dest")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let dest = percent_encoding::percent_decode_str(raw).decode_utf8_lossy().into_owned();
+    if dest.is_empty() {
+        return Err("psd_save needs a destination".into());
+    }
+    let psd = psd.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut path = std::path::PathBuf::from(&dest);
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("psd")) {
+            path.set_extension("psd");
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{dir:?}: {e}"))?;
+        }
+        std::fs::write(&path, &psd).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("psd_save task failed: {e}"))?
+}
+
 /// The file a save would write, resolved but not written — so the UI can ask before
 /// replacing a paint that's already there.
 #[tauri::command]
@@ -8056,6 +8130,8 @@ fn main() {
             paint_studio_pixels,
             paint_studio_stage,
             photo_save,
+            psd_read,
+            psd_save,
             paint_studio_target,
             paint_studio_save,
             paint_studio_extract,

@@ -1842,10 +1842,19 @@ export const es: Translation = {
 
   // ── Designer (el editor por capas) ────────────────────────────────────────────
   "designer.help":
-    "Dibuja una pintura sobre las hojas que el juego lee de verdad y mírala en el modelo mientras trabajas. Empieza desde una pintura instalada para acertar con los nombres de las hojas, píntala con pincel, degradado o formas, apila imágenes y texto encima y guarda: lo que sale es un .pnt que el juego carga, no una exportación que convertir.",
+    "Dibuja una pintura sobre las hojas que el juego lee de verdad y mírala en el modelo mientras trabajas. Elige un modelo y sus hojas ya están ahí, con los nombres que él usa — o empieza desde una pintura instalada o un archivo de Photoshop para traerte el trabajo. Pinta con pincel, degradado o formas, apila imágenes y texto encima y guarda: lo que sale es un .pnt que el juego carga, no una exportación que convertir.",
   "designer.empty":
-    "Todavía no hay nada sobre lo que dibujar. Empieza desde una pintura instalada para este modelo — así obtienes sus hojas y sus nombres — o añade una en blanco.",
+    "Todavía no hay nada sobre lo que dibujar. Empieza desde una pintura instalada para este modelo, abre un archivo de Photoshop para conservar sus capas, o añade una hoja en blanco.",
   "designer.startFromPaint": "Empezar desde una pintura…",
+  "designer.startFromPsd": "Empezar desde un PSD…",
+  "designer.exportPsd": "Exportar PSD",
+  "designer.exportPsdHint": "Guarda cada hoja como un .psd con capas, en una carpeta que elijas.",
+  "designer.exportedPsd_one": "1 hoja guardada en {{dir}}",
+  "designer.exportedPsd_other": "{{count}} hojas guardadas en {{dir}}",
+  "designer.sheetsSwitched": "Cambiado a las hojas que usa {{dest}}.",
+  "designer.switchSheetsTitle": "Estas hojas son de otro modelo",
+  "designer.switchSheetsBody": "{{dest}} usa {{names}}. Cambiar sustituye todas las hojas abiertas.",
+  "designer.switchSheets": "Cambiar hojas",
   "designer.blankSheet": "Hoja en blanco",
   "designer.addSheet": "Añadir una hoja",
   "designer.nothingToSave": "Todas las hojas están vacías: dibuja algo antes de guardar.",
