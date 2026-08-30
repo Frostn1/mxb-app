@@ -1,8 +1,14 @@
 # Changelog
 
 ## 2026-08-30
-
 ### Added
+
+- **Browse and install from MXB Hub.** A new sidebar tab for the shop.mxb-hub.com
+  marketplace: the whole catalogue, filterable by creator and by what a thing is, with prices
+  and artwork. Sign in and everything you already own — the free mods included — installs the
+  same way anything else does, into the folder the app suggests, with the same progress card
+  and "Installed" badge. Mods the store hosts elsewhere, on MediaFire and the like, install
+  from here too.
 
 - **Lock a mod to the people you made it for.** Studio has a new Protect tab: pick the files
   you built — one at a time, or a whole mod folder — paste the GUIDs of the riders allowed to

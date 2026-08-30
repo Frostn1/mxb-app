@@ -9,6 +9,7 @@ import Servers from "../Servers/Servers";
 import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
+import Hub from "../Hub/Hub";
 import ModDetail from "../ModDetail/ModDetail";
 import DropZone from "../Dropzone/DropZone";
 import Settings, { type SectionId } from "../Settings/Settings";
@@ -185,6 +186,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           ) : view === "shop" ? (
             <Shop refreshKey={libraryVersion} />
+          ) : view === "hub" ? (
+            <Hub refreshKey={libraryVersion} />
           ) : view === "library" ? (
             <Library
               modType={modType}
@@ -200,6 +203,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               onOpenMod={openModTarget}
               onShowInLibrary={showInLibrary}
               onOpenShop={() => navigate("shop")}
+              onOpenHub={() => navigate("hub")}
             />
           ) : view === "locker" ? (
             <Locker />

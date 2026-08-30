@@ -47,6 +47,7 @@ export const fr: Translation = {
   // ── Navigation ─────────────────────────────────────────────────────────────
   "nav.browse": "Parcourir",
   "nav.shop": "Boutique",
+  "nav.hub": "MXB Hub",
   "nav.library": "Bibliothèque",
   "nav.downloads": "Téléchargements",
   "nav.locker": "Casier",
@@ -498,6 +499,26 @@ export const fr: Translation = {
   "shop.sessionFailed": "Impossible de récupérer votre session MX Bikes Shop",
   "shop.loadFailed": "Impossible de charger vos achats : {{error}}",
   "shop.empty": "Aucun téléchargement acheté trouvé sur votre compte.",
+
+  // ── MXB Hub (shop.mxb-hub.com) ──
+  "hub.help":
+    "Parcourez la place de marché MXB Hub sur shop.mxb-hub.com et installez ce que vous possédez déjà. L'achat se fait toujours sur le site de la boutique ; connectez-vous dans Mes achats pour installer vos commandes depuis ici.",
+  "hub.count_one": "{{count}} article",
+  "hub.count_other": "{{count}} articles",
+  "hub.searchPlaceholder": "Rechercher sur MXB Hub…",
+  "hub.myDownloads": "Mes achats",
+  "hub.signInTitle": "Se connecter à MXB Hub",
+  "hub.signInBody":
+    "Connectez-vous à shop.mxb-hub.com pour voir et installer tout ce que vous possédez, mods gratuits compris. Nous ouvrons le vrai site : votre mot de passe ne touche jamais cette application.",
+  "hub.signIn": "Se connecter",
+  "hub.signedIn": "Connecté à MXB Hub",
+  "hub.sessionFailed": "Impossible de récupérer votre session MXB Hub",
+  "hub.empty": "Aucun téléchargement trouvé sur votre compte MXB Hub.",
+  "hubSort.newest": "Plus récents",
+  "hubSort.popular": "Plus populaires",
+  "hubSort.priceAsc": "Prix : croissant",
+  "hubSort.priceDesc": "Prix : décroissant",
+  "hubSort.nameAsc": "Nom (A–Z)",
   "purchases.count_one": "{{count}} achat",
   "purchases.count_other": "{{count}} achats",
   "purchases.fileCount_one": "{{count}} fichier",
@@ -1256,6 +1277,7 @@ export const fr: Translation = {
   "downloads.yesterday": "Hier",
   "downloads.sourceSite": "Téléchargement",
   "downloads.sourceShop": "Boutique",
+  "downloads.sourceHub": "MXB Hub",
   "downloads.sourceFile": "Fichier importé",
   "downloads.showInLibrary": "Voir dans la bibliothèque",
   "downloads.openModPage": "Ouvrir la page du mod",

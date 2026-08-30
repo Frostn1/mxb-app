@@ -61,6 +61,7 @@ interface DownloadsProps {
   /** Send a failed shop purchase back to the Shop, which is the only place it can be
    *  re-downloaded from — a purchase link is signed in, so there's nothing to retry here. */
   onOpenShop: () => void;
+  onOpenHub: () => void;
 }
 
 /** Records for one calendar day, newest day first. */
@@ -83,7 +84,8 @@ function groupByDay(records: DownloadRecord[]): DayGroup[] {
 
 function sourceLabel(record: DownloadRecord, t: TFunc): string {
   if (record.source === "site") return record.host || t("downloads.sourceSite");
-  return record.source === "shop" ? t("downloads.sourceShop") : t("downloads.sourceFile");
+  if (record.source === "shop") return t("downloads.sourceShop");
+  return record.source === "hub" ? t("downloads.sourceHub") : t("downloads.sourceFile");
 }
 
 /** Where it landed, as `tracks/MX2` — the answer to "so where did that one go". */
@@ -97,6 +99,7 @@ export default function Downloads({
   onOpenMod,
   onShowInLibrary,
   onOpenShop,
+  onOpenHub,
 }: DownloadsProps) {
   const t = useT();
   const { records, loading, forget, clear, markSeen } = useDownloads();
@@ -134,7 +137,11 @@ export default function Downloads({
 
   /** Straight back through the install queue, with the same destination as last time. */
   const retry = (r: DownloadRecord) => {
+    // Neither store's download URL survives a restart — the shop's is read out of a WebView and
+    // the Hub's is signed per session — so retrying one means going back to where it can be
+    // asked for again, not replaying a link.
     if (r.source === "shop") return onOpenShop();
+    if (r.source === "hub") return onOpenHub();
     if (!r.url) return;
     startInstall({
       slug: r.slug,
@@ -148,7 +155,7 @@ export default function Downloads({
   };
 
   const canRetry = (r: DownloadRecord) =>
-    r.status === "failed" && (r.source === "shop" || !!r.url);
+    r.status === "failed" && (r.source === "shop" || r.source === "hub" || !!r.url);
 
   return (
     <div className="flex h-full flex-col">
@@ -291,7 +298,11 @@ function DownloadRow({
   const t = useT();
   const failed = record.status === "failed";
   const SourceIcon =
-    record.source === "shop" ? Store : record.source === "file" ? FileArchive : Download;
+    record.source === "shop" || record.source === "hub"
+      ? Store
+      : record.source === "file"
+        ? FileArchive
+        : Download;
   const dest = destLabel(record);
 
   return (

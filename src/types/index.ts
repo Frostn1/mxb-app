@@ -850,7 +850,7 @@ export interface DropOutcome {
 
 /** Where a download's bytes came from: the mod site, a shop purchase, or a local file the
  *  user imported or dragged in. */
-export type DownloadSource = "site" | "shop" | "file";
+export type DownloadSource = "site" | "shop" | "hub" | "file";
 
 export type DownloadStatus = "installed" | "failed";
 
@@ -1433,6 +1433,43 @@ export interface ShopStatus {
   veryStale: boolean;
   error: string | null;
 }
+
+/**
+ * MXB Hub — `shop.mxb-hub.com`, the marketplace `mxbhub.com` redirects to.
+ *
+ * Deliberately expressed as extensions of the shop's types rather than as a parallel set. The
+ * two stores sell the same kinds of thing to the same person, and the grid, the price tag, the
+ * purchase card and the detail page are shared between them — types that merely resembled each
+ * other would make every one of those a translation layer. What the Hub adds is a `slug` (its
+ * API is addressable by one, where the shop's dump is not) and a creator link.
+ */
+export interface HubMod extends ShopMod {
+  slug: string;
+}
+
+export interface HubModDetail extends ShopModDetail {
+  slug: string;
+  /** The store's own one-line summary — where a Hub listing says "in-game ready PKZ". */
+  summary: string | null;
+}
+
+export interface HubCategory extends ShopCategory {
+  /** The category's page on the store; also the creator's page, under `creators`. */
+  link: string | null;
+}
+
+export interface HubPage {
+  items: HubMod[];
+  total: number;
+  hasMore: boolean;
+  currency: string;
+}
+
+/**
+ * `relevance` is absent because the store rejects it — measured, not assumed. `onSale` is a
+ * filter here rather than an order, which is what the Store API actually offers.
+ */
+export type HubSort = "newest" | "popular" | "priceAsc" | "priceDesc" | "nameAsc";
 
 export type ShopSort =
   | "newest"

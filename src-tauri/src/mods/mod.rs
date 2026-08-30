@@ -1,3 +1,5 @@
+pub mod hub;
+pub mod hubaccount;
 pub mod mxb;
 pub mod mxbshop;
 pub mod shop_catalog;

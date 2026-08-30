@@ -44,6 +44,7 @@ export const en = {
   // ── Sidebar navigation ─────────────────────────────────────────────────────
   "nav.browse": "Browse",
   "nav.shop": "Shop",
+  "nav.hub": "MXB Hub",
   "nav.library": "Library",
   "nav.downloads": "Downloads",
   "nav.locker": "Locker",
@@ -488,6 +489,26 @@ export const en = {
   "shop.sessionFailed": "Couldn't capture your MX Bikes Shop session",
   "shop.loadFailed": "Couldn't load your purchases: {{error}}",
   "shop.empty": "No purchased downloads found on your account yet.",
+
+  // ── MXB Hub (shop.mxb-hub.com — the marketplace mxbhub.com redirects to) ──
+  "hub.help":
+    "Browse the MXB Hub marketplace at shop.mxb-hub.com, and install what you already own. Buying still happens on the store's own site; sign in under My purchases to install your orders from here.",
+  "hub.count_one": "{{count}} item",
+  "hub.count_other": "{{count}} items",
+  "hub.searchPlaceholder": "Search MXB Hub…",
+  "hub.myDownloads": "My purchases",
+  "hub.signInTitle": "Sign in to MXB Hub",
+  "hub.signInBody":
+    "Log in to shop.mxb-hub.com to see and install everything you own, free mods included. We open the real site — your password never touches this app.",
+  "hub.signIn": "Sign in",
+  "hub.signedIn": "Signed in to MXB Hub",
+  "hub.sessionFailed": "Couldn't capture your MXB Hub session",
+  "hub.empty": "No downloads found on your MXB Hub account yet.",
+  "hubSort.newest": "Newest",
+  "hubSort.popular": "Most popular",
+  "hubSort.priceAsc": "Price: low to high",
+  "hubSort.priceDesc": "Price: high to low",
+  "hubSort.nameAsc": "Name (A–Z)",
   "purchases.count_one": "{{count}} purchase",
   "purchases.count_other": "{{count}} purchases",
   "purchases.fileCount_one": "{{count}} file",
@@ -1226,6 +1247,7 @@ export const en = {
   "downloads.yesterday": "Yesterday",
   "downloads.sourceSite": "Download",
   "downloads.sourceShop": "Shop",
+  "downloads.sourceHub": "MXB Hub",
   "downloads.sourceFile": "Imported file",
   "downloads.showInLibrary": "Show in library",
   "downloads.openModPage": "Open the mod's page",

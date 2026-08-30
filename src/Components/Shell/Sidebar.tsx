@@ -12,6 +12,7 @@ import {
   Gamepad2,
   SlidersHorizontal,
   Store,
+  ShoppingBag,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
@@ -42,6 +43,7 @@ import DownloadQueue from "./DownloadQueue";
 export type DashboardView =
   | "browse"
   | "shop"
+  | "hub"
   | "library"
   | "downloads"
   | "locker"
@@ -103,6 +105,16 @@ const NAV: NavEntry[] = [
  * hides the Catalog half in that case and opens on purchases.
  */
 const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store, cap: "shop" };
+
+/**
+ * MXB Hub — the other store, and the same reasoning as the entry above: it sells MX Bikes
+ * mods, so it has nothing to offer a player on another title.
+ *
+ * Its own entry rather than a third tab inside Shop. The two are separate storefronts with
+ * separate accounts and separate carts, and folding them into one view would mean a sign-in
+ * that silently means a different thing depending on which pill is lit.
+ */
+const HUB_ENTRY: NavEntry = { id: "hub", label: "nav.hub", icon: ShoppingBag, cap: "shop" };
 
 /** Shown only when the experimental features are on — see `settings.experimental`.
  *  Also capability-gated: it administers MX Bikes dedicated servers and keys riders by
@@ -283,7 +295,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
   // Two independent gates: servers needs the experimental toggle, and every entry needs the
   // active game to support it. Built here rather than inline so the JSX stays one `.map`.
   const supported = ({ cap }: NavEntry) => !cap || caps[cap];
-  const nav = [NAV[0], SHOP_ENTRY, ...NAV.slice(1), ...(experimental ? [EXPERIMENTAL_NAV] : [])]
+  const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1), ...(experimental ? [EXPERIMENTAL_NAV] : [])]
     .filter(supported)
     .map((e) => (e.children ? { ...e, children: e.children.filter(supported) } : e));
 

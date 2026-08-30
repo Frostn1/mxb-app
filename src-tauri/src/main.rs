@@ -22,6 +22,8 @@ mod gameproc;
 mod gate;
 mod gearrepair;
 mod heightfield;
+mod hub_clearance;
+mod hub_session;
 mod imgcache;
 mod install;
 mod ledger;
@@ -95,6 +97,9 @@ pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// The shop login WebView, opened on demand and closed once the session is captured.
 const SHOP_LOGIN_WINDOW: &str = "shop-login";
+/// The MXB Hub sign-in window. Transient like the shop's: it is the user typing a password
+/// into the store's own page, and it closes the moment the cookie appears.
+const HUB_LOGIN_WINDOW: &str = "hub-login";
 
 /// Whether closing this window should park it in the tray rather than destroy it.
 ///
@@ -6986,6 +6991,331 @@ async fn shop_install(
     Ok(())
 }
 
+// ─────────────────────────────────── MXB Hub ───────────────────────────────────
+//
+// shop.mxb-hub.com — the community marketplace `mxbhub.com` redirects to. Two halves, like
+// the shop: a public catalog anyone can browse, and the files this account owns.
+//
+// It is markedly simpler than the shop's equivalent because the store is not behind
+// Cloudflare (measured 2026-08-30: `server: nginx`, no `cf-ray`, no interstitial on
+// `/my-account/`). So there is no clearance to earn, no parked WebView reading pages out of
+// the DOM, and no `with_clearance` wrapper: `reqwest` talks to it directly, browsing needs no
+// credential at all, and the only window ever opened is the sign-in one.
+
+/// Run a hub read, and if the store answers with its robot challenge, solve it and try again.
+///
+/// The sibling of [`with_clearance`] above, and the difference is where the browser comes in.
+/// mxb-mods.com's fix is to move the *request* into a WebView and keep it there for the
+/// session, because Cloudflare judges the client. SiteGround judges the request rate and hands
+/// out a cookie once its script has run — so the browser is needed exactly once, and every
+/// request after it is an ordinary one again.
+async fn with_hub_clearance<T, F, Fut>(
+    app: &tauri::AppHandle,
+    what: &str,
+    op: F,
+) -> Result<T, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let err = match op().await {
+        Ok(value) => return Ok(value),
+        Err(err) => err,
+    };
+    if err.downcast_ref::<mods::Blocked>().is_none() {
+        log::warn!("{what} failed and a browser wouldn't help: {err:#}");
+        return Err(format!("{err:#}"));
+    }
+    log::info!("{what} hit the MXB Hub robot challenge — answering it in a browser");
+    if let Err(e) = hub_clearance::earn(app).await {
+        return Err(format!("{e:#}"));
+    }
+    op().await.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn hub_search(
+    app: tauri::AppHandle,
+    query: String,
+    category_id: Option<u64>,
+    page: u32,
+    sort: mods::hub::HubSort,
+    on_sale_only: bool,
+) -> Result<mods::hub::HubPage, String> {
+    with_hub_clearance(&app, "hub search", || {
+        mods::hub::search(&query, category_id, page, sort, on_sale_only)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn hub_categories(
+    app: tauri::AppHandle,
+) -> Result<Vec<mods::hub::HubCategory>, String> {
+    with_hub_clearance(&app, "hub categories", mods::hub::categories).await
+}
+
+#[tauri::command]
+async fn hub_detail(
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<mods::hub::HubModDetail, String> {
+    with_hub_clearance(&app, "hub detail", || mods::hub::detail(id)).await
+}
+
+#[tauri::command]
+fn hub_status(state: State<hub_session::HubSession>) -> bool {
+    state.logged_in()
+}
+
+#[tauri::command]
+async fn hub_logout(app: tauri::AppHandle) {
+    hub_session::clear_session(&app).await;
+}
+
+/// Open the store's own sign-in page and wait for the login cookie to appear.
+///
+/// The password is typed into WooCommerce's page, in a window of its own — the app never sees
+/// it, and never asks for it. What we take is the cookie the store sets afterwards.
+///
+/// Two things the shop's version has to do are deliberately absent. It clears the whole
+/// WebView's cookies first, because a stale `cf_clearance` there is worse than none; there is
+/// no Cloudflare here, and clearing is app-wide, so doing it would sign the user out of the
+/// *other* store on their way into this one. And it lands on `/robots.txt` to dodge a second
+/// challenge; this one can land on the account page, which is also the page that proves the
+/// sign-in worked.
+#[tauri::command]
+async fn hub_login(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(HUB_LOGIN_WINDOW) {
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    // The account page, plainly. It is both the login form when signed out and the proof of a
+    // sign-in when not, so there is nothing to redirect to and no parameter worth inventing.
+    let target = format!("{base}/my-account/", base = hub_session::HUB_BASE);
+    let url = tauri::WebviewUrl::External(target.parse().map_err(|e| format!("{e}"))?);
+    let window = tauri::WebviewWindowBuilder::new(&app, HUB_LOGIN_WINDOW, url)
+        .title("Sign in to MXB Hub")
+        .inner_size(520.0, 760.0)
+        .build()
+        .map_err(|e| format!("{e:#}"))?;
+    let _ = window;
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // ~5 minutes at 500 ms. Long enough for a password reset mid-flow; the user can retry.
+        let mut last_seen = Vec::new();
+        for _ in 0..600u32 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let Some(win) = app.get_webview_window(HUB_LOGIN_WINDOW) else {
+                // Closed by hand — a cancel, not a failure. Logged all the same, because "the
+                // user gave up" and "the app stopped watching" are indistinguishable later.
+                log::info!(
+                    "the MXB Hub login window was closed before sign-in finished (cookies: {})",
+                    hub_session::cookie_names(&last_seen)
+                );
+                return;
+            };
+            let cookies = hub_session::cookies_from_window(&win);
+            if !hub_session::is_authenticated(&cookies) {
+                last_seen = cookies;
+                continue;
+            }
+            let ok = match hub_session::set_session(&app, cookies) {
+                Ok(()) => {
+                    log::info!("captured MXB Hub session");
+                    true
+                }
+                Err(e) => {
+                    log::error!("failed to save the MXB Hub session: {e:#}");
+                    false
+                }
+            };
+            let _ = app.emit("hub-auth", ok);
+            let _ = win.close();
+            return;
+        }
+
+        log::warn!(
+            "MXB Hub sign-in did not complete within 5 minutes (cookies: {})",
+            hub_session::cookie_names(&last_seen)
+        );
+        let _ = app.emit("hub-auth", false);
+        // Closed rather than left up: nothing is watching it any more, so a sign-in finished
+        // afterwards would go unnoticed. Retry reopens it.
+        if let Some(win) = app.get_webview_window(HUB_LOGIN_WINDOW) {
+            let _ = win.close();
+        }
+    });
+    Ok(())
+}
+
+/// What this account owns, with its catalog entries alongside.
+///
+/// One command rather than the shop's two. A Hub download row links to its product page, so
+/// the catalog lookup is a single request keyed on exact slugs — where the shop has to fold
+/// product *names* together and match approximately, which is why its match is a separate
+/// call the grid makes after the fact. Doing both here means the grid renders once, complete,
+/// instead of popping in twice.
+///
+/// The listings are positional: `listings[i]` is `items[i]`'s catalog entry, or `null` where
+/// the product has since been unlisted. Best-effort — a catalog that won't answer costs the
+/// cards their artwork, not the list.
+#[tauri::command]
+async fn hub_my_downloads(
+    app: tauri::AppHandle,
+    state: State<'_, hub_session::HubSession>,
+) -> Result<HubDownloads, String> {
+    if !state.logged_in() {
+        return Err("Not signed in to MXB Hub.".to_string());
+    }
+    let mut items = with_hub_clearance(&app, "hub purchases", || {
+        // Re-read the client each attempt: answering the challenge rebuilds the signed-in one
+        // with the clearance folded in, and the stale handle would just be challenged again.
+        let client = state.client();
+        async {
+            let client = client.ok_or_else(|| anyhow::anyhow!("Not signed in to MXB Hub."))?;
+            mods::hubaccount::fetch_my_downloads(&app, &client).await
+        }
+    })
+    .await?;
+
+    let listings = match mods::hubaccount::match_products(&items).await {
+        Ok(found) => found,
+        Err(e) => {
+            log::warn!("could not match MXB Hub purchases to the catalog: {e:#}");
+            vec![None; items.len()]
+        }
+    };
+    // Mirrored onto the rows themselves as well, because a purchase is handed to the install
+    // queue on its own and has to still know what it is once the listing is out of scope.
+    for (item, found) in items.iter_mut().zip(&listings) {
+        let Some(found) = found else { continue };
+        item.image = found.image.clone();
+        item.author = found.author.clone();
+        item.category_id = found.category_ids.first().copied().unwrap_or(0) as u32;
+    }
+
+    Ok(HubDownloads { items, listings })
+}
+
+/// The purchases page and the catalog, joined, in one answer.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HubDownloads {
+    items: Vec<mods::hubaccount::HubItem>,
+    /// Positional against `items`.
+    listings: Vec<Option<mods::hub::HubMod>>,
+}
+
+/// Download a file this account owns and install it, to a destination the caller already chose.
+///
+/// The whole body after the client lookup is [`install`]'s — `download` streams with progress,
+/// resume and cancellation, and `extract_and_place` does what every other install does. That
+/// reuse is the point of the store having no Cloudflare in front of it: the shop needed a
+/// WebView download path ([`shop_fetch::download`]) precisely because its file URLs are
+/// challenged, and none of that is needed here.
+#[tauri::command]
+async fn hub_install(
+    app: tauri::AppHandle,
+    state: State<'_, hub_session::HubSession>,
+    item: mods::hubaccount::HubItem,
+    subpath: String,
+    dest_folder: String,
+) -> Result<(), String> {
+    let Some(session) = state.client() else {
+        return Err("Not signed in to MXB Hub.".to_string());
+    };
+    let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
+    // Asked before the download: a track archive is several hundred megabytes to waste.
+    if cfg.mods_path.trim().is_empty() {
+        return Err("No MX Bikes folder is configured yet.".to_string());
+    }
+
+    let work = install::staging_dir("hub");
+    std::fs::create_dir_all(&work).map_err(|e| format!("{e:#}"))?;
+
+    let _cancel = cancel::begin(&item.slug);
+
+    // Where the bytes come from decides both the client and whether the link needs resolving.
+    //
+    // A store-issued `?download_file=` URL is authorised by the user's session, so it is
+    // fetched with it and is already a file. A handed-off link — MediaFire and friends, which
+    // WooCommerce allows for any product and MXB Hub uses for a number of its free mods — is
+    // fetched with the ordinary download client instead: sending the user's store cookies to a
+    // third party would be wrong whichever way it turned out. It also has to be resolved
+    // first, because a MediaFire *folder* is a web page listing files, not a file.
+    let fetch = async {
+        if item.external {
+            let client = install::build_download_client()?;
+            install::emit_resolving(&app, &item.slug);
+            let direct = install::resolve_direct_url(&client, &item.download_url, &item.host)
+                .await?;
+            install::download(&app, &client, &item.slug, &direct, &work).await
+        } else {
+            // A dead cookie doesn't 401 here — WooCommerce answers a link it won't honour with
+            // an HTML page, which `install::download` reports as "a web page instead of a
+            // file". Left as it is rather than translated: guessing "session expired" from a
+            // content type would sign the user out on a server hiccup.
+            install::download(&app, &session, &item.slug, &item.download_url, &work).await
+        }
+    };
+    let archive = match fetch.await {
+        Ok(path) => path,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err(format!("{e:#}"));
+        }
+    };
+
+    // What identifies this purchase on disk afterwards. Both forms, because a `.pkz` is placed
+    // under its own file name while an archive that extracts lands in a folder named for its
+    // stem.
+    let names: Vec<String> = [archive.file_name(), archive.file_stem()]
+        .into_iter()
+        .flatten()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+
+    let placed = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        let cfg = cfg.clone();
+        let slug = item.slug.clone();
+        let work = work.clone();
+        let subpath = subpath.clone();
+        let dest_folder = dest_folder.clone();
+        move || {
+            install::extract_and_place(
+                &app,
+                &cfg,
+                &slug,
+                &archive,
+                &work,
+                &subpath,
+                &dest_folder,
+                install::Packs::PlaceWhole,
+            )
+            .map(|_| ())
+        }
+    })
+    .await
+    .map_err(|e| format!("hub_install task failed: {e}"))?;
+
+    let _ = std::fs::remove_dir_all(&work);
+    placed.map_err(|e| format!("{e:#}"))?;
+
+    // Same record the shop's installs write, so both stores' grids get their badge from one
+    // place — it is a claim about a product name and the folders it put on disk, and nothing
+    // in it is specific to which store sold the thing.
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        if let Err(e) = shop_installed::record(&dir, &item.product, &names) {
+            log::warn!("could not record what {} installed: {e:#}", item.product);
+        }
+    }
+    Ok(())
+}
+
 /// Which purchased products have a recorded install, and the folders they claim.
 ///
 /// The claim is not checked against disk here — the purchases grid already scans the library
@@ -7889,6 +8219,7 @@ fn main() {
         .manage(LookWatcher::default())
         .manage(CloudServers::default())
         .manage(shop_session::ShopSession::default())
+        .manage(hub_session::HubSession::default())
         .manage(voice::Monitor::default())
         .manage(voice::session::Session::default())
         .setup(|app| {
@@ -8107,6 +8438,7 @@ fn main() {
             // There is nothing to press: the supervisor is the whole of "joining a room".
             voice::session::start(handle);
             shop_session::load_session(handle);
+            hub_session::load_session(handle);
             shop_catalog_session::load(handle);
             mxb_session::load(handle);
             imgcache::start_maintenance(handle);
@@ -8330,6 +8662,14 @@ fn main() {
             shop_match_catalog,
             shop_install,
             shop_installed_map,
+            hub_search,
+            hub_categories,
+            hub_detail,
+            hub_login,
+            hub_status,
+            hub_logout,
+            hub_my_downloads,
+            hub_install,
             record_download,
             download_history,
             forget_download,
@@ -8610,6 +8950,8 @@ mod window_tests {
             mxb_fetch::WINDOW,
             shop_fetch::WINDOW,
             SHOP_LOGIN_WINDOW,
+            HUB_LOGIN_WINDOW,
+            hub_clearance::WINDOW,
             overlay::LABEL, // handled earlier by its own branch, but never by this one
         ] {
             assert!(
@@ -8660,7 +9002,7 @@ mod window_tests {
     /// their capability files grant.
     #[test]
     fn the_apps_own_windows_are_unaffected_by_the_guard() {
-        for label in [MAIN_WINDOW, overlay::LABEL, SHOP_LOGIN_WINDOW] {
+        for label in [MAIN_WINDOW, overlay::LABEL, SHOP_LOGIN_WINDOW, HUB_LOGIN_WINDOW] {
             for command in ["create_config", "install_mod", "plugin:event|emit"] {
                 assert!(ipc_allowed(label, command), "{label} / {command}");
             }

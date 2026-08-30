@@ -113,6 +113,15 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// [`download`]'s resume loop only wakes when the stream *errors*, and a silent socket never
 /// does — so without this a host that stops sending hangs forever. Not on [`build_client`]
 /// itself: an upload sees no response until its last byte is sent, which looks identical.
+/// Tell the queue this install is working out where the file actually is.
+///
+/// The same stage Browse emits before resolving a host link, exposed because the MXB Hub
+/// install does the same thing for a purchase whose file lives on MediaFire — without it the
+/// card sits at 0% through a folder lookup with nothing to say why.
+pub(crate) fn emit_resolving(app: &AppHandle, slug: &str) {
+    emit(app, slug, "resolving", None, None);
+}
+
 pub(crate) fn build_download_client() -> anyhow::Result<Client> {
     Ok(client_builder().read_timeout(READ_TIMEOUT).build()?)
 }
