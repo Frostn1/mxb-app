@@ -29,6 +29,19 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
+## 2026-08-30
+
+### Added
+
+- **Start a paint from the bike's own plastics rather than from nothing.** The Designer could
+  already show the texture a bike ships with faintly under your sheet, to draw against — but
+  what people actually keep asking for is that picture itself, with a number on it and nothing
+  else changed. **Stock as base** paints it into the sheet at full strength, where it becomes
+  part of what gets saved instead of a guide that never is: put your number over it, save, and
+  the paint is the bike exactly as it came with your number on the shroud. A sheet nothing has
+  been done to yet also takes the texture's own size, so the bike's artwork is never resampled
+  onto a blank that happened to be a different one.
+
 ## 2026-08-29
 
 ### Changed

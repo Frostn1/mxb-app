@@ -1985,6 +1985,12 @@ export const de: Translation = {
     "Nur Bikes können sagen, welche Texturen ihre eigenen sind. Ein Helm trägt die Lackierung, mit der er kam, und die ist kein Originallook zum Abpausen.",
   "designer.stockNoMatch":
     "Dieses Modell bringt keine eigene Textur namens „{{name}}“ mit, also gibt es vom Bike nichts unter diesem Blatt zu zeigen.",
+  "designer.stockAsBase": "Original als Basis",
+  "designer.stockAsBaseHint":
+    "Malt die eigene Textur des Bikes in voller Deckkraft in dieses Blatt — der Originallook als Ausgangspunkt, eine Startnummer von einer fertigen Lackierung entfernt. Anders als die Referenz darüber gehört diese zu dem, was du speicherst.",
+  "designer.stockAsBaseDone":
+    "„{{name}}“ trägt jetzt die eigene Textur des Bikes — setz deine Nummer drauf und speichere.",
+  "designer.stockReadFailed": "Die eigene Textur „{{name}}“ des Modells ließ sich nicht lesen.",
   "designer.uvMap": "UV-Karte",
   "designer.uvHint":
     "Zeigt, wo die Verkleidungsteile des Modells auf diesem Blatt landen, jedes in eigener Farbe.",

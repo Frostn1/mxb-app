@@ -1976,6 +1976,12 @@ export const fr: Translation = {
     "Seules les motos savent dire quelles textures leur appartiennent. Un casque porte la peinture avec laquelle il est arrivé, et ce n'est pas un aspect d'origine à décalquer.",
   "designer.stockNoMatch":
     "Ce modèle n'embarque aucune texture à lui nommée « {{name}} », il n'y a donc rien de la moto à montrer sous cette planche.",
+  "designer.stockAsBase": "Origine en base",
+  "designer.stockAsBaseHint":
+    "Peint la texture de la moto elle-même dans cette planche à pleine intensité — l'aspect d'origine comme point de départ, à un numéro d'être une peinture. Contrairement à la référence ci-dessus, celle-ci fait partie de ce que tu enregistres.",
+  "designer.stockAsBaseDone":
+    "« {{name}} » porte maintenant la texture de la moto elle-même — pose ton numéro dessus et enregistre.",
+  "designer.stockReadFailed": "Impossible de lire la texture « {{name}} » du modèle.",
   "designer.uvMap": "Carte UV",
   "designer.uvHint":
     "Montre où tombent sur cette planche les carrosseries du modèle, chacune dans sa couleur.",

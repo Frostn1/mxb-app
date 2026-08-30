@@ -1961,6 +1961,12 @@ export const ptBR: Translation = {
     "Só motos conseguem dizer quais texturas são delas. Um capacete usa a pintura com que veio, e isso não é um visual de fábrica para decalcar.",
   "designer.stockNoMatch":
     "Este modelo não traz nenhuma textura própria chamada “{{name}}”, então não há nada da moto para mostrar sob esta folha.",
+  "designer.stockAsBase": "Fábrica como base",
+  "designer.stockAsBaseHint":
+    "Pinta a textura da própria moto nesta folha em intensidade total — o visual de fábrica como ponto de partida, a um número de virar uma pintura. Diferente da referência acima, esta faz parte do que você salva.",
+  "designer.stockAsBaseDone":
+    "“{{name}}” agora tem a textura da própria moto — ponha o seu número e salve.",
+  "designer.stockReadFailed": "Não foi possível ler a textura “{{name}}” do modelo.",
   "designer.uvMap": "Mapa UV",
   "designer.uvHint":
     "Mostra onde as carenagens do modelo caem nesta folha, cada peça com sua cor.",
