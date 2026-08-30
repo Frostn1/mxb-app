@@ -659,6 +659,7 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
     }
     let html = resp.body;
     let (downloads, version) = (parse_downloads(&html), parse_version(&html));
+    let author = parse_author(&html);
     // Only call it a challenge when the page also yielded nothing, so a marker that turns
     // up in a page that actually parsed can never turn a working mod into an error.
     if downloads.is_empty() {
@@ -680,6 +681,8 @@ pub async fn detail(slug: &str) -> anyhow::Result<ModDetail> {
         description_html,
         images,
         version,
+        author: author.as_ref().map(|(name, _)| name.clone()),
+        author_url: author.and_then(|(_, url)| url),
         downloads,
         categories: term_names(&post),
     })
@@ -996,6 +999,33 @@ fn parse_version(html: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// The byline the theme prints above the post title, and the profile page it links to.
+///
+/// mxb-mods and gpb-mods run the same theme: `<p class="post-date">posted by
+/// <a href="…/author/<slug>/"><b id="authorName">Name</b></a>`. Scoped to the post header
+/// because every comment below the page names an author too, and the first `/author/` link
+/// in the document is only the byline by luck of layout.
+fn parse_author(html: &str) -> Option<(String, Option<String>)> {
+    let doc = Html::parse_document(html);
+
+    if let Ok(sel) = Selector::parse(r#".post-header a[href*="/author/"]"#) {
+        if let Some(el) = doc.select(&sel).next() {
+            let name = el.text().collect::<String>();
+            let name = name.trim();
+            if !name.is_empty() {
+                return Some((name.to_string(), el.value().attr("href").map(str::to_string)));
+            }
+        }
+    }
+
+    // The name without its link — the theme's own id for it, which still stands when the
+    // profile isn't linkable.
+    let sel = Selector::parse("#authorName").ok()?;
+    let name = doc.select(&sel).next()?.text().collect::<String>();
+    let name = name.trim();
+    (!name.is_empty()).then(|| (name.to_string(), None))
+}
+
 fn host_from_url(url: &str) -> String {
     reqwest::Url::parse(url)
         .ok()
@@ -1085,6 +1115,56 @@ mod tests {
 
         // A post fetched without `_embed`, or one with no terms, must not blow up.
         assert!(term_names(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
+    fn reads_the_byline_from_the_post_header() {
+        // mxb-mods: byline and date in one paragraph.
+        let mxb = r#"
+            <div class="post-header">
+              <p class="post-date">posted by
+                <a href="https://mxb-mods.com/author/kenziesaunders/"><b id="authorName">Macks Tracks</b></a>
+                on Aug. 29, 2026</p>
+              <h1 class="post-title">Highland-Mx</h1>
+            </div>"#;
+        assert_eq!(
+            parse_author(mxb),
+            Some((
+                "Macks Tracks".to_string(),
+                Some("https://mxb-mods.com/author/kenziesaunders/".to_string())
+            ))
+        );
+
+        // gpb-mods: same theme, date split into its own paragraph.
+        let gpb = r#"
+            <div class="post-header"><p class="post-date">Aug. 21, 2026</p>
+              <p class="post-date">posted by
+                <a href="https://gpb-mods.com/author/kalat/"><b id="authorName">Kalat le Nul</b></a></p>
+            </div>"#;
+        assert_eq!(
+            parse_author(gpb).unwrap().0,
+            "Kalat le Nul",
+            "the same parse has to serve both catalogs"
+        );
+    }
+
+    #[test]
+    fn a_commenter_is_never_mistaken_for_the_byline() {
+        // Discussion sits outside `.post-header` and names an author on every comment. A
+        // document-wide search for the first `/author/` link would credit the mod to
+        // whoever happened to be rendered first.
+        let html = r#"
+            <div class="wpd-comment">
+              <a href="https://mxb-mods.com/author/somecommenter/">SomeCommenter</a>
+            </div>
+            <div class="post-header">
+              <p class="post-date">posted by
+                <a href="https://mxb-mods.com/author/dr-phdeez/"><b id="authorName">Dr.PhDeez</b></a></p>
+            </div>"#;
+        assert_eq!(parse_author(html).unwrap().0, "Dr.PhDeez");
+
+        // No byline at all — a page must still parse rather than inventing one.
+        assert_eq!(parse_author("<div class=\"post-header\"></div>"), None);
     }
 
     #[test]
@@ -1493,8 +1573,14 @@ mod client_tests {
         assert!(!mods.is_empty(), "the tracks category should not be empty");
 
         let d = detail(&mods[0].slug).await.expect("detail works");
-        eprintln!("detail '{}': {} downloads, version {:?}", d.title, d.downloads.len(), d.version);
+        eprintln!(
+            "detail '{}': {} downloads, version {:?}, by {:?} ({:?})",
+            d.title, d.downloads.len(), d.version, d.author, d.author_url
+        );
         assert!(!d.title.is_empty());
+        // The byline is scraped off the rendered page, not the REST API — the site answers
+        // `_embed=author` with an empty user, so nothing else would notice a theme change.
+        assert!(d.author.is_some(), "every post on the catalog carries a byline");
     }
 
     /// The ReShade Presets category the Settings card sends people to is real, populated,

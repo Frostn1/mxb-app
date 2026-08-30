@@ -1410,6 +1410,18 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0113.hero.title":
+    "Cada pista se abre como el lugar que es",
+  "showcase.v0113.hero.body":
+    "Antes una pista se abr\u00eda como terreno desnudo: los surcos, peraltes y caras de salto correctos, pero nada encima, as\u00ed que un supercross y un circuito nacional se ve\u00edan casi igual. El visor ahora dibuja lo que la pista pone sobre s\u00ed misma: las carpas y toldos, las pacas de paja y muros de neum\u00e1ticos, las l\u00edneas de banderolas y el vallado, los remolques del paddock y el paisaje m\u00e1s all\u00e1 de su propio cuadrado.",
+  "showcase.v0113.sky":
+    "Una pista se sit\u00faa bajo su propio cielo, iluminada y con la bruma que indica su propio archivo de ambiente.",
+  "showcase.v0113.ground":
+    "El suelo conserva su detalle de cerca: la tierra de la propia pista, con relieve real cuando incluye un mapa de normales para ella.",
+  "showcase.v0113.pick":
+    "Haz clic en cualquier cosa que est\u00e9 sobre la pista y se ilumina por s\u00ed sola, con su nombre y su tama\u00f1o.",
+  "showcase.v0113.speed":
+    "Llega por etapas \u2014 primero el terreno, luego la forma de los objetos, luego sus colores \u2014 y volver a abrir la misma pista se salta el archivo por completo.",
   "showcase.v0112.hero.title":
     "Un pack de motos se instala como las motos que lleva dentro",
   "showcase.v0112.hero.body":
@@ -1852,10 +1864,19 @@ export const es: Translation = {
 
   // ── Designer (el editor por capas) ────────────────────────────────────────────
   "designer.help":
-    "Dibuja una pintura sobre las hojas que el juego lee de verdad y mírala en el modelo mientras trabajas. Empieza desde una pintura instalada para acertar con los nombres de las hojas, píntala con pincel, degradado o formas, apila imágenes y texto encima y guarda: lo que sale es un .pnt que el juego carga, no una exportación que convertir.",
+    "Dibuja una pintura sobre las hojas que el juego lee de verdad y mírala en el modelo mientras trabajas. Elige un modelo y sus hojas ya están ahí, con los nombres que él usa — o empieza desde una pintura instalada o un archivo de Photoshop para traerte el trabajo. Pinta con pincel, degradado o formas, apila imágenes y texto encima y guarda: lo que sale es un .pnt que el juego carga, no una exportación que convertir.",
   "designer.empty":
-    "Todavía no hay nada sobre lo que dibujar. Empieza desde una pintura instalada para este modelo — así obtienes sus hojas y sus nombres — o añade una en blanco.",
+    "Todavía no hay nada sobre lo que dibujar. Empieza desde una pintura instalada para este modelo, abre un archivo de Photoshop para conservar sus capas, o añade una hoja en blanco.",
   "designer.startFromPaint": "Empezar desde una pintura…",
+  "designer.startFromPsd": "Empezar desde un PSD…",
+  "designer.exportPsd": "Exportar PSD",
+  "designer.exportPsdHint": "Guarda cada hoja como un .psd con capas, en una carpeta que elijas.",
+  "designer.exportedPsd_one": "1 hoja guardada en {{dir}}",
+  "designer.exportedPsd_other": "{{count}} hojas guardadas en {{dir}}",
+  "designer.sheetsSwitched": "Cambiado a las hojas que usa {{dest}}.",
+  "designer.switchSheetsTitle": "Estas hojas son de otro modelo",
+  "designer.switchSheetsBody": "{{dest}} usa {{names}}. Cambiar sustituye todas las hojas abiertas.",
+  "designer.switchSheets": "Cambiar hojas",
   "designer.blankSheet": "Hoja en blanco",
   "designer.addSheet": "Añadir una hoja",
   "designer.nothingToSave": "Todas las hojas están vacías: dibuja algo antes de guardar.",
@@ -1993,6 +2014,12 @@ export const es: Translation = {
     "Solo las motos pueden decir qué texturas son suyas. Un casco lleva la pintura con la que vino, y eso no es un aspecto de fábrica que calcar.",
   "designer.stockNoMatch":
     "Este modelo no trae ninguna textura propia llamada “{{name}}”, así que no hay nada de la moto que mostrar bajo esta hoja.",
+  "designer.stockAsBase": "Fábrica como base",
+  "designer.stockAsBaseHint":
+    "Pinta la textura propia de la moto en esta hoja a plena intensidad — el aspecto de fábrica como punto de partida, a un número de ser una pintura. A diferencia de la referencia de arriba, esta sí forma parte de lo que guardas.",
+  "designer.stockAsBaseDone":
+    "“{{name}}” ya lleva la textura propia de la moto — ponle tu número y guarda.",
+  "designer.stockReadFailed": "No se pudo leer la textura “{{name}}” del modelo.",
   "designer.uvMap": "Mapa UV",
   "designer.uvHint":
     "Muestra dónde cae en esta hoja cada pieza del carenado del modelo, cada una con su color.",
@@ -2048,6 +2075,18 @@ export const es: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Desnivel",
+  "trackViewer.objects": "Objetos",
+  "trackViewer.painting": "Pintando…",
+  "trackViewer.scenery": "Escenografía",
+  "trackViewer.sceneryTris": "{{count}} triángulos",
+  "trackViewer.fixtures": "Elementos marcados",
+  "trackViewer.pieces": "Piezas separables",
+  "trackViewer.selected": "Pieza seleccionada",
+  "trackViewer.place": "Colocar un modelo",
+  "trackViewer.placePick": "Elige un modelo y haz clic en el suelo.",
+  "trackViewer.placeHint": "Haz clic en el suelo para colocarlo.",
+  "trackViewer.placedCount": "{{count}} colocados",
+  "trackViewer.saveProps": "Guardar .scr",
   "trackViewer.noTerrain": "No hay terreno que mostrar",
   "trackViewer.noTerrainHint":
     "Los datos de altura de este circuito no están en un formato que el visor sepa leer todavía.",
@@ -2058,4 +2097,41 @@ export const es: Translation = {
   "trackViewer.whyDetails": "¿Por qué?",
   "trackViewer.copyDetails": "Copiar detalles",
   "trackViewer.copied": "Copiado",
+  /* ── Protect ─────────────────────────────────────────────────────────── */
+  "nav.protect": "Proteger",
+  "protect.help": "Bloquea los archivos que has creado a los GUID de quienes pueden cargarlos. Un archivo bloqueado solo se abre en la instalación cuyo GUID lleva, así que un comprador es una copia: elige los archivos una vez, pega los GUID y obtienes una carpeta por comprador. Tus originales solo se leen.",
+  "protect.ownTitle": "Tu GUID",
+  "protect.ownDesc": "La identidad con la que MX Bikes te reconoce. No está en ningún archivo — la entrega Steam al iniciar sesión — así que la app la lee del juego en marcha.",
+  "protect.ownUnknown": "Aún desconocido",
+  "protect.readOwn": "Leer del juego",
+  "protect.copy": "Copiar",
+  "protect.copied": "Copiado",
+  "protect.useMine": "Añadir a la lista",
+  "protect.ownFound": "Tu GUID es {{guid}}",
+  "protect.ownNotFound": "No se pudo leer tu GUID",
+  "protect.ownNotFoundWhy": "Abre MX Bikes e inicia sesión en Steam, y vuelve a intentarlo.",
+  "protect.ownFailed": "Falló la lectura de tu GUID",
+  "protect.filesTitle": "Archivos a bloquear",
+  "protect.filesDesc": "Añade archivos sueltos, o una carpeta para tomar todo lo que hay dentro. Un .pkz se bloquea como archivo comprimido; lo demás se bloquea por separado.",
+  "protect.addFiles": "Añadir archivos",
+  "protect.addFolder": "Añadir carpeta",
+  "protect.clear": "Vaciar",
+  "protect.summary": "{{files}} archivos · {{size}}",
+  "protect.summarySkipped": "{{count}} omitidos",
+  "protect.planFailed": "No se pudo leer esa selección",
+  "protect.skipJunk": "Omitido",
+  "protect.skipEmpty": "Vacío",
+  "protect.skipProtected": "Ya protegido",
+  "protect.guidsTitle": "Bloquear para",
+  "protect.guidsDesc": "Un GUID por línea — sale una carpeta por GUID. Cada copia lleva su propia clave, así que dos compradores no pueden saber que tienen el mismo archivo.",
+  "protect.guidsPlaceholder": "FF0110000108D7CFE3",
+  "protect.guidBad": "No es un GUID — 18 caracteres hexadecimales",
+  "protect.outTitle": "Dónde ponerlos",
+  "protect.outDesc": "Aquí se crea una carpeta por GUID, con los archivos en las mismas rutas que ya tenían. Tus originales no se tocan.",
+  "protect.outPlaceholder": "Elige una carpeta",
+  "protect.browse": "Examinar",
+  "protect.lock": "Bloquear {{files}} archivos para {{guids}} GUID",
+  "protect.done": "Bloqueados {{files}} archivos para {{guids}} GUID",
+  "protect.failed": "El bloqueo falló",
+  "protect.showFolder": "Mostrar carpeta",
 };

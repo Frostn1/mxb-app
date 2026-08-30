@@ -129,6 +129,12 @@ pub struct ModDetail {
     pub description_html: String,
     pub images: Vec<String>,
     pub version: Option<String>,
+    /// Who the catalog credits the post to — the byline it prints above the title. `None`
+    /// when the page carries none; the site is the only thing that knows, and a mod page
+    /// without a byline must still open.
+    pub author: Option<String>,
+    /// The author's profile page on the catalog, so the byline can link to it.
+    pub author_url: Option<String>,
     pub downloads: Vec<DownloadOption>,
     /// The post's category names, verbatim ("2023 KTM 450 SX-F OEM", "Liveries", "KTM").
     /// A livery's model category names the bike it's for far more precisely than its title

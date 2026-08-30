@@ -1384,6 +1384,18 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0113.hero.title":
+    "Every track opens as the place it is",
+  "showcase.v0113.hero.body":
+    "A track used to open as bare ground \u2014 the right ruts, berms and jump faces, but nothing standing on them, so a supercross floor and a national circuit read much the same. The viewer now draws what a track puts on itself: the tents and awnings, the hay bales and tyre walls, the banner lines and fencing, the trailers in the paddock, and the landscape beyond the track\u2019s own square.",
+  "showcase.v0113.sky":
+    "A track sits under its own sky, lit and hazed the way its own ambience file says it should be.",
+  "showcase.v0113.ground":
+    "The ground keeps its detail up close \u2014 the track\u2019s own dirt, with real relief where it ships a normal map for it.",
+  "showcase.v0113.pick":
+    "Click anything standing on the track and it lights up on its own, named and measured.",
+  "showcase.v0113.speed":
+    "It arrives in stages \u2014 the terrain first, then the shape of the scenery, then its colours \u2014 and opening the same track again skips the archive entirely.",
   "showcase.v0112.hero.title":
     "A bike pack installs as the bikes inside it",
   "showcase.v0112.hero.body":
@@ -1824,10 +1836,19 @@ export const en = {
 
   // ── Designer (the layer editor) ───────────────────────────────────────────────
   "designer.help":
-    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Start from an installed paint to get the sheet names right, paint on it with a brush, a gradient or a shape, stack images and text on top, then save — what comes out is a .pnt the game loads, not an export to convert.",
+    "Draw a paint on the sheets the game actually reads, and watch it on the model as you go. Pick a model and its sheets are already there under the names it binds — or start from an installed paint or a Photoshop file to bring artwork with you. Paint with a brush, a gradient or a shape, stack images and text on top, then save: what comes out is a .pnt the game loads, not an export to convert.",
   "designer.empty":
-    "Nothing to draw on yet. Start from a paint installed for this model to get its real sheets and their names, or add a blank one.",
+    "Nothing to draw on yet. Start from a paint installed for this model, open a Photoshop file to keep its layers, or add a blank sheet.",
   "designer.startFromPaint": "Start from a paint…",
+  "designer.startFromPsd": "Start from a PSD…",
+  "designer.exportPsd": "Export PSD",
+  "designer.exportPsdHint": "Write every sheet out as a layered .psd, into a folder you pick.",
+  "designer.exportedPsd_one": "Wrote 1 sheet to {{dir}}",
+  "designer.exportedPsd_other": "Wrote {{count}} sheets to {{dir}}",
+  "designer.sheetsSwitched": "Switched to the sheets {{dest}} uses.",
+  "designer.switchSheetsTitle": "These sheets are for another model",
+  "designer.switchSheetsBody": "{{dest}} uses {{names}}. Switching replaces every sheet you have open.",
+  "designer.switchSheets": "Switch sheets",
   "designer.blankSheet": "Blank sheet",
   "designer.addSheet": "Add a sheet",
   "designer.nothingToSave": "Every sheet is empty — draw something before saving.",
@@ -1963,6 +1984,12 @@ export const en = {
     "Only bikes can say which textures are their own. A helmet wears whichever paint it shipped with, and that isn't a stock look to trace.",
   "designer.stockNoMatch":
     "This model carries no texture of its own called “{{name}}”, so there's nothing of the bike's to show under this sheet.",
+  "designer.stockAsBase": "Stock as base",
+  "designer.stockAsBaseHint":
+    "Paint the bike's own texture into this sheet at full strength — the stock look as your starting point, a number away from being a paint. Unlike the reference above, this one is part of what you save.",
+  "designer.stockAsBaseDone":
+    "“{{name}}” now holds the bike's own texture — put your number on it and save.",
+  "designer.stockReadFailed": "Couldn't read the model's own “{{name}}” texture.",
   "designer.uvMap": "UV map",
   "designer.uvHint":
     "Show where the model's bodywork lands on this sheet, each piece in its own colour.",
@@ -2018,6 +2045,18 @@ export const en = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Elevation range",
+  "trackViewer.objects": "Objects",
+  "trackViewer.painting": "Painting…",
+  "trackViewer.scenery": "Scenery",
+  "trackViewer.sceneryTris": "{{count}} triangles",
+  "trackViewer.fixtures": "Marked fixtures",
+  "trackViewer.pieces": "Separable pieces",
+  "trackViewer.selected": "Selected piece",
+  "trackViewer.place": "Place a model",
+  "trackViewer.placePick": "Pick a model, then click the ground.",
+  "trackViewer.placeHint": "Click the ground to put it down.",
+  "trackViewer.placedCount": "{{count}} placed",
+  "trackViewer.saveProps": "Save .scr",
   "trackViewer.noTerrain": "No terrain to show",
   "trackViewer.noTerrainHint":
     "This track's height data isn't in a layout the viewer can read yet.",
@@ -2028,4 +2067,41 @@ export const en = {
   "trackViewer.whyDetails": "Why?",
   "trackViewer.copyDetails": "Copy details",
   "trackViewer.copied": "Copied",
+  /* ── Protect: lock content to a GUID ─────────────────────────────────── */
+  "nav.protect": "Protect",
+  "protect.help": "Lock the files you've made to the GUIDs of the people allowed to load them. A locked file only opens on the install whose GUID it carries, so one buyer means one copy: pick the files once, paste the GUIDs, and you get a folder per buyer. Your originals are only ever read.",
+  "protect.ownTitle": "Your GUID",
+  "protect.ownDesc": "The identity MX Bikes knows you by. It isn't in any file — Steam hands it over when you sign in — so the app reads it out of the running game.",
+  "protect.ownUnknown": "Not known yet",
+  "protect.readOwn": "Read from game",
+  "protect.copy": "Copy",
+  "protect.copied": "Copied",
+  "protect.useMine": "Add to the list",
+  "protect.ownFound": "Your GUID is {{guid}}",
+  "protect.ownNotFound": "Couldn't read your GUID",
+  "protect.ownNotFoundWhy": "Start MX Bikes and sign in to Steam, then try again.",
+  "protect.ownFailed": "Reading your GUID failed",
+  "protect.filesTitle": "Files to lock",
+  "protect.filesDesc": "Add single files, or a folder to take everything inside it. A .pkz is locked as an archive; anything else is locked on its own.",
+  "protect.addFiles": "Add files",
+  "protect.addFolder": "Add folder",
+  "protect.clear": "Clear",
+  "protect.summary": "{{files}} files · {{size}}",
+  "protect.summarySkipped": "{{count}} skipped",
+  "protect.planFailed": "Couldn't read that selection",
+  "protect.skipJunk": "Skipped",
+  "protect.skipEmpty": "Empty",
+  "protect.skipProtected": "Already protected",
+  "protect.guidsTitle": "Lock to",
+  "protect.guidsDesc": "One GUID per line — one folder comes out per GUID. Every copy gets its own key, so two buyers can't tell they hold the same file.",
+  "protect.guidsPlaceholder": "FF0110000108D7CFE3",
+  "protect.guidBad": "Not a GUID — 18 hex characters",
+  "protect.outTitle": "Where to put them",
+  "protect.outDesc": "A folder per GUID is created here, holding the files at the paths they already had. Your originals aren't touched.",
+  "protect.outPlaceholder": "Choose a folder",
+  "protect.browse": "Browse",
+  "protect.lock": "Lock {{files}} files for {{guids}} GUIDs",
+  "protect.done": "Locked {{files}} files for {{guids}} GUIDs",
+  "protect.failed": "Locking failed",
+  "protect.showFolder": "Show folder",
 } as const;

@@ -1423,6 +1423,18 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0113.hero.title":
+    "Jede Strecke \u00f6ffnet sich als der Ort, der sie ist",
+  "showcase.v0113.hero.body":
+    "Fr\u00fcher \u00f6ffnete sich eine Strecke als nackter Boden \u2014 die richtigen Rillen, Anlieger und Sprungkanten, aber nichts, was darauf steht, sodass eine Supercross-Halle und ein Nationalkurs kaum zu unterscheiden waren. Der Betrachter zeichnet jetzt, was eine Strecke auf sich stellt: Zelte und Vord\u00e4cher, Strohballen und Reifenw\u00e4nde, Bannerreihen und Z\u00e4une, die Anh\u00e4nger im Fahrerlager und die Landschaft jenseits des eigenen Quadrats.",
+  "showcase.v0113.sky":
+    "Eine Strecke liegt unter ihrem eigenen Himmel, beleuchtet und im Dunst so, wie es ihre eigene Ambience-Datei vorgibt.",
+  "showcase.v0113.ground":
+    "Der Boden beh\u00e4lt seine Details aus der N\u00e4he \u2014 der Dreck der Strecke selbst, mit echtem Relief, wo sie eine Normal Map daf\u00fcr mitliefert.",
+  "showcase.v0113.pick":
+    "Klicke auf irgendetwas, das auf der Strecke steht, und es leuchtet einzeln auf, benannt und vermessen.",
+  "showcase.v0113.speed":
+    "Es kommt in Stufen \u2014 erst das Gel\u00e4nde, dann die Form der Objekte, dann ihre Farben \u2014 und dieselbe Strecke erneut zu \u00f6ffnen \u00fcberspringt das Archiv ganz.",
   "showcase.v0112.hero.title":
     "Ein Bike-Pack wird als die Bikes darin installiert",
   "showcase.v0112.hero.body":
@@ -1866,10 +1878,19 @@ export const de: Translation = {
 
   // ── Designer (der Ebenen-Editor) ──────────────────────────────────────────────
   "designer.help":
-    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Fang bei einem installierten Design an, damit die Bahnennamen stimmen, male mit Pinsel, Verlauf oder Formen darauf, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
+    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Wähl ein Modell und seine Bahnen sind schon da, unter den Namen, die es nutzt — oder fang bei einem installierten Design oder einer Photoshop-Datei an und bring deine Arbeit mit. Male mit Pinsel, Verlauf oder Formen, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
   "designer.empty":
-    "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an — dann hast du seine Bahnen samt Namen — oder füge eine leere hinzu.",
+    "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an, öffne eine Photoshop-Datei, um ihre Ebenen zu behalten, oder füge eine leere Bahn hinzu.",
   "designer.startFromPaint": "Von einem Design ausgehen…",
+  "designer.startFromPsd": "Von einer PSD ausgehen…",
+  "designer.exportPsd": "Als PSD exportieren",
+  "designer.exportPsdHint": "Schreibt jede Bahn als PSD mit Ebenen in einen Ordner deiner Wahl.",
+  "designer.exportedPsd_one": "1 Bahn nach {{dir}} geschrieben",
+  "designer.exportedPsd_other": "{{count}} Bahnen nach {{dir}} geschrieben",
+  "designer.sheetsSwitched": "Auf die Bahnen von {{dest}} gewechselt.",
+  "designer.switchSheetsTitle": "Diese Bahnen gehören zu einem anderen Modell",
+  "designer.switchSheetsBody": "{{dest}} nutzt {{names}}. Beim Wechseln werden alle offenen Bahnen ersetzt.",
+  "designer.switchSheets": "Bahnen wechseln",
   "designer.blankSheet": "Leere Bahn",
   "designer.addSheet": "Bahn hinzufügen",
   "designer.nothingToSave": "Alle Bahnen sind leer — zeichne etwas, bevor du speicherst.",
@@ -2007,6 +2028,12 @@ export const de: Translation = {
     "Nur Bikes können sagen, welche Texturen ihre eigenen sind. Ein Helm trägt die Lackierung, mit der er kam, und die ist kein Originallook zum Abpausen.",
   "designer.stockNoMatch":
     "Dieses Modell bringt keine eigene Textur namens „{{name}}“ mit, also gibt es vom Bike nichts unter diesem Blatt zu zeigen.",
+  "designer.stockAsBase": "Original als Basis",
+  "designer.stockAsBaseHint":
+    "Malt die eigene Textur des Bikes in voller Deckkraft in dieses Blatt — der Originallook als Ausgangspunkt, eine Startnummer von einer fertigen Lackierung entfernt. Anders als die Referenz darüber gehört diese zu dem, was du speicherst.",
+  "designer.stockAsBaseDone":
+    "„{{name}}“ trägt jetzt die eigene Textur des Bikes — setz deine Nummer drauf und speichere.",
+  "designer.stockReadFailed": "Die eigene Textur „{{name}}“ des Modells ließ sich nicht lesen.",
   "designer.uvMap": "UV-Karte",
   "designer.uvHint":
     "Zeigt, wo die Verkleidungsteile des Modells auf diesem Blatt landen, jedes in eigener Farbe.",
@@ -2062,6 +2089,18 @@ export const de: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Höhenunterschied",
+  "trackViewer.objects": "Objekte",
+  "trackViewer.painting": "Texturen…",
+  "trackViewer.scenery": "Kulisse",
+  "trackViewer.sceneryTris": "{{count}} Dreiecke",
+  "trackViewer.fixtures": "Markierte Punkte",
+  "trackViewer.pieces": "Einzelteile",
+  "trackViewer.selected": "Gewähltes Teil",
+  "trackViewer.place": "Modell setzen",
+  "trackViewer.placePick": "Modell wählen, dann auf den Boden klicken.",
+  "trackViewer.placeHint": "Auf den Boden klicken zum Setzen.",
+  "trackViewer.placedCount": "{{count}} gesetzt",
+  "trackViewer.saveProps": ".scr speichern",
   "trackViewer.noTerrain": "Kein Gelände zum Anzeigen",
   "trackViewer.noTerrainHint":
     "Die Höhendaten dieser Strecke liegen in keinem Format vor, das der Betrachter bereits lesen kann.",
@@ -2072,4 +2111,41 @@ export const de: Translation = {
   "trackViewer.whyDetails": "Warum?",
   "trackViewer.copyDetails": "Details kopieren",
   "trackViewer.copied": "Kopiert",
+  /* ── Protect ─────────────────────────────────────────────────────────── */
+  "nav.protect": "Schützen",
+  "protect.help": "Sperre die Dateien, die du gebaut hast, auf die GUIDs derjenigen, die sie laden dürfen. Eine gesperrte Datei öffnet sich nur auf der Installation, deren GUID sie trägt — ein Käufer, eine Kopie. Dateien einmal auswählen, GUIDs einfügen, und du bekommst einen Ordner pro Käufer. Deine Originale werden nur gelesen.",
+  "protect.ownTitle": "Deine GUID",
+  "protect.ownDesc": "Die Identität, unter der MX Bikes dich kennt. Sie steht in keiner Datei — Steam liefert sie beim Anmelden — also liest die App sie aus dem laufenden Spiel.",
+  "protect.ownUnknown": "Noch nicht bekannt",
+  "protect.readOwn": "Aus dem Spiel lesen",
+  "protect.copy": "Kopieren",
+  "protect.copied": "Kopiert",
+  "protect.useMine": "Zur Liste hinzufügen",
+  "protect.ownFound": "Deine GUID ist {{guid}}",
+  "protect.ownNotFound": "GUID konnte nicht gelesen werden",
+  "protect.ownNotFoundWhy": "Starte MX Bikes, melde dich bei Steam an und versuch es noch einmal.",
+  "protect.ownFailed": "Lesen deiner GUID fehlgeschlagen",
+  "protect.filesTitle": "Zu sperrende Dateien",
+  "protect.filesDesc": "Einzelne Dateien hinzufügen — oder einen Ordner, um alles darin zu nehmen. Eine .pkz wird als Archiv gesperrt, alles andere für sich.",
+  "protect.addFiles": "Dateien hinzufügen",
+  "protect.addFolder": "Ordner hinzufügen",
+  "protect.clear": "Leeren",
+  "protect.summary": "{{files}} Dateien · {{size}}",
+  "protect.summarySkipped": "{{count}} übersprungen",
+  "protect.planFailed": "Diese Auswahl konnte nicht gelesen werden",
+  "protect.skipJunk": "Übersprungen",
+  "protect.skipEmpty": "Leer",
+  "protect.skipProtected": "Bereits geschützt",
+  "protect.guidsTitle": "Sperren auf",
+  "protect.guidsDesc": "Eine GUID pro Zeile — pro GUID kommt ein Ordner heraus. Jede Kopie bekommt ihren eigenen Schlüssel, damit zwei Käufer nicht erkennen können, dass sie dieselbe Datei haben.",
+  "protect.guidsPlaceholder": "FF0110000108D7CFE3",
+  "protect.guidBad": "Keine GUID — 18 Hex-Zeichen",
+  "protect.outTitle": "Wohin damit",
+  "protect.outDesc": "Hier entsteht ein Ordner pro GUID, mit den Dateien unter denselben Pfaden wie zuvor. Deine Originale bleiben unangetastet.",
+  "protect.outPlaceholder": "Ordner wählen",
+  "protect.browse": "Durchsuchen",
+  "protect.lock": "{{files}} Dateien für {{guids}} GUIDs sperren",
+  "protect.done": "{{files}} Dateien für {{guids}} GUIDs gesperrt",
+  "protect.failed": "Sperren fehlgeschlagen",
+  "protect.showFolder": "Ordner anzeigen",
 };

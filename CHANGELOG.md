@@ -2,9 +2,24 @@
 
 ## 2026-08-30
 ### Added
-- MXB Hub support: a new sidebar tab that browses the shop.mxb-hub.com marketplace and installs what your account already owns, free mods included
-- MXB Hub sign-in, purchases grid and one-click install, reusing the existing destination dialog, install queue and "Installed" badges
-- MXB Hub product images are served through the app's image cache
+
+- **Browse and install from MXB Hub.** A new sidebar tab for the shop.mxb-hub.com
+  marketplace: the whole catalogue, filterable by creator and by what a thing is, with prices
+  and artwork. Sign in and everything you already own — the free mods included — installs the
+  same way anything else does, into the folder the app suggests, with the same progress card
+  and "Installed" badge. Mods the store hosts elsewhere, on MediaFire and the like, install
+  from here too.
+
+- **Lock a mod to the people you made it for.** Studio has a new Protect tab: pick the files
+  you built — one at a time, or a whole mod folder — paste the GUIDs of the riders allowed to
+  load them, and you get a folder per rider with locked copies inside, ready to send out. A
+  `.pkz` is locked as an archive, so tracks and packaged bikes work the same as loose files.
+  Every copy is locked with its own key, so two riders can't tell they are holding the same
+  file. Your originals are only ever read — nothing is written over.
+- **Read your own GUID out of the game.** MX Bikes never writes your GUID to a file, so until
+  now the app had to wait for one of your servers to see you connect. The Protect tab reads it
+  from the running game instead, shows it, copies it, and claims it for your account — the
+  same GUID the Servers tab uses, so both places agree about who you are.
 
 ## Unannounced — voice chat
 
@@ -35,7 +50,189 @@ whichever release turns it on.
   half a grid in one room and half in another is the failure that looks like nothing is
   wrong.
 
-## 2026-08-29
+## 2026-08-30
+
+### Added
+
+- **A mod's page now says who made it.** Open a track, a bike or a set of gear and the
+  creator's name sits directly under the title, exactly as the site credits it. Click it to
+  open their page on the catalog, which is where the rest of their work is. The name is read
+  off the mod's own page rather than asked for over the catalog's API — the API stopped
+  answering who posted anything some time ago, which is why the browse cards have been
+  showing a date and nothing else.
+- **Start a paint from the bike's own plastics rather than from nothing.** The Designer could
+  already show the texture a bike ships with faintly under your sheet, to draw against — but
+  what people actually keep asking for is that picture itself, with a number on it and nothing
+  else changed. **Stock as base** paints it into the sheet at full strength, where it becomes
+  part of what gets saved instead of a guide that never is: put your number over it, save, and
+  the paint is the bike exactly as it came with your number on the shroud. A sheet nothing has
+  been done to yet also takes the texture's own size, so the bike's artwork is never resampled
+  onto a blank that happened to be a different one.
+
+- **The Designer opens and writes Photoshop files.** A livery almost always starts life as a
+  layered `.psd`, and until now the only way to bring one in was to flatten it first — which
+  threw away every layer and made this a worse editor than the file it was fed. Start from a
+  PSD and its layers arrive as layers: named, stacked in order, still at their own opacity and
+  blend mode, hidden ones still hidden, folders still grouped. Export PSD goes back the other
+  way, writing each sheet out with its layers intact, into a folder you pick. One file per
+  sheet, because sheets have their own sizes and a Photoshop document has one canvas. Both
+  directions turn the sheet the right way up, so what opens in Photoshop is the template a
+  painter draws on rather than the upside-down way the game stores it.
+
+### Changed
+
+- **Picking a model fills in the sheets it wants.** The Designer used to open empty, with the
+  names the model binds printed underneath as a hint and a button to turn them into sheets —
+  so the first move of every session was the same move, and getting it wrong meant a paint
+  that loads and shows nothing. The sheets are simply there now, named the way the model reads
+  them, the moment a bike or a piece of gear is chosen. Change the model and they follow it. If
+  anything has been drawn, nothing is thrown away without asking: a warning names the sheets
+  the new model uses and waits for you to say switch.
+
+### Fixed
+
+- **Mirror now works on bodywork that is one piece, like a seat.** "Mirror to other side" asks
+  the model where the far side of a decal's spot actually is, and it used to ask by looking for
+  a triangle whose corners were the exact mirror image of the ones under the layer. Bikes
+  rarely oblige: a seat, a tank or a fender is modelled once as a single piece, so its left and
+  right halves are near-copies rather than vertex-exact mirrors — 2mm apart on a stock
+  CRF450R — and the mirror answered "the model has nothing at the reflection of this spot" over
+  most of the bike. On a stock YZ450F's plastics it could not mirror anything at all. It now
+  asks for the nearest bit of surface at the reflected place instead of an exact twin, which is
+  the same answer where the mesh does line up and a real one where it doesn't. Across six stock
+  bikes it went from mirroring a third of a sheet at best to nearly all of it, and every
+  placement lands on the panel the model puts there.
+
+- **A decal mirrored onto a narrow panel comes out the right size.** Working out which way the
+  far side runs means stepping a little way along the layer's own axes and seeing where those
+  land. The first step tried is a wide one, and on a strip as thin as a seat's flank it ran off
+  the panel and came back with a placement up to a third too big. A wide step is still what it
+  reaches for first, but it now keeps looking when the answer doesn't read as a reflection.
+
+## 2026-08-29 — v0.11.3 — A track viewer that draws the whole track
+
+### Added
+
+- **The track viewer draws what stands on the track, not just the shape of it.** Until now a
+  track opened as bare ground: the right ruts, berms and jump faces, but nothing standing on
+  them, so a supercross floor and a national circuit read much the same. The viewer now draws
+  the track's scenery too — the tents and awnings, the hay bales and tyre walls, the banner
+  lines and fencing, the trailers in the paddock, and the landscape beyond the track's own
+  square — all in the places the track itself puts them. **Objects** in the header turns it
+  off again.
+
+  It also marks what a track places but ships no model for: every marshal post, every TV
+  camera and every crowd sound source, each as a pin standing on the ground where the track
+  states it. That the pins land on the ground rather than near it is the check that the
+  scenery is in the right place at all — a track states its marshals' heights, its terrain
+  states the ground's, and nothing makes the two agree except reading both correctly.
+
+  It is drawn in the track's own colours, not a flat grey: the `.map`'s surfaces come out
+  with it, so the tents are the tents and the dirt is the dirt. Foliage, crowd and fencing
+  are cut-outs rather than the solid slabs they would otherwise be — a track's own naming
+  says which surfaces carry a cut-out, and drawing those without one turns a treeline into a
+  wall and buries the track behind it.
+
+  It arrives in stages rather than all at once. The terrain draws first, then the scenery's
+  shape, then the colours on top of it — because pulling a track's map out of its archive is
+  nearly all of what a look at one costs, and the shape of the place is worth having on
+  screen while the hundreds of megabytes behind its colours are still being read. The header
+  says which stage is still running. Both halves are cached, so opening the same track again
+  skips the archive entirely.
+
+  Click anything standing on the track and it lights up on its own. The scenery arrives as one
+  mesh, but the things in it are separable — an exporter welds a tent to itself and to nothing
+  else — so the viewer recovers the pieces a track was built from and names the one you point
+  at: how many triangles it is and how big it is in metres. A published track comes apart into
+  ten thousand of them, the largest five metres across.
+
+  The ground keeps its own colour while it does. The grain is measured against the sheet's own
+  average brightness, so it varies the surface without dragging it darker — tiling a dirt or
+  grass sheet raw turned a dry circuit muddy — and only the sheet's luminance is used, never
+  its hue. A track with no dirt sheet of its own is left alone rather than tinted with
+  whatever else it had.
+
+  The ground keeps its detail when you get close to it. A track states its surface at about a
+  third of a metre per sample, height grid and surface picture alike, so anything nearer than
+  that was interpolation — a soft brown smear. The track's own ground sheet is now tiled over
+  the terrain and multiplied into it, which puts the grain back at whatever distance you care
+  to look from. It says what the ground is made of, not what is where.
+
+  And where a track ships one, that grain has relief rather than being a picture of relief.
+  Half the tracks measured carry a normal map beside their ground sheet — the sheet that says
+  which way the surface faces rather than what colour it is — and it is now tiled with the
+  colour it belongs to and lit by the track's own sun, so a rut catches the light on the side
+  facing it. Gently: one sheet is standing in for every surface a track has.
+
+  Which sheet gets picked is read as words rather than letters. A track's ground was chosen by
+  looking for `dirt` or `sand` anywhere in a name, which on one track picked `logo-dirtmaster`
+  — a logo — and on another a sponsor's banner, and a near-flat sheet tiled over a track does
+  nothing at all. Names now split into their words however they were written, capitals
+  included, a word only counts whole, and a name carrying `logo`, `banner`, `sign`, `marker`
+  or the like is not ground however grounded the rest of it sounds. A track may also name its
+  riding surface after itself — SandPoint calls it `track-dark` — which is now read as ground
+  where nothing better is offered. All sixteen installed tracks find their ground, against
+  thirteen before, three of which were finding the wrong thing; nine find its relief, against
+  three.
+
+  A track that places props of its own draws its scenery again. The props a `.scr` puts down
+  are added to the same mesh as the rest, but they were not being numbered as pieces — and the
+  viewer works out where the surfaces begin from the piece count, so a mesh short of ids reads
+  past its own end and is thrown away whole. Abydos was sixteen thousand prop triangles short
+  and drew nothing at all. Each placed prop is now a piece like any other, which is also what
+  makes it something you can point at.
+
+  A track that states no surfaces of its own draws its terrain again. Tiling the ground sheet
+  over it read the coordinates three.js sets up for a surface picture — which a track without
+  one never has, so the shader failed to build and the terrain drew nothing while its scenery,
+  sky and markers all drew fine. The grain now carries its own coordinates and works with or
+  without a picture under it.
+
+  A track that states no surfaces at all is drawn in the colour of its ground rather than by
+  height. Two of the installed tracks ship no coverage data, so the viewer fell back to an
+  elevation ramp — green in the hollows through to white on the high ground, which on a sand
+  circuit is not a legend anybody asked for. Where the track's own ground sheet is known, its
+  average colour is used instead and the shape reads by its shading alone.
+
+  The ground sheet is cached with the rest. Finding it means inflating candidate sheets to
+  check a normal map really is one, and that was happening on every open.
+
+  A track is lit and hazed the way it says it should be. Its ambience file states a sun
+  colour, an ambient, and a fog — the viewer used one fixed rig for every track and ignored
+  all of it. The haze is thinned to something a whole track can still be seen through: a
+  track's own figure is written for a rider looking down a straight, not for a view of the
+  entire place at once, so the colour and the relative thickness are the track's while the
+  depth it acts over is the view's.
+
+  A track now sits under its own sky. Every one ships a dome and a backdrop and names them in
+  its ambience file, and the viewer was throwing both away — a track ended at a hard edge with
+  black beyond it. They draw with the track's own picture on them, lit from where the track
+  says its sun is.
+
+  What stands on the track is lit from above rather than from below. Every piece of scenery
+  was being drawn back to front — the game's meshes are wound the other way round, and the
+  view already mirrors them, so reversing them again put every face the wrong way out. Drawn
+  double-sided that shows up not as holes but as light: the sun landed on the underside of
+  everything. Small props got away with it; a track that surrounds itself with landscape did
+  not, and Abydos's dunes drew as a black apron around the circuit. They are dunes now.
+
+  Where a track's surfaces can't be read, its cut-outs are left out rather than drawn wrong. A
+  quarter of a map is foliage, crowd and netting — flat cards that are a tree only once an
+  alpha channel has cut the tree out of them, and drawn plain they are thousands of standing
+  sheets of paper hiding the track behind them. Tracks whose surfaces do read keep every one
+  of them.
+
+  Ground colours are drier. A surface id names what the physics does, not what a track looks
+  like, and a lawn green on a dry circuit was the loudest wrong thing on the screen — the same
+  hues now sit closer to earth, so a surface a track named loosely reads as ground.
+
+  Props can be written back out. A track's `.scr` is the one part of it that states where a
+  thing goes in plain text, and the game reads it at load — so it is where anything placed in
+  the app ends up. What goes out reads back as what went in, and an existing file is left alone
+  unless replacing it is asked for.
+
+  A track carrying no scenery is left alone rather than reported as a failure; some ship none
+  at all.
 
 ### Changed
 

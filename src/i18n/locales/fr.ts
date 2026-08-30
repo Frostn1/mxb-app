@@ -1414,6 +1414,18 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0113.hero.title":
+    "Chaque piste s\u2019ouvre comme le lieu qu\u2019elle est",
+  "showcase.v0113.hero.body":
+    "Une piste s\u2019ouvrait auparavant comme un sol nu \u2014 les orni\u00e8res, les virages relev\u00e9s et les faces de saut justes, mais rien dessus, si bien qu\u2019un supercross et un circuit national se ressemblaient. La visionneuse dessine d\u00e9sormais ce qu\u2019une piste pose sur elle-m\u00eame\u00a0: les tentes et les auvents, les bottes de paille et les murs de pneus, les lignes de banderoles et les barri\u00e8res, les remorques du paddock et le paysage au-del\u00e0 de son propre carr\u00e9.",
+  "showcase.v0113.sky":
+    "Une piste se tient sous son propre ciel, \u00e9clair\u00e9e et voil\u00e9e comme son propre fichier d\u2019ambiance le demande.",
+  "showcase.v0113.ground":
+    "Le sol garde son d\u00e9tail de pr\u00e8s \u2014 la terre de la piste elle-m\u00eame, avec un vrai relief quand elle fournit une carte de normales.",
+  "showcase.v0113.pick":
+    "Cliquez sur ce qui se dresse sur la piste et l\u2019objet s\u2019allume seul, nomm\u00e9 et mesur\u00e9.",
+  "showcase.v0113.speed":
+    "Cela arrive par \u00e9tapes \u2014 le terrain d\u2019abord, puis la forme du d\u00e9cor, puis ses couleurs \u2014 et rouvrir la m\u00eame piste \u00e9vite enti\u00e8rement l\u2019archive.",
   "showcase.v0112.hero.title":
     "Un pack de motos s'installe comme les motos qu'il contient",
   "showcase.v0112.hero.body":
@@ -1857,10 +1869,19 @@ export const fr: Translation = {
 
   // ── Designer (l'éditeur par calques) ──────────────────────────────────────────
   "designer.help":
-    "Dessine une déco sur les planches que le jeu lit vraiment, et regarde-la sur le modèle au fur et à mesure. Pars d'une déco installée pour avoir les bons noms de planches, peins dessus au pinceau, au dégradé ou avec des formes, empile images et textes par-dessus, puis enregistre : ce qui sort est un .pnt que le jeu charge, pas un export à convertir.",
+    "Dessine une déco sur les planches que le jeu lit vraiment, et regarde-la sur le modèle au fur et à mesure. Choisis un modèle et ses planches sont déjà là, sous les noms qu'il utilise — ou pars d'une déco installée ou d'un fichier Photoshop pour amener ton travail avec toi. Peins au pinceau, au dégradé ou avec des formes, empile images et textes par-dessus, puis enregistre : ce qui sort est un .pnt que le jeu charge, pas un export à convertir.",
   "designer.empty":
-    "Rien sur quoi dessiner pour l'instant. Pars d'une déco installée pour ce modèle — tu récupères ses planches et leurs noms — ou ajoute une planche vierge.",
+    "Rien sur quoi dessiner pour l'instant. Pars d'une déco installée pour ce modèle, ouvre un fichier Photoshop pour en garder les calques, ou ajoute une planche vierge.",
   "designer.startFromPaint": "Partir d'une déco…",
+  "designer.startFromPsd": "Partir d'un PSD…",
+  "designer.exportPsd": "Exporter en PSD",
+  "designer.exportPsdHint": "Écrit chaque planche en .psd avec ses calques, dans un dossier de votre choix.",
+  "designer.exportedPsd_one": "1 planche écrite dans {{dir}}",
+  "designer.exportedPsd_other": "{{count}} planches écrites dans {{dir}}",
+  "designer.sheetsSwitched": "Passé aux planches utilisées par {{dest}}.",
+  "designer.switchSheetsTitle": "Ces planches sont celles d'un autre modèle",
+  "designer.switchSheetsBody": "{{dest}} utilise {{names}}. Changer remplace toutes les planches ouvertes.",
+  "designer.switchSheets": "Changer de planches",
   "designer.blankSheet": "Planche vierge",
   "designer.addSheet": "Ajouter une planche",
   "designer.nothingToSave": "Toutes les planches sont vides : dessinez quelque chose avant d'enregistrer.",
@@ -1998,6 +2019,12 @@ export const fr: Translation = {
     "Seules les motos savent dire quelles textures leur appartiennent. Un casque porte la peinture avec laquelle il est arrivé, et ce n'est pas un aspect d'origine à décalquer.",
   "designer.stockNoMatch":
     "Ce modèle n'embarque aucune texture à lui nommée « {{name}} », il n'y a donc rien de la moto à montrer sous cette planche.",
+  "designer.stockAsBase": "Origine en base",
+  "designer.stockAsBaseHint":
+    "Peint la texture de la moto elle-même dans cette planche à pleine intensité — l'aspect d'origine comme point de départ, à un numéro d'être une peinture. Contrairement à la référence ci-dessus, celle-ci fait partie de ce que tu enregistres.",
+  "designer.stockAsBaseDone":
+    "« {{name}} » porte maintenant la texture de la moto elle-même — pose ton numéro dessus et enregistre.",
+  "designer.stockReadFailed": "Impossible de lire la texture « {{name}} » du modèle.",
   "designer.uvMap": "Carte UV",
   "designer.uvHint":
     "Montre où tombent sur cette planche les carrosseries du modèle, chacune dans sa couleur.",
@@ -2053,6 +2080,18 @@ export const fr: Translation = {
   "trackViewer.surface": "Surface",
   "trackViewer.surfaceMasks": "From the track's surface data",
   "trackViewer.relief": "Dénivelé",
+  "trackViewer.objects": "Objets",
+  "trackViewer.painting": "Peinture…",
+  "trackViewer.scenery": "Décors",
+  "trackViewer.sceneryTris": "{{count}} triangles",
+  "trackViewer.fixtures": "Éléments repérés",
+  "trackViewer.pieces": "Éléments distincts",
+  "trackViewer.selected": "Élément choisi",
+  "trackViewer.place": "Placer un modèle",
+  "trackViewer.placePick": "Choisis un modèle, puis clique au sol.",
+  "trackViewer.placeHint": "Clique au sol pour le poser.",
+  "trackViewer.placedCount": "{{count}} posés",
+  "trackViewer.saveProps": "Enregistrer le .scr",
   "trackViewer.noTerrain": "Aucun terrain à afficher",
   "trackViewer.noTerrainHint":
     "Les données d'altitude de ce circuit ne sont pas dans un format que la visionneuse sait encore lire.",
@@ -2063,4 +2102,41 @@ export const fr: Translation = {
   "trackViewer.whyDetails": "Pourquoi ?",
   "trackViewer.copyDetails": "Copier les détails",
   "trackViewer.copied": "Copié",
+  /* ── Protect ─────────────────────────────────────────────────────────── */
+  "nav.protect": "Protéger",
+  "protect.help": "Verrouille les fichiers que tu as créés sur les GUID de ceux qui ont le droit de les charger. Un fichier verrouillé ne s'ouvre que sur l'installation dont il porte le GUID : un acheteur, une copie. Choisis les fichiers une fois, colle les GUID, et tu obtiens un dossier par acheteur. Tes originaux sont seulement lus.",
+  "protect.ownTitle": "Ton GUID",
+  "protect.ownDesc": "L'identité sous laquelle MX Bikes te connaît. Elle n'est dans aucun fichier — Steam la fournit à la connexion — donc l'app la lit dans le jeu en cours d'exécution.",
+  "protect.ownUnknown": "Pas encore connu",
+  "protect.readOwn": "Lire depuis le jeu",
+  "protect.copy": "Copier",
+  "protect.copied": "Copié",
+  "protect.useMine": "Ajouter à la liste",
+  "protect.ownFound": "Ton GUID est {{guid}}",
+  "protect.ownNotFound": "Impossible de lire ton GUID",
+  "protect.ownNotFoundWhy": "Lance MX Bikes, connecte-toi à Steam, puis réessaie.",
+  "protect.ownFailed": "La lecture de ton GUID a échoué",
+  "protect.filesTitle": "Fichiers à verrouiller",
+  "protect.filesDesc": "Ajoute des fichiers, ou un dossier pour prendre tout ce qu'il contient. Un .pkz est verrouillé comme archive ; tout le reste est verrouillé fichier par fichier.",
+  "protect.addFiles": "Ajouter des fichiers",
+  "protect.addFolder": "Ajouter un dossier",
+  "protect.clear": "Vider",
+  "protect.summary": "{{files}} fichiers · {{size}}",
+  "protect.summarySkipped": "{{count}} ignorés",
+  "protect.planFailed": "Impossible de lire cette sélection",
+  "protect.skipJunk": "Ignoré",
+  "protect.skipEmpty": "Vide",
+  "protect.skipProtected": "Déjà protégé",
+  "protect.guidsTitle": "Verrouiller pour",
+  "protect.guidsDesc": "Un GUID par ligne — un dossier par GUID en sortie. Chaque copie a sa propre clé, deux acheteurs ne peuvent donc pas voir qu'ils détiennent le même fichier.",
+  "protect.guidsPlaceholder": "FF0110000108D7CFE3",
+  "protect.guidBad": "Ce n'est pas un GUID — 18 caractères hexadécimaux",
+  "protect.outTitle": "Où les mettre",
+  "protect.outDesc": "Un dossier par GUID est créé ici, avec les fichiers aux mêmes chemins qu'avant. Tes originaux ne sont pas touchés.",
+  "protect.outPlaceholder": "Choisir un dossier",
+  "protect.browse": "Parcourir",
+  "protect.lock": "Verrouiller {{files}} fichiers pour {{guids}} GUID",
+  "protect.done": "{{files}} fichiers verrouillés pour {{guids}} GUID",
+  "protect.failed": "Le verrouillage a échoué",
+  "protect.showFolder": "Afficher le dossier",
 };
