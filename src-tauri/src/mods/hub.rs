@@ -357,7 +357,11 @@ pub async fn search(
         .unwrap_or_else(|| "USD".into());
 
     let mut items: Vec<HubMod> = products.iter().map(map_product).collect();
-    fill_dates(&mut items).await;
+    // Deliberately no `fill_dates` here. A card shows a title, a price and a creator — the
+    // date appears only on the detail page — so paying a second request per page of results
+    // for a field nobody sees is a third of this view's traffic spent on nothing. It matters
+    // more than it sounds: this store counts requests, and answers too many by refusing the
+    // whole site. `detail` still fills it, for the one item that displays it.
     fill_authors(&mut items).await;
 
     Ok(HubPage {
@@ -875,10 +879,12 @@ mod tests {
             "creator attribution stopped working"
         );
 
-        // Dates come from `wp/v2`, and the whole point of that request is that they arrive.
+        // Dates come from `wp/v2`, and are filled for the detail page only — the listing
+        // deliberately doesn't pay for them.
+        assert!(detail.item.updated.is_some(), "wp/v2 date enrichment stopped working");
         assert!(
-            page.items.iter().filter(|i| i.updated.is_some()).count() >= 20,
-            "wp/v2 date enrichment stopped working"
+            page.items.iter().all(|i| i.updated.is_none()),
+            "the listing should not be spending a request on dates it never shows"
         );
     }
 

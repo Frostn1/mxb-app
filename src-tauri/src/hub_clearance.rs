@@ -34,6 +34,14 @@ const SOLVE_TIMEOUT: Duration = Duration::from_secs(40);
 
 const POLL: Duration = Duration::from_millis(500);
 
+/// How long to let the page settle before asking the store anything. Probing instantly only
+/// spends a request confirming what we already know — we are here because we were refused.
+const FIRST_PROBE: Duration = Duration::from_secs(3);
+
+/// And how often after that. Deliberately unhurried: this runs while a page is refusing us,
+/// and hammering the thing that rate-limited us is how we got here.
+const PROBE_EVERY: Duration = Duration::from_secs(4);
+
 /// Unix seconds of the last successful handshake, or 0.
 ///
 /// Not a "we are cleared" flag: the clearance can lapse at any time and only the store knows.
@@ -73,6 +81,12 @@ pub async fn earn(app: &AppHandle) -> anyhow::Result<()> {
     log::info!("opening the hidden MXB Hub window to answer the robot challenge");
     let window = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
         .title("MXB Hub")
+        // Deliberately **no** `.user_agent()` override. Forcing `HUB_SITE.ua` on it here was
+        // tried and was worse than doing nothing: the string claims Chrome on Windows while
+        // the window is WKWebView on macOS, and the challenge fingerprints the browser — so a
+        // page that had been serving a solvable challenge started answering 403 outright.
+        // [`crate::shop_session::UA`] records the same lesson for Cloudflare. The window
+        // introduces itself honestly and earns what it can.
         // Never shown, and never given a way to talk to the app — see the module comment.
         .visible(false)
         .inner_size(1.0, 1.0)
@@ -83,31 +97,45 @@ pub async fn earn(app: &AppHandle) -> anyhow::Result<()> {
         .build()?;
 
     let deadline = std::time::Instant::now() + SOLVE_TIMEOUT;
-    let mut last_seen = Vec::new();
+    let mut last_seen: Vec<(String, String)> = Vec::new();
+    let mut next_probe = std::time::Instant::now() + FIRST_PROBE;
     while std::time::Instant::now() < deadline {
         tokio::time::sleep(POLL).await;
 
         let cookies = cookie_session::cookies_from_window(&window, &HUB_SITE);
-        if cookies.is_empty() {
+        let changed = cookies != last_seen;
+        if changed {
+            log::debug!(
+                "MXB Hub window cookies now: {}",
+                crate::hub_session::cookie_names(&cookies)
+            );
+            last_seen = cookies.clone();
+            if !cookies.is_empty() {
+                mods::hub::adopt_clearance(&cookies)?;
+            }
+        }
+        // Probed on a timer as well as on a cookie, because the clearance need not arrive as
+        // one. SiteGround is just as free to stop refusing this *address* once its script has
+        // run, and a loop that only looks when a cookie moves would sit out the whole timeout
+        // next to a store that had already let us back in.
+        if std::time::Instant::now() < next_probe && !changed {
             continue;
         }
+        next_probe = std::time::Instant::now() + PROBE_EVERY;
+
         // What "solved" means is asked of the store, not guessed from a cookie name. The
         // challenge sets more than one cookie and renames them between SiteGround versions, so
         // matching on a name is a check that silently stops working; a request that comes back
         // as the thing we asked for cannot.
-        if cookies != last_seen {
-            last_seen = cookies.clone();
-            mods::hub::adopt_clearance(&cookies)?;
-            if probe().await {
-                crate::hub_session::adopt_clearance(app, &cookies);
-                LAST.store(now(), Ordering::Relaxed);
-                log::info!(
-                    "MXB Hub clearance earned ({})",
-                    crate::hub_session::cookie_names(&cookies)
-                );
-                close(app);
-                return Ok(());
-            }
+        if probe().await {
+            crate::hub_session::adopt_clearance(app, &cookies);
+            LAST.store(now(), Ordering::Relaxed);
+            log::info!(
+                "MXB Hub clearance earned ({})",
+                crate::hub_session::cookie_names(&cookies)
+            );
+            close(app);
+            return Ok(());
         }
     }
 

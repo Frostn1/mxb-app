@@ -26,7 +26,13 @@ pub const HUB_SITE: Site = Site {
     base: HUB_BASE,
     domain: "shop.mxb-hub.com",
     file: "hub_session.json",
-    ua: crate::shop_session::UA,
+    // The realistic full-version string, not [`crate::shop_session::UA`], whose two-part
+    // `Chrome/126.0` is documented over there as a bot-filter signal in its own right. It
+    // matters more here than anywhere else in the app: the clearance window is opened wearing
+    // this exact string, so what the browser earns is what the HTTP client presents. A token
+    // minted under one User-Agent and replayed under another is simply refused, which reads
+    // from the outside as a challenge that never clears.
+    ua: crate::mxb_session::UA,
     // Purchased tracks run to hundreds of megabytes; `install::download` streams with this
     // client, so the ceiling has to cover a whole transfer rather than a page load.
     timeout: Duration::from_secs(60 * 30),

@@ -66,6 +66,10 @@ const PRUNE_TO: f64 = 0.8;
 /// sockets — the same reasoning as `mods::mxb`'s rating concurrency.
 const MAX_CONCURRENT_FETCHES: usize = 8;
 
+/// …and how many of those may be MXB Hub's at once. See the gate in [`handle`] for why this
+/// store gets its own, far smaller, number.
+const MAX_CONCURRENT_HUB_FETCHES: usize = 2;
+
 /// Ceiling on a single download.
 ///
 /// The whole body is held in memory to be sniffed and downscaled, and being on the allowlist
@@ -240,6 +244,17 @@ async fn load(app: &AppHandle, url: &str, width: Option<u32>) -> Option<(Vec<u8>
 
     let bytes = {
         let _permit = fetch_semaphore().acquire().await.ok()?;
+        // A second, much tighter gate for the store that counts requests. Everything else here
+        // is fetched eight at a time, which is what a grid of twenty-four thumbnails wants;
+        // MXB Hub answers that burst by deciding we are a robot and refusing the whole site,
+        // images and API alike, for everyone on this address. Two at a time costs a moment on
+        // the first paint of a page and nothing at all afterwards, because the entry is then
+        // on disk — and it is the difference between a grid that loads and one that cannot.
+        let _polite = if is_hub(url) {
+            Some(hub_semaphore().acquire().await.ok()?)
+        } else {
+            None
+        };
         fetch(url).await
     };
 
@@ -390,6 +405,18 @@ fn touch(path: &Path) {
 /// keep separate jars precisely because a clearance is scoped to the host that minted it, so
 /// serving a gpb-mods.com thumbnail through mxb-mods.com's session — or, as it did before,
 /// through the store's — sends a cookie that can only fail.
+fn is_hub(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+        .is_some_and(|h| h == "mxb-hub.com" || h.ends_with(".mxb-hub.com"))
+}
+
+fn hub_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_HUB_FETCHES))
+}
+
 fn client_for(url: &str) -> Option<&'static reqwest::Client> {
     static MXB: OnceLock<Option<reqwest::Client>> = OnceLock::new();
     static GPB: OnceLock<Option<reqwest::Client>> = OnceLock::new();
