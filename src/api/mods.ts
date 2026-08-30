@@ -667,6 +667,24 @@ export function photoSave(dest: string, png: ArrayBuffer): Promise<string> {
   });
 }
 
+/**
+ * The raw bytes of a `.psd`, for the Designer to take apart itself.
+ *
+ * The parsing lives in the webview because that is where the pixels have to end up — a PSD
+ * layer becomes a canvas — so the backend's whole part is handing the file over. Rejects
+ * anything that isn't a `.psd`/`.psb`.
+ */
+export function psdRead(path: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("psd_read", { path });
+}
+
+/** Write a sheet's `.psd` to a path the user picked. Body and header, as {@link photoSave}. */
+export function psdSave(dest: string, psd: ArrayBuffer): Promise<string> {
+  return invoke<string>("psd_save", psd, {
+    headers: { "x-dest": encodeURIComponent(dest) },
+  });
+}
+
 /** The file a save would write, resolved but not written — so we can ask before replacing. */
 export function paintStudioTarget(
   fileName: string,

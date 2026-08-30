@@ -6,6 +6,7 @@ import {
   CopyPlus,
   Eye,
   EyeOff,
+  FileImage,
   FilePlus2,
   FlipHorizontal2,
   FlipVertical2,
@@ -16,6 +17,7 @@ import {
   Link2Off,
   Loader2,
   PackageOpen,
+  PaintBucket,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -35,6 +37,8 @@ import {
   paintStudioSave,
   paintStudioStage,
   paintStudioTarget,
+  psdRead,
+  psdSave,
   textureBytes,
 } from "../../../api/mods";
 import { useT } from "../../../i18n/context";
@@ -115,6 +119,18 @@ import type { EdfNode, PaintTexture } from "../../../types";
 
 /** A blank sheet's edge. Powers of two only — the backend would resize anything else. */
 const BLANK_SIZE = 2048;
+
+/**
+ * A stock texture's pixels, decoded, or null if they can't be had.
+ *
+ * Null covers both ends of it: the store evicts, and a rejected read is the same nothing to
+ * draw as a name that matched no texture at all.
+ */
+function stockBitmap(tex: PaintTexture): Promise<ImageBitmap | null> {
+  return textureBytes(tex.token)
+    .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
+    .catch(() => null);
+}
 
 /**
  * What was last copied, and the sheet it was cut from.
@@ -207,7 +223,7 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   const [stockTextures, setStockTextures] = useState<PaintTexture[]>([]);
 
   const destState = usePaintDest();
-  const { dest, hints } = destState;
+  const { dest, hints, hintsFor } = destState;
 
   // Composites, one per sheet, owned here and reused: they're the size of the sheet, and
   // reallocating a 4096² canvas on every pointer move is not a thing to do.
@@ -772,6 +788,44 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, []);
 
   /**
+   * Which destination the sheets on screen belong to, and which one has already been asked
+   * about — see the effect below `destKey` for what each of them stops from happening twice.
+   *
+   * `destKeyRef` is the same string as `destKey`, readable from up here: `installSheets` is
+   * defined long before the destination is, and every caller of it means "these are the sheets
+   * for wherever this is aimed right now".
+   */
+  const filled = useRef<string | null>(null);
+  const warned = useRef<string | null>(null);
+  const destKeyRef = useRef("");
+
+  /**
+   * Make `next` the sheets, whatever they were made out of.
+   *
+   * Every way into the editor ends here — an unpacked `.pnt`, a Photoshop file, the sheets a
+   * model asks for — because they all mean the same thing: what was open is gone and this is
+   * open instead. One undo step covers it, which is what makes a wrong choice of starting
+   * point cost a keystroke rather than the work.
+   *
+   * Whatever arrives is recorded against the destination that is chosen. A paint opened for
+   * this bike is *for* this bike, and without that the warning below would fire on the way in
+   * — sheets handed over by Paint Studio land here before the model's own list has been
+   * fetched, which is indistinguishable from having switched models unless somebody says so.
+   */
+  const installSheets = useCallback(
+    (next: Sheet[], nameHint?: string) => {
+      remember();
+      setSheets(next);
+      setActiveId(next[0]?.id ?? null);
+      setSelection([]);
+      if (nameHint) setName((n) => n || nameHint);
+      filled.current = destKeyRef.current;
+      bump();
+    },
+    [bump, remember],
+  );
+
+  /**
    * Start from an installed paint.
    *
    * This is the template step, and it matters more than it looks: the sheets come back named
@@ -789,23 +843,20 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
         return;
       }
       const loaded = await Promise.all(paths.map((f) => readImage(f)));
-      const next: Sheet[] = loaded.map(({ name: sheetName, bitmap }) => ({
-        id: newId("sheet"),
-        name: sheetName,
-        width: bitmap.width,
-        height: bitmap.height,
-        base: bitmap,
-        layers: [],
-      }));
-      remember();
-      setSheets(next);
-      setActiveId(next[0]?.id ?? null);
-      setSelection([]);
-      if (nameHint) setName((n) => n || nameHint);
-      bump();
-      toast.success(t("designer.loadedSheets", { count: String(next.length) }));
+      installSheets(
+        loaded.map(({ name: sheetName, bitmap }) => ({
+          id: newId("sheet"),
+          name: sheetName,
+          width: bitmap.width,
+          height: bitmap.height,
+          base: bitmap,
+          layers: [],
+        })),
+        nameHint,
+      );
+      toast.success(t("designer.loadedSheets", { count: String(paths.length) }));
     },
-    [bump, readImage, remember, t],
+    [installSheets, readImage, t],
   );
 
   const startFromPaint = useCallback(async () => {
@@ -831,6 +882,85 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
       setBusy(false);
     }
   }, [loadSheets]);
+
+  /**
+   * Start from a Photoshop file — one sheet per document.
+   *
+   * The layers survive the crossing, which is the whole point: a livery that arrives flattened
+   * is a picture of somebody's work rather than the work, and every adjustment after that is
+   * repainting. Sizes and names come from the file, so a `plastics.psd` lands as a sheet called
+   * `plastics` at whatever the artist drew it at — the save resizes to an edge the game takes.
+   *
+   * One at a time rather than in parallel: a 4096² document with two dozen layers is decoded
+   * into as many bitmaps, and several of those in flight at once is how a webview runs out of
+   * memory partway through.
+   */
+  const startFromPsd = useCallback(async () => {
+    const picked = await openDialog({
+      multiple: true,
+      filters: [{ name: "Photoshop", extensions: ["psd", "psb"] }],
+    });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (!paths.length) return;
+    setBusy(true);
+    try {
+      // Loaded on demand, here and in the export below. The PSD codec is a quarter of a
+      // megabyte and most sessions never open one — see `psd.ts`.
+      const { psdToSheet } = await import("./psd");
+      const next: Sheet[] = [];
+      for (const path of paths) {
+        const stem = (path.replace(/\\/g, "/").split("/").pop() ?? "").replace(/\.ps[db]$/i, "");
+        next.push(await psdToSheet(await psdRead(path), stem));
+      }
+      installSheets(next, next[0]?.name);
+      toast.success(t("designer.loadedSheets", { count: String(next.length) }));
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  }, [installSheets, t]);
+
+  /**
+   * Write every sheet out as a `.psd`, into a folder the picker chose.
+   *
+   * A folder and not a file, because a sheet is a document: they have their own sizes, and a
+   * PSD has one canvas — so a paint with a 4096² `plastics` and a 1024² `number` cannot be one
+   * file without resampling one of them. One `.psd` each says what is true.
+   *
+   * Composited on the way out for the same reason the save does it: the layers only exist as
+   * canvases until something asks, and asking here is what stops an export shipping a frame
+   * older than the screen.
+   */
+  const exportPsd = useCallback(async () => {
+    if (!sheets.length) return;
+    const picked = await openDialog({ directory: true });
+    const dir = Array.isArray(picked) ? picked[0] : picked;
+    if (!dir) return;
+    setBusy(true);
+    try {
+      const { sheetToPsd } = await import("./psd");
+      // The picker answers in the platform's own separator, and a path with both in it is a
+      // path some Windows API will refuse. Follow whatever it handed back.
+      const sep = dir.includes("\\") ? "\\" : "/";
+      const prefix = name.trim() ? `${name.trim()} - ` : "";
+      let written = 0;
+      for (const sheet of sheets) {
+        const canvas = canvasFor(sheet);
+        composite(canvas, sheet);
+        // A sheet is named after a texture, and a texture name is not obliged to be a legal
+        // file name. Nothing is renamed on the sheet — only on the file it is written to.
+        const label = (sheet.name.trim() || `sheet-${written + 1}`).replace(/[\\/:*?"<>|]/g, "_");
+        await psdSave(`${dir}${sep}${prefix}${label}.psd`, sheetToPsd(sheet, canvas));
+        written += 1;
+      }
+      toast.success(t("designer.exportedPsd", { count: written, dir }));
+    } catch (e) {
+      toast.error(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  }, [canvasFor, name, sheets, t]);
 
   // Sheets sent over from Paint Studio. Same path as unpacking a paint here, because it is the
   // same thing — that tab has already done the unpacking.
@@ -888,6 +1018,70 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     setSelection([]);
     bump();
   }, [bump, missingHints, remember]);
+
+  /**
+   * The destination as one string, for comparing one against another.
+   *
+   * A model, not a folder path, is what decides which sheets a paint is made of — but a paint
+   * aimed at a folder of the player's own has no model behind it and no hints either, so the
+   * two share a key and the empty answer takes care of the difference.
+   */
+  const destKey = useMemo(
+    () => (dest ? (dest.kind === "mods" ? dest.rel : dest.path) : ""),
+    [dest],
+  );
+  destKeyRef.current = destKey;
+
+  /**
+   * Whether there is anything here worth not throwing away.
+   *
+   * "Blank sheets with the right names" is the state this editor now opens in, and replacing
+   * those costs nothing — they are a fact about the model, not somebody's work. A base or a
+   * layer is the first thing that isn't.
+   */
+  const pristine = useMemo(() => sheets.every((s) => !s.base && !s.layers.length), [sheets]);
+
+  /**
+   * Keep the sheet list on the model that's chosen.
+   *
+   * The names are the entire binding — a sheet called anything else paints nothing — and until
+   * now they were on screen as a hint line with a button beside it, which made the first move
+   * in every session the same move. So the sheets a model wants are simply *there* when it is
+   * picked, and they follow when it is changed.
+   *
+   * Two refs, not one. `filled` is which destination the sheets on screen belong to, and stops
+   * this from refilling a list the user has since emptied on purpose. `warned` is which one has
+   * already been asked about, and stops the warning below from being raised again by the next
+   * unrelated render — this effect follows the sheets, so there are many.
+   */
+  useEffect(() => {
+    // Not until the hints are about the destination that's actually chosen: they're fetched,
+    // and acting on the last model's list would fill a KTM with a Yamaha's sheet names.
+    if (!destKey || hintsFor !== destKey || filled.current === destKey) return;
+    const wanted = hints.filter((h) => !isCompanionMap(h));
+    if (!wanted.length) return;
+    const make = () => wanted.map((h) => blankSheet(h, BLANK_SIZE));
+    if (pristine) {
+      const switching = sheets.length > 0;
+      warned.current = destKey;
+      installSheets(make());
+      // Said out loud when it replaces something, silent when it fills an empty editor. A
+      // list that changed under you is worth a line; one that arrived is what was asked for.
+      if (switching) toast.info(t("designer.sheetsSwitched", { dest: destKey }));
+      return;
+    }
+    if (warned.current === destKey) return;
+    warned.current = destKey;
+    // Asked rather than done. Everything on screen would go, and a model picker is not a
+    // control anybody expects to lose an afternoon's drawing to.
+    toast.warning(t("designer.switchSheetsTitle"), {
+      description: t("designer.switchSheetsBody", { dest: destKey, names: wanted.join(", ") }),
+      action: {
+        label: t("designer.switchSheets"),
+        onClick: () => installSheets(make()),
+      },
+    });
+  }, [destKey, hints, hintsFor, installSheets, pristine, sheets.length, t]);
 
   const addImage = useCallback(async () => {
     if (!active) return;
@@ -1471,6 +1665,21 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
   }, [activeId, activeName, activeWidth, activeHeight, geometry, ghosts, parts, patchGhost]);
 
   /**
+   * The model's own texture for a sheet name, or null for a name it carries none of.
+   *
+   * The name is the whole binding here exactly as it is for the triangles — call a sheet
+   * `plastics` and it is the plastics, call it anything else and the model has nothing of its
+   * own to answer with.
+   */
+  const stockFor = useCallback(
+    (name: string): PaintTexture | null => {
+      const want = name.trim().toLowerCase();
+      return stockTextures.find((t) => t.name.trim().toLowerCase() === want) ?? null;
+    },
+    [stockTextures],
+  );
+
+  /**
    * Fetch the model's own texture for the active sheet, the same way and for the same reasons.
    *
    * Lazy and keyed on the name again — the name is what picks the texture out of the model,
@@ -1489,23 +1698,65 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     const key = `${activeId}:${activeName}`;
     if (stockFetch.current === key) return;
     stockFetch.current = key;
-    const want = activeName.trim().toLowerCase();
-    const tex = stockTextures.find((t) => t.name.trim().toLowerCase() === want);
+    const tex = stockFor(activeName);
     void (async () => {
-      // Null covers both "the model carries no such texture" and "the pixels are gone" — the
-      // store evicts, and a rejected read is the same nothing to draw as a name that missed.
-      const stock = tex
-        ? await textureBytes(tex.token)
-            .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
-            .catch(() => null)
-        : null;
+      const stock = tex ? await stockBitmap(tex) : null;
       // Written against the sheet it was asked *for*, not whichever is active now, and both
       // halves land together. So the worst a slow answer can do is describe a name the sheet
       // no longer has — which the guard above then notices, and asks again.
       patchGhost(activeId, (g) => ({ ...g, stock, stockFor: activeName }));
       if (stockFetch.current === key) stockFetch.current = null;
     })();
-  }, [activeId, activeName, ghosts, patchGhost, stockTextures]);
+  }, [activeId, activeName, ghosts, patchGhost, stockFor, stockTextures]);
+
+  /**
+   * Paint the model's own texture into the sheet, at full strength.
+   *
+   * The second thing here that touches a sheet, and the opposite of tracing: the stock plastics
+   * stop being something to draw *against* and become what is drawn. That is the whole of what
+   * most people are after — the bike as it ships, with their number on it — and until now the
+   * only route to it was to find the artwork outside the app, because a reference at 35% is
+   * deliberately not it. So this one is saved, and it goes through the history like any other
+   * edit to the sheet.
+   *
+   * The reference's copy is used when there is one, because it is the same texture read from
+   * the same store; the fetch is for the sheet whose ghost is switched off, since the button
+   * has to work without asking anyone to turn a guide on first.
+   */
+  const stockAsBase = useCallback(
+    async (sheetId: string) => {
+      const sheet = sheetsRef.current.find((s) => s.id === sheetId);
+      if (!sheet) return;
+      const tex = stockFor(sheet.name);
+      if (!tex) {
+        toast.error(t("designer.stockNoMatch", { name: sheet.name.trim() }));
+        return;
+      }
+      const held = ghostOf(sheetId);
+      const ready = held.stockFor === sheet.name ? held.stock : null;
+      setBusy(true);
+      const base = ready ?? (await stockBitmap(tex));
+      setBusy(false);
+      if (!base) {
+        toast.error(t("designer.stockReadFailed", { name: sheet.name.trim() }));
+        return;
+      }
+      patchSheet(sheetId, (s) => ({
+        ...s,
+        // The texture's own size, but only for a sheet nothing has been done to yet: a stock
+        // texture stretched onto a 2048 blank is the bike's artwork resampled for no reason,
+        // and resizing a sheet already drawn on would take every layer's placement with it.
+        ...(s.base || s.layers.length ? {} : { width: tex.width, height: tex.height }),
+        base,
+      }));
+      // The reference is drawn underneath the sheet, and the sheet is now the same picture —
+      // leaving it on would be showing the stock texture through the stock texture.
+      patchGhost(sheetId, (g) => ({ ...g, showStock: false }));
+      bump();
+      toast.success(t("designer.stockAsBaseDone", { name: sheet.name.trim() }));
+    },
+    [bump, ghostOf, patchGhost, patchSheet, stockFor, t],
+  );
 
   // Ghosts of sheets that are gone. Each holds a decoded bitmap and a raster the size of the
   // sheet, so leaving them behind would keep a closed paint's pixels alive for the session.
@@ -1710,6 +1961,18 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
           {t("paints.save")}
         </Button>
+        {/* Beside Save rather than buried in a menu: it is the other way out of here, and the
+            one somebody finishing a job in Photoshop is looking for. */}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !sheets.length}
+          title={t("designer.exportPsdHint")}
+          onClick={() => void exportPsd()}
+        >
+          <FileImage className="size-3.5" />
+          {t("designer.exportPsd")}
+        </Button>
         {blocked && (
           <span className="ml-auto max-w-[40%] truncate text-[11px] text-faint" title={blocked}>
             {blocked}
@@ -1745,6 +2008,8 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
             onAddBlank={addBlankSheet}
             onAddHintSheets={addHintSheets}
             onStartFromPaint={() => void startFromPaint()}
+            onStartFromPsd={() => void startFromPsd()}
+            pristine={pristine}
             busy={busy}
           />
 
@@ -1755,7 +2020,10 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               hasBase={!!active.base}
               hasGeometry={!!geometry}
               hasStock={!!stockTextures.length}
+              stockSheet={!!stockFor(active.name)}
+              busy={busy}
               onTrace={() => toggleTrace(active.id)}
+              onStockBase={() => void stockAsBase(active.id)}
               onChange={(fn) => patchGhost(active.id, fn)}
             />
           )}
@@ -1840,6 +2108,14 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
               <div className="flex gap-2">
                 <Button size="sm" disabled={busy} onClick={() => void startFromPaint()}>
                   <PackageOpen className="size-3.5" /> {t("designer.startFromPaint")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void startFromPsd()}
+                >
+                  <FileImage className="size-3.5" /> {t("designer.startFromPsd")}
                 </Button>
                 <Button variant="outline" size="sm" onClick={addBlankSheet}>
                   <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
@@ -1955,6 +2231,8 @@ function SheetList({
   onAddBlank,
   onAddHintSheets,
   onStartFromPaint,
+  onStartFromPsd,
+  pristine,
   busy,
 }: {
   sheets: Sheet[];
@@ -1970,6 +2248,9 @@ function SheetList({
   onAddBlank: () => void;
   onAddHintSheets: () => void;
   onStartFromPaint: () => void;
+  onStartFromPsd: () => void;
+  /** Nothing has been drawn yet — see the Designer's own `pristine`. */
+  pristine: boolean;
   busy: boolean;
 }) {
   const t = useT();
@@ -2071,10 +2352,12 @@ function SheetList({
         </div>
       )}
 
-      {/* Only while there is nothing to draw on. Starting from a paint *replaces* every sheet
-          — that's what makes it a template step — so offering it beside work in progress is
-          offering to throw that work away. Adding another sheet is the ＋ above. */}
-      {!sheets.length && (
+      {/* Only while there is nothing to lose. Starting from a paint or a `.psd` *replaces*
+          every sheet — that's what makes it a template step — so offering it beside work in
+          progress is offering to throw that work away. The blank sheets a model arrives with
+          are not work, which is why this reaches past "the list is empty" to "nothing has been
+          drawn on it". Adding another sheet is the ＋ above. */}
+      {pristine && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPaint}>
             {busy ? (
@@ -2083,6 +2366,9 @@ function SheetList({
               <PackageOpen className="size-3.5" />
             )}
             {t("designer.startFromPaint")}
+          </Button>
+          <Button variant="outline" size="sm" disabled={busy} onClick={onStartFromPsd}>
+            <FileImage className="size-3.5" /> {t("designer.startFromPsd")}
           </Button>
           <Button variant="outline" size="sm" onClick={onAddBlank}>
             <FilePlus2 className="size-3.5" /> {t("designer.blankSheet")}
@@ -2106,7 +2392,10 @@ function GhostPanel({
   hasBase,
   hasGeometry,
   hasStock,
+  stockSheet,
+  busy,
   onTrace,
+  onStockBase,
   onChange,
 }: {
   ghost: Ghost;
@@ -2116,7 +2405,12 @@ function GhostPanel({
   hasGeometry: boolean;
   /** Whether the model on screen can say which of its textures are its own — bikes can. */
   hasStock: boolean;
+  /** Whether it carries one under *this* sheet's name — what makes it something to paint on. */
+  stockSheet: boolean;
+  busy: boolean;
   onTrace: () => void;
+  /** Put that texture into the sheet for real, rather than faintly underneath it. */
+  onStockBase: () => void;
   onChange: (fn: (g: Ghost) => Ghost) => void;
 }) {
   const t = useT();
@@ -2200,6 +2494,30 @@ function GhostPanel({
           onClick={() => onChange((g) => ({ ...g, showWire: !g.showWire }))}
         />
       </div>
+
+      {/* Not a toggle and not part of the reference — what it puts in is the sheet itself, and
+          stays there through the save. It sits here because the picture it puts in is the one
+          the button above shows faintly, and wanting that at full strength with a number over
+          it is what a good half of the people who turn the reference on came for. */}
+      {hasStock && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mb-2 w-full min-w-0 justify-start"
+          disabled={!stockSheet || busy}
+          title={t(stockSheet ? "designer.stockAsBaseHint" : "designer.stockNoMatch", {
+            name: sheetName.trim(),
+          })}
+          onClick={onStockBase}
+        >
+          {busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <PaintBucket className="size-3.5" />
+          )}
+          <span className="truncate">{t("designer.stockAsBase")}</span>
+        </Button>
+      )}
 
       <Row label={t("designer.opacity")}>
         <Slider

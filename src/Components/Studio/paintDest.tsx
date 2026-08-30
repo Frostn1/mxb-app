@@ -169,6 +169,15 @@ export interface PaintDestState {
   dest: PaintDest | null;
   /** The sheet names this model binds — from its own mesh and from the paints installed for it. */
   hints: string[];
+  /**
+   * The destination `hints` describe, or `""` while none has been answered for.
+   *
+   * Hints are fetched, so between picking a model and hearing back, `hints` still holds the
+   * *previous* model's answer. Anything that acts on them — the Designer fills a sheet list
+   * from these — has to be able to tell the two apart, or it acts on the old bike's list and
+   * records it against the new bike's name.
+   */
+  hintsFor: string;
   /** This build can decode bike geometry — false on public builds, which have no bike mesh. */
   bikePreview: boolean;
   modelLabel: TKey;
@@ -193,6 +202,7 @@ export function usePaintDest(onChange?: () => void): PaintDestState {
   const [targets, setTargets] = useState<RiderTargets>(EMPTY_RIDER_TARGETS);
   const [bikePreview, setBikePreview] = useState(true);
   const [hints, setHints] = useState<string[]>([]);
+  const [hintsFor, setHintsFor] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -244,12 +254,17 @@ export function usePaintDest(onChange?: () => void): PaintDestState {
   useEffect(() => {
     if (folder || !model) {
       setHints([]);
+      setHintsFor(folder ?? "");
       return;
     }
     let alive = true;
-    paintStudioHints(relFor(kind, model))
-      .then((h) => alive && setHints(h))
-      .catch(() => alive && setHints([]));
+    const rel = relFor(kind, model);
+    // Both halves land together, and `hintsFor` is what says which model the list is about —
+    // see the field's note. Set on the way out whether or not the read found anything, because
+    // "this model expects nothing" is an answer and has to be distinguishable from "not yet".
+    paintStudioHints(rel)
+      .then((h) => alive && (setHints(h), setHintsFor(rel)))
+      .catch(() => alive && (setHints([]), setHintsFor(rel)));
     return () => {
       alive = false;
     };
@@ -298,6 +313,7 @@ export function usePaintDest(onChange?: () => void): PaintDestState {
     clearFolder,
     dest,
     hints,
+    hintsFor,
     bikePreview,
     // A rider folder holds profiles (MX Bikes) or rider models (GP Bikes); everything else
     // holds models. Naming it right is the difference between "For" reading as a question

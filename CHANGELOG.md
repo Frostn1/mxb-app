@@ -31,6 +31,43 @@ whichever release turns it on.
 
 ## 2026-08-30
 
+### Added
+
+- **A mod's page now says who made it.** Open a track, a bike or a set of gear and the
+  creator's name sits directly under the title, exactly as the site credits it. Click it to
+  open their page on the catalog, which is where the rest of their work is. The name is read
+  off the mod's own page rather than asked for over the catalog's API — the API stopped
+  answering who posted anything some time ago, which is why the browse cards have been
+  showing a date and nothing else.
+- **Start a paint from the bike's own plastics rather than from nothing.** The Designer could
+  already show the texture a bike ships with faintly under your sheet, to draw against — but
+  what people actually keep asking for is that picture itself, with a number on it and nothing
+  else changed. **Stock as base** paints it into the sheet at full strength, where it becomes
+  part of what gets saved instead of a guide that never is: put your number over it, save, and
+  the paint is the bike exactly as it came with your number on the shroud. A sheet nothing has
+  been done to yet also takes the texture's own size, so the bike's artwork is never resampled
+  onto a blank that happened to be a different one.
+
+- **The Designer opens and writes Photoshop files.** A livery almost always starts life as a
+  layered `.psd`, and until now the only way to bring one in was to flatten it first — which
+  threw away every layer and made this a worse editor than the file it was fed. Start from a
+  PSD and its layers arrive as layers: named, stacked in order, still at their own opacity and
+  blend mode, hidden ones still hidden, folders still grouped. Export PSD goes back the other
+  way, writing each sheet out with its layers intact, into a folder you pick. One file per
+  sheet, because sheets have their own sizes and a Photoshop document has one canvas. Both
+  directions turn the sheet the right way up, so what opens in Photoshop is the template a
+  painter draws on rather than the upside-down way the game stores it.
+
+### Changed
+
+- **Picking a model fills in the sheets it wants.** The Designer used to open empty, with the
+  names the model binds printed underneath as a hint and a button to turn them into sheets —
+  so the first move of every session was the same move, and getting it wrong meant a paint
+  that loads and shows nothing. The sheets are simply there now, named the way the model reads
+  them, the moment a bike or a piece of gear is chosen. Change the model and they follow it. If
+  anything has been drawn, nothing is thrown away without asking: a warning names the sheets
+  the new model uses and waits for you to say switch.
+
 ### Fixed
 
 - **Mirror now works on bodywork that is one piece, like a seat.** "Mirror to other side" asks

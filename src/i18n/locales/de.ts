@@ -1856,10 +1856,19 @@ export const de: Translation = {
 
   // ── Designer (der Ebenen-Editor) ──────────────────────────────────────────────
   "designer.help":
-    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Fang bei einem installierten Design an, damit die Bahnennamen stimmen, male mit Pinsel, Verlauf oder Formen darauf, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
+    "Zeichne ein Design auf die Bahnen, die das Spiel wirklich liest, und sieh es dabei am Modell. Wähl ein Modell und seine Bahnen sind schon da, unter den Namen, die es nutzt — oder fang bei einem installierten Design oder einer Photoshop-Datei an und bring deine Arbeit mit. Male mit Pinsel, Verlauf oder Formen, leg Bilder und Text darüber und speichere: heraus kommt eine .pnt, die das Spiel lädt — kein Export, den noch jemand umwandeln muss.",
   "designer.empty":
-    "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an — dann hast du seine Bahnen samt Namen — oder füge eine leere hinzu.",
+    "Noch nichts zum Zeichnen da. Fang bei einem für dieses Modell installierten Design an, öffne eine Photoshop-Datei, um ihre Ebenen zu behalten, oder füge eine leere Bahn hinzu.",
   "designer.startFromPaint": "Von einem Design ausgehen…",
+  "designer.startFromPsd": "Von einer PSD ausgehen…",
+  "designer.exportPsd": "Als PSD exportieren",
+  "designer.exportPsdHint": "Schreibt jede Bahn als PSD mit Ebenen in einen Ordner deiner Wahl.",
+  "designer.exportedPsd_one": "1 Bahn nach {{dir}} geschrieben",
+  "designer.exportedPsd_other": "{{count}} Bahnen nach {{dir}} geschrieben",
+  "designer.sheetsSwitched": "Auf die Bahnen von {{dest}} gewechselt.",
+  "designer.switchSheetsTitle": "Diese Bahnen gehören zu einem anderen Modell",
+  "designer.switchSheetsBody": "{{dest}} nutzt {{names}}. Beim Wechseln werden alle offenen Bahnen ersetzt.",
+  "designer.switchSheets": "Bahnen wechseln",
   "designer.blankSheet": "Leere Bahn",
   "designer.addSheet": "Bahn hinzufügen",
   "designer.nothingToSave": "Alle Bahnen sind leer — zeichne etwas, bevor du speicherst.",
@@ -1997,6 +2006,12 @@ export const de: Translation = {
     "Nur Bikes können sagen, welche Texturen ihre eigenen sind. Ein Helm trägt die Lackierung, mit der er kam, und die ist kein Originallook zum Abpausen.",
   "designer.stockNoMatch":
     "Dieses Modell bringt keine eigene Textur namens „{{name}}“ mit, also gibt es vom Bike nichts unter diesem Blatt zu zeigen.",
+  "designer.stockAsBase": "Original als Basis",
+  "designer.stockAsBaseHint":
+    "Malt die eigene Textur des Bikes in voller Deckkraft in dieses Blatt — der Originallook als Ausgangspunkt, eine Startnummer von einer fertigen Lackierung entfernt. Anders als die Referenz darüber gehört diese zu dem, was du speicherst.",
+  "designer.stockAsBaseDone":
+    "„{{name}}“ trägt jetzt die eigene Textur des Bikes — setz deine Nummer drauf und speichere.",
+  "designer.stockReadFailed": "Die eigene Textur „{{name}}“ des Modells ließ sich nicht lesen.",
   "designer.uvMap": "UV-Karte",
   "designer.uvHint":
     "Zeigt, wo die Verkleidungsteile des Modells auf diesem Blatt landen, jedes in eigener Farbe.",

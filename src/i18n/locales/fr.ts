@@ -1847,10 +1847,19 @@ export const fr: Translation = {
 
   // ── Designer (l'éditeur par calques) ──────────────────────────────────────────
   "designer.help":
-    "Dessine une déco sur les planches que le jeu lit vraiment, et regarde-la sur le modèle au fur et à mesure. Pars d'une déco installée pour avoir les bons noms de planches, peins dessus au pinceau, au dégradé ou avec des formes, empile images et textes par-dessus, puis enregistre : ce qui sort est un .pnt que le jeu charge, pas un export à convertir.",
+    "Dessine une déco sur les planches que le jeu lit vraiment, et regarde-la sur le modèle au fur et à mesure. Choisis un modèle et ses planches sont déjà là, sous les noms qu'il utilise — ou pars d'une déco installée ou d'un fichier Photoshop pour amener ton travail avec toi. Peins au pinceau, au dégradé ou avec des formes, empile images et textes par-dessus, puis enregistre : ce qui sort est un .pnt que le jeu charge, pas un export à convertir.",
   "designer.empty":
-    "Rien sur quoi dessiner pour l'instant. Pars d'une déco installée pour ce modèle — tu récupères ses planches et leurs noms — ou ajoute une planche vierge.",
+    "Rien sur quoi dessiner pour l'instant. Pars d'une déco installée pour ce modèle, ouvre un fichier Photoshop pour en garder les calques, ou ajoute une planche vierge.",
   "designer.startFromPaint": "Partir d'une déco…",
+  "designer.startFromPsd": "Partir d'un PSD…",
+  "designer.exportPsd": "Exporter en PSD",
+  "designer.exportPsdHint": "Écrit chaque planche en .psd avec ses calques, dans un dossier de votre choix.",
+  "designer.exportedPsd_one": "1 planche écrite dans {{dir}}",
+  "designer.exportedPsd_other": "{{count}} planches écrites dans {{dir}}",
+  "designer.sheetsSwitched": "Passé aux planches utilisées par {{dest}}.",
+  "designer.switchSheetsTitle": "Ces planches sont celles d'un autre modèle",
+  "designer.switchSheetsBody": "{{dest}} utilise {{names}}. Changer remplace toutes les planches ouvertes.",
+  "designer.switchSheets": "Changer de planches",
   "designer.blankSheet": "Planche vierge",
   "designer.addSheet": "Ajouter une planche",
   "designer.nothingToSave": "Toutes les planches sont vides : dessinez quelque chose avant d'enregistrer.",
@@ -1988,6 +1997,12 @@ export const fr: Translation = {
     "Seules les motos savent dire quelles textures leur appartiennent. Un casque porte la peinture avec laquelle il est arrivé, et ce n'est pas un aspect d'origine à décalquer.",
   "designer.stockNoMatch":
     "Ce modèle n'embarque aucune texture à lui nommée « {{name}} », il n'y a donc rien de la moto à montrer sous cette planche.",
+  "designer.stockAsBase": "Origine en base",
+  "designer.stockAsBaseHint":
+    "Peint la texture de la moto elle-même dans cette planche à pleine intensité — l'aspect d'origine comme point de départ, à un numéro d'être une peinture. Contrairement à la référence ci-dessus, celle-ci fait partie de ce que tu enregistres.",
+  "designer.stockAsBaseDone":
+    "« {{name}} » porte maintenant la texture de la moto elle-même — pose ton numéro dessus et enregistre.",
+  "designer.stockReadFailed": "Impossible de lire la texture « {{name}} » du modèle.",
   "designer.uvMap": "Carte UV",
   "designer.uvHint":
     "Montre où tombent sur cette planche les carrosseries du modèle, chacune dans sa couleur.",

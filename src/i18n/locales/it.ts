@@ -1836,10 +1836,19 @@ export const it: Translation = {
 
   // ── Designer (l'editor a livelli) ─────────────────────────────────────────────
   "designer.help":
-    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Parti da una livrea installata per avere i nomi giusti dei fogli, dipingici sopra con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
+    "Disegna una livrea sui fogli che il gioco legge davvero e guardala sul modello mentre lavori. Scegli un modello e i suoi fogli ci sono già, con i nomi che lui usa — oppure parti da una livrea installata o da un file di Photoshop per portarti dietro il lavoro. Dipingi con pennello, sfumatura o forme, aggiungi immagini e testo, poi salva: quello che esce è un .pnt che il gioco carica, non un export da convertire.",
   "designer.empty":
-    "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello — così ottieni i suoi fogli e i loro nomi — oppure aggiungine uno vuoto.",
+    "Non c'è ancora niente su cui disegnare. Parti da una livrea installata per questo modello, apri un file di Photoshop per conservarne i livelli, oppure aggiungi un foglio vuoto.",
   "designer.startFromPaint": "Parti da una livrea…",
+  "designer.startFromPsd": "Parti da un PSD…",
+  "designer.exportPsd": "Esporta PSD",
+  "designer.exportPsdHint": "Salva ogni foglio come .psd a livelli, in una cartella scelta da te.",
+  "designer.exportedPsd_one": "1 foglio salvato in {{dir}}",
+  "designer.exportedPsd_other": "{{count}} fogli salvati in {{dir}}",
+  "designer.sheetsSwitched": "Passato ai fogli usati da {{dest}}.",
+  "designer.switchSheetsTitle": "Questi fogli sono di un altro modello",
+  "designer.switchSheetsBody": "{{dest}} usa {{names}}. Cambiando sostituisci tutti i fogli aperti.",
+  "designer.switchSheets": "Cambia fogli",
   "designer.blankSheet": "Foglio vuoto",
   "designer.addSheet": "Aggiungi un foglio",
   "designer.nothingToSave": "Ogni foglio è vuoto: disegna qualcosa prima di salvare.",
@@ -1976,6 +1985,12 @@ export const it: Translation = {
     "Solo le moto sanno dire quali texture sono le loro. Un casco indossa la vernice con cui è arrivato, e quella non è un aspetto originale da ricalcare.",
   "designer.stockNoMatch":
     "Questo modello non porta una texture sua chiamata “{{name}}”, quindi non c'è nulla della moto da mostrare sotto questa planche.",
+  "designer.stockAsBase": "Originale come base",
+  "designer.stockAsBaseHint":
+    "Dipinge la texture della moto stessa in questa planche a piena intensità — l'aspetto originale come punto di partenza, a un numero di distanza dall'essere una vernice. A differenza del riferimento qui sopra, questa fa parte di ciò che salvi.",
+  "designer.stockAsBaseDone":
+    "Ora “{{name}}” contiene la texture della moto stessa — mettici il tuo numero e salva.",
+  "designer.stockReadFailed": "Impossibile leggere la texture “{{name}}” del modello.",
   "designer.uvMap": "Mappa UV",
   "designer.uvHint":
     "Mostra dove finiscono su questa planche le carene del modello, ognuna con il suo colore.",
