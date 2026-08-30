@@ -45,6 +45,7 @@ export const it: Translation = {
   // ── Navigazione ────────────────────────────────────────────────────────────
   "nav.browse": "Esplora",
   "nav.shop": "Shop",
+  "nav.hub": "MXB Hub",
   "nav.library": "Libreria",
   "nav.downloads": "Download",
   "nav.locker": "Armadietto",
@@ -493,6 +494,26 @@ export const it: Translation = {
   "shop.sessionFailed": "Impossibile acquisire la tua sessione di MX Bikes Shop",
   "shop.loadFailed": "Impossibile caricare i tuoi acquisti: {{error}}",
   "shop.empty": "Nessun download acquistato trovato sul tuo account.",
+
+  // ── MXB Hub (shop.mxb-hub.com) ──
+  "hub.help":
+    "Esplora il marketplace MXB Hub su shop.mxb-hub.com e installa ciò che possiedi già. L'acquisto avviene sempre sul sito dello store; accedi in I miei acquisti per installare i tuoi ordini da qui.",
+  "hub.count_one": "{{count}} elemento",
+  "hub.count_other": "{{count}} elementi",
+  "hub.searchPlaceholder": "Cerca su MXB Hub…",
+  "hub.myDownloads": "I miei acquisti",
+  "hub.signInTitle": "Accedi a MXB Hub",
+  "hub.signInBody":
+    "Accedi a shop.mxb-hub.com per vedere e installare tutto ciò che possiedi, mod gratuite comprese. Apriamo il sito vero: la tua password non passa mai da questa app.",
+  "hub.signIn": "Accedi",
+  "hub.signedIn": "Accesso a MXB Hub effettuato",
+  "hub.sessionFailed": "Impossibile acquisire la tua sessione MXB Hub",
+  "hub.empty": "Nessun download trovato sul tuo account MXB Hub.",
+  "hubSort.newest": "Più recenti",
+  "hubSort.popular": "Più popolari",
+  "hubSort.priceAsc": "Prezzo: dal più basso",
+  "hubSort.priceDesc": "Prezzo: dal più alto",
+  "hubSort.nameAsc": "Nome (A–Z)",
   "purchases.count_one": "{{count}} acquisto",
   "purchases.count_other": "{{count}} acquisti",
   "purchases.fileCount_one": "{{count}} file",
@@ -1247,6 +1268,7 @@ export const it: Translation = {
   "downloads.yesterday": "Ieri",
   "downloads.sourceSite": "Download",
   "downloads.sourceShop": "Negozio",
+  "downloads.sourceHub": "MXB Hub",
   "downloads.sourceFile": "File importato",
   "downloads.showInLibrary": "Mostra nella libreria",
   "downloads.openModPage": "Apri la pagina della mod",

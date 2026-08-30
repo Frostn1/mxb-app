@@ -29,11 +29,16 @@ pub const SCHEME: &str = "imgcache";
 /// Bumped when the on-disk layout changes, so old entries are dropped rather than misread.
 const CACHE_DIR: &str = "img-v1";
 
-/// The store's hosts. `mxbikes-shop.b-cdn.net` is its own Bunny pull zone, named in full
-/// rather than as `b-cdn.net` — that suffix is shared by every Bunny customer, and matching
-/// it would open the proxy to all of them. A few dozen product descriptions embed images
-/// from it.
-const SHOP_HOSTS: [&str; 2] = ["mxbikes-shop.com", "mxbikes-shop.b-cdn.net"];
+/// The stores' hosts. `mxbikes-shop.b-cdn.net` is that store's own Bunny pull zone, named in
+/// full rather than as `b-cdn.net` — that suffix is shared by every Bunny customer, and
+/// matching it would open the proxy to all of them. A few dozen product descriptions embed
+/// images from it.
+///
+/// MXB Hub serves everything from its own origin: a sweep of 40 listings, thumbnails, srcsets
+/// and description markup included, found no host but `shop.mxb-hub.com`. It is listed as the
+/// registrable domain anyway, which covers the subdomain it actually uses and any sibling the
+/// store adds later.
+const SHOP_HOSTS: [&str; 3] = ["mxbikes-shop.com", "mxbikes-shop.b-cdn.net", "mxb-hub.com"];
 
 /// Is `host` one we're willing to fetch from?
 ///
@@ -634,8 +639,24 @@ mod tests {
             "https://cdn.mxbikes-shop.com/img/1.png",
             // The store's Bunny pull zone — where some product descriptions embed from.
             "https://mxbikes-shop.b-cdn.net/wp-content/uploads/2024/05/a.jpg",
+            // MXB Hub serves its product images from its own origin.
+            "https://shop.mxb-hub.com/wp-content/uploads/2026/08/a.png",
+            "https://mxb-hub.com/wp-content/uploads/2026/08/a.png",
         ] {
             assert_eq!(source_url(&encoded(url)).as_deref(), Some(url), "{url}");
+        }
+    }
+
+    /// A lookalike host must not ride in on a store's name — the handler fetches whatever it
+    /// is handed, and product descriptions are markup written by other people.
+    #[test]
+    fn a_lookalike_store_host_is_refused() {
+        for url in [
+            "https://mxb-hub.com.evil.com/x.png",
+            "https://evil-mxb-hub.com/x.png",
+            "https://mxb-hub.co/x.png",
+        ] {
+            assert!(source_url(&encoded(url)).is_none(), "{url} must be refused");
         }
     }
 

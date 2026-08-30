@@ -44,6 +44,11 @@ pub struct HubMod {
     /// see [`safe_hub_url`]. `None` hides the Buy button.
     pub url: Option<String>,
     pub image: Option<String>,
+    /// The creator, where the product sits under one. MXB Hub is organised by creator — a
+    /// whole top-level category tree of them — so this is real attribution taken from the
+    /// product's own categories, not a placeholder. See [`fill_authors`].
+    pub author: Option<String>,
+    pub author_url: Option<String>,
     pub category_ids: Vec<u64>,
     pub category_names: Vec<String>,
     /// Unix seconds. The Store API carries no date, so this is filled in from `wp/v2` — see
@@ -72,6 +77,9 @@ pub struct HubCategory {
     pub name: String,
     pub slug: String,
     pub parent: Option<u64>,
+    /// The category's page on the store. Doubles as the creator's page for the rows under
+    /// [`CREATORS_SLUG`].
+    pub link: Option<String>,
     /// 0 for top level, so the UI can indent without walking the tree.
     pub depth: u8,
     pub count: u32,
@@ -195,6 +203,8 @@ struct ApiCategory {
     parent: u64,
     #[serde(default)]
     count: u32,
+    #[serde(default)]
+    permalink: String,
 }
 
 /// The `wp/v2` half of a listing: the only place a product's dates are published.
@@ -289,6 +299,7 @@ pub async fn search(
 
     let mut items: Vec<HubMod> = products.iter().map(map_product).collect();
     fill_dates(&mut items).await;
+    fill_authors(&mut items).await;
 
     Ok(HubPage {
         items,
@@ -310,6 +321,7 @@ pub async fn detail(id: u64) -> anyhow::Result<HubModDetail> {
 
     let mut item = map_product(&product);
     fill_dates(std::slice::from_mut(&mut item)).await;
+    fill_authors(std::slice::from_mut(&mut item)).await;
 
     // Every image the listing carries, largest form first, deduplicated — a Hub product often
     // repeats its hero shot as the gallery's first entry.
@@ -353,7 +365,9 @@ pub async fn by_slugs(slugs: &[String]) -> anyhow::Result<Vec<HubMod>> {
         anyhow::bail!("MXB Hub answered {} for a product lookup", resp.status());
     }
     let products: Vec<ApiProduct> = resp.json().await?;
-    Ok(products.iter().map(map_product).collect())
+    let mut items: Vec<HubMod> = products.iter().map(map_product).collect();
+    fill_authors(&mut items).await;
+    Ok(items)
 }
 
 /// The category tree, flattened depth-first with a `depth` on each row.
@@ -397,6 +411,8 @@ fn map_product(p: &ApiProduct) -> HubMod {
             .images
             .first()
             .and_then(|i| safe_image_url(&i.thumbnail).or_else(|| safe_image_url(&i.src))),
+        author: None,
+        author_url: None,
         category_ids: p.categories.iter().map(|c| c.id).collect(),
         category_names: p.categories.iter().map(|c| decode(&c.name)).collect(),
         updated: None,
@@ -497,6 +513,42 @@ async fn fill_dates(items: &mut [HubMod]) {
     }
 }
 
+/// The top-level category every creator's own category hangs off.
+const CREATORS_SLUG: &str = "creators";
+
+/// Attribute each item to its creator, from the category tree.
+///
+/// MXB Hub files a product under both what it is ("Helmet") and who made it ("CSTAR"), the
+/// latter as a child of a `creators` root. That makes the creator recoverable from data the
+/// product already carries, which is the only place it is published — the Store API has no
+/// author field, and the storefront prints the name nowhere else a listing can reach.
+///
+/// Reads the tree through [`categories`], so after the first call this costs nothing. Silent
+/// on failure: an unattributed card is a card, and no product is worth failing a search over.
+async fn fill_authors(items: &mut [HubMod]) {
+    if items.is_empty() {
+        return;
+    }
+    let Ok(tree) = categories().await else {
+        return;
+    };
+    let Some(root) = tree.iter().find(|c| c.slug == CREATORS_SLUG) else {
+        return;
+    };
+
+    for item in items {
+        let creator = item
+            .category_ids
+            .iter()
+            .filter_map(|id| tree.iter().find(|c| c.id == *id))
+            .find(|c| c.parent == Some(root.id));
+        if let Some(creator) = creator {
+            item.author = Some(creator.name.clone());
+            item.author_url = creator.link.clone();
+        }
+    }
+}
+
 /// WordPress prints `2026-08-30T16:20:55` with no zone on a `_gmt` field — it *is* UTC, and
 /// the marker is simply missing. [`parse_date_str`] already reads that form as UTC, which is
 /// why this delegates rather than growing a second date parser next to it.
@@ -526,6 +578,7 @@ fn flatten(raw: &[ApiCategory]) -> Vec<HubCategory> {
                 name: decode(&child.name),
                 slug: child.slug.clone(),
                 parent: (child.parent != 0).then_some(child.parent),
+                link: safe_hub_url(&child.permalink),
                 depth,
                 count: child.count,
             });
@@ -744,6 +797,12 @@ mod tests {
         let slugs: Vec<String> = page.items.iter().take(3).map(|i| i.slug.clone()).collect();
         let found = by_slugs(&slugs).await.unwrap();
         assert_eq!(found.len(), 3);
+
+        // Creators are recovered from the category tree; most of the store is filed under one.
+        assert!(
+            page.items.iter().filter(|i| i.author.is_some()).count() >= 10,
+            "creator attribution stopped working"
+        );
 
         // Dates come from `wp/v2`, and the whole point of that request is that they arrive.
         assert!(

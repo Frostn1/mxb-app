@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-30
+### Added
+- MXB Hub support: a new sidebar tab that browses the shop.mxb-hub.com marketplace and installs what your account already owns, free mods included
+- MXB Hub sign-in, purchases grid and one-click install, reusing the existing destination dialog, install queue and "Installed" badges
+- MXB Hub product images are served through the app's image cache
+
 ## Unannounced — voice chat
 
 Kept out of the release notes on purpose: voice is off by default and has not yet been

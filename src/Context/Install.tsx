@@ -19,17 +19,24 @@ import {
   shopInstall,
   type ShopItem,
 } from "../api/mods";
+import { hubInstall } from "../api/hub";
 import type { DownloadSource, InstallStage, ReloadOutcome } from "../types";
 import { useDownloads } from "./Downloads";
 import { useDropReview } from "./DropReview";
 import { useT } from "../i18n/context";
 
-/** Where the bytes come from — a resolvable host, a file the user picked, or a shop purchase
- *  (whose download goes through a WebView, because Cloudflare refuses our HTTP client). */
+/** Where the bytes come from — a resolvable host, a file the user picked, or something already
+ *  bought on one of the two stores.
+ *
+ *  The two stores are separate kinds rather than one with a flag because they are downloaded by
+ *  entirely different means: a shop purchase goes through a WebView (Cloudflare refuses our
+ *  HTTP client on that store), while an MXB Hub purchase streams over the same client every
+ *  other download uses. Nothing above this line has to know that, but the branch below does. */
 export type InstallSource =
   | { kind: "download"; url: string; host: string }
   | { kind: "import"; path: string }
-  | { kind: "shop"; item: ShopItem };
+  | { kind: "shop"; item: ShopItem }
+  | { kind: "hub"; item: ShopItem };
 
 interface StartParams {
   slug: string;
@@ -82,6 +89,7 @@ export interface PendingInstall {
 /** How the download history names this source. */
 function historySource(source: InstallSource): DownloadSource {
   if (source.kind === "shop") return "shop";
+  if (source.kind === "hub") return "hub";
   return source.kind === "download" ? "site" : "file";
 }
 
@@ -167,6 +175,7 @@ interface InstallContextValue {
   startPendingInstall: (p: PendingInstall) => void;
   /** A purchase from the shop, queued exactly like any other install. */
   startShopInstall: (p: Omit<StartParams, "source"> & { item: ShopItem }) => void;
+  startHubInstall: (p: Omit<StartParams, "source"> & { item: ShopItem }) => void;
   /** Clear a finished (done/error) install card. */
   clear: () => void;
 }
@@ -321,6 +330,8 @@ export function InstallProvider({
         }
       } else if (source.kind === "shop") {
         await shopInstall(source.item, subpath, destFolder);
+      } else if (source.kind === "hub") {
+        await hubInstall(source.item, subpath, destFolder);
       } else {
         await importFile(source.path, subpath, destFolder);
       }
@@ -577,6 +588,11 @@ export function InstallProvider({
     [enqueue],
   );
 
+  const startHubInstall: InstallContextValue["startHubInstall"] = useCallback(
+    ({ item, ...rest }) => enqueue({ ...rest, source: { kind: "hub", item } }),
+    [enqueue],
+  );
+
   /** Retire the finished cards, leaving anything still transferring alone. */
   const clear = useCallback(
     () => setActive((cur) => cur.filter((it) => it.stage !== "done" && it.stage !== "error")),
@@ -597,6 +613,7 @@ export function InstallProvider({
       cancel,
       startInstall,
       startImport,
+      startHubInstall,
       startPendingInstall,
       startShopInstall,
       clear,
@@ -608,6 +625,7 @@ export function InstallProvider({
       cancel,
       startInstall,
       startImport,
+      startHubInstall,
       startPendingInstall,
       startShopInstall,
       clear,

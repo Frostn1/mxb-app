@@ -33,7 +33,7 @@ export const DESCRIPTION_IMAGE_WIDTH = 1200;
  * Pass `width` for a downscaled copy, or omit it for the original (what the full-size
  * gallery wants). Each width is a separate cache entry.
  *
- * Only mxb-mods.com and mxbikes-shop.com URLs are served; anything else is refused by the
+ * Only the catalogs' and the two stores' URLs are served; anything else is refused by the
  * handler, which surfaces as a normal image error and falls back to the placeholder icon.
  */
 export function cachedImage(
@@ -58,6 +58,7 @@ const CACHEABLE_HOSTS = [
   "gpb-mods.com",
   "mxbikes-shop.com",
   "mxbikes-shop.b-cdn.net",
+  "mxb-hub.com",
 ];
 
 /** Whether [`cachedImage`] would resolve to something the handler is willing to serve. */

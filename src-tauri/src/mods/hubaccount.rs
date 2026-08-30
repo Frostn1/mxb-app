@@ -50,6 +50,12 @@ pub struct HubItem {
     pub date: String,
     /// Filled in later from the catalog, by slug — see [`match_products`].
     pub image: Option<String>,
+    /// Always 0, and always from the catalog match where it matters: the downloads page files
+    /// nothing under a category. Present because the purchases grid is the shop's, and this is
+    /// the shape it reads — see [`super::mxbshop::ShopItem`].
+    pub category_id: u32,
+    /// Likewise `None` here and filled from the catalog, which is the only side that knows.
+    pub author: Option<String>,
     /// The signed WooCommerce download URL. Only ever an `https` URL on the store itself.
     pub download_url: String,
 }
@@ -256,6 +262,8 @@ fn finish(rows: Vec<Row>) -> Vec<HubItem> {
             link: row.link.clone(),
             date: String::new(),
             image: None,
+            category_id: 0,
+            author: None,
             download_url: row.download_url.clone(),
         });
     }

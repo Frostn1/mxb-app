@@ -111,19 +111,26 @@ export function shopCatalogRefresh(): Promise<ShopStatus> {
   return invoke<ShopStatus>("shop_catalog_refresh");
 }
 
+/** The stores the app browses. A URL has to be https on one of them to be openable. */
+const STORE_HOSTS = ["mxbikes-shop.com", "mxb-hub.com"];
+
 /**
  * Open a store page in the user's own browser.
  *
- * Rust already dropped any URL that wasn't https on mxbikes-shop.com, so a non-null `url`
- * has been checked once. This checks again because the cost is a line and the failure mode
- * — handing an arbitrary URL to the OS handler — is not one worth being clever about.
+ * Rust already dropped any URL that wasn't https on the store it came from, so a non-null
+ * `url` has been checked once. This checks again because the cost is a line and the failure
+ * mode — handing an arbitrary URL to the OS handler — is not one worth being clever about.
+ *
+ * Both stores go through here rather than one function each: it is the same check against a
+ * different name, and a second copy is a second place for the host list to fall out of date.
+ * Which store a URL belongs to is settled on the Rust side, per store, before it gets here.
  */
 export async function openShopUrl(url: string | null): Promise<void> {
   if (!url) return;
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
-    const onStore = host === "mxbikes-shop.com" || host.endsWith(".mxbikes-shop.com");
+    const onStore = STORE_HOSTS.some((s) => host === s || host.endsWith(`.${s}`));
     if (parsed.protocol !== "https:" || !onStore) return;
     await open(url);
   } catch {

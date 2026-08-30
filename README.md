@@ -120,6 +120,13 @@ cargo test           # unit tests (REST/HTML parsing, download resolution)
 > launches it on macOS through a CrossOver, Whisky or Wine bottle, and on Linux
 > under Proton. The cross-platform logic builds and tests on any OS.
 
+### MXB Hub
+
+The **MXB Hub** tab browses [shop.mxb-hub.com](https://shop.mxb-hub.com) — the community
+marketplace `mxbhub.com` redirects to — and installs what the signed-in account owns, free
+mods included. Neither half needs a build-time credential: the store publishes a public
+WooCommerce Store API, and installing needs nothing but the user's own sign-in.
+
 ### Building with the shop catalog
 
 The **Shop** tab has two halves. **My purchases** signs in to

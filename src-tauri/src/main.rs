@@ -6825,17 +6825,22 @@ async fn hub_login(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// What this account owns, with the catalog's artwork already attached.
+/// What this account owns, with its catalog entries alongside.
 ///
-/// The artwork is folded in here rather than left to a second command the way the shop's is:
-/// a Hub download row links to its product page, so the lookup is one request keyed on exact
-/// slugs, and splitting that across two round trips would only make the grid pop in twice.
-/// Best-effort — a catalog that won't answer costs the cards their pictures, not the list.
+/// One command rather than the shop's two. A Hub download row links to its product page, so
+/// the catalog lookup is a single request keyed on exact slugs — where the shop has to fold
+/// product *names* together and match approximately, which is why its match is a separate
+/// call the grid makes after the fact. Doing both here means the grid renders once, complete,
+/// instead of popping in twice.
+///
+/// The listings are positional: `listings[i]` is `items[i]`'s catalog entry, or `null` where
+/// the product has since been unlisted. Best-effort — a catalog that won't answer costs the
+/// cards their artwork, not the list.
 #[tauri::command]
 async fn hub_my_downloads(
     app: tauri::AppHandle,
     state: State<'_, hub_session::HubSession>,
-) -> Result<Vec<mods::hubaccount::HubItem>, String> {
+) -> Result<HubDownloads, String> {
     let Some(client) = state.client() else {
         return Err("Not signed in to MXB Hub.".to_string());
     };
@@ -6843,15 +6848,32 @@ async fn hub_my_downloads(
         .await
         .map_err(|e| format!("{e:#}"))?;
 
-    match mods::hubaccount::match_products(&items).await {
-        Ok(matches) => {
-            for (item, found) in items.iter_mut().zip(matches) {
-                item.image = found.and_then(|m| m.image);
-            }
+    let listings = match mods::hubaccount::match_products(&items).await {
+        Ok(found) => found,
+        Err(e) => {
+            log::warn!("could not match MXB Hub purchases to the catalog: {e:#}");
+            vec![None; items.len()]
         }
-        Err(e) => log::warn!("could not match MXB Hub purchases to the catalog: {e:#}"),
+    };
+    // Mirrored onto the rows themselves as well, because a purchase is handed to the install
+    // queue on its own and has to still know what it is once the listing is out of scope.
+    for (item, found) in items.iter_mut().zip(&listings) {
+        let Some(found) = found else { continue };
+        item.image = found.image.clone();
+        item.author = found.author.clone();
+        item.category_id = found.category_ids.first().copied().unwrap_or(0) as u32;
     }
-    Ok(items)
+
+    Ok(HubDownloads { items, listings })
+}
+
+/// The purchases page and the catalog, joined, in one answer.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HubDownloads {
+    items: Vec<mods::hubaccount::HubItem>,
+    /// Positional against `items`.
+    listings: Vec<Option<mods::hub::HubMod>>,
 }
 
 /// Download a file this account owns and install it, to a destination the caller already chose.
