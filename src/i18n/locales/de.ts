@@ -1401,6 +1401,18 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0113.hero.title":
+    "Jede Strecke \u00f6ffnet sich als der Ort, der sie ist",
+  "showcase.v0113.hero.body":
+    "Fr\u00fcher \u00f6ffnete sich eine Strecke als nackter Boden \u2014 die richtigen Rillen, Anlieger und Sprungkanten, aber nichts, was darauf steht, sodass eine Supercross-Halle und ein Nationalkurs kaum zu unterscheiden waren. Der Betrachter zeichnet jetzt, was eine Strecke auf sich stellt: Zelte und Vord\u00e4cher, Strohballen und Reifenw\u00e4nde, Bannerreihen und Z\u00e4une, die Anh\u00e4nger im Fahrerlager und die Landschaft jenseits des eigenen Quadrats.",
+  "showcase.v0113.sky":
+    "Eine Strecke liegt unter ihrem eigenen Himmel, beleuchtet und im Dunst so, wie es ihre eigene Ambience-Datei vorgibt.",
+  "showcase.v0113.ground":
+    "Der Boden beh\u00e4lt seine Details aus der N\u00e4he \u2014 der Dreck der Strecke selbst, mit echtem Relief, wo sie eine Normal Map daf\u00fcr mitliefert.",
+  "showcase.v0113.pick":
+    "Klicke auf irgendetwas, das auf der Strecke steht, und es leuchtet einzeln auf, benannt und vermessen.",
+  "showcase.v0113.speed":
+    "Es kommt in Stufen \u2014 erst das Gel\u00e4nde, dann die Form der Objekte, dann ihre Farben \u2014 und dieselbe Strecke erneut zu \u00f6ffnen \u00fcberspringt das Archiv ganz.",
   "showcase.v0112.hero.title":
     "Ein Bike-Pack wird als die Bikes darin installiert",
   "showcase.v0112.hero.body":

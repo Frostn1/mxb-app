@@ -1362,6 +1362,18 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0113.hero.title":
+    "Every track opens as the place it is",
+  "showcase.v0113.hero.body":
+    "A track used to open as bare ground \u2014 the right ruts, berms and jump faces, but nothing standing on them, so a supercross floor and a national circuit read much the same. The viewer now draws what a track puts on itself: the tents and awnings, the hay bales and tyre walls, the banner lines and fencing, the trailers in the paddock, and the landscape beyond the track\u2019s own square.",
+  "showcase.v0113.sky":
+    "A track sits under its own sky, lit and hazed the way its own ambience file says it should be.",
+  "showcase.v0113.ground":
+    "The ground keeps its detail up close \u2014 the track\u2019s own dirt, with real relief where it ships a normal map for it.",
+  "showcase.v0113.pick":
+    "Click anything standing on the track and it lights up on its own, named and measured.",
+  "showcase.v0113.speed":
+    "It arrives in stages \u2014 the terrain first, then the shape of the scenery, then its colours \u2014 and opening the same track again skips the archive entirely.",
   "showcase.v0112.hero.title":
     "A bike pack installs as the bikes inside it",
   "showcase.v0112.hero.body":
