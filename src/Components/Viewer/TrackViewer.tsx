@@ -277,27 +277,42 @@ function viewFrame(terrain: TrackTerrain) {
   };
 }
 
-/** A soft column of light over one feature, for pointing at it from a list. */
+/** A standing ribbon over a stretch of track, for pointing at it from a list. */
 function Highlight({
   terrain,
   at,
 }: {
   terrain: TrackTerrain;
-  at: { x: number; z: number; width: number };
+  at: { path: { x: number; z: number }[]; width: number };
 }) {
-  const frame = viewFrame(terrain);
-  const [x, , z] = toView(frame, at.x, terrain.minHeight, at.z);
-  const radius = Math.max((at.width / 2) * frame.unitsPerMetre, 0.05);
-  // Tall enough to clear any relief the terrain has, and centred on the middle of its range
-  // so it reaches both above and below the ground it marks.
-  const tall = (terrain.maxHeight - terrain.minHeight) * frame.heightScale + 4;
+  const geometry = useMemo(() => {
+    const frame = viewFrame(terrain);
+    // Tall enough to clear any relief the terrain has, and reaching below it too, so the
+    // ribbon is visible whether the ground there is high or low.
+    const tall = (terrain.maxHeight - terrain.minHeight) * frame.heightScale + 4;
+    const verts: number[] = [];
+    for (const p of at.path) {
+      const [x, , z] = toView(frame, p.x, terrain.minHeight, p.z);
+      verts.push(x, -tall / 2, z, x, tall / 2, z);
+    }
+    const index: number[] = [];
+    for (let i = 0; i + 1 < at.path.length; i++) {
+      const a = i * 2;
+      index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    g.setIndex(index);
+    return g;
+  }, [terrain, at]);
+
+  if (at.path.length < 2) return null;
   return (
-    <mesh position={[x, 0, z]} renderOrder={2}>
-      <cylinderGeometry args={[radius, radius, tall, 24, 1, true]} />
+    <mesh geometry={geometry} renderOrder={2}>
       <meshBasicMaterial
         color="#ffffff"
         transparent
-        opacity={0.16}
+        opacity={0.14}
         depthWrite={false}
         side={THREE.DoubleSide}
       />
@@ -1194,11 +1209,14 @@ interface TrackViewerProps {
    */
   focus?: { x: number; z: number } | null;
   /**
-   * A point to light up, in world metres, and how wide it is. Drawn as a soft column so it
-   * reads from any angle and at any zoom — a highlight painted flat on the ground disappears
-   * the moment the camera is low, which is exactly when you are looking at a jump.
+   * A stretch of track to light up: world-metre points along it, and how wide it is.
+   *
+   * A path rather than a point, because a straight is two hundred metres long and marking
+   * only where it begins says almost nothing about which one it is. Drawn as a standing
+   * ribbon — a highlight painted flat on the ground disappears the moment the camera is low,
+   * which is exactly when you are looking at a jump.
    */
-  highlight?: { x: number; z: number; width: number } | null;
+  highlight?: { path: { x: number; z: number }[]; width: number } | null;
   className?: string;
 }
 

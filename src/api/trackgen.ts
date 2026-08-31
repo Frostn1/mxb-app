@@ -35,6 +35,11 @@ export interface TrackProgram {
    * question asked three times.
    */
   blend: number;
+  /**
+   * Height the track is lifted or dropped by, at points round the lap. Empty means it simply
+   * follows the ground it crosses.
+   */
+  elevation: { at: number; height: number }[];
 }
 
 export type TrackSegment =
@@ -268,6 +273,19 @@ export function fitFeatures(program: TrackProgram): TrackProgram {
       return { ...f, at: Math.max(0, Math.min(f.at, lap - featureSpan(f).length)) };
     }),
   };
+}
+
+/**
+ * Points along a stretch of the lap, for lighting it up in the preview.
+ *
+ * A stretch, not a point: a straight is two hundred metres long, and marking only where it
+ * starts says almost nothing about which one it is.
+ */
+export function pathAlong(program: TrackProgram, from: number, length: number): { x: number; z: number }[] {
+  const steps = Math.max(2, Math.min(48, Math.ceil(length / 4)));
+  return Array.from({ length: steps + 1 }, (_, i) =>
+    positionAt(program, from + (length * i) / steps),
+  );
 }
 
 /** A feature of each kind, with sizes that sit inside what published tracks measure. */

@@ -2391,4 +2391,6 @@ export const it: Translation = {
   "track.sand": "Sabbia",
   "track.grass": "Erba",
   "track.smoothing": "raccordo",
+  "track.live": "Dal vivo",
+  "track.rebuild": "Ricostruisci l'anteprima",
 };

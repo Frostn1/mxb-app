@@ -2412,4 +2412,6 @@ export const de: Translation = {
   "track.sand": "Sand",
   "track.grass": "Gras",
   "track.smoothing": "Übergang",
+  "track.live": "Live",
+  "track.rebuild": "Vorschau neu bauen",
 };

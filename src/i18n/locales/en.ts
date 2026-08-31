@@ -2368,4 +2368,6 @@ export const en = {
   "track.sand": "Sand",
   "track.grass": "Grass",
   "track.smoothing": "blend",
+  "track.live": "Live",
+  "track.rebuild": "Rebuild the preview",
 } as const;

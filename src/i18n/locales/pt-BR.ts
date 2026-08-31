@@ -2388,4 +2388,6 @@ export const ptBR: Translation = {
   "track.sand": "Areia",
   "track.grass": "Grama",
   "track.smoothing": "suavização",
+  "track.live": "Ao vivo",
+  "track.rebuild": "Reconstruir a prévia",
 };

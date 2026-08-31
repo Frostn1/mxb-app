@@ -66,6 +66,24 @@ pub struct TrackProgram {
     /// a few metres is a track a machine shaped.
     #[serde(default = "default_blend")]
     pub blend: f32,
+    /// Height the track is lifted or dropped by, at points round the lap.
+    ///
+    /// Empty means the track simply follows the ground it crosses, which is what it did
+    /// before this existed. A `rise` on a segment says "climb four metres across this
+    /// corner"; these say "be four metres up *here*" — the same shape stated as a curve
+    /// rather than as a run of instructions, which is the form you can take hold of.
+    #[serde(default)]
+    pub elevation: Vec<Knot>,
+}
+
+/// One point on the lap's height curve.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Knot {
+    /// Metres round the lap.
+    pub at: f32,
+    /// Metres above the ground the track would otherwise have followed.
+    pub height: f32,
 }
 
 pub(crate) fn default_blend() -> f32 {
@@ -652,6 +670,7 @@ mod tests {
             width: 12.0,
             features: Vec::new(),
             blend: default_blend(),
+            elevation: Vec::new(),
         }
     }
 
