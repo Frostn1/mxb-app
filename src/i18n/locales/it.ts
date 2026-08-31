@@ -1353,18 +1353,16 @@ export const it: Translation = {
     "Riseleziona il tuo profilo in MX Bikes per caricare lo scambio.",
   "locker.loadsNextTime":
     "Verrà caricato alla prossima apertura del gioco.",
-  "locker.modelRefreshing":
-    "Aggiornamento in gioco — se è la moto che hai selezionata, cambia adesso.",
   "locker.modelFrostmodNotRunning":
-    "Avvia FrostMod per vedere i cambi modello in tempo reale — per ora riseleziona la moto in gioco.",
-  "locker.modelReselectBike":
-    "Modello cambiato — riseleziona la moto in MX Bikes per vederlo.",
+    "FrostMod non è in esecuzione — in MX Bikes cambia categoria moto e torna indietro per vedere il modello.",
+  "locker.modelSwitchCategory":
+    "Modello cambiato — in MX Bikes cambia categoria moto e torna indietro per vederlo.",
   "locker.modelFrostmodUnreachable":
-    "Impossibile raggiungere FrostMod — riseleziona la moto in gioco per caricarla.",
+    "Impossibile raggiungere FrostMod — in gioco cambia categoria moto e torna indietro per caricare il modello.",
   "locker.modelRefreshWindowsOnly":
-    "L'aggiornamento del modello in tempo reale è solo per Windows — riseleziona la moto in gioco.",
+    "Modello cambiato — in gioco cambia categoria moto e torna indietro per vederlo.",
   "locker.modelInstantRefreshOff":
-    "Riseleziona la moto in MX Bikes per caricarla (l'aggiornamento istantaneo è disattivato).",
+    "In MX Bikes cambia categoria moto e torna indietro per caricare il modello.",
 
   // ── Registrazione set sparsi ───────────────────────────────────────────────
   "swaps.model": "modello",

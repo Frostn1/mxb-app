@@ -179,9 +179,20 @@ pub fn validate(prog: &TrackProgram) -> Vec<String> {
                 .map(|s| s.curvature == 0.0)
                 .unwrap_or(true);
             if straight {
+                // Say which corner, not just "a corner". This turns up after an edit moves
+                // the corners out from under a berm that was on one, and the way out is a
+                // number.
+                let nearest = turn
+                    .iter()
+                    .filter(|s| s.curvature != 0.0)
+                    .min_by(|a, b| {
+                        (a.s - at).abs().total_cmp(&(b.s - at).abs())
+                    })
+                    .map(|s| format!(" The nearest corner starts around {:.0} m.", s.s))
+                    .unwrap_or_else(|| " This lap has no corners at all.".into());
                 out.push(format!(
-                    "the berm at {at:.0} m is on a straight. Berms bank the outside of a \
-                     corner — put it where an arc segment is."
+                    "the berm at {at:.0} m is on a straight, where it does nothing — a berm \
+                     banks the outside of a corner.{nearest}"
                 ));
             }
         }

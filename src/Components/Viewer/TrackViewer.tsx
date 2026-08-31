@@ -277,6 +277,34 @@ function viewFrame(terrain: TrackTerrain) {
   };
 }
 
+/** A soft column of light over one feature, for pointing at it from a list. */
+function Highlight({
+  terrain,
+  at,
+}: {
+  terrain: TrackTerrain;
+  at: { x: number; z: number; width: number };
+}) {
+  const frame = viewFrame(terrain);
+  const [x, , z] = toView(frame, at.x, terrain.minHeight, at.z);
+  const radius = Math.max((at.width / 2) * frame.unitsPerMetre, 0.05);
+  // Tall enough to clear any relief the terrain has, and centred on the middle of its range
+  // so it reaches both above and below the ground it marks.
+  const tall = (terrain.maxHeight - terrain.minHeight) * frame.heightScale + 4;
+  return (
+    <mesh position={[x, 0, z]} renderOrder={2}>
+      <cylinderGeometry args={[radius, radius, tall, 24, 1, true]} />
+      <meshBasicMaterial
+        color="#ffffff"
+        transparent
+        opacity={0.16}
+        depthWrite={false}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
 /**
  * Bring the camera to a point on the track.
  *
@@ -1165,6 +1193,12 @@ interface TrackViewerProps {
    * bring you back to it after you have panned away.
    */
   focus?: { x: number; z: number } | null;
+  /**
+   * A point to light up, in world metres, and how wide it is. Drawn as a soft column so it
+   * reads from any angle and at any zoom — a highlight painted flat on the ground disappears
+   * the moment the camera is low, which is exactly when you are looking at a jump.
+   */
+  highlight?: { x: number; z: number; width: number } | null;
   className?: string;
 }
 
@@ -1179,6 +1213,7 @@ export function TrackViewer({
   ground = null,
   onPick,
   focus = null,
+  highlight = null,
   className,
 }: TrackViewerProps) {
   return (
@@ -1274,6 +1309,7 @@ export function TrackViewer({
             <PlacementMarkers placements={placements} terrain={terrain} />
           )}
           {terrain && <FocusCamera terrain={terrain} focus={focus} />}
+          {terrain && highlight && <Highlight terrain={terrain} at={highlight} />}
           <OrbitControls
             makeDefault
             enablePan
