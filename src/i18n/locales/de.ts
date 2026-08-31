@@ -2257,4 +2257,7 @@ export const de: Translation = {
   "track.stillNeeded": "Braucht noch eine .rdf aus TrackEd (Startgatter, Box, Kameras) und eine gate.edf aus einer anderen Strecke.",
   "track.base": "Basis-Strecke",
   "track.baseLoaded": "„{{name}}“ geladen",
+  "track.name": "Streckenname",
+  "track.author": "Autor",
+  "track.previewHint": "Auf Vorschau drücken, um sie zu bauen und hier anzusehen.",
 };

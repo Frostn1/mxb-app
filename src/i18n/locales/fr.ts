@@ -2248,4 +2248,7 @@ export const fr: Translation = {
   "track.stillNeeded": "Il manque encore un .rdf de TrackEd (grille, stands, caméras) et un gate.edf copié d'un autre circuit.",
   "track.base": "Circuit de base",
   "track.baseLoaded": "« {{name}} » chargé",
+  "track.name": "Nom du circuit",
+  "track.author": "Auteur",
+  "track.previewHint": "Appuie sur Aperçu pour le construire et le voir ici.",
 };

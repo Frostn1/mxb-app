@@ -981,7 +981,49 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
 ///
 /// This is a *preview*, not a build. It carries terrain and surfaces and nothing else — no
 /// graphics, no scenery, no race data — so the game has no use for it. The app does.
-pub fn trh(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
+/// The surface id a feature kind is painted with in a preview. See `track::surface_colour`.
+fn feature_id(f: &Feature) -> u32 {
+    match f {
+        Feature::Tabletop { .. } => 200,
+        Feature::Double { .. } => 201,
+        Feature::Roller { .. } => 202,
+        Feature::Whoops { .. } => 203,
+        Feature::StepUp { .. } => 204,
+        Feature::Berm { .. } => 205,
+        Feature::Rut { .. } => 206,
+    }
+}
+
+/// One coverage mask per kind of feature on the track, so a preview can colour them.
+///
+/// Grouped by kind rather than one per feature: thirty masks would be thirty megabytes and
+/// the question being answered is "which of these is the double", not "which double".
+fn feature_masks(prog: &TrackProgram, syn: &Synth, dim: usize) -> Vec<(u32, Vec<u8>)> {
+    let half = prog.width * 0.5;
+    let mut out: Vec<(u32, Vec<u8>)> = Vec::new();
+    for f in &prog.features {
+        let id = feature_id(f);
+        if out.iter().any(|(k, _)| *k == id) {
+            continue;
+        }
+        let spans: Vec<(f32, f32)> = prog
+            .features
+            .iter()
+            .filter(|g| feature_id(g) == id)
+            .map(|g| (g.at(), g.at() + g.length()))
+            .collect();
+        out.push((
+            id,
+            mask_from(syn, dim, |d, s| {
+                let on = d <= half && spans.iter().any(|(lo, hi)| s >= *lo && s <= *hi);
+                u8::from(on) * 255
+            }),
+        ));
+    }
+    out
+}
+
+pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     let scale = prog.terrain.scale;
     let mut out = Vec::with_capacity(12 + syn.heights.len() * 2 + 1024);
     out.extend_from_slice(b"TRH\0");
@@ -1010,7 +1052,7 @@ pub fn trh(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     // different material from both, and it is most of what you see from the seat.
     let (shoulder_id, shoulder_scale) = ground(prog.terrain.surface);
     let shoulder = SHOULDER_M * shoulder_scale;
-    let masks: [(u32, Vec<u8>); 3] = [
+    let mut masks: Vec<(u32, Vec<u8>)> = vec![
         // 10 is the riding line — the id published tracks paint their ribbon with.
         (10, mask_from(syn, TRH_MASK_DIM, |d, _| u8::from(d <= half) * 255)),
         (
@@ -1023,6 +1065,13 @@ pub fn trh(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
             u8::from(d > half + shoulder) * 255
         })),
     ];
+    if paint_features {
+        // First in the list, because a reader compositing these takes the first mask that
+        // covers a cell — and on a feature that is the answer wanted.
+        let mut all = feature_masks(prog, syn, TRH_MASK_DIM);
+        all.extend(masks);
+        masks = all;
+    }
     out.extend_from_slice(&(masks.len() as u32).to_le_bytes());
     out.extend_from_slice(&[0u8; 16]); // to the offset the records start at
 
@@ -1066,7 +1115,12 @@ fn ground(s: Surface) -> (u32, f32) {
 
 /// The preview as a `.pkz` the app can open: a plain zip, which is what the reader falls back
 /// to when a file isn't one of PiBoSo's encrypted ones.
-pub fn write_pkz(prog: &TrackProgram, syn: &Synth, path: &Path) -> Result<u64> {
+pub fn write_pkz(
+    prog: &TrackProgram,
+    syn: &Synth,
+    path: &Path,
+    paint_features: bool,
+) -> Result<u64> {
     let slug = slug(&prog.name);
     let file = std::fs::File::create(path).with_context(|| format!("create {path:?}"))?;
     let mut zip = zip::ZipWriter::new(file);
@@ -1075,7 +1129,7 @@ pub fn write_pkz(prog: &TrackProgram, syn: &Synth, path: &Path) -> Result<u64> {
 
     use std::io::Write;
     zip.start_file(format!("{slug}.trh"), opts)?;
-    zip.write_all(&trh(prog, syn))?;
+    zip.write_all(&trh(prog, syn, paint_features))?;
     zip.start_file(format!("{slug}.ini"), opts)?;
     zip.write_all(track_ini(prog).as_bytes())?;
     zip.finish()?;
@@ -1711,7 +1765,7 @@ mod tests {
             // the same code that reads published tracks. Anything the viewer would get wrong
             // shows up here as a track that measures like nothing.
             let pkz = dir.join(format!("{}.pkz", slug(&p.name)));
-            let size = write_pkz(&p, &s, &pkz).unwrap();
+            let size = write_pkz(&p, &s, &pkz, false).unwrap();
             let back = crate::trackstats::analyse(&pkz).expect("the .pkz reads back as a track");
             let bc = back.corridor.as_ref().expect("the .pkz carries a riding line");
             println!(
@@ -1791,7 +1845,7 @@ mod tests {
         if let Ok(dir) = std::env::var("FROST_BUILD") {
             let dir = Path::new(&dir);
             let wrote = write_source(&p, &s, dir).unwrap();
-            write_pkz(&p, &s, &dir.join(format!("{}.pkz", slug(&p.name)))).unwrap();
+            write_pkz(&p, &s, &dir.join(format!("{}.pkz", slug(&p.name))), true).unwrap();
             preview(&s, &dir.join("preview.ppm"));
             println!("wrote {} files to {}", wrote.len() + 2, dir.display());
         }

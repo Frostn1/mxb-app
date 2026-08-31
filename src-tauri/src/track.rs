@@ -439,6 +439,16 @@ fn surface_colour(id: u32) -> [u8; 3] {
         4 => [150, 118, 84],   // soil — mid brown
         5 => [158, 156, 150],  // concrete — light, neutral
         10 => [128, 84, 58],   // the riding line — darkest, reddest
+        // Generated tracks paint their features with ids of their own, so the studio's 3D
+        // preview can show you which lump is which. Nothing published uses these — real
+        // tracks' surface ids are all under about 16 — so they cost real tracks nothing.
+        200 => [214, 120, 60],  // tabletop
+        201 => [206, 74, 96],   // double
+        202 => [120, 150, 200], // roller
+        203 => [190, 170, 70],  // whoops
+        204 => [110, 180, 130], // step-up
+        205 => [150, 110, 200], // berm
+        206 => [90, 90, 110],   // rut
         12 => [124, 126, 102], // olive, so it parts from both grass and soil
         _ => [138, 126, 106],
     }
@@ -1175,9 +1185,25 @@ mod tests {
     #[test]
     fn a_surface_the_file_does_not_name_still_gets_a_colour() {
         // Ids past the table turn up on real tracks, and one that panicked or came back
-        // black would be worse than one that is merely approximate.
-        assert_ne!(surface_colour(200), [0, 0, 0]);
-        assert_eq!(surface_colour(200), surface_colour(201));
+        // black would be worse than one that is merely approximate. 200-206 are spoken for
+        // now — the studio paints generated features with them — so this asks about ids
+        // nothing has claimed.
+        assert_ne!(surface_colour(300), [0, 0, 0]);
+        assert_eq!(surface_colour(300), surface_colour(301));
+    }
+
+    #[test]
+    fn every_generated_feature_kind_gets_its_own_colour() {
+        // The whole point of them is telling one lump from another in the preview, so two
+        // sharing a colour is the one thing that must not happen.
+        let mut seen = std::collections::HashSet::new();
+        for id in 200..=206 {
+            assert!(seen.insert(surface_colour(id)), "id {id} repeats a colour");
+        }
+        // And none of them collides with a surface a real track paints.
+        for real in [0, 1, 2, 3, 4, 5, 10, 12] {
+            assert!(!seen.contains(&surface_colour(real)), "id {real} collides");
+        }
     }
 
     #[test]

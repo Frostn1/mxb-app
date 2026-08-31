@@ -142,6 +142,47 @@ export function lapSteps(program: TrackProgram): LapStep[] {
   return steps.sort((a, b) => a.at - b.at || (a.kind === "feature" ? 1 : -1));
 }
 
+/** A feature of each kind, with sizes that sit inside what published tracks measure. */
+export function newFeature(kind: TrackFeatureKind, at: number): TrackFeature {
+  switch (kind) {
+    case "tabletop":
+      return { kind, at, length: 20, height: 1.6 };
+    case "double":
+      return { kind, at, height: 1.6, gap: 10, lip: 6 };
+    case "roller":
+      return { kind, at, length: 14, height: 0.9 };
+    case "whoops":
+      return { kind, at, count: 5, spacing: 5, height: 0.7 };
+    case "stepUp":
+      return { kind, at, length: 25, height: 2.5 };
+    case "berm":
+      return { kind, at, length: 20, height: 1.6 };
+    case "rut":
+      return { kind, at, length: 20, depth: 0.15 };
+  }
+}
+
+/**
+ * The emptiest stretch of the lap, which is where a new feature should go.
+ *
+ * Dropping one at the finish line means it usually lands on top of something, and the
+ * validator then complains about a track the person didn't ask for.
+ */
+export function roomiestGap(program: TrackProgram, want: number): number {
+  const lap = lapLength(program);
+  const taken = program.features
+    .map((f) => ({ lo: f.at, hi: f.at + featureSpan(f).length }))
+    .sort((a, b) => a.lo - b.lo);
+  let best = { at: lap / 2, size: -1 };
+  let cursor = 0;
+  for (const span of [...taken, { lo: lap, hi: lap }]) {
+    const size = span.lo - cursor;
+    if (size > best.size) best = { at: cursor + (size - want) / 2, size };
+    cursor = Math.max(cursor, span.hi);
+  }
+  return Math.max(0, Math.min(best.at, Math.max(0, lap - want)));
+}
+
 /** How long the lap is. An arc states its radius and angle, so its length falls out. */
 export function lapLength(program: TrackProgram): number {
   return program.segments.reduce(
