@@ -16,6 +16,15 @@
 
 use anyhow::{bail, Result};
 
+/// How far past the finish a feature may end before it counts as a fault.
+///
+/// Not zero, and not a rounding tolerance either. The studio clamps a stranded jump to end
+/// exactly at the line, and it works out where that is in double precision while this walks
+/// the lap in single — so "exactly" differs between them by a fraction of a millimetre, and a
+/// strict comparison rejects the very thing it just asked for. Half a metre is far below
+/// anything that matters on a track and far above anything the two can disagree by.
+const FEATURE_END_SLACK_M: f32 = 0.5;
+
 /// Samples on the longest edge. Power of two plus one, as MX Bikes requires.
 pub const DEFAULT_SAMPLES: u32 = 2049;
 
@@ -483,7 +492,7 @@ impl TrackProgram {
                 bail!("the {} sits at {:.0} m, before the start", f.name(), f.at());
             }
             let end = f.at() + f.length();
-            if end > lap {
+            if end > lap + FEATURE_END_SLACK_M {
                 // Says how to fix it, not just that it is broken: this happens when a corner
                 // is shortened or removed under a jump that was already there, and the way
                 // out is a number rather than an insight.
@@ -610,6 +619,46 @@ mod tests {
         let p = prog(vec![Segment::Straight { length: 500.0, rise: 0.0 }]);
         let err = p.check().unwrap_err().to_string();
         assert!(err.contains("leaves the terrain"), "{err}");
+    }
+
+    /// The studio pulls a stranded jump back to end on the line, and works out where that is
+    /// in double precision while this walks the lap in single. A check that rejects what the
+    /// editor just did leaves someone with an error and no field to fix it in.
+    ///
+    /// Reproduced the way it actually happens: the real programme, the lap summed in f64 the
+    /// way the browser sums it, and the clamped position taken back through JSON — which is
+    /// where the f64 becomes an f32.
+    #[test]
+    fn a_feature_clamped_to_the_finish_is_not_past_it() {
+        let mut p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
+
+        // `lapLength` in `api/trackgen.ts`, in the precision the browser has.
+        let lap64: f64 = p
+            .segments
+            .iter()
+            .map(|s| match s {
+                Segment::Straight { length, .. } => *length as f64,
+                Segment::Arc { radius, angle, .. } => {
+                    (*radius as f64).abs() * (*angle as f64).abs() * std::f64::consts::PI / 180.0
+                }
+            })
+            .sum();
+
+        let last = p.features.len() - 1;
+        let length = p.features[last].length() as f64;
+        let at = (lap64 - length) as f32;
+        p.features[last] = match p.features[last] {
+            Feature::Berm { length, height, .. } => Feature::Berm { at, length, height },
+            other => other,
+        };
+
+        // Through JSON and back, because that is the trip the number really takes.
+        let round: TrackProgram = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+        assert!(
+            round.check().is_ok(),
+            "{}",
+            round.check().unwrap_err().to_string()
+        );
     }
 
     #[test]
