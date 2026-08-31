@@ -2367,4 +2367,5 @@ export const en = {
   "track.soil": "Soil",
   "track.sand": "Sand",
   "track.grass": "Grass",
+  "track.smoothing": "blend",
 } as const;
