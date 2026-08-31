@@ -125,6 +125,8 @@ export const it: Translation = {
   "welcome.intro.body":
     "Il tuo gestore di mod per MX Bikes. Tieni piste, moto e grafiche organizzate in un unico posto — niente più file zip sparsi sul desktop. Ti facciamo fare un giro in pochi secondi.",
   "welcome.getStarted": "Iniziamo",
+  "welcome.analyticsNote":
+    "MXB App conta in modo anonimo quali pagine vengono usate. Nessun nome, nessun file — puoi disattivarlo nelle Impostazioni.",
 
   // ── Preset ─────────────────────────────────────────────────────────────────
   "presets.missing": "mancante",
@@ -689,6 +691,9 @@ export const it: Translation = {
   "settings.themeSystem": "Sistema",
   "settings.language": "Lingua",
   "settings.languageSystem": "Sistema",
+  "settings.analytics": "Condividi statistiche d'uso anonime",
+  "settings.analyticsDesc":
+    "Invia un ID casuale, la versione dell'app e quante volte usi ogni pagina e funzione, così si capisce cosa vale la pena costruire. Mai il tuo nome, i tuoi file o il tuo indirizzo.",
   "settings.runInBackground": "Continua in background",
   "settings.runInBackgroundDesc":
     "Chiudendo la finestra, MXB App resta nella barra di sistema così FrostMod rimane collegato. Esci dall'icona nella barra.",
@@ -1416,11 +1421,15 @@ export const it: Translation = {
   "showcase.v0124.anyserver":
     "Qualsiasi server, non solo i nostri. L'app legge il server dal gioco in esecuzione, così una lobby pubblica funziona come una privata.",
   "showcase.v0124.nosetup":
-    "Niente da configurare. Nessun codice d'invito, nessuna registrazione, niente da installare sul server — avvia il gioco e parte.",
+    "Niente da configurare. Nessun codice d'invito, nessuna registrazione, niente da installare sul server — attivala nelle Impostazioni e fa tutto da sé.",
   "showcase.v0124.everyone":
     "Vedrai ogni pilota che ha anch'esso MXB App. Più ce ne sono nella tua lobby, più la griglia appare giusta.",
   "showcase.v0124.settings":
     "Impostazioni → Sincronizzazione livree mostra cosa è uscito, cosa è arrivato e ogni livrea che ha rifiutato di sovrascrivere. L'interruttore è in Generali.",
+  "showcase.v0124.shape":
+    "I salti si modellano trascinando il loro profilo. Prendi la cima di un tabletop per l'altezza, l'estremità per la lunghezza, il lato opposto di un doppio per il vuoto — o disegnane uno punto per punto.",
+  "showcase.v0124.stats":
+    "MXB App ora conta in modo anonimo quali pagine e funzioni vengono usate — un ID casuale e nulla su di te. Impostazioni → Generali lo disattiva.",
   "showcase.v0122.hero.title":
     "La telecamera replay può seguire il pilota",
   "showcase.v0122.hero.body":

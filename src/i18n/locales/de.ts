@@ -130,6 +130,8 @@ export const de: Translation = {
   "welcome.intro.body":
     "Dein Mod-Manager für MX Bikes. Halte Strecken, Motorräder und Lackierungen an einem Ort organisiert — keine ZIP-Dateien mehr über den ganzen Desktop verstreut. Wir zeigen dir das Wichtigste in ein paar Sekunden.",
   "welcome.getStarted": "Los geht's",
+  "welcome.analyticsNote":
+    "MXB App zählt anonym, welche Seiten genutzt werden. Keine Namen, keine Dateien — in den Einstellungen abschaltbar.",
 
   // ── Presets ────────────────────────────────────────────────────────────────
   "presets.missing": "fehlt",
@@ -698,6 +700,9 @@ export const de: Translation = {
   "settings.themeSystem": "System",
   "settings.language": "Sprache",
   "settings.languageSystem": "System",
+  "settings.analytics": "Anonyme Nutzungsstatistik teilen",
+  "settings.analyticsDesc":
+    "Sendet eine zufällige ID, die App-Version und Zähler dazu, welche Seiten und Funktionen du nutzt — damit klar wird, was sich zu bauen lohnt. Niemals dein Name, deine Dateien oder deine Adresse.",
   "settings.runInBackground": "Im Hintergrund weiterlaufen",
   "settings.runInBackgroundDesc":
     "Beim Schließen des Fensters läuft MXB App im Infobereich weiter, damit FrostMod verbunden bleibt. Beenden über das Symbol im Infobereich.",
@@ -1434,11 +1439,15 @@ export const de: Translation = {
   "showcase.v0124.anyserver":
     "Jeder Server, nicht nur unsere. Die App liest den Server aus dem laufenden Spiel, also funktioniert eine öffentliche Lobby genau wie eine private.",
   "showcase.v0124.nosetup":
-    "Nichts einzurichten. Kein Einladungscode, keine Anmeldung, keine Server-Installation — Spiel starten, fertig.",
+    "Nichts einzurichten. Kein Einladungscode, keine Anmeldung, keine Server-Installation — in den Einstellungen einschalten, den Rest macht sie selbst.",
   "showcase.v0124.everyone":
     "Du siehst jeden Fahrer, der ebenfalls MXB App hat. Je mehr in deiner Lobby, desto mehr vom Feld sieht richtig aus.",
   "showcase.v0124.settings":
     "Einstellungen → Lackierungs-Sync zeigt, was rausging, was ankam und welche Lackierung nicht überschrieben wurde. Der Schalter zum Abschalten sitzt unter Allgemein.",
+  "showcase.v0124.shape":
+    "Sprünge werden über ihre Kontur geformt. Zieh die Oberkante eines Tabletops für die Höhe, das hintere Ende für die Länge, die Gegenseite eines Doubles für die Lücke — oder zeichne einen Punkt für Punkt.",
+  "showcase.v0124.stats":
+    "MXB App zählt jetzt anonym, welche Seiten und Funktionen genutzt werden — eine zufällige ID und nichts über dich. Einstellungen → Allgemein schaltet es ab.",
   "showcase.v0122.hero.title":
     "Die Replay-Kamera kann dem Fahrer folgen",
   "showcase.v0122.hero.body":

@@ -127,6 +127,8 @@ export const fr: Translation = {
   "welcome.intro.body":
     "Votre gestionnaire de mods pour MX Bikes. Gardez circuits, motos et décos organisés au même endroit — fini les fichiers zip éparpillés sur le bureau. On vous fait faire le tour en quelques secondes.",
   "welcome.getStarted": "C'est parti",
+  "welcome.analyticsNote":
+    "MXB App compte anonymement quelles pages sont utilisées. Aucun nom, aucun fichier — désactivable dans les Réglages.",
 
   // ── Presets ────────────────────────────────────────────────────────────────
   "presets.missing": "manquant",
@@ -694,6 +696,9 @@ export const fr: Translation = {
   "settings.themeSystem": "Système",
   "settings.language": "Langue",
   "settings.languageSystem": "Système",
+  "settings.analytics": "Partager des statistiques d'usage anonymes",
+  "settings.analyticsDesc":
+    "Envoie un identifiant aléatoire, la version de l'app et le nombre d'utilisations de chaque page et fonction, pour savoir quoi construire. Jamais votre nom, vos fichiers ni votre adresse.",
   "settings.runInBackground": "Continuer en arrière-plan",
   "settings.runInBackgroundDesc":
     "Fermer la fenêtre place MXB App dans la barre d'état pour que FrostMod reste connecté. Quittez depuis l'icône de la barre.",
@@ -1425,11 +1430,15 @@ export const fr: Translation = {
   "showcase.v0124.anyserver":
     "N'importe quel serveur, pas seulement les nôtres. L'app lit le serveur depuis le jeu en cours, donc un lobby public fonctionne comme un lobby privé.",
   "showcase.v0124.nosetup":
-    "Rien à configurer. Pas de code d'invitation, pas d'inscription, rien à installer côté serveur — lancez le jeu et c'est parti.",
+    "Rien à configurer. Pas de code d'invitation, pas d'inscription, rien à installer côté serveur — activez-la dans les Paramètres, elle fait le reste toute seule.",
   "showcase.v0124.everyone":
     "Vous verrez tout pilote qui a aussi MXB App. Plus votre lobby en compte, plus la grille est correcte.",
   "showcase.v0124.settings":
     "Paramètres → Synchro des peintures montre ce qui est parti, ce qui est arrivé, et toute peinture qu'elle a refusé d'écraser. L'interrupteur est dans Général.",
+  "showcase.v0124.shape":
+    "Les sauts se façonnent en tirant leur contour. Attrapez le haut d'un tabletop pour sa hauteur, l'extrémité pour sa longueur, l'autre côté d'un double pour son écart — ou dessinez-en un point par point.",
+  "showcase.v0124.stats":
+    "MXB App compte désormais anonymement quelles pages et fonctions sont utilisées — un identifiant aléatoire et rien sur vous. Paramètres → Général le désactive.",
   "showcase.v0122.hero.title":
     "La caméra replay peut suivre le pilote",
   "showcase.v0122.hero.body":

@@ -128,6 +128,8 @@ export const ptBR: Translation = {
   "welcome.intro.body":
     "Seu gerenciador de mods do MX Bikes. Mantenha pistas, motos e pinturas organizadas em um só lugar — chega de arquivos zip espalhados pela área de trabalho. Em alguns segundos a gente te mostra tudo.",
   "welcome.getStarted": "Começar",
+  "welcome.analyticsNote":
+    "O MXB App conta anonimamente quais páginas são usadas. Sem nomes, sem arquivos — dá para desligar nas Configurações.",
 
   // ── Presets ────────────────────────────────────────────────────────────────
   "presets.missing": "faltando",
@@ -692,6 +694,9 @@ export const ptBR: Translation = {
   "settings.themeSystem": "Sistema",
   "settings.language": "Idioma",
   "settings.languageSystem": "Sistema",
+  "settings.analytics": "Compartilhar estatísticas de uso anônimas",
+  "settings.analyticsDesc":
+    "Envia um ID aleatório, a versão do app e quantas vezes você usa cada página e recurso, para saber o que vale a pena construir. Nunca seu nome, seus arquivos ou seu endereço.",
   "settings.runInBackground": "Continuar em segundo plano",
   "settings.runInBackgroundDesc":
     "Fechar a janela deixa o MXB App na bandeja do sistema para o FrostMod continuar conectado. Saia pelo ícone da bandeja.",
@@ -1414,11 +1419,15 @@ export const ptBR: Translation = {
   "showcase.v0124.anyserver":
     "Qualquer servidor, não só os nossos. O app lê o servidor do jogo em execução, então uma sala pública funciona igual a uma privada.",
   "showcase.v0124.nosetup":
-    "Nada para configurar. Sem código de convite, sem cadastro, sem instalar nada no servidor — abra o jogo e pronto.",
+    "Nada para configurar. Sem código de convite, sem cadastro, sem instalar nada no servidor — ative nas Configurações e ela roda sozinha.",
   "showcase.v0124.everyone":
     "Você verá qualquer piloto que também tenha o MXB App. Quanto mais gente na sua sala tiver, mais o grid fica certo.",
   "showcase.v0124.settings":
     "Configurações → Sincronização de pinturas mostra o que saiu, o que chegou e qualquer pintura que ela recusou sobrescrever. O interruptor fica em Geral.",
+  "showcase.v0124.shape":
+    "Os saltos são moldados arrastando o contorno. Pegue o topo de um tabletop para a altura, a ponta para o comprimento, o lado oposto de um double para o vão — ou desenhe um ponto a ponto.",
+  "showcase.v0124.stats":
+    "O MXB App agora conta anonimamente quais páginas e recursos são usados — um ID aleatório e nada sobre você. Configurações → Geral desliga isso.",
   "showcase.v0122.hero.title":
     "A câmera de replay pode seguir o piloto",
   "showcase.v0122.hero.body":

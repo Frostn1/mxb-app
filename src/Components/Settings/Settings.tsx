@@ -46,6 +46,7 @@ import {
   setOverlayEnabled,
   setOverlayHotkey,
   setProfilesPath,
+  setAnalyticsEnabled,
   setRunInBackground,
   setWatchModsReload,
   setWineRunner,
@@ -455,6 +456,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       : t("settings.insideModsFolder"));
 
   const runInBackground = config.runInBackground ?? true;
+  const analyticsEnabled = config.analyticsEnabled ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   const instantRefresh = config.instantRefresh ?? true;
@@ -465,9 +467,8 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // Same shape as the overlay pair above: the config's fields are optional (an install
   // predating voice has none), so every read is defaulted here rather than at each use.
   const voiceEnabled = config.voiceEnabled ?? false;
-  // On unless it was turned off — an older config has no field and means "on", same as the
-  // backend's default.
-  const paintSyncEnabled = config.paintSyncEnabled ?? true;
+  // Off unless it was turned on, matching the backend's default.
+  const paintSyncEnabled = config.paintSyncEnabled ?? false;
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
@@ -735,6 +736,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleBackground = async (v: boolean) => {
     try {
       await setRunInBackground(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleAnalytics = async (v: boolean) => {
+    try {
+      await setAnalyticsEnabled(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -1207,6 +1217,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               desc={t("settings.paintSyncDesc")}
               checked={paintSyncEnabled}
               onChange={togglePaintSync}
+            />
+            <div className="h-px bg-border" />
+            <ToggleRow
+              label={t("settings.analytics")}
+              desc={t("settings.analyticsDesc")}
+              checked={analyticsEnabled}
+              onChange={toggleAnalytics}
             />
           </Section>
           )}

@@ -454,12 +454,25 @@ pub async fn search(
         ModSort::Newest
     };
 
-    match sort {
+    let items = match sort {
         ModSort::Newest => listing(q, category_id, Page::Number(page)).await,
         ModSort::Oldest => oldest(q, category_id, page).await,
         // `popular_range` is Some for every remaining variant.
         _ => popular(category_id, page, sort.popular_range().unwrap_or("all")).await,
-    }
+    };
+
+    // The site publishes no author through its API — see `fill_authors`. Every listing gets
+    // whatever the feed has already taught us; only a date-ordered one asks it for more.
+    let mut items = items?;
+    fill_authors(
+        &mut items,
+        category_id,
+        q,
+        page,
+        matches!(sort, ModSort::Newest),
+    )
+    .await;
+    Ok(items)
 }
 
 /// Which slice of a listing to ask for. WP accepts either, and `Offset` is what makes
@@ -803,6 +816,109 @@ fn summary_from_post(p: &Value, category_id: u32) -> Option<ModSummary> {
     })
 }
 
+/// Post link to the name the site credits it to, learned from the feed and kept for the
+/// session. Authors do not change, and a mod seen once should keep its byline while the
+/// catalog is browsed around it.
+static FEED_AUTHORS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> =
+    std::sync::OnceLock::new();
+
+/// Posts the feed hands back per page. WordPress's own default, and not the same as
+/// [`PER_PAGE`] — which is why a listing needs two feed pages to cover itself.
+const FEED_PER_PAGE: u32 = 20;
+
+/// Fill in the bylines the API refuses to give.
+///
+/// mxb-mods.com has closed everything that would name an author: `_embed=author` answers
+/// `rest_user_invalid_id`, the users endpoint is shut, `class_list` carries no author class,
+/// and `/?author=<id>` is a 500. What it does still publish is its RSS feed, and every item
+/// in that carries a `dc:creator`.
+///
+/// So the feed is the source. One or two requests per page of results rather than one per
+/// card, matched on the post's own permalink, and remembered — scrolling the catalog warms
+/// the cache rather than paying for it again.
+///
+/// Best effort throughout: a feed that fails, or a sort the feed cannot reproduce, leaves the
+/// cards exactly as they were before this existed.
+async fn fill_authors(items: &mut [ModSummary], category_id: u32, q: &str, page: u32, fetch: bool) {
+    let cache = FEED_AUTHORS.get_or_init(Default::default);
+    let known = |items: &mut [ModSummary]| {
+        if let Ok(map) = cache.lock() {
+            for m in items.iter_mut() {
+                if m.author.is_none() {
+                    m.author = map.get(&m.link).cloned();
+                }
+            }
+        }
+    };
+    known(items);
+    // The feed is date-descending and nothing else, so it can only be *asked* about a listing
+    // in that order. Every other sort still gets whatever browsing has already learned.
+    if !fetch || items.iter().all(|m| m.author.is_some()) {
+        return;
+    }
+
+    // Which feed pages hold the posts this listing is showing.
+    let per: u32 = PER_PAGE.parse().unwrap_or(24);
+    let first = page.saturating_sub(1) * per;
+    let from = first / FEED_PER_PAGE + 1;
+    let to = (first + per).div_ceil(FEED_PER_PAGE);
+
+    for m in from..=to.max(from) {
+        let mut params: Vec<(&str, String)> = vec![("paged", m.to_string())];
+        if category_id != 0 {
+            params.push(("cat", category_id.to_string()));
+        }
+        if !q.is_empty() {
+            params.push(("s", q.to_string()));
+        }
+        // Built into the URL rather than passed alongside it: the webview path reads a page
+        // by URL alone and would drop them.
+        let base = format!("{}{}", mxb_session::base(), obfstr!("/feed/"));
+        let Ok(url) = reqwest::Url::parse_with_params(&base, &params) else {
+            return;
+        };
+
+        let Ok(resp) = get_page(url.as_str()).await else {
+            return;
+        };
+        if !resp.is_success() {
+            return;
+        }
+        if let Ok(mut map) = cache.lock() {
+            for (link, name) in feed_creators(&resp.body) {
+                map.insert(link, name);
+            }
+        }
+    }
+    known(items);
+}
+
+/// `(permalink, creator)` for each item of an RSS feed.
+///
+/// Read with a scanner rather than an XML parser: the shape is two known tags inside
+/// `<item>`, and the crate that reads the site's HTML is a *HTML* parser, which would mangle
+/// this. Anything it does not recognise is skipped rather than guessed at.
+fn feed_creators(xml: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for item in xml.split("<item>").skip(1) {
+        let item = item.split("</item>").next().unwrap_or_default();
+        let tag = |name: &str| -> Option<String> {
+            let open = format!("<{name}>");
+            let body = item.split(&open).nth(1)?.split(&format!("</{name}>")).next()?;
+            let body = body
+                .trim()
+                .trim_start_matches("<![CDATA[")
+                .trim_end_matches("]]>")
+                .trim();
+            (!body.is_empty()).then(|| decode_entities(body))
+        };
+        if let (Some(link), Some(name)) = (tag("link"), tag("dc:creator")) {
+            out.push((link, name));
+        }
+    }
+    out
+}
+
 /// The post author's display name, from `_embed=author`.
 ///
 /// Optional on purpose. WordPress answers the embed with an error object rather than a user
@@ -818,6 +934,50 @@ fn embedded_author(p: &Value) -> Option<String> {
         .as_str()?;
     let name = decode_entities(name).trim().to_string();
     (!name.is_empty()).then_some(name)
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::feed_creators;
+
+    /// The shape the site's own feed comes in, down to the CDATA and the entity.
+    const FEED: &str = r#"<rss><channel>
+<item>
+  <title><![CDATA[LATROBE SPEEDWAY RD.1]]></title>
+  <link>https://mxb-mods.com/latrobe-speedway-rd-1/</link>
+  <dc:creator><![CDATA[S33VERSMX]]></dc:creator>
+</item>
+<item>
+  <title><![CDATA[ID Worx &#8211; Factoryburn]]></title>
+  <link>https://mxb-mods.com/id-worx-factoryburn/</link>
+  <dc:creator><![CDATA[dryftzz]]></dc:creator>
+</item>
+<item>
+  <title><![CDATA[No byline on this one]]></title>
+  <link>https://mxb-mods.com/anon/</link>
+</item>
+</channel></rss>"#;
+
+    #[test]
+    fn creators_come_out_paired_with_their_post() {
+        let got = feed_creators(FEED);
+        assert_eq!(
+            got,
+            vec![
+                ("https://mxb-mods.com/latrobe-speedway-rd-1/".to_string(), "S33VERSMX".to_string()),
+                ("https://mxb-mods.com/id-worx-factoryburn/".to_string(), "dryftzz".to_string()),
+            ],
+            "an item with no creator is skipped rather than guessed at"
+        );
+    }
+
+    #[test]
+    fn nothing_that_isnt_a_feed_yields_anything() {
+        assert!(feed_creators("").is_empty());
+        assert!(feed_creators("<html><body>refused</body></html>").is_empty());
+        // A truncated item — a cut-off response — must not panic or half-read.
+        assert!(feed_creators("<item><link>https://x/</link>").is_empty());
+    }
 }
 
 /// `post[field]["rendered"]` as a &str.

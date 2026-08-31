@@ -95,14 +95,25 @@ pub struct AppConfig {
     /// Voice chat is off until the player turns it on. A feature that opens a microphone
     /// is not something anyone should discover by accident.
     pub voice_enabled: bool,
-    /// Paint sync is on unless the player turns it off. Unlike voice, it opens nothing and
-    /// costs nothing to be wrong about: the app publishes the look this rider is already
-    /// showing to everyone on the grid, and installs what the grid published back. Off by
-    /// default would mean a rider only sees the paints of whoever else went looking for a
-    /// setting, which is the same empty grid the feature exists to fix.
+    /// Which paint-sync default this config has been through.
     ///
-    /// A config written before this field deserializes to the struct default, which is on —
-    /// see the `default` on `AppConfig` itself.
+    /// v0.12.4 shipped paint sync on, and any config it saved carries
+    /// `paintSyncEnabled: true` written out explicitly — so simply changing the default
+    /// would not reach a single person who already has it. This is the one-shot: below
+    /// [`PAINT_SYNC_REV`], the setting is forced off once and the counter is caught up.
+    /// Anyone who then turns it back on keeps it, because the counter no longer moves.
+    #[serde(default)]
+    pub paint_sync_rev: u32,
+    /// Paint sync, off until the player turns it on.
+    ///
+    /// It shipped on by default and was turned off again the same day: keeping a running
+    /// session in step means reaching into the game — re-reading the mods folder, re-running
+    /// its customization loader — and that was freezing MX Bikes. Neither of those is a
+    /// thing to do to someone's race uninvited, however good the feature is when it works.
+    ///
+    /// The cost of off is real and understood: sync only pays off when the riders beside you
+    /// have it on too, so a default of off is a slower start. That is the right trade until
+    /// the freeze is understood on Windows — see `tasks/`.
     pub paint_sync_enabled: bool,
     /// Microphone to listen to. **Blank means "follow the system default"** — storing the
     /// resolved name instead would pin the player to whichever headset was plugged in the
@@ -151,6 +162,19 @@ pub struct AppConfig {
     /// What paint sync last did, so the UI can say so instead of the player having to guess
     /// from an empty grid. Written by the background tasks; never edited by hand.
     pub sync: SyncState,
+    /// Send anonymous usage counts — see [`crate::usage`].
+    ///
+    /// On by default, and off with one switch in Settings. What it sends is a random id,
+    /// a version, an OS and a set of counters; what it cannot send is anything about who
+    /// or where you are. Without it there is no way to tell a feature nobody uses from
+    /// one nobody has mentioned.
+    pub analytics_enabled: bool,
+    /// This install's id for those counts: a random UUID, minted on first run and tied to
+    /// nothing else. Blank until then, and blank forever if the setting is off.
+    ///
+    /// Deliberately not the account id or the GUID — an anonymous count that could be
+    /// joined back to a person is not one.
+    pub install_id: String,
 }
 
 /// The record of the last publish and the last pull.
@@ -231,7 +255,8 @@ impl Default for AppConfig {
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
             preview_tyres: String::new(),
             voice_enabled: false,
-            paint_sync_enabled: true,
+            paint_sync_rev: PAINT_SYNC_REV,
+            paint_sync_enabled: false,
             voice_input_device: String::new(),
             voice_output_device: String::new(),
             voice_ptt_hotkey: DEFAULT_PTT_HOTKEY.to_string(),
@@ -245,6 +270,8 @@ impl Default for AppConfig {
             cp_rider_name: String::new(),
             cp_guid: String::new(),
             sync: SyncState::default(),
+            analytics_enabled: true,
+            install_id: String::new(),
         }
     }
 }
@@ -254,7 +281,22 @@ impl Default for AppConfig {
 /// Applied on every read rather than in a one-shot upgrade step: the config is also
 /// written by hand and by older builds still on disk, so "has this already been
 /// migrated?" is only ever answerable from the values themselves.
+/// Bumped to turn paint sync off for everyone once.
+///
+/// v1: v0.12.4 shipped it on and it froze the game.
+pub const PAINT_SYNC_REV: u32 = 1;
+
 pub fn migrate(mut cfg: AppConfig) -> AppConfig {
+    // The one-shot described on `paint_sync_rev`. A config that never had the field is at
+    // rev 0 too, and forcing an already-off setting off is a no-op, so this needs no way to
+    // tell those two apart.
+    if cfg.paint_sync_rev < PAINT_SYNC_REV {
+        if cfg.paint_sync_enabled {
+            log::info!("turning paint sync off: it is off by default while the freeze is understood");
+        }
+        cfg.paint_sync_enabled = false;
+        cfg.paint_sync_rev = PAINT_SYNC_REV;
+    }
     if LEGACY_OVERLAY_HOTKEYS.contains(&cfg.overlay_hotkey.trim()) {
         log::info!(
             "moving the overlay hotkey off the retired default {} → {DEFAULT_OVERLAY_HOTKEY}",
@@ -930,18 +972,42 @@ mod tests {
         );
     }
 
-    /// Paint sync is on for every install that predates the setting.
+    /// Paint sync is off for every install that predates the setting.
     ///
-    /// It reaches players as an upgrade, not as an install, so the field is absent from every
-    /// config that exists today. Off would mean the feature shipped switched off for
-    /// everyone who already has the app — which is everyone it is for.
+    /// It briefly shipped on by default and was turned off again the same day, because
+    /// keeping a live session in step was freezing the game. An absent field must therefore
+    /// read as off: a config written by the build that defaulted it on carries the field
+    /// explicitly, so nothing that has it on loses it, and nothing that never had it gains it.
     #[test]
-    fn paint_sync_is_on_for_a_config_written_before_it_existed() {
+    fn paint_sync_is_off_for_a_config_written_before_it_existed() {
         let json = r#"{ "modsPath": "/games/MX Bikes", "voiceEnabled": false }"#;
         let cfg = serde_json::from_str::<AppConfig>(json).unwrap();
 
-        assert!(cfg.paint_sync_enabled, "an absent field means on");
+        assert!(!cfg.paint_sync_enabled, "an absent field means off");
         assert!(!cfg.voice_enabled, "and a field that is there still means what it says");
+    }
+
+    /// The hotfix's whole job: a v0.12.4 config says `paintSyncEnabled: true` in so many
+    /// words, so changing the default alone would reach nobody who already has the freeze.
+    #[test]
+    fn a_v0124_config_gets_paint_sync_turned_off_once() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "paintSyncEnabled": true }"#;
+        let cfg = migrate(serde_json::from_str::<AppConfig>(json).unwrap());
+
+        assert!(!cfg.paint_sync_enabled, "the explicit true is overridden once");
+        assert_eq!(cfg.paint_sync_rev, PAINT_SYNC_REV, "and the config is caught up");
+    }
+
+    /// Once. Someone who turns it back on afterwards keeps it — otherwise the setting is
+    /// not a setting, it is a switch that resets every launch.
+    #[test]
+    fn turning_paint_sync_back_on_survives_the_next_launch() {
+        let mut cfg = migrate(AppConfig::default());
+        cfg.paint_sync_enabled = true;
+
+        let saved = serde_json::to_string(&cfg).unwrap();
+        let reloaded = migrate(serde_json::from_str::<AppConfig>(&saved).unwrap());
+        assert!(reloaded.paint_sync_enabled, "their choice stands");
     }
 
     /// Turning it off has to survive a round trip, or the switch springs back on restart.

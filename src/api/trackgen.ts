@@ -314,22 +314,6 @@ export function setElevationAt(program: TrackProgram, s: number, height: number)
   return { ...program, elevation: knots };
 }
 
-/**
- * Turn a feature into a hand-drawn shape, keeping the shape it already had.
- *
- * Once a jump has been shaped point by point it is no longer a tabletop with a taller top —
- * it is a shape, and a tabletop's parameters stop meaning anything about it. So the kind
- * changes, and the silhouette it had becomes the points you start from.
- */
-export function toCustom(f: TrackFeature, silhouette: { at: number; height: number }[]): TrackFeature {
-  const length = featureSpan(f).length;
-  const shape = silhouette.map((p) => ({
-    u: Math.min(Math.max((p.at - f.at) / Math.max(length, 1e-6), 0), 1),
-    h: p.height,
-  }));
-  return { kind: "custom", at: f.at, length, shape };
-}
-
 /** The middle of a feature — where its own height point belongs. */
 export function featureMiddle(f: TrackFeature): number {
   return f.at + featureSpan(f).length / 2;

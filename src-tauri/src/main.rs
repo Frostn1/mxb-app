@@ -74,6 +74,7 @@ mod trackprog;
 mod trackstats;
 mod tracksynth;
 mod upload;
+mod usage;
 mod vcruntime;
 mod voice;
 mod winehost;
@@ -1188,6 +1189,7 @@ async fn generate_track(app: tauri::AppHandle, brief: String) -> Result<serde_js
     let prog = trackllm::generate(brief.trim(), &ask, 3)
         .await
         .map_err(|e| format!("{e:#}"))?;
+    usage::track("track.generate");
     serde_json::to_value(&prog).map_err(|e| e.to_string())
 }
 
@@ -1348,6 +1350,7 @@ async fn install_track_preview(
             .collect();
         let path = dir.join(format!("{}.pkz", name.trim_matches('_')));
         tracksynth::write_pkz(&prog, &syn, &path, false).map_err(|e| format!("{e:#}"))?;
+        usage::track("track.install");
         Ok(path.to_string_lossy().into_owned())
     })
     .await
@@ -1905,6 +1908,7 @@ async fn paint_studio_save(
             bytes.len(),
             names.join(", ")
         );
+        usage::track("paint.save");
         Ok(SavedPaint {
             path: target.to_string_lossy().into_owned(),
             textures: names,
@@ -5071,10 +5075,12 @@ async fn add_to_library(
 ) -> Result<Option<dropzone::DropPlan>, String> {
     let cfg = config::load(&app).map_err(|e| format!("{e:#}"))?;
     let _cancel = cancel::begin(&slug);
-    install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
+    let placed = install::add_to_library(&app, &cfg, &slug, &url, &host, &subpath, &dest_folder)
         .await
         .map(install::Placed::review)
-        .map_err(|e| format!("{e:#}"))
+        .map_err(|e| format!("{e:#}"))?;
+    usage::track("mod.install");
+    Ok(placed)
 }
 
 /// Stop the install running under `slug`. `false` when nothing is running under it — the
@@ -5188,6 +5194,7 @@ fn commit_plan(
     // which every library scanner listens to — firing it per item would re-run them all
     // N times for a single user action.
     if !outcome.installed.is_empty() {
+        usage::track("drop.import");
         install::notify_frostmod(app, "drop");
     }
     Ok(outcome)
@@ -5580,6 +5587,7 @@ async fn content_lock_run(
         .await
         .map_err(|e| format!("content_lock_run task failed: {e}"))?
         .map_err(|e| format!("{e:#}"))?;
+        usage::track("content.protect");
         return serde_json::to_value(outcome).map_err(|e| e.to_string());
     }
     #[cfg(not(sidecar))]
@@ -5614,6 +5622,29 @@ fn set_run_in_background(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     let mut cfg = config::load(&app).unwrap_or_default();
     cfg.run_in_background = enabled;
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// Count something the UI did.
+///
+/// The webview is where pages and most features are, so it needs a way in — but not a way
+/// to invent the payload: it sends a name and nothing else, and a name that isn't one is
+/// dropped by [`usage::track`] rather than stored.
+#[tauri::command]
+fn track_event(name: String) {
+    usage::track(&name);
+}
+
+/// The one switch that stops anonymous usage counts.
+///
+/// Saves first and only then tells [`usage`], so a save that failed can never leave the app
+/// counting things the player has said no to.
+#[tauri::command]
+fn set_analytics_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.analytics_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    usage::set_enabled(&app, enabled, &cfg);
+    Ok(())
 }
 
 #[tauri::command]
@@ -5701,6 +5732,7 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let outcome = gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        usage::track("game.launch");
         // Both directions, because Play is the last moment before either one matters: the
         // grid needs everyone else's paints on disk, and everyone else needs ours. No
         // address to aim at — they'll pick from the in-game browser — so the pre-pull
@@ -6104,6 +6136,7 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
                         o.uploaded
                     );
                     remember_publish(&app, &o);
+                    usage::track("paint.publish");
                 }
                 emit_sync(&app, SyncEvent::published(&o));
             }
@@ -6155,12 +6188,27 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     });
 }
 
-/// How often to re-check the grid while a session is running.
+/// The fallback heartbeat while a session is running.
 ///
-/// A rider who joins after you did is invisible until the next pull, so this is the gap
-/// between someone arriving and their paint appearing. Short enough not to matter in a race,
-/// long enough that an unchanged roster — the overwhelmingly common answer — costs nothing.
-const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
+/// Not the gap between a rider arriving and their paint appearing — `GRID_POLL` below
+/// watches the entry list and pulls within seconds of a new name, which is the case that
+/// matters in a race. This only covers what the grid cannot announce: a rider who was
+/// already there and has since changed their look, and keeping our own presence inside the
+/// endpoint's ten-minute window.
+///
+/// Three minutes rather than the 45 seconds it ran at. At 45s every player in a session was
+/// a request a minute and a half, and with paint sync on by default that was most of what
+/// took the worker past its daily ceiling on 2026-08-31. Nothing was bought for it: an
+/// unchanged roster is the overwhelmingly common answer, and the arrival path already
+/// covers the change anyone would notice.
+const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// How often to read the grid out of FrostMod.
+///
+/// A shared-memory read and a set lookup, so this is close to free — it is the *pull* that
+/// costs, and that still only happens when the grid changed or the heartbeat came due. Five
+/// seconds is the gap between a rider appearing on track and their paint being fetched.
+const GRID_POLL: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long to wait for the game to show up before giving up on a session.
 ///
@@ -6216,8 +6264,10 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
         let _running = LiveSyncGuard;
         let started = std::time::Instant::now();
         let mut seen_running = false;
+        let mut grid = GridWatch::default();
+        let mut last_pull = std::time::Instant::now();
         loop {
-            tokio::time::sleep(LIVE_SYNC_EVERY).await;
+            tokio::time::sleep(GRID_POLL).await;
 
             let cfg = config::load_or_detect(&app).unwrap_or_default();
             if !cfg.paint_sync_enabled {
@@ -6230,6 +6280,26 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 log::info!("[sync] session over, stopping the live sync");
                 return;
             }
+
+            // Someone new on the grid is the reason to pull; the heartbeat is the fallback
+            // for everything the grid can't tell us — a rider who was already there when we
+            // joined and has since changed their look, and keeping our own presence fresh so
+            // we stay in everyone else's roster.
+            let arrivals = match live_session().filter(|s| s.on_a_server()) {
+                Some(session) => {
+                    let key = voice::session::room_key(&session.server_name);
+                    grid.arrivals(&key, session.riders.iter().map(|r| r.name.as_str()))
+                }
+                None => 0,
+            };
+            let due = last_pull.elapsed() >= LIVE_SYNC_EVERY;
+            if arrivals == 0 && !due {
+                continue;
+            }
+            if arrivals > 0 {
+                log::info!("[sync] {arrivals} rider(s) joined the grid; pulling now");
+            }
+            last_pull = std::time::Instant::now();
 
             match pull_rosters(&app, address.clone()).await {
                 // Only say so when something actually arrived: an unchanged grid is the
@@ -6266,11 +6336,53 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
 /// `None` when FrostMod isn't running, the game isn't up, or the rider is in the menus, in a
 /// replay, or testing alone — none of which is a grid to sync with.
 fn live_server_key() -> Option<String> {
-    static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
-    let session = GAME.get_or_init(voice::gamesession::Reader::default).read()?;
+    let session = live_session()?;
     session
         .on_a_server()
         .then(|| voice::session::room_key(&session.server_name))
+}
+
+/// The session FrostMod is publishing, if any.
+///
+/// One reader for the whole app, held open across calls: opening the mapping is the
+/// expensive part and the block is read every few seconds.
+fn live_session() -> Option<voice::gamesession::GameSession> {
+    static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
+    GAME.get_or_init(voice::gamesession::Reader::default).read()
+}
+
+/// Who is on the grid, and who has turned up since we last looked.
+///
+/// A rider who joins after you is the case paint sync is worst at: they were not on the
+/// roster when you pulled, so they render in default livery until something pulls again.
+/// Waiting out the heartbeat means up to [`LIVE_SYNC_EVERY`] of a wrong-looking grid, and
+/// the rider who joined is the one person guaranteed to be looking at it.
+///
+/// So the grid itself is the trigger. The game knows the entry list, FrostMod publishes it,
+/// and a name that wasn't there last time is a reason to pull now.
+#[derive(Default)]
+struct GridWatch {
+    /// The server these names belong to. A different one is a different grid, so the names
+    /// carried over from the last server mean nothing and are dropped.
+    server: String,
+    seen: std::collections::HashSet<String>,
+}
+
+impl GridWatch {
+    /// How many riders on `grid` we hadn't seen on `server` before.
+    ///
+    /// Folded like a room key, because the entry list is what the game reports and one
+    /// rider must not read as two because their name arrived spaced differently.
+    fn arrivals<'a>(&mut self, server: &str, grid: impl Iterator<Item = &'a str>) -> usize {
+        if self.server != server {
+            self.server = server.to_string();
+            self.seen.clear();
+        }
+        grid.map(|name| name.trim().to_lowercase())
+            .filter(|name| !name.is_empty())
+            .filter(|name| self.seen.insert(name.clone()))
+            .count()
+    }
 }
 
 /// Pull the rosters for wherever the player is, or could be, riding.
@@ -6312,15 +6424,16 @@ async fn pull_rosters(
         return Err("No servers to sync with yet.".into());
     }
 
-    // Say where we are before asking who else is here: the roster is scoped by presence, so
-    // reporting first is what puts this rider into everyone else's grid too.
-    for key in &keys {
-        if let Err(e) = paintsync::report_presence(&token, key).await {
-            log::debug!("[sync] couldn't report presence on {key}: {e:#}");
-        }
-    }
-
-    let outcome = paintsync::pull(&cfg, &token, &keys).await.map_err(|e| format!("{e:#}"))?;
+    // Where we are rides along with the request that asks who else is here — the roster
+    // records it and then scopes itself by it, so this is one request rather than two.
+    //
+    // Only the server the rider is actually on. Reporting presence for every key used to
+    // happen here, which on a registry sweep meant claiming to be on every server at once:
+    // untrue, and one write per server for the privilege.
+    let here = live_server_key();
+    let outcome = paintsync::pull(&cfg, &token, &keys, here.as_deref())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
     // Re-read immediately before writing: the pull took a round trip, and `config::save`
     // rewrites the whole file.
     let mut cfg = config::load_or_detect(app).unwrap_or_default();
@@ -6332,8 +6445,14 @@ async fn pull_rosters(
         log::warn!("[sync] couldn't record the pull: {e:#}");
     }
     // Anything newly on disk is invisible to a running game until the loader re-reads the
-    // mods folder.
-    let _ = frostmod::signal_reload();
+    // mods folder — but only *newly*. This used to fire on every pull, and a pull that
+    // installed nothing is the overwhelmingly common one: the grid is unchanged, everyone's
+    // paints are already here, and there is nothing for the game to re-read. Asking it to
+    // rescan the mods folder anyway, every time a rider joined, is work done to a process
+    // that is mid-race.
+    if outcome.installed > 0 {
+        let _ = frostmod::signal_reload();
+    }
     Ok(outcome)
 }
 
@@ -6781,6 +6900,7 @@ fn join_server(app: tauri::AppHandle, address: String) -> Result<gameproc::Launc
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let outcome = gameproc::join(&cfg, &address).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
+        usage::track("server.join");
         publish_paints_soon(&app, &cfg, None);
         live_sync_session(&app, Some(address.clone()));
         // We know exactly where they're going, so this syncs that server alone.
@@ -6833,6 +6953,7 @@ async fn frostmod_install(
         .await
         .map_err(|e| format!("{e:#}"))?;
 
+    usage::track("frostmod.install");
     if was_running || !was_installed {
         let _ = frostmod_manage::start(&app, &state);
     }
@@ -7732,6 +7853,7 @@ fn record_download(
     entry: downloads::NewDownload,
 ) -> Result<Option<downloads::DownloadRecord>, String> {
     let dir = app.path().app_local_data_dir().map_err(|e| format!("{e:#}"))?;
+    usage::track("mod.download");
     downloads::record(&dir, entry).map_err(|e| format!("{e:#}"))
 }
 
@@ -8096,6 +8218,7 @@ fn apply_loadout_now(
         model_refresh = model_refresh_cmd(app, cfg.instant_refresh, bikeid);
     }
     let content_reload = frostmod::signal_reload();
+    usage::track("preset.apply");
     // The look on disk just changed, so what the control plane holds for this rider is now
     // stale. Queued rather than awaited — this function is the synchronous apply path.
     publish_paints_soon(app, cfg, Some(profile));
@@ -8114,7 +8237,9 @@ fn presets_list(app: tauri::AppHandle) -> Result<Vec<presets::Preset>, String> {
 
 #[tauri::command]
 fn presets_save(app: tauri::AppHandle, preset: presets::Preset) -> Result<(), String> {
-    presets::save_preset(&presets_dir(&app)?, preset).map_err(|e| format!("{e:#}"))
+    presets::save_preset(&presets_dir(&app)?, preset).map_err(|e| format!("{e:#}"))?;
+    usage::track("preset.save");
+    Ok(())
 }
 
 #[tauri::command]
@@ -8723,6 +8848,7 @@ fn main() {
                     "show" => show_main(app),
                     "quit" => {
                         frostmod_manage::stop(&app.state::<FrostmodProcess>());
+                        usage::flush_on_exit(app);
                         app.exit(0);
                     }
                     _ => {}
@@ -8836,6 +8962,9 @@ fn main() {
             mxb_session::load(handle);
             imgcache::start_maintenance(handle);
             memwatch::start();
+            // Anonymous counters. Started last of the startup tasks and after the config
+            // work above, because the install id it mints is saved into that same config.
+            usage::start(handle);
             // Only registers the result listener and stashes the handle — the hidden window
             // isn't built until something is actually refused.
             mxb_fetch::init(handle);
@@ -8871,7 +9000,12 @@ fn main() {
                 if parks_on_close(painted, cfg.run_in_background) {
                     api.prevent_close();
                     let _ = window.hide();
-                } else if !painted {
+                    return;
+                }
+                // Closing for real: this is the last chance to report the session, and a
+                // short one would otherwise never be counted at all.
+                usage::flush_on_exit(window.app_handle());
+                if !painted {
                     log::warn!(
                         "[startup] closing a main window that never painted — quitting \
                          rather than parking it in the tray"
@@ -9000,6 +9134,8 @@ fn main() {
             count_profiles_in,
             get_mods_root,
             set_run_in_background,
+            set_analytics_enabled,
+            track_event,
             set_launch_at_startup,
             set_auto_run_frostmod,
             set_instant_refresh,
@@ -9955,6 +10091,57 @@ mod deep_link_tests {
     fn refuses_an_absurdly_long_code() {
         let long = format!("mxb://enroll?code={}", "a".repeat(200));
         assert!(enroll_code_from_link(&long).is_none());
+    }
+}
+
+#[cfg(test)]
+mod grid_watch_tests {
+    use super::GridWatch;
+
+    /// The whole point: a rider who wasn't there a moment ago is a reason to pull.
+    #[test]
+    fn a_rider_who_joins_later_is_an_arrival() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 2, "the first look is all arrivals");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 0, "an unchanged grid pulls nothing");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate", "Alice"].into_iter()), 1, "the newcomer is the trigger");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate", "Alice"].into_iter()), 0);
+    }
+
+    /// A rider who leaves and comes back must not pull again — their paint is already here,
+    /// and a grid where someone is rejoining repeatedly would pull on a loop.
+    #[test]
+    fn someone_returning_is_not_a_new_arrival() {
+        let mut w = GridWatch::default();
+        w.arrivals("silver mx", ["Frost", "Nate"].into_iter());
+        assert_eq!(w.arrivals("silver mx", ["Frost"].into_iter()), 0, "Nate left");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 0, "and came back");
+    }
+
+    /// One rider must not read as two because the game spaced or capitalised their name
+    /// differently between two reads of the block.
+    #[test]
+    fn a_name_is_folded_before_it_counts() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost"].into_iter()), 1);
+        assert_eq!(w.arrivals("silver mx", ["  frost  ", "FROST"].into_iter()), 0);
+    }
+
+    /// An empty slot in the entry list is not a rider.
+    #[test]
+    fn blank_names_are_not_riders() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["", "   ", "Frost"].into_iter()), 1);
+    }
+
+    /// Changing server is a new grid. Carrying the last one's names over would mean the
+    /// riders on the new server were silently treated as already pulled for.
+    #[test]
+    fn another_server_starts_the_grid_again() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 2);
+        assert_eq!(w.arrivals("other server", ["Frost", "Nate"].into_iter()), 2, "same names, new grid");
+        assert_eq!(w.arrivals("other server", ["Frost", "Nate"].into_iter()), 0);
     }
 }
 

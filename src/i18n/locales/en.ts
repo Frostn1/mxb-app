@@ -123,6 +123,8 @@ export const en = {
   "welcome.intro.body":
     "Your mod manager for MX Bikes. Keep your tracks, bikes and paints organized in one place — no more zip files scattered across your desktop. We'll show you around in a few seconds.",
   "welcome.getStarted": "Get started",
+  "welcome.analyticsNote":
+    "MXB App counts which pages get used, anonymously. No names, no files — you can turn it off in Settings.",
 
   // ── Presets ────────────────────────────────────────────────────────────────
   "presets.missing": "missing",
@@ -684,6 +686,9 @@ export const en = {
   "settings.themeSystem": "System",
   "settings.language": "Language",
   "settings.languageSystem": "System",
+  "settings.analytics": "Share anonymous usage stats",
+  "settings.analyticsDesc":
+    "Sends a random ID, the app version and counts of which pages and features you use, so I can tell what's worth building. Never your name, your files or your address.",
   "settings.runInBackground": "Keep running in the background",
   "settings.runInBackgroundDesc":
     "Closing the window hides MXB App to the tray so FrostMod stays connected. Quit from the tray icon.",
@@ -1395,11 +1400,15 @@ export const en = {
   "showcase.v0124.anyserver":
     "Any server, not just ours. The app reads the server from the running game, so a public lobby works exactly like a private one.",
   "showcase.v0124.nosetup":
-    "Nothing to set up. No invite code, no sign-up, no server-side install — start the game and it goes.",
+    "Nothing to set up. No invite code, no sign-up, no server-side install — switch it on in Settings and it runs by itself.",
   "showcase.v0124.everyone":
     "You'll see any rider who also has MXB App. The more of your lobby that does, the more of the grid looks right.",
   "showcase.v0124.settings":
     "Settings → Paint sync shows what went out, what came back, and any paint it refused to overwrite. The switch to turn it off is in General.",
+  "showcase.v0124.shape":
+    "Jumps are shaped by dragging their outline. Grab the top of a tabletop for its height, the far end for its length, the far side of a double for its gap — or draw one point by point.",
+  "showcase.v0124.stats":
+    "MXB App now counts which pages and features get used, anonymously — a random ID and nothing about you. Settings → General turns it off.",
   "showcase.v0122.hero.title":
     "The replay camera can follow the rider",
   "showcase.v0122.hero.body":

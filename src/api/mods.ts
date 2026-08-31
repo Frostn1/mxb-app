@@ -989,6 +989,11 @@ export function onLogsShareProgress(
   return listen<BundleProgress>("logs-share-progress", (event) => cb(event.payload));
 }
 
+/** Share anonymous usage counts. Off stops the app buffering them, not merely sending. */
+export function setAnalyticsEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_analytics_enabled", { enabled });
+}
+
 /** Hide-to-tray + keep-running toggle. */
 export function setRunInBackground(enabled: boolean): Promise<void> {
   return invoke<void>("set_run_in_background", { enabled });

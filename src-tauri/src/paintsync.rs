@@ -551,7 +551,18 @@ fn rider_key(rider: &RosterRider) -> String {
 /// Rosters overlap heavily — the same rider is on more than one, and riders share paints —
 /// so everything is de-duplicated *before* any work happens. Without that, two servers means
 /// hashing every local file twice and a report that double-counts what it did.
-pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow::Result<PullOutcome> {
+/// Pull every rider's paints for the given servers.
+///
+/// `here` names the server this rider is actually on, if any. That key's roster request also
+/// reports the presence the roster is scoped by, so a rider in a session does the whole loop
+/// in one request rather than a write followed by a read — see the endpoint's own note. The
+/// other keys get no presence at all, which is the truth: the rider is not on them.
+pub async fn pull(
+    cfg: &AppConfig,
+    token: &str,
+    server_ids: &[String],
+    here: Option<&str>,
+) -> anyhow::Result<PullOutcome> {
     let http = client()?;
 
     let mut seen_riders: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -563,9 +574,13 @@ pub async fn pull(cfg: &AppConfig, token: &str, server_ids: &[String]) -> anyhow
     let mut reached = 0usize;
 
     for server_id in server_ids {
+        let mut query: Vec<(&str, &str)> = vec![("server", server_id.as_str())];
+        if here == Some(server_id.as_str()) {
+            query.push(("here", "1"));
+        }
         let roster: Roster = match http
             .get(format!("{}/v1/roster", control_plane()))
-            .query(&[("server", server_id.as_str())])
+            .query(&query)
             .bearer_auth(token)
             .send()
             .await
@@ -1191,7 +1206,7 @@ mod live_sync {
 
         // Bob rides onto the server and pulls.
         let (bob_root, bob_cfg) = rider_machine("bob");
-        let out = pull(&bob_cfg, &bob.token, &[server.clone()]).await.unwrap();
+        let out = pull(&bob_cfg, &bob.token, &[server.clone()], Some(server.as_str())).await.unwrap();
         println!("bob: {out:?}");
 
         let landed = bob_root.join("mods/bikes/YZ450F/paints/Alice.pnt");
@@ -1207,7 +1222,7 @@ mod live_sync {
 
         // And the other direction, which is the half a one-sided test would miss.
         let (alice_root, alice_cfg) = rider_machine("alice");
-        let out = pull(&alice_cfg, &alice.token, &[server.clone()]).await.unwrap();
+        let out = pull(&alice_cfg, &alice.token, &[server.clone()], Some(server.as_str())).await.unwrap();
         assert_eq!(
             std::fs::read(alice_root.join("mods/bikes/YZ450F/paints/Bob.pnt")).ok(),
             Some(bob_paint),
@@ -1215,7 +1230,7 @@ mod live_sync {
         );
 
         // A second pass installs nothing: the manifest recognises what it wrote.
-        let again = pull(&bob_cfg, &bob.token, &[server.clone()]).await.unwrap();
+        let again = pull(&bob_cfg, &bob.token, &[server.clone()], Some(server.as_str())).await.unwrap();
         assert_eq!(again.installed, 0, "a repeat sync installs nothing: {again:?}");
         assert!(again.already_had >= 1, "and recognises what it already has: {again:?}");
 
@@ -1223,9 +1238,10 @@ mod live_sync {
         // different server sees an empty grid, not Alice and Bob.
         let carol = sign_up("Carol", &fresh_guid(3)).await;
         let elsewhere = crate::voice::session::room_key("Someone Else's Server");
-        report_presence(&carol.token, &elsewhere).await.unwrap();
+        // No separate presence call: the pull below reports it, which is the whole point of
+        // `here` — one request where there used to be two.
         let (carol_root, carol_cfg) = rider_machine("carol");
-        let out = pull(&carol_cfg, &carol.token, &[elsewhere]).await.unwrap();
+        let out = pull(&carol_cfg, &carol.token, &[elsewhere.clone()], Some(elsewhere.as_str())).await.unwrap();
         assert_eq!(out.installed, 0, "another server is another grid: {out:?}");
         assert!(
             !carol_root.join("mods/bikes/YZ450F/paints/Alice.pnt").exists(),
@@ -1266,7 +1282,7 @@ mod live_sync {
         report_presence(&second.token, &server).await.unwrap();
 
         let (root, cfg) = rider_machine("clash");
-        let out = pull(&cfg, &first.token, &[server]).await.unwrap();
+        let out = pull(&cfg, &first.token, &[server.clone()], Some(server.as_str())).await.unwrap();
         println!("name clash: {out:?}");
 
         assert_eq!(
@@ -1294,7 +1310,7 @@ mod live_sync {
         let before = std::fs::read(&mine).unwrap();
 
         let cfg = AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
-        let out = pull(&cfg, &token(), &["local".to_string()]).await.unwrap();
+        let out = pull(&cfg, &token(), &["local".to_string()], None).await.unwrap();
         println!("{out:?}");
 
         assert_eq!(std::fs::read(&mine).unwrap(), before, "our own paint must be untouched");
@@ -1310,7 +1326,7 @@ mod live_sync {
         );
 
         // Second run: nothing new, and still no damage.
-        let again = pull(&cfg, &token(), &["local".to_string()]).await.unwrap();
+        let again = pull(&cfg, &token(), &["local".to_string()], None).await.unwrap();
         assert_eq!(again.installed, 0, "a repeat sync installs nothing: {again:?}");
         assert!(again.already_had >= 1, "what we installed is recognised: {again:?}");
         assert_eq!(std::fs::read(&mine).unwrap(), before);

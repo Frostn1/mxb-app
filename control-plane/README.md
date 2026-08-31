@@ -40,6 +40,9 @@ consequences fall out of that, and they're baked into the schema:
 | POST | `/v1/provision` | bearer | Launch a server. Capped, and reaped when idle. |
 | PUT/GET | `/v1/paints/:sha256` | bearer | Content-addressed paint blobs |
 | POST | `/v1/bmac/webhook` | HMAC signature | Buy Me a Coffee announcing a supporter. Posted on to Discord. |
+| POST | `/v1/usage` | — | Anonymous usage counters from an install. Unauthenticated because most people who run the app never claim an invite; bounded by body size, event count and a per-address daily cap. |
+| GET | `/v1/usage/stats` | `ADMIN_KEY` | The same numbers as JSON, for anything that scripts them |
+| GET | `/admin/usage` | `ADMIN_KEY` | The usage dashboard, server-rendered |
 
 Enrollment by invite code stands in for Steam sign-in until there's an API key. `accounts`
 already carries a nullable `steam_id`, so adding Steam is a backfill rather than a rewrite
@@ -92,6 +95,34 @@ clipped to 400 characters and posted with `allowed_mentions: {parse: []}`, so so
 words can't restyle the embed or ping the server. `bmac_events` records what has been
 announced: BMAC retries a delivery up to four more times, and a reply it never received looks
 exactly like a failure, so without that table one coffee arrives five times.
+
+### Usage counters
+
+How many people run the app, and which parts they open — the question release downloads and
+the accounts table both fail to answer.
+
+The key is an **install id**: a random UUID the app mints for itself and keeps in its own
+config, tied to no account, no rider and no machine. Reports carry that, a version, an OS, a
+title, a session count, minutes open, and counters for names shaped `area.thing`. That shape
+is the privacy property, not a style rule — a path, a rider name or an address cannot survive
+`isEventName`, so a careless call site counts nothing instead of sending one. Addresses are
+hashed for the day into the same `device_claims` counter open signup uses, and never stored.
+
+Storage is two rollup tables (`usage_daily`, `usage_events`), a row per install per day and a
+row per install per event per day. `install_id` stays in the events key so a feature's *reach*
+(`COUNT(DISTINCT install_id)`) can be read apart from its *volume* (`SUM(count)`) — "nobody
+opens the track studio" and "one person lives in it" are different answers. Rows older than
+400 days are swept on the same cron as the idle servers.
+
+```sh
+npx wrangler secret put ADMIN_KEY   # without it both admin routes answer 503, not 401
+```
+
+Then `https://<worker>/admin/usage?key=<ADMIN_KEY>`, optionally `&days=7|30|90|365`.
+
+The app's side is `src-tauri/src/usage.rs`. It is off in debug builds unless
+`MXB_ANALYTICS_DEV=1`, off for a run with `MXB_NO_ANALYTICS=1`, and off for good from the
+switch in Settings → General.
 
 ## Security notes
 

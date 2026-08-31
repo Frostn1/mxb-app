@@ -31,7 +31,8 @@ async function keypair() {
     "sign",
     "verify",
   ])) as CryptoKeyPair;
-  const pkcs8 = await crypto.subtle.exportKey("pkcs8", pair.privateKey);
+  // `exportKey` is typed `ArrayBuffer | JsonWebKey`; "pkcs8" only ever yields the former.
+  const pkcs8 = (await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer;
   return { pair, pkcs8B64: b64url(new Uint8Array(pkcs8)) };
 }
 
