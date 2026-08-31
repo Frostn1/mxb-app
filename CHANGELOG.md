@@ -2,7 +2,22 @@
 
 ## 2026-08-31 — v0.12.3
 
+### Added
+- The lap list groups by segment: each corner and straight heads a section holding the
+  jumps on it, collapsible, with a count when it's shut.
+- Adding a feature scrolls to it and flashes the row. It lands in the emptiest stretch of
+  lap, which is rarely where you were looking.
+- Name, author and location are proper fields rather than headings, and all three end up
+  in the track's `.ini`.
+- Install writes the `.trh`, a `.map`, the `.ini`, the `.amb` and both UI images. It used
+  to write two files. Still missing is the `.rdf` — start gate, pits and cameras — which
+  only TrackEd writes.
+- Each feature row carries its kind's colour, and hovering a row lights that feature up in
+  the 3D view.
+
 ### Fixed
+- A berm stranded on a straight by a segment edit is moved onto the nearest corner and
+  fitted to it. It used to be dropped without saying so.
 - Applying a model swap no longer says the bike changes in the running game. FrostMod
   dropped the live re-apply in v0.9.11 because it crashed the game, so the app now tells
   you what actually has to happen: switch bike category away and back in the garage.

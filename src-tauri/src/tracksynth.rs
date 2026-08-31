@@ -1113,6 +1113,27 @@ fn ground(s: Surface) -> (u32, f32) {
     }
 }
 
+/// The smallest `.map` the format allows: no materials, no geometry, no nodes.
+///
+/// TerrainEd is what really makes these, and it is Windows-only. This is not a substitute —
+/// it is the degenerate case the format already has, which the OEM L21-DragStrip ships (its
+/// material count is zero and it carries no geometry at all). Whether the game will draw the
+/// terrain from the `.trh` when the `.map` is empty is the one thing about this pipeline that
+/// cannot be answered without running it, and shipping the empty file is how the question
+/// gets asked.
+///
+/// The layout is `map.rs`'s, which is the parser that reads real ones.
+fn empty_map() -> Vec<u8> {
+    let mut out = Vec::with_capacity(24);
+    out.extend_from_slice(b"MP2\0");
+    out.extend_from_slice(&304u32.to_le_bytes()); // header size, constant on every map measured
+    out.extend_from_slice(&0u32.to_le_bytes()); // materials
+    out.extend_from_slice(&0u32.to_le_bytes()); // vertices
+    out.extend_from_slice(&0u32.to_le_bytes()); // triangles
+    out.extend_from_slice(&0u32.to_le_bytes()); // nodes
+    out
+}
+
 /// The preview as a `.pkz` the app can open: a plain zip, which is what the reader falls back
 /// to when a file isn't one of PiBoSo's encrypted ones.
 pub fn write_pkz(
@@ -1128,10 +1149,21 @@ pub fn write_pkz(
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     use std::io::Write;
-    zip.start_file(format!("{slug}.trh"), opts)?;
-    zip.write_all(&trh(prog, syn, paint_features))?;
-    zip.start_file(format!("{slug}.ini"), opts)?;
-    zip.write_all(track_ini(prog).as_bytes())?;
+    let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
+    // Everything a track needs that we can actually produce. What is still missing is the
+    // `.rdf` — start gate, pit lane, cameras, which only TrackEd writes — and a `gate.edf`
+    // copied from another track. Neither is ours to make at any effort.
+    for (name, bytes) in [
+        (format!("{slug}.trh"), trh(prog, syn, paint_features)),
+        (format!("{slug}.map"), empty_map()),
+        (format!("{slug}.ini"), track_ini(prog).into_bytes()),
+        (format!("{slug}.amb"), AMB.as_bytes().to_vec()),
+        (format!("{slug}_map.tga"), map_img),
+        (format!("{slug}.tga"), shot),
+    ] {
+        zip.start_file(name, opts)?;
+        zip.write_all(&bytes)?;
+    }
     zip.finish()?;
     Ok(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0))
 }
@@ -1596,6 +1628,21 @@ mod tests {
             worst = worst.max((v as f32 * step - h).abs());
         }
         assert!(worst <= step, "worst {worst} against a step of {step}");
+    }
+
+    /// The empty `.map` has to be one our own parser accepts, or it is not the format's
+    /// degenerate case — it is a broken file.
+    #[test]
+    fn the_empty_map_is_a_map() {
+        let m = empty_map();
+        assert_eq!(&m[..4], b"MP2\0");
+        assert_eq!(u32::from_le_bytes(m[4..8].try_into().unwrap()), 304);
+        assert_eq!(u32::from_le_bytes(m[8..12].try_into().unwrap()), 0, "materials");
+        // `map::parse` builds a *mesh*, so it rightly declines one with no geometry — that
+        // is the whole point of the degenerate case. What has to hold is that the file is
+        // recognised as a map at all, and that reading it doesn't panic.
+        assert!(crate::map::is_map(&m), "not recognised as a map");
+        assert!(crate::map::parse(&m).is_none(), "there is no mesh in it to find");
     }
 
     #[test]

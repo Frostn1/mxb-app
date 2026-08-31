@@ -189,14 +189,44 @@ export function positionAt(program: TrackProgram, s: number): { x: number; z: nu
  * and the row editor has no field for where a feature sits — so without this, removing one
  * segment produces an error the person has no way to clear except by deleting their jumps.
  */
+/**
+ * Where each corner starts and ends, in metres round the lap.
+ */
+export function corners(program: TrackProgram): { at: number; length: number }[] {
+  const out: { at: number; length: number }[] = [];
+  let at = 0;
+  for (const seg of program.segments) {
+    if (seg.kind === "straight") {
+      at += seg.length;
+    } else {
+      const length = (Math.abs(seg.radius) * Math.abs(seg.angle) * Math.PI) / 180;
+      out.push({ at, length });
+      at += length;
+    }
+  }
+  return out;
+}
+
 export function fitFeatures(program: TrackProgram): TrackProgram {
   // A metre short of the line, not exactly on it. The lap is summed here in double precision
   // and in the synthesiser in single, so "exactly on the line" is a different number in each
   // — and clamping to the boundary produced a jump the validator then rejected.
   const lap = lapLength(program) - 1;
+  const turns = corners(program);
   return {
     ...program,
     features: program.features.map((f) => {
+      // A berm's whole meaning is "on this corner". Move the corners and the berm has to
+      // follow, or it lands on a straight where the synthesiser silently drops it.
+      if (f.kind === "berm" && turns.length) {
+        const on = turns.find((c) => f.at >= c.at && f.at < c.at + c.length);
+        if (!on) {
+          const near = turns.reduce((best, c) =>
+            Math.abs(c.at - f.at) < Math.abs(best.at - f.at) ? c : best,
+          );
+          return { ...f, at: near.at + 1, length: Math.max(4, near.length - 2) };
+        }
+      }
       const end = f.at + featureSpan(f).length;
       if (end <= lap && f.at >= 0) return f;
       return { ...f, at: Math.max(0, Math.min(f.at, lap - featureSpan(f).length)) };
@@ -290,6 +320,23 @@ export function setTrackTools(dir: string): Promise<TrackToolsStatus> {
 export function buildTrack(program: TrackProgram, dir: string): Promise<BuildStep[]> {
   return invoke<BuildStep[]>("build_track", { program, dir });
 }
+
+/**
+ * The colours the preview paints each feature kind with.
+ *
+ * The same values as `surface_colour` in `src-tauri/src/track.rs`, ids 200–206. They have to
+ * match: the point of both is that a row in the list and a lump on the ground are obviously
+ * the same thing.
+ */
+export const FEATURE_COLOUR: Record<TrackFeatureKind, string> = {
+  tabletop: "rgb(214, 120, 60)",
+  double: "rgb(206, 74, 96)",
+  roller: "rgb(120, 150, 200)",
+  whoops: "rgb(190, 170, 70)",
+  stepUp: "rgb(110, 180, 130)",
+  berm: "rgb(150, 110, 200)",
+  rut: "rgb(90, 90, 110)",
+};
 
 /** Where a feature sits, and how long it runs — the two numbers every kind has. */
 export function featureSpan(f: TrackFeature): { at: number; length: number } {
