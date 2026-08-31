@@ -28,15 +28,13 @@ use sha2::{Digest, Sha256};
 
 /// Public half of the pair the control plane signs with (raw 32 bytes, base64url).
 ///
-/// **This is a placeholder from a throwaway pair.** Before shipping, run
-/// `control-plane/scripts/plugin-keypair.ts`, put the private half in the worker
-/// (`wrangler secret put PLUGIN_SIGNING_KEY`) and the public half here. Until both sides
-/// hold halves of the same pair, every license fails verification — which is the safe
-/// direction to fail in, but it does mean nothing works.
+/// The live pair's public half. Its private half was generated on 2026-08-31 and piped
+/// straight into the worker's secret store (`PLUGIN_SIGNING_KEY`) without ever being
+/// written down — it exists nowhere else, which is the point of it being a signature.
 ///
-/// Rotating it later means shipping an app update: an install that has not updated rejects
-/// every license signed by the new pair.
-pub const LICENSE_PUBLIC_KEY: &str = "3RVzr7dGG2rcorozGze9rR7NUTj61bwxS2IL0t40kk0";
+/// Rotating means shipping an app update: an install that has not updated rejects every
+/// license signed by the new pair. So a rotation is a release, not a command.
+pub const LICENSE_PUBLIC_KEY: &str = "69r-oZw-vbOA_vI5JLQLoJPKFqc1FL3s-yyd-jUDeQw";
 
 /// License format we understand. A newer one is refused rather than half-read.
 pub const LICENSE_VERSION: u32 = 1;
