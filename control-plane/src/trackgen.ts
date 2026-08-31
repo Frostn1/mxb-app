@@ -26,9 +26,14 @@ import { z } from "zod";
  * — which fails loudly, at the boundary, rather than producing a wrong track. Change one,
  * change the other.
  */
+const RISE = z
+  .number()
+  .describe("metres the ground climbs over this segment; negative drops, 0 follows the land");
+
 const Straight = z.object({
   kind: z.literal("straight"),
   length: z.number().describe("metres"),
+  rise: RISE,
 });
 
 const Arc = z.object({
@@ -37,6 +42,7 @@ const Arc = z.object({
     .number()
     .describe("metres, signed — positive turns right, negative turns left"),
   angle: z.number().describe("degrees swept, always positive"),
+  rise: RISE,
 });
 
 const Feature = z.discriminatedUnion("kind", [
@@ -149,6 +155,10 @@ already there. A rut feature is for putting one somewhere a corner would not.
 
 Set terrain.surface from the brief: sand for a sand track, grass for an early-season or
 grasstrack circuit, soil for everything else.
+
+Elevation is per segment: rise is metres gained across it, negative for a drop. A lap that
+climbs has to come back down, so the rises must sum to about zero or the finish ends up above
+the start. Leave them 0 to follow the landscape, which is what most of a track does.
 
 Berms bank the OUTSIDE of a corner, so only place one where an arc segment is — a berm on a
 straight does nothing. Jumps go on straights.

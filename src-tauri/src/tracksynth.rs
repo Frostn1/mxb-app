@@ -209,6 +209,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         .map(|st| sample(&heights, gw, gh, st.x / mps_x, st.z / mps_z))
         .collect();
     smooth_along(&mut along, (BENCH_SMOOTH_M / STATION_STEP) as usize);
+    apply_rise(&mut along, &stations, &prog.segments);
     apply_step_ups(&mut along, &stations, &prog.features);
 
     // Everything that varies along the lap, resampled onto one even ruler so a cell can ask
@@ -693,6 +694,36 @@ fn berm_profile(features: &[Feature], turn: &Profile, lap: f32) -> Profile {
         }
     }
     out
+}
+
+/// Climb and drop, as the segments declare it.
+///
+/// Cumulative, and eased across each segment rather than applied at its end — a straight that
+/// gains four metres gains them evenly along its length, which is what makes it a hill rather
+/// than a step. Every later station carries the total of everything before it, so a lap whose
+/// rises don't sum to zero comes back to the start higher than it left, and the height budget
+/// check is what notices.
+fn apply_rise(along: &mut [f32], st: &[Station], segments: &[Segment]) {
+    let mut at = 0.0f32;
+    let mut base = 0.0f32;
+    for seg in segments {
+        let len = seg.length();
+        let rise = seg.rise();
+        if len <= 0.0 {
+            continue;
+        }
+        for (i, s) in st.iter().enumerate() {
+            if s.s < at {
+                continue;
+            }
+            let u = ((s.s - at) / len).clamp(0.0, 1.0);
+            along[i] += base + rise * smoothstep(u);
+        }
+        // Undo the part of the loop above that ran past this segment: stations beyond it
+        // took `base + rise`, which is exactly what the next segment's base should be.
+        base += rise;
+        at += len;
+    }
 }
 
 /// A step-up doesn't sit on the ground, it *is* the ground — so it moves the elevation the
@@ -1295,7 +1326,7 @@ fn tcl(prog: &TrackProgram) -> String {
     for (i, seg) in prog.segments.iter().enumerate() {
         let (radius, angle) = match *seg {
             Segment::Straight { .. } => (0.0, 0.0),
-            Segment::Arc { radius, angle } => (radius, angle.abs()),
+            Segment::Arc { radius, angle, .. } => (radius, angle.abs()),
         };
         let kind = if matches!(seg, Segment::Straight { .. }) {
             0
@@ -1304,8 +1335,9 @@ fn tcl(prog: &TrackProgram) -> String {
         };
         s.push_str(&format!(
             "segment{i}\n{{\n\ttype = {kind}\n\tlength = {:.6}\n\tradius = {radius:.6}\n\
-             \tangle = {angle:.6}\n\theight = 0.000000\n\theightlock = 0\n}}\n",
-            seg.length()
+             \tangle = {angle:.6}\n\theight = {:.6}\n\theightlock = 0\n}}\n",
+            seg.length(),
+            seg.rise()
         ));
     }
     s
@@ -1414,10 +1446,10 @@ mod tests {
                 angle: 0.0,
             },
             segments: vec![
-                Segment::Straight { length: 160.0 },
-                Segment::Arc { radius: 60.0, angle: 180.0 },
-                Segment::Straight { length: 160.0 },
-                Segment::Arc { radius: 60.0, angle: 180.0 },
+                Segment::Straight { length: 160.0, rise: 0.0 },
+                Segment::Arc { radius: 60.0, angle: 180.0, rise: 0.0 },
+                Segment::Straight { length: 160.0, rise: 0.0 },
+                Segment::Arc { radius: 60.0, angle: 180.0, rise: 0.0 },
             ],
             width: 12.0,
             features: vec![
@@ -1474,6 +1506,25 @@ mod tests {
             "tabletop stands {:.2} m above the run-in, wanted about 2.4",
             on - before
         );
+    }
+
+    #[test]
+    fn a_segment_that_rises_takes_the_track_with_it() {
+        let mut p = oval();
+        p.features.clear();
+        // The first straight climbs six metres; the far one gives them back, so the lap
+        // still meets itself at the same height.
+        p.segments[0] = Segment::Straight { length: 160.0, rise: 6.0 };
+        p.segments[2] = Segment::Straight { length: 160.0, rise: -6.0 };
+        let s = synthesise(&p).unwrap();
+        let climb = height_at_arc(&s, 155.0) - height_at_arc(&s, 5.0);
+        assert!(
+            (climb - 6.0).abs() < 1.0,
+            "the straight climbed {climb:.2} m, not 6"
+        );
+        // And it is a hill, not a step: half way up is half way there.
+        let half = height_at_arc(&s, 80.0) - height_at_arc(&s, 5.0);
+        assert!((half - 3.0).abs() < 1.2, "half way up reads {half:.2} m");
     }
 
     #[test]
