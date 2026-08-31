@@ -20,6 +20,9 @@
 - No invite code. The app signs itself up the first time sync runs, the same way voice does.
 - Paint sync is on by default, with a switch in Settings → General to turn it off.
 - Starting the game from Steam or a shortcut now syncs too. Only the Play button did before.
+- A rider joining after you triggers a sync straight away. The app watches the entry list
+  and pulls within a few seconds of a new name appearing, instead of waiting out the
+  45-second heartbeat.
 - A feature's ground height is set on its own row in the track editor.
 - Features can be dragged along the height strip.
 
