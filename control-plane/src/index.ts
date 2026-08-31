@@ -19,6 +19,7 @@ import {
   terminateInstance,
 } from "./aws";
 import { bmacWebhook } from "./bmac";
+import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
 import {
@@ -161,6 +162,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   const gate = invitedOnly(account);
   if (gate) return gate;
 
+  if (method === "POST" && path === "/v1/track/generate") return generateTrack(request, env);
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);

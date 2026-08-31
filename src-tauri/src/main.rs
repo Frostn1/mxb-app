@@ -66,6 +66,7 @@ mod shop_session;
 mod soundmods;
 mod texstore;
 mod track;
+mod trackllm;
 mod trackprog;
 mod trackstats;
 mod tracksynth;
