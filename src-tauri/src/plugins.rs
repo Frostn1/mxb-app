@@ -978,3 +978,185 @@ pub fn payload_dir(app: &tauri::AppHandle, id: &str) -> Option<PathBuf> {
     let dir = plugins_dir(app).ok()?.join(id).join("payload");
     dir.is_dir().then_some(dir)
 }
+
+// ---------------------------------------------------------------------------
+// what a plugin may touch on disk
+// ---------------------------------------------------------------------------
+
+/// The one directory tree a plugin may read and write: the game's own user folder.
+///
+/// A plugin already runs with the app's privileges through `invoke`, so this is not a
+/// sandbox in the security sense and does not pretend to be. It is a statement of intent
+/// that keeps honest plugins honest and makes the dishonest ones obvious: a mod plugin has
+/// business in `Documents\PiBoSo\MX Bikes` and nowhere else, so that is the only place the
+/// file API will go — and a bug in a plugin cannot walk off into someone's home directory.
+fn sandbox_root(app: &tauri::AppHandle) -> Result<PathBuf> {
+    let cfg = crate::config::load_or_detect(app).unwrap_or_default();
+    crate::config::default_user_dir(cfg.game())
+        .ok_or_else(|| anyhow!("the game's user folder isn't known yet"))
+}
+
+/// Resolve `rel` inside `root`, or refuse.
+///
+/// Refusing is done on the *resolved* path, not the written one: `safe_path` rejects the
+/// obvious `..` but says nothing about a symlink already on disk pointing somewhere else,
+/// and a plugin writing through one would be outside the tree with a path that looked fine.
+/// So the parent is canonicalised and checked to still be under the root.
+pub fn resolve_in(root: &Path, rel: &str) -> Result<PathBuf> {
+    let safe = safe_path(rel).ok_or_else(|| anyhow!("that path is not one a plugin may use"))?;
+    let full = root.join(&safe);
+
+    // Canonicalise the deepest part that exists — the file itself may not yet.
+    let mut probe = full.as_path();
+    let anchor = loop {
+        if probe.exists() {
+            break probe.canonicalize().unwrap_or_else(|_| probe.to_path_buf());
+        }
+        match probe.parent() {
+            Some(p) if p != probe => probe = p,
+            _ => break full.clone(),
+        }
+    };
+    let root_real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if !anchor.starts_with(&root_real) {
+        bail!("that path resolves outside the game folder");
+    }
+    Ok(full)
+}
+
+/// Every file call is licence-gated at the moment it happens. Checking only when the panel
+/// mounted would leave a plugin able to write for as long as the window stayed open.
+fn licensed(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    let mut state = load_state(app);
+    if state.status_of(id, now_secs()) != Status::Live {
+        return Err("That plugin isn't licensed on this account.".into());
+    }
+    let _ = save_state(app, &state);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn plugin_read_file(app: tauri::AppHandle, id: String, path: String) -> Result<String, String> {
+    licensed(&app, &id)?;
+    let root = sandbox_root(&app).map_err(|e| e.to_string())?;
+    let full = resolve_in(&root, &path).map_err(|e| e.to_string())?;
+    std::fs::read_to_string(&full).map_err(|e| format!("{}: {e}", full.display()))
+}
+
+#[tauri::command]
+pub fn plugin_write_file(
+    app: tauri::AppHandle,
+    id: String,
+    path: String,
+    contents: String,
+) -> Result<(), String> {
+    licensed(&app, &id)?;
+    let root = sandbox_root(&app).map_err(|e| e.to_string())?;
+    let full = resolve_in(&root, &path).map_err(|e| e.to_string())?;
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    std::fs::write(&full, contents).map_err(|e| format!("{}: {e}", full.display()))
+}
+
+#[tauri::command]
+pub fn plugin_list_dir(
+    app: tauri::AppHandle,
+    id: String,
+    path: String,
+) -> Result<Vec<String>, String> {
+    licensed(&app, &id)?;
+    let root = sandbox_root(&app).map_err(|e| e.to_string())?;
+    let full = resolve_in(&root, &path).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    // A missing directory is an empty one, not an error: a plugin asking where its files
+    // are before it has written any is the normal first run.
+    if let Ok(entries) = std::fs::read_dir(&full) {
+        for e in entries.flatten() {
+            if let Some(name) = e.file_name().to_str() {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn plugin_delete_file(app: tauri::AppHandle, id: String, path: String) -> Result<(), String> {
+    licensed(&app, &id)?;
+    let root = sandbox_root(&app).map_err(|e| e.to_string())?;
+    let full = resolve_in(&root, &path).map_err(|e| e.to_string())?;
+    match std::fs::remove_file(&full) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("{}: {e}", full.display())),
+    }
+}
+
+/// Copy a plugin's `payload/` into the game, which for a PiBoSo title means its plugins
+/// folder. This is how a paid *mod* — as opposed to a paid panel — gets installed.
+#[tauri::command]
+pub fn plugin_install_payload(app: tauri::AppHandle, id: String) -> Result<Vec<String>, String> {
+    licensed(&app, &id)?;
+    let src = payload_dir(&app, &id).ok_or_else(|| "That plugin has nothing to install.".to_string())?;
+    let root = sandbox_root(&app).map_err(|e| e.to_string())?;
+    let dest = root.join("plugins");
+    std::fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+
+    let mut copied = Vec::new();
+    for entry in std::fs::read_dir(&src).map_err(|e| e.to_string())?.flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name();
+        let to = dest.join(&name);
+        std::fs::copy(entry.path(), &to)
+            // The commonest failure by far, and worth naming: the game holds its plugins
+            // open, so this fails while it is running and succeeds the moment it is not.
+            .map_err(|e| format!("Couldn't write {}: {e}. Close the game and try again.", to.display()))?;
+        copied.push(name.to_string_lossy().to_string());
+    }
+    Ok(copied)
+}
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::*;
+
+    fn root() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("mxb-sandbox-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("FrostReplay")).unwrap();
+        d
+    }
+
+    #[test]
+    fn resolves_a_plain_relative_path() {
+        let r = root();
+        let p = resolve_in(&r, "FrostReplay/slot1.fcam").unwrap();
+        assert!(p.starts_with(&r));
+        assert!(p.ends_with("slot1.fcam"));
+    }
+
+    #[test]
+    fn refuses_what_would_leave_the_tree() {
+        let r = root();
+        for bad in ["../escape", "../../etc/passwd", "/etc/passwd", "C:/Windows/x"] {
+            assert!(resolve_in(&r, bad).is_err(), "accepted {bad}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_symlink_that_points_out_of_the_tree() {
+        // The case `safe_path` alone cannot see: the written path is innocent and the
+        // symlink already on disk is what leaves the tree.
+        #[cfg(unix)]
+        {
+            let r = root();
+            let link = r.join("sneaky");
+            std::fs::remove_file(&link).ok();
+            std::os::unix::fs::symlink("/tmp", &link).unwrap();
+            assert!(resolve_in(&r, "sneaky/anything").is_err());
+        }
+    }
+}

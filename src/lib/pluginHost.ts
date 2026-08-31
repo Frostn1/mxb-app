@@ -29,6 +29,21 @@ export interface PluginPanel {
   component: ComponentType;
 }
 
+/**
+ * The files a plugin may touch: its own, inside the game's user folder.
+ *
+ * Paths are relative to `Documents\PiBoSo\<game>` and cannot leave it — including through
+ * a symlink already on disk, which the backend checks by resolving the path rather than
+ * only inspecting it. Every call re-checks the licence, so a plugin whose subscription
+ * lapses stops being able to write mid-session.
+ */
+export interface PluginFiles {
+  read(path: string): Promise<string>;
+  write(path: string, contents: string): Promise<void>;
+  list(path: string): Promise<string[]>;
+  remove(path: string): Promise<void>;
+}
+
 export interface PluginApi {
   /** Format version of this surface. A plugin should refuse a major it does not know. */
   readonly version: 1;
@@ -41,6 +56,13 @@ export interface PluginApi {
    * app's privileges, which is why a bundle only ever arrives over a verified licence.
    */
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  /** Read and write inside the game's user folder. */
+  readonly files: PluginFiles;
+  /**
+   * Copy this plugin's `payload/` into the game's plugins folder — how a paid *mod*, as
+   * opposed to a paid panel, gets installed. Resolves with the filenames written.
+   */
+  installPayload(): Promise<string[]>;
   /** Register the panels this plugin contributes. Called once, from the entry module. */
   registerPanels(panels: PluginPanel[]): void;
 }
@@ -90,6 +112,13 @@ export async function mountPlugin(id: string): Promise<LoadedPlugin> {
     react: React,
     invoke: <T,>(command: string, args?: Record<string, unknown>) =>
       invoke<T>(command, args),
+    files: {
+      read: (path) => invoke<string>("plugin_read_file", { id, path }),
+      write: (path, contents) => invoke<void>("plugin_write_file", { id, path, contents }),
+      list: (path) => invoke<string[]>("plugin_list_dir", { id, path }),
+      remove: (path) => invoke<void>("plugin_delete_file", { id, path }),
+    },
+    installPayload: () => invoke<string[]>("plugin_install_payload", { id }),
     registerPanels: (p) => panels.push(...p),
   };
 
