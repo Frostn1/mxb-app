@@ -8,6 +8,7 @@
  * else), so the app reports it here and every other app on the server reads it back.
  */
 
+import { unwrapContentKey } from "./assetkey";
 import {
   isVerified,
   loginUrl,
@@ -197,6 +198,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "POST" && path === "/v1/entitlements/check") {
     return checkEntitlement(request, account, env);
   }
+  if (method === "POST" && path === "/v1/keys/grant") return grantKey(request, account, env);
   if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
 
   // Paint sync, open on the same terms as voice, and for the same reason: a rider only sees
@@ -433,15 +435,23 @@ async function listEntitlements(account: Account, env: Env): Promise<Response> {
  * Every call is written to the audit log, refusals included: one identity walking the
  * catalogue is only visible if the "no"s are recorded too.
  */
-async function checkEntitlement(request: Request, account: Account, env: Env): Promise<Response> {
-  const body = await readJson(request);
-  if (!body) return json(400, { error: "expected a JSON body" });
-  const { assetId, sessionId } = body as { assetId?: unknown; sessionId?: unknown };
-  if (typeof assetId !== "string" || !assetId.trim()) {
-    return json(400, { error: "an asset id is required" });
-  }
-  const session = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : "none";
-
+/**
+ * The single entitlement decision, and the single audit write.
+ *
+ * Extracted so the check and the key grant cannot drift: a key is released on exactly the
+ * condition the check reports, because they are the same function. Both the withdrawn-asset
+ * and the revoked-entitlement branches matter to the grant especially — a key must stop
+ * being issued the instant either flips, which is what makes revocation real.
+ *
+ * Every call is logged, refusals included: one identity walking the catalogue is only
+ * visible if the "no"s are written down too.
+ */
+async function decideEntitlement(
+  account: Account,
+  assetId: string,
+  session: string,
+  env: Env,
+): Promise<{ allowed: boolean; reason: string }> {
   const decide = async (): Promise<{ allowed: boolean; reason: string }> => {
     if (!account.steam_id) return { allowed: false, reason: "no Steam account linked" };
     const asset = await env.DB.prepare("SELECT withdrawn_at FROM assets WHERE id = ?")
@@ -460,15 +470,99 @@ async function checkEntitlement(request: Request, account: Account, env: Env): P
     return { allowed: true, reason: "entitled" };
   };
 
-  const { allowed, reason } = await decide();
+  const result = await decide();
   await env.DB.prepare(
     "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, issued_at)" +
       " VALUES (?, ?, ?, ?, ?, ?)",
   )
-    .bind(account.steam_id ?? "unlinked", assetId, session, allowed ? "allow" : "deny", reason, Date.now())
+    .bind(
+      account.steam_id ?? "unlinked",
+      assetId,
+      session,
+      result.allowed ? "allow" : "deny",
+      result.reason,
+      Date.now(),
+    )
     .run();
+  return result;
+}
 
+/** Pull and validate `{ assetId, sessionId }` from a request body. */
+async function assetRequest(
+  request: Request,
+): Promise<{ assetId: string; session: string } | Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { assetId, sessionId } = body as { assetId?: unknown; sessionId?: unknown };
+  if (typeof assetId !== "string" || !assetId.trim()) {
+    return json(400, { error: "an asset id is required" });
+  }
+  const session = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : "none";
+  return { assetId: assetId.trim(), session };
+}
+
+async function checkEntitlement(request: Request, account: Account, env: Env): Promise<Response> {
+  const parsed = await assetRequest(request);
+  if (parsed instanceof Response) return parsed;
+  const { allowed, reason } = await decideEntitlement(account, parsed.assetId, parsed.session, env);
   return json(allowed ? 200 : 403, { allowed, reason });
+}
+
+/**
+ * Release the content key for a secured asset to an entitled session.
+ *
+ * The step the DLL cannot proceed without: it has the ciphertext blob and needs the key to
+ * open it. The key is released on exactly the entitlement check above — same function, so a
+ * withdrawal or revocation stops key issuance immediately — and only after the master-key
+ * secret unwraps the stored key. The raw content key leaves the server only here, only to a
+ * caller Valve's identity and our entitlement both vouch for, and the grant is audited like
+ * any other.
+ *
+ * `ttlSeconds` tells the DLL how briefly to hold it before asking again, which is what keeps
+ * revocation to one TTL rather than one session.
+ */
+async function grantKey(request: Request, account: Account, env: Env): Promise<Response> {
+  const parsed = await assetRequest(request);
+  if (parsed instanceof Response) return parsed;
+  const { assetId, session } = parsed;
+
+  const { allowed, reason } = await decideEntitlement(account, assetId, session, env);
+  if (!allowed) return json(403, { error: reason });
+
+  const asset = await env.DB.prepare("SELECT wrapped_key, key_id FROM assets WHERE id = ?")
+    .bind(assetId)
+    .first<{ wrapped_key: string | null; key_id: string | null }>();
+  if (!asset?.wrapped_key) {
+    // Entitled, but the asset has no stored key — it was never packed, or was registered
+    // before key custody existed. Not the caller's fault and not a 403: there is simply
+    // nothing to hand back.
+    return json(409, { error: "asset has no content key" });
+  }
+
+  const key = await unwrapContentKey(asset.wrapped_key, env.MXB_ASSET_MASTER_KEY);
+  if (!key) {
+    // No master key configured, or the stored key doesn't unwrap. Either way this
+    // deployment cannot serve secured content right now; say so rather than 200 with
+    // nothing usable.
+    return json(503, { error: "content keys are unavailable" });
+  }
+
+  return json(200, {
+    assetId,
+    keyId: asset.key_id ?? null,
+    contentKey: b64(key),
+    ttlSeconds: KEY_GRANT_TTL_SECONDS,
+  });
+}
+
+/** How briefly the DLL should cache a released key before re-checking entitlement. */
+const KEY_GRANT_TTL_SECONDS = 300;
+
+/** Base64 of raw bytes, for handing the key back over JSON. */
+function b64(bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
 }
 
 /**

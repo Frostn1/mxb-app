@@ -32,6 +32,10 @@ declare global {
     /** Keys the daily digest of a signup's IP address. Without it the digest is a plain
      *  hash, which is reversible for IPv4 — set it before open signup carries real load. */
     IP_HASH_SECRET?: string;
+    /** Base64 of 32 random bytes. Wraps every secured asset's content key, so a database
+     *  leak yields wrapped keys and no way to unwrap them. Absent means secured content is
+     *  off: `/v1/keys/grant` answers 503 rather than serving a key from nothing. */
+    MXB_ASSET_MASTER_KEY?: string;
   }
 }
 
