@@ -164,7 +164,7 @@ pub(crate) fn read_entry(path: &Path, name: &str) -> Result<Vec<u8>> {
 }
 
 /// The entries that could hold a terrain grid, best-looking first.
-fn heightfield_entries(names: &[String]) -> Vec<String> {
+pub(crate) fn heightfield_entries(names: &[String]) -> Vec<String> {
     let mut out: Vec<String> = names
         .iter()
         .filter(|n| {
@@ -449,7 +449,7 @@ fn surface_colour(id: u32) -> [u8; 3] {
 /// Found by the table's own first entry rather than by walking: mask bytes are arbitrary and
 /// contain plenty of values that read as a plausible record header, so a walk with no end in
 /// sight runs off into the data. With the end known, the walk is bounded and exact.
-fn material_table_offset(block: &[u8]) -> Option<usize> {
+pub(crate) fn material_table_offset(block: &[u8]) -> Option<usize> {
     block
         .windows(8)
         .position(|w| w == b"asphalt\0")
@@ -457,11 +457,11 @@ fn material_table_offset(block: &[u8]) -> Option<usize> {
 }
 
 /// One painted surface: which id it is, and a byte of coverage per cell.
-struct Coverage {
-    id: u32,
-    width: u32,
-    height: u32,
-    at: usize,
+pub(crate) struct Coverage {
+    pub(crate) id: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) at: usize,
 }
 
 /// The coverage masks in a height file's trailing block.
@@ -469,7 +469,7 @@ struct Coverage {
 /// Records start at 44 and are `id, value, width, height` then `width * height` bytes —
 /// except that some carry no `value`, so a header is twelve bytes as often as sixteen and
 /// each has to be tried. A record with zero dimensions is a surface named but never painted.
-fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
+pub(crate) fn coverage_masks(block: &[u8]) -> Vec<Coverage> {
     let Some(end) = material_table_offset(block) else {
         return Vec::new();
     };
