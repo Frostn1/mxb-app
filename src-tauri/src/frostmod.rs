@@ -133,8 +133,7 @@ pub fn is_running() -> bool {
 //   `refresh_bike_model` — the named bike's model changed on disk. FrostMod logs it and
 //       puts a notice on screen; it does NOT re-apply the bike (v0.9.11 removed that —
 //       the replay crashed the game). The player has to switch bike category away and
-//       back. NOTE: FrostMod's own notice still says "re-select the bike", which isn't
-//       enough — fix it there.
+//       back; reselecting the same bike does not re-read the model.
 //   `swap_bike` — switch the active bike outright. NOT implemented in FrostMod
 //       yet (Stage B); it logs and ignores.
 //
