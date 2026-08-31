@@ -119,6 +119,7 @@ export interface Config {
    *  something anyone discovers by accident. */
   voiceEnabled?: boolean;
   paintSyncEnabled?: boolean;
+  mxbsecureEnabled?: boolean;
   /** Microphone to listen to. **Blank means "follow the system default"**, so a player
    *  who never picks one keeps tracking the device they change in Windows later. */
   voiceInputDevice?: string;

@@ -19,6 +19,7 @@ import {
   Palette,
   PersonStanding,
   Shield,
+  Lock,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
@@ -42,7 +43,7 @@ import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
 import { ATTACH_PROBLEM } from "../../types";
-import { contentLockAvailable } from "../../api/mods";
+import { contentLockAvailable, contentSecureAvailable } from "../../api/mods";
 import type { StudioTab } from "../Studio/Studio";
 import JoinServerDialog from "./JoinServerDialog";
 import DownloadQueue from "./DownloadQueue";
@@ -57,6 +58,7 @@ export type DashboardView =
   | "presets"
   | "studio"
   | "manage"
+  | "secure"
   | "settings";
 
 interface SidebarProps {
@@ -89,6 +91,8 @@ type NavEntry = {
   studio?: StudioTab;
   /** Hidden unless the optional local content-lock module is present. */
   needsLock?: boolean;
+  /** Hidden unless the mxbsecure module is present AND the experimental flag is on. */
+  needsSecure?: boolean;
 };
 
 const NAV: NavEntry[] = [
@@ -123,6 +127,7 @@ const NAV: NavEntry[] = [
     ],
   },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
+  { id: "secure", label: "nav.secure", icon: Lock, needsSecure: true },
 ];
 
 /**
@@ -257,6 +262,13 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
       .then(setHasLock)
       .catch(() => {});
   }, []);
+  // The mxbsecure Lock tab needs the local module present *and* the experimental flag on.
+  const [hasSecure, setHasSecure] = useState(false);
+  useEffect(() => {
+    contentSecureAvailable()
+      .then(setHasSecure)
+      .catch(() => {});
+  }, []);
   const { running, attachment, reload, status, start, stop } = useFrostmod();
   // FrostMod is up but isn't reaching the game — see `frostmod::attachment`. The good
   // states (and the grace period after a launch) deliberately look like plain "Running".
@@ -264,7 +276,7 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
     attachment !== null && ATTACH_PROBLEM.includes(attachment.state);
   const { unseenFailures } = useDownloads();
   const { running: gameRunning, refresh: refreshGame } = useGameRunning();
-  const { game } = useConfig();
+  const { game, config } = useConfig();
   const caps = game.caps;
   const [starting, setStarting] = useState(false);
   const [collapsed, setCollapsed] = useState(
@@ -326,8 +338,9 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
 
   // Every entry needs the
   // active game to support it. Built here rather than inline so the JSX stays one `.map`.
-  const supported = ({ cap, needsLock }: NavEntry) =>
-    (!cap || caps[cap]) && (!needsLock || hasLock);
+  const secureEnabled = hasSecure && (config.mxbsecureEnabled ?? false);
+  const supported = ({ cap, needsLock, needsSecure }: NavEntry) =>
+    (!cap || caps[cap]) && (!needsLock || hasLock) && (!needsSecure || secureEnabled);
   const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1)]
     .filter(supported)
     .map((e) => (e.children ? { ...e, children: e.children.filter(supported) } : e));

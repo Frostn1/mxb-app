@@ -59,6 +59,7 @@ export const fr: Translation = {
   "nav.studio": "Studio",
   "nav.servers": "Serveurs",
   "nav.manage": "Mode course",
+  "nav.secure": "Sécuriser",
   "nav.settings": "Réglages",
 
   "sidebar.installing": "Installation de « {{name}} »",
@@ -708,6 +709,37 @@ export const fr: Translation = {
   "settings.instantRefresh": "Actualisation instantanée des presets",
   "settings.instantRefreshDesc":
     "Quand vous appliquez un preset pendant que {{game}} tourne, actualise le look en jeu instantanément — sans redémarrage ni resélection de profil. Si ce n'est pas possible, il vous sera demandé de resélectionner votre profil.",
+  "settings.mxbsecure": "Verrouillage de contenu (mxbsecure)",
+  "settings.mxbsecureDesc":
+    "Expérimental. Ajoute un onglet Sécuriser qui verrouille un fichier pour que le posséder ne suffise pas à l'utiliser. Réservé aux créateurs qui empaquettent du contenu payant.",
+  "secure.help":
+    "Verrouille un fichier dans un blob .mxbsecure. Le texte en clair n'est jamais distribué — seul le blob chiffré l'est, et il est inutile sans une clé que le serveur remet aux joueurs autorisés.",
+  "secure.experimental": "Expérimental",
+  "secure.intro":
+    "Choisissez un fichier, verrouillez-le, puis vérifiez qu'il se déverrouille. La vérification déchiffre le blob ici même et le compare à l'original, octet par octet — la preuve qu'il fait l'aller-retour sur cette machine.",
+  "secure.step1": "Verrouiller un fichier",
+  "secure.pick": "Choisir un fichier",
+  "secure.lock": "Verrouiller",
+  "secure.locked": "Verrouillé.",
+  "secure.lockFailed": "Impossible de verrouiller ce fichier",
+  "secure.result": "Verrouillé",
+  "secure.blob": "Blob",
+  "secure.size": "Taille",
+  "secure.sizeValue": "{{plain}} en clair → {{blob}} verrouillé",
+  "secure.assetId": "ID d'asset",
+  "secure.key": "Clé",
+  "secure.copyKey": "Copier la clé",
+  "secure.keyNote":
+    "Conservez cette clé — elle est affichée une fois et n'est pas dans le blob. En production, le serveur la détient et ne la remet qu'aux joueurs autorisés.",
+  "secure.step2": "Vérifier le déverrouillage",
+  "secure.step2Desc":
+    "Déchiffrer le blob avec la clé et le comparer au fichier verrouillé.",
+  "secure.verify": "Vérifier le déverrouillage",
+  "secure.verifiedOk": "Déverrouillé et identique à l'original.",
+  "secure.verifiedBad": "Déverrouillé, mais ne correspond pas.",
+  "secure.verifyFailed": "Échec de la vérification",
+  "secure.unlockedMatches": "Déverrouillé — identique à l'original",
+  "secure.unlockedMismatch": "Ne correspond pas",
   "settings.paintSync": "Synchro des peintures",
   "settings.paintSyncDesc":
     "Partage les peintures que vous portez avec les autres pilotes de votre serveur, et installe les leurs, pour que la grille ressemble à ce que chacun a voulu. Fonctionne tout seul sur n'importe quel serveur — rien à configurer, ni pour vous ni pour l'hébergeur.",

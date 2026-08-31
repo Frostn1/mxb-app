@@ -3511,10 +3511,12 @@ version = "0.12.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "chacha20poly1305",
  "cpal",
  "dirs-next",
  "flate2",
  "futures-util",
+ "getrandom 0.2.17",
  "html-escape",
  "http",
  "image",

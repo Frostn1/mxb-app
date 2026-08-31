@@ -14,6 +14,13 @@ fn main() {
     println!("cargo::rerun-if-changed=src/sidecar.rs");
     println!("cargo::rerun-if-changed=src/sidecar_lock.rs");
 
+    // The secure-content packer, gated independently of the sidecar modules above.
+    println!("cargo::rustc-check-cfg=cfg(mxbsecure)");
+    if Path::new("src/mxbsecure.rs").exists() {
+        println!("cargo::rustc-cfg=mxbsecure");
+    }
+    println!("cargo::rerun-if-changed=src/mxbsecure.rs");
+
     shop_credentials();
     release_tag();
 

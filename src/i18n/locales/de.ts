@@ -62,6 +62,7 @@ export const de: Translation = {
   "nav.studio": "Studio",
   "nav.servers": "Server",
   "nav.manage": "Rennmodus",
+  "nav.secure": "Schützen",
   "nav.settings": "Einstellungen",
 
   "sidebar.installing": "„{{name}}“ wird installiert",
@@ -712,6 +713,37 @@ export const de: Translation = {
   "settings.instantRefresh": "Sofortige Preset-Aktualisierung",
   "settings.instantRefreshDesc":
     "Wenn du ein Preset anwendest, während {{game}} läuft, wird der Look sofort im Spiel aktualisiert — ohne Neustart und ohne das Profil neu auszuwählen. Falls das nicht klappt, wirst du gebeten, dein Profil neu auszuwählen.",
+  "settings.mxbsecure": "Inhaltssperre (mxbsecure)",
+  "settings.mxbsecureDesc":
+    "Experimentell. Fügt einen Schützen-Tab hinzu, der eine Datei so sperrt, dass ihr Besitz allein nicht zur Nutzung reicht. Nur für Creator, die bezahlte Inhalte packen.",
+  "secure.help":
+    "Sperrt eine Datei in ein .mxbsecure-Blob. Der Klartext wird nie ausgeliefert — nur das verschlüsselte Blob, und das ist ohne einen Schlüssel wertlos, den der Server berechtigten Spielern gibt.",
+  "secure.experimental": "Experimentell",
+  "secure.intro":
+    "Datei wählen, sperren, dann das Entsperren prüfen. Beim Prüfen wird das Blob hier entschlüsselt und Byte für Byte mit dem Original verglichen — der Beleg, dass es auf diesem Rechner zurückkommt.",
+  "secure.step1": "Datei sperren",
+  "secure.pick": "Datei wählen",
+  "secure.lock": "Sperren",
+  "secure.locked": "Gesperrt.",
+  "secure.lockFailed": "Datei konnte nicht gesperrt werden",
+  "secure.result": "Gesperrt",
+  "secure.blob": "Blob",
+  "secure.size": "Größe",
+  "secure.sizeValue": "{{plain}} Klartext → {{blob}} gesperrt",
+  "secure.assetId": "Asset-ID",
+  "secure.key": "Schlüssel",
+  "secure.copyKey": "Schlüssel kopieren",
+  "secure.keyNote":
+    "Bewahre diesen Schlüssel auf — er wird einmal gezeigt und steht nicht im Blob. In Produktion hält ihn der Server und gibt ihn nur berechtigten Spielern.",
+  "secure.step2": "Entsperren prüfen",
+  "secure.step2Desc":
+    "Das Blob mit dem Schlüssel entschlüsseln und mit der gesperrten Datei vergleichen.",
+  "secure.verify": "Entsperren prüfen",
+  "secure.verifiedOk": "Entsperrt und stimmt mit dem Original überein.",
+  "secure.verifiedBad": "Entsperrt, aber es stimmt nicht überein.",
+  "secure.verifyFailed": "Prüfung fehlgeschlagen",
+  "secure.unlockedMatches": "Entsperrt — stimmt mit dem Original überein",
+  "secure.unlockedMismatch": "Stimmt nicht überein",
   "settings.paintSync": "Lackierungs-Sync",
   "settings.paintSyncDesc":
     "Teilt die Lackierungen, die du trägst, mit den anderen Fahrern auf deinem Server und installiert deren Lackierungen, damit das Starterfeld so aussieht, wie alle es gemeint haben. Läuft von selbst auf jedem Server — weder du noch der Host müssen etwas einrichten.",

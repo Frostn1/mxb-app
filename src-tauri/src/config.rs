@@ -115,6 +115,10 @@ pub struct AppConfig {
     /// have it on too, so a default of off is a slower start. That is the right trade until
     /// the freeze is understood on Windows — see `tasks/`.
     pub paint_sync_enabled: bool,
+    /// Show the mxbsecure content-locking tab. Off by default and behind this flag because
+    /// it is experimental and only does anything in a full build (the packer is the
+    /// gitignored `mxbsecure` sidecar) — see [`crate::content_secure_available`].
+    pub mxbsecure_enabled: bool,
     /// Microphone to listen to. **Blank means "follow the system default"** — storing the
     /// resolved name instead would pin the player to whichever headset was plugged in the
     /// day they set it, and stop tracking the default they later change in Windows.
@@ -257,6 +261,7 @@ impl Default for AppConfig {
             voice_enabled: false,
             paint_sync_rev: PAINT_SYNC_REV,
             paint_sync_enabled: false,
+            mxbsecure_enabled: false,
             voice_input_device: String::new(),
             voice_output_device: String::new(),
             voice_ptt_hotkey: DEFAULT_PTT_HOTKEY.to_string(),
@@ -1008,6 +1013,15 @@ mod tests {
         let saved = serde_json::to_string(&cfg).unwrap();
         let reloaded = migrate(serde_json::from_str::<AppConfig>(&saved).unwrap());
         assert!(reloaded.paint_sync_enabled, "their choice stands");
+    }
+
+    /// The mxbsecure flag defaults off and is absent from every existing config.
+    #[test]
+    fn mxbsecure_is_off_by_default() {
+        let cfg = serde_json::from_str::<AppConfig>(r#"{ "modsPath": "/x" }"#).unwrap();
+        assert!(!cfg.mxbsecure_enabled, "an absent flag means off");
+        let on = serde_json::from_str::<AppConfig>(r#"{ "modsPath": "/x", "mxbsecureEnabled": true }"#).unwrap();
+        assert!(on.mxbsecure_enabled, "and it round-trips when set");
     }
 
     /// Turning it off has to survive a round trip, or the switch springs back on restart.

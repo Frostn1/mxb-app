@@ -53,6 +53,8 @@ mod proton;
 mod sidecar;
 #[cfg(sidecar)]
 mod sidecar_lock;
+#[cfg(mxbsecure)]
+mod mxbsecure;
 mod presets;
 mod paintsync;
 mod reshade;
@@ -5541,6 +5543,120 @@ fn content_lock_available() -> bool {
     cfg!(sidecar)
 }
 
+/// Whether this build can lock content with mxbsecure — the packer is the gitignored
+/// `mxbsecure` sidecar, so a public build reports false and the Secure tab stays hidden.
+#[tauri::command]
+fn content_secure_available() -> bool {
+    cfg!(mxbsecure)
+}
+
+/// Turn the experimental mxbsecure tab on or off.
+#[tauri::command]
+fn set_mxbsecure_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.mxbsecure_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
+/// The result of locking a file: where the blob landed, and the content key to keep. The key
+/// is returned once, for the operator to store server-side; it is never written into the blob.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecureLockOutcome {
+    blob_path: String,
+    asset_id: String,
+    key_id: String,
+    key: String,
+    plain_bytes: u64,
+    blob_bytes: u64,
+}
+
+/// Lock a file into a `.mxbsecure` blob under a fresh content key.
+///
+/// `src` is read and never modified. The blob is written beside it (or into `out_dir` when
+/// given) as `<name>.mxbsecure`. Reads the whole file into memory — a creator's asset, not a
+/// stream — which is fine for the sizes involved and keeps the packer simple.
+#[tauri::command]
+async fn mxbsecure_lock(
+    src: String,
+    out_dir: Option<String>,
+) -> Result<SecureLockOutcome, String> {
+    #[cfg(mxbsecure)]
+    {
+        use std::path::PathBuf;
+        let src_path = PathBuf::from(&src);
+        let name = src_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .ok_or_else(|| "not a file".to_string())?;
+        let out = match out_dir {
+            Some(d) => PathBuf::from(d).join(format!("{name}.mxbsecure")),
+            None => src_path.with_file_name(format!("{name}.mxbsecure")),
+        };
+        // A stable-ish asset id from the file name plus a random suffix, so two locks of two
+        // files don't collide. A real registration mints this; here it just labels the blob.
+        let mut rnd = [0u8; 6];
+        getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+        let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
+        let asset_id = format!("{}-{suffix}", sanitize_asset_id(&name));
+
+        let plaintext = tokio::fs::read(&src_path).await.map_err(|e| format!("read {src}: {e}"))?;
+        let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
+        tokio::fs::write(&out, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
+
+        Ok(SecureLockOutcome {
+            blob_path: out.to_string_lossy().to_string(),
+            asset_id: locked.asset_id,
+            key_id: locked.key_id,
+            key: mxbsecure::hex_key(&locked.content_key),
+            plain_bytes: plaintext.len() as u64,
+            blob_bytes: locked.blob.len() as u64,
+        })
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (src, out_dir);
+        Err("this build can't lock content with mxbsecure".into())
+    }
+}
+
+/// Verify a locked blob opens back to a plaintext identical to `original`.
+///
+/// This is the "can it unlock it" check the Secure tab runs after a lock: decrypt the blob
+/// with the key and compare byte-for-byte to the source. Proves the format round-trips on
+/// this machine, independently of the in-game DLL.
+#[tauri::command]
+async fn mxbsecure_verify(
+    blob_path: String,
+    key: String,
+    original: String,
+) -> Result<bool, String> {
+    #[cfg(mxbsecure)]
+    {
+        let content_key = mxbsecure::key_from_hex(&key).ok_or("the key isn't 32 bytes of hex")?;
+        let blob = tokio::fs::read(&blob_path).await.map_err(|e| format!("read blob: {e}"))?;
+        let opened = mxbsecure::open(&blob, &content_key).map_err(|e| format!("{e}"))?;
+        let original = tokio::fs::read(&original).await.map_err(|e| format!("read original: {e}"))?;
+        Ok(opened == original)
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (blob_path, key, original);
+        Err("this build can't open mxbsecure content".into())
+    }
+}
+
+/// Keep an asset id to the characters a header and a URL are both happy with.
+#[cfg(mxbsecure)]
+fn sanitize_asset_id(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect();
+    let trimmed = cleaned.trim_matches('_');
+    if trimmed.is_empty() { "asset".to_string() } else { trimmed.to_string() }
+}
+
 /// What a run over `paths` would touch — every file under the selection, with the ones it
 /// would leave alone flagged and why. Folders are walked; a file is taken as itself.
 #[tauri::command]
@@ -9164,6 +9280,10 @@ fn main() {
             content_lock_available,
             content_lock_plan,
             content_lock_run,
+            content_secure_available,
+            set_mxbsecure_enabled,
+            mxbsecure_lock,
+            mxbsecure_verify,
             local_guid,
             load_bike_model,
             preview_model_swap,

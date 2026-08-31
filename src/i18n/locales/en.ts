@@ -56,6 +56,7 @@ export const en = {
   "nav.studio": "Studio",
   "nav.servers": "Servers",
   "nav.manage": "Race mode",
+  "nav.secure": "Secure",
   "nav.settings": "Settings",
 
   "sidebar.installing": "Installing “{{name}}”",
@@ -698,6 +699,37 @@ export const en = {
   "settings.instantRefresh": "Instant preset refresh",
   "settings.instantRefreshDesc":
     "When you apply a preset while {{game}} is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile.",
+  "settings.mxbsecure": "Content locking (mxbsecure)",
+  "settings.mxbsecureDesc":
+    "Experimental. Adds a Secure tab that locks a file so owning it isn't enough to use it. Only creators packing paid content need this.",
+  "secure.help":
+    "Lock a file into a .mxbsecure blob. The plaintext never ships — only the encrypted blob does, and it's useless without a key the server releases to entitled players.",
+  "secure.experimental": "Experimental",
+  "secure.intro":
+    "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",
+  "secure.step1": "Lock a file",
+  "secure.pick": "Choose file",
+  "secure.lock": "Lock",
+  "secure.locked": "Locked.",
+  "secure.lockFailed": "Couldn't lock that file",
+  "secure.result": "Locked",
+  "secure.blob": "Blob",
+  "secure.size": "Size",
+  "secure.sizeValue": "{{plain}} plaintext → {{blob}} locked",
+  "secure.assetId": "Asset ID",
+  "secure.key": "Key",
+  "secure.copyKey": "Copy key",
+  "secure.keyNote":
+    "Keep this key — it's shown once and isn't in the blob. In production the server holds it and releases it only to entitled players.",
+  "secure.step2": "Check it unlocks",
+  "secure.step2Desc":
+    "Decrypt the blob with the key and compare it to the file you locked.",
+  "secure.verify": "Verify unlock",
+  "secure.verifiedOk": "Unlocked and matches the original.",
+  "secure.verifiedBad": "Unlocked, but it doesn't match.",
+  "secure.verifyFailed": "Couldn't verify",
+  "secure.unlockedMatches": "Unlocked — matches the original",
+  "secure.unlockedMismatch": "Doesn't match",
   "settings.paintSync": "Paint sync",
   "settings.paintSyncDesc":
     "Share the paints you're wearing with the other riders on your server, and install theirs, so the grid looks the way everyone meant it to. Runs by itself on any server — nothing for you or the host to set up.",
