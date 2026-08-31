@@ -1186,6 +1186,18 @@ async fn generate_track(app: tauri::AppHandle, brief: String) -> Result<serde_js
     serde_json::to_value(&prog).map_err(|e| e.to_string())
 }
 
+/// A track to start from, without asking anyone for one.
+///
+/// The studio's first screen used to be a prompt and nothing else, which is a bad place to
+/// start from when the model isn't configured — and a worse one when you just want to change
+/// two jumps on something that already works.
+#[tauri::command]
+async fn base_track_program() -> Result<serde_json::Value, String> {
+    serde_json::from_str::<trackprog::TrackProgram>(trackprog::EXAMPLE)
+        .and_then(|p| serde_json::to_value(&p))
+        .map_err(|e| format!("the built-in track didn't load: {e}"))
+}
+
 /// Everything wrong with a program, without asking anyone. The studio calls this as edits are
 /// made, so a hand-edited track is held to the same corpus a generated one is.
 #[tauri::command]
@@ -8778,6 +8790,7 @@ fn main() {
             load_track_terrain,
             generate_track,
             check_track,
+            base_track_program,
             preview_track,
             install_track_preview,
             export_track_source,

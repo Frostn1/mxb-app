@@ -78,6 +78,11 @@ export function generateTrack(brief: string): Promise<TrackProgram> {
   return invoke<TrackProgram>("generate_track", { brief });
 }
 
+/** A track to start from, with no model involved. */
+export function baseTrackProgram(): Promise<TrackProgram> {
+  return invoke<TrackProgram>("base_track_program");
+}
+
 /** Everything wrong with a program, held to the same corpus a generated one is. */
 export function checkTrack(program: TrackProgram): Promise<string[]> {
   return invoke<string[]>("check_track", { program });

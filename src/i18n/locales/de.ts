@@ -2255,4 +2255,6 @@ export const de: Translation = {
   "track.pointAtTools": "Track-Tools auswählen…",
   "track.toolsNotFound": "Kein terrained.exe in diesem Ordner",
   "track.stillNeeded": "Braucht noch eine .rdf aus TrackEd (Startgatter, Box, Kameras) und eine gate.edf aus einer anderen Strecke.",
+  "track.base": "Basis-Strecke",
+  "track.baseLoaded": "„{{name}}“ geladen",
 };

@@ -2231,4 +2231,6 @@ export const ptBR: Translation = {
   "track.pointAtTools": "Indicar as ferramentas…",
   "track.toolsNotFound": "Sem terrained.exe nessa pasta",
   "track.stillNeeded": "Ainda precisa de um .rdf do TrackEd (portão, boxes, câmeras) e um gate.edf copiado de outra pista.",
+  "track.base": "Pista base",
+  "track.baseLoaded": "“{{name}}” carregada",
 };
