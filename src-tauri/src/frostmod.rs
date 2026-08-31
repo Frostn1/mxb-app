@@ -130,9 +130,10 @@ pub fn is_running() -> bool {
 // Must match `HandleFrostModCommand` in frostmod.cpp, verb names included.
 //
 // Verbs:
-//   `refresh_bike_model` — re-apply the named bike so a just-swapped model shows
-//       in the garage without the class-switch away-and-back. FrostMod no-ops
-//       unless that bike is the one currently selected.
+//   `refresh_bike_model` — the named bike's model changed on disk. FrostMod logs it and
+//       puts a notice on screen; it does NOT re-apply the bike (v0.9.11 removed that —
+//       the replay crashed the game). The player has to switch bike category away and
+//       back; reselecting the same bike does not re-read the model.
 //   `swap_bike` — switch the active bike outright. NOT implemented in FrostMod
 //       yet (Stage B); it logs and ignores.
 //
@@ -283,8 +284,9 @@ pub fn signal_swap_bike(bike_id: &str) -> CommandOutcome {
     send_command(command_json("swap_bike", bike_id))
 }
 
-/// Ask FrostMod to re-apply `bike_id` so a just-swapped model shows in the garage
-/// straight away. A no-op inside FrostMod unless that bike is the selected one.
+/// Tell FrostMod that `bike_id`'s model changed on disk. It answers with an in-game
+/// notice; the mesh does not reload on its own, and only a bike-category switch away
+/// and back re-reads it (see the verb table above).
 ///
 /// NOT safe to fire at every FrostMod — see `model_refresh_is_safe`, which every
 /// caller must clear first.

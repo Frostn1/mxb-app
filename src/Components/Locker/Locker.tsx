@@ -95,8 +95,10 @@ function pruneHiddenOrphans(live: OrphanedSetup[]): Set<string> {
  * Models and sounds get different notes because they refresh by different routes.
  * `live_refresh` re-runs the game's *customization* loader — that reloads paints and
  * gear but never the bike mesh, so it says nothing about whether a swapped model is
- * visible. A model only appears live if FrostMod re-applies the bike (`model_refresh`),
- * which it does solely for the bike you currently have selected.
+ * visible. Nothing reloads the mesh: FrostMod v0.9.11 removed the live re-apply because
+ * it crashed the game, so every model outcome ends in the same instruction — switch bike
+ * category away and back, which is what actually re-reads the model. Reselecting the same
+ * bike does not. `model_refresh` only decides who says it.
  */
 function swapNote(
   kind: "model" | "sound",
@@ -108,11 +110,10 @@ function swapNote(
   if (kind === "model") {
     switch (outcome.model_refresh) {
       case "signaled":
-        return t("locker.modelRefreshing");
+      case "withheld":
+        return t("locker.modelSwitchCategory");
       case "not_running":
         return t("locker.modelFrostmodNotRunning");
-      case "withheld":
-        return t("locker.modelReselectBike");
       case "write_failed":
         return t("locker.modelFrostmodUnreachable");
       case "unsupported":

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-31
+
+### Fixed
+- Applying a model swap no longer says the bike changes in the running game. FrostMod
+  dropped the live re-apply in v0.9.11 because it crashed the game, so the app now tells
+  you what actually has to happen: switch bike category away and back in the garage.
+  Reselecting the same bike doesn't load the new model.
+
 ## 2026-08-31 — v0.12.2
 
 ### Added
