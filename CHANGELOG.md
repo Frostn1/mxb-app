@@ -1,6 +1,17 @@
 # Changelog
 
-## 2026-08-31 — v0.12.2
+## Unreleased
+
+### Added
+- Paint sync works on any server, not just ours. The app reads the server name out of the
+  running game, so a public server syncs the same as a private one and the host installs
+  nothing.
+- No invite code. The app signs itself up the first time sync runs, the same way voice does.
+- Paint sync is on by default, with a switch in Settings → General to turn it off.
+- Starting the game from Steam or a shortcut now syncs too. Only the Play button did before.
+
+### Changed
+- The sync line in the sidebar is no longer behind the experimental toggle.
 
 ### Added
 - Settings → FrostMod lists the nine replay camera slots. Open one to see where its keys

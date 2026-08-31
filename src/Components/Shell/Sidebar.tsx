@@ -533,9 +533,10 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
         {/* Paint sync, in one line. Both halves of it run in the background off actions the
             player didn't ask for — an apply, a launch, the game rewriting profile.ini — so
             without something like this the only place its state existed was the log file.
-            Shown only once there's an account, since before that the Servers page is where
-            the answer is. */}
-        {!collapsed && experimental && sync?.enrolled && (
+            No longer behind the experimental toggle: sync is on for everyone and works on
+            any server, so everyone needs somewhere to see it working. Waits for an account,
+            which the app claims for itself the first time sync runs. */}
+        {!collapsed && sync?.paintSyncEnabled && sync?.enrolled && (
           <div className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2">
             <span
               className={cn(
@@ -556,8 +557,11 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
                     ? t("sync.sidebarOk", { count: sync.sync.pulledRiders })
                     : t("sync.sidebarUnpublished")}
             </span>
+            {/* Where the detail is. The Servers page holds it, but that page only exists
+                with the experimental toggle on — so without it, send them to the switch
+                that turns sync off, which is the only other thing there is to do here. */}
             <button
-              onClick={() => onNavigate("servers")}
+              onClick={() => onNavigate(experimental ? "servers" : "settings")}
               title={t("sync.title")}
               className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
             >

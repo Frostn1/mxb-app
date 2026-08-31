@@ -699,6 +699,9 @@ export const es: Translation = {
   "settings.instantRefresh": "Actualización instantánea de presets",
   "settings.instantRefreshDesc":
     "Cuando aplicas un preset con {{game}} en marcha, actualiza el look en el juego al instante — sin reiniciar ni volver a seleccionar el perfil. Si no puede, se te pedirá que vuelvas a seleccionar tu perfil.",
+  "settings.paintSync": "Sincronización de pinturas",
+  "settings.paintSyncDesc":
+    "Comparte las pinturas que llevas con los demás pilotos de tu servidor, e instala las suyas, para que la parrilla se vea como todos querían. Funciona solo en cualquier servidor — nada que configurar, ni para ti ni para el anfitrión.",
   "settings.instantRefreshWindowsOnly":
     "Actualizar el look en el juego sin reiniciar implica entrar en el juego en marcha, y eso solo puede hacerlo la versión de Windows — en su lugar se te pedirá que vuelvas a seleccionar tu perfil.",
   "settings.autoRunFrostmod": "Ejecutar FrostMod automáticamente",

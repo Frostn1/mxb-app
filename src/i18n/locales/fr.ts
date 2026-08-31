@@ -703,6 +703,9 @@ export const fr: Translation = {
   "settings.instantRefresh": "Actualisation instantanée des presets",
   "settings.instantRefreshDesc":
     "Quand vous appliquez un preset pendant que {{game}} tourne, actualise le look en jeu instantanément — sans redémarrage ni resélection de profil. Si ce n'est pas possible, il vous sera demandé de resélectionner votre profil.",
+  "settings.paintSync": "Synchro des peintures",
+  "settings.paintSyncDesc":
+    "Partage les peintures que vous portez avec les autres pilotes de votre serveur, et installe les leurs, pour que la grille ressemble à ce que chacun a voulu. Fonctionne tout seul sur n'importe quel serveur — rien à configurer, ni pour vous ni pour l'hébergeur.",
   "settings.instantRefreshWindowsOnly":
     "Actualiser le look en jeu sans redémarrer suppose d'intervenir dans le jeu en cours, ce que seule la version Windows peut faire — il vous sera demandé de resélectionner votre profil à la place.",
   "settings.autoRunFrostmod": "Lancer FrostMod automatiquement",

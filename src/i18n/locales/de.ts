@@ -707,6 +707,9 @@ export const de: Translation = {
   "settings.instantRefresh": "Sofortige Preset-Aktualisierung",
   "settings.instantRefreshDesc":
     "Wenn du ein Preset anwendest, während {{game}} läuft, wird der Look sofort im Spiel aktualisiert — ohne Neustart und ohne das Profil neu auszuwählen. Falls das nicht klappt, wirst du gebeten, dein Profil neu auszuwählen.",
+  "settings.paintSync": "Lackierungs-Sync",
+  "settings.paintSyncDesc":
+    "Teilt die Lackierungen, die du trägst, mit den anderen Fahrern auf deinem Server und installiert deren Lackierungen, damit das Starterfeld so aussieht, wie alle es gemeint haben. Läuft von selbst auf jedem Server — weder du noch der Host müssen etwas einrichten.",
   "settings.instantRefreshWindowsOnly":
     "Den Look ohne Neustart im Spiel zu aktualisieren heißt, in das laufende Spiel hineinzugreifen, und das kann nur die Windows-Version — du wirst stattdessen gebeten, dein Profil neu auszuwählen.",
   "settings.autoRunFrostmod": "FrostMod automatisch starten",

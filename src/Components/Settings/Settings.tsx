@@ -57,6 +57,7 @@ import {
   voiceMute,
   voiceStatus,
   setVoiceEnabled,
+  setPaintSyncEnabled,
   setVoiceInputDevice,
   setVoiceOutputDevice,
   setVoicePttHotkey,
@@ -463,6 +464,9 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // Same shape as the overlay pair above: the config's fields are optional (an install
   // predating voice has none), so every read is defaulted here rather than at each use.
   const voiceEnabled = config.voiceEnabled ?? false;
+  // On unless it was turned off — an older config has no field and means "on", same as the
+  // backend's default.
+  const paintSyncEnabled = config.paintSyncEnabled ?? true;
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
@@ -687,6 +691,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const togglePaintSync = async (v: boolean) => {
+    try {
+      await setPaintSyncEnabled(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+      await reloadConfig();
     }
   };
 
@@ -1182,6 +1196,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={instantRefresh && caps.instantRefresh}
               disabled={!caps.instantRefresh}
               onChange={toggleInstantRefresh}
+            />
+            <div className="h-px bg-border" />
+            {/* Paint sync. In General rather than behind the experimental toggle because it
+                is on by default and runs by itself — the one thing a player needs is the
+                switch that stops it. */}
+            <ToggleRow
+              label={t("settings.paintSync")}
+              desc={t("settings.paintSyncDesc")}
+              checked={paintSyncEnabled}
+              onChange={togglePaintSync}
             />
           </Section>
           )}
