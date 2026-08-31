@@ -635,7 +635,7 @@ fn mask_grid(block: &[u8], c: &track::Coverage, gw: usize, gh: usize) -> Option<
 }
 
 /// Mean over a square window, separable, in two passes of prefix sums.
-fn box_blur(v: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+pub(crate) fn box_blur(v: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
     if r == 0 || w == 0 || h == 0 {
         return v.to_vec();
     }
