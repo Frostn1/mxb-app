@@ -1603,7 +1603,7 @@ export const de: Translation = {
   "showcase.v0124.anyserver":
     "Jeder Server, nicht nur unsere. Die App liest den Server aus dem laufenden Spiel, also funktioniert eine öffentliche Lobby genau wie eine private.",
   "showcase.v0124.nosetup":
-    "Nichts einzurichten. Kein Einladungscode, keine Anmeldung, keine Server-Installation — Spiel starten, fertig.",
+    "Nichts einzurichten. Kein Einladungscode, keine Anmeldung, keine Server-Installation — in den Einstellungen einschalten, den Rest macht sie selbst.",
   "showcase.v0124.everyone":
     "Du siehst jeden Fahrer, der ebenfalls MXB App hat. Je mehr in deiner Lobby, desto mehr vom Feld sieht richtig aus.",
   "showcase.v0124.settings":
