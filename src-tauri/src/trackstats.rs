@@ -375,7 +375,7 @@ fn close(mask: &[bool], gw: usize, gh: usize, r: usize) -> Vec<bool> {
     eroded.iter().map(|x| -x >= 0.5).collect()
 }
 
-fn measure(
+pub(crate) fn measure(
     rule: &'static str,
     mask: &[bool],
     heights: &[f32],
