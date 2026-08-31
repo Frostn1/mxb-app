@@ -2381,4 +2381,10 @@ export const ptBR: Translation = {
   "track.replaceTitle": "Substituir esta pista?",
   "track.replaceBody": "Você fez alterações que não foram exportadas nem instaladas. Carregar outra pista descarta tudo.",
   "track.replaceConfirm": "Descartar e carregar",
+  "track.across": "de largura",
+  "track.hills": "colinas",
+  "track.surface": "solo",
+  "track.soil": "Terra",
+  "track.sand": "Areia",
+  "track.grass": "Grama",
 };

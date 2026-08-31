@@ -89,6 +89,16 @@ export function blankTrackProgram(): Promise<TrackProgram> {
   return invoke<TrackProgram>("blank_track_program");
 }
 
+/**
+ * Give the track a height budget that fits it.
+ *
+ * The budget exists only because samples are quantised against it, so nobody should be asked
+ * to guess a number the synthesiser already knows.
+ */
+export function fitTrackBudget(program: TrackProgram): Promise<TrackProgram> {
+  return invoke<TrackProgram>("fit_track_budget", { program });
+}
+
 /** Bring an open lap back to its start: a turn, a straight and a turn. */
 export function closeTrackLap(program: TrackProgram): Promise<TrackProgram> {
   return invoke<TrackProgram>("close_track_lap", { program });

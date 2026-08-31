@@ -42,6 +42,7 @@ import {
   blankTrackProgram,
   buildTrack,
   closeTrackLap,
+  fitTrackBudget,
   checkTrack,
   exportTrackSource,
   generateTrack,
@@ -122,7 +123,18 @@ export default function TrackStudio() {
       setProgram(next);
       setPreview(null);
       try {
-        const found = await checkTrack(next);
+        let found = await checkTrack(next);
+        // The height budget is arithmetic, not a decision. Work it out and carry on rather
+        // than telling someone to raise a number they have no field for.
+        if (found.problems.some((p) => p.includes("budget"))) {
+          try {
+            next = await fitTrackBudget(next);
+            setProgram(next);
+            found = await checkTrack(next);
+          } catch {
+            /* leave the original complaint standing */
+          }
+        }
         setProblems(found.problems);
         setNotes(found.notes);
         return found.problems;
@@ -358,6 +370,12 @@ export default function TrackStudio() {
     setDropAt(null);
   }
 
+  function settleTerrain(patch: Partial<TrackProgram["terrain"]>) {
+    if (!program) return;
+    setTouched(true);
+    void settle({ ...program, terrain: { ...program.terrain, ...patch } });
+  }
+
   function addFeature(kind: TrackFeatureKind) {
     if (!program) return;
     setTouched(true);
@@ -506,6 +524,52 @@ export default function TrackStudio() {
                 <Row label={t("track.features")} value={String(program.features.length)} />
                 <Row label={t("track.corners")} value={String(program.segments.filter((s) => s.kind === "arc").length)} />
               </dl>
+            </div>
+
+            <div className="rounded-xl border border-input p-3.5">
+              <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("track.ground")}
+              </h3>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <Field
+                  label={t("track.across")}
+                  value={program.terrain.sizeX}
+                  step={20}
+                  onChange={(v) =>
+                    void settleTerrain({ sizeX: Math.max(100, v), sizeZ: Math.max(100, v) })
+                  }
+                />
+                <Field
+                  label={t("track.hills")}
+                  value={program.terrain.relief.amplitude}
+                  step={1}
+                  onChange={(v) =>
+                    void settle({
+                      ...program,
+                      terrain: {
+                        ...program.terrain,
+                        relief: { ...program.terrain.relief, amplitude: Math.max(0, v) },
+                      },
+                    })
+                  }
+                />
+                <label className="flex items-center gap-1">
+                  <span className="text-[11px] text-muted-foreground">{t("track.surface")}</span>
+                  <select
+                    value={program.terrain.surface}
+                    onChange={(e) =>
+                      void settleTerrain({
+                        surface: e.target.value as TrackProgram["terrain"]["surface"],
+                      })
+                    }
+                    className="rounded-md border border-input bg-transparent px-1 py-0.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    <option value="soil">{t("track.soil")}</option>
+                    <option value="sand">{t("track.sand")}</option>
+                    <option value="grass">{t("track.grass")}</option>
+                  </select>
+                </label>
+              </div>
             </div>
 
             {/* Measured, not claimed — the same figures taken of published tracks. */}

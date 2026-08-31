@@ -2391,4 +2391,10 @@ export const es: Translation = {
   "track.replaceTitle": "¿Reemplazar esta pista?",
   "track.replaceBody": "Has hecho cambios que no se han exportado ni instalado. Cargar otra pista los descarta.",
   "track.replaceConfirm": "Descartar y cargar",
+  "track.across": "de ancho",
+  "track.hills": "colinas",
+  "track.surface": "suelo",
+  "track.soil": "Tierra",
+  "track.sand": "Arena",
+  "track.grass": "Hierba",
 };
