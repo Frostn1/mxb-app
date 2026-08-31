@@ -704,6 +704,42 @@ export const es: Translation = {
   "settings.autoRunFrostmod": "Ejecutar FrostMod automáticamente",
   "settings.autoRunFrostmodDesc":
     "Inicia FrostMod en segundo plano cada vez que abres MXB App.",
+  "settings.rcamKeys":
+    "Teclas de la cámara de repetición",
+  "settings.rcamKeysDesc":
+    "El juego lee la misma tecla en el mismo momento, así que elige teclas que tus controles de cámara no usen — las teclas de función y el teclado numérico suelen estar libres.",
+  "settings.rcamReset":
+    "Restablecer",
+  "settings.rcamPressKey":
+    "Pulsa una tecla",
+  "settings.rcamUnbound":
+    "Sin asignar",
+  "settings.rcamCaptureHint":
+    "Pulsa la tecla que quieras. Esc cancela, Retroceso borra la asignación.",
+  "settings.rcamAppliesHint":
+    "Se aplica la próxima vez que abras el editor en el juego — sin reiniciar.",
+  "settings.rcamDuplicate":
+    "Dos acciones comparten una tecla.",
+  "settings.rcamUnsupportedKey":
+    "FrostMod no puede usar esa tecla.",
+  "settings.rcamSaveFailed":
+    "No se pudieron guardar las teclas",
+  "settings.rcamActionSetkey":
+    "Fijar punto",
+  "settings.rcamActionDelete":
+    "Borrar punto",
+  "settings.rcamActionClear":
+    "Vaciar trayecto",
+  "settings.rcamActionPlay":
+    "Reproducir / parar",
+  "settings.rcamActionPrev":
+    "Punto anterior",
+  "settings.rcamActionNext":
+    "Punto siguiente",
+  "settings.rcamActionSave":
+    "Guardar trayecto",
+  "settings.rcamActionLoad":
+    "Cargar trayecto",
   "settings.watchModsReload": "Recarga automática al cambiar la carpeta",
   "settings.watchModsReloadDesc":
     "Recarga el juego automáticamente cuando se añaden pistas o motos a tu carpeta de mods — incluso descargadas manualmente fuera de MXB App.",

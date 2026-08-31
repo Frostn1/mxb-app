@@ -75,6 +75,7 @@ import { useUpdate } from "../../Context/Update";
 import { usePlatform } from "../../lib/usePlatform";
 import { useConfig } from "../../Context/Config";
 import GameSwitcher from "../Shell/GameSwitcher";
+import { ReplayCameraKeys } from "./ReplayCameraKeys";
 import ReshadeCard from "./ReshadeCard";
 import SupportersCard from "./SupportersCard";
 import { useTheme, type ThemeMode } from "../../Context/Theme";
@@ -1765,6 +1766,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={watchModsReload}
               onChange={toggleWatchModsReload}
             />
+
+            {/* Only once FrostMod is on disk: without an install there is no config to
+                edit, and the keys would be an offer that quietly does nothing. */}
+            {status?.installed && <ReplayCameraKeys />}
 
             <div className="flex gap-2">
               {/* Stop is offered whenever FrostMod is running, installed by us or not —

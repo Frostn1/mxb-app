@@ -5359,6 +5359,30 @@ fn frostmod_running() -> bool {
     frostmod::is_running()
 }
 
+/// The replay camera editor's key bindings, as FrostMod would read them.
+#[tauri::command]
+fn frostmod_keybinds(app: tauri::AppHandle) -> Vec<frostmod_manage::Keybind> {
+    let cfg = config::load(&app).unwrap_or_default();
+    frostmod_manage::rcam_keybinds(&app, &cfg.game_path)
+}
+
+/// Rebind the replay camera editor. Written into FrostMod's own config, which it re-reads
+/// each time the editor opens — so this applies without restarting the game.
+#[tauri::command]
+fn frostmod_set_keybinds(
+    app: tauri::AppHandle,
+    binds: Vec<frostmod_manage::Keybind>,
+) -> Result<(), String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    frostmod_manage::set_rcam_keybinds(&app, &cfg.game_path, &binds)
+}
+
+/// What FrostMod ships with, for the reset button.
+#[tauri::command]
+fn frostmod_default_keybinds() -> Vec<frostmod_manage::Keybind> {
+    frostmod_manage::default_rcam_keybinds()
+}
+
 /// Whether FrostMod actually got into the running game — and what to do when it didn't.
 ///
 /// `frostmod_running` only says the launcher is up, which is what made an elevated game so
@@ -8623,6 +8647,9 @@ fn main() {
             voice_test_output,
             set_watch_mods_reload,
             frostmod_reload,
+            frostmod_keybinds,
+            frostmod_set_keybinds,
+            frostmod_default_keybinds,
             frostmod_running,
             frostmod_attachment,
             garage_scan_bikes,

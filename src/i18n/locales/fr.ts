@@ -708,6 +708,42 @@ export const fr: Translation = {
   "settings.autoRunFrostmod": "Lancer FrostMod automatiquement",
   "settings.autoRunFrostmodDesc":
     "Démarrer FrostMod en arrière-plan à chaque ouverture de MXB App.",
+  "settings.rcamKeys":
+    "Touches de la caméra de replay",
+  "settings.rcamKeysDesc":
+    "Le jeu lit la même touche au même moment : choisis des touches que tes commandes de caméra n'utilisent pas — les touches de fonction et le pavé numérique sont souvent libres.",
+  "settings.rcamReset":
+    "Réinitialiser",
+  "settings.rcamPressKey":
+    "Appuie sur une touche",
+  "settings.rcamUnbound":
+    "Non attribuée",
+  "settings.rcamCaptureHint":
+    "Appuie sur la touche voulue. Échap annule, Retour arrière efface l'attribution.",
+  "settings.rcamAppliesHint":
+    "Prise en compte à la prochaine ouverture de l'éditeur en jeu — sans redémarrer.",
+  "settings.rcamDuplicate":
+    "Deux actions partagent une touche.",
+  "settings.rcamUnsupportedKey":
+    "FrostMod ne peut pas utiliser cette touche.",
+  "settings.rcamSaveFailed":
+    "Impossible d'enregistrer les touches",
+  "settings.rcamActionSetkey":
+    "Placer un point",
+  "settings.rcamActionDelete":
+    "Supprimer le point",
+  "settings.rcamActionClear":
+    "Effacer le trajet",
+  "settings.rcamActionPlay":
+    "Lecture / arrêt",
+  "settings.rcamActionPrev":
+    "Point précédent",
+  "settings.rcamActionNext":
+    "Point suivant",
+  "settings.rcamActionSave":
+    "Enregistrer le trajet",
+  "settings.rcamActionLoad":
+    "Charger le trajet",
   "settings.watchModsReload":
     "Rechargement auto lors des changements de dossier",
   "settings.watchModsReloadDesc":

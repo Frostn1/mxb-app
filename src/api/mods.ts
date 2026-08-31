@@ -2136,6 +2136,26 @@ export function isGameRunning(): Promise<boolean> {
 }
 
 /** Install/version/running snapshot (hits GitHub for the latest tag). */
+/** One replay camera editor action and the key it is on, in FrostMod's own text form
+ *  (`F9`, `Ctrl+Numpad1`, `none`) — one spelling shared by both programs. */
+export type FrostmodKeybind = { id: string; key: string };
+
+/** The bindings FrostMod would read right now: its defaults, plus whatever its config says. */
+export function frostmodKeybinds(): Promise<FrostmodKeybind[]> {
+  return invoke<FrostmodKeybind[]>("frostmod_keybinds");
+}
+
+/** Rebind the editor. FrostMod re-reads its config each time the editor opens, so this
+ *  lands without restarting the game. Rejects a key FrostMod could not read back. */
+export function setFrostmodKeybinds(binds: FrostmodKeybind[]): Promise<void> {
+  return invoke<void>("frostmod_set_keybinds", { binds });
+}
+
+/** What FrostMod ships with, for the reset button. */
+export function frostmodDefaultKeybinds(): Promise<FrostmodKeybind[]> {
+  return invoke<FrostmodKeybind[]>("frostmod_default_keybinds");
+}
+
 export function frostmodStatus(): Promise<FrostmodStatus> {
   return invoke<FrostmodStatus>("frostmod_status");
 }

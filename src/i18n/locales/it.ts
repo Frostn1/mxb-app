@@ -703,6 +703,42 @@ export const it: Translation = {
   "settings.autoRunFrostmod": "Avvia FrostMod automaticamente",
   "settings.autoRunFrostmodDesc":
     "Avvia FrostMod in background ogni volta che apri MXB App.",
+  "settings.rcamKeys":
+    "Tasti della telecamera replay",
+  "settings.rcamKeysDesc":
+    "Il gioco legge lo stesso tasto nello stesso momento, quindi scegli tasti che i tuoi comandi telecamera non usano — i tasti funzione e il tastierino numerico di solito sono liberi.",
+  "settings.rcamReset":
+    "Ripristina",
+  "settings.rcamPressKey":
+    "Premi un tasto",
+  "settings.rcamUnbound":
+    "Non assegnato",
+  "settings.rcamCaptureHint":
+    "Premi il tasto che vuoi. Esc annulla, Backspace cancella l'assegnazione.",
+  "settings.rcamAppliesHint":
+    "Si applica alla prossima apertura dell'editor in gioco — senza riavviare.",
+  "settings.rcamDuplicate":
+    "Due azioni condividono un tasto.",
+  "settings.rcamUnsupportedKey":
+    "FrostMod non può usare quel tasto.",
+  "settings.rcamSaveFailed":
+    "Impossibile salvare i tasti",
+  "settings.rcamActionSetkey":
+    "Imposta punto",
+  "settings.rcamActionDelete":
+    "Elimina punto",
+  "settings.rcamActionClear":
+    "Svuota percorso",
+  "settings.rcamActionPlay":
+    "Riproduci / ferma",
+  "settings.rcamActionPrev":
+    "Punto precedente",
+  "settings.rcamActionNext":
+    "Punto successivo",
+  "settings.rcamActionSave":
+    "Salva percorso",
+  "settings.rcamActionLoad":
+    "Carica percorso",
   "settings.watchModsReload": "Ricarica automatica alle modifiche",
   "settings.watchModsReloadDesc":
     "Ricarica il gioco automaticamente quando piste o moto vengono aggiunte alla cartella mod — anche se scaricate manualmente fuori da MXB App.",
