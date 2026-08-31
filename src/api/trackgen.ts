@@ -182,6 +182,25 @@ export function positionAt(program: TrackProgram, s: number): { x: number; z: nu
   return { x, z };
 }
 
+/**
+ * Pull every feature back inside the lap.
+ *
+ * Shortening or removing a corner leaves the jumps that were past it hanging off the end,
+ * and the row editor has no field for where a feature sits — so without this, removing one
+ * segment produces an error the person has no way to clear except by deleting their jumps.
+ */
+export function fitFeatures(program: TrackProgram): TrackProgram {
+  const lap = lapLength(program);
+  return {
+    ...program,
+    features: program.features.map((f) => {
+      const end = f.at + featureSpan(f).length;
+      if (end <= lap && f.at >= 0) return f;
+      return { ...f, at: Math.max(0, Math.min(f.at, lap - featureSpan(f).length)) };
+    }),
+  };
+}
+
 /** A feature of each kind, with sizes that sit inside what published tracks measure. */
 export function newFeature(kind: TrackFeatureKind, at: number): TrackFeature {
   switch (kind) {
