@@ -94,6 +94,9 @@ pub fn hrc_level0_scene(cfg: &CfgNode) -> Option<String> {
     cfg.block("level0")?.get("scene").map(str::to_string)
 }
 
+/// Every `level<n>` block's name, in file order — the whole ladder, where
+/// [`hrc_level0`] takes only the top rung. Read by the tests today.
+#[allow(dead_code)]
 pub fn hrc_all_levels(cfg: &CfgNode, stem: &str) -> Vec<String> {
     let mut out = Vec::new();
     for (name, blk) in &cfg.blocks {

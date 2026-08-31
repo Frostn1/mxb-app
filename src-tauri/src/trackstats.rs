@@ -551,7 +551,7 @@ fn largest_component(mask: &[bool], gw: usize, gh: usize) -> usize {
         while let Some(i) = stack.pop() {
             size += 1;
             let (x, y) = (i % gw, i / gw);
-            let mut push = |j: usize, seen: &mut Vec<bool>, stack: &mut Vec<usize>| {
+            let push = |j: usize, seen: &mut Vec<bool>, stack: &mut Vec<usize>| {
                 if mask[j] && !seen[j] {
                     seen[j] = true;
                     stack.push(j);

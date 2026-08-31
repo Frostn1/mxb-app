@@ -214,17 +214,14 @@ pub fn move_to_trash(path: &Path) -> anyhow::Result<TrashedAt> {
     use objc2_foundation::{NSFileManager, NSString, NSURL};
 
     let path_str = path.to_string_lossy();
-    // SAFETY: every argument outlives the call, and `out` is a valid out-pointer for the
-    // resulting URL. This is the same call the `trash` crate makes, asking for the one extra
-    // value it declines to request.
-    unsafe {
-        let mgr = NSFileManager::defaultManager();
-        let url = NSURL::fileURLWithPath(&NSString::from_str(&path_str));
-        let mut out = None;
-        mgr.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out))
-            .map_err(|e| anyhow::anyhow!("could not move to Trash: {e}"))?;
-        Ok(out.and_then(|u| u.path()).map(|p| p.to_string()))
-    }
+    // The same call the `trash` crate makes, asking for the one extra value it declines to
+    // request. `objc2` wraps it safely, so there is no unsafe block to justify.
+    let mgr = NSFileManager::defaultManager();
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path_str));
+    let mut out = None;
+    mgr.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out))
+        .map_err(|e| anyhow::anyhow!("could not move to Trash: {e}"))?;
+    Ok(out.and_then(|u| u.path()).map(|p| p.to_string()))
 }
 
 /// Windows and Linux have no Finder problem, and their own Trash reports nothing useful

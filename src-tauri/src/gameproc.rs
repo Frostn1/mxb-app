@@ -504,6 +504,7 @@ fn ansi_field(field: &[std::os::raw::c_char]) -> String {
 /// `None` means we could not look — the game isn't up, or the snapshot failed — which is
 /// deliberately different from `Some(vec![])`, "we looked and there was nothing to list".
 #[cfg(windows)]
+#[allow(dead_code)] // the Windows callers ask game_modules() for the refusal too.
 pub fn game_module_paths() -> Option<Vec<String>> {
     match game_modules() {
         GameModules::Loaded(paths) => Some(paths),
@@ -610,6 +611,8 @@ fn module_paths(pid: u32) -> Result<Vec<String>, WalkFailure> {
 /// its full path means opening it, which fails on anything running as another user or at a
 /// higher integrity level. A name is enough for what this is used for.
 #[cfg(windows)]
+// No caller in the app yet; each platform answers the same question.
+#[allow(dead_code)]
 pub fn running_process_names() -> Option<Vec<String>> {
     // SAFETY: standard Toolhelp process walk; the snapshot handle is closed before return.
     unsafe {
@@ -847,7 +850,7 @@ pub fn local_guid() -> Option<String> {
 }
 
 /// A GUID as the game prints it: 18 hex characters.
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 const GUID_TEXT_LEN: usize = 18;
 
 /// Read `buf` as a GUID, or nothing.
@@ -855,7 +858,7 @@ const GUID_TEXT_LEN: usize = 18;
 /// All-zero is what the buffer holds before Steam has authenticated the player, and it is a
 /// value the format itself uses to mean "bound to nobody" — so it is a miss here, not a GUID
 /// worth handing to anyone.
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 fn valid_guid(buf: &[u8]) -> Option<String> {
     let s = std::str::from_utf8(buf).ok()?.to_ascii_uppercase();
     let shaped = s.len() == GUID_TEXT_LEN && s.bytes().all(|b| b.is_ascii_hexdigit());
@@ -914,6 +917,7 @@ pub fn game_module_paths() -> Option<Vec<String>> {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub fn running_process_names() -> Option<Vec<String>> {
     let names = crate::proton::process_names();
     if names.is_empty() {
@@ -932,6 +936,7 @@ pub fn game_module_paths() -> Option<Vec<String>> {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
+#[allow(dead_code)]
 pub fn running_process_names() -> Option<Vec<String>> {
     None
 }

@@ -837,6 +837,8 @@ fn is_secondary(
 /// A diagnostic: names and dimensions only, nothing inflated. What a map calls its sheets is
 /// the whole of the binding problem, so being able to ask a track that question directly is
 /// worth a function.
+// Diagnostics the scenery tests read; nothing in the app calls them.
+#[allow(dead_code)]
 pub fn survey(b: &[u8]) -> Vec<(String, u32, u32)> {
     let Some((from, _)) = texture_table(b) else {
         return Vec::new();
@@ -848,6 +850,7 @@ pub fn survey(b: &[u8]) -> Vec<(String, u32, u32)> {
 }
 
 /// The records that look like a material's own colour map, in order.
+#[allow(dead_code)]
 pub fn primaries(b: &[u8]) -> Vec<(String, u32, u32)> {
     let Some((from, _)) = texture_table(b) else {
         return Vec::new();
@@ -1339,8 +1342,6 @@ mod tests {
         assert_eq!(name_stem("dirt"), name_stem("dirt_n"));
         assert_ne!(name_stem("soil_dark_c"), name_stem("soil_white_n_s"));
     }
-
-    use super::*;
 
     /// Build a `.map` byte-for-byte the way a real one is laid out.
     fn synth(materials: usize, verts: usize, tris: usize) -> Vec<u8> {

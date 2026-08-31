@@ -165,7 +165,7 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
       <div className="flex min-h-0 flex-1">
-        <Sidebar view={view} onNavigate={navigate} />
+        <Sidebar view={view} studioTab={studioTab} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {view === "browse" && selectedSlug ? (
             <ModDetail

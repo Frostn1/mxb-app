@@ -339,6 +339,7 @@ struct RawMod {
     /// the ignored live test can print the union of unknown keys and tell us exactly what
     /// [`map_mod`] should be corrected to.
     #[serde(flatten)]
+    #[allow(dead_code)]
     extra: HashMap<String, Value>,
 }
 

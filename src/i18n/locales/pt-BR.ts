@@ -2211,4 +2211,12 @@ export const ptBR: Translation = {
   "track.over": "sobre",
   "track.kind.rut": "Sulco",
   "track.sequenceHint": "Você pode descrever a volta em ordem — “uma reta longa, uma curva fechada à esquerda, depois um duplo e uma seção de ritmo” — e será construída assim.",
+  "track.compile": "Compilar com TerrainEd",
+  "track.compiling": "Compilando…",
+  "track.compiled": "Compilado",
+  "track.compileFailed": "Não foi possível compilar",
+  "track.buildStepFailed": "A etapa “{{step}}” falhou",
+  "track.pointAtTools": "Indicar as ferramentas…",
+  "track.toolsNotFound": "Sem terrained.exe nessa pasta",
+  "track.stillNeeded": "Ainda precisa de um .rdf do TrackEd (portão, boxes, câmeras) e um gate.edf copiado de outra pista.",
 };

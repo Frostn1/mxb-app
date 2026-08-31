@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 
@@ -8,6 +8,7 @@ import { TrackViewerDialog } from "../../Viewer/TrackViewerDialog";
 import { useT } from "../../../i18n/context";
 import { cn } from "@/lib/utils";
 import {
+  buildTrack,
   checkTrack,
   exportTrackSource,
   generateTrack,
@@ -15,10 +16,14 @@ import {
   lapLength,
   lapSteps,
   previewTrack,
+  setTrackTools,
+  trackToolsStatus,
+  type BuildStep,
   type LapStep,
   type TrackFeature,
   type TrackPreview,
   type TrackProgram,
+  type TrackToolsStatus,
 } from "../../../api/trackgen";
 
 /**
@@ -35,11 +40,21 @@ import {
 export default function TrackStudio() {
   const t = useT();
   const [brief, setBrief] = useState("");
-  const [busy, setBusy] = useState<"generate" | "preview" | "install" | "export" | null>(null);
+  const [busy, setBusy] = useState<
+    "generate" | "preview" | "install" | "export" | "build" | null
+  >(null);
   const [program, setProgram] = useState<TrackProgram | null>(null);
   const [preview, setPreview] = useState<TrackPreview | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const [viewing, setViewing] = useState(false);
+  const [tools, setTools] = useState<TrackToolsStatus | null>(null);
+  const [steps, setSteps] = useState<BuildStep[]>([]);
+
+  // Whether the compilers are here decides whether the last step is a button or a folder of
+  // homework, so it is worth knowing before anyone has generated anything.
+  useEffect(() => {
+    trackToolsStatus().then(setTools).catch(() => {});
+  }, []);
 
   /** Re-check and re-measure. Called after every edit, so the numbers are never stale. */
   const settle = useCallback(
@@ -127,6 +142,42 @@ export default function TrackStudio() {
   function removeFeature(index: number) {
     if (!program) return;
     void settle({ ...program, features: program.features.filter((_, i) => i !== index) });
+  }
+
+  async function onPointAtTools() {
+    const dir = await openDialog({ multiple: false, directory: true });
+    if (typeof dir !== "string") return;
+    try {
+      const next = await setTrackTools(dir);
+      setTools(next);
+      if (!next.found) toast.error(t("track.toolsNotFound"));
+    } catch (e) {
+      toast.error(t("track.toolsNotFound"), { description: String(e) });
+    }
+  }
+
+  async function onBuild() {
+    if (!program || busy) return;
+    const dir = await openDialog({ multiple: false, directory: true });
+    if (typeof dir !== "string") return;
+    setBusy("build");
+    setSteps([]);
+    try {
+      const ran = await buildTrack(program, dir);
+      setSteps(ran);
+      const failed = ran.find((s) => !s.ok);
+      if (failed) {
+        toast.error(t("track.buildStepFailed", { step: failed.name }), {
+          description: failed.output.slice(0, 400),
+        });
+      } else {
+        toast.success(t("track.compiled"), { description: dir });
+      }
+    } catch (e) {
+      toast.error(t("track.compileFailed"), { description: String(e) });
+    } finally {
+      setBusy(null);
+    }
   }
 
   const blocked = problems.length > 0;
@@ -241,8 +292,31 @@ export default function TrackStudio() {
                   {t("track.export")}
                 </Button>
               </div>
+              {tools?.found ? (
+                <Button
+                  variant="outline"
+                  onClick={() => void onBuild()}
+                  disabled={blocked || busy !== null}
+                >
+                  {busy === "build" ? t("track.compiling") : t("track.compile")}
+                </Button>
+              ) : (
+                <Button variant="ghost" onClick={() => void onPointAtTools()} disabled={busy !== null}>
+                  {t("track.pointAtTools")}
+                </Button>
+              )}
+              {steps.length > 0 && (
+                <ul className="space-y-1 text-[11.5px] leading-snug">
+                  {steps.map((s) => (
+                    <li key={s.name} className={s.ok ? "text-muted-foreground" : "text-destructive"}>
+                      {s.ok ? "✓" : "✕"} {s.name}
+                      {s.produced ? ` → ${s.produced}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
               <p className="text-[11.5px] leading-snug text-muted-foreground">
-                {t("track.previewOnly")}
+                {tools?.found ? t("track.stillNeeded") : t("track.previewOnly")}
               </p>
             </div>
           </div>

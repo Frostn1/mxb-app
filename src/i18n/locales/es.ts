@@ -2221,4 +2221,12 @@ export const es: Translation = {
   "track.over": "sobre",
   "track.kind.rut": "Rodada",
   "track.sequenceHint": "Puedes describir la vuelta en orden — «una recta larga, una horquilla a izquierda, luego un doble y una sección de ritmo» — y se construirá así.",
+  "track.compile": "Compilar con TerrainEd",
+  "track.compiling": "Compilando…",
+  "track.compiled": "Compilado",
+  "track.compileFailed": "No se pudo compilar",
+  "track.buildStepFailed": "Falló el paso «{{step}}»",
+  "track.pointAtTools": "Indicar las herramientas…",
+  "track.toolsNotFound": "No hay terrained.exe en esa carpeta",
+  "track.stillNeeded": "Aún necesita un .rdf de TrackEd (parrilla, boxes, cámaras) y un gate.edf copiado de otra pista.",
 };
