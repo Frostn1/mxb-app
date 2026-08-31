@@ -52,12 +52,15 @@ import {
   installTrackPreview,
   lapLength,
   FEATURE_COLOUR,
+  elevationAt,
+  featureMiddle,
   featureSpan,
   fitFeatures,
   lapSteps,
   newFeature,
   pathAlong,
   positionAt,
+  setElevationAt,
   previewTrack,
   roomiestGap,
   setTrackTools,
@@ -115,6 +118,9 @@ export default function TrackStudio() {
   // have in their heads.
   const [shut, setShut] = useState<Set<number>>(new Set());
   const [flash, setFlash] = useState<number | null>(null);
+  // Which row the height strip is showing. A corner or a straight at a time, because on a
+  // 1500 m lap a 40 m berm is three pixels wide and every point lands on the last one.
+  const [scope, setScope] = useState<number | null>(null);
   // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
   // rather than the default. With it on, an edit settles and then the view catches up.
   const [live, setLive] = useState(false);
@@ -397,6 +403,13 @@ export default function TrackStudio() {
     if (!program) return;
     setTouched(true);
     void settle({ ...program, terrain: { ...program.terrain, ...patch } });
+  }
+
+  /** Put the ground under one feature at a given height, by moving the lap's height curve. */
+  function liftFeature(f: TrackFeature, height: number) {
+    if (!program) return;
+    setTouched(true);
+    void settle(setElevationAt(program, featureMiddle(f), height));
   }
 
   function addFeature(kind: TrackFeatureKind) {
@@ -770,7 +783,10 @@ export default function TrackStudio() {
                     key={row}
                     data-step={row}
                     data-at={step.at}
-                    onClick={() => setFocus(positionAt(program, step.at))}
+                    onClick={() => {
+                      setScope(row);
+                      setFocus(positionAt(program, step.at));
+                    }}
                     onPointerEnter={() =>
                       setHover({
                         // The whole of it, not where it starts: a straight is two hundred
@@ -792,6 +808,7 @@ export default function TrackStudio() {
                       dragging === row && "opacity-40",
                       // The line lands above this row when it is the drop target, and below
                       // the last one when the drop is past the end.
+                      scope === row && "bg-foreground/[0.06]",
                       dropAt === row && "before:absolute before:inset-x-2 before:top-0 before:h-0.5 before:bg-primary",
                       dropAt === steps.length &&
                         row === steps.length - 1 &&
@@ -855,14 +872,21 @@ export default function TrackStudio() {
                     )}
 
                     <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                      {fieldsOf(step).map((f) => (
+                      {fieldsOf(
+                        step,
+                        step.kind === "feature"
+                          ? elevationAt(program, featureMiddle(step.feature))
+                          : undefined,
+                      ).map((f) => (
                         <Field
                           key={f.label}
                           label={f.label}
                           value={f.value}
                           step={f.step}
                           onChange={(v) =>
-                            step.kind === "feature"
+                            f.ground && step.kind === "feature"
+                              ? liftFeature(step.feature, v)
+                              : step.kind === "feature"
                               ? editFeature(step.index, { [f.key]: v } as Partial<TrackFeature>)
                               : editSegment(step.index, {
                                   [f.key]:
@@ -891,18 +915,73 @@ export default function TrackStudio() {
             {/* The lap's own height, as a line you can pull about — the same shape the
                 segment rises describe, in the form you can take hold of. */}
             <div className="flex-none border-t border-input px-2 pb-1 pt-1.5">
-              <div className="px-1 text-[10.5px] uppercase tracking-wide text-muted-foreground">
-                {t("track.height")}
+              <div className="flex items-center gap-2 px-1 text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                <span>{t("track.height")}</span>
+                {(() => {
+                  const steps = lapSteps(program);
+                  const on = scope !== null ? steps[scope] : undefined;
+                  return on ? (
+                    <button
+                      onClick={() => setScope(null)}
+                      className="cursor-default rounded px-1 normal-case tracking-normal text-foreground hover:bg-foreground/[0.06]"
+                      title={t("track.wholeLap")}
+                    >
+                      {stepName(on, t)} · {on.at.toFixed(0)}–
+                      {(on.at + stepLength(on)).toFixed(0)} m ×
+                    </button>
+                  ) : (
+                    <span className="normal-case tracking-normal">{t("track.wholeLap")}</span>
+                  );
+                })()}
               </div>
               <ElevationCurve
                 lap={lapLength(program)}
+                {...(() => {
+                  const steps = lapSteps(program);
+                  const on = scope !== null ? steps[scope] : undefined;
+                  if (!on) return {};
+                  // A little either side, so the ends of the stretch can be shaped against
+                  // what they run into rather than against the edge of the picture.
+                  const pad = Math.max(stepLength(on) * 0.15, 5);
+                  return { from: Math.max(0, on.at - pad), to: on.at + stepLength(on) + pad };
+                })()}
                 knots={program.elevation ?? []}
                 features={program.features}
                 onChange={(elevation) => {
                   setTouched(true);
                   void settle({ ...program, elevation });
                 }}
-                className="h-[92px]"
+                onFeature={editFeature}
+                {...(() => {
+                  const steps = lapSteps(program);
+                  const on = scope !== null ? steps[scope] : undefined;
+                  if (!on) return {};
+                  return {
+                    scoped:
+                      on.kind === "feature"
+                        ? { at: on.at, feature: on.feature }
+                        : { at: on.at, segment: on.segment },
+                    onScoped: (patch: Record<string, number>) =>
+                      on.kind === "feature"
+                        ? editFeature(on.index, patch as Partial<TrackFeature>)
+                        : editSegment(on.index, patch as Partial<TrackSegment>),
+                  };
+                })()}
+                onHover={(i) =>
+                  setHover(
+                    i === null
+                      ? null
+                      : {
+                          path: pathAlong(
+                            program,
+                            program.features[i].at,
+                            featureSpan(program.features[i]).length,
+                          ),
+                          width: program.width * 1.6,
+                        },
+                  )
+                }
+                className="h-[104px]"
               />
             </div>
           </div>
@@ -1012,7 +1091,10 @@ function stepName(step: LapStep, t: ReturnType<typeof useT>): string {
  * kind. `rise` is on every segment because "does this bit go up or down" is a question you
  * ask of a straight as often as of a corner.
  */
-function fieldsOf(step: LapStep): { key: string; label: string; value: number; step: number }[] {
+function fieldsOf(
+  step: LapStep,
+  ground?: number,
+): { key: string; label: string; value: number; step: number; ground?: boolean }[] {
   const len = (v: number) => ({ key: "length", label: "m", value: v, step: 1 });
   const rise = (v: number) => ({ key: "rise", label: "↕", value: v, step: 0.5 });
   if (step.kind === "straight") {
@@ -1030,26 +1112,33 @@ function fieldsOf(step: LapStep): { key: string; label: string; value: number; s
     ];
   }
   const f = step.feature;
+  // Where the ground is under this feature, as opposed to how tall the feature is. Every
+  // kind gets one: "this jump is three metres up" is a different question from "this jump is
+  // two metres tall", and both are worth asking of the same row.
+  const up = { key: "ground", label: "↑", value: ground ?? 0, step: 0.5, ground: true };
   switch (f.kind) {
     case "double":
       return [
         { key: "height", label: "h", value: f.height, step: 0.1 },
         { key: "gap", label: "gap", value: f.gap, step: 1 },
         { key: "lip", label: "lip", value: f.lip, step: 0.5 },
+        up,
       ];
     case "whoops":
       return [
         { key: "height", label: "h", value: f.height, step: 0.05 },
         { key: "count", label: "×", value: f.count, step: 1 },
         { key: "spacing", label: "gap", value: f.spacing, step: 0.5 },
+        up,
       ];
     case "rut":
-      return [
-        { key: "depth", label: "deep", value: f.depth, step: 0.05 },
-        len(f.length),
-      ];
+      return [{ key: "depth", label: "deep", value: f.depth, step: 0.05 }, len(f.length), up];
     default:
-      return [{ key: "height", label: "h", value: f.height, step: 0.1 }, len(f.length)];
+      return [
+        { key: "height", label: "h", value: f.height, step: 0.1 },
+        len(f.length),
+        up,
+      ];
   }
 }
 

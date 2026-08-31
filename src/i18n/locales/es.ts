@@ -704,6 +704,9 @@ export const es: Translation = {
   "settings.instantRefresh": "Actualización instantánea de presets",
   "settings.instantRefreshDesc":
     "Cuando aplicas un preset con {{game}} en marcha, actualiza el look en el juego al instante — sin reiniciar ni volver a seleccionar el perfil. Si no puede, se te pedirá que vuelvas a seleccionar tu perfil.",
+  "settings.paintSync": "Sincronización de pinturas",
+  "settings.paintSyncDesc":
+    "Comparte las pinturas que llevas con los demás pilotos de tu servidor, e instala las suyas, para que la parrilla se vea como todos querían. Funciona solo en cualquier servidor — nada que configurar, ni para ti ni para el anfitrión.",
   "settings.instantRefreshWindowsOnly":
     "Actualizar el look en el juego sin reiniciar implica entrar en el juego en marcha, y eso solo puede hacerlo la versión de Windows — en su lugar se te pedirá que vuelvas a seleccionar tu perfil.",
   "settings.autoRunFrostmod": "Ejecutar FrostMod automáticamente",
@@ -1094,6 +1097,9 @@ export const es: Translation = {
   "sync.lastPulled": "Última comprobación {{ago}}. Se repite sola cuando pulsas Jugar.",
   "sync.neverPulled": "Aún no has descargado las pinturas de los demás",
   "sync.neverPulledWhy": "Hasta que lo hagas, los otros pilotos aparecen con motos por defecto aunque hayan publicado las suyas.",
+  "sync.notStartedTitle": "Aún no ha empezado",
+  "sync.notStartedWhy":
+    "La sincronización de pinturas se configura sola la primera vez que ruedas en línea — no hay nada que rellenar. Abre MX Bikes, únete a un servidor, y esto se completará solo.",
   "sync.oversized_one": "{{count}} pintura es demasiado grande para compartirla, así que los demás pilotos no la verán.",
   "sync.oversized_other": "{{count}} pinturas son demasiado grandes para compartirlas, así que los demás pilotos no las verán.",
   "sync.skippedBikes_one": "{{count}} moto no se publicó — tienes más de las que podemos guardar.",
@@ -2405,4 +2411,5 @@ export const es: Translation = {
   "track.smoothing": "fundido",
   "track.live": "En vivo",
   "track.rebuild": "Reconstruir la vista",
+  "track.wholeLap": "vuelta entera",
 };

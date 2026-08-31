@@ -118,6 +118,7 @@ export interface Config {
   /** Voice chat is off until turned on — a feature that opens a microphone shouldn't be
    *  something anyone discovers by accident. */
   voiceEnabled?: boolean;
+  paintSyncEnabled?: boolean;
   /** Microphone to listen to. **Blank means "follow the system default"**, so a player
    *  who never picks one keeps tracking the device they change in Windows later. */
   voiceInputDevice?: string;

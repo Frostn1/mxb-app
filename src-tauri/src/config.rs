@@ -95,6 +95,15 @@ pub struct AppConfig {
     /// Voice chat is off until the player turns it on. A feature that opens a microphone
     /// is not something anyone should discover by accident.
     pub voice_enabled: bool,
+    /// Paint sync is on unless the player turns it off. Unlike voice, it opens nothing and
+    /// costs nothing to be wrong about: the app publishes the look this rider is already
+    /// showing to everyone on the grid, and installs what the grid published back. Off by
+    /// default would mean a rider only sees the paints of whoever else went looking for a
+    /// setting, which is the same empty grid the feature exists to fix.
+    ///
+    /// A config written before this field deserializes to the struct default, which is on —
+    /// see the `default` on `AppConfig` itself.
+    pub paint_sync_enabled: bool,
     /// Microphone to listen to. **Blank means "follow the system default"** — storing the
     /// resolved name instead would pin the player to whichever headset was plugged in the
     /// day they set it, and stop tracking the default they later change in Windows.
@@ -126,13 +135,6 @@ pub struct AppConfig {
     /// token. Stored here in clear, like the rest of the config — worth knowing before
     /// adding a server whose token protects anything beyond the game process it runs.
     pub servers: Vec<crate::servers::ServerRef>,
-    /// Show the unfinished multiplayer features — the Servers tab and paint sync.
-    ///
-    /// Off by default even in a beta build: these talk to a live control plane and write
-    /// files other players uploaded, so they're opt-in rather than something a player finds
-    /// by accident. Also settable with `MXB_EXPERIMENTAL=1` for a run that doesn't touch
-    /// the saved config (see [`AppConfig::experimental_enabled`]).
-    pub experimental: bool,
     /// Bearer token for this player's control-plane account, from enrolling with an invite
     /// code. Empty until they enroll.
     pub cp_token: String,
@@ -186,23 +188,6 @@ pub struct SyncState {
     pub kept_yours: usize,
     /// Destinations two riders disagreed about, so neither was installed.
     pub conflicted: usize,
-}
-
-/// Set to `1` to force the experimental features on for one run.
-pub const EXPERIMENTAL_ENV: &str = "MXB_EXPERIMENTAL";
-
-impl AppConfig {
-    /// Whether the experimental features should be visible.
-    ///
-    /// The environment variable wins so a build can be handed to a tester with a flag
-    /// rather than a settings walkthrough, and so turning it on for one run leaves no
-    /// trace in their saved config.
-    pub fn experimental_enabled(&self) -> bool {
-        if std::env::var(EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false) {
-            return true;
-        }
-        self.experimental
-    }
 }
 
 /// Toggle combo used until the player picks another one.
@@ -259,6 +244,7 @@ impl Default for AppConfig {
             overlay_hotkey: DEFAULT_OVERLAY_HOTKEY.to_string(),
             preview_tyres: String::new(),
             voice_enabled: false,
+            paint_sync_enabled: true,
             voice_input_device: String::new(),
             voice_output_device: String::new(),
             voice_ptt_hotkey: DEFAULT_PTT_HOTKEY.to_string(),
@@ -267,7 +253,6 @@ impl Default for AppConfig {
             voice_output_volume: 1.0,
             seen_version: String::new(),
             servers: Vec::new(),
-            experimental: false,
             cp_token: String::new(),
             track_tools_path: String::new(),
             cp_rider_name: String::new(),
@@ -958,6 +943,32 @@ mod tests {
             cfg.games.get("mxb").map(|g| g.mods_path.as_str()),
             Some("/games/MX Bikes"),
         );
+    }
+
+    /// Paint sync is on for every install that predates the setting.
+    ///
+    /// It reaches players as an upgrade, not as an install, so the field is absent from every
+    /// config that exists today. Off would mean the feature shipped switched off for
+    /// everyone who already has the app — which is everyone it is for.
+    #[test]
+    fn paint_sync_is_on_for_a_config_written_before_it_existed() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "voiceEnabled": false }"#;
+        let cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+
+        assert!(cfg.paint_sync_enabled, "an absent field means on");
+        assert!(!cfg.voice_enabled, "and a field that is there still means what it says");
+    }
+
+    /// Turning it off has to survive a round trip, or the switch springs back on restart.
+    #[test]
+    fn paint_sync_stays_off_once_it_is_turned_off() {
+        let json = r#"{ "modsPath": "/games/MX Bikes", "paintSyncEnabled": false }"#;
+        let cfg = serde_json::from_str::<AppConfig>(json).unwrap();
+        assert!(!cfg.paint_sync_enabled);
+
+        let round_tripped =
+            serde_json::from_str::<AppConfig>(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!round_tripped.paint_sync_enabled, "and it is written back out");
     }
 
     /// Switching parks the outgoing game's folders and restores the incoming one's, so a

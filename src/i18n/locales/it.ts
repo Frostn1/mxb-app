@@ -703,6 +703,9 @@ export const it: Translation = {
   "settings.instantRefresh": "Aggiornamento preset istantaneo",
   "settings.instantRefreshDesc":
     "Quando applichi un preset mentre {{game}} è in esecuzione, aggiorna il look in gioco all'istante — senza riavvio né riselezione del profilo. Se non ci riesce, ti verrà chiesto di riselezionare il profilo.",
+  "settings.paintSync": "Sincronizzazione livree",
+  "settings.paintSyncDesc":
+    "Condivide le livree che indossi con gli altri piloti del tuo server e installa le loro, così la griglia appare come tutti volevano. Funziona da sé su qualsiasi server — niente da configurare, né per te né per l'host.",
   "settings.instantRefreshWindowsOnly":
     "Aggiornare il look in gioco senza riavviare significa intervenire nel gioco in esecuzione, e può farlo solo la versione Windows — ti verrà invece chiesto di riselezionare il profilo.",
   "settings.autoRunFrostmod": "Avvia FrostMod automaticamente",
@@ -1092,6 +1095,9 @@ export const it: Translation = {
   "sync.lastPulled": "Ultimo controllo {{ago}}. Riparte da solo quando premi Gioca.",
   "sync.neverPulled": "Non hai ancora scaricato le grafiche degli altri",
   "sync.neverPulledWhy": "Finché non lo fai, gli altri piloti appaiono con moto predefinite anche se hanno pubblicato le loro.",
+  "sync.notStartedTitle": "Non ancora avviata",
+  "sync.notStartedWhy":
+    "La sincronizzazione delle livree si configura da sé la prima volta che giri online — non c'è nulla da compilare. Avvia MX Bikes, entra in un server, e il resto comparirà qui da solo.",
   "sync.oversized_one": "{{count}} grafica è troppo grande da condividere, quindi gli altri piloti non la vedranno.",
   "sync.oversized_other": "{{count}} grafiche sono troppo grandi da condividere, quindi gli altri piloti non le vedranno.",
   "sync.skippedBikes_one": "{{count}} moto non è stata pubblicata — ne hai più di quante possiamo tenerne.",
@@ -2398,4 +2404,5 @@ export const it: Translation = {
   "track.smoothing": "raccordo",
   "track.live": "Dal vivo",
   "track.rebuild": "Ricostruisci l'anteprima",
+  "track.wholeLap": "giro intero",
 };

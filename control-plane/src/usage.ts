@@ -77,7 +77,6 @@ export const KNOWN_EVENTS = [
   "view.studio.track",
   "view.studio.protect",
   "view.manage",
-  "view.servers",
   "view.shop",
   "view.hub",
   "view.settings",

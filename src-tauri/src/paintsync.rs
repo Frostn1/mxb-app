@@ -1059,6 +1059,228 @@ mod live_sync {
         std::env::var("MXB_TEST_TOKEN").expect("MXB_TEST_TOKEN must name an enrolled account")
     }
 
+    /// A rider: a fresh self-serve account, with a GUID of its own.
+    ///
+    /// Self-serve rather than invited on purpose. Two strangers on a public server is the
+    /// case the whole feature is for, and neither of them has an invite code — so if this
+    /// signs up and publishes, the control plane is open on exactly the terms it needs to be.
+    struct Rider {
+        token: String,
+        guid: String,
+        name: String,
+    }
+
+    /// A GUID nobody has claimed yet.
+    ///
+    /// The column is UNIQUE, so a hardcoded one can be claimed exactly once per database and
+    /// every later run gets a 409. `n` keeps two riders in the same run apart; the clock
+    /// keeps this run apart from the last one.
+    fn fresh_guid(n: u8) -> String {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("{:08x}-0000-0000-{:04x}-{:012x}", t as u32, n as u16, (t >> 32) as u64 & 0xffff_ffff_ffff)
+    }
+
+    async fn sign_up(name: &str, guid: &str) -> Rider {
+        #[derive(Deserialize)]
+        struct Claimed {
+            token: String,
+        }
+        let http = client().unwrap();
+        let claimed: Claimed = http
+            .post(format!("{}/v1/account", control_plane()))
+            .json(&serde_json::json!({ "riderName": name }))
+            .send()
+            .await
+            .expect("the control plane must be reachable")
+            .error_for_status()
+            .expect("a self-serve sign-up must be accepted")
+            .json()
+            .await
+            .unwrap();
+
+        // The GUID is what tells two riders apart in a roster; without it they are told
+        // apart by name, which two people can share.
+        http.put(format!("{}/v1/me/guid", control_plane()))
+            .bearer_auth(&claimed.token)
+            .json(&serde_json::json!({ "guid": guid }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect("claiming a GUID must be open to a self-serve account");
+
+        Rider { token: claimed.token, guid: guid.to_string(), name: name.to_string() }
+    }
+
+    /// Wear one paint, and publish it. Returns the bytes, so the receiver can be checked
+    /// against them rather than against the fact that *a* file arrived.
+    async fn publish_one(rider: &Rider, bike: &str, rel_dest: &str, bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let sha = format!("{:x}", Sha256::digest(bytes));
+        let file_name = rel_dest.rsplit('/').next().unwrap().to_string();
+        let http = client().unwrap();
+
+        http.put(format!("{}/v1/paints/{sha}", control_plane()))
+            .bearer_auth(&rider.token)
+            .body(bytes.to_vec())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect("a self-serve account must be able to store a paint");
+
+        http.put(format!("{}/v1/loadouts", control_plane()))
+            .bearer_auth(&rider.token)
+            .json(&serde_json::json!({
+                "bikes": [{
+                    "bikeId": bike,
+                    "paints": [{
+                        "slot": "paint",
+                        "fileName": file_name,
+                        "sha256": sha,
+                        "size": bytes.len(),
+                        "relDest": rel_dest,
+                    }],
+                }],
+            }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect("a self-serve account must be able to publish a loadout");
+        sha
+    }
+
+    /// A mods tree to pull into, and the config that points at it.
+    fn rider_machine(name: &str) -> (PathBuf, AppConfig) {
+        let root = scratch(name);
+        let cfg =
+            AppConfig { mods_path: root.to_string_lossy().into_owned(), ..Default::default() };
+        (root, cfg)
+    }
+
+    /// The whole point of the feature, on a server nobody registered.
+    ///
+    /// Two riders sign themselves up, both say they are on the same server — keyed by its
+    /// *name*, exactly as `voice::session::room_key` derives it from what FrostMod reads out
+    /// of the running game — and each ends up with the other's paint on disk. Nothing here
+    /// touches the server registry, and no agent is involved: the key is an arbitrary string
+    /// two strangers happened to compute the same way.
+    #[tokio::test]
+    #[ignore = "needs a running control plane"]
+    async fn two_riders_on_one_server_install_each_others_paints() {
+        // A name with the punctuation and capitals a real server has, folded the way the app
+        // folds it. If this key were mishandled anywhere, the two riders would sit in
+        // different rosters and each would install nothing.
+        let server = crate::voice::session::room_key("  Frost's  Test Server #2  ");
+        assert_eq!(server, "frost's test server #2", "the key is folded, not hashed");
+
+        let alice = sign_up("Alice", &fresh_guid(1)).await;
+        let bob = sign_up("Bob", &fresh_guid(2)).await;
+
+        let alice_paint = b"alice's artwork, not bob's".to_vec();
+        let bob_paint = b"bob's artwork, not alice's".to_vec();
+        publish_one(&alice, "YZ450F", "bikes/YZ450F/paints/Alice.pnt", &alice_paint).await;
+        publish_one(&bob, "YZ450F", "bikes/YZ450F/paints/Bob.pnt", &bob_paint).await;
+
+        report_presence(&alice.token, &server).await.unwrap();
+        report_presence(&bob.token, &server).await.unwrap();
+
+        // Bob rides onto the server and pulls.
+        let (bob_root, bob_cfg) = rider_machine("bob");
+        let out = pull(&bob_cfg, &bob.token, &[server.clone()]).await.unwrap();
+        println!("bob: {out:?}");
+
+        let landed = bob_root.join("mods/bikes/YZ450F/paints/Alice.pnt");
+        assert_eq!(
+            std::fs::read(&landed).ok(),
+            Some(alice_paint.clone()),
+            "Alice's paint must be on Bob's disk, byte for byte: {out:?}"
+        );
+        // Two riders on the grid, told apart by GUID — the roster carries both, and Bob's
+        // own row is one of them.
+        assert_eq!(out.riders, 2, "the roster is two distinct riders: {out:?}");
+        assert!(out.installed >= 1, "something must have been installed: {out:?}");
+
+        // And the other direction, which is the half a one-sided test would miss.
+        let (alice_root, alice_cfg) = rider_machine("alice");
+        let out = pull(&alice_cfg, &alice.token, &[server.clone()]).await.unwrap();
+        assert_eq!(
+            std::fs::read(alice_root.join("mods/bikes/YZ450F/paints/Bob.pnt")).ok(),
+            Some(bob_paint),
+            "Bob's paint must reach Alice too: {out:?}"
+        );
+
+        // A second pass installs nothing: the manifest recognises what it wrote.
+        let again = pull(&bob_cfg, &bob.token, &[server.clone()]).await.unwrap();
+        assert_eq!(again.installed, 0, "a repeat sync installs nothing: {again:?}");
+        assert!(again.already_had >= 1, "and recognises what it already has: {again:?}");
+
+        // The scoping has to be real, or "keyed on the server" is decoration: a rider on a
+        // different server sees an empty grid, not Alice and Bob.
+        let carol = sign_up("Carol", &fresh_guid(3)).await;
+        let elsewhere = crate::voice::session::room_key("Someone Else's Server");
+        report_presence(&carol.token, &elsewhere).await.unwrap();
+        let (carol_root, carol_cfg) = rider_machine("carol");
+        let out = pull(&carol_cfg, &carol.token, &[elsewhere]).await.unwrap();
+        assert_eq!(out.installed, 0, "another server is another grid: {out:?}");
+        assert!(
+            !carol_root.join("mods/bikes/YZ450F/paints/Alice.pnt").exists(),
+            "a rider elsewhere must not receive this server's paints"
+        );
+
+        assert_ne!(alice.guid, bob.guid);
+        assert_ne!(alice.name, bob.name);
+        for root in [alice_root, bob_root, carol_root] {
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// The GUID is what tells riders apart, and this is the only test that can prove it.
+    ///
+    /// Two riders with *the same name* and different GUIDs are two people. If the GUID were
+    /// not reaching the roster — never claimed, not selected, dropped in transit — the
+    /// receiver would fall back to keying on the name, both rows would collapse into one,
+    /// and the count would say 1. So the count is the proof; a test with two different names
+    /// passes either way and proves nothing about the GUID at all.
+    ///
+    /// Their *paints* are not routed by GUID, and are not meant to be: MX Bikes matches a
+    /// remote rider's livery by file name, so a pull installs files and the GUID's only job
+    /// is to stop one rider being counted twice.
+    #[tokio::test]
+    #[ignore = "needs a running control plane"]
+    async fn two_riders_sharing_a_name_are_told_apart_by_guid() {
+        let server = crate::voice::session::room_key("Name Clash Test");
+
+        let first = sign_up("Frost", &fresh_guid(4)).await;
+        let second = sign_up("Frost", &fresh_guid(5)).await;
+        assert_eq!(first.name, second.name, "the same name on purpose");
+        assert_ne!(first.token, second.token, "but two separate accounts");
+
+        publish_one(&first, "YZ450F", "bikes/YZ450F/paints/First.pnt", b"the first Frost").await;
+        publish_one(&second, "YZ450F", "bikes/YZ450F/paints/Second.pnt", b"the other Frost").await;
+        report_presence(&first.token, &server).await.unwrap();
+        report_presence(&second.token, &server).await.unwrap();
+
+        let (root, cfg) = rider_machine("clash");
+        let out = pull(&cfg, &first.token, &[server]).await.unwrap();
+        println!("name clash: {out:?}");
+
+        assert_eq!(
+            out.riders, 2,
+            "a shared name must not merge two riders — the GUID has to be doing the work: {out:?}"
+        );
+        // And both liveries land, because the destinations differ. A name collision on the
+        // *file* is the other problem entirely, and `kept_yours` is where that shows up.
+        assert!(root.join("mods/bikes/YZ450F/paints/First.pnt").exists());
+        assert!(root.join("mods/bikes/YZ450F/paints/Second.pnt").exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// The failure this whole manifest exists to prevent: a rider publishing a different
     /// paint under a name you already use, and the sync quietly replacing your artwork.
     #[tokio::test]
