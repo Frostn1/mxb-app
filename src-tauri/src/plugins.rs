@@ -28,9 +28,14 @@ use sha2::{Digest, Sha256};
 
 /// Public half of the pair the control plane signs with (raw 32 bytes, base64url).
 ///
-/// Rotating this means shipping an app update: an install that has not updated rejects
-/// every entitlement signed by the new pair. Generate a pair with
-/// `control-plane/scripts/plugin-keypair.ts`.
+/// **This is a placeholder from a throwaway pair.** Before shipping, run
+/// `control-plane/scripts/plugin-keypair.ts`, put the private half in the worker
+/// (`wrangler secret put PLUGIN_SIGNING_KEY`) and the public half here. Until both sides
+/// hold halves of the same pair, every entitlement fails verification — which is the safe
+/// direction to fail in, but it does mean nothing works.
+///
+/// Rotating it later means shipping an app update: an install that has not updated rejects
+/// every entitlement signed by the new pair.
 pub const ENTITLEMENT_PUBLIC_KEY: &str = "3RVzr7dGG2rcorozGze9rR7NUTj61bwxS2IL0t40kk0";
 
 /// Entitlement format we understand. A newer one is refused rather than half-read.
