@@ -68,6 +68,13 @@ pub struct Entitlement {
 /// in the error text because "your clock is wrong" and "that signature is not ours" send a
 /// person to very different places.
 pub fn verify_entitlement(token: &str) -> Result<Entitlement> {
+    verify_with(token, ENTITLEMENT_PUBLIC_KEY)
+}
+
+/// The same check against a named key. Split out so a test can pin the wire format against
+/// a token the control plane's own TypeScript actually produced — the encoding is agreed
+/// across two languages and nothing in either would notice if they drifted apart.
+pub fn verify_with(token: &str, public_key_b64: &str) -> Result<Entitlement> {
     let (payload_b64, sig_b64) = token
         .split_once('.')
         .ok_or_else(|| anyhow!("not an entitlement token"))?;
@@ -79,7 +86,7 @@ pub fn verify_entitlement(token: &str) -> Result<Entitlement> {
         .context("entitlement signature is not base64url")?;
 
     let key_bytes: [u8; 32] = URL_SAFE_NO_PAD
-        .decode(ENTITLEMENT_PUBLIC_KEY)
+        .decode(public_key_b64)
         .ok()
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| anyhow!("the built-in signing key is malformed"))?;
@@ -201,6 +208,22 @@ impl PluginState {
     /// file, and a file gets pasted into someone else's install.
     pub fn accept(&mut self, token: &str) -> Result<Entitlement> {
         let e = verify_entitlement(token)?;
+        match &self.account {
+            Some(existing) if existing != &e.account => {
+                bail!("that entitlement belongs to a different account")
+            }
+            _ => {}
+        }
+        self.account = Some(e.account.clone());
+        self.clock.witness(&e);
+        self.entitlements.insert(e.plugin.clone(), token.to_string());
+        Ok(e)
+    }
+
+    /// Test-only twin of `accept`, against a named key.
+    #[cfg(test)]
+    pub fn accept_with(&mut self, token: &str, key: &str) -> Result<Entitlement> {
+        let e = verify_with(token, key)?;
         match &self.account {
             Some(existing) if existing != &e.account => {
                 bail!("that entitlement belongs to a different account")
@@ -406,6 +429,42 @@ mod tests {
         )
     }
 
+    /// A token produced by the control plane's own `signEntitlement`, in TypeScript, in a
+    /// Worker runtime — pasted here verbatim.
+    ///
+    /// This is the one seam neither side can check alone. The payload is JSON with a field
+    /// order, encoded base64url without padding, signed Ed25519 over those exact bytes, and
+    /// every one of those is a place the two languages could quietly disagree: a `+` for a
+    /// `-`, a padded string, a re-serialised payload with the keys in another order. Each of
+    /// those produces a token that looks perfectly well-formed and fails to verify, and the
+    /// symptom in production is "nobody's licence works".
+    const TS_PUBLIC_KEY: &str = "Sp8dtEFQK86a9AKfQg-2wwRxFBGgZX4Wc6qHN2UHLJg";
+    const TS_TOKEN: &str = "eyJ2IjoxLCJhY2NvdW50IjoiYWNjX3Rlc3QiLCJwbHVnaW4iOiJyZXBsYXljYW0iLCJleHBpcmVzIjoyMDAwMDAwMDAwLCJyZWZyZXNoQWZ0ZXIiOjE5MDAwMDAwMDAsImJ1bmRsZVNoYTI1NiI6Ijc3OTZkNDdlYzBkZTg0OGYzYjQxOWY0M2ZmMjExMTQ5ZGI0Y2MzYzQ0MDA3Yzk3ZjhkYTIxYTc2OWUzZTYwZGYiLCJpc3N1ZWQiOjE4MDAwMDAwMDB9.fljHCXVRtstMp1ZvUbPP54Vw1N1vwJAezyDkrgXwN-5at1M4P5LJtZ90UMqdWV1pRkpH5ccnILW1ffhkJ_fIAA";
+
+    #[test]
+    fn verifies_a_token_the_typescript_worker_actually_signed() {
+        let e = verify_with(TS_TOKEN, TS_PUBLIC_KEY).expect("the worker's own token must verify");
+        assert_eq!(e.v, 1);
+        assert_eq!(e.account, "acc_test");
+        assert_eq!(e.plugin, "replaycam");
+        assert_eq!(e.expires, 2000000000);
+        assert_eq!(e.refresh_after, 1900000000);
+        assert_eq!(e.issued, 1800000000);
+        // The camelCase rename is part of the wire format, and serde would silently default
+        // these to 0 if the attribute were dropped.
+        assert_eq!(
+            e.bundle_sha256.as_deref(),
+            Some("7796d47ec0de848f3b419f43ff211149db4cc3c44007c97f8da21a769e3e60df")
+        );
+    }
+
+    #[test]
+    fn rejects_the_worker_token_under_a_different_key() {
+        // Same token, the app's own key: this is what a licence signed by someone else's
+        // control plane looks like.
+        assert!(verify_with(TS_TOKEN, ENTITLEMENT_PUBLIC_KEY).is_err());
+    }
+
     #[test]
     fn status_has_three_states_and_the_middle_one_matters() {
         let e = Entitlement {
@@ -476,16 +535,27 @@ mod tests {
     }
 
     #[test]
+    fn state_takes_a_real_token_and_learns_the_account_from_it() {
+        let mut st = PluginState::default();
+        let e = st.accept_with(TS_TOKEN, TS_PUBLIC_KEY).unwrap();
+        assert_eq!(st.account.as_deref(), Some("acc_test"));
+        assert_eq!(st.entitlements.get("replaycam").map(String::as_str), Some(TS_TOKEN));
+        // The signed `issued` is evidence of a real instant, so the clock now floors there.
+        assert_eq!(st.clock.high_water, e.issued);
+    }
+
+    #[test]
     fn state_refuses_an_entitlement_for_another_account() {
-        let mut s = PluginState {
-            account: Some("acc_1".into()),
+        // The casual-sharing case: the token is a file, and a file gets pasted into
+        // somebody else's install. The signature is perfectly valid — the account is not.
+        let mut st = PluginState {
+            account: Some("someone_else".into()),
             ..Default::default()
         };
-        // Signature verification runs first, so this needs a token that is at least
-        // well-formed; the point is that account binding is checked at all, and a real
-        // token for another account is exercised in the control plane's own tests.
-        assert!(s.accept("garbage").is_err());
-        assert_eq!(s.account.as_deref(), Some("acc_1"));
+        let err = st.accept_with(TS_TOKEN, TS_PUBLIC_KEY).unwrap_err().to_string();
+        assert!(err.contains("different account"), "{err}");
+        assert_eq!(st.account.as_deref(), Some("someone_else"));
+        assert!(st.entitlements.is_empty());
     }
 
     #[test]
