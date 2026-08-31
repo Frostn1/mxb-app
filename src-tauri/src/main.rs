@@ -6294,6 +6294,13 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
 /// long enough that an unchanged roster — the overwhelmingly common answer — costs nothing.
 const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
 
+/// How often to read the grid out of FrostMod.
+///
+/// A shared-memory read and a set lookup, so this is close to free — it is the *pull* that
+/// costs, and that still only happens when the grid changed or the heartbeat came due. Five
+/// seconds is the gap between a rider appearing on track and their paint being fetched.
+const GRID_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// How long to wait for the game to show up before giving up on a session.
 ///
 /// MX Bikes takes a while to appear in the process list, and on a platform where we cannot
@@ -6348,8 +6355,10 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
         let _running = LiveSyncGuard;
         let started = std::time::Instant::now();
         let mut seen_running = false;
+        let mut grid = GridWatch::default();
+        let mut last_pull = std::time::Instant::now();
         loop {
-            tokio::time::sleep(LIVE_SYNC_EVERY).await;
+            tokio::time::sleep(GRID_POLL).await;
 
             let cfg = config::load_or_detect(&app).unwrap_or_default();
             if !cfg.paint_sync_enabled {
@@ -6362,6 +6371,26 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
                 log::info!("[sync] session over, stopping the live sync");
                 return;
             }
+
+            // Someone new on the grid is the reason to pull; the heartbeat is the fallback
+            // for everything the grid can't tell us — a rider who was already there when we
+            // joined and has since changed their look, and keeping our own presence fresh so
+            // we stay in everyone else's roster.
+            let arrivals = match live_session().filter(|s| s.on_a_server()) {
+                Some(session) => {
+                    let key = voice::session::room_key(&session.server_name);
+                    grid.arrivals(&key, session.riders.iter().map(|r| r.name.as_str()))
+                }
+                None => 0,
+            };
+            let due = last_pull.elapsed() >= LIVE_SYNC_EVERY;
+            if arrivals == 0 && !due {
+                continue;
+            }
+            if arrivals > 0 {
+                log::info!("[sync] {arrivals} rider(s) joined the grid; pulling now");
+            }
+            last_pull = std::time::Instant::now();
 
             match pull_rosters(&app, address.clone()).await {
                 // Only say so when something actually arrived: an unchanged grid is the
@@ -6398,11 +6427,53 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
 /// `None` when FrostMod isn't running, the game isn't up, or the rider is in the menus, in a
 /// replay, or testing alone — none of which is a grid to sync with.
 fn live_server_key() -> Option<String> {
-    static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
-    let session = GAME.get_or_init(voice::gamesession::Reader::default).read()?;
+    let session = live_session()?;
     session
         .on_a_server()
         .then(|| voice::session::room_key(&session.server_name))
+}
+
+/// The session FrostMod is publishing, if any.
+///
+/// One reader for the whole app, held open across calls: opening the mapping is the
+/// expensive part and the block is read every few seconds.
+fn live_session() -> Option<voice::gamesession::GameSession> {
+    static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
+    GAME.get_or_init(voice::gamesession::Reader::default).read()
+}
+
+/// Who is on the grid, and who has turned up since we last looked.
+///
+/// A rider who joins after you is the case paint sync is worst at: they were not on the
+/// roster when you pulled, so they render in default livery until something pulls again.
+/// Waiting out the heartbeat means up to [`LIVE_SYNC_EVERY`] of a wrong-looking grid, and
+/// the rider who joined is the one person guaranteed to be looking at it.
+///
+/// So the grid itself is the trigger. The game knows the entry list, FrostMod publishes it,
+/// and a name that wasn't there last time is a reason to pull now.
+#[derive(Default)]
+struct GridWatch {
+    /// The server these names belong to. A different one is a different grid, so the names
+    /// carried over from the last server mean nothing and are dropped.
+    server: String,
+    seen: std::collections::HashSet<String>,
+}
+
+impl GridWatch {
+    /// How many riders on `grid` we hadn't seen on `server` before.
+    ///
+    /// Folded like a room key, because the entry list is what the game reports and one
+    /// rider must not read as two because their name arrived spaced differently.
+    fn arrivals<'a>(&mut self, server: &str, grid: impl Iterator<Item = &'a str>) -> usize {
+        if self.server != server {
+            self.server = server.to_string();
+            self.seen.clear();
+        }
+        grid.map(|name| name.trim().to_lowercase())
+            .filter(|name| !name.is_empty())
+            .filter(|name| self.seen.insert(name.clone()))
+            .count()
+    }
 }
 
 /// Pull the rosters for wherever the player is, or could be, riding.
@@ -10104,6 +10175,57 @@ mod deep_link_tests {
     fn refuses_an_absurdly_long_code() {
         let long = format!("mxb://enroll?code={}", "a".repeat(200));
         assert!(enroll_code_from_link(&long).is_none());
+    }
+}
+
+#[cfg(test)]
+mod grid_watch_tests {
+    use super::GridWatch;
+
+    /// The whole point: a rider who wasn't there a moment ago is a reason to pull.
+    #[test]
+    fn a_rider_who_joins_later_is_an_arrival() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 2, "the first look is all arrivals");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 0, "an unchanged grid pulls nothing");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate", "Alice"].into_iter()), 1, "the newcomer is the trigger");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate", "Alice"].into_iter()), 0);
+    }
+
+    /// A rider who leaves and comes back must not pull again — their paint is already here,
+    /// and a grid where someone is rejoining repeatedly would pull on a loop.
+    #[test]
+    fn someone_returning_is_not_a_new_arrival() {
+        let mut w = GridWatch::default();
+        w.arrivals("silver mx", ["Frost", "Nate"].into_iter());
+        assert_eq!(w.arrivals("silver mx", ["Frost"].into_iter()), 0, "Nate left");
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 0, "and came back");
+    }
+
+    /// One rider must not read as two because the game spaced or capitalised their name
+    /// differently between two reads of the block.
+    #[test]
+    fn a_name_is_folded_before_it_counts() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost"].into_iter()), 1);
+        assert_eq!(w.arrivals("silver mx", ["  frost  ", "FROST"].into_iter()), 0);
+    }
+
+    /// An empty slot in the entry list is not a rider.
+    #[test]
+    fn blank_names_are_not_riders() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["", "   ", "Frost"].into_iter()), 1);
+    }
+
+    /// Changing server is a new grid. Carrying the last one's names over would mean the
+    /// riders on the new server were silently treated as already pulled for.
+    #[test]
+    fn another_server_starts_the_grid_again() {
+        let mut w = GridWatch::default();
+        assert_eq!(w.arrivals("silver mx", ["Frost", "Nate"].into_iter()), 2);
+        assert_eq!(w.arrivals("other server", ["Frost", "Nate"].into_iter()), 2, "same names, new grid");
+        assert_eq!(w.arrivals("other server", ["Frost", "Nate"].into_iter()), 0);
     }
 }
 
