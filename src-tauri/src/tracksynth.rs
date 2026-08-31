@@ -31,7 +31,7 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 
-use crate::trackprog::{Feature, Segment, Station, Surface, TrackProgram};
+use crate::trackprog::{Feature, Knot, Segment, Station, Surface, TrackProgram};
 
 /// Metres of centreline between stations. Finer than the grid, so every cell finds a station
 /// nearer than its own width.
@@ -210,6 +210,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         .collect();
     smooth_along(&mut along, (BENCH_SMOOTH_M / STATION_STEP) as usize);
     apply_rise(&mut along, &stations, &prog.segments);
+    apply_elevation(&mut along, &stations, &prog.elevation, lap);
     apply_step_ups(&mut along, &stations, &prog.features);
 
     // Everything that varies along the lap, resampled onto one even ruler so a cell can ask
@@ -766,6 +767,45 @@ fn apply_rise(along: &mut [f32], st: &[Station], segments: &[Segment]) {
             }
         }
         at += len;
+    }
+}
+
+/// The hand-drawn height curve, added to whatever the ground was already doing.
+///
+/// Eased between neighbouring points rather than run straight between them, so a curve drawn
+/// with four points is four hills and not four ramps with corners on them. It **wraps**: the
+/// last point eases into the first, because a lap is a loop and a step across the finish line
+/// is the one place a rider would notice one.
+fn apply_elevation(along: &mut [f32], st: &[Station], knots: &[Knot], lap: f32) {
+    if knots.is_empty() || lap <= 0.0 {
+        return;
+    }
+    let mut k: Vec<Knot> = knots.to_vec();
+    k.sort_by(|a, b| a.at.total_cmp(&b.at));
+
+    let at = |s: f32| -> f32 {
+        // Which pair of points this station falls between, treating the list as a ring.
+        let n = k.len();
+        if n == 1 {
+            return k[0].height;
+        }
+        let i = match k.iter().position(|p| p.at > s) {
+            Some(0) | None => n - 1, // before the first or after the last: the wrap-around pair
+            Some(j) => j - 1,
+        };
+        let a = k[i];
+        let b = k[(i + 1) % n];
+        // The gap, measured the way round that actually connects them.
+        let span = if b.at > a.at { b.at - a.at } else { lap - a.at + b.at };
+        if span <= 1e-3 {
+            return b.height;
+        }
+        let along = if s >= a.at { s - a.at } else { lap - a.at + s };
+        a.height + (b.height - a.height) * smoothstep((along / span).clamp(0.0, 1.0))
+    };
+
+    for (i, s) in st.iter().enumerate() {
+        along[i] += at(s.s);
     }
 }
 
@@ -1709,6 +1749,7 @@ mod tests {
             ],
             width: 12.0,
             blend: crate::trackprog::default_blend(),
+            elevation: Vec::new(),
             features: vec![
                 Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4 },
                 Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0 },
@@ -1848,6 +1889,31 @@ mod tests {
 
     /// Rises are cumulative, and nothing should count twice. Two climbs and two drops of the
     /// same size, spread round a lap, has to come out level however many segments carry it.
+    /// A curve drawn by hand lifts the track where its points say, and comes back round to
+    /// meet itself — a lap is a loop, so the last point has to ease into the first.
+    #[test]
+    fn a_drawn_curve_lifts_the_track_where_it_says() {
+        let mut p = oval();
+        p.features.clear();
+        p.terrain.relief.amplitude = 0.0;
+        let lap = p.lap_length();
+        p.elevation = vec![
+            Knot { at: 0.0, height: 0.0 },
+            Knot { at: lap * 0.25, height: 8.0 },
+            Knot { at: lap * 0.5, height: 0.0 },
+            Knot { at: lap * 0.75, height: -4.0 },
+        ];
+        let s = synthesise(&p).unwrap();
+        let ground = height_at_arc(&s, 1.0);
+        let top = height_at_arc(&s, lap * 0.25) - ground;
+        let dip = height_at_arc(&s, lap * 0.75) - ground;
+        assert!((top - 8.0).abs() < 1.2, "the peak reads {top:.2} m, wanted 8");
+        assert!((dip + 4.0).abs() < 1.2, "the dip reads {dip:.2} m, wanted -4");
+        // And across the line, where the wrap has to hold.
+        let before = height_at_arc(&s, lap - 2.0) - ground;
+        assert!(before.abs() < 1.2, "it comes back {before:.2} m off");
+    }
+
     #[test]
     fn climbs_and_drops_cancel_however_many_there_are() {
         let mut p = oval();

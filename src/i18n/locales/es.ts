@@ -2398,4 +2398,6 @@ export const es: Translation = {
   "track.sand": "Arena",
   "track.grass": "Hierba",
   "track.smoothing": "fundido",
+  "track.live": "En vivo",
+  "track.rebuild": "Reconstruir la vista",
 };

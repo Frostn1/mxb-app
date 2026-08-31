@@ -15,6 +15,7 @@ import {
   ChevronRight,
   GripVertical,
   Plus,
+  RefreshCw,
   Waves,
   type LucideIcon,
 } from "lucide-react";
@@ -33,6 +34,8 @@ import {
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { TrackViewer } from "../../Viewer/TrackViewer";
+import ElevationCurve from "./ElevationCurve";
+import { Switch } from "../../ui/switch";
 import { loadTrackOverview, loadTrackTerrain } from "../../../api/tracks";
 import type { TrackOverview, TrackTerrain } from "../../../types";
 import { useT } from "../../../i18n/context";
@@ -53,6 +56,7 @@ import {
   fitFeatures,
   lapSteps,
   newFeature,
+  pathAlong,
   positionAt,
   previewTrack,
   roomiestGap,
@@ -96,7 +100,10 @@ export default function TrackStudio() {
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [focus, setFocus] = useState<{ x: number; z: number } | null>(null);
-  const [hover, setHover] = useState<{ x: number; z: number; width: number } | null>(null);
+  const [hover, setHover] = useState<{
+    path: { x: number; z: number }[];
+    width: number;
+  } | null>(null);
   // Reordering is done with pointer events, not HTML5 drag-and-drop. Tauri's
   // `dragDropEnabled` hands drags to the OS so the webview never sees a dragstart — which is
   // also why the whole-window file dropzone was catching every attempt.
@@ -108,6 +115,10 @@ export default function TrackStudio() {
   // have in their heads.
   const [shut, setShut] = useState<Set<number>>(new Set());
   const [flash, setFlash] = useState<number | null>(null);
+  // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
+  // rather than the default. With it on, an edit settles and then the view catches up.
+  const [live, setLive] = useState(false);
+  const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
   const [steps, setSteps] = useState<BuildStep[]>([]);
 
@@ -137,6 +148,12 @@ export default function TrackStudio() {
         }
         setProblems(found.problems);
         setNotes(found.notes);
+        if (live && found.problems.length === 0) {
+          // Debounced: a drag is a hundred edits, and only the last one is worth building.
+          if (rebuild.current) clearTimeout(rebuild.current);
+          const settled = next;
+          rebuild.current = setTimeout(() => void showIn3d(settled).catch(() => {}), 500);
+        }
         return found.problems;
       } catch (e) {
         setProblems([String(e)]);
@@ -144,7 +161,7 @@ export default function TrackStudio() {
         return [String(e)];
       }
     },
-    [],
+    [live],
   );
 
   async function onGenerate() {
@@ -446,6 +463,19 @@ export default function TrackStudio() {
         >
           {busy === "generate" ? t("track.generating") : t("track.generate")}
         </Button>
+        <label className="flex flex-none cursor-default items-center gap-2 pl-1 text-[12.5px] text-muted-foreground">
+          <Switch checked={live} onCheckedChange={setLive} />
+          {t("track.live")}
+          <button
+            onClick={() => void onPreview()}
+            disabled={blocked || busy !== null}
+            title={t("track.rebuild")}
+            aria-label={t("track.rebuild")}
+            className="cursor-default rounded p-1 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-40"
+          >
+            <RefreshCw className={cn("size-3.5", busy === "preview" && "animate-spin")} />
+          </button>
+        </label>
         {/* Always here, not just when the model is unreachable: starting from a track that
             already works and changing two jumps is a better first move than describing one
             from nothing. */}
@@ -638,9 +668,6 @@ export default function TrackStudio() {
             )}
 
             <div className="mt-auto flex flex-col gap-2">
-              <Button onClick={() => void onPreview()} disabled={blocked || busy !== null}>
-                {busy === "preview" ? t("track.building") : t("track.preview")}
-              </Button>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -740,13 +767,14 @@ export default function TrackStudio() {
                     onClick={() => setFocus(positionAt(program, step.at))}
                     onPointerEnter={() =>
                       setHover({
-                        // The middle of the feature, not its start — a 40 m berm marked at
-                        // its entry looks like it belongs to the corner before it.
-                        ...positionAt(
+                        // The whole of it, not where it starts: a straight is two hundred
+                        // metres long and its first metre says nothing about which one it is.
+                        path: pathAlong(
                           program,
+                          step.at,
                           step.kind === "feature"
-                            ? step.at + featureSpan(step.feature).length / 2
-                            : step.at,
+                            ? featureSpan(step.feature).length
+                            : stepLength(step),
                         ),
                         width: program.width * 1.6,
                       })
@@ -854,6 +882,23 @@ export default function TrackStudio() {
                 );
               })}
             </ol>
+            {/* The lap's own height, as a line you can pull about — the same shape the
+                segment rises describe, in the form you can take hold of. */}
+            <div className="flex-none border-t border-input px-2 pb-1 pt-1.5">
+              <div className="px-1 text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                {t("track.height")}
+              </div>
+              <ElevationCurve
+                lap={lapLength(program)}
+                knots={program.elevation ?? []}
+                features={program.features}
+                onChange={(elevation) => {
+                  setTouched(true);
+                  void settle({ ...program, elevation });
+                }}
+                className="h-[92px]"
+              />
+            </div>
           </div>
 
           {/* Right: the track itself. Features are painted with a colour each, so a row in
@@ -935,6 +980,15 @@ function stepIcon(step: LapStep): LucideIcon {
   // the one thing that tells them apart.
   if (step.feature.kind === "stepUp" && step.feature.height < 0) return TrendingDown;
   return FEATURE_ICON[step.feature.kind];
+}
+
+/** How much lap a step covers. */
+function stepLength(step: LapStep): number {
+  if (step.kind === "feature") return featureSpan(step.feature).length;
+  const seg = step.segment;
+  return seg.kind === "straight"
+    ? seg.length
+    : (Math.abs(seg.radius) * Math.abs(seg.angle) * Math.PI) / 180;
 }
 
 function stepName(step: LapStep, t: ReturnType<typeof useT>): string {

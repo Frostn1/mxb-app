@@ -2403,4 +2403,6 @@ export const fr: Translation = {
   "track.sand": "Sable",
   "track.grass": "Herbe",
   "track.smoothing": "fondu",
+  "track.live": "Direct",
+  "track.rebuild": "Reconstruire l'aperçu",
 };
