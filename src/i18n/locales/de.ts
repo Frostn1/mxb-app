@@ -2396,4 +2396,5 @@ export const de: Translation = {
   "track.name": "Streckenname",
   "track.author": "Autor",
   "track.previewHint": "Auf Vorschau drücken, um sie zu bauen und hier anzusehen.",
+  "track.location": "Ort",
 };

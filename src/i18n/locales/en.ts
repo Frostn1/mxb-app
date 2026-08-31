@@ -2352,4 +2352,5 @@ export const en = {
   "track.name": "Track name",
   "track.author": "Author",
   "track.previewHint": "Press Preview to build it and look at it here.",
+  "track.location": "Location",
 } as const;
