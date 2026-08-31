@@ -2237,4 +2237,12 @@ export const de: Translation = {
   "track.over": "über",
   "track.kind.rut": "Rille",
   "track.sequenceHint": "Du kannst die Runde der Reihe nach beschreiben — „eine lange Gerade, eine linke Haarnadel, dann ein Double und eine Rhythmus-Sektion“ — und genau so wird sie gebaut.",
+  "track.compile": "Mit TerrainEd bauen",
+  "track.compiling": "Kompiliert…",
+  "track.compiled": "Kompiliert",
+  "track.compileFailed": "Konnte nicht kompiliert werden",
+  "track.buildStepFailed": "Schritt „{{step}}“ fehlgeschlagen",
+  "track.pointAtTools": "Track-Tools auswählen…",
+  "track.toolsNotFound": "Kein terrained.exe in diesem Ordner",
+  "track.stillNeeded": "Braucht noch eine .rdf aus TrackEd (Startgatter, Box, Kameras) und eine gate.edf aus einer anderen Strecke.",
 };

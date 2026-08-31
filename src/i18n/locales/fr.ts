@@ -2228,4 +2228,12 @@ export const fr: Translation = {
   "track.over": "sur",
   "track.kind.rut": "Ornière",
   "track.sequenceHint": "Tu peux décrire le tour dans l'ordre — « une longue ligne droite, une épingle à gauche, puis un double et une section rythmique » — et il sera construit ainsi.",
+  "track.compile": "Compiler avec TerrainEd",
+  "track.compiling": "Compilation…",
+  "track.compiled": "Compilé",
+  "track.compileFailed": "Compilation impossible",
+  "track.buildStepFailed": "L'étape « {{step}} » a échoué",
+  "track.pointAtTools": "Indiquer les outils…",
+  "track.toolsNotFound": "Aucun terrained.exe dans ce dossier",
+  "track.stillNeeded": "Il manque encore un .rdf de TrackEd (grille, stands, caméras) et un gate.edf copié d'un autre circuit.",
 };

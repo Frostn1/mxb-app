@@ -346,12 +346,15 @@ pub fn model_refresh_is_safe(tag: Option<&str>) -> bool {
 /// or in a bottle would take every write and never look. It would inject fine and reload on
 /// `F8`, and every button in this app would quietly do nothing. v0.13.0 is the release that
 /// polls the file, so off Windows it is the floor for starting FrostMod at all.
+// Off-Windows question: on Windows the event channel is used instead.
+#[cfg_attr(windows, allow(dead_code))]
 pub const FILE_CHANNEL_MIN_VERSION: &str = "v0.13.0";
 
 /// Does the installed FrostMod, tagged `tag`, read commands from a file?
 ///
 /// An unreadable tag counts as no — same reasoning as the floors around it, with a milder
 /// cost: the player is told to update rather than left with buttons that do nothing.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn reads_command_files(tag: Option<&str>) -> bool {
     match (tag.and_then(version_parts), version_parts(FILE_CHANNEL_MIN_VERSION)) {
         (Some(have), Some(min)) => have >= min,

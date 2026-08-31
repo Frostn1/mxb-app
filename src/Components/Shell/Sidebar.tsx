@@ -13,7 +13,12 @@ import {
   SlidersHorizontal,
   Store,
   ShoppingBag,
+  Brush,
+  Move3d,
+  Mountain,
   Palette,
+  PersonStanding,
+  Shield,
   PanelLeftClose,
   PanelLeftOpen,
   Server as ServerIcon,
@@ -37,6 +42,8 @@ import { useGameRunning } from "../../lib/useGameRunning";
 import { useConfig } from "../../Context/Config";
 import type { GameCaps } from "../../types";
 import { ATTACH_PROBLEM } from "../../types";
+import { contentLockAvailable } from "../../api/mods";
+import type { StudioTab } from "../Studio/Studio";
 import JoinServerDialog from "./JoinServerDialog";
 import DownloadQueue from "./DownloadQueue";
 
@@ -55,7 +62,9 @@ export type DashboardView =
 
 interface SidebarProps {
   view: DashboardView;
-  onNavigate: (view: DashboardView) => void;
+  /** Which Studio sub-view is showing, so the right child row reads as active. */
+  studioTab: StudioTab;
+  onNavigate: (view: DashboardView, studio?: StudioTab) => void;
 }
 
 /**
@@ -70,6 +79,17 @@ type NavEntry = {
   cap?: keyof GameCaps;
   /** Indented under this entry, behind a chevron. */
   children?: NavEntry[];
+  /**
+   * Which Studio sub-view this row opens. Studio's tools are entries in the sidebar rather
+   * than a control inside the page: there are six of them and a row across the top has
+   * nowhere to grow, while a list under Studio reads the way Downloads reads under Library.
+   *
+   * They all share `id: "studio"`, so the active row is the one whose sub-view is showing
+   * rather than the one whose id matches.
+   */
+  studio?: StudioTab;
+  /** Hidden unless the optional local content-lock module is present. */
+  needsLock?: boolean;
 };
 
 const NAV: NavEntry[] = [
@@ -90,7 +110,19 @@ const NAV: NavEntry[] = [
   // Designer, Paints and Rider in one tab. Deliberately *not* viewer-gated: building a `.pnt`
   // is the same job for either title — same container, same encoder, same folders — and only
   // the 3D preview needs part bindings. Studio hides the sub-views that do.
-  { id: "studio", label: "nav.studio", icon: Palette },
+  {
+    id: "studio",
+    label: "nav.studio",
+    icon: Palette,
+    children: [
+      { id: "studio", label: "nav.designer", icon: Palette, studio: "designer" },
+      { id: "studio", label: "nav.paints", icon: Brush, studio: "paints" },
+      { id: "studio", label: "nav.rider", icon: PersonStanding, studio: "rider", cap: "viewer" },
+      { id: "studio", label: "nav.pose", icon: Move3d, studio: "pose", cap: "viewer" },
+      { id: "studio", label: "nav.track", icon: Mountain, studio: "track" },
+      { id: "studio", label: "nav.protect", icon: Shield, studio: "protect", needsLock: true },
+    ],
+  },
   { id: "manage", label: "nav.manage", icon: SlidersHorizontal, cap: "manage" },
 ];
 
@@ -227,8 +259,16 @@ function NavRow({
   );
 }
 
-export default function Sidebar({ view, onNavigate }: SidebarProps) {
+export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
   const t = useT();
+  // Locking needs an optional local module. Without it the Protect row would be a place you
+  // can go and nothing can happen, so it isn't listed.
+  const [hasLock, setHasLock] = useState(false);
+  useEffect(() => {
+    contentLockAvailable()
+      .then(setHasLock)
+      .catch(() => {});
+  }, []);
   const { running, attachment, reload, status, start, stop } = useFrostmod();
   // FrostMod is up but isn't reaching the game — see `frostmod::attachment`. The good
   // states (and the grace period after a launch) deliberately look like plain "Running".
@@ -294,7 +334,8 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
 
   // Two independent gates: servers needs the experimental toggle, and every entry needs the
   // active game to support it. Built here rather than inline so the JSX stays one `.map`.
-  const supported = ({ cap }: NavEntry) => !cap || caps[cap];
+  const supported = ({ cap, needsLock }: NavEntry) =>
+    (!cap || caps[cap]) && (!needsLock || hasLock);
   const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1), ...(experimental ? [EXPERIMENTAL_NAV] : [])]
     .filter(supported)
     .map((e) => (e.children ? { ...e, children: e.children.filter(supported) } : e));
@@ -398,18 +439,23 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         </button>
       </div>
 
-      <nav className="flex flex-col gap-0.5">
+      {/* The list scrolls; the Play button below it does not. Studio's tools are rows now,
+          so a short window or an expanded group can push the list past the bottom, and the
+          thing that must never scroll away is the one people came to press. */}
+      <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden">
         {rows.map(({ entry, child, badge, group }) => (
           <NavRow
-            key={entry.id}
+            key={entry.studio ?? entry.id}
             entry={entry}
-            active={view === entry.id}
+            active={
+              entry.studio ? view === "studio" && studioTab === entry.studio : view === entry.id
+            }
             collapsed={collapsed}
             child={child}
             badge={badge}
             group={group}
             onSelect={() => {
-              onNavigate(entry.id);
+              onNavigate(entry.id, entry.studio);
               // Opening the parent's page shows what's under it. Only ever opens: clicking
               // Library twice shouldn't make Downloads disappear — that's the chevron's job.
               if (group) setGroupOpen(entry.id, true);
@@ -418,7 +464,7 @@ export default function Sidebar({ view, onNavigate }: SidebarProps) {
         ))}
       </nav>
 
-      <div className="mt-auto flex flex-col gap-2">
+      <div className="mt-3 flex flex-none flex-col gap-2">
         {/* The install card is the queue's trigger now — same look, opens the panel. */}
         <DownloadQueue collapsed={collapsed} />
 

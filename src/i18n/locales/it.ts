@@ -2216,4 +2216,12 @@ export const it: Translation = {
   "track.over": "su",
   "track.kind.rut": "Solco",
   "track.sequenceHint": "Puoi descrivere il giro in ordine — «un lungo rettilineo, un tornante a sinistra, poi un doppio e una sezione ritmica» — e sarà costruito così.",
+  "track.compile": "Compila con TerrainEd",
+  "track.compiling": "Compilazione…",
+  "track.compiled": "Compilato",
+  "track.compileFailed": "Impossibile compilare",
+  "track.buildStepFailed": "Passo «{{step}}» fallito",
+  "track.pointAtTools": "Indica gli strumenti…",
+  "track.toolsNotFound": "Nessun terrained.exe in quella cartella",
+  "track.stillNeeded": "Servono ancora un .rdf da TrackEd (cancelletto, box, telecamere) e un gate.edf copiato da un'altra pista.",
 };

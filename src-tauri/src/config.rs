@@ -136,6 +136,10 @@ pub struct AppConfig {
     /// Bearer token for this player's control-plane account, from enrolling with an invite
     /// code. Empty until they enroll.
     pub cp_token: String,
+    /// Folder holding PiBoSo's track editing tools — `terrained.exe` and `tracked.exe`.
+    /// They are a separate download from the game and not ours to ship, so this is empty
+    /// until someone points at them, and the compile step is simply not offered until then.
+    pub track_tools_path: String,
     /// The in-game rider name this account enrolled with. Kept so the UI can show which
     /// identity the paints are published under.
     pub cp_rider_name: String,
@@ -252,6 +256,7 @@ impl Default for AppConfig {
             servers: Vec::new(),
             experimental: false,
             cp_token: String::new(),
+            track_tools_path: String::new(),
             cp_rider_name: String::new(),
             cp_guid: String::new(),
             sync: SyncState::default(),
@@ -834,7 +839,7 @@ pub fn detect_game_path(game: &GameProfile) -> Option<String> {
 /// same `steamapps` as the game itself — including on a second drive.
 pub(crate) fn steam_libraries() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
-    let mut push = |roots: &mut Vec<PathBuf>, p: PathBuf| {
+    let push = |roots: &mut Vec<PathBuf>, p: PathBuf| {
         if !roots.contains(&p) {
             roots.push(p);
         }

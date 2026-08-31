@@ -148,6 +148,40 @@ export function lapLength(program: TrackProgram): number {
   );
 }
 
+/** Whether the app can compile a track here, and what with. */
+export interface TrackToolsStatus {
+  path: string;
+  found: boolean;
+  hasTracked: boolean;
+}
+
+/** One compiler run, and what it said. */
+export interface BuildStep {
+  name: "map" | "trh" | "centerline";
+  ok: boolean;
+  code: number | null;
+  output: string;
+  produced: string | null;
+}
+
+export function trackToolsStatus(): Promise<TrackToolsStatus> {
+  return invoke<TrackToolsStatus>("track_tools_status");
+}
+
+export function setTrackTools(dir: string): Promise<TrackToolsStatus> {
+  return invoke<TrackToolsStatus>("set_track_tools", { dir });
+}
+
+/**
+ * Export and compile in one.
+ *
+ * The compilers are PiBoSo's and Windows-only; on macOS they go through the same Wine prefix
+ * the game does. Minutes, not seconds — TerrainEd bakes shadow maps over the whole terrain.
+ */
+export function buildTrack(program: TrackProgram, dir: string): Promise<BuildStep[]> {
+  return invoke<BuildStep[]>("build_track", { program, dir });
+}
+
 /** Where a feature sits, and how long it runs — the two numbers every kind has. */
 export function featureSpan(f: TrackFeature): { at: number; length: number } {
   switch (f.kind) {

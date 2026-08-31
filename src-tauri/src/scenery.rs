@@ -886,6 +886,8 @@ pub fn load_surfaces(app: &tauri::AppHandle, path: &str) -> Result<Vec<MapTextur
 
 /// The expensive path. A track's `.map` is the largest file it ships — most of it textures
 /// this doesn't read — which is exactly why the result is worth caching.
+// The uncached entry point, for the tests; the app comes in through the cache.
+#[allow(dead_code)]
 fn decode(path: &Path, want_surfaces: bool) -> Result<Scenery> {
     decode_with_key(path, want_surfaces, None)
 }

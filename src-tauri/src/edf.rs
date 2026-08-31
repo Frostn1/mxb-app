@@ -209,6 +209,7 @@ fn finite_pos(b: &[u8], o: usize, extent: f32) -> bool {
 /// magic. Written by the exporter over the *placed* mesh, so it is the one statement in the
 /// file about where the geometry ends up, and the way to tell a placement that ran twice
 /// from one that ran once. Covers every node and LOD in the file.
+#[allow(dead_code)]
 pub fn header_aabb(b: &[u8]) -> Option<([f32; 3], [f32; 3])> {
     if b.len() < HEADER_START || &b[0..4] != b"EDF\0" {
         return None;

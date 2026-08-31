@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import HelpHint from "../ui/help-hint";
-import { Segmented } from "../ui/segmented";
 import { useT } from "../../i18n/context";
 import { useConfig } from "../../Context/Config";
 import { contentLockAvailable } from "../../api/mods";
@@ -93,27 +92,9 @@ export default function Studio({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-none items-center gap-3.5 px-7 pb-3 pt-4">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.2px]">{t("nav.studio")}</h1>
-          <HelpHint title={help.title} description={help.body} />
-        </div>
-        <Segmented
-          value={tab}
-          onChange={(v) => onTab(v as StudioTab)}
-          options={[
-            { value: "designer", label: t("nav.designer") },
-            { value: "paints", label: t("nav.paints") },
-            ...(hasRider
-              ? [
-                  { value: "rider" as const, label: t("nav.rider") },
-                  { value: "pose" as const, label: t("nav.pose") },
-                ]
-              : []),
-            { value: "track", label: t("nav.track") },
-            ...(hasLock ? [{ value: "protect" as const, label: t("nav.protect") }] : []),
-          ]}
-        />
+      <header className="flex flex-none items-center gap-1.5 px-7 pb-3 pt-4">
+        <h1 className="text-[21px] font-bold tracking-[-0.2px]">{help.title}</h1>
+        <HelpHint title={help.title} description={help.body} />
       </header>
 
       {/* Hidden, not unmounted. These hold real work — a stack of layers, a list of sheets,

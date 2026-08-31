@@ -56,6 +56,26 @@ const BENCH_SMOOTH_M: f32 = 45.0;
 const FEATURE_FULL: f32 = 0.8;
 const FEATURE_EDGE: f32 = 1.75;
 
+/// How much shorter a cut face is than a fill slope.
+///
+/// A track is bladed into the ground, not draped over it. Where the machine digs into rising
+/// ground it leaves a short steep face; where it pushes the spoil out onto falling ground it
+/// leaves a long shallow one. Grading both sides the same distance is the single clearest
+/// tell that nobody built this — real benching is never symmetrical.
+const CUT_SHOULDER: f32 = 0.5;
+const FILL_SHOULDER: f32 = 1.7;
+
+/// The ridge left between one pass of the machine and the next: how far apart they are, and
+/// how proud the seam stands.
+///
+/// A blade's own fine grooves are a few centimetres apart and cannot be represented here at
+/// all — at a third of a metre a sample they are far below what the grid can hold, and asking
+/// for them produces aliasing noise rather than grooves. The *passes* are the feature at this
+/// scale, they are a real thing you can see on a built track, and they run along the
+/// direction of travel — so they vary across the track and not along it.
+const PASS_SPACING_M: f32 = 2.6;
+const PASS_DEPTH_M: f32 = 0.022;
+
 /// Metres between the bumps of the riding surface's own texture.
 const TEXTURE_WAVELENGTH_M: f32 = 3.5;
 
@@ -104,6 +124,9 @@ const PROFILE_STEP: f32 = 0.1;
 
 /// Masks are stretched over the terrain, so they cost nothing to keep coarser than it.
 const MASK_DIM: usize = 1024;
+
+/// The ground textures' edge, in pixels. A power of two, as MX Bikes requires.
+const GROUND_TEXTURE_DIM: usize = 512;
 
 /// The UI pictures' edge, in pixels. Square and modest — they are shown at a few hundred
 /// pixels and stored uncompressed.
@@ -217,9 +240,14 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         arc[i] = s;
         let half = widths.at(s);
 
-        let w = bench_weight(d, half, SHOULDER_M);
+        // Cut or fill: which one decides how far the grading reaches, and so how the edge
+        // of the track reads from the seat.
+        let ground = heights[i];
+        let deck = bench.at(s);
+        let shoulder = SHOULDER_M * if ground > deck { CUT_SHOULDER } else { FILL_SHOULDER };
+        let w = bench_weight(d, half, shoulder);
         if w > 0.0 {
-            heights[i] = heights[i] * (1.0 - w) + bench.at(s) * w;
+            heights[i] = ground * (1.0 - w) + deck * w;
         }
         if d <= half {
             corridor[i] = true;
@@ -255,6 +283,11 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             ) * r.texture
                 * gain
                 * w;
+            // The seams between the machine's passes, running the way it drove.
+            heights[i] -= ((t / PASS_SPACING_M) * std::f32::consts::TAU).sin().abs()
+                * PASS_DEPTH_M
+                * w;
+
             // Braking bumps: a washboard across the track on the way into a corner, which is
             // the direction they actually form in.
             let brake = braking.at(s);
@@ -352,7 +385,7 @@ fn nearest_station(
         }
     }
 
-    let mut relax = |at: usize, from: usize, cost: i32, d: &mut Vec<i32>, l: &mut Vec<u32>| {
+    let relax = |at: usize, from: usize, cost: i32, d: &mut Vec<i32>, l: &mut Vec<u32>| {
         if d[from] + cost < d[at] {
             d[at] = d[from] + cost;
             l[at] = l[from];
@@ -688,12 +721,14 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         // Up, along the top, and down. The ramps are a third each, which is about what a
         // built tabletop measures.
         Feature::Tabletop { height, .. } => {
-            if t < 0.33 {
-                height * smoothstep(t / 0.33)
-            } else if t < 0.67 {
+            if t < 0.27 {
+                // Steeper than a smoothstep at the lip, which is what a packed takeoff is.
+                let u = t / 0.27;
+                height * (u * u * (3.0 - 2.0 * u)).powf(0.82)
+            } else if t < 0.56 {
                 height
             } else {
-                height * smoothstep((1.0 - t) / 0.33)
+                height * smoothstep((1.0 - t) / 0.44)
             }
         }
         Feature::Roller { height, .. } => height * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
@@ -812,7 +847,7 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     std::fs::create_dir_all(dir.join(&slug)).context("make the track folder")?;
     let mut wrote = Vec::new();
 
-    let mut put = |rel: &str, bytes: Vec<u8>, wrote: &mut Vec<String>| -> Result<()> {
+    let put = |rel: &str, bytes: Vec<u8>, wrote: &mut Vec<String>| -> Result<()> {
         std::fs::write(dir.join(rel), bytes).with_context(|| format!("write {rel}"))?;
         wrote.push(rel.to_string());
         Ok(())
@@ -843,6 +878,31 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     put("mask_grass.tga", tga_alpha(MASK_DIM, MASK_DIM, &grass), &mut wrote)?;
     put("area_off.tga", tga_alpha(MASK_DIM, MASK_DIM, &off), &mut wrote)?;
     put("area_start.tga", tga_alpha(MASK_DIM, MASK_DIM, &start), &mut wrote)?;
+
+    // Ground colours follow what the track is made of, so a sand national exports sand.
+    let (ground, line) = match prog.terrain.surface {
+        Surface::Soil => ([124, 96, 68], [96, 70, 50]),
+        Surface::Sand => ([196, 174, 132], [172, 148, 108]),
+        Surface::Grass => ([104, 118, 74], [92, 74, 54]),
+    };
+    std::fs::create_dir_all(dir.join("maps")).context("make the maps folder")?;
+    let seed = prog.terrain.relief.seed;
+    put(
+        "maps/ground.tga",
+        ground_texture(GROUND_TEXTURE_DIM, ground, 0.22, seed ^ 0x9A0D),
+        &mut wrote,
+    )?;
+    put(
+        "maps/line.tga",
+        ground_texture(GROUND_TEXTURE_DIM, line, 0.28, seed ^ 0x11E5),
+        &mut wrote,
+    )?;
+    put(
+        "maps/grass.tga",
+        ground_texture(GROUND_TEXTURE_DIM, [96, 116, 66], 0.30, seed ^ 0x6A55),
+        &mut wrote,
+    )?;
+    put("maps/grassfx.tga", grass_billboard(128), &mut wrote)?;
 
     put("track.hmf", hmf(prog, syn).into_bytes(), &mut wrote)?;
     put("track.tht", tht(prog, syn).into_bytes(), &mut wrote)?;
@@ -1027,6 +1087,73 @@ fn soft_edge(edge: f32, fade: f32, d: f32) -> u8 {
     }
 }
 
+/// Tileable value noise. The lattice wraps at `period`, so the texture it builds meets
+/// itself at the edges — a ground texture repeated sixty times across a track shows every
+/// seam it has.
+fn tile_noise(x: f32, y: f32, period: i32, seed: u32) -> f32 {
+    let (xf, yf) = (x.floor(), y.floor());
+    let (fx, fy) = (smoothstep(x - xf), smoothstep(y - yf));
+    let (xi, yi) = (xf as i32, yf as i32);
+    let at = |a: i32, b: i32| hash2(a.rem_euclid(period), b.rem_euclid(period), seed);
+    let top = at(xi, yi) + (at(xi + 1, yi) - at(xi, yi)) * fx;
+    let bot = at(xi, yi + 1) + (at(xi + 1, yi + 1) - at(xi, yi + 1)) * fx;
+    top + (bot - top) * fy
+}
+
+/// Ground, as a tileable picture of itself.
+///
+/// Generated rather than shipped. The layers have to point at *some* texture, and pointing
+/// them at PiBoSo's example track means the exported folder doesn't compile until someone
+/// has downloaded a 95 MB zip and copied a directory out of it. Three octaves of wrapping
+/// noise over a base colour is not a photograph, but it tiles, it is the right format, and
+/// it is in the folder.
+fn ground_texture(dim: usize, base: [u8; 3], grain: f32, seed: u32) -> Vec<u8> {
+    let mut px = Vec::with_capacity(dim * dim * 4);
+    for y in 0..dim {
+        for x in 0..dim {
+            let (u, v) = (x as f32 / dim as f32, y as f32 / dim as f32);
+            let mut n = 0.0;
+            let mut amp = 1.0;
+            let mut period = 8;
+            for o in 0..3 {
+                n += tile_noise(u * period as f32, v * period as f32, period, seed ^ (o * 131)) * amp;
+                amp *= 0.5;
+                period *= 2;
+            }
+            let k = 1.0 + n * grain;
+            let c = |i: usize| (base[i] as f32 * k).clamp(0.0, 255.0) as u8;
+            px.extend_from_slice(&[c(2), c(1), c(0), 255]);
+        }
+    }
+    tga_bgra(dim, dim, &px)
+}
+
+/// The blade sprite the grass layer scatters. Alpha-cut, like every foliage sheet in the
+/// game — see the note about `_c_a` materials in the map decoder.
+fn grass_billboard(dim: usize) -> Vec<u8> {
+    let mut px = Vec::with_capacity(dim * dim * 4);
+    for y in 0..dim {
+        for x in 0..dim {
+            let (u, v) = (x as f32 / dim as f32, 1.0 - y as f32 / dim as f32);
+            // A handful of tapered blades, thinner and fainter towards the tip.
+            let mut a = 0.0f32;
+            for b in 0..5 {
+                let centre = (b as f32 + 0.5) / 5.0;
+                let lean = (v * 0.12) * if b % 2 == 0 { 1.0 } else { -1.0 };
+                let width = 0.045 * (1.0 - v * 0.8).max(0.05);
+                let d = ((u - centre - lean) / width).abs();
+                if d < 1.0 && v < 0.92 {
+                    a = a.max(1.0 - d);
+                }
+            }
+            let shade = 0.55 + 0.45 * v;
+            let g = (150.0 * shade) as u8;
+            px.extend_from_slice(&[(60.0 * shade) as u8, g, (70.0 * shade) as u8, (a * 255.0) as u8]);
+        }
+    }
+    tga_bgra(dim, dim, &px)
+}
+
 /// Lighting and weather. Three conditions, because the game asks for all three and a track
 /// missing one falls back to nothing rather than to a default.
 ///
@@ -1121,16 +1248,15 @@ fn hmf(prog: &TrackProgram, syn: &Synth) -> String {
     s.push_str("num_layers = 3\n");
     // Layer zero carries no mask: it is the ground everything else is painted over.
     s.push_str(
-        "layer0\n{\n\tmap = maps/dirt.tga\n\tframe1\n\t{\n\t\tmap = maps/dirt_wet.tga\n\t}\n\
-         \trepetitions = 60\n}\n\n",
+        "layer0\n{\n\tmap = maps/ground.tga\n\trepetitions = 60\n}\n\n",
     );
     s.push_str(
-        "layer1\n{\n\tmap = maps/mud_treads.tga\n\tframe1\n\t{\n\t\tmap = maps/mud_treads_wet.tga\
-         \n\t}\n\trepetitions = 50\n\tmask = mask_dirt.tga\n\tthickness = 0.1\n}\n\n",
+        "layer1\n{\n\tmap = maps/line.tga\n\trepetitions = 50\n\tmask = mask_dirt.tga\n\
+         \tthickness = 0.1\n}\n\n",
     );
     s.push_str(
         "layer2\n{\n\tmap = maps/grass.tga\n\trepetitions = 40\n\tmask = mask_grass.tga\n\
-         \tthickness = 0.01\n\n\tgrass\n\t{\n\t\tmax_density = 25\n\t\theight = 0.2\n\
+         \tthickness = 0.01\n\n\tgrass\n\t{\n\t\tmax_density = 20\n\t\theight = 0.2\n\
          \t\theight_diff = 0.1\n\t\twidth = 0.25\n\t\twidth_diff = 0.1\n\
          \t\ttexture = maps/grassfx.tga\n\t\tdensitymap = mask_grass.tga\n\t}\n}\n",
     );
@@ -1143,7 +1269,14 @@ fn tht(prog: &TrackProgram, syn: &Synth) -> String {
     s.push_str("surface_layer0\n{\n\tsurface = off\n\tmask = area_off.tga\n}\n\n");
     s.push_str("surface_layer1\n{\n\tsurface = start\n\tmask = area_start.tga\n}\n\n");
     s.push_str("num_material_layers = 3\n\n");
-    s.push_str("material_layer0\n{\n\tmaterial = compact soil\n}\n\n");
+    // The base is whatever the ground is; the line is worked soil on top of it, and the
+    // field is grass. Same three bands the height file paints, said in physics.
+    let base = match prog.terrain.surface {
+        Surface::Soil => "compact soil",
+        Surface::Sand => "sand",
+        Surface::Grass => "grass",
+    };
+    s.push_str(&format!("material_layer0\n{{\n\tmaterial = {base}\n}}\n\n"));
     s.push_str("material_layer1\n{\n\tmaterial = soil\n\tthickness = 0.1\n\tmask = mask_dirt.tga\n}\n\n");
     s.push_str("material_layer2\n{\n\tmaterial = grass\n\tthickness = 0.01\n\tmask = mask_grass.tga\n}\n");
     s
@@ -1383,6 +1516,56 @@ mod tests {
     }
 
     use crate::trackprog::EXAMPLE as DEMO;
+
+    /// Every file the source files name has to be in the folder beside them.
+    ///
+    /// This is the check that would have caught the exported folder pointing at PiBoSo's
+    /// example track for its textures: it compiled fine in the sense that the text was
+    /// valid, and TerrainEd would have stopped on the first missing `.tga`.
+    #[test]
+    fn the_exported_folder_references_nothing_it_doesnt_contain() {
+        let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        let s = synthesise(&p).unwrap();
+        let dir = std::env::temp_dir().join(format!("mxb-track-selftest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_source(&p, &s, &dir).unwrap();
+
+        let mut named = Vec::new();
+        for f in ["track.hmf", "track.tht"] {
+            let text = std::fs::read_to_string(dir.join(f)).unwrap();
+            for line in text.lines() {
+                let Some((key, value)) = line.split_once('=') else {
+                    continue;
+                };
+                // Every key whose value is a file name rather than a number.
+                if matches!(
+                    key.trim(),
+                    "map" | "mask" | "data" | "texture" | "densitymap"
+                ) {
+                    named.push((f, value.trim().to_string()));
+                }
+            }
+        }
+        assert!(named.len() >= 8, "found only {named:?}");
+        for (from, name) in &named {
+            assert!(
+                dir.join(name).is_file(),
+                "{from} names {name}, which isn't in the folder"
+            );
+        }
+
+        // And the pieces the game itself asks for, which the README promises are there.
+        let slug = slug(&p.name);
+        for f in [
+            format!("{slug}/{slug}.ini"),
+            format!("{slug}/{slug}.amb"),
+            format!("{slug}/{slug}.tga"),
+            format!("{slug}/{slug}_map.tga"),
+        ] {
+            assert!(dir.join(&f).is_file(), "{f} is missing");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_demo_program_parses_and_closes() {

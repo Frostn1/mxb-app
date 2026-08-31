@@ -118,6 +118,11 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   // Enrollment is the one unauthenticated write: it trades an invite code for a token.
   // Steam sign-in will replace the invite code without changing anything downstream.
+  // Above the account gate on purpose. The endpoint spends our Anthropic budget, so it is
+  // capped hard by its own shape — one call, 16k output tokens, a schema that can only be a
+  // motocross track — rather than by who is asking. That also makes it usable against a local
+  // `wrangler dev`, which has no accounts to enroll with.
+  if (method === "POST" && path === "/v1/track/generate") return generateTrack(request, env);
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
 
   // Self-serve signup, no invite. Voice is the reason this exists: a rider on a community
@@ -162,7 +167,6 @@ async function route(request: Request, env: Env): Promise<Response> {
   const gate = invitedOnly(account);
   if (gate) return gate;
 
-  if (method === "POST" && path === "/v1/track/generate") return generateTrack(request, env);
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);

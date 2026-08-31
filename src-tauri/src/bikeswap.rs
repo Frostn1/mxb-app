@@ -68,6 +68,8 @@ pub fn class_matches(bike_class: &str, allowed: &str) -> bool {
 }
 
 /// Bikes from `bikes` whose class satisfies `allowed`. Preserves input order.
+// Class matching: exercised by the tests below, with no caller in the app yet.
+#[allow(dead_code)]
 pub fn bikes_in_class<'a>(bikes: &'a [BikeIdentity], allowed: &str) -> Vec<&'a BikeIdentity> {
     bikes.iter().filter(|b| class_matches(&b.class, allowed)).collect()
 }

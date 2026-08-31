@@ -66,6 +66,7 @@ mod shop_session;
 mod soundmods;
 mod texstore;
 mod track;
+mod trackbuild;
 mod trackllm;
 mod trackprog;
 mod trackstats;
@@ -1159,11 +1160,22 @@ fn track_program(value: serde_json::Value) -> Result<trackprog::TrackProgram, St
 #[tauri::command]
 async fn generate_track(app: tauri::AppHandle, brief: String) -> Result<serde_json::Value, String> {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enroll with an invite code first.".into());
+    let base = paintsync::control_plane();
+    // A debug build pointed at a local control plane is someone testing this, and a local
+    // `wrangler dev` has no accounts to enroll with. Anywhere else, the token is what says
+    // whose Anthropic spend this is.
+    let local = cfg!(debug_assertions) && !base.starts_with("https://");
+    if cfg.cp_token.trim().is_empty() && !local {
+        return Err(
+            "Track generation goes through your MXB account — enroll with an invite code in \
+             Settings first. To test against a local control plane, run `wrangler dev` in \
+             control-plane/ with ANTHROPIC_API_KEY in .dev.vars and start the app with \
+             MXB_CONTROL_PLANE=http://localhost:8787."
+                .into(),
+        );
     }
     let ask = trackllm::ControlPlane {
-        base: paintsync::control_plane(),
+        base,
         token: cfg.cp_token.clone(),
     };
     // Three attempts: one to write it, one to fix the numbers, one for the thing the fix
@@ -1271,6 +1283,77 @@ async fn export_track_source(
     })
     .await
     .map_err(|e| format!("export_track_source task failed: {e}"))?
+}
+
+
+/// Whether the app can compile a track here, and what with.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackToolsStatus {
+    /// The folder someone pointed at, if they have.
+    path: String,
+    /// Whether `terrained.exe` was actually found in it.
+    found: bool,
+    /// Whether `tracked.exe` was too — without it the terrain still builds, it just has no
+    /// centreline yet.
+    has_tracked: bool,
+}
+
+#[tauri::command]
+async fn track_tools_status(app: tauri::AppHandle) -> Result<TrackToolsStatus, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    let path = cfg.track_tools_path.clone();
+    let tools = (!path.trim().is_empty())
+        .then(|| trackbuild::find(std::path::Path::new(&path)))
+        .flatten();
+    Ok(TrackToolsStatus {
+        path,
+        found: tools.is_some(),
+        has_tracked: tools.map(|t| t.tracked.is_some()).unwrap_or(false),
+    })
+}
+
+/// Remember where PiBoSo's track editing tools live.
+#[tauri::command]
+async fn set_track_tools(app: tauri::AppHandle, dir: String) -> Result<TrackToolsStatus, String> {
+    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
+    cfg.track_tools_path = dir.trim().to_string();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    track_tools_status(app).await
+}
+
+/// Export a track and run the compilers over it.
+///
+/// One step from the studio's point of view, because the folder on its own is homework. The
+/// compilers are PiBoSo's and Windows-only; on macOS they run through the same Wine prefix
+/// the game does.
+#[tauri::command]
+async fn build_track(
+    app: tauri::AppHandle,
+    program: serde_json::Value,
+    dir: String,
+) -> Result<Vec<trackbuild::Step>, String> {
+    let prog = track_program(program)?;
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.track_tools_path.trim().is_empty() {
+        return Err("Point at PiBoSo's track editing tools first.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let tools = trackbuild::find(std::path::Path::new(&cfg.track_tools_path))
+            .ok_or("There's no terrained.exe in that folder.".to_string())?;
+        let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
+        let root = std::path::Path::new(&dir);
+        tracksynth::write_source(&prog, &syn, root).map_err(|e| format!("{e:#}"))?;
+        let slug: String = prog
+            .name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        trackbuild::compile(&tools, root, slug.trim_matches('_'), &cfg.game_path)
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("build_track task failed: {e}"))?
 }
 
 /// A track's surfaces, fetched after its mesh is already on screen.
@@ -8698,6 +8781,9 @@ fn main() {
             preview_track,
             install_track_preview,
             export_track_source,
+            track_tools_status,
+            set_track_tools,
+            build_track,
             load_track_overview,
             load_track_scenery,
             load_track_surfaces,

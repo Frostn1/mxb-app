@@ -115,7 +115,6 @@ fn read_active(mods_path: &str, bike: &str) -> String {
 }
 
 pub const ORIGINAL_LABEL: &str = ORIGINAL;
-pub const STOCK_LABEL: &str = STOCK;
 
 pub fn current_active(mods_path: &str, bike: &str) -> String {
     let a = read_active(mods_path, bike);

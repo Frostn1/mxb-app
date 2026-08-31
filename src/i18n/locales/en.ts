@@ -2193,4 +2193,12 @@ export const en = {
   "track.over": "over",
   "track.kind.rut": "Rut",
   "track.sequenceHint": "You can describe the lap in order — “a long straight, a left hairpin, then a double and a rhythm section” — and it will be built that way.",
+  "track.compile": "Build with TerrainEd",
+  "track.compiling": "Compiling…",
+  "track.compiled": "Compiled",
+  "track.compileFailed": "Couldn't compile it",
+  "track.buildStepFailed": "The {{step}} step failed",
+  "track.pointAtTools": "Point at the track tools…",
+  "track.toolsNotFound": "No terrained.exe in that folder",
+  "track.stillNeeded": "Still needs a .rdf from TrackEd (start gate, pits, cameras) and a gate.edf copied from another track.",
 } as const;

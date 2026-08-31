@@ -601,7 +601,7 @@ fn build_surface_blob(path: &Path, max_dim: u32) -> Option<Vec<u8>> {
             // leaves the whole track a flat brown with nothing to pick features out by.
             let mut best = 0u32;
             let mut colour = BARE;
-            for (i, m) in masks.iter().enumerate() {
+            for m in masks.iter() {
                 let mx = x * scale * m.width as usize / src_w.max(1);
                 let my = y * scale * m.height as usize / src_h.max(1);
 
