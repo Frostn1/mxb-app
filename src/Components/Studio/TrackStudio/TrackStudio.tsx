@@ -952,6 +952,21 @@ export default function TrackStudio() {
                   void settle({ ...program, elevation });
                 }}
                 onFeature={editFeature}
+                {...(() => {
+                  const steps = lapSteps(program);
+                  const on = scope !== null ? steps[scope] : undefined;
+                  if (!on) return {};
+                  return {
+                    scoped:
+                      on.kind === "feature"
+                        ? { at: on.at, feature: on.feature }
+                        : { at: on.at, segment: on.segment },
+                    onScoped: (patch: Record<string, number>) =>
+                      on.kind === "feature"
+                        ? editFeature(on.index, patch as Partial<TrackFeature>)
+                        : editSegment(on.index, patch as Partial<TrackSegment>),
+                  };
+                })()}
                 onHover={(i) =>
                   setHover(
                     i === null
