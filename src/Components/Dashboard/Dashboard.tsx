@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import Sidebar, { type DashboardView } from "../Shell/Sidebar";
+import { parsePluginView, usePlugins } from "@/lib/usePlugins";
 import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
@@ -63,6 +65,21 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Which Settings section to land on, when something sent us there on purpose.
   // Cleared on the way out so a later visit opens where Settings normally opens.
   const [settingsSection, setSettingsSection] = useState<SectionId | undefined>();
+
+  // Paid plugins running this session. A plugin that fails to mount says so once and is
+  // then dropped: the app is a mod manager first, and a broken add-on must not take it down.
+  const plugins = usePlugins((id, message) =>
+    toast.error(`${id}: ${message}`),
+  );
+  // The panel on screen, when the current view addresses one. A view naming a plugin that
+  // is no longer mounted — a licence that lapsed mid-session — falls through to the
+  // built-in pages rather than rendering a blank frame.
+  const pluginPanel = (() => {
+    const ref = parsePluginView(view);
+    if (!ref) return null;
+    const p = plugins.find((x) => x.manifest.id === ref.plugin);
+    return p?.panels.find((panel) => panel.id === ref.panel) ?? null;
+  })();
 
   const navigate = useCallback(
     (v: DashboardView, studio?: StudioTab) => {
@@ -164,9 +181,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
       <div className="flex min-h-0 flex-1">
-        <Sidebar view={view} studioTab={studioTab} onNavigate={navigate} />
+        <Sidebar view={view} studioTab={studioTab} plugins={plugins} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {view === "browse" && selectedSlug ? (
+          {pluginPanel ? (
+            <pluginPanel.component />
+          ) : view === "browse" && selectedSlug ? (
             <ModDetail
               slug={selectedSlug}
               modType={modType}

@@ -21,6 +21,7 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import PaintSync from "./PaintSync";
+import Plugins from "./Plugins";
 import {
   countProfilesIn,
   detectGamePath,
@@ -118,6 +119,7 @@ export type SectionId =
   | "reshade"
   | "logs"
   | "paintsync"
+  | "plugins"
   | "supporters"
   | "about";
 
@@ -150,6 +152,7 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
       { id: "overlay", label: "overlay.section" },
       { id: "voice", label: "voice.section" },
       { id: "paintsync", label: "settings.paintSync" },
+      { id: "plugins", label: "plugins.section" },
     ],
   },
   {
@@ -1213,6 +1216,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {/* Paint sync's own state. The General toggle turns it on and off; this says what
               it has actually managed — both halves run in the background off things the
               player didn't ask for, so without this the only record was a log file. */}
+          {active === "plugins" && <Plugins />}
           {active === "paintsync" && (
           <Section title={t("settings.paintSync")} desc={t("settings.paintSyncDesc")}>
             <PaintSync />
