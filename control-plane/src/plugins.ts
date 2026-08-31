@@ -1,15 +1,15 @@
 /**
- * Paid plugins: licences, redeemable keys, and the signed entitlement the app runs on.
+ * Paid plugins: licenses, redeemable keys, and the signed license the app runs on.
  *
  * The shape of the problem is that the app has to keep working on a plane. So the plane is
  * not asked "may this person run the plugin" at the moment they run it — it is asked
- * periodically, and answers with a short-lived **entitlement**: a small signed statement the
+ * periodically, and answers with a short-lived **license**: a small signed statement the
  * app can check by itself, with no network and no shared secret.
  *
  * Signed with Ed25519, not an HMAC. An HMAC would need the same key at both ends, and the
  * app's end ships to the people paying for the plugin — one `strings` away from being able
  * to mint their own. With a signature the app only ever holds the public half, and forging
- * an entitlement means breaking the curve rather than reading a binary.
+ * an license means breaking the curve rather than reading a binary.
  *
  * Two clocks matter and they are deliberately different:
  *   * `expires`      — when the subscription runs out. Months away.
@@ -18,22 +18,22 @@
  * the end of the month, without the app needing to be online to find out.
  */
 
-/** How long an entitlement is honoured with no contact. */
+/** How long an license is honoured with no contact. */
 export const GRACE_DAYS = 7;
 
 /** Format version, so a future field can be added without old apps mis-reading a token. */
-export const ENTITLEMENT_VERSION = 1;
+export const LICENSE_VERSION = 1;
 
-export interface Entitlement {
+export interface License {
   v: number;
-  /** Account the entitlement was issued to. Bound so a token cannot be passed around. */
+  /** Account the license was issued to. Bound so a token cannot be passed around. */
   account: string;
   plugin: string;
   /** Seconds since epoch. When the subscription ends. */
   expires: number;
   /** Seconds since epoch. When the app must re-check. Always <= expires. */
   refreshAfter: number;
-  /** The bundle this entitlement is good for, so a swapped bundle fails to verify. */
+  /** The bundle this license is good for, so a swapped bundle fails to verify. */
   bundleSha256: string | null;
   issued: number;
 }
@@ -58,8 +58,8 @@ function unb64url(s: string): Uint8Array {
  * Import the signing key from its PKCS#8 DER, base64'd, in `PLUGIN_SIGNING_KEY`.
  *
  * Generate one with `scripts/plugin-keypair.ts`. Absent, every endpoint here answers 503
- * rather than issuing something unsigned — an unsigned entitlement is not a degraded
- * entitlement, it is a forged one that happens to be ours.
+ * rather than issuing something unsigned — an unsigned license is not a degraded
+ * license, it is a forged one that happens to be ours.
  */
 async function signingKey(env: Env): Promise<CryptoKey | null> {
   if (!env.PLUGIN_SIGNING_KEY) return null;
@@ -77,17 +77,17 @@ async function signingKey(env: Env): Promise<CryptoKey | null> {
 }
 
 /** `<b64url(json)>.<b64url(sig)>` — a JWS in spirit, without the header nobody reads. */
-export async function signEntitlement(e: Entitlement, key: CryptoKey): Promise<string> {
+export async function signLicense(e: License, key: CryptoKey): Promise<string> {
   const payload = new TextEncoder().encode(JSON.stringify(e));
   const sig = await crypto.subtle.sign({ name: "Ed25519" }, key, payload);
   return `${b64url(payload)}.${b64url(new Uint8Array(sig))}`;
 }
 
 /** The app's side of the same check, kept here so the two can be tested against each other. */
-export async function verifyEntitlement(
+export async function verifyLicense(
   token: string,
   publicKey: CryptoKey,
-): Promise<Entitlement | null> {
+): Promise<License | null> {
   const dot = token.indexOf(".");
   if (dot < 0) return null;
   const payload = unb64url(token.slice(0, dot));
@@ -95,21 +95,21 @@ export async function verifyEntitlement(
   const ok = await crypto.subtle.verify({ name: "Ed25519" }, publicKey, sig, payload);
   if (!ok) return null;
   try {
-    return JSON.parse(new TextDecoder().decode(payload)) as Entitlement;
+    return JSON.parse(new TextDecoder().decode(payload)) as License;
   } catch {
     return null;
   }
 }
 
 // ---------------------------------------------------------------------------
-// licences
+// licenses
 // ---------------------------------------------------------------------------
 
 export interface Account {
   id: string;
 }
 
-interface LicenceRow {
+interface LicenseRow {
   plugin_id: string;
   expires_at: number;
   bundle_sha256: string | null;
@@ -144,13 +144,13 @@ async function issue(
   row: { plugin_id: string; expires_at: number; bundle_sha256: string | null },
 ): Promise<string> {
   const now = nowSec();
-  return signEntitlement(
+  return signLicense(
     {
-      v: ENTITLEMENT_VERSION,
+      v: LICENSE_VERSION,
       account: accountId,
       plugin: row.plugin_id,
       expires: row.expires_at,
-      // Never past the subscription itself: a licence with three days left must not hand out
+      // Never past the subscription itself: a license with three days left must not hand out
       // a seven-day grace.
       refreshAfter: Math.min(now + GRACE_DAYS * DAY, row.expires_at),
       bundleSha256: row.bundle_sha256,
@@ -183,38 +183,38 @@ export async function listPlugins(env: Env): Promise<Response> {
   });
 }
 
-/** What this account holds, each with a freshly signed entitlement. */
+/** What this account holds, each with a freshly signed license. */
 export async function myPlugins(account: Account, env: Env): Promise<Response> {
   const key = await signingKey(env);
   if (!key) return json(503, { error: "plugin licensing is not configured" });
 
   const { results } = await env.DB.prepare(
     `SELECT l.plugin_id, l.expires_at, p.bundle_sha256, p.version, p.name
-       FROM plugin_licences l JOIN plugins p ON p.id = l.plugin_id
+       FROM plugin_licenses l JOIN plugins p ON p.id = l.plugin_id
       WHERE l.account_id = ?`,
   )
     .bind(account.id)
-    .all<LicenceRow>();
+    .all<LicenseRow>();
 
   const now = nowSec();
-  const licences = [];
+  const licenses = [];
   for (const row of results ?? []) {
-    licences.push({
+    licenses.push({
       plugin: row.plugin_id,
       name: row.name,
       version: row.version,
       expires: row.expires_at,
       active: row.expires_at > now,
-      // An expired licence gets no entitlement at all. Handing one out and letting the app
+      // An expired license gets no license at all. Handing one out and letting the app
       // notice it is stale would make every consumer responsible for a check that belongs
       // in exactly one place.
-      entitlement: row.expires_at > now ? await issue(env, key, account.id, row) : null,
+      license: row.expires_at > now ? await issue(env, key, account.id, row) : null,
     });
   }
-  return json(200, { licences });
+  return json(200, { licenses });
 }
 
-/** Trade a key for months on a licence. */
+/** Trade a key for months on a license. */
 export async function redeemKey(
   request: Request,
   account: Account,
@@ -236,7 +236,7 @@ export async function redeemKey(
   // Claim the key first, and only if it is still unclaimed. Doing this as the WHERE of the
   // UPDATE is what makes two simultaneous redemptions of one code resolve to one winner:
   // the second matches no row and gets the "already used" answer, rather than both reading
-  // "unredeemed" and both extending the licence.
+  // "unredeemed" and both extending the license.
   const claimed = await env.DB.prepare(
     `UPDATE plugin_keys SET redeemed_by = ?, redeemed_at = ?
       WHERE code = ? AND redeemed_by IS NULL
@@ -256,14 +256,14 @@ export async function redeemKey(
   }
 
   const current = await env.DB.prepare(
-    `SELECT expires_at FROM plugin_licences WHERE account_id = ? AND plugin_id = ?`,
+    `SELECT expires_at FROM plugin_licenses WHERE account_id = ? AND plugin_id = ?`,
   )
     .bind(account.id, claimed.plugin_id)
     .first<{ expires_at: number }>();
 
   const expires = extendBy(current?.expires_at ?? null, claimed.months, now);
   await env.DB.prepare(
-    `INSERT INTO plugin_licences (account_id, plugin_id, expires_at, granted_at)
+    `INSERT INTO plugin_licenses (account_id, plugin_id, expires_at, granted_at)
      VALUES (?, ?, ?, ?)
      ON CONFLICT (account_id, plugin_id) DO UPDATE SET expires_at = excluded.expires_at`,
   )
@@ -281,7 +281,7 @@ export async function redeemKey(
     name: meta?.name ?? claimed.plugin_id,
     version: meta?.version ?? null,
     expires,
-    entitlement: await issue(env, key, account.id, {
+    license: await issue(env, key, account.id, {
       plugin_id: claimed.plugin_id,
       expires_at: expires,
       bundle_sha256: meta?.bundle_sha256 ?? null,
@@ -290,7 +290,7 @@ export async function redeemKey(
 }
 
 /**
- * The bundle itself, for an account whose licence is live right now.
+ * The bundle itself, for an account whose license is live right now.
  *
  * Streamed from R2 rather than redirected to it: a redirect would be a URL that works for
  * whoever holds it, and the whole point of this route is that it does not.
@@ -303,7 +303,7 @@ export async function pluginBundle(
   const row = await env.DB.prepare(
     `SELECT p.bundle_key, p.bundle_sha256, l.expires_at
        FROM plugins p
-       LEFT JOIN plugin_licences l ON l.plugin_id = p.id AND l.account_id = ?
+       LEFT JOIN plugin_licenses l ON l.plugin_id = p.id AND l.account_id = ?
       WHERE p.id = ?`,
   )
     .bind(account.id, pluginId)
@@ -311,7 +311,7 @@ export async function pluginBundle(
 
   if (!row) return json(404, { error: "no such plugin" });
   if (!row.expires_at || row.expires_at <= nowSec()) {
-    return json(403, { error: "no live licence for that plugin" });
+    return json(403, { error: "no live license for that plugin" });
   }
   if (!row.bundle_key) return json(404, { error: "that plugin has no build published yet" });
 
@@ -320,7 +320,7 @@ export async function pluginBundle(
   return new Response(object.body, {
     headers: {
       "content-type": "application/octet-stream",
-      // Private and uncached: this response is only correct for the licence that fetched it.
+      // Private and uncached: this response is only correct for the license that fetched it.
       "cache-control": "private, no-store",
       ...(row.bundle_sha256 ? { etag: row.bundle_sha256 } : {}),
     },

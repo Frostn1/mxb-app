@@ -28,7 +28,7 @@ function until(at: number | null): string | null {
  * What this row is, in one sentence, plus the one button that changes it.
  *
  * A paid thing that isn't working has to say which of the four reasons it is: not bought,
- * bought but not installed, installed but the licence needs re-checking, or working. Every
+ * bought but not installed, installed but the license needs re-checking, or working. Every
  * one of those sends the person somewhere different, and a single "unavailable" state would
  * send them all to the same place — support.
  */
@@ -146,7 +146,7 @@ const PluginRow = ({
 /**
  * The Plugins page.
  *
- * Everything here works offline except redeeming a key: the licence is a signed statement
+ * Everything here works offline except redeeming a key: the license is a signed statement
  * the app already holds, so a list that showed nothing without a network would be lying
  * about a plugin that is, right now, running.
  */

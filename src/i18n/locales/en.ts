@@ -2240,14 +2240,14 @@ export const en = {
 
   // --- paid plugins ---
   "plugins.section": "Plugins",
-  "plugins.sectionDesc": "Paid add-ons for MXB App. A licence is a monthly subscription tied to your account, and it keeps working offline for a week between checks.",
+  "plugins.sectionDesc": "Paid add-ons for MXB App. A license is a monthly subscription tied to your account, and it keeps working offline for a week between checks.",
   "plugins.keyLabel": "Redeem a key",
   "plugins.keyHelp": "Paste the key you were sent. Renewing is another key — it adds to whatever time you have left.",
   "plugins.redeem": "Redeem",
   "plugins.redeemed": "{{name}} is licensed on this account.",
   "plugins.available": "Available",
   "plugins.refresh": "Refresh",
-  "plugins.loading": "Checking your licences…",
+  "plugins.loading": "Checking your licenses…",
   "plugins.none": "Nothing on offer yet.",
   "plugins.install": "Install",
   "plugins.update": "Update",
@@ -2262,7 +2262,7 @@ export const en = {
   "plugins.needsCheck": "Needs a check-in",
   "plugins.needsCheckDetail": "it's been a week since we could reach the control plane. Go online and refresh.",
   "plugins.lapsed": "Lapsed",
-  "plugins.lapsedDetail": "your licence ran out on {{date}}. Redeem a key to carry on.",
+  "plugins.lapsedDetail": "your license ran out on {{date}}. Redeem a key to carry on.",
   "plugins.notLicensed": "Not licensed",
   "plugins.notLicensedDetail": "redeem a key above to unlock it.",
 } as const;

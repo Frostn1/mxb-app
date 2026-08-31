@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * Why a plugin is or is not runnable.
  *
- * `stale` is the one worth understanding: the licence has not expired, but we have not been
+ * `stale` is the one worth understanding: the license has not expired, but we have not been
  * able to re-check it inside the grace window. It reads to the user as "needs to go online",
  * not as "you have been cut off" — and it is what makes a cancellation take effect on a
  * machine that stops asking.
@@ -19,7 +19,7 @@ export interface PluginView {
   /** Whether there is a build to install at all. */
   published: boolean;
   status: PluginStatus;
-  /** Seconds since epoch. Null if this account has never held a licence. */
+  /** Seconds since epoch. Null if this account has never held a license. */
   expires: number | null;
   installedVersion: string | null;
   /** Licensed, installed, and on the current build — the only state that runs. */
@@ -41,12 +41,12 @@ export interface PluginRuntime {
   source: string;
 }
 
-/** The catalogue plus this account's licences. Works offline, from what is on disk. */
+/** The catalogue plus this account's licenses. Works offline, from what is on disk. */
 export function listPlugins(): Promise<PluginView[]> {
   return invoke("plugin_list");
 }
 
-/** Trade a key for months on a licence. Resolves with the plugin's name. */
+/** Trade a key for months on a license. Resolves with the plugin's name. */
 export function redeemPluginKey(code: string): Promise<string> {
   return invoke("plugin_redeem", { code });
 }
@@ -63,8 +63,8 @@ export function removePlugin(id: string): Promise<void> {
 /**
  * Fetch a plugin's manifest and entry source.
  *
- * The licence is checked again on this call, at the last point before the code runs — not
- * only on the page that listed it. A plugin whose licence lapsed between the list and the
+ * The license is checked again on this call, at the last point before the code runs — not
+ * only on the page that listed it. A plugin whose license lapsed between the list and the
  * mount must not start.
  */
 export function pluginRuntime(id: string): Promise<PluginRuntime> {

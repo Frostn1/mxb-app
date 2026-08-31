@@ -8,14 +8,14 @@ import { pluginRuntime, type PluginManifest } from "@/api/plugins";
  * Loading and mounting a paid plugin's UI.
  *
  * A plugin ships its panels as one ES module. The Rust side has already verified the
- * licence and the bundle's signature-named hash before handing us a line of it, so what is
+ * license and the bundle's signature-named hash before handing us a line of it, so what is
  * left here is the mechanics: turn the source text into a module, hand it a small stable
  * API, and take back the components it registers.
  *
  * **Source text, not a file URL.** The module arrives as a string and is turned into a blob
  * URL right before `import()`. That is deliberate: nothing on disk is ever loaded by path,
  * so a file dropped into the plugins folder by hand is not a way to get code into the app —
- * the only route in goes through the licence check that produced this string.
+ * the only route in goes through the license check that produced this string.
  *
  * The API handed to a plugin is deliberately small. Every method here is one the app is
  * promising to keep working across versions, so the bar for adding one is that a plugin
@@ -34,7 +34,7 @@ export interface PluginPanel {
  *
  * Paths are relative to `Documents\PiBoSo\<game>` and cannot leave it — including through
  * a symlink already on disk, which the backend checks by resolving the path rather than
- * only inspecting it. Every call re-checks the licence, so a plugin whose subscription
+ * only inspecting it. Every call re-checks the license, so a plugin whose subscription
  * lapses stops being able to write mid-session.
  */
 export interface PluginFiles {
@@ -53,7 +53,7 @@ export interface PluginApi {
    * Call a backend command the plugin's own payload installed, or one of the app's.
    *
    * Not a general escape hatch by intent, but it is one in effect — a plugin runs with the
-   * app's privileges, which is why a bundle only ever arrives over a verified licence.
+   * app's privileges, which is why a bundle only ever arrives over a verified license.
    */
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
   /** Read and write inside the game's user folder. */
@@ -96,7 +96,7 @@ export function isMounted(id: string): boolean {
 /**
  * Verify, fetch and run a plugin's entry module.
  *
- * Throws with something a person can act on: the licence checks in the backend answer in
+ * Throws with something a person can act on: the license checks in the backend answer in
  * sentences, and a plugin that fails to mount is a thing the user paid for, so "it didn't
  * work" is not an acceptable message.
  */
@@ -156,7 +156,7 @@ export async function mountPlugin(id: string): Promise<LoadedPlugin> {
  * Drop a plugin from this session.
  *
  * The module itself cannot be unloaded — nothing in a browser can — so this only stops the
- * app rendering its panels. A licence that lapses mid-session therefore takes its UI away
+ * app rendering its panels. A license that lapses mid-session therefore takes its UI away
  * without pretending the code has gone; the code that matters is the game-side payload, and
  * that is gated where it is installed.
  */

@@ -1,19 +1,19 @@
 //! Paid plugins: what this install is allowed to run, and how it proves it offline.
 //!
-//! The control plane hands out a short-lived **entitlement** — a small Ed25519-signed
+//! The control plane hands out a short-lived **license** — a small Ed25519-signed
 //! statement that a named account holds a named plugin until a named date. The app checks
 //! it locally, so the plugin keeps working on a plane and through an outage; and because
-//! the entitlement carries a second, much nearer deadline (`refresh_after`), a cancelled
+//! the license carries a second, much nearer deadline (`refresh_after`), a cancelled
 //! subscription stops working within the grace window rather than at the end of the month.
 //!
 //! We hold only the public half of the signing key. That is the whole reason it is a
 //! signature and not a MAC: a MAC key shipped in this binary is one `strings` away from
-//! letting anyone mint themselves a permanent licence.
+//! letting anyone mint themselves a permanent license.
 //!
 //! Three things are checked before a bundle is allowed to run, and all three matter:
 //!   1. the signature, or the payload is just JSON somebody typed;
 //!   2. the two clocks, against a time that cannot be wound backwards (see `Clock`);
-//!   3. the bundle's SHA-256 against the one the entitlement names, so a bundle swapped
+//!   3. the bundle's SHA-256 against the one the license names, so a bundle swapped
 //!      anywhere between R2 and this disk fails to load instead of running.
 
 use std::collections::BTreeMap;
@@ -31,22 +31,22 @@ use sha2::{Digest, Sha256};
 /// **This is a placeholder from a throwaway pair.** Before shipping, run
 /// `control-plane/scripts/plugin-keypair.ts`, put the private half in the worker
 /// (`wrangler secret put PLUGIN_SIGNING_KEY`) and the public half here. Until both sides
-/// hold halves of the same pair, every entitlement fails verification — which is the safe
+/// hold halves of the same pair, every license fails verification — which is the safe
 /// direction to fail in, but it does mean nothing works.
 ///
 /// Rotating it later means shipping an app update: an install that has not updated rejects
-/// every entitlement signed by the new pair.
-pub const ENTITLEMENT_PUBLIC_KEY: &str = "3RVzr7dGG2rcorozGze9rR7NUTj61bwxS2IL0t40kk0";
+/// every license signed by the new pair.
+pub const LICENSE_PUBLIC_KEY: &str = "3RVzr7dGG2rcorozGze9rR7NUTj61bwxS2IL0t40kk0";
 
-/// Entitlement format we understand. A newer one is refused rather than half-read.
-pub const ENTITLEMENT_VERSION: u32 = 1;
+/// License format we understand. A newer one is refused rather than half-read.
+pub const LICENSE_VERSION: u32 = 1;
 
 // ---------------------------------------------------------------------------
-// the entitlement
+// the license
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Entitlement {
+pub struct License {
     pub v: u32,
     /// Account it was issued to. Bound so a token cannot simply be passed around.
     pub account: String,
@@ -56,7 +56,7 @@ pub struct Entitlement {
     /// When we must have talked to the control plane again. Always <= `expires`.
     #[serde(rename = "refreshAfter")]
     pub refresh_after: i64,
-    /// The bundle this entitlement is good for, lowercase hex. None before a build exists.
+    /// The bundle this license is good for, lowercase hex. None before a build exists.
     #[serde(rename = "bundleSha256")]
     pub bundle_sha256: Option<String>,
     pub issued: i64,
@@ -64,26 +64,26 @@ pub struct Entitlement {
 
 /// Verify a `<b64url(payload)>.<b64url(sig)>` token and return what it says.
 ///
-/// Every failure is the same answer to the caller — no licence — but they are distinguished
+/// Every failure is the same answer to the caller — no license — but they are distinguished
 /// in the error text because "your clock is wrong" and "that signature is not ours" send a
 /// person to very different places.
-pub fn verify_entitlement(token: &str) -> Result<Entitlement> {
-    verify_with(token, ENTITLEMENT_PUBLIC_KEY)
+pub fn verify_license(token: &str) -> Result<License> {
+    verify_with(token, LICENSE_PUBLIC_KEY)
 }
 
 /// The same check against a named key. Split out so a test can pin the wire format against
 /// a token the control plane's own TypeScript actually produced — the encoding is agreed
 /// across two languages and nothing in either would notice if they drifted apart.
-pub fn verify_with(token: &str, public_key_b64: &str) -> Result<Entitlement> {
+pub fn verify_with(token: &str, public_key_b64: &str) -> Result<License> {
     let (payload_b64, sig_b64) = token
         .split_once('.')
-        .ok_or_else(|| anyhow!("not an entitlement token"))?;
+        .ok_or_else(|| anyhow!("not an license token"))?;
     let payload = URL_SAFE_NO_PAD
         .decode(payload_b64)
-        .context("entitlement payload is not base64url")?;
+        .context("license payload is not base64url")?;
     let sig_bytes = URL_SAFE_NO_PAD
         .decode(sig_b64)
-        .context("entitlement signature is not base64url")?;
+        .context("license signature is not base64url")?;
 
     let key_bytes: [u8; 32] = URL_SAFE_NO_PAD
         .decode(public_key_b64)
@@ -95,14 +95,14 @@ pub fn verify_with(token: &str, public_key_b64: &str) -> Result<Entitlement> {
     let sig_arr: [u8; 64] = sig_bytes
         .as_slice()
         .try_into()
-        .map_err(|_| anyhow!("entitlement signature is the wrong length"))?;
+        .map_err(|_| anyhow!("license signature is the wrong length"))?;
     key.verify_strict(&payload, &Signature::from_bytes(&sig_arr))
-        .map_err(|_| anyhow!("that entitlement was not signed by us"))?;
+        .map_err(|_| anyhow!("that license was not signed by us"))?;
 
-    let e: Entitlement =
-        serde_json::from_slice(&payload).context("entitlement payload is not one of ours")?;
-    if e.v != ENTITLEMENT_VERSION {
-        bail!("that entitlement is version {}; this build understands {ENTITLEMENT_VERSION}. Update MXB App.", e.v);
+    let e: License =
+        serde_json::from_slice(&payload).context("license payload is not one of ours")?;
+    if e.v != LICENSE_VERSION {
+        bail!("that license is version {}; this build understands {LICENSE_VERSION}. Update MXB App.", e.v);
     }
     Ok(e)
 }
@@ -123,7 +123,7 @@ pub enum Status {
     Expired,
 }
 
-pub fn status(e: &Entitlement, now: i64) -> Status {
+pub fn status(e: &License, now: i64) -> Status {
     if now >= e.expires {
         Status::Expired
     } else if now >= e.refresh_after {
@@ -140,9 +140,9 @@ pub fn status(e: &Entitlement, now: i64) -> Status {
 /// A wall clock that cannot be wound backwards.
 ///
 /// Every expiry check on a machine the user controls has the same hole: set the clock to
-/// last year and a lapsed licence is live again. It cannot be closed offline — there is no
+/// last year and a lapsed license is live again. It cannot be closed offline — there is no
 /// trusted time source — but it can be made a one-way door. We remember the latest instant
-/// we have ever been sure of (the `issued` of an entitlement the control plane signed, or
+/// we have ever been sure of (the `issued` of an license the control plane signed, or
 /// simply the highest wall-clock reading we have seen) and never accept a reading below it.
 ///
 /// So winding the clock back does not extend anything; it freezes it, which is the failure
@@ -156,7 +156,7 @@ pub struct Clock {
 }
 
 impl Clock {
-    /// The time to judge an entitlement by, and the updated mark to persist.
+    /// The time to judge an license by, and the updated mark to persist.
     pub fn observe(&mut self, wall: i64) -> i64 {
         if wall > self.high_water {
             self.high_water = wall;
@@ -164,9 +164,9 @@ impl Clock {
         self.high_water
     }
 
-    /// A signed entitlement is evidence of a real instant: the control plane stamped it, so
+    /// A signed license is evidence of a real instant: the control plane stamped it, so
     /// time is at least that. Fold it in when one arrives.
-    pub fn witness(&mut self, e: &Entitlement) {
+    pub fn witness(&mut self, e: &License) {
         if e.issued > self.high_water {
             self.high_water = e.issued;
         }
@@ -180,70 +180,70 @@ impl Clock {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Installed {
     pub version: Option<String>,
-    /// SHA-256 of the bundle that was unpacked, so a mismatch against the entitlement is
+    /// SHA-256 of the bundle that was unpacked, so a mismatch against the license is
     /// noticed without hashing the unpacked tree.
     pub sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PluginState {
-    /// The account these entitlements belong to. Learnt from the first one verified; a later
-    /// entitlement naming a different account is refused, which is what stops one being
+    /// The account these licenses belong to. Learnt from the first one verified; a later
+    /// license naming a different account is refused, which is what stops one being
     /// copied between machines.
     #[serde(default)]
     pub account: Option<String>,
     #[serde(default)]
     pub clock: Clock,
-    /// plugin id -> the entitlement token as issued.
+    /// plugin id -> the license token as issued.
     #[serde(default)]
-    pub entitlements: BTreeMap<String, String>,
+    pub licenses: BTreeMap<String, String>,
     #[serde(default)]
     pub installed: BTreeMap<String, Installed>,
 }
 
 impl PluginState {
-    /// Take an entitlement the control plane just issued.
+    /// Take an license the control plane just issued.
     ///
     /// Refuses one for another account, which is the casual-sharing case: the token is a
     /// file, and a file gets pasted into someone else's install.
-    pub fn accept(&mut self, token: &str) -> Result<Entitlement> {
-        let e = verify_entitlement(token)?;
+    pub fn accept(&mut self, token: &str) -> Result<License> {
+        let e = verify_license(token)?;
         match &self.account {
             Some(existing) if existing != &e.account => {
-                bail!("that entitlement belongs to a different account")
+                bail!("that license belongs to a different account")
             }
             _ => {}
         }
         self.account = Some(e.account.clone());
         self.clock.witness(&e);
-        self.entitlements.insert(e.plugin.clone(), token.to_string());
+        self.licenses.insert(e.plugin.clone(), token.to_string());
         Ok(e)
     }
 
     /// Test-only twin of `accept`, against a named key.
     #[cfg(test)]
-    pub fn accept_with(&mut self, token: &str, key: &str) -> Result<Entitlement> {
+    pub fn accept_with(&mut self, token: &str, key: &str) -> Result<License> {
         let e = verify_with(token, key)?;
         match &self.account {
             Some(existing) if existing != &e.account => {
-                bail!("that entitlement belongs to a different account")
+                bail!("that license belongs to a different account")
             }
             _ => {}
         }
         self.account = Some(e.account.clone());
         self.clock.witness(&e);
-        self.entitlements.insert(e.plugin.clone(), token.to_string());
+        self.licenses.insert(e.plugin.clone(), token.to_string());
         Ok(e)
     }
 
     /// What this install may run right now, judged against the un-windable clock.
     pub fn status_of(&mut self, plugin: &str, wall: i64) -> Status {
         let now = self.clock.observe(wall);
-        match self.entitlements.get(plugin) {
+        match self.licenses.get(plugin) {
             None => Status::Expired,
-            Some(token) => match verify_entitlement(token) {
+            Some(token) => match verify_license(token) {
                 Ok(e) if e.plugin == plugin => status(&e, now),
-                // A token that no longer verifies is not a licence, whatever it used to be.
+                // A token that no longer verifies is not a license, whatever it used to be.
                 _ => Status::Expired,
             },
         }
@@ -316,7 +316,7 @@ pub fn version_at_least(have: &str, need: &str) -> bool {
     !(a_pre && !b_pre)
 }
 
-/// Verify a downloaded bundle against the entitlement, then unpack it.
+/// Verify a downloaded bundle against the license, then unpack it.
 ///
 /// The hash check is the load-bearing one and it happens **before** a single byte is
 /// written: this is code that is about to run inside the app, and "unpack then check" would
@@ -331,9 +331,9 @@ pub fn install_bundle(
     let got = sha256_hex(bytes);
     match expected_sha256 {
         Some(want) if !want.eq_ignore_ascii_case(&got) => {
-            bail!("the downloaded plugin does not match what your licence names ({want} vs {got}) - it was not installed")
+            bail!("the downloaded plugin does not match what your license names ({want} vs {got}) - it was not installed")
         }
-        None => bail!("your licence doesn't name a build for that plugin yet"),
+        None => bail!("your license doesn't name a build for that plugin yet"),
         _ => {}
     }
 
@@ -429,7 +429,7 @@ mod tests {
         )
     }
 
-    /// A token produced by the control plane's own `signEntitlement`, in TypeScript, in a
+    /// A token produced by the control plane's own `signLicense`, in TypeScript, in a
     /// Worker runtime — pasted here verbatim.
     ///
     /// This is the one seam neither side can check alone. The payload is JSON with a field
@@ -437,7 +437,7 @@ mod tests {
     /// every one of those is a place the two languages could quietly disagree: a `+` for a
     /// `-`, a padded string, a re-serialised payload with the keys in another order. Each of
     /// those produces a token that looks perfectly well-formed and fails to verify, and the
-    /// symptom in production is "nobody's licence works".
+    /// symptom in production is "nobody's license works".
     const TS_PUBLIC_KEY: &str = "Sp8dtEFQK86a9AKfQg-2wwRxFBGgZX4Wc6qHN2UHLJg";
     const TS_TOKEN: &str = "eyJ2IjoxLCJhY2NvdW50IjoiYWNjX3Rlc3QiLCJwbHVnaW4iOiJyZXBsYXljYW0iLCJleHBpcmVzIjoyMDAwMDAwMDAwLCJyZWZyZXNoQWZ0ZXIiOjE5MDAwMDAwMDAsImJ1bmRsZVNoYTI1NiI6Ijc3OTZkNDdlYzBkZTg0OGYzYjQxOWY0M2ZmMjExMTQ5ZGI0Y2MzYzQ0MDA3Yzk3ZjhkYTIxYTc2OWUzZTYwZGYiLCJpc3N1ZWQiOjE4MDAwMDAwMDB9.fljHCXVRtstMp1ZvUbPP54Vw1N1vwJAezyDkrgXwN-5at1M4P5LJtZ90UMqdWV1pRkpH5ccnILW1ffhkJ_fIAA";
 
@@ -460,14 +460,14 @@ mod tests {
 
     #[test]
     fn rejects_the_worker_token_under_a_different_key() {
-        // Same token, the app's own key: this is what a licence signed by someone else's
+        // Same token, the app's own key: this is what a license signed by someone else's
         // control plane looks like.
-        assert!(verify_with(TS_TOKEN, ENTITLEMENT_PUBLIC_KEY).is_err());
+        assert!(verify_with(TS_TOKEN, LICENSE_PUBLIC_KEY).is_err());
     }
 
     #[test]
     fn status_has_three_states_and_the_middle_one_matters() {
-        let e = Entitlement {
+        let e = License {
             v: 1,
             account: "acc".into(),
             plugin: "replaycam".into(),
@@ -488,7 +488,7 @@ mod tests {
     fn the_clock_does_not_run_backwards() {
         let mut c = Clock::default();
         assert_eq!(c.observe(1_000), 1_000);
-        // Winding the machine's clock back a year must not resurrect a lapsed licence.
+        // Winding the machine's clock back a year must not resurrect a lapsed license.
         assert_eq!(c.observe(10), 1_000);
         // Forward is believed, and becomes the new floor.
         assert_eq!(c.observe(2_000), 2_000);
@@ -496,9 +496,9 @@ mod tests {
     }
 
     #[test]
-    fn a_signed_entitlement_is_evidence_of_the_time() {
+    fn a_signed_license_is_evidence_of_the_time() {
         let mut c = Clock::default();
-        let e = Entitlement {
+        let e = License {
             v: 1,
             account: "acc".into(),
             plugin: "p".into(),
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn verify_rejects_junk_without_panicking() {
         for bad in ["", "nodot", "a.b", "....", "!!!.???"] {
-            assert!(verify_entitlement(bad).is_err(), "accepted {bad:?}");
+            assert!(verify_license(bad).is_err(), "accepted {bad:?}");
         }
     }
 
@@ -530,7 +530,7 @@ mod tests {
             }),
             &other,
         );
-        let err = verify_entitlement(&token).unwrap_err().to_string();
+        let err = verify_license(&token).unwrap_err().to_string();
         assert!(err.contains("not signed by us"), "{err}");
     }
 
@@ -539,13 +539,13 @@ mod tests {
         let mut st = PluginState::default();
         let e = st.accept_with(TS_TOKEN, TS_PUBLIC_KEY).unwrap();
         assert_eq!(st.account.as_deref(), Some("acc_test"));
-        assert_eq!(st.entitlements.get("replaycam").map(String::as_str), Some(TS_TOKEN));
+        assert_eq!(st.licenses.get("replaycam").map(String::as_str), Some(TS_TOKEN));
         // The signed `issued` is evidence of a real instant, so the clock now floors there.
         assert_eq!(st.clock.high_water, e.issued);
     }
 
     #[test]
-    fn state_refuses_an_entitlement_for_another_account() {
+    fn state_refuses_an_license_for_another_account() {
         // The casual-sharing case: the token is a file, and a file gets pasted into
         // somebody else's install. The signature is perfectly valid — the account is not.
         let mut st = PluginState {
@@ -555,19 +555,19 @@ mod tests {
         let err = st.accept_with(TS_TOKEN, TS_PUBLIC_KEY).unwrap_err().to_string();
         assert!(err.contains("different account"), "{err}");
         assert_eq!(st.account.as_deref(), Some("someone_else"));
-        assert!(st.entitlements.is_empty());
+        assert!(st.licenses.is_empty());
     }
 
     #[test]
-    fn no_entitlement_means_expired_not_live() {
+    fn no_license_means_expired_not_live() {
         let mut s = PluginState::default();
         assert_eq!(s.status_of("replaycam", 100), Status::Expired);
     }
 
     #[test]
-    fn a_token_that_stops_verifying_stops_being_a_licence() {
+    fn a_token_that_stops_verifying_stops_being_a_license() {
         let mut s = PluginState::default();
-        s.entitlements
+        s.licenses
             .insert("replaycam".into(), "not-a-token".into());
         assert_eq!(s.status_of("replaycam", 100), Status::Expired);
     }
@@ -618,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn install_refuses_when_the_licence_names_no_build() {
+    fn install_refuses_when_the_license_names_no_build() {
         let dir = tempdir();
         let err = install_bundle(&dir, "replaycam", b"x", None, "0.12.4")
             .unwrap_err()
@@ -795,10 +795,10 @@ pub struct PluginView {
     /// Whether there is a build to install at all.
     pub published: bool,
     pub status: Status,
-    /// Seconds since epoch, when the licence runs out. None if never held.
+    /// Seconds since epoch, when the license runs out. None if never held.
     pub expires: Option<i64>,
     pub installed_version: Option<String>,
-    /// True when a licence is live and the installed build is the one on offer.
+    /// True when a license is live and the installed build is the one on offer.
     pub ready: bool,
 }
 
@@ -816,20 +816,20 @@ struct CataloguePlugin {
 }
 
 #[derive(Deserialize)]
-struct LicencesResp {
-    licences: Vec<LicenceRow>,
+struct LicensesResp {
+    licenses: Vec<LicenseRow>,
 }
 #[derive(Deserialize)]
-struct LicenceRow {
+struct LicenseRow {
     plugin: String,
     expires: i64,
-    entitlement: Option<String>,
+    license: Option<String>,
 }
 
-/// The catalogue plus this account's licences, refreshed from the control plane.
+/// The catalogue plus this account's licenses, refreshed from the control plane.
 ///
 /// Best-effort by design: with no network we still answer from what is on disk, because the
-/// whole point of a signed entitlement is that being offline is not a licensing failure.
+/// whole point of a signed license is that being offline is not a licensing failure.
 #[tauri::command]
 pub async fn plugin_list(app: tauri::AppHandle) -> Result<Vec<PluginView>, String> {
     let base = crate::paintsync::control_plane();
@@ -857,13 +857,13 @@ pub async fn plugin_list(app: tauri::AppHandle) -> Result<Vec<PluginView>, Strin
             .await
         {
             if resp.status().is_success() {
-                if let Ok(body) = resp.json::<LicencesResp>().await {
-                    for row in body.licences {
+                if let Ok(body) = resp.json::<LicensesResp>().await {
+                    for row in body.licenses {
                         expiries.insert(row.plugin.clone(), row.expires);
-                        if let Some(t) = row.entitlement {
-                            // A refused entitlement (wrong account, bad signature) leaves the
+                        if let Some(t) = row.license {
+                            // A refused license (wrong account, bad signature) leaves the
                             // previous one in place rather than clearing it: a bad answer from
-                            // the network must not revoke a licence we already verified.
+                            // the network must not revoke a license we already verified.
                             let _ = state.accept(&t);
                         }
                     }
@@ -898,7 +898,7 @@ pub async fn plugin_list(app: tauri::AppHandle) -> Result<Vec<PluginView>, Strin
     Ok(out)
 }
 
-/// Trade a key for months on a licence.
+/// Trade a key for months on a license.
 #[tauri::command]
 pub async fn plugin_redeem(app: tauri::AppHandle, code: String) -> Result<String, String> {
     let tok = token(&app).map_err(|e| e.to_string())?;
@@ -920,38 +920,38 @@ pub async fn plugin_redeem(app: tauri::AppHandle, code: String) -> Result<String
     struct Redeemed {
         plugin: String,
         name: String,
-        entitlement: String,
+        license: String,
     }
     let body: Redeemed = resp.json().await.map_err(|e| e.to_string())?;
 
     let mut state = load_state(&app);
-    state.accept(&body.entitlement).map_err(|e| e.to_string())?;
+    state.accept(&body.license).map_err(|e| e.to_string())?;
     save_state(&app, &state).map_err(|e| e.to_string())?;
     let _ = body.plugin;
     Ok(body.name)
 }
 
-/// Download, verify and unpack a plugin this account holds a live licence for.
+/// Download, verify and unpack a plugin this account holds a live license for.
 #[tauri::command]
 pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<String, String> {
     let tok = token(&app).map_err(|e| e.to_string())?;
 
-    // Check what we already hold before asking for bytes: a lapsed licence should say so
+    // Check what we already hold before asking for bytes: a lapsed license should say so
     // rather than downloading a bundle it is not allowed to run.
     let mut state = load_state(&app);
     let wall = now_secs();
     match state.status_of(&id, wall) {
         Status::Live => {}
         Status::Stale => {
-            return Err("Your licence needs re-checking and the control plane isn't answering. Try again when you're online.".into())
+            return Err("Your license needs re-checking and the control plane isn't answering. Try again when you're online.".into())
         }
-        Status::Expired => return Err("You don't have a live licence for that plugin.".into()),
+        Status::Expired => return Err("You don't have a live license for that plugin.".into()),
     }
-    let entitlement = state
-        .entitlements
+    let license = state
+        .licenses
         .get(&id)
-        .and_then(|t| verify_entitlement(t).ok())
-        .ok_or_else(|| "You don't have a live licence for that plugin.".to_string())?;
+        .and_then(|t| verify_license(t).ok())
+        .ok_or_else(|| "You don't have a live license for that plugin.".to_string())?;
 
     let resp = reqwest::Client::new()
         .get(format!(
@@ -973,7 +973,7 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<String,
         &dir,
         &id,
         &bytes,
-        entitlement.bundle_sha256.as_deref(),
+        license.bundle_sha256.as_deref(),
         &app_version,
     )
     .map_err(|e| e.to_string())?;
@@ -982,7 +982,7 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<String,
         id.clone(),
         Installed {
             version: Some(manifest.version.clone()),
-            sha256: entitlement.bundle_sha256.clone(),
+            sha256: license.bundle_sha256.clone(),
         },
     );
     save_state(&app, &state).map_err(|e| e.to_string())?;
@@ -994,7 +994,7 @@ pub async fn plugin_remove(app: tauri::AppHandle, id: String) -> Result<(), Stri
     let dir = plugins_dir(&app).map_err(|e| e.to_string())?;
     std::fs::remove_dir_all(dir.join(&id)).ok();
     let mut state = load_state(&app);
-    // The licence survives an uninstall — it is a subscription, not an install token, and
+    // The license survives an uninstall — it is a subscription, not an install token, and
     // someone removing the plugin for a week must not have to buy it again.
     state.installed.remove(&id);
     save_state(&app, &state).map_err(|e| e.to_string())?;
@@ -1004,7 +1004,7 @@ pub async fn plugin_remove(app: tauri::AppHandle, id: String) -> Result<(), Stri
 /// What the webview needs to mount a plugin: its manifest, and its entry module's source.
 ///
 /// The source is handed over as text rather than a path so the webview never loads code off
-/// the filesystem by URL. It is only ever produced for a plugin whose licence is live *at
+/// the filesystem by URL. It is only ever produced for a plugin whose license is live *at
 /// this moment* — the check is here, at the last point before the code runs, and not only
 /// on the page that lists them.
 #[derive(Debug, Serialize)]
@@ -1036,7 +1036,7 @@ pub fn plugin_runtime(app: tauri::AppHandle, id: String) -> Result<PluginRuntime
 }
 
 /// Where a plugin's non-code payload was unpacked, for the Rust side to install into the
-/// game. Returns None unless the licence is live right now.
+/// game. Returns None unless the license is live right now.
 pub fn payload_dir(app: &tauri::AppHandle, id: &str) -> Option<PathBuf> {
     let mut state = load_state(app);
     if state.status_of(id, now_secs()) != Status::Live {
@@ -1091,7 +1091,7 @@ pub fn resolve_in(root: &Path, rel: &str) -> Result<PathBuf> {
     Ok(full)
 }
 
-/// Every file call is licence-gated at the moment it happens. Checking only when the panel
+/// Every file call is license-gated at the moment it happens. Checking only when the panel
 /// mounted would leave a plugin able to write for as long as the window stayed open.
 fn licensed(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     let mut state = load_state(app);

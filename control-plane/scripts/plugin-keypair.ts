@@ -1,16 +1,16 @@
 /**
- * Generate the Ed25519 pair that signs plugin entitlements. Run once, ever.
+ * Generate the Ed25519 pair that signs plugin licenses. Run once, ever.
  *
  *   bun scripts/plugin-keypair.ts
  *
  * The private half goes into the worker as a secret; the public half is compiled into the
  * app. Rotating means shipping a new app build, so this is not a thing to do casually —
  * every installed copy verifies against the key it was built with, and one that has not
- * updated will reject every entitlement signed by the new pair.
+ * updated will reject every license signed by the new pair.
  *
  * The private key is printed once and not stored. If it is lost, mint a new pair and ship
  * an app update; if it leaks, do the same immediately, because anyone holding it can grant
- * themselves and everyone else a permanent licence.
+ * themselves and everyone else a permanent license.
  */
 
 function b64url(bytes: Uint8Array): string {
@@ -35,7 +35,7 @@ Set it and then close this terminal:
   ${b64url(privatePkcs8)}
 
 Public key (raw, 32 bytes, base64url) — compile into the app.
-Put it in src-tauri/src/plugins.rs as ENTITLEMENT_PUBLIC_KEY:
+Put it in src-tauri/src/plugins.rs as LICENSE_PUBLIC_KEY:
 
   ${b64url(publicRaw)}
 `);
