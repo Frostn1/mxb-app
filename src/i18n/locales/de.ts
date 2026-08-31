@@ -1587,6 +1587,18 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0122.hero.title":
+    "Die Replay-Kamera kann dem Fahrer folgen",
+  "showcase.v0122.hero.body":
+    "Ziele mit einem Key auf einen Fahrer, und FrostMods Replay-Kamera hält Bild für Bild auf ihn statt auf die Winkel, die du geflogen hast. Schneide zwischen Einstellungen, halte auf einer, und sieh den ganzen Pfad in der Welt, während du ihn baust.",
+  "showcase.v0122.aim":
+    "Drücke T auf einem Key, um auf einen Fahrer zu zielen. Die Kamera folgt ihm, und bei zwei Fahrern auf einem Abschnitt gleitet sie weich von einem zum anderen.",
+  "showcase.v0122.shots":
+    "E entscheidet, was ein Key tut: durchlaufen, darauf halten oder hart auf die nächste Einstellung schneiden. Ein Pfad kann ein ganzer Schnitt sein.",
+  "showcase.v0122.preview":
+    "V zeichnet den Pfad in der Welt, während du ihn baust, und U macht die letzte Änderung rückgängig — vierundzwanzig Schritte weit.",
+  "showcase.v0122.paths":
+    "Einstellungen → FrostMod listet jeden gespeicherten Pfad: wo seine Keys liegen, wie er fliegt, und wie du ihn weitergibst.",
   "showcase.v0121.hero.title":
     "Deine Replay-Kamera-Tasten, deine Tastatur",
   "showcase.v0121.hero.body":

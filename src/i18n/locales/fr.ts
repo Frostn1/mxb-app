@@ -1578,6 +1578,18 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0122.hero.title":
+    "La caméra replay peut suivre le pilote",
+  "showcase.v0122.hero.body":
+    "Visez un pilote avec une clé et la caméra replay de FrostMod le cadre image par image, au lieu des angles que vous avez posés. Coupez entre les plans, tenez-en un, et voyez tout le trajet dans le monde pendant que vous le construisez.",
+  "showcase.v0122.aim":
+    "Appuyez sur T sur une clé pour viser un pilote. La caméra le suit, et avec deux pilotes sur un même segment elle glisse doucement de l'un à l'autre.",
+  "showcase.v0122.shots":
+    "E décide de ce que fait une clé : la traverser, s'y poser, ou couper net vers le plan suivant. Un trajet peut être un montage entier.",
+  "showcase.v0122.preview":
+    "V dessine le trajet dans le monde pendant que vous le faites, et U annule la dernière modification — jusqu'à vingt-quatre en arrière.",
+  "showcase.v0122.paths":
+    "Paramètres → FrostMod liste chaque trajet enregistré : où tombent ses clés, comment il vole, et comment le transmettre.",
   "showcase.v0121.hero.title":
     "Tes touches de caméra replay, ton clavier",
   "showcase.v0121.hero.body":

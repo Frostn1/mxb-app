@@ -1574,6 +1574,18 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0122.hero.title":
+    "La cámara de repetición puede seguir al piloto",
+  "showcase.v0122.hero.body":
+    "Apunta una clave a un piloto y la cámara de repetición de FrostMod lo enfoca fotograma a fotograma, en vez de los ángulos que volaste. Corta entre planos, mantente en uno y mira todo el recorrido en el mundo mientras lo construyes.",
+  "showcase.v0122.aim":
+    "Pulsa T sobre una clave para apuntarla a un piloto. La cámara lo sigue, y con dos pilotos en un mismo tramo pasa suavemente de uno a otro.",
+  "showcase.v0122.shots":
+    "E decide qué hace una clave: pasar por ella, detenerse en ella o cortar en seco al siguiente plano. Un recorrido puede ser un montaje entero.",
+  "showcase.v0122.preview":
+    "V dibuja el recorrido en el mundo mientras lo haces, y U deshace el último cambio — hasta veinticuatro atrás.",
+  "showcase.v0122.paths":
+    "Ajustes → FrostMod lista cada recorrido guardado: dónde caen sus claves, cómo vuela y cómo pasárselo a alguien.",
   "showcase.v0121.hero.title":
     "Tus teclas de la cámara de repetición, tu teclado",
   "showcase.v0121.hero.body":
