@@ -94,9 +94,19 @@ export function closeTrackLap(program: TrackProgram): Promise<TrackProgram> {
   return invoke<TrackProgram>("close_track_lap", { program });
 }
 
-/** Everything wrong with a program, held to the same corpus a generated one is. */
-export function checkTrack(program: TrackProgram): Promise<string[]> {
-  return invoke<string[]>("check_track", { program });
+/**
+ * What is wrong with a program, and what is merely unlike a published one.
+ *
+ * `problems` block: it won't build, or it isn't a lap, or a feature does nothing where it
+ * sits. `notes` don't: a blank lap is empty, not broken.
+ */
+export interface TrackReview {
+  problems: string[];
+  notes: string[];
+}
+
+export function checkTrack(program: TrackProgram): Promise<TrackReview> {
+  return invoke<TrackReview>("check_track", { program });
 }
 
 /** Build it, and write it where the track viewer can open it. */

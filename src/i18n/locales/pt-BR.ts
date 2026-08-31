@@ -2377,4 +2377,8 @@ export const ptBR: Translation = {
   "track.closeLap": "Fechar a volta",
   "track.lapClosed": "A volta agora fecha",
   "track.closeFailed": "Não foi possível fechar",
+  "track.notes": "Diferente de uma pista publicada",
+  "track.replaceTitle": "Substituir esta pista?",
+  "track.replaceBody": "Você fez alterações que não foram exportadas nem instaladas. Carregar outra pista descarta tudo.",
+  "track.replaceConfirm": "Descartar e carregar",
 };

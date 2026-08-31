@@ -2357,4 +2357,8 @@ export const en = {
   "track.closeLap": "Close the lap",
   "track.lapClosed": "The lap meets itself now",
   "track.closeFailed": "Couldn't close it",
+  "track.notes": "Unlike a published track",
+  "track.replaceTitle": "Replace this track?",
+  "track.replaceBody": "You've made changes that haven't been exported or installed. Loading another track discards them.",
+  "track.replaceConfirm": "Discard and load",
 } as const;

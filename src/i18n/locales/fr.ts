@@ -2392,4 +2392,8 @@ export const fr: Translation = {
   "track.closeLap": "Fermer le tour",
   "track.lapClosed": "Le tour se referme",
   "track.closeFailed": "Fermeture impossible",
+  "track.notes": "Différent d'un circuit publié",
+  "track.replaceTitle": "Remplacer ce circuit ?",
+  "track.replaceBody": "Tu as fait des modifications qui n'ont été ni exportées ni installées. Charger un autre circuit les supprime.",
+  "track.replaceConfirm": "Supprimer et charger",
 };

@@ -19,6 +19,16 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../../ui/alert-dialog";
 
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
@@ -77,6 +87,11 @@ export default function TrackStudio() {
   const [program, setProgram] = useState<TrackProgram | null>(null);
   const [preview, setPreview] = useState<TrackPreview | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
+  const [notes, setNotes] = useState<string[]>([]);
+  // Whether anything has been changed since it was loaded, so a starting point can't be
+  // dropped on top of an afternoon's work by accident.
+  const [touched, setTouched] = useState(false);
+  const [confirming, setConfirming] = useState<(() => Promise<void>) | null>(null);
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [focus, setFocus] = useState<{ x: number; z: number } | null>(null);
@@ -108,10 +123,12 @@ export default function TrackStudio() {
       setPreview(null);
       try {
         const found = await checkTrack(next);
-        setProblems(found);
-        return found;
+        setProblems(found.problems);
+        setNotes(found.notes);
+        return found.problems;
       } catch (e) {
         setProblems([String(e)]);
+        setNotes([]);
         return [String(e)];
       }
     },
@@ -137,12 +154,24 @@ export default function TrackStudio() {
   /** Load a starting point and put it on screen — a track you can't see isn't a start. */
   async function onLoad(load: () => Promise<TrackProgram>) {
     if (busy) return;
+    // Replacing a track you have been working on is the one action here that throws work
+    // away, so it asks first — and only when there is work to throw away.
+    if (touched) {
+      setConfirming(() => () => reallyLoad(load));
+      return;
+    }
+    await reallyLoad(load);
+  }
+
+  async function reallyLoad(load: () => Promise<TrackProgram>) {
+    if (busy) return;
     setBusy("generate");
     setPreview(null);
     setProblems([]);
     try {
       const next = await load();
       const found = await settle(next);
+      setTouched(false);
       toast.success(t("track.baseLoaded", { name: next.name }));
       if (found.length === 0) await showIn3d(next);
     } catch (e) {
@@ -219,6 +248,7 @@ export default function TrackStudio() {
 
   function editFeature(index: number, patch: Partial<TrackFeature>) {
     if (!program) return;
+    setTouched(true);
     const features = program.features.map((f, i) =>
       i === index ? ({ ...f, ...patch } as TrackFeature) : f,
     );
@@ -227,6 +257,7 @@ export default function TrackStudio() {
 
   function editSegment(index: number, patch: Partial<TrackSegment>) {
     if (!program) return;
+    setTouched(true);
     const segments = program.segments.map((seg, i) =>
       i === index ? ({ ...seg, ...patch } as TrackSegment) : seg,
     );
@@ -236,6 +267,7 @@ export default function TrackStudio() {
 
   function removeFeature(index: number) {
     if (!program) return;
+    setTouched(true);
     void settle({ ...program, features: program.features.filter((_, i) => i !== index) });
   }
 
@@ -243,6 +275,7 @@ export default function TrackStudio() {
   /// in metres, which is a better teacher than a disabled button.
   function removeSegment(index: number) {
     if (!program || program.segments.length <= 2) return;
+    setTouched(true);
     void settle(
       fitFeatures({ ...program, segments: program.segments.filter((_, i) => i !== index) }),
     );
@@ -258,6 +291,7 @@ export default function TrackStudio() {
    */
   function reorder(steps: LapStep[], from: number, to: number) {
     if (!program || from === to) return;
+    setTouched(true);
     const moved = steps[from];
     const target = steps[to];
     if (moved.kind === "feature") {
@@ -326,6 +360,7 @@ export default function TrackStudio() {
 
   function addFeature(kind: TrackFeatureKind) {
     if (!program) return;
+    setTouched(true);
     const probe = newFeature(kind, 0);
     const at = roomiestGap(program, featureSpan(probe).length);
     void settle({ ...program, features: [...program.features, newFeature(kind, at)] });
@@ -513,6 +548,19 @@ export default function TrackStudio() {
                     {t("track.closeLap")}
                   </Button>
                 )}
+              </div>
+            )}
+
+            {notes.length > 0 && problems.length === 0 && (
+              <div className="rounded-xl border border-input p-3.5">
+                <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("track.notes")}
+                </h3>
+                <ul className="mt-2 space-y-1.5 text-[12.5px] leading-snug text-muted-foreground">
+                  {notes.map((n, i) => (
+                    <li key={i}>{n}</li>
+                  ))}
+                </ul>
               </div>
             )}
 
@@ -761,6 +809,26 @@ export default function TrackStudio() {
         </div>
       )}
 
+      <AlertDialog open={confirming !== null} onOpenChange={(o) => !o && setConfirming(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("track.replaceTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("track.replaceBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const go = confirming;
+                setConfirming(null);
+                void go?.();
+              }}
+            >
+              {t("track.replaceConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
