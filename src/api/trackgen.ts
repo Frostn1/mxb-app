@@ -190,7 +190,10 @@ export function positionAt(program: TrackProgram, s: number): { x: number; z: nu
  * segment produces an error the person has no way to clear except by deleting their jumps.
  */
 export function fitFeatures(program: TrackProgram): TrackProgram {
-  const lap = lapLength(program);
+  // A metre short of the line, not exactly on it. The lap is summed here in double precision
+  // and in the synthesiser in single, so "exactly on the line" is a different number in each
+  // — and clamping to the boundary produced a jump the validator then rejected.
+  const lap = lapLength(program) - 1;
   return {
     ...program,
     features: program.features.map((f) => {
