@@ -43,6 +43,8 @@ import {
   PRESENCE_TTL_MS,
 } from "./validate";
 import { claimDeviceAccount, iceServers, voiceRoom } from "./voice";
+import { pruneUsage, reportUsage, usageStats } from "./usage";
+import { usageDashboard } from "./usagepage";
 import { VoiceRoom } from "./voiceroom";
 
 interface Account {
@@ -81,7 +83,12 @@ export default {
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      Promise.all([reapIdleServers(env), advanceImageBuild(env), pruneDeviceClaims(env)]).then(
+      Promise.all([
+        reapIdleServers(env),
+        advanceImageBuild(env),
+        pruneDeviceClaims(env),
+        pruneUsage(env),
+      ]).then(
         () => undefined,
       ),
     );
@@ -149,6 +156,19 @@ async function route(request: Request, env: Env): Promise<Response> {
   // same sense as the two above: the caller is not a player and holds no bearer token. Its
   // credential is the HMAC signature over the body, checked before the body is parsed.
   if (method === "POST" && path === "/v1/bmac/webhook") return bmacWebhook(request, env);
+
+  // Anonymous usage counters, from every install rather than every account. Unauthenticated
+  // for the reason the feature exists: most people who run the app never claim an invite, so
+  // a report that required a token would only ever describe the few who did. Nothing here
+  // identifies anyone — see `usage.ts` — and everything about it is bounded by size, by
+  // count and by a per-address daily cap.
+  if (method === "POST" && path === "/v1/usage") return reportUsage(request, env);
+
+  // Reading the numbers back. Behind `ADMIN_KEY`, above the account gate because it is not a
+  // player's endpoint at all: the key belongs to whoever runs the deployment, and an account
+  // token must never be enough to read what everybody else is doing.
+  if (method === "GET" && path === "/v1/usage/stats") return usageStats(request, url, env);
+  if (method === "GET" && path === "/admin/usage") return usageDashboard(request, url, env);
 
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });

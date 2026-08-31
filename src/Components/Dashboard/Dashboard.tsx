@@ -23,6 +23,7 @@ import { useConfig } from "../../Context/Config";
 import { modTypesFor, setIntroSeen } from "../../api/mods";
 import { useModBrowsing } from "../../lib/useModBrowsing";
 import { displayName } from "../../lib/mods";
+import { track } from "../../lib/analytics";
 import type { DownloadRecord, Loadout } from "../../types";
 
 interface DashboardProps {
@@ -64,6 +65,23 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Which Settings section to land on, when something sent us there on purpose.
   // Cleared on the way out so a later visit opens where Settings normally opens.
   const [settingsSection, setSettingsSection] = useState<SectionId | undefined>();
+
+  // Which page is open, as the usage counters name it.
+  //
+  // Derived and counted by an effect rather than inside `navigate`, because plenty of
+  // things move the view without going through it — the tour, the release showcase, a
+  // download row jumping to the Library — and a page nobody counted is worse than one
+  // counted twice. Studio's sub-views are pages in their own right; everything else is
+  // one name, so a tab added to the sidebar is counted without touching this.
+  const page = view === "studio" ? `view.studio.${studioTab}` : `view.${view}`;
+  useEffect(() => {
+    track(page);
+  }, [page]);
+
+  // Opening a mod's page is a use of the browser, not a page of its own.
+  useEffect(() => {
+    if (selectedSlug) track("mod.detail");
+  }, [selectedSlug]);
 
   const navigate = useCallback(
     (v: DashboardView, studio?: StudioTab) => {

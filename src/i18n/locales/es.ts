@@ -125,6 +125,8 @@ export const es: Translation = {
   "welcome.intro.body":
     "Tu gestor de mods para MX Bikes. Mantén pistas, motos y gráficos organizados en un solo sitio — se acabaron los archivos zip repartidos por el escritorio. Te enseñamos todo en unos segundos.",
   "welcome.getStarted": "Empezar",
+  "welcome.analyticsNote":
+    "MXB App cuenta de forma anónima qué páginas se usan. Sin nombres ni archivos — puedes desactivarlo en Ajustes.",
 
   // ── Presets ────────────────────────────────────────────────────────────────
   "presets.missing": "falta",
@@ -690,6 +692,9 @@ export const es: Translation = {
   "settings.themeSystem": "Sistema",
   "settings.language": "Idioma",
   "settings.languageSystem": "Sistema",
+  "settings.analytics": "Compartir estadísticas de uso anónimas",
+  "settings.analyticsDesc":
+    "Envía un ID aleatorio, la versión de la app y cuántas veces usas cada página y función, para saber qué merece la pena construir. Nunca tu nombre, tus archivos ni tu dirección.",
   "settings.runInBackground": "Seguir en segundo plano",
   "settings.runInBackgroundDesc":
     "Cerrar la ventana deja MXB App en la bandeja del sistema para que FrostMod siga conectado. Sal desde el icono de la bandeja.",

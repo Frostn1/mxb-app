@@ -210,6 +210,7 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
         stun_servers: stun_servers(),
     });
     log::info!("[voice] joining the room for \"{}\"", game.server_name);
+    crate::usage::track("voice.join");
     session.set(key, handle);
     Ok(())
 }

@@ -25,6 +25,10 @@ declare global {
      *  carries on. Spend is capped by the endpoint itself: one Opus call per request, at
      *  most 16k output tokens, and only ever a motocross track. */
     ANTHROPIC_API_KEY?: string;
+    /** Reads the usage dashboard and the stats JSON. Without it both answer 503, which is
+     *  the right default: a deployment that was never given a key has no admin surface
+     *  rather than an open one. */
+    ADMIN_KEY?: string;
     /** Keys the daily digest of a signup's IP address. Without it the digest is a plain
      *  hash, which is reversible for IPv4 — set it before open signup carries real load. */
     IP_HASH_SECRET?: string;

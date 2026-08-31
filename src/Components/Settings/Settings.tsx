@@ -44,6 +44,7 @@ import {
   setOverlayEnabled,
   setOverlayHotkey,
   setProfilesPath,
+  setAnalyticsEnabled,
   setRunInBackground,
   setWatchModsReload,
   setWineRunner,
@@ -453,6 +454,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
       : t("settings.insideModsFolder"));
 
   const runInBackground = config.runInBackground ?? true;
+  const analyticsEnabled = config.analyticsEnabled ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   const instantRefresh = config.instantRefresh ?? true;
@@ -720,6 +722,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const toggleBackground = async (v: boolean) => {
     try {
       await setRunInBackground(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const toggleAnalytics = async (v: boolean) => {
+    try {
+      await setAnalyticsEnabled(v);
       await reloadConfig();
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
@@ -1182,6 +1193,13 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={instantRefresh && caps.instantRefresh}
               disabled={!caps.instantRefresh}
               onChange={toggleInstantRefresh}
+            />
+            <div className="h-px bg-border" />
+            <ToggleRow
+              label={t("settings.analytics")}
+              desc={t("settings.analyticsDesc")}
+              checked={analyticsEnabled}
+              onChange={toggleAnalytics}
             />
           </Section>
           )}

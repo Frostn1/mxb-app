@@ -123,6 +123,8 @@ export const en = {
   "welcome.intro.body":
     "Your mod manager for MX Bikes. Keep your tracks, bikes and paints organized in one place — no more zip files scattered across your desktop. We'll show you around in a few seconds.",
   "welcome.getStarted": "Get started",
+  "welcome.analyticsNote":
+    "MXB App counts which pages get used, anonymously. No names, no files — you can turn it off in Settings.",
 
   // ── Presets ────────────────────────────────────────────────────────────────
   "presets.missing": "missing",
@@ -684,6 +686,9 @@ export const en = {
   "settings.themeSystem": "System",
   "settings.language": "Language",
   "settings.languageSystem": "System",
+  "settings.analytics": "Share anonymous usage stats",
+  "settings.analyticsDesc":
+    "Sends a random ID, the app version and counts of which pages and features you use, so I can tell what's worth building. Never your name, your files or your address.",
   "settings.runInBackground": "Keep running in the background",
   "settings.runInBackgroundDesc":
     "Closing the window hides MXB App to the tray so FrostMod stays connected. Quit from the tray icon.",
