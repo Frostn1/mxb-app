@@ -1117,6 +1117,162 @@ async fn load_track_scenery(
     .map_err(|e| format!("load_track_scenery task failed: {e}"))
 }
 
+
+// ---------------------------------------------------------------------------
+// Generating a track
+// ---------------------------------------------------------------------------
+
+/// What a generated track measures, so the studio can show it rather than assert it.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackPreview {
+    /// The `.pkz` written for the viewer. Terrain and surfaces only — no graphics, no
+    /// scenery — so it previews and does not play.
+    path: String,
+    name: String,
+    lap_m: f32,
+    width_m: f32,
+    features: usize,
+    closure_m: f32,
+    /// Height used against the budget it was given. A track using a tenth of its budget is
+    /// quantising ten times coarser than it needs to.
+    used_m: f32,
+    budget_m: f32,
+    /// The same measurements `trackstats` takes of published tracks.
+    measured_width_m: f32,
+    measured_length_m: f32,
+    lips: usize,
+    lips_per_km: f32,
+    slope_p99_deg: f32,
+    relief_p90_m: f32,
+}
+
+fn track_program(value: serde_json::Value) -> Result<trackprog::TrackProgram, String> {
+    serde_json::from_value(value).map_err(|e| format!("that isn't a track program: {e}"))
+}
+
+/// Ask the control plane for a track program, and keep asking until it measures like a track.
+///
+/// The key lives there, not here. Everything that comes back is synthesised and measured
+/// before this returns — see `trackllm` — so a program reaching the studio has already been
+/// built once.
+#[tauri::command]
+async fn generate_track(app: tauri::AppHandle, brief: String) -> Result<serde_json::Value, String> {
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    if cfg.cp_token.trim().is_empty() {
+        return Err("Enroll with an invite code first.".into());
+    }
+    let ask = trackllm::ControlPlane {
+        base: paintsync::control_plane(),
+        token: cfg.cp_token.clone(),
+    };
+    // Three attempts: one to write it, one to fix the numbers, one for the thing the fix
+    // broke. Past that it isn't converging and the cost is real.
+    let prog = trackllm::generate(brief.trim(), &ask, 3)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    serde_json::to_value(&prog).map_err(|e| e.to_string())
+}
+
+/// Everything wrong with a program, without asking anyone. The studio calls this as edits are
+/// made, so a hand-edited track is held to the same corpus a generated one is.
+#[tauri::command]
+async fn check_track(program: serde_json::Value) -> Result<Vec<String>, String> {
+    let prog = track_program(program)?;
+    tauri::async_runtime::spawn_blocking(move || trackllm::validate(&prog))
+        .await
+        .map_err(|e| format!("check_track task failed: {e}"))
+}
+
+/// Build a program into terrain and write it where the track viewer can open it.
+#[tauri::command]
+async fn preview_track(
+    app: tauri::AppHandle,
+    program: serde_json::Value,
+) -> Result<TrackPreview, String> {
+    let prog = track_program(program)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
+        let dir = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| format!("no cache directory: {e}"))?
+            .join("track-preview");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{e}"))?;
+        // One file, overwritten. A studio session generates many tracks and none of them are
+        // worth keeping until someone installs one.
+        let path = dir.join("preview.pkz");
+        tracksynth::write_pkz(&prog, &syn, &path).map_err(|e| format!("{e:#}"))?;
+
+        let c = trackstats::measure("synth", &syn.corridor, &syn.heights, syn.gw, syn.gh, syn.mps);
+        Ok(TrackPreview {
+            path: path.to_string_lossy().into_owned(),
+            name: prog.name.clone(),
+            lap_m: prog.lap_length(),
+            width_m: prog.width,
+            features: prog.features.len(),
+            closure_m: prog.closure_error(),
+            used_m: syn.used_m,
+            budget_m: syn.budget_m,
+            measured_width_m: c.width_from_mean_m,
+            measured_length_m: c.length_m,
+            lips: c.lips,
+            lips_per_km: c.lips_per_km,
+            slope_p99_deg: c.slope_deg.p99,
+            relief_p90_m: c.feature_relief_m.p90,
+        })
+    })
+    .await
+    .map_err(|e| format!("preview_track task failed: {e}"))?
+}
+
+/// Install the preview into the game's tracks folder.
+///
+/// Terrain only, so the game will list it and fail to load it — the studio says so. It is
+/// there to be looked at in the app, and to be the thing you ride once TerrainEd has been
+/// run over the source folder.
+#[tauri::command]
+async fn install_track_preview(
+    app: tauri::AppHandle,
+    program: serde_json::Value,
+) -> Result<String, String> {
+    let prog = track_program(program)?;
+    let cfg = config::load_or_detect(&app).unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
+        let dir = std::path::Path::new(&cfg.game_path)
+            .join("mods")
+            .join("tracks");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{e}"))?;
+        let name: String = prog
+            .name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        let path = dir.join(format!("{}.pkz", name.trim_matches('_')));
+        tracksynth::write_pkz(&prog, &syn, &path).map_err(|e| format!("{e:#}"))?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("install_track_preview task failed: {e}"))?
+}
+
+/// Write the folder TerrainEd compiles: the heightmap, the masks, and every config file.
+#[tauri::command]
+async fn export_track_source(
+    program: serde_json::Value,
+    dir: String,
+) -> Result<Vec<String>, String> {
+    let prog = track_program(program)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let syn = tracksynth::synthesise(&prog).map_err(|e| format!("{e:#}"))?;
+        tracksynth::write_source(&prog, &syn, std::path::Path::new(&dir))
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("export_track_source task failed: {e}"))?
+}
+
 /// A track's surfaces, fetched after its mesh is already on screen.
 ///
 /// The second half of a two-stage load: the mesh parses in milliseconds, while inflating a
@@ -8513,6 +8669,11 @@ fn main() {
             get_pkz_preview,
             read_track_info,
             load_track_terrain,
+            generate_track,
+            check_track,
+            preview_track,
+            install_track_preview,
+            export_track_source,
             load_track_overview,
             load_track_scenery,
             load_track_surfaces,

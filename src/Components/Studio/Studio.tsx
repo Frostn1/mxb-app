@@ -11,6 +11,7 @@ import PaintStudio from "../PaintStudio/PaintStudio";
 import RiderStudio from "../Rider/RiderStudio";
 import PoseStudio from "../Rider/PoseStudio";
 import Protect from "./Protect/Protect";
+import TrackStudio from "./TrackStudio/TrackStudio";
 import RiderKitProvider from "../Rider/RiderKit";
 
 /**
@@ -26,7 +27,7 @@ import RiderKitProvider from "../Rider/RiderKit";
  * first-run tour both need to open the Studio *at* a particular one.
  */
 
-export type StudioTab = "designer" | "paints" | "rider" | "pose" | "protect";
+export type StudioTab = "designer" | "paints" | "rider" | "pose" | "track" | "protect";
 
 interface StudioProps {
   tab: StudioTab;
@@ -84,9 +85,11 @@ export default function Studio({
         ? { title: t("nav.paints"), body: t("paints.help") }
         : tab === "pose"
           ? { title: t("nav.pose"), body: t("pose.help") }
-          : tab === "protect"
-            ? { title: t("nav.protect"), body: t("protect.help") }
-            : { title: t("nav.rider"), body: t("rider.help") };
+          : tab === "track"
+            ? { title: t("nav.track"), body: t("track.help") }
+            : tab === "protect"
+              ? { title: t("nav.protect"), body: t("protect.help") }
+              : { title: t("nav.rider"), body: t("rider.help") };
 
   return (
     <div className="flex h-full flex-col">
@@ -107,6 +110,7 @@ export default function Studio({
                   { value: "pose" as const, label: t("nav.pose") },
                 ]
               : []),
+            { value: "track", label: t("nav.track") },
             ...(hasLock ? [{ value: "protect" as const, label: t("nav.protect") }] : []),
           ]}
         />
@@ -119,6 +123,11 @@ export default function Studio({
       {visited.has("designer") && (
         <Pane active={tab === "designer"}>
           <Designer incoming={handoff} onIncomingLoaded={() => setHandoff(null)} />
+        </Pane>
+      )}
+      {visited.has("track") && (
+        <Pane active={tab === "track"}>
+          <TrackStudio />
         </Pane>
       )}
       {visited.has("protect") && hasLock && (
