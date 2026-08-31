@@ -9,6 +9,12 @@
  */
 
 import {
+  isVerified,
+  loginUrl,
+  verifyAssertion,
+  LOGIN_TTL_MS,
+} from "./steam";
+import {
   awsEnv,
   createImage,
   fleet,
@@ -132,6 +138,11 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "POST" && path === "/v1/track/generate") return generateTrack(request, env);
   if (method === "POST" && path === "/v1/enroll") return enroll(request, env);
 
+  // Steam comes back to the browser, which carries no bearer token — the login id in the
+  // return URL is what identifies the sign-in, and it is single-use. Above the account
+  // gate for that reason, not because it is unprotected.
+  if (method === "GET" && path === "/v1/steam/return") return steamReturn(request, url, env);
+
   // Self-serve signup, no invite. Voice is the reason this exists: a rider on a community
   // server has nobody to talk to unless the people beside them can sign up too. The account
   // it mints can report presence and join a voice room and nothing else — see `invitedOnly`.
@@ -179,6 +190,13 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
+  // Linking a Steam account, and asking what it may use. Open to every account: identity
+  // is the point of the flow, and entitlement is checked per asset when it is asked for.
+  if (method === "POST" && path === "/v1/steam/login") return steamLogin(request, account, env);
+  if (method === "GET" && path === "/v1/entitlements") return listEntitlements(account, env);
+  if (method === "POST" && path === "/v1/entitlements/check") {
+    return checkEntitlement(request, account, env);
+  }
   if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
 
   // Paint sync, open on the same terms as voice, and for the same reason: a rider only sees
@@ -292,6 +310,165 @@ async function enroll(request: Request, env: Env): Promise<Response> {
   // The only time the token is ever visible. It is stored as a digest, so it cannot be
   // shown again and a database leak yields nothing presentable.
   return json(201, { accountId: id, token, riderName: (riderName as string).trim() });
+}
+
+/**
+ * Begin a Steam sign-in.
+ *
+ * Returns a URL rather than redirecting: the caller is the app, which opens it in the
+ * player's browser and waits. The login row is what ties the browser's eventual return to
+ * the account that started it — the browser itself carries no credential of ours.
+ */
+async function steamLogin(request: Request, account: Account, env: Env): Promise<Response> {
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    "INSERT INTO steam_logins (id, account_id, created_at) VALUES (?, ?, ?)",
+  )
+    .bind(id, account.id, Date.now())
+    .run();
+
+  const origin = new URL(request.url).origin;
+  const returnTo = `${origin}/v1/steam/return?login=${id}`;
+  return json(200, { url: loginUrl(returnTo, `${origin}/`), loginId: id });
+}
+
+/**
+ * Steam sending the player back.
+ *
+ * Everything in the query string is attacker-controlled until Valve confirms it, so the
+ * order here is deliberate: find the pending login, check it is still open, then ask Steam
+ * whether it really signed this. The row is consumed before anything is written, so a
+ * replayed return finds nothing to complete.
+ *
+ * The response is a page, not JSON — a person is looking at it.
+ */
+async function steamReturn(request: Request, url: URL, env: Env): Promise<Response> {
+  const loginId = url.searchParams.get("login");
+  if (!loginId) return page(400, "That sign-in link is incomplete.");
+
+  const login = await env.DB.prepare(
+    "SELECT account_id, created_at, consumed_at FROM steam_logins WHERE id = ?",
+  )
+    .bind(loginId)
+    .first<{ account_id: string; created_at: number; consumed_at: number | null }>();
+
+  if (!login) return page(404, "That sign-in has expired or already been used.");
+  if (login.consumed_at !== null) return page(409, "That sign-in has already been used.");
+  if (Date.now() - login.created_at > LOGIN_TTL_MS) {
+    return page(410, "That sign-in took too long. Start it again from the app.");
+  }
+
+  const expectedReturnTo = `${url.origin}${url.pathname}`;
+  const result = await verifyAssertion(url.searchParams, expectedReturnTo);
+  if (!isVerified(result)) {
+    return page(403, `Steam couldn't confirm that sign-in: ${result.error}.`);
+  }
+
+  // Consumed whatever happens next, so a failed link cannot be retried against a row that
+  // has already been through Valve.
+  await env.DB.prepare("UPDATE steam_logins SET consumed_at = ? WHERE id = ?")
+    .bind(Date.now(), loginId)
+    .run();
+
+  // `accounts.steam_id` is UNIQUE: one Steam account is one identity here, and a second
+  // community account cannot quietly claim an identity that is already spoken for.
+  try {
+    await env.DB.prepare("UPDATE accounts SET steam_id = ? WHERE id = ?")
+      .bind(result.steamId, login.account_id)
+      .run();
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) {
+      return page(409, "That Steam account is already linked to another profile.");
+    }
+    throw err;
+  }
+
+  return page(200, "Steam account linked. You can close this tab and go back to the app.");
+}
+
+/** A one-line page for the browser half of the sign-in. */
+function page(status: number, message: string): Response {
+  const body = `<!doctype html><meta charset="utf-8"><title>MXB App</title>` +
+    `<body style="font:16px/1.5 system-ui;margin:4rem auto;max-width:30rem;padding:0 1rem">` +
+    `<p>${message.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</p>`;
+  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+/**
+ * What this player may use.
+ *
+ * Empty for an account with no Steam link — not an error. Entitlement is keyed on the
+ * Steam identity, so an unlinked account simply owns nothing yet, and saying so plainly is
+ * more useful than a failure the app has to interpret.
+ */
+async function listEntitlements(account: Account, env: Env): Promise<Response> {
+  if (!account.steam_id) return json(200, { steamId: null, assets: [] });
+
+  const rows = await env.DB.prepare(
+    "SELECT e.asset_id, a.title, e.source, e.granted_at" +
+      " FROM entitlements e JOIN assets a ON a.id = e.asset_id" +
+      " WHERE e.steam_id = ? AND e.revoked_at IS NULL AND a.withdrawn_at IS NULL" +
+      " ORDER BY e.granted_at DESC",
+  )
+    .bind(account.steam_id)
+    .all<{ asset_id: string; title: string; source: string; granted_at: number }>();
+
+  return json(200, {
+    steamId: account.steam_id,
+    assets: (rows.results ?? []).map((r) => ({
+      assetId: r.asset_id,
+      title: r.title,
+      source: r.source,
+      grantedAt: r.granted_at,
+    })),
+  });
+}
+
+/**
+ * May this player use this asset, right now?
+ *
+ * The question the whole system exists to answer. No key is minted here and no crypto
+ * happens — this is the decision, proved end to end before there is anything to decrypt.
+ *
+ * Every call is written to the audit log, refusals included: one identity walking the
+ * catalogue is only visible if the "no"s are recorded too.
+ */
+async function checkEntitlement(request: Request, account: Account, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "expected a JSON body" });
+  const { assetId, sessionId } = body as { assetId?: unknown; sessionId?: unknown };
+  if (typeof assetId !== "string" || !assetId.trim()) {
+    return json(400, { error: "an asset id is required" });
+  }
+  const session = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : "none";
+
+  const decide = async (): Promise<{ allowed: boolean; reason: string }> => {
+    if (!account.steam_id) return { allowed: false, reason: "no Steam account linked" };
+    const asset = await env.DB.prepare("SELECT withdrawn_at FROM assets WHERE id = ?")
+      .bind(assetId)
+      .first<{ withdrawn_at: number | null }>();
+    if (!asset) return { allowed: false, reason: "no such asset" };
+    if (asset.withdrawn_at !== null) return { allowed: false, reason: "withdrawn" };
+
+    const row = await env.DB.prepare(
+      "SELECT revoked_at FROM entitlements WHERE steam_id = ? AND asset_id = ?",
+    )
+      .bind(account.steam_id, assetId)
+      .first<{ revoked_at: number | null }>();
+    if (!row) return { allowed: false, reason: "not entitled" };
+    if (row.revoked_at !== null) return { allowed: false, reason: "revoked" };
+    return { allowed: true, reason: "entitled" };
+  };
+
+  const { allowed, reason } = await decide();
+  await env.DB.prepare(
+    "INSERT INTO entitlement_grants (steam_id, asset_id, session_id, decision, reason, issued_at)" +
+      " VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(account.steam_id ?? "unlinked", assetId, session, allowed ? "allow" : "deny", reason, Date.now())
+    .run();
+
+  return json(allowed ? 200 : 403, { allowed, reason });
 }
 
 /**
