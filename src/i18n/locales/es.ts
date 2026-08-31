@@ -2241,4 +2241,6 @@ export const es: Translation = {
   "track.pointAtTools": "Indicar las herramientas…",
   "track.toolsNotFound": "No hay terrained.exe en esa carpeta",
   "track.stillNeeded": "Aún necesita un .rdf de TrackEd (parrilla, boxes, cámaras) y un gate.edf copiado de otra pista.",
+  "track.base": "Pista base",
+  "track.baseLoaded": "Se cargó «{{name}}»",
 };

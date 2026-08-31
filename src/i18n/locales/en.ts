@@ -2211,4 +2211,6 @@ export const en = {
   "track.pointAtTools": "Point at the track tools…",
   "track.toolsNotFound": "No terrained.exe in that folder",
   "track.stillNeeded": "Still needs a .rdf from TrackEd (start gate, pits, cameras) and a gate.edf copied from another track.",
+  "track.base": "Base track",
+  "track.baseLoaded": "Loaded “{{name}}”",
 } as const;

@@ -8,6 +8,7 @@ import { TrackViewerDialog } from "../../Viewer/TrackViewerDialog";
 import { useT } from "../../../i18n/context";
 import { cn } from "@/lib/utils";
 import {
+  baseTrackProgram,
   buildTrack,
   checkTrack,
   exportTrackSource,
@@ -82,6 +83,22 @@ export default function TrackStudio() {
       const next = await generateTrack(brief.trim());
       await settle(next);
       toast.success(t("track.generated", { name: next.name }));
+    } catch (e) {
+      toast.error(t("track.generateFailed"), { description: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onBase() {
+    if (busy) return;
+    setBusy("generate");
+    setPreview(null);
+    setProblems([]);
+    try {
+      const next = await baseTrackProgram();
+      await settle(next);
+      toast.success(t("track.baseLoaded", { name: next.name }));
     } catch (e) {
       toast.error(t("track.generateFailed"), { description: String(e) });
     } finally {
@@ -201,6 +218,17 @@ export default function TrackStudio() {
           className="h-10 flex-none"
         >
           {busy === "generate" ? t("track.generating") : t("track.generate")}
+        </Button>
+        {/* Always here, not just when the model is unreachable: starting from a track that
+            already works and changing two jumps is a better first move than describing one
+            from nothing. */}
+        <Button
+          variant="outline"
+          onClick={() => void onBase()}
+          disabled={busy !== null}
+          className="h-10 flex-none"
+        >
+          {t("track.base")}
         </Button>
       </div>
 
