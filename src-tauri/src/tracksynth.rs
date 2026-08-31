@@ -136,6 +136,13 @@ const UI_IMAGE_DIM: usize = 512;
 /// against 2049. It is also the resolution anything reading the file will measure it at.
 const TRH_MASK_DIM: usize = 2048;
 
+/// And the resolution a *preview* keeps them at.
+///
+/// A preview can carry ten of these — one per kind of feature on the track, plus the three
+/// surfaces — and at the full size that is forty megabytes of mask for a picture nobody
+/// measures. A quarter of the area is still finer than the screen it is drawn on.
+const PREVIEW_MASK_DIM: usize = 1024;
+
 /// How far below the top of the height budget the terrain is allowed to sit. Quantisation is
 /// against the budget, so leaving room costs resolution for nothing — but landing exactly on
 /// 0 or 65535 risks a clamp at the ends.
@@ -155,8 +162,6 @@ pub struct Synth {
     pub dist: Vec<f32>,
     /// Metres round the lap.
     pub arc: Vec<f32>,
-    /// Which station is nearest — the index that carries arc length and heading.
-    pub station: Vec<u32>,
     pub stations: Vec<Station>,
     /// What the terrain actually used of its budget, and what the budget was.
     pub used_m: f32,
@@ -334,7 +339,6 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         corridor,
         dist,
         arc,
-        station,
         stations,
         used_m: used,
         budget_m: budget,
@@ -1150,25 +1154,26 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     // Three bands rather than two. A track painted as line-and-grass reads as a brown
     // ribbon on a green field and nothing else; the graded shoulder either side is a
     // different material from both, and it is most of what you see from the seat.
+    let dim = if paint_features { PREVIEW_MASK_DIM } else { TRH_MASK_DIM };
     let (shoulder_id, shoulder_scale) = ground(prog.terrain.surface);
     let shoulder = SHOULDER_M * shoulder_scale;
     let mut masks: Vec<(u32, Vec<u8>)> = vec![
         // 10 is the riding line — the id published tracks paint their ribbon with.
-        (10, mask_from(syn, TRH_MASK_DIM, |d, _| u8::from(d <= half) * 255)),
+        (10, mask_from(syn, dim, |d, _| u8::from(d <= half) * 255)),
         (
             shoulder_id,
-            mask_from(syn, TRH_MASK_DIM, |d, _| {
+            mask_from(syn, dim, |d, _| {
                 u8::from(d > half && d <= half + shoulder) * 255
             }),
         ),
-        (1, mask_from(syn, TRH_MASK_DIM, |d, _| {
+        (1, mask_from(syn, dim, |d, _| {
             u8::from(d > half + shoulder) * 255
         })),
     ];
     if paint_features {
         // First in the list, because a reader compositing these takes the first mask that
         // covers a cell — and on a feature that is the answer wanted.
-        let mut all = feature_masks(prog, syn, TRH_MASK_DIM);
+        let mut all = feature_masks(prog, syn, dim);
         all.extend(masks);
         masks = all;
     }
@@ -1178,8 +1183,8 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     for (id, m) in &masks {
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes());
-        out.extend_from_slice(&(TRH_MASK_DIM as u32).to_le_bytes());
-        out.extend_from_slice(&(TRH_MASK_DIM as u32).to_le_bytes());
+        out.extend_from_slice(&(dim as u32).to_le_bytes());
+        out.extend_from_slice(&(dim as u32).to_le_bytes());
         out.extend_from_slice(m);
     }
 
@@ -1507,7 +1512,16 @@ rainy\n{\n\tambient\n\t{\n\t\tred = 0.6\n\t\tgreen = 0.6\n\t\tblue = 0.85\n\t}\n
 fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
     let mut map = vec![0u8; dim * dim * 4];
     let mut shot = vec![0u8; dim * dim * 4];
-    let base = crate::trackstats::box_blur(&syn.heights, syn.gw, syn.gh, 6);
+    // Sampled down to the picture's own size *before* blurring. Blurring the full grid to
+    // shade a postage stamp costs two copies of the terrain and changes nothing you can see.
+    let small: Vec<f32> = (0..dim * dim)
+        .map(|i| {
+            let gy = ((i / dim) * syn.gh / dim).min(syn.gh - 1);
+            let gx = ((i % dim) * syn.gw / dim).min(syn.gw - 1);
+            syn.heights[gy * syn.gw + gx]
+        })
+        .collect();
+    let base_small = crate::trackstats::box_blur(&small, dim, dim, 3);
     for y in 0..dim {
         // TGA's origin is bottom-left, so the picture is written from the far edge back.
         let gy = ((dim - 1 - y) * syn.gh / dim).min(syn.gh - 1);
@@ -1522,7 +1536,9 @@ fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
             map[at..at + 4].copy_from_slice(&[c[2], c[1], c[0], 255]);
 
             // The picture: the terrain's own relief, with the line picked out.
-            let relief = ((syn.heights[i] - base[i]) * 90.0 + 128.0).clamp(0.0, 255.0) as u8;
+            let here = y * dim + x;
+            let relief =
+                ((small[here] - base_small[here]) * 90.0 + 128.0).clamp(0.0, 255.0) as u8;
             let s: [u8; 3] = if on {
                 [relief.saturating_add(40), relief / 2, relief / 3]
             } else {

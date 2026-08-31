@@ -226,7 +226,10 @@ export default function TrackStudio() {
     setPreview(p);
     const t3 = await loadTrackTerrain(p.path, 1024);
     setTerrain(t3);
-    setOverview(await loadTrackOverview(p.path, 2048).catch(() => null));
+    // 1024, not 2048: the surface picture is a texture on a preview, and at the
+    // larger size it is seventeen megabytes over the bridge every time the track is
+    // rebuilt — which with Live on is every edit.
+    setOverview(await loadTrackOverview(p.path, 1024).catch(() => null));
   }
 
   async function onPreview() {
@@ -239,7 +242,10 @@ export default function TrackStudio() {
       // — the second is the slower half and the view is useful before it lands.
       const t3 = await loadTrackTerrain(p.path, 1024);
       setTerrain(t3);
-      setOverview(await loadTrackOverview(p.path, 2048).catch(() => null));
+      // 1024, not 2048: the surface picture is a texture on a preview, and at the
+    // larger size it is seventeen megabytes over the bridge every time the track is
+    // rebuilt — which with Live on is every edit.
+    setOverview(await loadTrackOverview(p.path, 1024).catch(() => null));
     } catch (e) {
       toast.error(t("track.buildFailed"), { description: String(e) });
     } finally {

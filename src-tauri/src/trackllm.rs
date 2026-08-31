@@ -22,6 +22,13 @@ use anyhow::{bail, Context, Result};
 use crate::trackprog::{Feature, TrackProgram};
 use crate::tracksynth;
 
+/// Samples a check builds at. A power of two plus one, like every other grid here.
+///
+/// Sixteen times less work than 2049, and everything measured off it — corridor width, how
+/// connected it is, how steep the ground gets — survives the reduction. What wouldn't is the
+/// fine texture, and no check asks about that.
+const VALIDATION_SAMPLES: u32 = 513;
+
 /// What published tracks measure, from `trackstats` over the installed corpus. These are the
 /// numbers a generated track is held to, and the ones the prompt quotes.
 pub mod corpus {
@@ -223,7 +230,15 @@ pub fn review(prog: &TrackProgram) -> Review {
     }
 
     // Then the real test: build it, and measure what came out.
-    let syn = match tracksynth::synthesise(prog) {
+    //
+    // At a quarter of the samples the track ships with. This runs on every edit — every drag
+    // of a curve point, every nudge of a jump's height — and a full-resolution synthesis is
+    // most of a second of work to answer a question that only needs to know whether the
+    // corridor holds together and roughly how steep it is. The terrain that gets written is
+    // still built at full size.
+    let mut coarse = prog.clone();
+    coarse.terrain.samples = prog.terrain.samples.min(VALIDATION_SAMPLES);
+    let syn = match tracksynth::synthesise(&coarse) {
         Ok(s) => s,
         Err(e) => {
             out.push(e.to_string());
