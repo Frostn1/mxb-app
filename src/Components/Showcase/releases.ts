@@ -49,6 +49,11 @@ import {
   Undo2,
   ShieldAlert,
   SwatchBook,
+  Shirt,
+  Globe,
+  Zap,
+  Users,
+  SlidersHorizontal,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
@@ -75,6 +80,20 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.12.4",
+    hero: {
+      icon: Shirt,
+      title: "showcase.v0124.hero.title",
+      body: "showcase.v0124.hero.body",
+    },
+    highlights: [
+      { icon: Globe, text: "showcase.v0124.anyserver" },
+      { icon: Zap, text: "showcase.v0124.nosetup" },
+      { icon: Users, text: "showcase.v0124.everyone" },
+      { icon: SlidersHorizontal, text: "showcase.v0124.settings" },
+    ],
+  },
   {
     version: "0.12.2",
     hero: {

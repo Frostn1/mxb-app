@@ -58,7 +58,7 @@ export const fr: Translation = {
   "nav.paints": "Décos",
   "nav.studio": "Studio",
   "nav.servers": "Serveurs",
-  "nav.manage": "Gérer",
+  "nav.manage": "Mode course",
   "nav.settings": "Réglages",
 
   "sidebar.installing": "Installation de « {{name}} »",
@@ -1587,6 +1587,18 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0124.hero.title":
+    "Toute la grille dans la peinture qu'elle a vraiment choisie",
+  "showcase.v0124.hero.body":
+    "MX Bikes ne transmet aucun contenu personnalisé : un lobby d'inconnus a toujours été un lobby de livrées par défaut. MXB App partage désormais ce que vous portez avec les pilotes autour de vous et installe les leurs — sur n'importe quel serveur, sans rien à faire côté hébergeur et sans code à saisir.",
+  "showcase.v0124.anyserver":
+    "N'importe quel serveur, pas seulement les nôtres. L'app lit le serveur depuis le jeu en cours, donc un lobby public fonctionne comme un lobby privé.",
+  "showcase.v0124.nosetup":
+    "Rien à configurer. Pas de code d'invitation, pas d'inscription, rien à installer côté serveur — lancez le jeu et c'est parti.",
+  "showcase.v0124.everyone":
+    "Vous verrez tout pilote qui a aussi MXB App. Plus votre lobby en compte, plus la grille est correcte.",
+  "showcase.v0124.settings":
+    "Paramètres → Synchro des peintures montre ce qui est parti, ce qui est arrivé, et toute peinture qu'elle a refusé d'écraser. L'interrupteur est dans Général.",
   "showcase.v0122.hero.title":
     "La caméra replay peut suivre le pilote",
   "showcase.v0122.hero.body":

@@ -61,7 +61,7 @@ export const de: Translation = {
   "nav.paints": "Designs",
   "nav.studio": "Studio",
   "nav.servers": "Server",
-  "nav.manage": "Verwalten",
+  "nav.manage": "Rennmodus",
   "nav.settings": "Einstellungen",
 
   "sidebar.installing": "„{{name}}“ wird installiert",
@@ -1596,6 +1596,18 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0124.hero.title":
+    "Jeder im Starterfeld in der Lackierung, die er wirklich gewählt hat",
+  "showcase.v0124.hero.body":
+    "MX Bikes überträgt keine eigenen Inhalte, also war ein Lobby voller Fremder immer ein Lobby voller Standard-Lackierungen. MXB App teilt jetzt, was du trägst, mit den Fahrern um dich herum und installiert deren Lackierungen — auf jedem Server, ohne Zutun des Hosts und ohne Code.",
+  "showcase.v0124.anyserver":
+    "Jeder Server, nicht nur unsere. Die App liest den Server aus dem laufenden Spiel, also funktioniert eine öffentliche Lobby genau wie eine private.",
+  "showcase.v0124.nosetup":
+    "Nichts einzurichten. Kein Einladungscode, keine Anmeldung, keine Server-Installation — Spiel starten, fertig.",
+  "showcase.v0124.everyone":
+    "Du siehst jeden Fahrer, der ebenfalls MXB App hat. Je mehr in deiner Lobby, desto mehr vom Feld sieht richtig aus.",
+  "showcase.v0124.settings":
+    "Einstellungen → Lackierungs-Sync zeigt, was rausging, was ankam und welche Lackierung nicht überschrieben wurde. Der Schalter zum Abschalten sitzt unter Allgemein.",
   "showcase.v0122.hero.title":
     "Die Replay-Kamera kann dem Fahrer folgen",
   "showcase.v0122.hero.body":

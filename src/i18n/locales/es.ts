@@ -56,7 +56,7 @@ export const es: Translation = {
   "nav.paints": "Pinturas",
   "nav.studio": "Studio",
   "nav.servers": "Servidores",
-  "nav.manage": "Gestionar",
+  "nav.manage": "Modo carrera",
   "nav.settings": "Ajustes",
 
   "sidebar.installing": "Instalando «{{name}}»",
@@ -1583,6 +1583,18 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0124.hero.title":
+    "Toda la parrilla con la pintura que de verdad eligió",
+  "showcase.v0124.hero.body":
+    "MX Bikes no envía contenido personalizado, así que una sala de desconocidos siempre ha sido una sala de libreas por defecto. MXB App ahora comparte lo que llevas con los pilotos que te rodean e instala las suyas — en cualquier servidor, sin que el anfitrión haga nada y sin códigos.",
+  "showcase.v0124.anyserver":
+    "Cualquier servidor, no solo los nuestros. La app lee el servidor del juego en marcha, así que una sala pública funciona igual que una privada.",
+  "showcase.v0124.nosetup":
+    "Nada que configurar. Sin código de invitación, sin registro, sin instalar nada en el servidor — abre el juego y ya está.",
+  "showcase.v0124.everyone":
+    "Verás a cualquier piloto que también tenga MXB App. Cuantos más haya en tu sala, más parrilla se ve como debe.",
+  "showcase.v0124.settings":
+    "Ajustes → Sincronización de pinturas muestra qué salió, qué llegó y cualquier pintura que se negó a sobrescribir. El interruptor está en General.",
   "showcase.v0122.hero.title":
     "La cámara de repetición puede seguir al piloto",
   "showcase.v0122.hero.body":

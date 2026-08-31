@@ -3,12 +3,6 @@
 ## Unreleased
 
 ### Added
-- Paint sync works on any server, not just ours. The app reads the server name out of the
-  running game, so a public server syncs the same as a private one and the host installs
-  nothing.
-- No invite code. The app signs itself up the first time sync runs, the same way voice does.
-- Paint sync is on by default, with a switch in Settings → General to turn it off.
-- Starting the game from Steam or a shortcut now syncs too. Only the Play button did before.
 - Anonymous usage counts, so which pages and features actually get used is knowable. The
   app sends a random install id, its version, the OS, the title, a session count and
   counters for named pages and features — never your name, your files or your address.
@@ -17,8 +11,23 @@
   installs by day, week and month, version and OS spread, and every page and feature
   ranked by how many installs touched it — including the ones nothing touched.
 
+## 2026-08-31 — v0.12.4 — Paint sync, on every server
+
+### Added
+- Paint sync works on any server, not just ours. The app reads the server name out of the
+  running game, so a public server syncs the same as a private one and the host installs
+  nothing.
+- No invite code. The app signs itself up the first time sync runs, the same way voice does.
+- Paint sync is on by default, with a switch in Settings → General to turn it off.
+- Starting the game from Steam or a shortcut now syncs too. Only the Play button did before.
+- A feature's ground height is set on its own row in the track editor.
+- Features can be dragged along the height strip.
+
 ### Changed
 - The sync line in the sidebar is no longer behind the experimental toggle.
+- The Manage tab is called Race mode, which is what its own help text has always called it.
+- Join server only appears when there are servers to list. Until the app can read the
+  game's own browser, an empty list behind a button is worse than no button.
 - Paint sync has its own Settings page — what it published, what it pulled, your GUID, and
   any paint it declined to overwrite. It used to live on the Servers tab.
 
