@@ -366,6 +366,16 @@ pub const EXAMPLE: &str = r#"{
 // Walking the centreline
 // ---------------------------------------------------------------------------
 
+/// An angle brought into (-pi, pi].
+fn wrap(a: f32) -> f32 {
+    let tau = std::f32::consts::TAU;
+    let mut x = (a + std::f32::consts::PI).rem_euclid(tau) - std::f32::consts::PI;
+    if x <= -std::f32::consts::PI {
+        x += tau;
+    }
+    x
+}
+
 /// One point on the riding line, and which way it faces there.
 #[derive(Clone, Copy, Debug)]
 pub struct Station {
@@ -529,6 +539,68 @@ impl TrackProgram {
         Ok(())
     }
 
+    /// Segments that bring the finish back to the start, or `None` if it is already there.
+    ///
+    /// A turn, a straight, and a turn — the shortest of the two same-direction Dubins paths
+    /// between two poses. Both are tried and the shorter kept, which is enough for a lap that
+    /// has drifted open under an edit; the mixed-direction paths matter only when the two
+    /// poses are closer together than the turning circles, and a lap that has come apart
+    /// never is.
+    ///
+    /// Closing the *pose* is what closes the lap. Position alone leaves a kink at the line;
+    /// heading alone leaves it parallel and somewhere else.
+    pub fn closing_segments(&self, radius: f32) -> Option<Vec<Segment>> {
+        let st = self.stations(1.0);
+        let last = *st.last()?;
+        let r = radius.abs().max(1.0);
+        let goal = (self.start.x, self.start.z, self.start.angle.to_radians());
+
+        let gap = ((last.x - goal.0).powi(2) + (last.z - goal.1).powi(2)).sqrt();
+        let turned = wrap(goal.2 - last.heading).abs();
+        if gap < 0.5 && turned < 0.02 {
+            return None;
+        }
+
+        // `turn` is +1 for a pair of right-hand circles, -1 for left.
+        let solve = |turn: f32| -> Option<(f32, f32, f32)> {
+            let centre = |x: f32, z: f32, th: f32| {
+                let (rx, rz) = right_vector(th);
+                (x + rx * r * turn, z + rz * r * turn)
+            };
+            let c1 = centre(last.x, last.z, last.heading);
+            let c2 = centre(goal.0, goal.1, goal.2);
+            let (dx, dz) = (c2.0 - c1.0, c2.1 - c1.1);
+            let run = (dx * dx + dz * dz).sqrt();
+            if run < 1e-3 {
+                return None;
+            }
+            // The straight's heading, in the same convention the walk uses.
+            let th_s = dx.atan2(dz);
+            let sweep = |from: f32, to: f32| {
+                let d = wrap(to - from) * turn;
+                if d < 0.0 { d + std::f32::consts::TAU } else { d }
+            };
+            Some((sweep(last.heading, th_s), run, sweep(th_s, goal.2)))
+        };
+
+        let mut best: Option<(f32, f32, Vec<Segment>)> = None;
+        for turn in [1.0f32, -1.0] {
+            let Some((a1, run, a2)) = solve(turn) else {
+                continue;
+            };
+            let cost = (a1 + a2) * r + run;
+            let segs = vec![
+                Segment::Arc { radius: r * turn, angle: a1.to_degrees(), rise: 0.0 },
+                Segment::Straight { length: run, rise: 0.0 },
+                Segment::Arc { radius: r * turn, angle: a2.to_degrees(), rise: 0.0 },
+            ];
+            if best.as_ref().map(|b| cost < b.0).unwrap_or(true) {
+                best = Some((cost, run, segs));
+            }
+        }
+        best.map(|(_, _, segs)| segs)
+    }
+
     /// How far the finish is from the start. A lap that doesn't close is a dead end, and the
     /// error is easier to read as a distance than as a drawing.
     pub fn closure_error(&self) -> f32 {
@@ -612,6 +684,49 @@ mod tests {
         assert!((st[0].curvature - 1.0 / 25.0).abs() < 1e-4);
         let straight = prog(vec![Segment::Straight { length: 10.0, rise: 0.0 }]);
         assert_eq!(straight.stations(1.0)[0].curvature, 0.0);
+    }
+
+    #[test]
+    fn an_open_lap_can_be_closed() {
+        // Three quarters of a rounded square: it ends facing the wrong way, a long way off.
+        let mut p = prog(vec![
+            Segment::Straight { length: 60.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 60.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 60.0, rise: 0.0 },
+        ]);
+        assert!(p.closure_error() > 50.0, "the fixture should be open");
+
+        let add = p.closing_segments(20.0).expect("it has somewhere to go");
+        p.segments.extend(add);
+        assert!(
+            p.closure_error() < 1.0,
+            "still {:.1} m from home",
+            p.closure_error()
+        );
+        // And facing the way it started, or the line has a kink in it.
+        let end = *p.stations(1.0).last().unwrap();
+        assert!(
+            wrap(end.heading - p.start.angle.to_radians()).abs() < 0.05,
+            "ends {:.1} degrees off",
+            wrap(end.heading - p.start.angle.to_radians()).to_degrees()
+        );
+    }
+
+    #[test]
+    fn a_closed_lap_needs_nothing_added() {
+        let p = prog(vec![
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+        ]);
+        assert!(p.closing_segments(20.0).is_none());
     }
 
     #[test]

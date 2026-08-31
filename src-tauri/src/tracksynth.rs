@@ -946,6 +946,11 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         &mut wrote,
     )?;
     put(&format!("{slug}/{slug}.amb"), AMB.into(), &mut wrote)?;
+    put(
+        &format!("{slug}/{slug}.rdf"),
+        rdf(prog).into_bytes(),
+        &mut wrote,
+    )?;
     let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
@@ -1113,6 +1118,115 @@ fn ground(s: Surface) -> (u32, f32) {
     }
 }
 
+/// Race data: the start gate, the pit lane, the finish line and the checkpoints.
+///
+/// TrackEd writes this, and TrackEd is Windows-only — but the file is plain text, and its
+/// positions are stated as `long` and `lat` along the centreline, which is the one coordinate
+/// system this whole module already thinks in. So it can be written here.
+///
+/// Laid out from the lap rather than copied: the finish line a little into the first
+/// straight, the gate behind it, the pit lane alongside, and the splits and checkpoints
+/// spread evenly round. The example track's own file is the shape this follows, down to the
+/// keys and the order.
+///
+/// Untested against the game — nothing here has been loaded by MX Bikes. The structure is
+/// right; whether every field means what it looks like is not something a macOS box can say.
+fn rdf(prog: &TrackProgram) -> String {
+    let lap = prog.lap_length();
+    let half = prog.width * 0.5;
+    // Far enough in that the gate behind it is still on the opening straight.
+    let line = (lap * 0.06).clamp(10.0, 40.0);
+    let gate_at = (line - 12.0).max(1.0);
+
+    let mut s = String::new();
+    let mark = |s: &mut String, name: &str, at: f32, w: f32| {
+        s.push_str(&format!(
+            "{name}\n{{\n\tline = 0\n\tlong = {at:.6}\n\tleft = {:.6}\n\tright = {:.6}\n}}\n",
+            -w, w
+        ));
+    };
+    mark(&mut s, "finish_line", line, half);
+    mark(&mut s, "split1", (line + lap / 3.0) % lap, half);
+    mark(&mut s, "split2", (line + lap * 2.0 / 3.0) % lap, half);
+
+    // The pit lane runs alongside the opening straight, a track's width off the racing line.
+    let stalls = 16;
+    let lane_lat = -(half + 6.0);
+    s.push_str(&format!(
+        "pit_lane\n{{\n\tnumstalls = {stalls}\n\tstarttype = 1\n\tstartstartlong = 0.000000\n\
+         \tstartdifflong = 0.000000\n\tstartstartlat = 0.000000\n\tstartendlat = 0.000000\n\
+         \tstartanglerel = 0.000000\n\tstartposx = {:.6}\n\tstartposz = {:.6}\n\
+         \tstartspacingx = -4.000000\n\tstartspacingz = 6.000000\n\tstartangleabs = {:.6}\n\
+         \tstartcolumns = 8\n",
+        prog.start.x, prog.start.z, prog.start.angle
+    ));
+    for i in 0..stalls {
+        s.push_str(&format!(
+            "\tstart_stall{i}\n\t{{\n\t\tlong = {:.6}\n\t\tlat = {lane_lat:.6}\n\
+             \t\tangle = 0.000000\n\t}}\n",
+            gate_at + i as f32 * 5.0
+        ));
+    }
+    s.push_str("}\n");
+
+    s.push_str(
+        "pit_board\n{\n\theight = 1.500000\n\tstartlong = 18.000000\n\tdifflong = 1.400000\n\
+         \tstartlat = -5.000000\n\tendlat = -5.000000\n",
+    );
+    for i in 0..stalls {
+        s.push_str(&format!(
+            "\tstall{i}\n\t{{\n\t\tlong = {:.6}\n\t\tlat = {:.6}\n\t\tangle = 0.000000\n\t}}\n",
+            18.0 + i as f32 * 1.4,
+            lane_lat
+        ));
+    }
+    s.push_str("}\n");
+
+    // One row of gates across the track, which is what a motocross start is.
+    let grid = 24;
+    s.push_str(&format!(
+        "starting_grid\n{{\n\tnumstalls = {grid}\n\ttype = 1\n\tposx = {:.6}\n\
+         \tposz = {:.6}\n\tangle = {:.6}\n\tnumstallsperrow = {grid}\n\
+         \tdistfromstartline = 0.000000\n\tlanespacing = 0.000000\n\trowspacing = 0.000000\n\
+         \tdifflat = 0.000000\n\tlanewidth = 1.500000\n\tlatshift = 0.000000\n\tside = 1\n",
+        prog.start.x, prog.start.z, prog.start.angle
+    ));
+    for i in 0..grid {
+        // Spread across the track and a little beyond it: a gate is wider than the line.
+        let lat = -half * 1.4 + (i as f32 + 0.5) * (half * 2.8 / grid as f32);
+        s.push_str(&format!(
+            "\tstall{i}\n\t{{\n\t\tlong = {gate_at:.6}\n\t\tlat = {lat:.6}\n\
+             \t\tangle = 0.000000\n\t}}\n"
+        ));
+    }
+    s.push_str("}\n");
+
+    // Three, evenly round, so a lap can't be cut. The first carries the start flag.
+    s.push_str("num_checkpoints = 3\n");
+    for i in 0..3 {
+        let at = (line + lap * (i as f32 + 1.0) / 4.0) % lap;
+        s.push_str(&format!(
+            "checkpoint{i}\n{{\n\tlong = {at:.6}\n\tleft = {:.6}\n\tright = {:.6}\n\
+             \tpenalty = {:.6}\n\tline = 0\n\tstart = {}\n}}\n",
+            -half * 1.3,
+            half * 1.3,
+            if i == 0 { 15.0 } else { 5.0 },
+            if i == 0 { 1 } else { 0 }
+        ));
+    }
+
+    s.push_str(&format!(
+        "30secondsboard_posx = {:.6}\n30secondsboard_posz = {:.6}\n30secondsboard_angle = {:.6}\n\
+         30seconds_board\n{{\n\tlong = {:.6}\n\tlat = {:.6}\n\tangle = 0.000000\n}}\n",
+        prog.start.x,
+        prog.start.z,
+        prog.start.angle - 90.0,
+        gate_at - 4.0,
+        -(half + 3.0)
+    ));
+    s
+}
+
 /// The smallest `.map` the format allows: no materials, no geometry, no nodes.
 ///
 /// TerrainEd is what really makes these, and it is Windows-only. This is not a substitute —
@@ -1157,6 +1271,7 @@ pub fn write_pkz(
         (format!("{slug}.trh"), trh(prog, syn, paint_features)),
         (format!("{slug}.map"), empty_map()),
         (format!("{slug}.ini"), track_ini(prog).into_bytes()),
+        (format!("{slug}.rdf"), rdf(prog).into_bytes()),
         (format!("{slug}.amb"), AMB.as_bytes().to_vec()),
         (format!("{slug}_map.tga"), map_img),
         (format!("{slug}.tga"), shot),
@@ -1632,6 +1747,44 @@ mod tests {
 
     /// The empty `.map` has to be one our own parser accepts, or it is not the format's
     /// degenerate case — it is a broken file.
+    /// The race data has to parse as the same shape the example track's does, because that
+    /// file is the only description of the format there is.
+    #[test]
+    fn the_race_data_has_the_blocks_the_game_looks_for() {
+        let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        let text = rdf(&p);
+        for block in [
+            "finish_line",
+            "split1",
+            "split2",
+            "pit_lane",
+            "pit_board",
+            "starting_grid",
+            "num_checkpoints = 3",
+            "checkpoint0",
+            "30seconds_board",
+        ] {
+            assert!(text.contains(block), "no {block}");
+        }
+        // Braces balance, or the game's parser walks off the end of the file.
+        assert_eq!(
+            text.matches('{').count(),
+            text.matches('}').count(),
+            "unbalanced braces"
+        );
+        // Every marker sits somewhere on the lap.
+        for line in text.lines() {
+            if let Some(v) = line.trim().strip_prefix("long = ") {
+                let at: f32 = v.parse().unwrap();
+                assert!(
+                    (0.0..=p.lap_length()).contains(&at),
+                    "a marker at {at} m is off a {} m lap",
+                    p.lap_length()
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_empty_map_is_a_map() {
         let m = empty_map();

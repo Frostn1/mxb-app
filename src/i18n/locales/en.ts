@@ -2353,4 +2353,8 @@ export const en = {
   "track.author": "Author",
   "track.previewHint": "Press Preview to build it and look at it here.",
   "track.location": "Location",
+  "track.blank": "Blank",
+  "track.closeLap": "Close the lap",
+  "track.lapClosed": "The lap meets itself now",
+  "track.closeFailed": "Couldn't close it",
 } as const;

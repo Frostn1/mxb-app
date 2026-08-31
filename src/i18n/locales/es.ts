@@ -2383,4 +2383,8 @@ export const es: Translation = {
   "track.author": "Autor",
   "track.previewHint": "Pulsa Previsualizar para construirla y verla aquí.",
   "track.location": "Ubicación",
+  "track.blank": "En blanco",
+  "track.closeLap": "Cerrar la vuelta",
+  "track.lapClosed": "La vuelta ya cierra",
+  "track.closeFailed": "No se pudo cerrar",
 };

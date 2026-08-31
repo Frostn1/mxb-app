@@ -2397,4 +2397,8 @@ export const de: Translation = {
   "track.author": "Autor",
   "track.previewHint": "Auf Vorschau drücken, um sie zu bauen und hier anzusehen.",
   "track.location": "Ort",
+  "track.blank": "Leer",
+  "track.closeLap": "Runde schließen",
+  "track.lapClosed": "Die Runde schließt sich jetzt",
+  "track.closeFailed": "Konnte nicht geschlossen werden",
 };

@@ -2376,4 +2376,8 @@ export const it: Translation = {
   "track.author": "Autore",
   "track.previewHint": "Premi Anteprima per costruirla e vederla qui.",
   "track.location": "Località",
+  "track.blank": "Vuota",
+  "track.closeLap": "Chiudi il giro",
+  "track.lapClosed": "Il giro ora si chiude",
+  "track.closeFailed": "Impossibile chiudere",
 };
