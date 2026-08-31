@@ -55,7 +55,9 @@ export type TrackFeature =
   | { kind: "whoops"; at: number; count: number; spacing: number; height: number }
   | { kind: "stepUp"; at: number; length: number; height: number }
   | { kind: "berm"; at: number; length: number; height: number }
-  | { kind: "rut"; at: number; length: number; depth: number };
+  | { kind: "rut"; at: number; length: number; depth: number }
+  /** A shape drawn point by point. `u` runs 0 at the feature's start to 1 at its end. */
+  | { kind: "custom"; at: number; length: number; shape: { u: number; h: number }[] };
 
 export type TrackFeatureKind = TrackFeature["kind"];
 
@@ -312,6 +314,22 @@ export function setElevationAt(program: TrackProgram, s: number, height: number)
   return { ...program, elevation: knots };
 }
 
+/**
+ * Turn a feature into a hand-drawn shape, keeping the shape it already had.
+ *
+ * Once a jump has been shaped point by point it is no longer a tabletop with a taller top —
+ * it is a shape, and a tabletop's parameters stop meaning anything about it. So the kind
+ * changes, and the silhouette it had becomes the points you start from.
+ */
+export function toCustom(f: TrackFeature, silhouette: { at: number; height: number }[]): TrackFeature {
+  const length = featureSpan(f).length;
+  const shape = silhouette.map((p) => ({
+    u: Math.min(Math.max((p.at - f.at) / Math.max(length, 1e-6), 0), 1),
+    h: p.height,
+  }));
+  return { kind: "custom", at: f.at, length, shape };
+}
+
 /** The middle of a feature — where its own height point belongs. */
 export function featureMiddle(f: TrackFeature): number {
   return f.at + featureSpan(f).length / 2;
@@ -347,6 +365,12 @@ export function newFeature(kind: TrackFeatureKind, at: number): TrackFeature {
       return { kind, at, length: 20, height: 1.6 };
     case "rut":
       return { kind, at, length: 20, depth: 0.15 };
+    case "custom":
+      return { kind, at, length: 24, shape: [
+        { u: 0, h: 0 },
+        { u: 0.35, h: 1.6 },
+        { u: 1, h: 0 },
+      ] };
   }
 }
 
@@ -432,6 +456,7 @@ export const FEATURE_COLOUR: Record<TrackFeatureKind, string> = {
   stepUp: "rgb(110, 180, 130)",
   berm: "rgb(150, 110, 200)",
   rut: "rgb(90, 90, 110)",
+  custom: "rgb(200, 200, 210)",
 };
 
 /** Where a feature sits, and how long it runs — the two numbers every kind has. */
@@ -441,6 +466,8 @@ export function featureSpan(f: TrackFeature): { at: number; length: number } {
       return { at: f.at, length: (f.lip + Math.min(f.lip, 5)) * 2 + f.gap };
     case "whoops":
       return { at: f.at, length: f.count * f.spacing };
+    case "custom":
+      return { at: f.at, length: f.length };
     default:
       return { at: f.at, length: f.length };
   }

@@ -2419,4 +2419,7 @@ export const es: Translation = {
   "track.live": "En vivo",
   "track.rebuild": "Reconstruir la vista",
   "track.wholeLap": "vuelta entera",
+  "track.kind.custom": "Forma",
+  "track.mode.height": "Altura",
+  "track.mode.shape": "Forma",
 };

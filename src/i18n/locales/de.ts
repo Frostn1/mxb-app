@@ -2433,4 +2433,7 @@ export const de: Translation = {
   "track.live": "Live",
   "track.rebuild": "Vorschau neu bauen",
   "track.wholeLap": "ganze Runde",
+  "track.kind.custom": "Form",
+  "track.mode.height": "Höhe",
+  "track.mode.shape": "Form",
 };

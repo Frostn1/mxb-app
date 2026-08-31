@@ -835,6 +835,11 @@ fn apply_step_ups(along: &mut [f32], st: &[Station], features: &[Feature]) {
 
 /// A feature's shape along the track. `t` runs 0–1 across it, `u` is metres from its start.
 fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
+    // Drawn by hand: eased between the points it was given, which is the same easing the lap's
+    // own height curve uses. Nothing else here has a shape someone chose point by point.
+    if let Feature::Custom { shape, .. } = f {
+        return along_points(shape, t);
+    }
     match *f {
         // Up, along the top, and down. The ramps are a third each, which is about what a
         // built tabletop measures.
@@ -882,7 +887,31 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         // Both are applied elsewhere: a step-up moves the elevation profile, and a berm
         // and a rut are shaped across the track rather than along it.
         Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. } => 0.0,
+        Feature::Custom { .. } => unreachable!("handled above"),
     }
+}
+
+/// A hand-drawn shape's height at `t`, which runs 0 to 1 across the feature.
+///
+/// Eased rather than joined straight, so points placed roughly still make a shape a bike can
+/// ride. Outside the points it reads as the nearest one, so a shape that does not start at
+/// zero simply begins at the height it was drawn at.
+fn along_points(points: &[crate::trackprog::ShapePoint], t: f32) -> f32 {
+    if points.is_empty() {
+        return 0.0;
+    }
+    let mut p: Vec<_> = points.to_vec();
+    p.sort_by(|a, b| a.u.total_cmp(&b.u));
+    if t <= p[0].u {
+        return p[0].h;
+    }
+    if t >= p[p.len() - 1].u {
+        return p[p.len() - 1].h;
+    }
+    let i = p.iter().rposition(|q| q.u <= t).unwrap_or(0);
+    let (a, b) = (p[i], p[(i + 1).min(p.len() - 1)]);
+    let span = (b.u - a.u).max(1e-6);
+    a.h + (b.h - a.h) * smoothstep((t - a.u) / span)
 }
 
 fn smoothstep(t: f32) -> f32 {
@@ -1095,6 +1124,7 @@ fn feature_id(f: &Feature) -> u32 {
         Feature::StepUp { .. } => 204,
         Feature::Berm { .. } => 205,
         Feature::Rut { .. } => 206,
+        Feature::Custom { .. } => 207,
     }
 }
 
@@ -1832,6 +1862,31 @@ mod tests {
     /// Two jumps close together must not add up. Before, the ground between a pair of
     /// tabletops rose to their combined height and a rhythm section came out as one tall
     /// lump; each should keep its own height and the pair should read as one shape.
+    /// A shape drawn point by point is built as it was drawn.
+    #[test]
+    fn a_hand_drawn_shape_is_built_where_its_points_are() {
+        use crate::trackprog::ShapePoint;
+        let mut p = oval();
+        p.terrain.relief.amplitude = 0.0;
+        p.features = vec![Feature::Custom {
+            at: 40.0,
+            length: 40.0,
+            shape: vec![
+                ShapePoint { u: 0.0, h: 0.0 },
+                ShapePoint { u: 0.3, h: 2.5 },
+                ShapePoint { u: 0.6, h: 0.4 },
+                ShapePoint { u: 1.0, h: 0.0 },
+            ],
+        }];
+        let s = synthesise(&p).unwrap();
+        let ground = height_at_arc(&s, 20.0);
+        let crest = height_at_arc(&s, 40.0 + 40.0 * 0.3) - ground;
+        let dip = height_at_arc(&s, 40.0 + 40.0 * 0.6) - ground;
+        assert!((crest - 2.5).abs() < 0.6, "the crest reads {crest:.2} m, drawn at 2.5");
+        assert!(dip < 1.2, "the dip reads {dip:.2} m, drawn at 0.4");
+        assert!(crest - dip > 1.2, "the two are {:.2} m apart", crest - dip);
+    }
+
     #[test]
     fn jumps_that_touch_keep_their_own_height() {
         let mut p = oval();
