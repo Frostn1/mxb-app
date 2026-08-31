@@ -1701,6 +1701,51 @@ mod tests {
         }
     }
 
+    /// Build a track program from a file, the way the studio does but without the studio.
+    ///
+    /// ```text
+    /// FROST_PROGRAM=track.json FROST_BUILD=/tmp/out \
+    ///   cargo test -- --ignored --nocapture builds_from_a_file
+    /// ```
+    #[test]
+    #[ignore = "needs a program — set FROST_PROGRAM"]
+    fn builds_from_a_file() {
+        let path = std::env::var("FROST_PROGRAM").expect("set FROST_PROGRAM");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let p: TrackProgram = serde_json::from_str(&text).expect("that isn't a track program");
+
+        let problems = crate::trackllm::validate(&p);
+        for problem in &problems {
+            println!("  ! {problem}");
+        }
+        assert!(problems.is_empty(), "{} problems", problems.len());
+
+        let s = synthesise(&p).unwrap();
+        let c = crate::trackstats::measure("synth", &s.corridor, &s.heights, s.gw, s.gh, s.mps);
+        println!(
+            "{}: {:.0} m lap, {:.1} m wide, closes to {:.2} m — measured {:.1} m wide, \
+             {:.0} m long, {} lips at {:.0}/km, relief p90 {:.2} m, slope p99 {:.0}°",
+            p.name,
+            p.lap_length(),
+            p.width,
+            p.closure_error(),
+            c.width_from_mean_m,
+            c.length_m,
+            c.lips,
+            c.lips_per_km,
+            c.feature_relief_m.p90,
+            c.slope_deg.p99,
+        );
+
+        if let Ok(dir) = std::env::var("FROST_BUILD") {
+            let dir = Path::new(&dir);
+            let wrote = write_source(&p, &s, dir).unwrap();
+            write_pkz(&p, &s, &dir.join(format!("{}.pkz", slug(&p.name)))).unwrap();
+            preview(&s, &dir.join("preview.ppm"));
+            println!("wrote {} files to {}", wrote.len() + 2, dir.display());
+        }
+    }
+
     /// The terrain, slope-shaded, with the riding line tinted.
     ///
     /// Tinted, not filled: the point of looking is to see the jumps, and painting the corridor
