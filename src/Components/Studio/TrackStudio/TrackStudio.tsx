@@ -52,12 +52,15 @@ import {
   installTrackPreview,
   lapLength,
   FEATURE_COLOUR,
+  elevationAt,
+  featureMiddle,
   featureSpan,
   fitFeatures,
   lapSteps,
   newFeature,
   pathAlong,
   positionAt,
+  setElevationAt,
   previewTrack,
   roomiestGap,
   setTrackTools,
@@ -397,6 +400,13 @@ export default function TrackStudio() {
     if (!program) return;
     setTouched(true);
     void settle({ ...program, terrain: { ...program.terrain, ...patch } });
+  }
+
+  /** Put the ground under one feature at a given height, by moving the lap's height curve. */
+  function liftFeature(f: TrackFeature, height: number) {
+    if (!program) return;
+    setTouched(true);
+    void settle(setElevationAt(program, featureMiddle(f), height));
   }
 
   function addFeature(kind: TrackFeatureKind) {
@@ -855,14 +865,21 @@ export default function TrackStudio() {
                     )}
 
                     <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                      {fieldsOf(step).map((f) => (
+                      {fieldsOf(
+                        step,
+                        step.kind === "feature"
+                          ? elevationAt(program, featureMiddle(step.feature))
+                          : undefined,
+                      ).map((f) => (
                         <Field
                           key={f.label}
                           label={f.label}
                           value={f.value}
                           step={f.step}
                           onChange={(v) =>
-                            step.kind === "feature"
+                            f.ground && step.kind === "feature"
+                              ? liftFeature(step.feature, v)
+                              : step.kind === "feature"
                               ? editFeature(step.index, { [f.key]: v } as Partial<TrackFeature>)
                               : editSegment(step.index, {
                                   [f.key]:
@@ -1012,7 +1029,10 @@ function stepName(step: LapStep, t: ReturnType<typeof useT>): string {
  * kind. `rise` is on every segment because "does this bit go up or down" is a question you
  * ask of a straight as often as of a corner.
  */
-function fieldsOf(step: LapStep): { key: string; label: string; value: number; step: number }[] {
+function fieldsOf(
+  step: LapStep,
+  ground?: number,
+): { key: string; label: string; value: number; step: number; ground?: boolean }[] {
   const len = (v: number) => ({ key: "length", label: "m", value: v, step: 1 });
   const rise = (v: number) => ({ key: "rise", label: "↕", value: v, step: 0.5 });
   if (step.kind === "straight") {
@@ -1030,26 +1050,33 @@ function fieldsOf(step: LapStep): { key: string; label: string; value: number; s
     ];
   }
   const f = step.feature;
+  // Where the ground is under this feature, as opposed to how tall the feature is. Every
+  // kind gets one: "this jump is three metres up" is a different question from "this jump is
+  // two metres tall", and both are worth asking of the same row.
+  const up = { key: "ground", label: "↑", value: ground ?? 0, step: 0.5, ground: true };
   switch (f.kind) {
     case "double":
       return [
         { key: "height", label: "h", value: f.height, step: 0.1 },
         { key: "gap", label: "gap", value: f.gap, step: 1 },
         { key: "lip", label: "lip", value: f.lip, step: 0.5 },
+        up,
       ];
     case "whoops":
       return [
         { key: "height", label: "h", value: f.height, step: 0.05 },
         { key: "count", label: "×", value: f.count, step: 1 },
         { key: "spacing", label: "gap", value: f.spacing, step: 0.5 },
+        up,
       ];
     case "rut":
-      return [
-        { key: "depth", label: "deep", value: f.depth, step: 0.05 },
-        len(f.length),
-      ];
+      return [{ key: "depth", label: "deep", value: f.depth, step: 0.05 }, len(f.length), up];
     default:
-      return [{ key: "height", label: "h", value: f.height, step: 0.1 }, len(f.length)];
+      return [
+        { key: "height", label: "h", value: f.height, step: 0.1 },
+        len(f.length),
+        up,
+      ];
   }
 }
 

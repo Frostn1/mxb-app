@@ -276,6 +276,48 @@ export function fitFeatures(program: TrackProgram): TrackProgram {
 }
 
 /**
+ * How high the track sits at a point on the lap, read off the elevation curve.
+ *
+ * The same easing the synthesiser uses — smoothstep between neighbouring points, wrapping
+ * from the last round to the first — so what a row says matches what the ground does.
+ */
+export function elevationAt(program: TrackProgram, s: number): number {
+  const k = [...(program.elevation ?? [])].sort((a, b) => a.at - b.at);
+  if (k.length === 0) return 0;
+  if (k.length === 1) return k[0].height;
+  const lap = lapLength(program);
+  let i = k.findIndex((p) => p.at > s);
+  i = i <= 0 ? k.length - 1 : i - 1;
+  const a = k[i];
+  const b = k[(i + 1) % k.length];
+  const span = b.at > a.at ? b.at - a.at : lap - a.at + b.at;
+  if (span <= 1e-3) return b.height;
+  const along = s >= a.at ? s - a.at : lap - a.at + s;
+  const u = Math.min(Math.max(along / span, 0), 1);
+  return a.height + (b.height - a.height) * (u * u * (3 - 2 * u));
+}
+
+/**
+ * Set the track's height at a point, by putting a curve point there.
+ *
+ * Within a couple of metres of an existing point it moves that one rather than crowding
+ * another in beside it — otherwise nudging a jump's height twice leaves two points fighting
+ * over the same stretch of lap.
+ */
+export function setElevationAt(program: TrackProgram, s: number, height: number): TrackProgram {
+  const knots = [...(program.elevation ?? [])];
+  const near = knots.findIndex((k) => Math.abs(k.at - s) < 2);
+  if (near >= 0) knots[near] = { at: knots[near].at, height };
+  else knots.push({ at: s, height });
+  return { ...program, elevation: knots };
+}
+
+/** The middle of a feature — where its own height point belongs. */
+export function featureMiddle(f: TrackFeature): number {
+  return f.at + featureSpan(f).length / 2;
+}
+
+/**
  * Points along a stretch of the lap, for lighting it up in the preview.
  *
  * A stretch, not a point: a straight is two hundred metres long, and marking only where it
