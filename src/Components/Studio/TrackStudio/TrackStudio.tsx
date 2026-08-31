@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Activity,
@@ -11,6 +11,7 @@ import {
   Square,
   TrendingDown,
   TrendingUp,
+  GripVertical,
   Plus,
   Waves,
   type LucideIcon,
@@ -33,6 +34,7 @@ import {
   installTrackPreview,
   lapLength,
   featureSpan,
+  fitFeatures,
   lapSteps,
   newFeature,
   positionAt,
@@ -73,7 +75,12 @@ export default function TrackStudio() {
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [focus, setFocus] = useState<{ x: number; z: number } | null>(null);
+  // Reordering is done with pointer events, not HTML5 drag-and-drop. Tauri's
+  // `dragDropEnabled` hands drags to the OS so the webview never sees a dragstart — which is
+  // also why the whole-window file dropzone was catching every attempt.
+  const listRef = useRef<HTMLOListElement>(null);
   const [dragging, setDragging] = useState<number | null>(null);
+  const [dropAt, setDropAt] = useState<number | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
   const [steps, setSteps] = useState<BuildStep[]>([]);
 
@@ -191,7 +198,8 @@ export default function TrackStudio() {
     const segments = program.segments.map((seg, i) =>
       i === index ? ({ ...seg, ...patch } as TrackSegment) : seg,
     );
-    void settle({ ...program, segments });
+    // Shortening a corner can leave the jumps beyond it hanging off the end of the lap.
+    void settle(fitFeatures({ ...program, segments }));
   }
 
   function removeFeature(index: number) {
@@ -203,7 +211,9 @@ export default function TrackStudio() {
   /// in metres, which is a better teacher than a disabled button.
   function removeSegment(index: number) {
     if (!program || program.segments.length <= 2) return;
-    void settle({ ...program, segments: program.segments.filter((_, i) => i !== index) });
+    void settle(
+      fitFeatures({ ...program, segments: program.segments.filter((_, i) => i !== index) }),
+    );
   }
 
   /**
@@ -235,7 +245,40 @@ export default function TrackStudio() {
     const next = [...program.segments];
     const [seg] = next.splice(moved.index, 1);
     next.splice(Math.min(Math.max(landing, 0), next.length), 0, seg);
-    void settle({ ...program, segments: next });
+    void settle(fitFeatures({ ...program, segments: next }));
+  }
+
+  /** Which gap between rows the pointer is over. */
+  function gapUnder(clientY: number): number {
+    const rows = Array.from(listRef.current?.children ?? []) as HTMLElement[];
+    for (let i = 0; i < rows.length; i++) {
+      const box = rows[i].getBoundingClientRect();
+      if (clientY < box.top + box.height / 2) return i;
+    }
+    return rows.length;
+  }
+
+  function onGripDown(e: React.PointerEvent, row: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setDragging(row);
+    setDropAt(row);
+  }
+
+  function onGripMove(e: React.PointerEvent) {
+    if (dragging === null) return;
+    setDropAt(gapUnder(e.clientY));
+  }
+
+  function onGripUp(steps: LapStep[]) {
+    if (dragging !== null && dropAt !== null) {
+      // A gap index is one past the row above it, so dropping below where you started
+      // lands one row too far without this.
+      reorder(steps, dragging, Math.max(0, dropAt > dragging ? dropAt - 1 : dropAt));
+    }
+    setDragging(null);
+    setDropAt(null);
   }
 
   function addFeature(kind: TrackFeatureKind) {
@@ -466,29 +509,33 @@ export default function TrackStudio() {
                 </button>
               ))}
             </div>
-            <ol className="min-h-0 flex-1 divide-y divide-input/60 overflow-y-auto">
+            <ol ref={listRef} className="min-h-0 flex-1 divide-y divide-input/60 overflow-y-auto">
               {lapSteps(program).map((step, row) => {
                 const Icon = stepIcon(step);
                 const steps = lapSteps(program);
                 return (
                   <li
                     key={row}
-                    draggable
-                    onDragStart={() => setDragging(row)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (dragging !== null) reorder(steps, dragging, row);
-                      setDragging(null);
-                    }}
-                    onDragEnd={() => setDragging(null)}
                     onClick={() => setFocus(positionAt(program, step.at))}
                     className={cn(
-                      "flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] transition-colors",
+                      "relative flex items-center gap-1.5 px-2 py-1.5 text-[12.5px] transition-colors",
                       terrain && "cursor-default hover:bg-foreground/[0.04]",
                       dragging === row && "opacity-40",
+                      // The line lands above this row when it is the drop target, and below
+                      // the last one when the drop is past the end.
+                      dropAt === row && "before:absolute before:inset-x-2 before:top-0 before:h-0.5 before:bg-primary",
+                      dropAt === steps.length &&
+                        row === steps.length - 1 &&
+                        "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-primary",
                     )}
                   >
-                    <span className="w-12 flex-none tabular-nums text-right text-muted-foreground">
+                    <GripVertical
+                      onPointerDown={(e) => onGripDown(e, row)}
+                      onPointerMove={onGripMove}
+                      onPointerUp={() => onGripUp(steps)}
+                      className="size-3.5 flex-none cursor-default text-faint hover:text-foreground"
+                    />
+                    <span className="w-11 flex-none tabular-nums text-right text-muted-foreground">
                       {step.at.toFixed(0)}
                     </span>
                     <Icon

@@ -235,6 +235,19 @@ impl Feature {
         }
     }
 
+    /// What to call it in a sentence.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Feature::Tabletop { .. } => "tabletop",
+            Feature::Double { .. } => "double",
+            Feature::Roller { .. } => "roller",
+            Feature::Whoops { .. } => "whoop section",
+            Feature::StepUp { .. } => "step-up",
+            Feature::Berm { .. } => "berm",
+            Feature::Rut { .. } => "rut",
+        }
+    }
+
     pub fn height(&self) -> f32 {
         match self {
             Feature::Tabletop { height, .. }
@@ -466,13 +479,21 @@ impl TrackProgram {
         // which looks like the model forgot to write it.
         let lap = self.lap_length();
         for f in &self.features {
-            if f.at() < 0.0 || f.at() + f.length() > lap {
+            if f.at() < 0.0 {
+                bail!("the {} sits at {:.0} m, before the start", f.name(), f.at());
+            }
+            let end = f.at() + f.length();
+            if end > lap {
+                // Says how to fix it, not just that it is broken: this happens when a corner
+                // is shortened or removed under a jump that was already there, and the way
+                // out is a number rather than an insight.
                 bail!(
-                    "a {:?} runs from {:.0} m to {:.0} m, past the {:.0} m lap",
-                    f,
+                    "the {} at {:.0} m ends {:.0} m past the finish — move it back to {:.0} m \
+                     or earlier, or give the lap its length back",
+                    f.name(),
                     f.at(),
-                    f.at() + f.length(),
-                    lap
+                    end - lap,
+                    (lap - f.length()).max(0.0)
                 );
             }
         }
