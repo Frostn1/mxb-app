@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-31
+
+### Added
+- Settings → FrostMod now lets you rebind the replay camera editor's keys. The game reads
+  the same key at the same moment, so `S` for save also moved the camera for anyone with
+  `S` bound to move-backwards; now you can put the action on a key the game doesn't use.
+- Keys are written into FrostMod's own config, including a plugin-folder install, and take
+  effect the next time the editor opens.
+
 ## 2026-08-30 — v0.12.0 — MXB Hub, and PSD support in the Designer
 
 ### Added

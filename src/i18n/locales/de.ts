@@ -712,6 +712,42 @@ export const de: Translation = {
   "settings.autoRunFrostmod": "FrostMod automatisch starten",
   "settings.autoRunFrostmodDesc":
     "FrostMod im Hintergrund starten, sobald MXB App geöffnet wird.",
+  "settings.rcamKeys":
+    "Tasten der Replay-Kamera",
+  "settings.rcamKeysDesc":
+    "Das Spiel liest dieselbe Taste im selben Moment. Wähle daher Tasten, die deine Kamerasteuerung nicht belegt — Funktionstasten und der Ziffernblock sind meist frei.",
+  "settings.rcamReset":
+    "Zurücksetzen",
+  "settings.rcamPressKey":
+    "Taste drücken",
+  "settings.rcamUnbound":
+    "Nicht belegt",
+  "settings.rcamCaptureHint":
+    "Drücke die gewünschte Taste. Esc bricht ab, Rücktaste löscht die Belegung.",
+  "settings.rcamAppliesHint":
+    "Gilt beim nächsten Öffnen des Editors im Spiel — kein Neustart nötig.",
+  "settings.rcamDuplicate":
+    "Zwei Aktionen teilen sich eine Taste.",
+  "settings.rcamUnsupportedKey":
+    "FrostMod kann diese Taste nicht verwenden.",
+  "settings.rcamSaveFailed":
+    "Tasten konnten nicht gespeichert werden",
+  "settings.rcamActionSetkey":
+    "Punkt setzen",
+  "settings.rcamActionDelete":
+    "Punkt löschen",
+  "settings.rcamActionClear":
+    "Pfad leeren",
+  "settings.rcamActionPlay":
+    "Start / Stopp",
+  "settings.rcamActionPrev":
+    "Vorheriger Punkt",
+  "settings.rcamActionNext":
+    "Nächster Punkt",
+  "settings.rcamActionSave":
+    "Pfad speichern",
+  "settings.rcamActionLoad":
+    "Pfad laden",
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
     "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von MXB App manuell heruntergeladen wurden.",

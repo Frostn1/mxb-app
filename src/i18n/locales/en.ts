@@ -698,6 +698,42 @@ export const en = {
   "settings.autoRunFrostmod": "Run FrostMod automatically",
   "settings.autoRunFrostmodDesc":
     "Start FrostMod in the background whenever MXB App opens.",
+  "settings.rcamKeys":
+    "Replay camera keys",
+  "settings.rcamKeysDesc":
+    "The game reads the same key at the same moment, so pick keys your camera controls don't use — function keys and the numpad are usually free.",
+  "settings.rcamReset":
+    "Reset",
+  "settings.rcamPressKey":
+    "Press a key",
+  "settings.rcamUnbound":
+    "Not set",
+  "settings.rcamCaptureHint":
+    "Press the key you want. Esc cancels, Backspace clears the binding.",
+  "settings.rcamAppliesHint":
+    "Applies the next time you open the editor in game — no restart needed.",
+  "settings.rcamDuplicate":
+    "Two actions share a key.",
+  "settings.rcamUnsupportedKey":
+    "FrostMod can't use that key.",
+  "settings.rcamSaveFailed":
+    "Could not save the keys",
+  "settings.rcamActionSetkey":
+    "Set key",
+  "settings.rcamActionDelete":
+    "Delete key",
+  "settings.rcamActionClear":
+    "Clear path",
+  "settings.rcamActionPlay":
+    "Play / stop",
+  "settings.rcamActionPrev":
+    "Previous key",
+  "settings.rcamActionNext":
+    "Next key",
+  "settings.rcamActionSave":
+    "Save path",
+  "settings.rcamActionLoad":
+    "Load path",
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App.",
