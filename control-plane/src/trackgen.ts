@@ -121,6 +121,19 @@ const TrackProgram = z.object({
     z: z.number(),
     angle: z.number().describe("degrees; 0 looks down +z and increases clockwise towards +x"),
   }),
+  blend: z
+    .number()
+    .describe(
+      "metres things ease into each other over: where two jumps meet, where a straight becomes a corner, and how long a jump's own ramps are. 1.2 is normal; 0 is every edge sharp",
+    ),
+  elevation: z
+    .array(
+      z.object({
+        at: z.number().describe('metres round the lap'),
+        height: z.number().describe('metres above the ground the track would otherwise follow'),
+      }),
+    )
+    .describe('the lap height as a curve; leave empty to follow the landscape'),
   segments: z.array(z.discriminatedUnion("kind", [Straight, Arc])),
   features: z.array(Feature),
 });

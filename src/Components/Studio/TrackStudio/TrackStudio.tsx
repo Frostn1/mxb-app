@@ -15,21 +15,37 @@ import {
   ChevronRight,
   GripVertical,
   Plus,
+  RefreshCw,
   Waves,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../../ui/alert-dialog";
 
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { TrackViewer } from "../../Viewer/TrackViewer";
+import ElevationCurve from "./ElevationCurve";
+import { Switch } from "../../ui/switch";
 import { loadTrackOverview, loadTrackTerrain } from "../../../api/tracks";
 import type { TrackOverview, TrackTerrain } from "../../../types";
 import { useT } from "../../../i18n/context";
 import { cn } from "@/lib/utils";
 import {
   baseTrackProgram,
+  blankTrackProgram,
   buildTrack,
+  closeTrackLap,
+  fitTrackBudget,
   checkTrack,
   exportTrackSource,
   generateTrack,
@@ -40,6 +56,7 @@ import {
   fitFeatures,
   lapSteps,
   newFeature,
+  pathAlong,
   positionAt,
   previewTrack,
   roomiestGap,
@@ -75,10 +92,18 @@ export default function TrackStudio() {
   const [program, setProgram] = useState<TrackProgram | null>(null);
   const [preview, setPreview] = useState<TrackPreview | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
+  const [notes, setNotes] = useState<string[]>([]);
+  // Whether anything has been changed since it was loaded, so a starting point can't be
+  // dropped on top of an afternoon's work by accident.
+  const [touched, setTouched] = useState(false);
+  const [confirming, setConfirming] = useState<(() => Promise<void>) | null>(null);
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [focus, setFocus] = useState<{ x: number; z: number } | null>(null);
-  const [hover, setHover] = useState<{ x: number; z: number; width: number } | null>(null);
+  const [hover, setHover] = useState<{
+    path: { x: number; z: number }[];
+    width: number;
+  } | null>(null);
   // Reordering is done with pointer events, not HTML5 drag-and-drop. Tauri's
   // `dragDropEnabled` hands drags to the OS so the webview never sees a dragstart — which is
   // also why the whole-window file dropzone was catching every attempt.
@@ -90,6 +115,10 @@ export default function TrackStudio() {
   // have in their heads.
   const [shut, setShut] = useState<Set<number>>(new Set());
   const [flash, setFlash] = useState<number | null>(null);
+  // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
+  // rather than the default. With it on, an edit settles and then the view catches up.
+  const [live, setLive] = useState(false);
+  const rebuild = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
   const [steps, setSteps] = useState<BuildStep[]>([]);
 
@@ -105,15 +134,34 @@ export default function TrackStudio() {
       setProgram(next);
       setPreview(null);
       try {
-        const found = await checkTrack(next);
-        setProblems(found);
-        return found;
+        let found = await checkTrack(next);
+        // The height budget is arithmetic, not a decision. Work it out and carry on rather
+        // than telling someone to raise a number they have no field for.
+        if (found.problems.some((p) => p.includes("budget"))) {
+          try {
+            next = await fitTrackBudget(next);
+            setProgram(next);
+            found = await checkTrack(next);
+          } catch {
+            /* leave the original complaint standing */
+          }
+        }
+        setProblems(found.problems);
+        setNotes(found.notes);
+        if (live && found.problems.length === 0) {
+          // Debounced: a drag is a hundred edits, and only the last one is worth building.
+          if (rebuild.current) clearTimeout(rebuild.current);
+          const settled = next;
+          rebuild.current = setTimeout(() => void showIn3d(settled).catch(() => {}), 500);
+        }
+        return found.problems;
       } catch (e) {
         setProblems([String(e)]);
+        setNotes([]);
         return [String(e)];
       }
     },
-    [],
+    [live],
   );
 
   async function onGenerate() {
@@ -132,20 +180,56 @@ export default function TrackStudio() {
     }
   }
 
-  async function onBase() {
+  /** Load a starting point and put it on screen — a track you can't see isn't a start. */
+  async function onLoad(load: () => Promise<TrackProgram>) {
+    if (busy) return;
+    // Replacing a track you have been working on is the one action here that throws work
+    // away, so it asks first — and only when there is work to throw away.
+    if (touched) {
+      setConfirming(() => () => reallyLoad(load));
+      return;
+    }
+    await reallyLoad(load);
+  }
+
+  async function reallyLoad(load: () => Promise<TrackProgram>) {
     if (busy) return;
     setBusy("generate");
     setPreview(null);
     setProblems([]);
     try {
-      const next = await baseTrackProgram();
-      await settle(next);
+      const next = await load();
+      const found = await settle(next);
+      setTouched(false);
       toast.success(t("track.baseLoaded", { name: next.name }));
+      if (found.length === 0) await showIn3d(next);
     } catch (e) {
       toast.error(t("track.generateFailed"), { description: String(e) });
     } finally {
       setBusy(null);
     }
+  }
+
+  async function onClose() {
+    if (!program || busy) return;
+    try {
+      const next = await closeTrackLap(program);
+      await settle(next);
+      toast.success(t("track.lapClosed"));
+    } catch (e) {
+      toast.error(t("track.closeFailed"), { description: String(e) });
+    }
+  }
+
+  async function showIn3d(prog: TrackProgram) {
+    const p = await previewTrack(prog);
+    setPreview(p);
+    const t3 = await loadTrackTerrain(p.path, 1024);
+    setTerrain(t3);
+    // 1024, not 2048: the surface picture is a texture on a preview, and at the
+    // larger size it is seventeen megabytes over the bridge every time the track is
+    // rebuilt — which with Live on is every edit.
+    setOverview(await loadTrackOverview(p.path, 1024).catch(() => null));
   }
 
   async function onPreview() {
@@ -158,7 +242,10 @@ export default function TrackStudio() {
       // — the second is the slower half and the view is useful before it lands.
       const t3 = await loadTrackTerrain(p.path, 1024);
       setTerrain(t3);
-      setOverview(await loadTrackOverview(p.path, 2048).catch(() => null));
+      // 1024, not 2048: the surface picture is a texture on a preview, and at the
+    // larger size it is seventeen megabytes over the bridge every time the track is
+    // rebuilt — which with Live on is every edit.
+    setOverview(await loadTrackOverview(p.path, 1024).catch(() => null));
     } catch (e) {
       toast.error(t("track.buildFailed"), { description: String(e) });
     } finally {
@@ -196,6 +283,7 @@ export default function TrackStudio() {
 
   function editFeature(index: number, patch: Partial<TrackFeature>) {
     if (!program) return;
+    setTouched(true);
     const features = program.features.map((f, i) =>
       i === index ? ({ ...f, ...patch } as TrackFeature) : f,
     );
@@ -204,6 +292,7 @@ export default function TrackStudio() {
 
   function editSegment(index: number, patch: Partial<TrackSegment>) {
     if (!program) return;
+    setTouched(true);
     const segments = program.segments.map((seg, i) =>
       i === index ? ({ ...seg, ...patch } as TrackSegment) : seg,
     );
@@ -213,6 +302,7 @@ export default function TrackStudio() {
 
   function removeFeature(index: number) {
     if (!program) return;
+    setTouched(true);
     void settle({ ...program, features: program.features.filter((_, i) => i !== index) });
   }
 
@@ -220,6 +310,7 @@ export default function TrackStudio() {
   /// in metres, which is a better teacher than a disabled button.
   function removeSegment(index: number) {
     if (!program || program.segments.length <= 2) return;
+    setTouched(true);
     void settle(
       fitFeatures({ ...program, segments: program.segments.filter((_, i) => i !== index) }),
     );
@@ -235,6 +326,7 @@ export default function TrackStudio() {
    */
   function reorder(steps: LapStep[], from: number, to: number) {
     if (!program || from === to) return;
+    setTouched(true);
     const moved = steps[from];
     const target = steps[to];
     if (moved.kind === "feature") {
@@ -301,8 +393,15 @@ export default function TrackStudio() {
     setDropAt(null);
   }
 
+  function settleTerrain(patch: Partial<TrackProgram["terrain"]>) {
+    if (!program) return;
+    setTouched(true);
+    void settle({ ...program, terrain: { ...program.terrain, ...patch } });
+  }
+
   function addFeature(kind: TrackFeatureKind) {
     if (!program) return;
+    setTouched(true);
     const probe = newFeature(kind, 0);
     const at = roomiestGap(program, featureSpan(probe).length);
     void settle({ ...program, features: [...program.features, newFeature(kind, at)] });
@@ -370,16 +469,37 @@ export default function TrackStudio() {
         >
           {busy === "generate" ? t("track.generating") : t("track.generate")}
         </Button>
+        <label className="flex flex-none cursor-default items-center gap-2 pl-1 text-[12.5px] text-muted-foreground">
+          <Switch checked={live} onCheckedChange={setLive} />
+          {t("track.live")}
+          <button
+            onClick={() => void onPreview()}
+            disabled={blocked || busy !== null}
+            title={t("track.rebuild")}
+            aria-label={t("track.rebuild")}
+            className="cursor-default rounded p-1 transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-40"
+          >
+            <RefreshCw className={cn("size-3.5", busy === "preview" && "animate-spin")} />
+          </button>
+        </label>
         {/* Always here, not just when the model is unreachable: starting from a track that
             already works and changing two jumps is a better first move than describing one
             from nothing. */}
         <Button
           variant="outline"
-          onClick={() => void onBase()}
+          onClick={() => void onLoad(baseTrackProgram)}
           disabled={busy !== null}
           className="h-10 flex-none"
         >
           {t("track.base")}
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={() => void onLoad(blankTrackProgram)}
+          disabled={busy !== null}
+          className="h-10 flex-none"
+        >
+          {t("track.blank")}
         </Button>
       </div>
 
@@ -442,6 +562,61 @@ export default function TrackStudio() {
               </dl>
             </div>
 
+            <div className="rounded-xl border border-input p-3.5">
+              <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("track.ground")}
+              </h3>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <Field
+                  label={t("track.across")}
+                  value={program.terrain.sizeX}
+                  step={20}
+                  onChange={(v) =>
+                    void settleTerrain({ sizeX: Math.max(100, v), sizeZ: Math.max(100, v) })
+                  }
+                />
+                <Field
+                  label={t("track.hills")}
+                  value={program.terrain.relief.amplitude}
+                  step={1}
+                  onChange={(v) =>
+                    void settle({
+                      ...program,
+                      terrain: {
+                        ...program.terrain,
+                        relief: { ...program.terrain.relief, amplitude: Math.max(0, v) },
+                      },
+                    })
+                  }
+                />
+                <Field
+                  label={t("track.smoothing")}
+                  value={program.blend}
+                  step={0.5}
+                  onChange={(v) => {
+                    setTouched(true);
+                    void settle({ ...program, blend: Math.max(0, v) });
+                  }}
+                />
+                <label className="flex items-center gap-1">
+                  <span className="text-[11px] text-muted-foreground">{t("track.surface")}</span>
+                  <select
+                    value={program.terrain.surface}
+                    onChange={(e) =>
+                      void settleTerrain({
+                        surface: e.target.value as TrackProgram["terrain"]["surface"],
+                      })
+                    }
+                    className="rounded-md border border-input bg-transparent px-1 py-0.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    <option value="soil">{t("track.soil")}</option>
+                    <option value="sand">{t("track.sand")}</option>
+                    <option value="grass">{t("track.grass")}</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
             {/* Measured, not claimed — the same figures taken of published tracks. */}
             {preview && (
               <div className="rounded-xl border border-input p-3.5">
@@ -472,13 +647,33 @@ export default function TrackStudio() {
                     <li key={i}>{p}</li>
                   ))}
                 </ul>
+                {problems.some((p) => p.includes("doesn't close")) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2.5 w-full"
+                    onClick={() => void onClose()}
+                  >
+                    {t("track.closeLap")}
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {notes.length > 0 && problems.length === 0 && (
+              <div className="rounded-xl border border-input p-3.5">
+                <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("track.notes")}
+                </h3>
+                <ul className="mt-2 space-y-1.5 text-[12.5px] leading-snug text-muted-foreground">
+                  {notes.map((n, i) => (
+                    <li key={i}>{n}</li>
+                  ))}
+                </ul>
               </div>
             )}
 
             <div className="mt-auto flex flex-col gap-2">
-              <Button onClick={() => void onPreview()} disabled={blocked || busy !== null}>
-                {busy === "preview" ? t("track.building") : t("track.preview")}
-              </Button>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -520,9 +715,11 @@ export default function TrackStudio() {
                   ))}
                 </ul>
               )}
-              <p className="text-[11.5px] leading-snug text-muted-foreground">
-                {tools?.found ? t("track.stillNeeded") : t("track.previewOnly")}
-              </p>
+              {tools?.found && (
+                <p className="text-[11.5px] leading-snug text-muted-foreground">
+                  {t("track.stillNeeded")}
+                </p>
+              )}
             </div>
           </div>
 
@@ -576,13 +773,14 @@ export default function TrackStudio() {
                     onClick={() => setFocus(positionAt(program, step.at))}
                     onPointerEnter={() =>
                       setHover({
-                        // The middle of the feature, not its start — a 40 m berm marked at
-                        // its entry looks like it belongs to the corner before it.
-                        ...positionAt(
+                        // The whole of it, not where it starts: a straight is two hundred
+                        // metres long and its first metre says nothing about which one it is.
+                        path: pathAlong(
                           program,
+                          step.at,
                           step.kind === "feature"
-                            ? step.at + featureSpan(step.feature).length / 2
-                            : step.at,
+                            ? featureSpan(step.feature).length
+                            : stepLength(step),
                         ),
                         width: program.width * 1.6,
                       })
@@ -690,6 +888,23 @@ export default function TrackStudio() {
                 );
               })}
             </ol>
+            {/* The lap's own height, as a line you can pull about — the same shape the
+                segment rises describe, in the form you can take hold of. */}
+            <div className="flex-none border-t border-input px-2 pb-1 pt-1.5">
+              <div className="px-1 text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                {t("track.height")}
+              </div>
+              <ElevationCurve
+                lap={lapLength(program)}
+                knots={program.elevation ?? []}
+                features={program.features}
+                onChange={(elevation) => {
+                  setTouched(true);
+                  void settle({ ...program, elevation });
+                }}
+                className="h-[92px]"
+              />
+            </div>
           </div>
 
           {/* Right: the track itself. Features are painted with a colour each, so a row in
@@ -718,6 +933,26 @@ export default function TrackStudio() {
         </div>
       )}
 
+      <AlertDialog open={confirming !== null} onOpenChange={(o) => !o && setConfirming(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("track.replaceTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("track.replaceBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const go = confirming;
+                setConfirming(null);
+                void go?.();
+              }}
+            >
+              {t("track.replaceConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -751,6 +986,15 @@ function stepIcon(step: LapStep): LucideIcon {
   // the one thing that tells them apart.
   if (step.feature.kind === "stepUp" && step.feature.height < 0) return TrendingDown;
   return FEATURE_ICON[step.feature.kind];
+}
+
+/** How much lap a step covers. */
+function stepLength(step: LapStep): number {
+  if (step.kind === "feature") return featureSpan(step.feature).length;
+  const seg = step.segment;
+  return seg.kind === "straight"
+    ? seg.length
+    : (Math.abs(seg.radius) * Math.abs(seg.angle) * Math.PI) / 180;
 }
 
 function stepName(step: LapStep, t: ReturnType<typeof useT>): string {

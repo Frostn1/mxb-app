@@ -29,6 +29,17 @@ export interface TrackProgram {
   start: { x: number; z: number; angle: number };
   segments: TrackSegment[];
   features: TrackFeature[];
+  /**
+   * Metres things ease into each other over: where two jumps meet, where a straight becomes
+   * a corner, and how long a jump's own ramps are. One control, because those are the same
+   * question asked three times.
+   */
+  blend: number;
+  /**
+   * Height the track is lifted or dropped by, at points round the lap. Empty means it simply
+   * follows the ground it crosses.
+   */
+  elevation: { at: number; height: number }[];
 }
 
 export type TrackSegment =
@@ -84,9 +95,39 @@ export function baseTrackProgram(): Promise<TrackProgram> {
   return invoke<TrackProgram>("base_track_program");
 }
 
-/** Everything wrong with a program, held to the same corpus a generated one is. */
-export function checkTrack(program: TrackProgram): Promise<string[]> {
-  return invoke<string[]>("check_track", { program });
+/** A lap with nothing on it, to start from scratch. */
+export function blankTrackProgram(): Promise<TrackProgram> {
+  return invoke<TrackProgram>("blank_track_program");
+}
+
+/**
+ * Give the track a height budget that fits it.
+ *
+ * The budget exists only because samples are quantised against it, so nobody should be asked
+ * to guess a number the synthesiser already knows.
+ */
+export function fitTrackBudget(program: TrackProgram): Promise<TrackProgram> {
+  return invoke<TrackProgram>("fit_track_budget", { program });
+}
+
+/** Bring an open lap back to its start: a turn, a straight and a turn. */
+export function closeTrackLap(program: TrackProgram): Promise<TrackProgram> {
+  return invoke<TrackProgram>("close_track_lap", { program });
+}
+
+/**
+ * What is wrong with a program, and what is merely unlike a published one.
+ *
+ * `problems` block: it won't build, or it isn't a lap, or a feature does nothing where it
+ * sits. `notes` don't: a blank lap is empty, not broken.
+ */
+export interface TrackReview {
+  problems: string[];
+  notes: string[];
+}
+
+export function checkTrack(program: TrackProgram): Promise<TrackReview> {
+  return invoke<TrackReview>("check_track", { program });
 }
 
 /** Build it, and write it where the track viewer can open it. */
@@ -232,6 +273,19 @@ export function fitFeatures(program: TrackProgram): TrackProgram {
       return { ...f, at: Math.max(0, Math.min(f.at, lap - featureSpan(f).length)) };
     }),
   };
+}
+
+/**
+ * Points along a stretch of the lap, for lighting it up in the preview.
+ *
+ * A stretch, not a point: a straight is two hundred metres long, and marking only where it
+ * starts says almost nothing about which one it is.
+ */
+export function pathAlong(program: TrackProgram, from: number, length: number): { x: number; z: number }[] {
+  const steps = Math.max(2, Math.min(48, Math.ceil(length / 4)));
+  return Array.from({ length: steps + 1 }, (_, i) =>
+    positionAt(program, from + (length * i) / steps),
+  );
 }
 
 /** A feature of each kind, with sizes that sit inside what published tracks measure. */

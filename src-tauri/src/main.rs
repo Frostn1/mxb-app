@@ -1202,12 +1202,80 @@ async fn base_track_program() -> Result<serde_json::Value, String> {
         .map_err(|e| format!("the built-in track didn't load: {e}"))
 }
 
+/// A lap with nothing on it: somewhere to start from scratch.
+///
+/// Deliberately the plainest thing that is still a track — an oval on a small plot, 12 m
+/// wide, no jumps at all. It validates, it builds, and everything on it is yours.
+#[tauri::command]
+async fn blank_track_program() -> Result<serde_json::Value, String> {
+    let json = serde_json::json!({
+        "name": "New Track",
+        "author": "",
+        "location": "",
+        "width": 12.0,
+        "terrain": {
+            "sizeX": 400.0, "sizeZ": 400.0, "samples": 2049, "scale": 20.0,
+            "relief": { "amplitude": 4.0, "wavelength": 130.0, "seed": 1, "texture": 0.06 },
+            "surface": "soil"
+        },
+        "start": { "x": 120.0, "z": 260.0, "angle": 90.0 },
+        "segments": [
+            { "kind": "straight", "length": 120.0, "rise": 0.0 },
+            { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 },
+            { "kind": "straight", "length": 120.0, "rise": 0.0 },
+            { "kind": "arc", "radius": 45.0, "angle": 180.0, "rise": 0.0 }
+        ],
+        "features": []
+    });
+    // Through the type, so a blank track can never be one the rest of this refuses.
+    serde_json::from_value::<trackprog::TrackProgram>(json.clone())
+        .map_err(|e| format!("the blank track didn't load: {e}"))?;
+    Ok(json)
+}
+
+/// Give a programme a height budget that fits it.
+///
+/// The budget only exists because samples are quantised against it, and there is no reason a
+/// person should be told to guess a number the synthesiser already knows.
+#[tauri::command]
+async fn fit_track_budget(program: serde_json::Value) -> Result<serde_json::Value, String> {
+    let prog = track_program(program)?;
+    let fitted = tauri::async_runtime::spawn_blocking(move || {
+        tracksynth::with_fitted_budget(&prog).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("fit_track_budget task failed: {e}"))??;
+    serde_json::to_value(&fitted).map_err(|e| e.to_string())
+}
+
+/// Bring an open lap back to its start.
+#[tauri::command]
+async fn close_track_lap(program: serde_json::Value) -> Result<serde_json::Value, String> {
+    let mut prog = track_program(program)?;
+    // A turn no tighter than the lap's own tightest, so the join doesn't need a corner
+    // sharper than anything already on the track.
+    let radius = prog
+        .segments
+        .iter()
+        .filter_map(|s| match s {
+            trackprog::Segment::Arc { radius, .. } => Some(radius.abs()),
+            _ => None,
+        })
+        .fold(f32::MAX, f32::min);
+    let radius = if radius.is_finite() { radius } else { 25.0 };
+    match prog.closing_segments(radius) {
+        Some(add) => prog.segments.extend(add),
+        None => return Err("The lap already meets itself.".into()),
+    }
+    serde_json::to_value(&prog).map_err(|e| e.to_string())
+}
+
 /// Everything wrong with a program, without asking anyone. The studio calls this as edits are
 /// made, so a hand-edited track is held to the same corpus a generated one is.
 #[tauri::command]
-async fn check_track(program: serde_json::Value) -> Result<Vec<String>, String> {
+async fn check_track(program: serde_json::Value) -> Result<trackllm::Review, String> {
     let prog = track_program(program)?;
-    tauri::async_runtime::spawn_blocking(move || trackllm::validate(&prog))
+    tauri::async_runtime::spawn_blocking(move || trackllm::review(&prog))
         .await
         .map_err(|e| format!("check_track task failed: {e}"))
 }
@@ -8936,6 +9004,9 @@ fn main() {
             generate_track,
             check_track,
             base_track_program,
+            blank_track_program,
+            close_track_lap,
+            fit_track_budget,
             preview_track,
             install_track_preview,
             export_track_source,

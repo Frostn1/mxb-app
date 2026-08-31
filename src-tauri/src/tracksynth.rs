@@ -31,7 +31,7 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 
-use crate::trackprog::{Feature, Segment, Station, Surface, TrackProgram};
+use crate::trackprog::{Feature, Knot, Segment, Station, Surface, TrackProgram};
 
 /// Metres of centreline between stations. Finer than the grid, so every cell finds a station
 /// nearer than its own width.
@@ -136,6 +136,13 @@ const UI_IMAGE_DIM: usize = 512;
 /// against 2049. It is also the resolution anything reading the file will measure it at.
 const TRH_MASK_DIM: usize = 2048;
 
+/// And the resolution a *preview* keeps them at.
+///
+/// A preview can carry ten of these — one per kind of feature on the track, plus the three
+/// surfaces — and at the full size that is forty megabytes of mask for a picture nobody
+/// measures. A quarter of the area is still finer than the screen it is drawn on.
+const PREVIEW_MASK_DIM: usize = 1024;
+
 /// How far below the top of the height budget the terrain is allowed to sit. Quantisation is
 /// against the budget, so leaving room costs resolution for nothing — but landing exactly on
 /// 0 or 65535 risks a clamp at the ends.
@@ -155,8 +162,6 @@ pub struct Synth {
     pub dist: Vec<f32>,
     /// Metres round the lap.
     pub arc: Vec<f32>,
-    /// Which station is nearest — the index that carries arc length and heading.
-    pub station: Vec<u32>,
     pub stations: Vec<Station>,
     /// What the terrain actually used of its budget, and what the budget was.
     pub used_m: f32,
@@ -210,17 +215,25 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         .collect();
     smooth_along(&mut along, (BENCH_SMOOTH_M / STATION_STEP) as usize);
     apply_rise(&mut along, &stations, &prog.segments);
+    apply_elevation(&mut along, &stations, &prog.elevation, lap);
     apply_step_ups(&mut along, &stations, &prog.features);
 
     // Everything that varies along the lap, resampled onto one even ruler so a cell can ask
     // for the value at *its* distance round rather than at the nearest station's.
     let bench = resample(&stations, &along, lap);
-    let turn = resample(
+    let mut turn = resample(
         &stations,
         &stations.iter().map(|s| s.curvature).collect::<Vec<_>>(),
         lap,
     );
-    let feat = feature_profile(&prog.features, lap);
+    // Curvature steps from nothing to 1/r the instant a corner starts, and everything that
+    // reads it — the ruts, the roughness, which side a berm stands on — stepped with it. Eased
+    // over the blend distance, a corner arrives instead of appearing.
+    smooth_along(
+        &mut turn.v,
+        (prog.blend.max(0.0) / PROFILE_STEP).round() as usize,
+    );
+    let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
     let berms = berm_profile(&prog.features, &turn, lap);
     let ruts = rut_profile(&prog.features, &turn, lap, r.seed);
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
@@ -326,11 +339,33 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         corridor,
         dist,
         arc,
-        station,
         stations,
         used_m: used,
         budget_m: budget,
     })
+}
+
+/// How much height a programme actually needs, in metres.
+///
+/// The budget is a technical quantity — samples are quantised against it — and nobody should
+/// have to guess it. Built by synthesising against a budget large enough that the check can't
+/// fire, then reading what was used.
+pub fn required_height(prog: &TrackProgram) -> Result<f32> {
+    let mut roomy = prog.clone();
+    // Far more than any track needs, so nothing clips and `used_m` is the honest figure.
+    roomy.terrain.scale = 10_000.0;
+    Ok(synthesise(&roomy)?.used_m)
+}
+
+/// A programme with a height budget that fits it: just above what it needs, so the terrain
+/// quantises as finely as it can without clipping.
+pub fn with_fitted_budget(prog: &TrackProgram) -> Result<TrackProgram> {
+    let need = required_height(prog)?;
+    let mut out = prog.clone();
+    // Fifteen percent of headroom, rounded up to a whole metre. Room for an edit or two
+    // before this has to be worked out again, and no more.
+    out.terrain.scale = (need * 1.15).ceil().max(2.0);
+    Ok(out)
 }
 
 /// Samples across and down, both a power of two plus one, with cells as square as that allows.
@@ -648,7 +683,7 @@ fn resample(st: &[Station], vals: &[f32], lap: f32) -> Profile {
 }
 
 /// Height added by everything built on the line, along the lap.
-fn feature_profile(features: &[Feature], lap: f32) -> Profile {
+fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
     let mut out = Profile::blank(lap);
     for f in features {
         if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. }) {
@@ -662,9 +697,16 @@ fn feature_profile(features: &[Feature], lap: f32) -> Profile {
             if u < 0.0 || u > len {
                 continue;
             }
-            out.v[i] += longitudinal(f, u / len, u);
+            // The larger of the two, not the sum. Two jumps a metre apart used to add, so
+            // the ground between them rose to their combined height and a rhythm section came
+            // out as one tall lump with notches in it.
+            out.v[i] = out.v[i].max(longitudinal(f, u / len, u));
         }
     }
+    // Then round the whole thing off over the blend distance. That is what turns two jumps
+    // that merely touch into one shape, and it is the same control that decides how long a
+    // single jump's ramps are — they are the same question asked twice.
+    smooth_along(&mut out.v, (blend / PROFILE_STEP).round() as usize);
     out
 }
 
@@ -705,24 +747,69 @@ fn berm_profile(features: &[Feature], turn: &Profile, lap: f32) -> Profile {
 /// check is what notices.
 fn apply_rise(along: &mut [f32], st: &[Station], segments: &[Segment]) {
     let mut at = 0.0f32;
-    let mut base = 0.0f32;
     for seg in segments {
         let len = seg.length();
         let rise = seg.rise();
         if len <= 0.0 {
             continue;
         }
-        for (i, s) in st.iter().enumerate() {
-            if s.s < at {
-                continue;
+        if rise != 0.0 {
+            for (i, s) in st.iter().enumerate() {
+                if s.s < at {
+                    continue;
+                }
+                // Each segment contributes only its *own* climb — eased across it, and held
+                // at full value for everything after. Summing those over the segments a
+                // station is past is the cumulative height, with nothing counted twice.
+                //
+                // It carried a running total as well, and added that to every station past
+                // each segment's start. Every later segment then re-added what the earlier
+                // ones had already left there, so a lap whose rises cancelled finished metres
+                // above where it started — and the terrain wore the difference as a cliff.
+                let u = ((s.s - at) / len).clamp(0.0, 1.0);
+                along[i] += rise * smoothstep(u);
             }
-            let u = ((s.s - at) / len).clamp(0.0, 1.0);
-            along[i] += base + rise * smoothstep(u);
         }
-        // Undo the part of the loop above that ran past this segment: stations beyond it
-        // took `base + rise`, which is exactly what the next segment's base should be.
-        base += rise;
         at += len;
+    }
+}
+
+/// The hand-drawn height curve, added to whatever the ground was already doing.
+///
+/// Eased between neighbouring points rather than run straight between them, so a curve drawn
+/// with four points is four hills and not four ramps with corners on them. It **wraps**: the
+/// last point eases into the first, because a lap is a loop and a step across the finish line
+/// is the one place a rider would notice one.
+fn apply_elevation(along: &mut [f32], st: &[Station], knots: &[Knot], lap: f32) {
+    if knots.is_empty() || lap <= 0.0 {
+        return;
+    }
+    let mut k: Vec<Knot> = knots.to_vec();
+    k.sort_by(|a, b| a.at.total_cmp(&b.at));
+
+    let at = |s: f32| -> f32 {
+        // Which pair of points this station falls between, treating the list as a ring.
+        let n = k.len();
+        if n == 1 {
+            return k[0].height;
+        }
+        let i = match k.iter().position(|p| p.at > s) {
+            Some(0) | None => n - 1, // before the first or after the last: the wrap-around pair
+            Some(j) => j - 1,
+        };
+        let a = k[i];
+        let b = k[(i + 1) % n];
+        // The gap, measured the way round that actually connects them.
+        let span = if b.at > a.at { b.at - a.at } else { lap - a.at + b.at };
+        if span <= 1e-3 {
+            return b.height;
+        }
+        let along = if s >= a.at { s - a.at } else { lap - a.at + s };
+        a.height + (b.height - a.height) * smoothstep((along / span).clamp(0.0, 1.0))
+    };
+
+    for (i, s) in st.iter().enumerate() {
+        along[i] += at(s.s);
     }
 }
 
@@ -803,20 +890,32 @@ fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Smooth a quantity that runs round the lap.
+///
+/// **Circular.** A lap is a loop, and smoothing it as a line gives the first and last
+/// stations different neighbourhoods to average — so the track's own elevation came out at
+/// two different heights on the two sides of the finish line, and the terrain wore the
+/// difference as a step across it. Two metres of step, on a lap that closes perfectly.
 fn smooth_along(v: &mut [f32], r: usize) {
-    if r == 0 || v.len() < 3 {
+    let n = v.len();
+    if r == 0 || n < 3 {
         return;
     }
-    let n = v.len();
-    let mut pre = vec![0.0f64; n + 1];
-    for i in 0..n {
-        pre[i + 1] = pre[i] + v[i] as f64;
+    // Prefix sums over the sequence laid end to end three times, so a window centred
+    // anywhere in the middle copy can run off either side and still land on real values.
+    // Two copies is not enough: the last station's window reaches past the end of them.
+    let mut pre = vec![0.0f64; 3 * n + 1];
+    for i in 0..3 * n {
+        pre[i + 1] = pre[i] + v[i % n] as f64;
     }
-    for i in 0..n {
-        let a = i.saturating_sub(r);
-        let b = (i + r + 1).min(n);
-        v[i] = ((pre[b] - pre[a]) / (b - a) as f64) as f32;
-    }
+    let span = (2 * r + 1).min(n);
+    let out: Vec<f32> = (0..n)
+        .map(|i| {
+            let start = i + n - span / 2;
+            ((pre[start + span] - pre[start]) / span as f64) as f32
+        })
+        .collect();
+    v.copy_from_slice(&out);
 }
 
 fn sample(h: &[f32], gw: usize, gh: usize, x: f32, y: f32) -> f32 {
@@ -946,6 +1045,11 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         &mut wrote,
     )?;
     put(&format!("{slug}/{slug}.amb"), AMB.into(), &mut wrote)?;
+    put(
+        &format!("{slug}/{slug}.rdf"),
+        rdf(prog).into_bytes(),
+        &mut wrote,
+    )?;
     let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
     put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
     put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
@@ -1050,25 +1154,26 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     // Three bands rather than two. A track painted as line-and-grass reads as a brown
     // ribbon on a green field and nothing else; the graded shoulder either side is a
     // different material from both, and it is most of what you see from the seat.
+    let dim = if paint_features { PREVIEW_MASK_DIM } else { TRH_MASK_DIM };
     let (shoulder_id, shoulder_scale) = ground(prog.terrain.surface);
     let shoulder = SHOULDER_M * shoulder_scale;
     let mut masks: Vec<(u32, Vec<u8>)> = vec![
         // 10 is the riding line — the id published tracks paint their ribbon with.
-        (10, mask_from(syn, TRH_MASK_DIM, |d, _| u8::from(d <= half) * 255)),
+        (10, mask_from(syn, dim, |d, _| u8::from(d <= half) * 255)),
         (
             shoulder_id,
-            mask_from(syn, TRH_MASK_DIM, |d, _| {
+            mask_from(syn, dim, |d, _| {
                 u8::from(d > half && d <= half + shoulder) * 255
             }),
         ),
-        (1, mask_from(syn, TRH_MASK_DIM, |d, _| {
+        (1, mask_from(syn, dim, |d, _| {
             u8::from(d > half + shoulder) * 255
         })),
     ];
     if paint_features {
         // First in the list, because a reader compositing these takes the first mask that
         // covers a cell — and on a feature that is the answer wanted.
-        let mut all = feature_masks(prog, syn, TRH_MASK_DIM);
+        let mut all = feature_masks(prog, syn, dim);
         all.extend(masks);
         masks = all;
     }
@@ -1078,8 +1183,8 @@ pub fn trh(prog: &TrackProgram, syn: &Synth, paint_features: bool) -> Vec<u8> {
     for (id, m) in &masks {
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes());
-        out.extend_from_slice(&(TRH_MASK_DIM as u32).to_le_bytes());
-        out.extend_from_slice(&(TRH_MASK_DIM as u32).to_le_bytes());
+        out.extend_from_slice(&(dim as u32).to_le_bytes());
+        out.extend_from_slice(&(dim as u32).to_le_bytes());
         out.extend_from_slice(m);
     }
 
@@ -1111,6 +1216,115 @@ fn ground(s: Surface) -> (u32, f32) {
         // Grass to the edge of the line, which is what an early-season circuit looks like.
         Surface::Grass => (1, 0.35),
     }
+}
+
+/// Race data: the start gate, the pit lane, the finish line and the checkpoints.
+///
+/// TrackEd writes this, and TrackEd is Windows-only — but the file is plain text, and its
+/// positions are stated as `long` and `lat` along the centreline, which is the one coordinate
+/// system this whole module already thinks in. So it can be written here.
+///
+/// Laid out from the lap rather than copied: the finish line a little into the first
+/// straight, the gate behind it, the pit lane alongside, and the splits and checkpoints
+/// spread evenly round. The example track's own file is the shape this follows, down to the
+/// keys and the order.
+///
+/// Untested against the game — nothing here has been loaded by MX Bikes. The structure is
+/// right; whether every field means what it looks like is not something a macOS box can say.
+fn rdf(prog: &TrackProgram) -> String {
+    let lap = prog.lap_length();
+    let half = prog.width * 0.5;
+    // Far enough in that the gate behind it is still on the opening straight.
+    let line = (lap * 0.06).clamp(10.0, 40.0);
+    let gate_at = (line - 12.0).max(1.0);
+
+    let mut s = String::new();
+    let mark = |s: &mut String, name: &str, at: f32, w: f32| {
+        s.push_str(&format!(
+            "{name}\n{{\n\tline = 0\n\tlong = {at:.6}\n\tleft = {:.6}\n\tright = {:.6}\n}}\n",
+            -w, w
+        ));
+    };
+    mark(&mut s, "finish_line", line, half);
+    mark(&mut s, "split1", (line + lap / 3.0) % lap, half);
+    mark(&mut s, "split2", (line + lap * 2.0 / 3.0) % lap, half);
+
+    // The pit lane runs alongside the opening straight, a track's width off the racing line.
+    let stalls = 16;
+    let lane_lat = -(half + 6.0);
+    s.push_str(&format!(
+        "pit_lane\n{{\n\tnumstalls = {stalls}\n\tstarttype = 1\n\tstartstartlong = 0.000000\n\
+         \tstartdifflong = 0.000000\n\tstartstartlat = 0.000000\n\tstartendlat = 0.000000\n\
+         \tstartanglerel = 0.000000\n\tstartposx = {:.6}\n\tstartposz = {:.6}\n\
+         \tstartspacingx = -4.000000\n\tstartspacingz = 6.000000\n\tstartangleabs = {:.6}\n\
+         \tstartcolumns = 8\n",
+        prog.start.x, prog.start.z, prog.start.angle
+    ));
+    for i in 0..stalls {
+        s.push_str(&format!(
+            "\tstart_stall{i}\n\t{{\n\t\tlong = {:.6}\n\t\tlat = {lane_lat:.6}\n\
+             \t\tangle = 0.000000\n\t}}\n",
+            gate_at + i as f32 * 5.0
+        ));
+    }
+    s.push_str("}\n");
+
+    s.push_str(
+        "pit_board\n{\n\theight = 1.500000\n\tstartlong = 18.000000\n\tdifflong = 1.400000\n\
+         \tstartlat = -5.000000\n\tendlat = -5.000000\n",
+    );
+    for i in 0..stalls {
+        s.push_str(&format!(
+            "\tstall{i}\n\t{{\n\t\tlong = {:.6}\n\t\tlat = {:.6}\n\t\tangle = 0.000000\n\t}}\n",
+            18.0 + i as f32 * 1.4,
+            lane_lat
+        ));
+    }
+    s.push_str("}\n");
+
+    // One row of gates across the track, which is what a motocross start is.
+    let grid = 24;
+    s.push_str(&format!(
+        "starting_grid\n{{\n\tnumstalls = {grid}\n\ttype = 1\n\tposx = {:.6}\n\
+         \tposz = {:.6}\n\tangle = {:.6}\n\tnumstallsperrow = {grid}\n\
+         \tdistfromstartline = 0.000000\n\tlanespacing = 0.000000\n\trowspacing = 0.000000\n\
+         \tdifflat = 0.000000\n\tlanewidth = 1.500000\n\tlatshift = 0.000000\n\tside = 1\n",
+        prog.start.x, prog.start.z, prog.start.angle
+    ));
+    for i in 0..grid {
+        // Spread across the track and a little beyond it: a gate is wider than the line.
+        let lat = -half * 1.4 + (i as f32 + 0.5) * (half * 2.8 / grid as f32);
+        s.push_str(&format!(
+            "\tstall{i}\n\t{{\n\t\tlong = {gate_at:.6}\n\t\tlat = {lat:.6}\n\
+             \t\tangle = 0.000000\n\t}}\n"
+        ));
+    }
+    s.push_str("}\n");
+
+    // Three, evenly round, so a lap can't be cut. The first carries the start flag.
+    s.push_str("num_checkpoints = 3\n");
+    for i in 0..3 {
+        let at = (line + lap * (i as f32 + 1.0) / 4.0) % lap;
+        s.push_str(&format!(
+            "checkpoint{i}\n{{\n\tlong = {at:.6}\n\tleft = {:.6}\n\tright = {:.6}\n\
+             \tpenalty = {:.6}\n\tline = 0\n\tstart = {}\n}}\n",
+            -half * 1.3,
+            half * 1.3,
+            if i == 0 { 15.0 } else { 5.0 },
+            if i == 0 { 1 } else { 0 }
+        ));
+    }
+
+    s.push_str(&format!(
+        "30secondsboard_posx = {:.6}\n30secondsboard_posz = {:.6}\n30secondsboard_angle = {:.6}\n\
+         30seconds_board\n{{\n\tlong = {:.6}\n\tlat = {:.6}\n\tangle = 0.000000\n}}\n",
+        prog.start.x,
+        prog.start.z,
+        prog.start.angle - 90.0,
+        gate_at - 4.0,
+        -(half + 3.0)
+    ));
+    s
 }
 
 /// The smallest `.map` the format allows: no materials, no geometry, no nodes.
@@ -1157,6 +1371,7 @@ pub fn write_pkz(
         (format!("{slug}.trh"), trh(prog, syn, paint_features)),
         (format!("{slug}.map"), empty_map()),
         (format!("{slug}.ini"), track_ini(prog).into_bytes()),
+        (format!("{slug}.rdf"), rdf(prog).into_bytes()),
         (format!("{slug}.amb"), AMB.as_bytes().to_vec()),
         (format!("{slug}_map.tga"), map_img),
         (format!("{slug}.tga"), shot),
@@ -1297,7 +1512,16 @@ rainy\n{\n\tambient\n\t{\n\t\tred = 0.6\n\t\tgreen = 0.6\n\t\tblue = 0.85\n\t}\n
 fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
     let mut map = vec![0u8; dim * dim * 4];
     let mut shot = vec![0u8; dim * dim * 4];
-    let base = crate::trackstats::box_blur(&syn.heights, syn.gw, syn.gh, 6);
+    // Sampled down to the picture's own size *before* blurring. Blurring the full grid to
+    // shade a postage stamp costs two copies of the terrain and changes nothing you can see.
+    let small: Vec<f32> = (0..dim * dim)
+        .map(|i| {
+            let gy = ((i / dim) * syn.gh / dim).min(syn.gh - 1);
+            let gx = ((i % dim) * syn.gw / dim).min(syn.gw - 1);
+            syn.heights[gy * syn.gw + gx]
+        })
+        .collect();
+    let base_small = crate::trackstats::box_blur(&small, dim, dim, 3);
     for y in 0..dim {
         // TGA's origin is bottom-left, so the picture is written from the far edge back.
         let gy = ((dim - 1 - y) * syn.gh / dim).min(syn.gh - 1);
@@ -1312,7 +1536,9 @@ fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
             map[at..at + 4].copy_from_slice(&[c[2], c[1], c[0], 255]);
 
             // The picture: the terrain's own relief, with the line picked out.
-            let relief = ((syn.heights[i] - base[i]) * 90.0 + 128.0).clamp(0.0, 255.0) as u8;
+            let here = y * dim + x;
+            let relief =
+                ((small[here] - base_small[here]) * 90.0 + 128.0).clamp(0.0, 255.0) as u8;
             let s: [u8; 3] = if on {
                 [relief.saturating_add(40), relief / 2, relief / 3]
             } else {
@@ -1538,6 +1764,8 @@ mod tests {
                 Segment::Arc { radius: 60.0, angle: 180.0, rise: 0.0 },
             ],
             width: 12.0,
+            blend: crate::trackprog::default_blend(),
+            elevation: Vec::new(),
             features: vec![
                 Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4 },
                 Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0 },
@@ -1557,6 +1785,27 @@ mod tests {
         });
         assert!(lo >= 0.0 && hi <= p.terrain.scale, "{lo}..{hi}");
         assert!(s.used_m > 1.0, "the terrain came out flat");
+    }
+
+    #[test]
+    fn a_fitted_budget_holds_the_track_and_little_else() {
+        let mut p = oval();
+        p.terrain.scale = 1.0; // far too small to build
+        let fitted = with_fitted_budget(&p).expect("fitting doesn't need a workable budget");
+        let s = synthesise(&fitted).expect("and what comes back builds");
+        assert!(
+            s.used_m < fitted.terrain.scale,
+            "used {:.1} of {:.1}",
+            s.used_m,
+            fitted.terrain.scale
+        );
+        // Snug, not generous: a budget ten times the relief quantises ten times coarser.
+        assert!(
+            fitted.terrain.scale < s.used_m * 1.5,
+            "budget {:.1} for {:.1} m of terrain",
+            fitted.terrain.scale,
+            s.used_m
+        );
     }
 
     #[test]
@@ -1580,6 +1829,34 @@ mod tests {
         assert!((width - p.width).abs() < 1.0, "measured {width:.2} m");
     }
 
+    /// Two jumps close together must not add up. Before, the ground between a pair of
+    /// tabletops rose to their combined height and a rhythm section came out as one tall
+    /// lump; each should keep its own height and the pair should read as one shape.
+    #[test]
+    fn jumps_that_touch_keep_their_own_height() {
+        let mut p = oval();
+        // Overlapping where both are at full height, which is the only place summing shows
+        // itself — two jumps that meet ramp-to-ramp barely overlap at all.
+        // Flat ground, so the only thing in the measurement is the jumps.
+        p.terrain.relief.amplitude = 0.0;
+        // Overlapping where both are at full height, which is the only place summing shows
+        // itself — two jumps that meet ramp-to-ramp barely overlap at all.
+        p.features = vec![
+            Feature::Tabletop { at: 30.0, length: 24.0, height: 2.0 },
+            Feature::Tabletop { at: 33.0, length: 24.0, height: 2.0 },
+        ];
+        let s = synthesise(&p).unwrap();
+        let base = height_at_arc(&s, 10.0);
+        let peak = (300..=700)
+            .map(|i| height_at_arc(&s, i as f32 / 10.0) - base)
+            .fold(f32::MIN, f32::max);
+        assert!(
+            peak < 2.4,
+            "two 2 m jumps a hair apart came out {peak:.2} m tall"
+        );
+        assert!(peak > 1.4, "and they should still be jumps: {peak:.2} m");
+    }
+
     #[test]
     fn a_tabletop_stands_where_it_was_put() {
         let p = oval();
@@ -1598,6 +1875,10 @@ mod tests {
     fn a_segment_that_rises_takes_the_track_with_it() {
         let mut p = oval();
         p.features.clear();
+        // Flat ground, so what is measured is the rise and not the hill it was laid on: the
+        // track follows the landscape, and this oval's landscape moves several metres over
+        // the length of a straight.
+        p.terrain.relief.amplitude = 0.0;
         // The first straight climbs six metres; the far one gives them back, so the lap
         // still meets itself at the same height.
         p.segments[0] = Segment::Straight { length: 160.0, rise: 6.0 };
@@ -1611,6 +1892,70 @@ mod tests {
         // And it is a hill, not a step: half way up is half way there.
         let half = height_at_arc(&s, 80.0) - height_at_arc(&s, 5.0);
         assert!((half - 3.0).abs() < 1.2, "half way up reads {half:.2} m");
+
+        // The whole point: rises that cancel bring the lap home level. Checked at the far
+        // end, which is the only place a running total that compounds can show itself.
+        let lap = p.lap_length();
+        let home = height_at_arc(&s, lap - 2.0) - height_at_arc(&s, 2.0);
+        assert!(
+            home.abs() < 1.0,
+            "the lap comes back {home:.2} m off the height it left at"
+        );
+    }
+
+    /// Rises are cumulative, and nothing should count twice. Two climbs and two drops of the
+    /// same size, spread round a lap, has to come out level however many segments carry it.
+    /// A curve drawn by hand lifts the track where its points say, and comes back round to
+    /// meet itself — a lap is a loop, so the last point has to ease into the first.
+    #[test]
+    fn a_drawn_curve_lifts_the_track_where_it_says() {
+        let mut p = oval();
+        p.features.clear();
+        p.terrain.relief.amplitude = 0.0;
+        let lap = p.lap_length();
+        p.elevation = vec![
+            Knot { at: 0.0, height: 0.0 },
+            Knot { at: lap * 0.25, height: 8.0 },
+            Knot { at: lap * 0.5, height: 0.0 },
+            Knot { at: lap * 0.75, height: -4.0 },
+        ];
+        let s = synthesise(&p).unwrap();
+        let ground = height_at_arc(&s, 1.0);
+        let top = height_at_arc(&s, lap * 0.25) - ground;
+        let dip = height_at_arc(&s, lap * 0.75) - ground;
+        assert!((top - 8.0).abs() < 1.2, "the peak reads {top:.2} m, wanted 8");
+        assert!((dip + 4.0).abs() < 1.2, "the dip reads {dip:.2} m, wanted -4");
+        // And across the line, where the wrap has to hold.
+        let before = height_at_arc(&s, lap - 2.0) - ground;
+        assert!(before.abs() < 1.2, "it comes back {before:.2} m off");
+    }
+
+    #[test]
+    fn climbs_and_drops_cancel_however_many_there_are() {
+        let mut p = oval();
+        p.features.clear();
+        p.segments = vec![
+            Segment::Straight { length: 80.0, rise: 4.0 },
+            Segment::Arc { radius: 60.0, angle: 180.0, rise: -4.0 },
+            Segment::Straight { length: 80.0, rise: 4.0 },
+            Segment::Arc { radius: 60.0, angle: 180.0, rise: -4.0 },
+        ];
+        let s = synthesise(&p).unwrap();
+        let lap = p.lap_length();
+        let drift = height_at_arc(&s, lap - 2.0) - height_at_arc(&s, 2.0);
+        assert!(drift.abs() < 1.0, "drifted {drift:.2} m over the lap");
+        // And it never climbs more than the 4 m any one segment asked for.
+        let peak = (0..40)
+            .map(|i| height_at_arc(&s, lap * i as f32 / 40.0))
+            .fold(f32::MIN, f32::max);
+        let floor = (0..40)
+            .map(|i| height_at_arc(&s, lap * i as f32 / 40.0))
+            .fold(f32::MAX, f32::min);
+        assert!(
+            peak - floor < 12.0,
+            "the line spans {:.1} m for two 4 m climbs",
+            peak - floor
+        );
     }
 
     #[test]
@@ -1632,6 +1977,44 @@ mod tests {
 
     /// The empty `.map` has to be one our own parser accepts, or it is not the format's
     /// degenerate case — it is a broken file.
+    /// The race data has to parse as the same shape the example track's does, because that
+    /// file is the only description of the format there is.
+    #[test]
+    fn the_race_data_has_the_blocks_the_game_looks_for() {
+        let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        let text = rdf(&p);
+        for block in [
+            "finish_line",
+            "split1",
+            "split2",
+            "pit_lane",
+            "pit_board",
+            "starting_grid",
+            "num_checkpoints = 3",
+            "checkpoint0",
+            "30seconds_board",
+        ] {
+            assert!(text.contains(block), "no {block}");
+        }
+        // Braces balance, or the game's parser walks off the end of the file.
+        assert_eq!(
+            text.matches('{').count(),
+            text.matches('}').count(),
+            "unbalanced braces"
+        );
+        // Every marker sits somewhere on the lap.
+        for line in text.lines() {
+            if let Some(v) = line.trim().strip_prefix("long = ") {
+                let at: f32 = v.parse().unwrap();
+                assert!(
+                    (0.0..=p.lap_length()).contains(&at),
+                    "a marker at {at} m is off a {} m lap",
+                    p.lap_length()
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_empty_map_is_a_map() {
         let m = empty_map();
