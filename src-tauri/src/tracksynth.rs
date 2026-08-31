@@ -75,6 +75,10 @@ const PROFILE_STEP: f32 = 0.1;
 /// Masks are stretched over the terrain, so they cost nothing to keep coarser than it.
 const MASK_DIM: usize = 1024;
 
+/// Coverage masks inside a `.trh`, which published tracks keep at half the grid — 2048
+/// against 2049. It is also the resolution anything reading the file will measure it at.
+const TRH_MASK_DIM: usize = 2048;
+
 /// How far below the top of the height budget the terrain is allowed to sit. Quantisation is
 /// against the budget, so leaving room costs resolution for nothing — but landing exactly on
 /// 0 or 65535 risks a clamp at the ends.
@@ -723,6 +727,90 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
     Ok(wrote)
 }
 
+/// A playable-shaped `.trh` — the collision terrain, written directly.
+///
+/// TerrainEd is the thing that really makes these, and it is Windows-only, so a generated
+/// track can't be looked at until someone compiles it. But the `.trh` layout is known well
+/// enough to write one: the header and signed samples were confirmed against published tracks
+/// in `heightfield.rs`, and the trailing block's coverage masks and material table in
+/// `trackstats.rs`. Writing it here is what lets the app draw a track it has just generated,
+/// on any platform, before anyone has run a compiler.
+///
+/// This is a *preview*, not a build. It carries terrain and surfaces and nothing else — no
+/// graphics, no scenery, no race data — so the game has no use for it. The app does.
+pub fn trh(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
+    let scale = prog.terrain.scale;
+    let mut out = Vec::with_capacity(12 + syn.heights.len() * 2 + 1024);
+    out.extend_from_slice(b"TRH\0");
+    out.extend_from_slice(&(syn.gw as u32).to_le_bytes());
+    out.extend_from_slice(&(syn.gh as u32).to_le_bytes());
+    for h in &syn.heights {
+        // Signed, with the datum at zero — half the range sits below it.
+        let v = (h / scale * u16::MAX as f32).round() - 32768.0;
+        out.extend_from_slice(&(v.clamp(-32768.0, 32767.0) as i16).to_le_bytes());
+    }
+
+    // The trailing block opens with the footprint and the height budget, which is where every
+    // metre figure the app reports comes from.
+    out.extend_from_slice(&prog.terrain.size_x.to_le_bytes());
+    out.extend_from_slice(&scale.to_le_bytes());
+    out.extend_from_slice(&prog.terrain.size_z.to_le_bytes());
+    out.extend_from_slice(&[0u8; 12]);
+
+    let half = prog.width * 0.5;
+    // Hard edges, unlike the `.tga` masks: those are blended into a texture, while these say
+    // which surface a cell *is*. A soft edge here reads as a wider track — a metre of fade
+    // each side put the riding line two metres over what it was built as.
+    let masks: [(u32, Vec<u8>); 2] = [
+        // 10 is the riding line — the id published tracks paint their ribbon with.
+        (10, mask_from(syn, TRH_MASK_DIM, |d, _| u8::from(d <= half) * 255)),
+        (1, mask_from(syn, TRH_MASK_DIM, |d, _| {
+            u8::from(d > half + SHOULDER_M) * 255
+        })),
+    ];
+    out.extend_from_slice(&(masks.len() as u32).to_le_bytes());
+    out.extend_from_slice(&[0u8; 16]); // to the offset the records start at
+
+    for (id, m) in &masks {
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&(TRH_MASK_DIM as u32).to_le_bytes());
+        out.extend_from_slice(&(TRH_MASK_DIM as u32).to_le_bytes());
+        out.extend_from_slice(m);
+    }
+
+    // The material table, which is also how a reader finds the end of the masks: it looks for
+    // "asphalt" and counts back four bytes. Same six, in the same order, as every published
+    // track carries.
+    out.extend_from_slice(&6u32.to_le_bytes());
+    for name in ["asphalt", "grass", "sand", "kerb", "soil", "concrete"] {
+        let mut field = [0u8; 16];
+        field[..name.len()].copy_from_slice(name.as_bytes());
+        out.extend_from_slice(&field);
+        out.extend_from_slice(&[0u8; 36]); // nine floats of physics we have nothing to say about
+    }
+    out.extend_from_slice(b"EXT\0");
+    out
+}
+
+/// The preview as a `.pkz` the app can open: a plain zip, which is what the reader falls back
+/// to when a file isn't one of PiBoSo's encrypted ones.
+pub fn write_pkz(prog: &TrackProgram, syn: &Synth, path: &Path) -> Result<u64> {
+    let slug = slug(&prog.name);
+    let file = std::fs::File::create(path).with_context(|| format!("create {path:?}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts: zip::write::FileOptions<'_, ()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    use std::io::Write;
+    zip.start_file(format!("{slug}.trh"), opts)?;
+    zip.write_all(&trh(prog, syn))?;
+    zip.start_file(format!("{slug}.ini"), opts)?;
+    zip.write_all(track_ini(prog).as_bytes())?;
+    zip.finish()?;
+    Ok(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0))
+}
+
 /// The heightmap: little-endian u16, quantised against the height budget.
 fn raw16(syn: &Synth, scale: f32) -> Vec<u8> {
     let mut out = Vec::with_capacity(syn.heights.len() * 2);
@@ -1226,6 +1314,33 @@ mod tests {
                 let n = std::fs::metadata(dir.join(f)).map(|m| m.len()).unwrap_or(0);
                 println!("  {f:<24} {n:>10} bytes");
             }
+            // A `.pkz` the app can open, and then the proof that it can: read it back with
+            // the same code that reads published tracks. Anything the viewer would get wrong
+            // shows up here as a track that measures like nothing.
+            let pkz = dir.join(format!("{}.pkz", slug(&p.name)));
+            let size = write_pkz(&p, &s, &pkz).unwrap();
+            let back = crate::trackstats::analyse(&pkz).expect("the .pkz reads back as a track");
+            let bc = back.corridor.as_ref().expect("the .pkz carries a riding line");
+            println!(
+                "\n{} — {} bytes, reads back as {}x{} over {:.0}x{:.0} m, \
+                 {:.1} m wide corridor by the {} rule, {} lips",
+                pkz.file_name().unwrap().to_string_lossy(),
+                size,
+                back.source_grid[0],
+                back.source_grid[1],
+                back.size_x_m,
+                back.size_z_m,
+                bc.width_from_mean_m,
+                bc.rule,
+                bc.lips
+            );
+            assert!(
+                (bc.width_from_mean_m - c.width_from_mean_m).abs() < 1.0,
+                "the .pkz measures {:.1} m wide where the terrain it was written from is {:.1}",
+                bc.width_from_mean_m,
+                c.width_from_mean_m
+            );
+
             preview(&s, &dir.join("preview.ppm"));
             // The start straight, close up. The whole-track view is too coarse to tell a
             // tabletop from a bump — at 0.34 m a sample a 24 m jump is seventy pixels of a
