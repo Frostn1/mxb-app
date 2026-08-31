@@ -6287,12 +6287,20 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     });
 }
 
-/// How often to re-check the grid while a session is running.
+/// The fallback heartbeat while a session is running.
 ///
-/// A rider who joins after you did is invisible until the next pull, so this is the gap
-/// between someone arriving and their paint appearing. Short enough not to matter in a race,
-/// long enough that an unchanged roster — the overwhelmingly common answer — costs nothing.
-const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
+/// Not the gap between a rider arriving and their paint appearing — `GRID_POLL` below
+/// watches the entry list and pulls within seconds of a new name, which is the case that
+/// matters in a race. This only covers what the grid cannot announce: a rider who was
+/// already there and has since changed their look, and keeping our own presence inside the
+/// endpoint's ten-minute window.
+///
+/// Three minutes rather than the 45 seconds it ran at. At 45s every player in a session was
+/// a request a minute and a half, and with paint sync on by default that was most of what
+/// took the worker past its daily ceiling on 2026-08-31. Nothing was bought for it: an
+/// unchanged roster is the overwhelmingly common answer, and the arrival path already
+/// covers the change anyone would notice.
+const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// How often to read the grid out of FrostMod.
 ///
@@ -6515,15 +6523,16 @@ async fn pull_rosters(
         return Err("No servers to sync with yet.".into());
     }
 
-    // Say where we are before asking who else is here: the roster is scoped by presence, so
-    // reporting first is what puts this rider into everyone else's grid too.
-    for key in &keys {
-        if let Err(e) = paintsync::report_presence(&token, key).await {
-            log::debug!("[sync] couldn't report presence on {key}: {e:#}");
-        }
-    }
-
-    let outcome = paintsync::pull(&cfg, &token, &keys).await.map_err(|e| format!("{e:#}"))?;
+    // Where we are rides along with the request that asks who else is here — the roster
+    // records it and then scopes itself by it, so this is one request rather than two.
+    //
+    // Only the server the rider is actually on. Reporting presence for every key used to
+    // happen here, which on a registry sweep meant claiming to be on every server at once:
+    // untrue, and one write per server for the privilege.
+    let here = live_server_key();
+    let outcome = paintsync::pull(&cfg, &token, &keys, here.as_deref())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
     // Re-read immediately before writing: the pull took a round trip, and `config::save`
     // rewrites the whole file.
     let mut cfg = config::load_or_detect(app).unwrap_or_default();

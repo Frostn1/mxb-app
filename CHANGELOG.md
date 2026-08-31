@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Paint sync makes one request where it used to make two: saying where you are now rides
+  along with asking who else is here.
+- The sync heartbeat drops from every 45 seconds to every 3 minutes. A rider joining still
+  pulls within seconds — the heartbeat only ever covered someone already there changing
+  their look.
+- Sync no longer claims you are on every server in the registry when you are not on one.
+- Usage counts are sent every half hour instead of every five minutes, and stop for the
+  run if the server says it has had enough.
+
+### Fixed
+- The control plane ran out of its daily request allowance on the day v0.12.4 shipped,
+  which took paint sync, voice and the server list down with it. The changes above cut
+  what the app asks for by roughly four fifths.
+
 ## 2026-08-31 — v0.12.4 — Paint sync, on every server
 
 ### Added

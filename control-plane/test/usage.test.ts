@@ -181,20 +181,26 @@ describe("the endpoint", () => {
     expect(db.statements).toHaveLength(0);
   });
 
-  it("drops reports once an address is past its daily cap, without asking it to retry", async () => {
-    const db = stubDb(MAX_REPORTS_PER_DAY);
-    const res = await reportUsage(post(body()), { DB: db } as unknown as Env);
-
-    expect(res.status).toBe(202);
-    expect(db.statements).toHaveLength(0);
-  });
-
   it("counts a signup and a usage report separately", async () => {
     const db = stubDb();
     await reportUsage(post(body()), { DB: db } as unknown as Env);
 
     const claims = db.statements.find((s) => s.sql.includes("INTO device_claims"))!;
     expect(claims.sql).toContain("'usage'");
+  });
+});
+
+describe("what a rate-limited caller is told", () => {
+  it("answers 429 once an address is past its cap, so the client stops asking", async () => {
+    // The client treats 429 as "stop reporting this run" — see `usage.rs`. It must therefore
+    // actually see one, rather than the 202-and-ignore this used to answer with: a few
+    // hundred installs each knocking every half hour is exactly how a daily ceiling is
+    // reached, and a counter is not worth being part of that.
+    const db = stubDb(MAX_REPORTS_PER_DAY);
+    const res = await reportUsage(post(body()), { DB: db } as unknown as Env);
+
+    expect(res.status).toBe(429);
+    expect(db.statements).toHaveLength(0);
   });
 });
 

@@ -136,9 +136,10 @@ export async function reportUsage(request: Request, env: Env): Promise<Response>
     .bind(digest, day)
     .first<{ claims: number }>();
   if (seen && seen.claims >= MAX_REPORTS_PER_DAY) {
-    // Answered as accepted-and-ignored rather than 429: the client has nothing useful to do
-    // with a retry, and a rejection it would keep retrying is worse for both sides.
-    return json(202, { ok: true });
+    // A real 429, not the 202-and-ignore this first shipped with. The client reads it as
+    // "stop reporting for this run" rather than as something to retry, which is the only
+    // answer that actually reduces load — and load is the entire reason the cap exists.
+    return json(429, { error: "too many reports from here today" });
   }
 
   const statements = [
