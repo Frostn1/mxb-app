@@ -2405,4 +2405,10 @@ export const de: Translation = {
   "track.replaceTitle": "Diese Strecke ersetzen?",
   "track.replaceBody": "Es gibt Änderungen, die weder exportiert noch installiert wurden. Eine andere Strecke zu laden verwirft sie.",
   "track.replaceConfirm": "Verwerfen und laden",
+  "track.across": "breit",
+  "track.hills": "Hügel",
+  "track.surface": "Boden",
+  "track.soil": "Erde",
+  "track.sand": "Sand",
+  "track.grass": "Gras",
 };

@@ -1233,6 +1233,21 @@ async fn blank_track_program() -> Result<serde_json::Value, String> {
     Ok(json)
 }
 
+/// Give a programme a height budget that fits it.
+///
+/// The budget only exists because samples are quantised against it, and there is no reason a
+/// person should be told to guess a number the synthesiser already knows.
+#[tauri::command]
+async fn fit_track_budget(program: serde_json::Value) -> Result<serde_json::Value, String> {
+    let prog = track_program(program)?;
+    let fitted = tauri::async_runtime::spawn_blocking(move || {
+        tracksynth::with_fitted_budget(&prog).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| format!("fit_track_budget task failed: {e}"))??;
+    serde_json::to_value(&fitted).map_err(|e| e.to_string())
+}
+
 /// Bring an open lap back to its start.
 #[tauri::command]
 async fn close_track_lap(program: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -8926,6 +8941,7 @@ fn main() {
             base_track_program,
             blank_track_program,
             close_track_lap,
+            fit_track_budget,
             preview_track,
             install_track_preview,
             export_track_source,

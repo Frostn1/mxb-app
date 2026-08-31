@@ -333,6 +333,29 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     })
 }
 
+/// How much height a programme actually needs, in metres.
+///
+/// The budget is a technical quantity — samples are quantised against it — and nobody should
+/// have to guess it. Built by synthesising against a budget large enough that the check can't
+/// fire, then reading what was used.
+pub fn required_height(prog: &TrackProgram) -> Result<f32> {
+    let mut roomy = prog.clone();
+    // Far more than any track needs, so nothing clips and `used_m` is the honest figure.
+    roomy.terrain.scale = 10_000.0;
+    Ok(synthesise(&roomy)?.used_m)
+}
+
+/// A programme with a height budget that fits it: just above what it needs, so the terrain
+/// quantises as finely as it can without clipping.
+pub fn with_fitted_budget(prog: &TrackProgram) -> Result<TrackProgram> {
+    let need = required_height(prog)?;
+    let mut out = prog.clone();
+    // Fifteen percent of headroom, rounded up to a whole metre. Room for an edit or two
+    // before this has to be worked out again, and no more.
+    out.terrain.scale = (need * 1.15).ceil().max(2.0);
+    Ok(out)
+}
+
 /// Samples across and down, both a power of two plus one, with cells as square as that allows.
 fn grid_dims(prog: &TrackProgram) -> Result<(usize, usize)> {
     let n = prog.terrain.samples as usize;
@@ -1672,6 +1695,27 @@ mod tests {
         });
         assert!(lo >= 0.0 && hi <= p.terrain.scale, "{lo}..{hi}");
         assert!(s.used_m > 1.0, "the terrain came out flat");
+    }
+
+    #[test]
+    fn a_fitted_budget_holds_the_track_and_little_else() {
+        let mut p = oval();
+        p.terrain.scale = 1.0; // far too small to build
+        let fitted = with_fitted_budget(&p).expect("fitting doesn't need a workable budget");
+        let s = synthesise(&fitted).expect("and what comes back builds");
+        assert!(
+            s.used_m < fitted.terrain.scale,
+            "used {:.1} of {:.1}",
+            s.used_m,
+            fitted.terrain.scale
+        );
+        // Snug, not generous: a budget ten times the relief quantises ten times coarser.
+        assert!(
+            fitted.terrain.scale < s.used_m * 1.5,
+            "budget {:.1} for {:.1} m of terrain",
+            fitted.terrain.scale,
+            s.used_m
+        );
     }
 
     #[test]

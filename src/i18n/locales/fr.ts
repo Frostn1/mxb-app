@@ -2396,4 +2396,10 @@ export const fr: Translation = {
   "track.replaceTitle": "Remplacer ce circuit ?",
   "track.replaceBody": "Tu as fait des modifications qui n'ont été ni exportées ni installées. Charger un autre circuit les supprime.",
   "track.replaceConfirm": "Supprimer et charger",
+  "track.across": "de large",
+  "track.hills": "collines",
+  "track.surface": "sol",
+  "track.soil": "Terre",
+  "track.sand": "Sable",
+  "track.grass": "Herbe",
 };
