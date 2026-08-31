@@ -54,6 +54,7 @@ import {
   Zap,
   Users,
   SlidersHorizontal,
+  BarChart3,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TKey } from "../../i18n/context";
@@ -92,6 +93,10 @@ export const RELEASES: Release[] = [
       { icon: Zap, text: "showcase.v0124.nosetup" },
       { icon: Users, text: "showcase.v0124.everyone" },
       { icon: SlidersHorizontal, text: "showcase.v0124.settings" },
+      { icon: Mountain, text: "showcase.v0124.shape" },
+      // Said here because it is the kind of change people would rather be told about than
+      // find: the switch is one click from this modal.
+      { icon: BarChart3, text: "showcase.v0124.stats" },
     ],
   },
   {

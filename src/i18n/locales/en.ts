@@ -1569,6 +1569,10 @@ export const en = {
     "You'll see any rider who also has MXB App. The more of your lobby that does, the more of the grid looks right.",
   "showcase.v0124.settings":
     "Settings → Paint sync shows what went out, what came back, and any paint it refused to overwrite. The switch to turn it off is in General.",
+  "showcase.v0124.shape":
+    "Jumps are shaped by dragging their outline. Grab the top of a tabletop for its height, the far end for its length, the far side of a double for its gap — or draw one point by point.",
+  "showcase.v0124.stats":
+    "MXB App now counts which pages and features get used, anonymously — a random ID and nothing about you. Settings → General turns it off.",
   "showcase.v0122.hero.title":
     "The replay camera can follow the rider",
   "showcase.v0122.hero.body":

@@ -1588,6 +1588,10 @@ export const ptBR: Translation = {
     "Você verá qualquer piloto que também tenha o MXB App. Quanto mais gente na sua sala tiver, mais o grid fica certo.",
   "showcase.v0124.settings":
     "Configurações → Sincronização de pinturas mostra o que saiu, o que chegou e qualquer pintura que ela recusou sobrescrever. O interruptor fica em Geral.",
+  "showcase.v0124.shape":
+    "Os saltos são moldados arrastando o contorno. Pegue o topo de um tabletop para a altura, a ponta para o comprimento, o lado oposto de um double para o vão — ou desenhe um ponto a ponto.",
+  "showcase.v0124.stats":
+    "O MXB App agora conta anonimamente quais páginas e recursos são usados — um ID aleatório e nada sobre você. Configurações → Geral desliga isso.",
   "showcase.v0122.hero.title":
     "A câmera de replay pode seguir o piloto",
   "showcase.v0122.hero.body":
