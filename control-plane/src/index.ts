@@ -26,6 +26,7 @@ import {
   terminateInstance,
 } from "./aws";
 import { bmacWebhook } from "./bmac";
+import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
@@ -169,6 +170,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   // credential is the HMAC signature over the body, checked before the body is parsed.
   if (method === "POST" && path === "/v1/bmac/webhook") return bmacWebhook(request, env);
 
+  // The plugin catalogue, before there is anyone to authenticate. What is on offer is not a
+  // secret and the app lists it on a first run, with no account and nothing enrolled.
+  if (method === "GET" && path === "/v1/plugins") return listPlugins(env);
   // Anonymous usage counters, from every install rather than every account. Unauthenticated
   // for the reason the feature exists: most people who run the app never claim an invite, so
   // a report that required a token would only ever describe the few who did. Nothing here
@@ -191,6 +195,13 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
+
+  // Paid plugins. Open to every account on the same terms as voice and paint sync: holding
+  // a license is what gates the bundle, not holding an invite.
+  if (method === "GET" && path === "/v1/me/plugins") return myPlugins(account, env);
+  if (method === "POST" && path === "/v1/plugins/redeem") return redeemKey(request, account, env);
+  const bundle = /^\/v1\/plugins\/([a-z0-9-]{1,32})\/bundle$/.exec(path);
+  if (bundle && method === "GET") return pluginBundle(bundle[1], account, env);
   // Linking a Steam account, and asking what it may use. Open to every account: identity
   // is the point of the flow, and entitlement is checked per asset when it is asked for.
   if (method === "POST" && path === "/v1/steam/login") return steamLogin(request, account, env);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { LoadedPlugin } from "@/lib/pluginHost";
 import {
   Home,
   Library as LibraryIcon,
@@ -18,6 +19,7 @@ import {
   Mountain,
   Palette,
   PersonStanding,
+  Puzzle,
   Shield,
   Lock,
   PanelLeftClose,
@@ -30,7 +32,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useFrostmod } from "../../Context/FrostmodContext";
 import { useDownloads } from "../../Context/Downloads";
-import { useT, type TKey } from "../../i18n/context";
+import { useT, type TFunc, type TKey } from "../../i18n/context";
 import {
   experimentalState,
   cpServers,
@@ -48,7 +50,13 @@ import type { StudioTab } from "../Studio/Studio";
 import JoinServerDialog from "./JoinServerDialog";
 import DownloadQueue from "./DownloadQueue";
 
+/**
+ * A page in the shell. The template literal is how a plugin gets a nav row: its panels are
+ * addressed `plugin:<plugin id>/<panel id>`, so the shell can route to one without the
+ * union having to name plugins it will never know about at build time.
+ */
 export type DashboardView =
+  | `plugin:${string}`
   | "browse"
   | "shop"
   | "hub"
@@ -65,6 +73,8 @@ interface SidebarProps {
   view: DashboardView;
   /** Which Studio sub-view is showing, so the right child row reads as active. */
   studioTab: StudioTab;
+  /** Plugins running this session. Each contributes its panels as rows under one group. */
+  plugins: LoadedPlugin[];
   onNavigate: (view: DashboardView, studio?: StudioTab) => void;
 }
 
@@ -75,7 +85,10 @@ interface SidebarProps {
  */
 type NavEntry = {
   id: DashboardView;
+  /** A translation key for the app's own rows. A plugin supplies `rawLabel` instead. */
   label: TKey;
+  /** A label the app cannot translate, because a plugin wrote it. Wins over `label`. */
+  rawLabel?: string;
   icon: typeof Home;
   cap?: keyof GameCaps;
   /** Indented under this entry, behind a chevron. */
@@ -94,6 +107,9 @@ type NavEntry = {
   /** Hidden unless the mxbsecure module is present AND the experimental flag is on. */
   needsSecure?: boolean;
 };
+
+/** A row's text. A plugin wrote its own, so there is nothing to translate. */
+const entryLabel = (t: TFunc, e: NavEntry) => e.rawLabel ?? t(e.label);
 
 const NAV: NavEntry[] = [
   { id: "browse", label: "nav.browse", icon: Home },
@@ -203,8 +219,8 @@ function NavRow({
     >
       <button
         onClick={onSelect}
-        title={collapsed ? t(entry.label) : undefined}
-        aria-label={collapsed ? t(entry.label) : undefined}
+        title={collapsed ? entryLabel(t, entry) : undefined}
+        aria-label={collapsed ? entryLabel(t, entry) : undefined}
         className={cn(
           "flex min-w-0 flex-1 cursor-default items-center gap-2.5",
           collapsed ? "justify-center px-0 py-2.5" : indented ? "py-2 pl-9 pr-3" : "px-3 py-2.5",
@@ -213,7 +229,7 @@ function NavRow({
         )}
       >
         <Icon className={cn("flex-none", indented ? "size-3.5" : "size-4")} />
-        {!collapsed && <span className="truncate">{t(entry.label)}</span>}
+        {!collapsed && <span className="truncate">{entryLabel(t, entry)}</span>}
       </button>
 
       {/* A failed download used to exist only as a toast, so one dismissed in passing left no
@@ -235,10 +251,10 @@ function NavRow({
         <button
           onClick={group.onToggle}
           title={t(group.open ? "sidebar.hideGroup" : "sidebar.showGroup", {
-            name: t(entry.label),
+            name: entryLabel(t, entry),
           })}
           aria-label={t(group.open ? "sidebar.hideGroup" : "sidebar.showGroup", {
-            name: t(entry.label),
+            name: entryLabel(t, entry),
           })}
           aria-expanded={group.open}
           className="flex flex-none cursor-default items-center py-2.5 pl-1 pr-2.5"
@@ -252,7 +268,7 @@ function NavRow({
   );
 }
 
-export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
+export default function Sidebar({ view, studioTab, plugins, onNavigate }: SidebarProps) {
   const t = useT();
   // Locking needs an optional local module. Without it the Protect row would be a place you
   // can go and nothing can happen, so it isn't listed.
@@ -341,7 +357,28 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
   const secureEnabled = hasSecure && (config.mxbsecureEnabled ?? false);
   const supported = ({ cap, needsLock, needsSecure }: NavEntry) =>
     (!cap || caps[cap]) && (!needsLock || hasLock) && (!needsSecure || secureEnabled);
-  const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1)]
+
+  // Plugin rows, under one group so a paid add-on reads as a thing the user installed
+  // rather than as another built-in page. Absent entirely when nothing is licensed.
+  const pluginGroup: NavEntry[] =
+    plugins.length === 0
+      ? []
+      : [
+          {
+            id: `plugin:${plugins[0].manifest.id}/${plugins[0].panels[0].id}` as DashboardView,
+            label: "plugins.section",
+            icon: Puzzle,
+            children: plugins.flatMap((p) =>
+              p.panels.map((panel) => ({
+                id: `plugin:${p.manifest.id}/${panel.id}` as DashboardView,
+                label: "plugins.section" as TKey,
+                rawLabel: panel.label,
+                icon: Puzzle,
+              })),
+            ),
+          },
+        ];
+  const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1), ...pluginGroup]
     .filter(supported)
     .map((e) => (e.children ? { ...e, children: e.children.filter(supported) } : e));
 

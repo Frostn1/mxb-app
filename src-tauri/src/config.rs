@@ -454,7 +454,7 @@ fn resolve_profiles_dir(primary: PathBuf, fallback: impl FnOnce() -> Option<Path
 /// The game's user folder where it puts it when nothing has been moved: inside the Wine
 /// prefix wherever the game runs as a Windows process (Proton on Linux, a bottle on
 /// macOS), `Documents\PiBoSo\<game>` on Windows.
-fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
+pub fn default_user_dir(game: &GameProfile) -> Option<PathBuf> {
     if let Some(p) = detect_prefix_mods_path(game) {
         return Some(PathBuf::from(p));
     }

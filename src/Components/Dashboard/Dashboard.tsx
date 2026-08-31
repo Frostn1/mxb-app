@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import Sidebar, { type DashboardView } from "../Shell/Sidebar";
+import { parsePluginView, usePlugins } from "@/lib/usePlugins";
 import Library from "../Library/Library";
 import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
@@ -66,6 +68,20 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // Cleared on the way out so a later visit opens where Settings normally opens.
   const [settingsSection, setSettingsSection] = useState<SectionId | undefined>();
 
+  // Paid plugins running this session. A plugin that fails to mount says so once and is
+  // then dropped: the app is a mod manager first, and a broken add-on must not take it down.
+  const plugins = usePlugins((id, message) =>
+    toast.error(`${id}: ${message}`),
+  );
+  // The panel on screen, when the current view addresses one. A view naming a plugin that
+  // is no longer mounted — a licence that lapsed mid-session — falls through to the
+  // built-in pages rather than rendering a blank frame.
+  const pluginPanel = (() => {
+    const ref = parsePluginView(view);
+    if (!ref) return null;
+    const p = plugins.find((x) => x.manifest.id === ref.plugin);
+    return p?.panels.find((panel) => panel.id === ref.panel) ?? null;
+  })();
   // Which page is open, as the usage counters name it.
   //
   // Derived and counted by an effect rather than inside `navigate`, because plenty of
@@ -73,7 +89,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
   // download row jumping to the Library — and a page nobody counted is worse than one
   // counted twice. Studio's sub-views are pages in their own right; everything else is
   // one name, so a tab added to the sidebar is counted without touching this.
-  const page = view === "studio" ? `view.studio.${studioTab}` : `view.${view}`;
+  const page = view.startsWith("plugin:")
+    ? "view.plugin"   // one bucket: naming each panel would be unbounded cardinality
+    : view === "studio"
+      ? `view.studio.${studioTab}`
+      : `view.${view}`;
   useEffect(() => {
     track(page);
   }, [page]);
@@ -183,9 +203,11 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
           window renders its own tree and deliberately gets no drop target. */}
       <DropZone />
       <div className="flex min-h-0 flex-1">
-        <Sidebar view={view} studioTab={studioTab} onNavigate={navigate} />
+        <Sidebar view={view} studioTab={studioTab} plugins={plugins} onNavigate={navigate} />
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {view === "browse" && selectedSlug ? (
+          {pluginPanel ? (
+            <pluginPanel.component />
+          ) : view === "browse" && selectedSlug ? (
             <ModDetail
               slug={selectedSlug}
               modType={modType}
