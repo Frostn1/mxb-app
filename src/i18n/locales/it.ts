@@ -2380,4 +2380,8 @@ export const it: Translation = {
   "track.closeLap": "Chiudi il giro",
   "track.lapClosed": "Il giro ora si chiude",
   "track.closeFailed": "Impossibile chiudere",
+  "track.notes": "Diverso da una pista pubblicata",
+  "track.replaceTitle": "Sostituire questa pista?",
+  "track.replaceBody": "Hai fatto modifiche che non sono state esportate né installate. Caricare un'altra pista le scarta.",
+  "track.replaceConfirm": "Scarta e carica",
 };

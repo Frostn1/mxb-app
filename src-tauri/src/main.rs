@@ -1258,9 +1258,9 @@ async fn close_track_lap(program: serde_json::Value) -> Result<serde_json::Value
 /// Everything wrong with a program, without asking anyone. The studio calls this as edits are
 /// made, so a hand-edited track is held to the same corpus a generated one is.
 #[tauri::command]
-async fn check_track(program: serde_json::Value) -> Result<Vec<String>, String> {
+async fn check_track(program: serde_json::Value) -> Result<trackllm::Review, String> {
     let prog = track_program(program)?;
-    tauri::async_runtime::spawn_blocking(move || trackllm::validate(&prog))
+    tauri::async_runtime::spawn_blocking(move || trackllm::review(&prog))
         .await
         .map_err(|e| format!("check_track task failed: {e}"))
 }

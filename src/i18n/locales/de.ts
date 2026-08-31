@@ -2401,4 +2401,8 @@ export const de: Translation = {
   "track.closeLap": "Runde schließen",
   "track.lapClosed": "Die Runde schließt sich jetzt",
   "track.closeFailed": "Konnte nicht geschlossen werden",
+  "track.notes": "Anders als veröffentlichte Strecken",
+  "track.replaceTitle": "Diese Strecke ersetzen?",
+  "track.replaceBody": "Es gibt Änderungen, die weder exportiert noch installiert wurden. Eine andere Strecke zu laden verwirft sie.",
+  "track.replaceConfirm": "Verwerfen und laden",
 };

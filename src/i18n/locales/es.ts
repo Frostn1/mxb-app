@@ -2387,4 +2387,8 @@ export const es: Translation = {
   "track.closeLap": "Cerrar la vuelta",
   "track.lapClosed": "La vuelta ya cierra",
   "track.closeFailed": "No se pudo cerrar",
+  "track.notes": "Distinto de una pista publicada",
+  "track.replaceTitle": "¿Reemplazar esta pista?",
+  "track.replaceBody": "Has hecho cambios que no se han exportado ni instalado. Cargar otra pista los descarta.",
+  "track.replaceConfirm": "Descartar y cargar",
 };

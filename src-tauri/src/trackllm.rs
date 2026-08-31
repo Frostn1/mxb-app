@@ -113,13 +113,33 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
     )
 }
 
+/// What is wrong with a program, and what is merely unlike a published one.
+///
+/// The difference matters: a blank lap with nothing built on it is not broken, it is empty,
+/// and telling someone their brand new track has "0.0 features per km" as though it were a
+/// fault is how a starting point stops being one. Problems block; notes do not.
+#[derive(serde::Serialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Review {
+    /// Structural: it won't build, or it isn't a lap, or a feature does nothing where it is.
+    pub problems: Vec<String>,
+    /// It builds and it is a lap — it just doesn't measure like the tracks people ride.
+    pub notes: Vec<String>,
+}
+
 /// Everything wrong with a program, said the way the model needs to hear it.
 ///
 /// Each problem names the measurement, the value, and what published tracks do. That last
 /// part is what makes it fixable: "too wide" is an opinion, "31 m against a corpus of 10–17"
 /// is an instruction.
 pub fn validate(prog: &TrackProgram) -> Vec<String> {
+    let r = review(prog);
+    r.problems.into_iter().chain(r.notes).collect()
+}
+
+pub fn review(prog: &TrackProgram) -> Review {
     let mut out = Vec::new();
+    let mut notes = Vec::new();
     let between = |what: &str, v: f32, (lo, hi): (f32, f32), unit: &str, out: &mut Vec<String>| {
         if v < lo || v > hi {
             out.push(format!(
@@ -132,7 +152,7 @@ pub fn validate(prog: &TrackProgram) -> Vec<String> {
     // can't be synthesised, so there would be nothing to measure.
     if let Err(e) = prog.check() {
         out.push(e.to_string());
-        return out;
+        return Review { problems: out, notes };
     }
 
     let closure = prog.closure_error();
@@ -143,11 +163,15 @@ pub fn validate(prog: &TrackProgram) -> Vec<String> {
              ±360°."
         ));
     }
-    between("the riding line", prog.width, corpus::WIDTH_M, " m", &mut out);
-    between("the lap", prog.lap_length(), corpus::LAP_M, " m", &mut out);
+    between("the riding line", prog.width, corpus::WIDTH_M, " m", &mut notes);
+    between("the lap", prog.lap_length(), corpus::LAP_M, " m", &mut notes);
 
-    let per_km = prog.features.len() as f32 * 1000.0 / prog.lap_length().max(1.0);
-    between("feature density", per_km, corpus::LIPS_PER_KM, " per km", &mut out);
+    // Only worth saying once there is something to count. A lap with nothing built on it is
+    // a starting point, and "0 features per km" is not news to whoever just asked for one.
+    if !prog.features.is_empty() {
+        let per_km = prog.features.len() as f32 * 1000.0 / prog.lap_length().max(1.0);
+        between("feature density", per_km, corpus::LIPS_PER_KM, " per km", &mut notes);
+    }
 
     // Per-feature, where the complaint can name the thing that's wrong.
     let turn = prog.stations(1.0);
@@ -203,20 +227,24 @@ pub fn validate(prog: &TrackProgram) -> Vec<String> {
         Ok(s) => s,
         Err(e) => {
             out.push(e.to_string());
-            return out;
+            return Review { problems: out, notes };
         }
     };
     let c = crate::trackstats::measure("synth", &syn.corridor, &syn.heights, syn.gw, syn.gh, syn.mps);
 
-    between("the built relief", c.feature_relief_m.p90, corpus::RELIEF_M, " m", &mut out);
-    between("the steepest ground", c.slope_deg.p99, corpus::SLOPE_P99_DEG, "°", &mut out);
+    // Both of these measure what was *built* on the ground, so an empty lap has nothing to
+    // say about them either.
+    if !prog.features.is_empty() {
+        between("the built relief", c.feature_relief_m.p90, corpus::RELIEF_M, " m", &mut notes);
+        between("the steepest ground", c.slope_deg.p99, corpus::SLOPE_P99_DEG, "°", &mut notes);
+    }
     if c.largest_component_fraction < 0.95 {
         out.push(format!(
             "the riding line comes out in {:.0}% pieces — the lap probably crosses itself",
             (1.0 - c.largest_component_fraction) * 100.0
         ));
     }
-    out
+    Review { problems: out, notes }
 }
 
 /// The brief, as the app sends it. Kept small on purpose: everything that shapes the output
@@ -326,6 +354,21 @@ mod tests {
         let mut p: TrackProgram = serde_json::from_str(EXAMPLE).unwrap();
         f(&mut p);
         p
+    }
+
+    /// A lap with nothing built on it is a starting point, not a broken track. It must not
+    /// come back with problems, or the Blank button hands you an error.
+    #[test]
+    fn a_blank_lap_is_empty_rather_than_broken() {
+        let blank = tweaked(|p| p.features.clear());
+        let r = review(&blank);
+        assert_eq!(r.problems, Vec::<String>::new(), "a blank lap should build");
+        // And nothing about what was built on it, because nothing was.
+        assert!(
+            !r.notes.iter().any(|n| n.contains("density") || n.contains("built relief")),
+            "{:?}",
+            r.notes
+        );
     }
 
     #[test]
