@@ -35,7 +35,7 @@ import {
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { TrackViewer } from "../../Viewer/TrackViewer";
-import ElevationCurve, { silhouette } from "./ElevationCurve";
+import ElevationCurve from "./ElevationCurve";
 import { Switch } from "../../ui/switch";
 import { Segmented } from "../../ui/segmented";
 import { loadTrackOverview, loadTrackTerrain } from "../../../api/tracks";
@@ -63,7 +63,6 @@ import {
   pathAlong,
   positionAt,
   setElevationAt,
-  toCustom,
   previewTrack,
   roomiestGap,
   setTrackTools,
@@ -983,21 +982,15 @@ export default function TrackStudio() {
                         ? editFeature(on.index, patch as Partial<TrackFeature>)
                         : editSegment(on.index, patch as Partial<TrackSegment>),
                     mode: on.kind === "feature" ? stripMode : "height",
+                    // Only a jump that is already a drawn shape has loose points to move;
+                    // every other kind is reshaped through its own numbers.
                     onShape: (shape: { u: number; h: number }[]) => {
-                      if (on.kind !== "feature") return;
+                      if (on.kind !== "feature" || on.feature.kind !== "custom") return;
                       setTouched(true);
-                      // The first point drawn on a jump turns it into a shape, keeping the
-                      // shape it already had as its starting points.
-                      const base =
-                        on.feature.kind === "custom"
-                          ? on.feature
-                          : toCustom(on.feature, silhouette({ at: on.feature.at, feature: on.feature }));
                       void settle({
                         ...program,
                         features: program.features.map((f, i) =>
-                          i === on.index
-                            ? ({ ...base, shape } as TrackFeature)
-                            : f,
+                          i === on.index ? ({ ...on.feature, shape } as TrackFeature) : f,
                         ),
                       });
                     },

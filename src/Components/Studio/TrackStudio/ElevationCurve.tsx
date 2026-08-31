@@ -135,58 +135,73 @@ function handlesOf(s: Scoped): Handle[] {
   ];
 }
 
-/** The shape a feature cuts, roughly — a picture of its numbers, not of the terrain. */
-export function silhouette(s: Scoped): { at: number; height: number }[] {
+/**
+ * The shape a feature cuts, as corners you can take hold of.
+ *
+ * Each corner carries what it *means*: the top of a tabletop is its height, the far end is
+ * its length, the far side of a double's gap is the gap. So dragging the outline changes the
+ * jump — it does not draw over it. The shape is what the feature is.
+ */
+export function shapeOf(s: Scoped): Handle[] {
   const f = s.feature;
   if (!f) return [];
   const L = featureSpan(f).length;
   const at = (u: number) => s.at + u * L;
-  if (f.kind === "double") {
-    const back = Math.min(2.5, f.lip * 0.5);
-    const total = (f.lip + back) * 2 + f.gap;
-    const p = (m: number) => s.at + m;
-    return [
-      { at: s.at, height: 0 },
-      { at: p(f.lip), height: f.height },
-      { at: p(f.lip + back), height: 0 },
-      { at: p(f.lip + back + f.gap), height: 0 },
-      { at: p(f.lip + back * 2 + f.gap), height: f.height },
-      { at: s.at + total, height: 0 },
-    ];
+  const anchor = (a: number, h: number, label: string): Handle => ({ at: a, height: h, label });
+
+  switch (f.kind) {
+    case "custom":
+      return [...f.shape]
+        .sort((a, b) => a.u - b.u)
+        .map((p, i) => ({ at: s.at + p.u * L, height: p.h, label: `${i}` }));
+
+    case "double": {
+      const back = Math.min(2.5, f.lip * 0.5);
+      const p = (m: number) => s.at + m;
+      return [
+        anchor(s.at, 0, "start"),
+        { at: p(f.lip), height: f.height, x: { key: "lip", from: f.lip }, y: { key: "height", from: f.height }, label: "takeoff" },
+        anchor(p(f.lip + back), 0, "lip"),
+        { at: p(f.lip + back + f.gap), height: 0, x: { key: "gap", from: f.gap }, label: "gap" },
+        anchor(p(f.lip + back * 2 + f.gap), f.height, "landing"),
+        anchor(s.at + L, 0, "end"),
+      ];
+    }
+
+    case "whoops":
+      return [
+        anchor(s.at, 0, "start"),
+        { at: s.at + f.spacing / 2, height: f.height, x: { key: "spacing", from: f.spacing }, y: { key: "height", from: f.height }, label: "crest" },
+        { at: s.at + L, height: 0, x: { key: "count", from: f.count }, label: "count" },
+      ];
+
+    case "rut":
+      return [
+        anchor(s.at, 0, "start"),
+        { at: at(0.5), height: -f.depth, y: { key: "depth", from: f.depth }, label: "deep" },
+        { at: s.at + L, height: 0, x: { key: "length", from: f.length }, label: "end" },
+      ];
+
+    case "roller":
+      return [
+        anchor(s.at, 0, "start"),
+        { at: at(0.5), height: f.height, y: { key: "height", from: f.height }, label: "top" },
+        { at: s.at + L, height: 0, x: { key: "length", from: f.length }, label: "end" },
+      ];
+
+    default: {
+      // Tabletop, berm and step-up: up, along, down. Both ends of the flat top set the
+      // height, so it can be pulled from whichever side is nearer the pointer.
+      const g = f as { length: number; height: number };
+      const ends = f.kind === "stepUp" ? g.height : 0;
+      return [
+        anchor(s.at, 0, "start"),
+        { at: at(0.27), height: g.height, y: { key: "height", from: g.height }, label: "up" },
+        { at: at(0.56), height: g.height, y: { key: "height", from: g.height }, label: "top" },
+        { at: s.at + L, height: ends, x: { key: "length", from: g.length }, label: "end" },
+      ];
+    }
   }
-  if (f.kind === "whoops") {
-    return Array.from({ length: f.count * 4 + 1 }, (_, i) => ({
-      at: s.at + (i * f.spacing) / 4,
-      height: (f.height / 2) * (1 - Math.cos((i / 4) * Math.PI * 2)),
-    }));
-  }
-  if (f.kind === "rut") {
-    return [
-      { at: s.at, height: 0 },
-      { at: at(0.35), height: -f.depth },
-      { at: at(0.65), height: -f.depth },
-      { at: s.at + L, height: 0 },
-    ];
-  }
-  if (f.kind === "custom") {
-    return [...f.shape]
-      .sort((a, b) => a.u - b.u)
-      .map((p) => ({ at: s.at + p.u * L, height: p.h }));
-  }
-  const h = (f as { height: number }).height;
-  if (f.kind === "roller") {
-    return Array.from({ length: 17 }, (_, i) => ({
-      at: at(i / 16),
-      height: (h / 2) * (1 - Math.cos((i / 16) * Math.PI * 2)),
-    }));
-  }
-  // Tabletop, berm and step-up all read as up, along, down.
-  return [
-    { at: s.at, height: 0 },
-    { at: at(0.27), height: h },
-    { at: at(0.56), height: h },
-    { at: s.at + L, height: f.kind === "stepUp" ? h : 0 },
-  ];
 }
 
 /**
@@ -292,38 +307,9 @@ export default function ElevationCurve({
     const here = fromPointer(e);
     if (!r || !here) return;
 
-    // In shape mode the points are the feature's own, and a click on empty space adds one.
-    if (mode === "shape" && scoped?.feature) {
-      const f = scoped.feature;
-      const L = featureSpan(f).length;
-      const pts = f.kind === "custom" ? f.shape : [];
-      let near = -1;
-      let best = GRAB_PX;
-      pts.forEach((q, i) => {
-        const d = Math.hypot(
-          ((scoped.at + q.u * L - from) / width) * r.width - (e.clientX - r.left),
-          (toY(q.h) / 100) * r.height - (e.clientY - r.top),
-        );
-        if (d < best) {
-          best = d;
-          near = i;
-        }
-      });
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      const u = Math.min(Math.max((here.at - scoped.at) / Math.max(L, 1e-6), 0), 1);
-      if (near >= 0) {
-        setGrip({ index: near, at: here.at, height: pts[near].h });
-      } else {
-        // A new point where the line was clicked, and the drag continues from it.
-        const next = [...pts, { u, h: here.height }];
-        onShape?.(next);
-        setGrip({ index: next.length - 1, at: here.at, height: here.height });
-      }
-      return;
-    }
-
-    // The scoped step's own numbers come first: they are what the strip is showing.
-    const hs = scoped ? handlesOf(scoped) : [];
+    // Whichever set the strip is showing: the feature's own outline, or the numbers of the
+    // step it is scoped to.
+    const hs = scoped ? (mode === "shape" ? shapeOf(scoped) : handlesOf(scoped)) : [];
     let hit = -1;
     let closest = GRAB_PX;
     hs.forEach((h, i) => {
@@ -421,10 +407,10 @@ export default function ElevationCurve({
   }
 
   function onUp() {
-    if (grip && mode === "shape" && scoped?.feature && onShape) {
+    if (grip && mode === "shape" && scoped?.feature?.kind === "custom" && onShape) {
       const f = scoped.feature;
       const L = featureSpan(f).length;
-      const pts = f.kind === "custom" ? [...f.shape] : [];
+      const pts = [...f.shape].sort((a, b) => a.u - b.u);
       if (pts[grip.index]) {
         pts[grip.index] = {
           u: Math.min(Math.max((grip.at - scoped.at) / Math.max(L, 1e-6), 0), 1),
@@ -438,10 +424,21 @@ export default function ElevationCurve({
       return;
     }
     if (grip && scoped && onScoped) {
-      const h = handlesOf(scoped)[grip.index];
+      const h = (mode === "shape" ? shapeOf(scoped) : handlesOf(scoped))[grip.index];
       const patch: Record<string, number> = {};
       // Sideways moves whatever length that handle governs; up and down moves its height.
-      if (h.x) patch[h.x.key] = Math.max(0.5, h.x.from + (grip.at - h.at));
+      // A corner with nothing bound to it is an anchor — it shows the shape, it doesn't
+      // change it.
+      if (!h.x && !h.y) {
+        setGrip(null);
+        setBar(null);
+        setDrag(null);
+        return;
+      }
+      if (h.x) {
+        const moved = h.x.from + (grip.at - h.at);
+        patch[h.x.key] = h.x.key === "count" ? Math.max(1, Math.round(moved)) : Math.max(0.5, moved);
+      }
       if (h.y) {
         const raw = h.y.from + (grip.height - h.height);
         patch[h.y.key] = h.y.key === "depth" ? Math.max(0, -grip.height) : raw;
@@ -497,9 +494,9 @@ export default function ElevationCurve({
           );
         })}
 
-        {scoped && (
+        {scoped?.feature && (
           <polyline
-            points={silhouette(scoped)
+            points={shapeOf(scoped)
               .map((p) => `${toX(p.at)},${toY(p.height + heightAt(sorted, p.at, lap))}`)
               .join(" ")}
             fill="none"
@@ -532,43 +529,24 @@ export default function ElevationCurve({
 
       {/* Handles as real elements rather than SVG circles: the viewBox is stretched, which
           would make them ovals. */}
-      {mode === "shape" && scoped?.feature?.kind === "custom" &&
-        scoped.feature.shape.map((q, i) => {
-          const L = featureSpan(scoped.feature!).length;
-          const at = grip?.index === i ? grip.at : scoped.at + q.u * L;
-          const height = grip?.index === i ? grip.height : q.h;
-          if (at < from - 0.5 || at > end + 0.5) return null;
-          return (
-            <button
-              key={`s${i}`}
-              onDoubleClick={(ev) => {
-                ev.stopPropagation();
-                onShape?.(scoped.feature!.kind === "custom"
-                  ? scoped.feature!.shape.filter((_, j) => j !== i)
-                  : []);
-              }}
-              style={{ left: `${toX(at)}%`, top: `${toY(height)}%` }}
-              className={cn(
-                "absolute size-2.5 -translate-x-1/2 -translate-y-1/2 cursor-default rounded-full border border-background",
-                grip?.index === i ? "bg-foreground ring-2 ring-primary/50" : "bg-foreground/80",
-              )}
-              title={`${(q.u * 100).toFixed(0)}% · ${height.toFixed(2)} m`}
-            />
-          );
-        })}
-
-      {mode === "height" && scoped &&
-        handlesOf(scoped).map((h, i) => {
+      {scoped &&
+        (mode === "shape" ? shapeOf(scoped) : handlesOf(scoped)).map((h, i) => {
           const at = grip?.index === i ? grip.at : h.at;
           const height = grip?.index === i ? grip.height : h.height;
           if (at < from - 0.5 || at > end + 0.5) return null;
+          const fixed = !h.x && !h.y;
           return (
             <button
               key={`h${i}`}
-              style={{ left: `${toX(at)}%`, top: `${toY(height)}%` }}
+              style={{
+                left: `${toX(at)}%`,
+                top: `${toY(height + heightAt(sorted, at, lap))}%`,
+              }}
               className={cn(
-                "absolute size-3 -translate-x-1/2 -translate-y-1/2 cursor-default rounded-sm border-2 border-background",
-                grip?.index === i ? "bg-foreground ring-2 ring-primary/50" : "bg-foreground/70",
+                "absolute -translate-x-1/2 -translate-y-1/2 cursor-default border-2 border-background",
+                // Anchors are smaller and round: they show the shape without changing it.
+                fixed ? "size-2 rounded-full bg-foreground/35" : "size-3 rounded-sm bg-foreground/70",
+                grip?.index === i && "bg-foreground ring-2 ring-primary/50",
               )}
               title={`${h.label} · ${height.toFixed(2)} m`}
             />
