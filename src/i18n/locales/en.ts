@@ -706,170 +706,6 @@ export const en = {
   "settings.autoRunFrostmod": "Run FrostMod automatically",
   "settings.autoRunFrostmodDesc":
     "Start FrostMod in the background whenever MXB App opens.",
-  "settings.rcamKeys":
-    "Replay camera keys",
-  "settings.rcamKeysDesc":
-    "The game reads the same key at the same moment, so pick keys your camera controls don't use — function keys and the numpad are usually free.",
-  "settings.rcamReset":
-    "Reset",
-  "settings.rcamPressKey":
-    "Press a key",
-  "settings.rcamUnbound":
-    "Not set",
-  "settings.rcamCaptureHint":
-    "Press the key you want. Esc cancels, Backspace clears the binding.",
-  "settings.rcamAppliesHint":
-    "Applies the next time you open the editor in game — no restart needed.",
-  "settings.rcamDuplicate":
-    "Two actions share a key.",
-  "settings.rcamUnsupportedKey":
-    "FrostMod can't use that key.",
-  "settings.rcamSaveFailed":
-    "Could not save the keys",
-  "settings.rcamActionSetkey":
-    "Set key",
-  "settings.rcamActionDelete":
-    "Delete key",
-  "settings.rcamActionClear":
-    "Clear path",
-  "settings.rcamActionPlay":
-    "Play / stop",
-  "settings.rcamActionPrev":
-    "Previous key",
-  "settings.rcamActionNext":
-    "Next key",
-  "settings.rcamActionSave":
-    "Save path",
-  "settings.rcamActionClean":
-    "Hide overlay",
-  "settings.rcamActionLoad":
-    "Load path",
-  "settings.rcamActionEase":
-    "Key ease",
-  "settings.rcamActionTarget":
-    "Aim at rider",
-  "settings.rcamActionNudgeback":
-    "Nudge key back",
-  "settings.rcamActionNudgefwd":
-    "Nudge key forward",
-  "settings.rcamActionUndo":
-    "Undo",
-  "settings.rcamActionRig":
-    "Camera rig",
-  "settings.rcamActionRetime":
-    "Respace by distance",
-  "settings.rcamActionPreview":
-    "Show path",
-  "settings.rcamActionCurve":
-    "Curve style",
-  "settings.rcamActionAnchor":
-    "Path axis",
-  "settings.rcamActionAutofov":
-    "Auto FOV",
-  "settings.rcamPaths":
-    "Replay camera paths",
-  "settings.rcamPathsDesc":
-    "The nine slots FrostMod saves camera paths to. Open one to see where its keys fall, change how it flies, or pass it on.",
-  "settings.rcamPathsEmpty":
-    "Nothing saved yet. Set keys in game with the replay camera editor, then press save.",
-  "settings.rcamUnavailable":
-    "The replay camera can't run on this game build: {{reason}}",
-  "settings.rcamNotCalibrated":
-    "Aiming isn't calibrated yet. Open the editor in game and swing the camera round once.",
-  "settings.rcamRefresh":
-    "Refresh",
-  "settings.rcamSlot":
-    "Slot {{n}}",
-  "settings.rcamSlotEmpty":
-    "Empty",
-  "settings.rcamKeyCount_one":
-    "{{count}} key",
-  "settings.rcamKeyCount_other":
-    "{{count}} keys",
-  "settings.rcamShotCount_one":
-    "{{count}} shot",
-  "settings.rcamShotCount_other":
-    "{{count}} shots",
-  "settings.rcamTimelineHint":
-    "Drag a key to move it. Times snap to the replay's 30 ms grid, and a key can't cross its neighbour.",
-  "settings.rcamKeyAt":
-    "Key at {{time}}",
-  "settings.rcamNoKeySelected":
-    "Pick a key on the timeline to change what it does.",
-  "settings.rcamAim":
-    "Aim at",
-  "settings.rcamAimNone":
-    "nobody",
-  "settings.rcamEaseSmooth":
-    "Smooth",
-  "settings.rcamEaseHold":
-    "Hold",
-  "settings.rcamEaseCut":
-    "Cut",
-  "settings.rcamCurve":
-    "Curve",
-  "settings.rcamCurveCentripetal":
-    "Centripetal",
-  "settings.rcamCurveUniform":
-    "Uniform",
-  "settings.rcamAxis":
-    "Axis",
-  "settings.rcamAxisClock":
-    "Replay clock",
-  "settings.rcamAxisTrack":
-    "Rider's lap",
-  "settings.rcamAxisHint":
-    "Keyed to a rider's lap, the path plays on any lap, any rider, any replay. Every key needs an aimed rider and a lap position.",
-  "settings.rcamRig":
-    "Rig",
-  "settings.rcamRigLocked":
-    "Locked",
-  "settings.rcamRigHandheld":
-    "Handheld",
-  "settings.rcamRigDrone":
-    "Drone",
-  "settings.rcamRigCrane":
-    "Crane",
-  "settings.rcamRigAmount":
-    "Amount",
-  "settings.rcamAutoFov":
-    "Hold the subject's size",
-  "settings.rcamAutoFovHint":
-    "FOV follows the aimed rider so they stay the same size on screen.",
-  "settings.rcamSave":
-    "Save",
-  "settings.rcamRevert":
-    "Revert",
-  "settings.rcamRetime":
-    "Respace by distance",
-  "settings.rcamExport":
-    "Export",
-  "settings.rcamImport":
-    "Import",
-  "settings.rcamDelete":
-    "Delete",
-  "settings.rcamSaved":
-    "Path saved",
-  "settings.rcamWriteFailed":
-    "Could not save the path",
-  "settings.rcamReadFailed":
-    "Could not read the path",
-  "settings.rcamRetimeDone":
-    "Keys respaced. Save to keep it.",
-  "settings.rcamRetimeFailed":
-    "Could not respace the keys",
-  "settings.rcamDeleted":
-    "Slot {{n}} deleted",
-  "settings.rcamDeleteFailed":
-    "Could not delete the path",
-  "settings.rcamImported":
-    "Imported into slot {{n}}",
-  "settings.rcamImportFailed":
-    "Could not import that path",
-  "settings.rcamExported":
-    "Path exported",
-  "settings.rcamExportFailed":
-    "Could not export the path",
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App.",
@@ -2401,4 +2237,32 @@ export const en = {
   "track.kind.custom": "Shape",
   "track.mode.height": "Height",
   "track.mode.shape": "Shape",
+
+  // --- paid plugins ---
+  "plugins.section": "Plugins",
+  "plugins.sectionDesc": "Paid add-ons for MXB App. A licence is a monthly subscription tied to your account, and it keeps working offline for a week between checks.",
+  "plugins.keyLabel": "Redeem a key",
+  "plugins.keyHelp": "Paste the key you were sent. Renewing is another key — it adds to whatever time you have left.",
+  "plugins.redeem": "Redeem",
+  "plugins.redeemed": "{{name}} is licensed on this account.",
+  "plugins.available": "Available",
+  "plugins.refresh": "Refresh",
+  "plugins.loading": "Checking your licences…",
+  "plugins.none": "Nothing on offer yet.",
+  "plugins.install": "Install",
+  "plugins.update": "Update",
+  "plugins.installed": "{{name}} is installed and running.",
+  "plugins.active": "Active",
+  "plugins.activeDetail": "licensed until {{date}}.",
+  "plugins.licensed": "Licensed",
+  "plugins.readyToInstall": "version {{version}} is ready to install.",
+  "plugins.noBuildYet": "there's no build to install yet.",
+  "plugins.updateAvailable": "Update available",
+  "plugins.updateDetail": "you have {{installed}}, {{latest}} is out.",
+  "plugins.needsCheck": "Needs a check-in",
+  "plugins.needsCheckDetail": "it's been a week since we could reach the control plane. Go online and refresh.",
+  "plugins.lapsed": "Lapsed",
+  "plugins.lapsedDetail": "your licence ran out on {{date}}. Redeem a key to carry on.",
+  "plugins.notLicensed": "Not licensed",
+  "plugins.notLicensedDetail": "redeem a key above to unlock it.",
 } as const;

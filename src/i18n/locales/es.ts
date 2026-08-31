@@ -712,170 +712,6 @@ export const es: Translation = {
   "settings.autoRunFrostmod": "Ejecutar FrostMod automáticamente",
   "settings.autoRunFrostmodDesc":
     "Inicia FrostMod en segundo plano cada vez que abres MXB App.",
-  "settings.rcamKeys":
-    "Teclas de la cámara de repetición",
-  "settings.rcamKeysDesc":
-    "El juego lee la misma tecla en el mismo momento, así que elige teclas que tus controles de cámara no usen — las teclas de función y el teclado numérico suelen estar libres.",
-  "settings.rcamReset":
-    "Restablecer",
-  "settings.rcamPressKey":
-    "Pulsa una tecla",
-  "settings.rcamUnbound":
-    "Sin asignar",
-  "settings.rcamCaptureHint":
-    "Pulsa la tecla que quieras. Esc cancela, Retroceso borra la asignación.",
-  "settings.rcamAppliesHint":
-    "Se aplica la próxima vez que abras el editor en el juego — sin reiniciar.",
-  "settings.rcamDuplicate":
-    "Dos acciones comparten una tecla.",
-  "settings.rcamUnsupportedKey":
-    "FrostMod no puede usar esa tecla.",
-  "settings.rcamSaveFailed":
-    "No se pudieron guardar las teclas",
-  "settings.rcamActionSetkey":
-    "Fijar punto",
-  "settings.rcamActionDelete":
-    "Borrar punto",
-  "settings.rcamActionClear":
-    "Vaciar trayecto",
-  "settings.rcamActionPlay":
-    "Reproducir / parar",
-  "settings.rcamActionPrev":
-    "Punto anterior",
-  "settings.rcamActionNext":
-    "Punto siguiente",
-  "settings.rcamActionSave":
-    "Guardar trayecto",
-  "settings.rcamActionClean":
-    "Ocultar superposición",
-  "settings.rcamActionLoad":
-    "Cargar trayecto",
-  "settings.rcamActionEase":
-    "Interpolacion",
-  "settings.rcamActionTarget":
-    "Apuntar al piloto",
-  "settings.rcamActionNudgeback":
-    "Mover atras",
-  "settings.rcamActionNudgefwd":
-    "Mover adelante",
-  "settings.rcamActionUndo":
-    "Deshacer",
-  "settings.rcamActionRig":
-    "Soporte de camara",
-  "settings.rcamActionRetime":
-    "Redistribuir por distancia",
-  "settings.rcamActionPreview":
-    "Mostrar la ruta",
-  "settings.rcamActionCurve":
-    "Estilo de curva",
-  "settings.rcamActionAnchor":
-    "Eje de la ruta",
-  "settings.rcamActionAutofov":
-    "FOV automatico",
-  "settings.rcamPaths":
-    "Rutas de camara de repeticion",
-  "settings.rcamPathsDesc":
-    "Las nueve ranuras donde FrostMod guarda las rutas. Abre una para ver donde caen sus claves, cambiar como vuela o compartirla.",
-  "settings.rcamPathsEmpty":
-    "Aun no hay nada guardado. Pon claves en el juego con el editor de camara y pulsa guardar.",
-  "settings.rcamUnavailable":
-    "La camara de repeticion no funciona en esta version del juego: {{reason}}",
-  "settings.rcamNotCalibrated":
-    "La punteria aun no esta calibrada. Abre el editor en el juego y gira la camara una vez.",
-  "settings.rcamRefresh":
-    "Actualizar",
-  "settings.rcamSlot":
-    "Ranura {{n}}",
-  "settings.rcamSlotEmpty":
-    "Vacia",
-  "settings.rcamKeyCount_one":
-    "{{count}} clave",
-  "settings.rcamKeyCount_other":
-    "{{count}} claves",
-  "settings.rcamShotCount_one":
-    "{{count}} plano",
-  "settings.rcamShotCount_other":
-    "{{count}} planos",
-  "settings.rcamTimelineHint":
-    "Arrastra una clave para moverla. Los tiempos se ajustan a la rejilla de 30 ms y una clave no puede pasar a su vecina.",
-  "settings.rcamKeyAt":
-    "Clave en {{time}}",
-  "settings.rcamNoKeySelected":
-    "Elige una clave en la linea de tiempo para cambiar lo que hace.",
-  "settings.rcamAim":
-    "Apuntar a",
-  "settings.rcamAimNone":
-    "nadie",
-  "settings.rcamEaseSmooth":
-    "Suave",
-  "settings.rcamEaseHold":
-    "Pausa",
-  "settings.rcamEaseCut":
-    "Corte",
-  "settings.rcamCurve":
-    "Curva",
-  "settings.rcamCurveCentripetal":
-    "Centripeta",
-  "settings.rcamCurveUniform":
-    "Uniforme",
-  "settings.rcamAxis":
-    "Eje",
-  "settings.rcamAxisClock":
-    "Reloj de la repeticion",
-  "settings.rcamAxisTrack":
-    "Vuelta del piloto",
-  "settings.rcamAxisHint":
-    "Atada a la vuelta de un piloto, la ruta sirve en cualquier vuelta, piloto y repeticion. Cada clave necesita un piloto apuntado y una posicion en la vuelta.",
-  "settings.rcamRig":
-    "Soporte",
-  "settings.rcamRigLocked":
-    "Fijo",
-  "settings.rcamRigHandheld":
-    "En mano",
-  "settings.rcamRigDrone":
-    "Dron",
-  "settings.rcamRigCrane":
-    "Grua",
-  "settings.rcamRigAmount":
-    "Intensidad",
-  "settings.rcamAutoFov":
-    "Mantener el tamano del sujeto",
-  "settings.rcamAutoFovHint":
-    "El FOV sigue al piloto apuntado para que se vea siempre del mismo tamano.",
-  "settings.rcamSave":
-    "Guardar",
-  "settings.rcamRevert":
-    "Revertir",
-  "settings.rcamRetime":
-    "Redistribuir por distancia",
-  "settings.rcamExport":
-    "Exportar",
-  "settings.rcamImport":
-    "Importar",
-  "settings.rcamDelete":
-    "Eliminar",
-  "settings.rcamSaved":
-    "Ruta guardada",
-  "settings.rcamWriteFailed":
-    "No se pudo guardar la ruta",
-  "settings.rcamReadFailed":
-    "No se pudo leer la ruta",
-  "settings.rcamRetimeDone":
-    "Claves redistribuidas. Guarda para conservarlo.",
-  "settings.rcamRetimeFailed":
-    "No se pudieron redistribuir las claves",
-  "settings.rcamDeleted":
-    "Ranura {{n}} eliminada",
-  "settings.rcamDeleteFailed":
-    "No se pudo eliminar la ruta",
-  "settings.rcamImported":
-    "Importada en la ranura {{n}}",
-  "settings.rcamImportFailed":
-    "No se pudo importar esa ruta",
-  "settings.rcamExported":
-    "Ruta exportada",
-  "settings.rcamExportFailed":
-    "No se pudo exportar la ruta",
   "settings.watchModsReload": "Recarga automática al cambiar la carpeta",
   "settings.watchModsReloadDesc":
     "Recarga el juego automáticamente cuando se añaden pistas o motos a tu carpeta de mods — incluso descargadas manualmente fuera de MXB App.",
@@ -2431,4 +2267,32 @@ export const es: Translation = {
   "track.kind.custom": "Forma",
   "track.mode.height": "Altura",
   "track.mode.shape": "Forma",
+
+  // --- paid plugins ---
+  "plugins.section": "Complementos",
+  "plugins.sectionDesc": "Complementos de pago para MXB App. La licencia es una suscripción mensual ligada a tu cuenta y sigue funcionando sin conexión durante una semana entre comprobaciones.",
+  "plugins.keyLabel": "Canjear una clave",
+  "plugins.keyHelp": "Pega la clave que recibiste. Para renovar usa otra clave: se suma al tiempo que te quede.",
+  "plugins.redeem": "Canjear",
+  "plugins.redeemed": "{{name}} tiene licencia en esta cuenta.",
+  "plugins.available": "Disponibles",
+  "plugins.refresh": "Actualizar",
+  "plugins.loading": "Comprobando tus licencias…",
+  "plugins.none": "Todavía no hay nada disponible.",
+  "plugins.install": "Instalar",
+  "plugins.update": "Actualizar",
+  "plugins.installed": "{{name}} está instalado y en marcha.",
+  "plugins.active": "Activo",
+  "plugins.activeDetail": "con licencia hasta el {{date}}.",
+  "plugins.licensed": "Con licencia",
+  "plugins.readyToInstall": "la versión {{version}} está lista para instalar.",
+  "plugins.noBuildYet": "todavía no hay una compilación para instalar.",
+  "plugins.updateAvailable": "Actualización disponible",
+  "plugins.updateDetail": "tienes la {{installed}}, ha salido la {{latest}}.",
+  "plugins.needsCheck": "Necesita comprobarse",
+  "plugins.needsCheckDetail": "hace una semana que no se puede contactar con el control plane. Conéctate y actualiza.",
+  "plugins.lapsed": "Caducado",
+  "plugins.lapsedDetail": "tu licencia caducó el {{date}}. Canjea una clave para continuar.",
+  "plugins.notLicensed": "Sin licencia",
+  "plugins.notLicensedDetail": "canjea una clave arriba para desbloquearlo.",
 };

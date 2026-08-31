@@ -711,170 +711,6 @@ export const it: Translation = {
   "settings.autoRunFrostmod": "Avvia FrostMod automaticamente",
   "settings.autoRunFrostmodDesc":
     "Avvia FrostMod in background ogni volta che apri MXB App.",
-  "settings.rcamKeys":
-    "Tasti della telecamera replay",
-  "settings.rcamKeysDesc":
-    "Il gioco legge lo stesso tasto nello stesso momento, quindi scegli tasti che i tuoi comandi telecamera non usano — i tasti funzione e il tastierino numerico di solito sono liberi.",
-  "settings.rcamReset":
-    "Ripristina",
-  "settings.rcamPressKey":
-    "Premi un tasto",
-  "settings.rcamUnbound":
-    "Non assegnato",
-  "settings.rcamCaptureHint":
-    "Premi il tasto che vuoi. Esc annulla, Backspace cancella l'assegnazione.",
-  "settings.rcamAppliesHint":
-    "Si applica alla prossima apertura dell'editor in gioco — senza riavviare.",
-  "settings.rcamDuplicate":
-    "Due azioni condividono un tasto.",
-  "settings.rcamUnsupportedKey":
-    "FrostMod non può usare quel tasto.",
-  "settings.rcamSaveFailed":
-    "Impossibile salvare i tasti",
-  "settings.rcamActionSetkey":
-    "Imposta punto",
-  "settings.rcamActionDelete":
-    "Elimina punto",
-  "settings.rcamActionClear":
-    "Svuota percorso",
-  "settings.rcamActionPlay":
-    "Riproduci / ferma",
-  "settings.rcamActionPrev":
-    "Punto precedente",
-  "settings.rcamActionNext":
-    "Punto successivo",
-  "settings.rcamActionSave":
-    "Salva percorso",
-  "settings.rcamActionClean":
-    "Nascondi overlay",
-  "settings.rcamActionLoad":
-    "Carica percorso",
-  "settings.rcamActionEase":
-    "Interpolazione",
-  "settings.rcamActionTarget":
-    "Punta al pilota",
-  "settings.rcamActionNudgeback":
-    "Sposta indietro",
-  "settings.rcamActionNudgefwd":
-    "Sposta avanti",
-  "settings.rcamActionUndo":
-    "Annulla",
-  "settings.rcamActionRig":
-    "Supporto camera",
-  "settings.rcamActionRetime":
-    "Ridistribuisci per distanza",
-  "settings.rcamActionPreview":
-    "Mostra il percorso",
-  "settings.rcamActionCurve":
-    "Stile della curva",
-  "settings.rcamActionAnchor":
-    "Asse del percorso",
-  "settings.rcamActionAutofov":
-    "FOV automatico",
-  "settings.rcamPaths":
-    "Percorsi della camera replay",
-  "settings.rcamPathsDesc":
-    "I nove slot in cui FrostMod salva i percorsi. Aprine uno per vedere dove cadono i key, cambiare come vola o passarlo ad altri.",
-  "settings.rcamPathsEmpty":
-    "Ancora niente salvato. Imposta dei key in gioco con l'editor della camera replay, poi premi salva.",
-  "settings.rcamUnavailable":
-    "La camera replay non funziona su questa build del gioco: {{reason}}",
-  "settings.rcamNotCalibrated":
-    "La mira non e ancora calibrata. Apri l'editor in gioco e fai girare la camera una volta.",
-  "settings.rcamRefresh":
-    "Aggiorna",
-  "settings.rcamSlot":
-    "Slot {{n}}",
-  "settings.rcamSlotEmpty":
-    "Vuoto",
-  "settings.rcamKeyCount_one":
-    "{{count}} key",
-  "settings.rcamKeyCount_other":
-    "{{count}} key",
-  "settings.rcamShotCount_one":
-    "{{count}} inquadratura",
-  "settings.rcamShotCount_other":
-    "{{count}} inquadrature",
-  "settings.rcamTimelineHint":
-    "Trascina un key per spostarlo. I tempi si allineano alla griglia da 30 ms del replay e un key non puo superare il vicino.",
-  "settings.rcamKeyAt":
-    "Key a {{time}}",
-  "settings.rcamNoKeySelected":
-    "Scegli un key sulla timeline per cambiarne il comportamento.",
-  "settings.rcamAim":
-    "Punta a",
-  "settings.rcamAimNone":
-    "nessuno",
-  "settings.rcamEaseSmooth":
-    "Morbida",
-  "settings.rcamEaseHold":
-    "Pausa",
-  "settings.rcamEaseCut":
-    "Stacco",
-  "settings.rcamCurve":
-    "Curva",
-  "settings.rcamCurveCentripetal":
-    "Centripeta",
-  "settings.rcamCurveUniform":
-    "Uniforme",
-  "settings.rcamAxis":
-    "Asse",
-  "settings.rcamAxisClock":
-    "Tempo del replay",
-  "settings.rcamAxisTrack":
-    "Giro del pilota",
-  "settings.rcamAxisHint":
-    "Legato al giro di un pilota, il percorso funziona su qualsiasi giro, pilota e replay. Ogni key deve avere un pilota puntato e una posizione sul giro.",
-  "settings.rcamRig":
-    "Supporto",
-  "settings.rcamRigLocked":
-    "Fisso",
-  "settings.rcamRigHandheld":
-    "A mano",
-  "settings.rcamRigDrone":
-    "Drone",
-  "settings.rcamRigCrane":
-    "Gru",
-  "settings.rcamRigAmount":
-    "Intensita",
-  "settings.rcamAutoFov":
-    "Mantieni la dimensione del soggetto",
-  "settings.rcamAutoFovHint":
-    "Il FOV segue il pilota puntato per tenerlo sempre della stessa dimensione.",
-  "settings.rcamSave":
-    "Salva",
-  "settings.rcamRevert":
-    "Ripristina",
-  "settings.rcamRetime":
-    "Ridistribuisci per distanza",
-  "settings.rcamExport":
-    "Esporta",
-  "settings.rcamImport":
-    "Importa",
-  "settings.rcamDelete":
-    "Elimina",
-  "settings.rcamSaved":
-    "Percorso salvato",
-  "settings.rcamWriteFailed":
-    "Impossibile salvare il percorso",
-  "settings.rcamReadFailed":
-    "Impossibile leggere il percorso",
-  "settings.rcamRetimeDone":
-    "Key ridistribuiti. Salva per mantenerli.",
-  "settings.rcamRetimeFailed":
-    "Impossibile ridistribuire i key",
-  "settings.rcamDeleted":
-    "Slot {{n}} eliminato",
-  "settings.rcamDeleteFailed":
-    "Impossibile eliminare il percorso",
-  "settings.rcamImported":
-    "Importato nello slot {{n}}",
-  "settings.rcamImportFailed":
-    "Impossibile importare quel percorso",
-  "settings.rcamExported":
-    "Percorso esportato",
-  "settings.rcamExportFailed":
-    "Impossibile esportare il percorso",
   "settings.watchModsReload": "Ricarica automatica alle modifiche",
   "settings.watchModsReloadDesc":
     "Ricarica il gioco automaticamente quando piste o moto vengono aggiunte alla cartella mod — anche se scaricate manualmente fuori da MXB App.",
@@ -2424,4 +2260,32 @@ export const it: Translation = {
   "track.kind.custom": "Forma",
   "track.mode.height": "Altezza",
   "track.mode.shape": "Forma",
+
+  // --- paid plugins ---
+  "plugins.section": "Plugin",
+  "plugins.sectionDesc": "Componenti aggiuntivi a pagamento per MXB App. La licenza è un abbonamento mensile legato al tuo account e continua a funzionare offline per una settimana tra un controllo e l'altro.",
+  "plugins.keyLabel": "Riscatta una chiave",
+  "plugins.keyHelp": "Incolla la chiave che hai ricevuto. Per rinnovare serve un'altra chiave: si somma al tempo che ti resta.",
+  "plugins.redeem": "Riscatta",
+  "plugins.redeemed": "{{name}} è concesso in licenza su questo account.",
+  "plugins.available": "Disponibili",
+  "plugins.refresh": "Aggiorna",
+  "plugins.loading": "Controllo delle licenze…",
+  "plugins.none": "Ancora niente disponibile.",
+  "plugins.install": "Installa",
+  "plugins.update": "Aggiorna",
+  "plugins.installed": "{{name}} è installato e attivo.",
+  "plugins.active": "Attivo",
+  "plugins.activeDetail": "con licenza fino al {{date}}.",
+  "plugins.licensed": "Con licenza",
+  "plugins.readyToInstall": "la versione {{version}} è pronta per l'installazione.",
+  "plugins.noBuildYet": "non c'è ancora una build da installare.",
+  "plugins.updateAvailable": "Aggiornamento disponibile",
+  "plugins.updateDetail": "hai la {{installed}}, è uscita la {{latest}}.",
+  "plugins.needsCheck": "Serve un controllo",
+  "plugins.needsCheckDetail": "è passata una settimana dall'ultimo contatto con il control plane. Vai online e aggiorna.",
+  "plugins.lapsed": "Scaduto",
+  "plugins.lapsedDetail": "la licenza è scaduta il {{date}}. Riscatta una chiave per continuare.",
+  "plugins.notLicensed": "Senza licenza",
+  "plugins.notLicensedDetail": "riscatta una chiave qui sopra per sbloccarlo.",
 };

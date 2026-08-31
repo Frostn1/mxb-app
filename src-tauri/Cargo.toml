@@ -104,6 +104,10 @@ notify-debouncer-mini = "0.4"
 # Check an installed FrostMod binary against the digest its GitHub release advertises,
 # so an install that only half-applied can be spotted and repaired.
 sha2 = "0.10"
+# Verifies the signature on a paid plugin's entitlement. Verification only — the app holds
+# the public half of the pair and never signs anything, which is the whole reason this is a
+# signature rather than a MAC whose key would ship inside the binary.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # The 16-byte digest a `.pnt`/`.edf` texture header carries beside its dimensions, written
 # when the app builds a paint of its own (`paint::encode`). Shares the `digest` traits
 # `sha2` already pulls in, so it costs one small crate.
