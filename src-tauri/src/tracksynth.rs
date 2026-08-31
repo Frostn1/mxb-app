@@ -728,23 +728,29 @@ fn berm_profile(features: &[Feature], turn: &Profile, lap: f32) -> Profile {
 /// check is what notices.
 fn apply_rise(along: &mut [f32], st: &[Station], segments: &[Segment]) {
     let mut at = 0.0f32;
-    let mut base = 0.0f32;
     for seg in segments {
         let len = seg.length();
         let rise = seg.rise();
         if len <= 0.0 {
             continue;
         }
-        for (i, s) in st.iter().enumerate() {
-            if s.s < at {
-                continue;
+        if rise != 0.0 {
+            for (i, s) in st.iter().enumerate() {
+                if s.s < at {
+                    continue;
+                }
+                // Each segment contributes only its *own* climb — eased across it, and held
+                // at full value for everything after. Summing those over the segments a
+                // station is past is the cumulative height, with nothing counted twice.
+                //
+                // It carried a running total as well, and added that to every station past
+                // each segment's start. Every later segment then re-added what the earlier
+                // ones had already left there, so a lap whose rises cancelled finished metres
+                // above where it started — and the terrain wore the difference as a cliff.
+                let u = ((s.s - at) / len).clamp(0.0, 1.0);
+                along[i] += rise * smoothstep(u);
             }
-            let u = ((s.s - at) / len).clamp(0.0, 1.0);
-            along[i] += base + rise * smoothstep(u);
         }
-        // Undo the part of the loop above that ran past this segment: stations beyond it
-        // took `base + rise`, which is exactly what the next segment's base should be.
-        base += rise;
         at += len;
     }
 }
@@ -826,20 +832,32 @@ fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Smooth a quantity that runs round the lap.
+///
+/// **Circular.** A lap is a loop, and smoothing it as a line gives the first and last
+/// stations different neighbourhoods to average — so the track's own elevation came out at
+/// two different heights on the two sides of the finish line, and the terrain wore the
+/// difference as a step across it. Two metres of step, on a lap that closes perfectly.
 fn smooth_along(v: &mut [f32], r: usize) {
-    if r == 0 || v.len() < 3 {
+    let n = v.len();
+    if r == 0 || n < 3 {
         return;
     }
-    let n = v.len();
-    let mut pre = vec![0.0f64; n + 1];
-    for i in 0..n {
-        pre[i + 1] = pre[i] + v[i] as f64;
+    // Prefix sums over the sequence laid end to end three times, so a window centred
+    // anywhere in the middle copy can run off either side and still land on real values.
+    // Two copies is not enough: the last station's window reaches past the end of them.
+    let mut pre = vec![0.0f64; 3 * n + 1];
+    for i in 0..3 * n {
+        pre[i + 1] = pre[i] + v[i % n] as f64;
     }
-    for i in 0..n {
-        let a = i.saturating_sub(r);
-        let b = (i + r + 1).min(n);
-        v[i] = ((pre[b] - pre[a]) / (b - a) as f64) as f32;
-    }
+    let span = (2 * r + 1).min(n);
+    let out: Vec<f32> = (0..n)
+        .map(|i| {
+            let start = i + n - span / 2;
+            ((pre[start + span] - pre[start]) / span as f64) as f32
+        })
+        .collect();
+    v.copy_from_slice(&out);
 }
 
 fn sample(h: &[f32], gw: usize, gh: usize, x: f32, y: f32) -> f32 {
@@ -1757,6 +1775,10 @@ mod tests {
     fn a_segment_that_rises_takes_the_track_with_it() {
         let mut p = oval();
         p.features.clear();
+        // Flat ground, so what is measured is the rise and not the hill it was laid on: the
+        // track follows the landscape, and this oval's landscape moves several metres over
+        // the length of a straight.
+        p.terrain.relief.amplitude = 0.0;
         // The first straight climbs six metres; the far one gives them back, so the lap
         // still meets itself at the same height.
         p.segments[0] = Segment::Straight { length: 160.0, rise: 6.0 };
@@ -1770,6 +1792,45 @@ mod tests {
         // And it is a hill, not a step: half way up is half way there.
         let half = height_at_arc(&s, 80.0) - height_at_arc(&s, 5.0);
         assert!((half - 3.0).abs() < 1.2, "half way up reads {half:.2} m");
+
+        // The whole point: rises that cancel bring the lap home level. Checked at the far
+        // end, which is the only place a running total that compounds can show itself.
+        let lap = p.lap_length();
+        let home = height_at_arc(&s, lap - 2.0) - height_at_arc(&s, 2.0);
+        assert!(
+            home.abs() < 1.0,
+            "the lap comes back {home:.2} m off the height it left at"
+        );
+    }
+
+    /// Rises are cumulative, and nothing should count twice. Two climbs and two drops of the
+    /// same size, spread round a lap, has to come out level however many segments carry it.
+    #[test]
+    fn climbs_and_drops_cancel_however_many_there_are() {
+        let mut p = oval();
+        p.features.clear();
+        p.segments = vec![
+            Segment::Straight { length: 80.0, rise: 4.0 },
+            Segment::Arc { radius: 60.0, angle: 180.0, rise: -4.0 },
+            Segment::Straight { length: 80.0, rise: 4.0 },
+            Segment::Arc { radius: 60.0, angle: 180.0, rise: -4.0 },
+        ];
+        let s = synthesise(&p).unwrap();
+        let lap = p.lap_length();
+        let drift = height_at_arc(&s, lap - 2.0) - height_at_arc(&s, 2.0);
+        assert!(drift.abs() < 1.0, "drifted {drift:.2} m over the lap");
+        // And it never climbs more than the 4 m any one segment asked for.
+        let peak = (0..40)
+            .map(|i| height_at_arc(&s, lap * i as f32 / 40.0))
+            .fold(f32::MIN, f32::max);
+        let floor = (0..40)
+            .map(|i| height_at_arc(&s, lap * i as f32 / 40.0))
+            .fold(f32::MAX, f32::min);
+        assert!(
+            peak - floor < 12.0,
+            "the line spans {:.1} m for two 4 m climbs",
+            peak - floor
+        );
     }
 
     #[test]
