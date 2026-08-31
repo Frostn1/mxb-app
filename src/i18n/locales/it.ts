@@ -56,7 +56,7 @@ export const it: Translation = {
   "nav.paints": "Livree",
   "nav.studio": "Studio",
   "nav.servers": "Server",
-  "nav.manage": "Gestisci",
+  "nav.manage": "Modalità gara",
   "nav.settings": "Impostazioni",
 
   "sidebar.installing": "Installazione di “{{name}}”",
@@ -1573,6 +1573,18 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0124.hero.title":
+    "Tutta la griglia con la livrea che ha davvero scelto",
+  "showcase.v0124.hero.body":
+    "MX Bikes non trasmette contenuti personalizzati, quindi una lobby di sconosciuti è sempre stata una lobby di livree predefinite. MXB App ora condivide quello che indossi con i piloti attorno a te e installa le loro — su qualsiasi server, senza nulla da fare per l'host e senza codici.",
+  "showcase.v0124.anyserver":
+    "Qualsiasi server, non solo i nostri. L'app legge il server dal gioco in esecuzione, così una lobby pubblica funziona come una privata.",
+  "showcase.v0124.nosetup":
+    "Niente da configurare. Nessun codice d'invito, nessuna registrazione, niente da installare sul server — avvia il gioco e parte.",
+  "showcase.v0124.everyone":
+    "Vedrai ogni pilota che ha anch'esso MXB App. Più ce ne sono nella tua lobby, più la griglia appare giusta.",
+  "showcase.v0124.settings":
+    "Impostazioni → Sincronizzazione livree mostra cosa è uscito, cosa è arrivato e ogni livrea che ha rifiutato di sovrascrivere. L'interruttore è in Generali.",
   "showcase.v0122.hero.title":
     "La telecamera replay può seguire il pilota",
   "showcase.v0122.hero.body":

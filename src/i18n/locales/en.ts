@@ -55,7 +55,7 @@ export const en = {
   "nav.paints": "Paints",
   "nav.studio": "Studio",
   "nav.servers": "Servers",
-  "nav.manage": "Manage",
+  "nav.manage": "Race mode",
   "nav.settings": "Settings",
 
   "sidebar.installing": "Installing “{{name}}”",
@@ -1552,6 +1552,18 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0124.hero.title":
+    "Everyone on the grid, in the paint they actually chose",
+  "showcase.v0124.hero.body":
+    "MX Bikes sends no custom content, so a lobby of strangers has always been a lobby of default liveries. MXB App now shares what you're wearing with the riders around you and installs theirs — on any server, with nothing for the host to do and no code to enter.",
+  "showcase.v0124.anyserver":
+    "Any server, not just ours. The app reads the server from the running game, so a public lobby works exactly like a private one.",
+  "showcase.v0124.nosetup":
+    "Nothing to set up. No invite code, no sign-up, no server-side install — start the game and it goes.",
+  "showcase.v0124.everyone":
+    "You'll see any rider who also has MXB App. The more of your lobby that does, the more of the grid looks right.",
+  "showcase.v0124.settings":
+    "Settings → Paint sync shows what went out, what came back, and any paint it refused to overwrite. The switch to turn it off is in General.",
   "showcase.v0122.hero.title":
     "The replay camera can follow the rider",
   "showcase.v0122.hero.body":

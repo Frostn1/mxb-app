@@ -59,7 +59,7 @@ export const ptBR: Translation = {
   "nav.paints": "Pinturas",
   "nav.studio": "Studio",
   "nav.servers": "Servidores",
-  "nav.manage": "Gerenciar",
+  "nav.manage": "Modo corrida",
   "nav.settings": "Configurações",
 
   "sidebar.installing": "Instalando “{{name}}”",
@@ -1571,6 +1571,18 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0124.hero.title":
+    "Todo o grid com a pintura que realmente escolheu",
+  "showcase.v0124.hero.body":
+    "O MX Bikes não envia conteúdo personalizado, então uma sala de desconhecidos sempre foi uma sala de pinturas padrão. O MXB App agora compartilha o que você está usando com os pilotos ao seu redor e instala as deles — em qualquer servidor, sem nada a fazer para o host e sem código.",
+  "showcase.v0124.anyserver":
+    "Qualquer servidor, não só os nossos. O app lê o servidor do jogo em execução, então uma sala pública funciona igual a uma privada.",
+  "showcase.v0124.nosetup":
+    "Nada para configurar. Sem código de convite, sem cadastro, sem instalar nada no servidor — abra o jogo e pronto.",
+  "showcase.v0124.everyone":
+    "Você verá qualquer piloto que também tenha o MXB App. Quanto mais gente na sua sala tiver, mais o grid fica certo.",
+  "showcase.v0124.settings":
+    "Configurações → Sincronização de pinturas mostra o que saiu, o que chegou e qualquer pintura que ela recusou sobrescrever. O interruptor fica em Geral.",
   "showcase.v0122.hero.title":
     "A câmera de replay pode seguir o piloto",
   "showcase.v0122.hero.body":
