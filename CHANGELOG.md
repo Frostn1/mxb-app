@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Settings → FrostMod lists the nine replay camera slots. Open one to see where its keys
+  fall, drag a key to move it, change what a key does, and set how the path flies.
+- Camera paths can be exported and imported, so one can be passed to someone else.
+- Respace by distance, for a constant-speed dolly. A cut keeps the length it was given.
+- The panel says when the replay camera can't run on your game build, and why. That reason
+  only existed in a log file next to a DLL before.
+- FrostMod's eleven new replay camera actions are in the key list.
+
 ## 2026-08-31 — v0.12.1
 
 ### Added

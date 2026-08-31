@@ -1222,7 +1222,7 @@ pub struct Keybind {
 
 /// Mirrors `kb::Actions()` in FrostMod's `src/keybinds.h`, in the same order. The ids are
 /// the config keys (`rcam_<id>`); the UI labels them itself, translated.
-const RCAM_ACTIONS: [(&str, &str); 9] = [
+const RCAM_ACTIONS: [(&str, &str); 20] = [
     ("setkey", "K"),
     ("delete", "X"),
     ("clear", "C"),
@@ -1234,6 +1234,21 @@ const RCAM_ACTIONS: [(&str, &str); 9] = [
     // Hiding the overlay defaults to a function key, not a letter: it is pressed while
     // recording, so a key the game might have bound would be the wrong default.
     ("clean", "F7"),
+    // Per-key edits, pressed while scrubbing.
+    ("ease", "E"),
+    ("target", "T"),
+    ("nudgeback", "LeftBracket"),
+    ("nudgefwd", "RightBracket"),
+    ("undo", "U"),
+    ("rig", "R"),
+    ("retime", "Ctrl+R"),
+    ("preview", "V"),
+    // Whole-path settings. Unbound on purpose: they are set once per path, this app has a
+    // panel for them, and a letter the replay screen may already use is a worse default
+    // than no key at all.
+    ("curve", "none"),
+    ("anchor", "none"),
+    ("autofov", "none"),
 ];
 
 /// Key names FrostMod can parse, beyond the plain letters and digits. Mirrors the table in
@@ -1416,12 +1431,21 @@ mod rcam_tests {
     fn defaults_match_frostmods() {
         // If FrostMod's defaults move, this is the reminder to move ours with them.
         let d = default_rcam_keybinds();
-        assert_eq!(d.len(), 9);
+        assert_eq!(d.len(), 20);
         assert_eq!(d[0].id, "setkey");
         assert_eq!(d[0].key, "K");
         assert_eq!(d[6].key, "S");
         assert_eq!(d[8].id, "clean");
         assert_eq!(d[8].key, "F7");
+        // Appended after the first release, so the ids above keep their places and a
+        // binding someone already set is not silently moved onto another action.
+        assert_eq!(d[9].id, "ease");
+        assert_eq!(d[16].id, "preview");
+        // Three ship unbound on purpose; "none" is a binding FrostMod parses, not a gap.
+        for id in ["curve", "anchor", "autofov"] {
+            let b = d.iter().find(|b| b.id == id).expect("missing action");
+            assert_eq!(b.key, "none", "{id} should ship unbound");
+        }
         for b in &d {
             assert!(valid_bind(&b.key), "default {} is not valid", b.key);
         }

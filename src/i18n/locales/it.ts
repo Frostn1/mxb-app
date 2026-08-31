@@ -741,6 +741,132 @@ export const it: Translation = {
     "Nascondi overlay",
   "settings.rcamActionLoad":
     "Carica percorso",
+  "settings.rcamActionEase":
+    "Interpolazione",
+  "settings.rcamActionTarget":
+    "Punta al pilota",
+  "settings.rcamActionNudgeback":
+    "Sposta indietro",
+  "settings.rcamActionNudgefwd":
+    "Sposta avanti",
+  "settings.rcamActionUndo":
+    "Annulla",
+  "settings.rcamActionRig":
+    "Supporto camera",
+  "settings.rcamActionRetime":
+    "Ridistribuisci per distanza",
+  "settings.rcamActionPreview":
+    "Mostra il percorso",
+  "settings.rcamActionCurve":
+    "Stile della curva",
+  "settings.rcamActionAnchor":
+    "Asse del percorso",
+  "settings.rcamActionAutofov":
+    "FOV automatico",
+  "settings.rcamPaths":
+    "Percorsi della camera replay",
+  "settings.rcamPathsDesc":
+    "I nove slot in cui FrostMod salva i percorsi. Aprine uno per vedere dove cadono i key, cambiare come vola o passarlo ad altri.",
+  "settings.rcamPathsEmpty":
+    "Ancora niente salvato. Imposta dei key in gioco con l'editor della camera replay, poi premi salva.",
+  "settings.rcamUnavailable":
+    "La camera replay non funziona su questa build del gioco: {{reason}}",
+  "settings.rcamNotCalibrated":
+    "La mira non e ancora calibrata. Apri l'editor in gioco e fai girare la camera una volta.",
+  "settings.rcamRefresh":
+    "Aggiorna",
+  "settings.rcamSlot":
+    "Slot {{n}}",
+  "settings.rcamSlotEmpty":
+    "Vuoto",
+  "settings.rcamKeyCount_one":
+    "{{count}} key",
+  "settings.rcamKeyCount_other":
+    "{{count}} key",
+  "settings.rcamShotCount_one":
+    "{{count}} inquadratura",
+  "settings.rcamShotCount_other":
+    "{{count}} inquadrature",
+  "settings.rcamTimelineHint":
+    "Trascina un key per spostarlo. I tempi si allineano alla griglia da 30 ms del replay e un key non puo superare il vicino.",
+  "settings.rcamKeyAt":
+    "Key a {{time}}",
+  "settings.rcamNoKeySelected":
+    "Scegli un key sulla timeline per cambiarne il comportamento.",
+  "settings.rcamAim":
+    "Punta a",
+  "settings.rcamAimNone":
+    "nessuno",
+  "settings.rcamEaseSmooth":
+    "Morbida",
+  "settings.rcamEaseHold":
+    "Pausa",
+  "settings.rcamEaseCut":
+    "Stacco",
+  "settings.rcamCurve":
+    "Curva",
+  "settings.rcamCurveCentripetal":
+    "Centripeta",
+  "settings.rcamCurveUniform":
+    "Uniforme",
+  "settings.rcamAxis":
+    "Asse",
+  "settings.rcamAxisClock":
+    "Tempo del replay",
+  "settings.rcamAxisTrack":
+    "Giro del pilota",
+  "settings.rcamAxisHint":
+    "Legato al giro di un pilota, il percorso funziona su qualsiasi giro, pilota e replay. Ogni key deve avere un pilota puntato e una posizione sul giro.",
+  "settings.rcamRig":
+    "Supporto",
+  "settings.rcamRigLocked":
+    "Fisso",
+  "settings.rcamRigHandheld":
+    "A mano",
+  "settings.rcamRigDrone":
+    "Drone",
+  "settings.rcamRigCrane":
+    "Gru",
+  "settings.rcamRigAmount":
+    "Intensita",
+  "settings.rcamAutoFov":
+    "Mantieni la dimensione del soggetto",
+  "settings.rcamAutoFovHint":
+    "Il FOV segue il pilota puntato per tenerlo sempre della stessa dimensione.",
+  "settings.rcamSave":
+    "Salva",
+  "settings.rcamRevert":
+    "Ripristina",
+  "settings.rcamRetime":
+    "Ridistribuisci per distanza",
+  "settings.rcamExport":
+    "Esporta",
+  "settings.rcamImport":
+    "Importa",
+  "settings.rcamDelete":
+    "Elimina",
+  "settings.rcamSaved":
+    "Percorso salvato",
+  "settings.rcamWriteFailed":
+    "Impossibile salvare il percorso",
+  "settings.rcamReadFailed":
+    "Impossibile leggere il percorso",
+  "settings.rcamRetimeDone":
+    "Key ridistribuiti. Salva per mantenerli.",
+  "settings.rcamRetimeFailed":
+    "Impossibile ridistribuire i key",
+  "settings.rcamDeleted":
+    "Slot {{n}} eliminato",
+  "settings.rcamDeleteFailed":
+    "Impossibile eliminare il percorso",
+  "settings.rcamImported":
+    "Importato nello slot {{n}}",
+  "settings.rcamImportFailed":
+    "Impossibile importare quel percorso",
+  "settings.rcamExported":
+    "Percorso esportato",
+  "settings.rcamExportFailed":
+    "Impossibile esportare il percorso",
   "settings.watchModsReload": "Ricarica automatica alle modifiche",
   "settings.watchModsReloadDesc":
     "Ricarica il gioco automaticamente quando piste o moto vengono aggiunte alla cartella mod — anche se scaricate manualmente fuori da MXB App.",
