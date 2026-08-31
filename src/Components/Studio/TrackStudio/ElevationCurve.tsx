@@ -36,13 +36,18 @@ const GRAB_PX = 14;
  */
 export default function ElevationCurve({ lap, knots, features, onChange, className }: Props) {
   const box = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState<number | null>(null);
+  // The point being dragged, held here rather than pushed upstream on every move: a drag is
+  // a hundred events, each of which would otherwise rebuild and re-measure the whole track.
+  // The line follows the pointer from this; the program hears about it once, on release.
+  const [drag, setDrag] = useState<{ index: number; knot: Knot } | null>(null);
 
-  const span = Math.max(
-    MIN_RANGE,
-    ...knots.map((k) => Math.abs(k.height) + 1),
-  );
-  const sorted = [...knots].sort((a, b) => a.at - b.at);
+  const live = drag
+    ? knots.map((k, i) => (i === drag.index ? drag.knot : k))
+    : knots;
+  const span = Math.max(MIN_RANGE, ...live.map((k) => Math.abs(k.height) + 1));
+  // Sorted for drawing only. The array itself keeps its order, so dragging a point past its
+  // neighbour doesn't renumber the thing under the pointer and swap which one you are moving.
+  const sorted = [...live].sort((a, b) => a.at - b.at);
 
   const toX = (at: number) => (lap > 0 ? (at / lap) * 100 : 0);
   const toY = (h: number) => 50 - (h / span) * 45;
@@ -64,7 +69,7 @@ export default function ElevationCurve({ lap, knots, features, onChange, classNa
     // would make a point at the far end of a long lap easier to grab than one underfoot.
     let near = -1;
     let best = GRAB_PX;
-    sorted.forEach((k, i) => {
+    live.forEach((k, i) => {
       const dx = (toX(k.at) / 100) * r.width - (e.clientX - r.left);
       const dy = (toY(k.height) / 100) * r.height - (e.clientY - r.top);
       const d = Math.hypot(dx, dy);
@@ -75,20 +80,24 @@ export default function ElevationCurve({ lap, knots, features, onChange, classNa
     });
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     if (near >= 0) {
-      setDragging(near);
+      setDrag({ index: near, knot: live[near] });
       return;
     }
-    const next = [...sorted, here].sort((a, b) => a.at - b.at);
-    setDragging(next.findIndex((k) => k === here));
+    // A new point, added where the line was clicked and then dragged from there.
+    const next = [...knots, here];
+    setDrag({ index: next.length - 1, knot: here });
     onChange(next);
   }
 
   function onMove(e: React.PointerEvent) {
-    if (dragging === null) return;
+    if (!drag) return;
     const here = fromPointer(e);
-    if (!here) return;
-    const next = sorted.map((k, i) => (i === dragging ? here : k));
-    onChange(next);
+    if (here) setDrag({ ...drag, knot: here });
+  }
+
+  function onUp() {
+    if (drag) onChange(knots.map((k, i) => (i === drag.index ? drag.knot : k)));
+    setDrag(null);
   }
 
   return (
@@ -97,8 +106,8 @@ export default function ElevationCurve({ lap, knots, features, onChange, classNa
       className={cn("relative select-none", className)}
       onPointerDown={onDown}
       onPointerMove={onMove}
-      onPointerUp={() => setDragging(null)}
-      onPointerCancel={() => setDragging(null)}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
     >
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
         {/* Ground level, which is what the numbers are relative to. */}
@@ -139,17 +148,17 @@ export default function ElevationCurve({ lap, knots, features, onChange, classNa
 
       {/* Handles as real elements rather than SVG circles: the viewBox is stretched, which
           would make them ovals. */}
-      {sorted.map((k, i) => (
+      {live.map((k, i) => (
         <button
           key={i}
           onDoubleClick={(e) => {
             e.stopPropagation();
-            onChange(sorted.filter((_, j) => j !== i));
+            onChange(knots.filter((_, j) => j !== i));
           }}
           style={{ left: `${toX(k.at)}%`, top: `${toY(k.height)}%` }}
           className={cn(
             "absolute size-2.5 -translate-x-1/2 -translate-y-1/2 cursor-default rounded-full border border-background bg-primary",
-            dragging === i && "ring-2 ring-primary/50",
+            drag?.index === i && "ring-2 ring-primary/50",
           )}
           title={`${k.at.toFixed(0)} m · ${k.height.toFixed(1)} m`}
         />
