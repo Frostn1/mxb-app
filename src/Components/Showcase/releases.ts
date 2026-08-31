@@ -9,6 +9,10 @@
  * else knows about versions.
  */
 import {
+  Crosshair,
+  Scissors,
+  Route,
+  ListVideo,
   EyeOff,
   Mountain,
   Sun,
@@ -71,6 +75,20 @@ export interface Release {
 }
 
 export const RELEASES: Release[] = [
+  {
+    version: "0.12.2",
+    hero: {
+      icon: Crosshair,
+      title: "showcase.v0122.hero.title",
+      body: "showcase.v0122.hero.body",
+    },
+    highlights: [
+      { icon: Crosshair, text: "showcase.v0122.aim" },
+      { icon: Scissors, text: "showcase.v0122.shots" },
+      { icon: Route, text: "showcase.v0122.preview" },
+      { icon: ListVideo, text: "showcase.v0122.paths" },
+    ],
+  },
   {
     version: "0.12.1",
     hero: {

@@ -1569,6 +1569,18 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0122.hero.title":
+    "La telecamera replay può seguire il pilota",
+  "showcase.v0122.hero.body":
+    "Punta un key su un pilota e la telecamera replay di FrostMod lo inquadra fotogramma per fotogramma, invece degli angoli che hai impostato. Stacca tra le inquadrature, fermati su una, e guarda tutto il percorso nel mondo mentre lo costruisci.",
+  "showcase.v0122.aim":
+    "Premi T su un key per puntarlo su un pilota. La telecamera lo segue, e con due piloti sullo stesso tratto passa dolcemente dall'uno all'altro.",
+  "showcase.v0122.shots":
+    "E decide cosa fa un key: passarci attraverso, fermarsi, o staccare di netto sull'inquadratura successiva. Un percorso può essere un montaggio intero.",
+  "showcase.v0122.preview":
+    "V disegna il percorso nel mondo mentre lo costruisci, e U annulla l'ultima modifica — fino a ventiquattro indietro.",
+  "showcase.v0122.paths":
+    "Impostazioni → FrostMod elenca ogni percorso salvato: dove cadono i suoi key, come vola, e come passarlo a qualcuno.",
   "showcase.v0121.hero.title":
     "I tasti della telecamera replay, sulla tua tastiera",
   "showcase.v0121.hero.body":

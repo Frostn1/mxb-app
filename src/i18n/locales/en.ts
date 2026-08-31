@@ -1548,6 +1548,18 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0122.hero.title":
+    "The replay camera can follow the rider",
+  "showcase.v0122.hero.body":
+    "Aim a key at a rider and FrostMod's replay camera points at them frame by frame, instead of at the angles you flew. Cut between shots, hold on one, and watch the whole path in the world while you build it.",
+  "showcase.v0122.aim":
+    "Press T on a key to aim it at a rider. The camera tracks them, and two riders across one stretch eases from one to the other.",
+  "showcase.v0122.shots":
+    "E decides what a key does: run through it, settle on it, or cut hard to the next shot. One path can be a whole edit.",
+  "showcase.v0122.preview":
+    "V draws the path in the world while you build it, and U undoes the last edit — twenty-four deep.",
+  "showcase.v0122.paths":
+    "Settings → FrostMod lists every saved path: where its keys fall, how it flies, and a way to hand one to someone.",
   "showcase.v0121.hero.title":
     "Your replay camera keys, your keyboard",
   "showcase.v0121.hero.body":

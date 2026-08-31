@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-08-31 — v0.12.2
 
 ### Added
 - Settings → FrostMod lists the nine replay camera slots. Open one to see where its keys
@@ -10,6 +10,8 @@
 - The panel says when the replay camera can't run on your game build, and why. That reason
   only existed in a log file next to a DLL before.
 - FrostMod's eleven new replay camera actions are in the key list.
+- The camera itself learned to aim at a rider, cut between shots and fly with a handheld or
+  drone rig, in FrostMod 0.15.3 — which the app installs and updates for you.
 
 ## 2026-08-31 — v0.12.1
 

@@ -1567,6 +1567,18 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0122.hero.title":
+    "A câmera de replay pode seguir o piloto",
+  "showcase.v0122.hero.body":
+    "Mire uma chave em um piloto e a câmera de replay do FrostMod aponta para ele quadro a quadro, em vez dos ângulos que você voou. Corte entre planos, segure em um, e veja todo o caminho no mundo enquanto o monta.",
+  "showcase.v0122.aim":
+    "Pressione T em uma chave para mirar em um piloto. A câmera o segue, e com dois pilotos no mesmo trecho ela passa suavemente de um para o outro.",
+  "showcase.v0122.shots":
+    "E decide o que uma chave faz: passar por ela, parar nela, ou cortar seco para o próximo plano. Um caminho pode ser uma edição inteira.",
+  "showcase.v0122.preview":
+    "V desenha o caminho no mundo enquanto você o monta, e U desfaz a última alteração — até vinte e quatro atrás.",
+  "showcase.v0122.paths":
+    "Configurações → FrostMod lista cada caminho salvo: onde caem suas chaves, como ele voa, e como passá-lo adiante.",
   "showcase.v0121.hero.title":
     "As teclas da câmera de replay são suas",
   "showcase.v0121.hero.body":
