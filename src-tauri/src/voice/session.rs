@@ -160,7 +160,7 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
         // Already here. Keep presence fresh — it is what the room checks on the way in, so
         // a reconnect after a blip must not be turned away — and pass on a race number that
         // has arrived since we joined, which is what places this rider on the grid.
-        if let Ok((token, _)) = signal::ensure_account(&cfg).await {
+        if let Ok(token) = signal::account(app, &cfg).await {
             let _ = crate::paintsync::report_presence(&token, &key).await;
         }
         session.send(engine::Command::Rider {
@@ -173,19 +173,7 @@ async fn reconcile(app: &AppHandle) -> Result<(), String> {
     // Somewhere new.
     session.stop();
 
-    let (token, is_new) = signal::ensure_account(&cfg).await?;
-    if is_new {
-        // Re-read before writing: `save` rewrites the whole file and this ran across an
-        // await, so the config on disk may have moved on.
-        let mut cfg = crate::config::load_or_detect(app).unwrap_or_default();
-        cfg.cp_token = token.clone();
-        if cfg.cp_rider_name.trim().is_empty() {
-            cfg.cp_rider_name = signal::rider_name(&cfg);
-        }
-        if let Err(e) = crate::config::save(app, &cfg) {
-            log::warn!("[voice] couldn't save the voice account: {e:#}");
-        }
-    }
+    let token = signal::account(app, &cfg).await?;
 
     // Presence before joining: the room admits a rider because the control plane already
     // believes they are on this server, so saying so has to come first.

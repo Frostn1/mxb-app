@@ -2418,6 +2418,11 @@ export function setVoiceEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_voice_enabled", { enabled });
 }
 
+/** Share this rider's look with the grid, and install the grid's back. */
+export function setPaintSyncEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_paint_sync_enabled", { enabled });
+}
+
 /** Pick the tyre pack the 3D previews fit. `""` means "whatever the bike names". */
 export function setPreviewTyres(tyres: string): Promise<void> {
   return invoke<void>("set_preview_tyres", { tyres });
@@ -2716,15 +2721,18 @@ export function appPlatform(): Promise<string> {
 export interface ExperimentalState {
   /** The MX Bikes GUID this account has claimed, if any. */
   guid?: string;
-  /** Whether the unfinished multiplayer features should be shown at all. */
-  enabled: boolean;
-  /** On because `MXB_EXPERIMENTAL=1` was set, so the toggle can explain itself. */
-  forcedByEnv: boolean;
   version: string;
   /** A semver pre-release suffix (`0.8.0-beta.1`) — what makes this build a beta. */
   prerelease: boolean;
-  /** Whether this install has a control-plane account yet. */
+  /**
+   * Whether this install has a control-plane account yet.
+   *
+   * No longer "typed in an invite code": paint sync claims one on its own the first time it
+   * runs, so this is simply whether the control plane knows who this is.
+   */
   enrolled: boolean;
+  /** Whether paint sync is running at all. Off is a setting, not a missing account. */
+  paintSyncEnabled: boolean;
   riderName: string;
   /** What paint sync last achieved — present so a cold start can say so straight away. */
   sync: SyncState;
@@ -2797,10 +2805,6 @@ export function onSyncEvent(cb: (event: SyncEvent) => void): Promise<UnlistenFn>
 
 export function experimentalState(): Promise<ExperimentalState> {
   return invoke<ExperimentalState>("experimental_state");
-}
-
-export function setExperimental(enabled: boolean): Promise<void> {
-  return invoke<void>("set_experimental", { enabled });
 }
 
 /** Trade an invite code for an account. The token is stored by the backend, never here. */

@@ -21,7 +21,6 @@ import {
   Shield,
   PanelLeftClose,
   PanelLeftOpen,
-  Server as ServerIcon,
   Plug,
   Download as DownloadIcon,
   ChevronDown,
@@ -56,7 +55,6 @@ export type DashboardView =
   | "locker"
   | "presets"
   | "studio"
-  | "servers"
   | "manage"
   | "settings";
 
@@ -127,8 +125,7 @@ const NAV: NavEntry[] = [
 ];
 
 /**
- * Sits second, next to Browse, because it is the other catalog — unlike the experimental
- * entry below, which is appended.
+ * Sits second, next to Browse, because it is the other catalog.
  *
  * Gated only on `cap: "shop"`: the store is mxbikes-shop.com, so it has nothing to sell a
  * player on another title. Deliberately *not* gated on the build-time catalog credential any
@@ -147,16 +144,6 @@ const SHOP_ENTRY: NavEntry = { id: "shop", label: "nav.shop", icon: Store, cap: 
  * that silently means a different thing depending on which pill is lit.
  */
 const HUB_ENTRY: NavEntry = { id: "hub", label: "nav.hub", icon: ShoppingBag, cap: "shop" };
-
-/** Shown only when the experimental features are on — see `settings.experimental`.
- *  Also capability-gated: it administers MX Bikes dedicated servers and keys riders by
- *  MX Bikes GUID, neither of which means anything for another title. */
-const EXPERIMENTAL_NAV: NavEntry = {
-  id: "servers",
-  label: "nav.servers",
-  icon: ServerIcon,
-  cap: "servers",
-};
 
 /** Remembered across launches: a collapsed sidebar is a preference, not a mode. */
 const COLLAPSED_KEY = "mxb:sidebarCollapsed:v1";
@@ -302,22 +289,13 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
     });
   }, []);
   const [joinOpen, setJoinOpen] = useState(false);
-  // Re-read on navigation rather than subscribing: the toggle lives in Settings, and
-  // leaving that page is exactly when the nav needs to reflect a change.
-  const [experimental, setExperimental] = useState(false);
-
-  // Kept whole rather than just `.enabled`: the sync line below reads the same payload, and
-  // asking twice for one answer is two IPC round trips per navigation.
+  // Re-read on navigation rather than subscribing: paint sync can be switched off in
+  // Settings, and leaving that page is exactly when this line needs to reflect it.
   const [sync, setSync] = useState<ExperimentalState | null>(null);
   const [syncBusy, setSyncBusy] = useState<SyncEvent["phase"] | null>(null);
 
   const readExperimental = useCallback(() => {
-    experimentalState()
-      .then((s) => {
-        setExperimental(s.enabled);
-        setSync(s);
-      })
-      .catch(() => {});
+    experimentalState().then(setSync).catch(() => {});
   }, []);
   useEffect(readExperimental, [readExperimental, view]);
 
@@ -332,11 +310,11 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
     };
   }, [readExperimental]);
 
-  // Two independent gates: servers needs the experimental toggle, and every entry needs the
+  // Every entry needs the
   // active game to support it. Built here rather than inline so the JSX stays one `.map`.
   const supported = ({ cap, needsLock }: NavEntry) =>
     (!cap || caps[cap]) && (!needsLock || hasLock);
-  const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1), ...(experimental ? [EXPERIMENTAL_NAV] : [])]
+  const nav = [NAV[0], SHOP_ENTRY, HUB_ENTRY, ...NAV.slice(1)]
     .filter(supported)
     .map((e) => (e.children ? { ...e, children: e.children.filter(supported) } : e));
 
@@ -499,13 +477,11 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
           )}
         </button>
 
-        {/* Join-by-address launches the game with `-directconnect`. Behind the experimental
-            toggle with the rest of the unfinished multiplayer surface: the flag is
-            undocumented by PiBoSo, so it's opt-in rather than something a player finds by
-            accident. Capability-gated on top — both the argv parser offset it was found at
-            and the default port it assumes are MX Bikes', so it waits until GP's are
-            confirmed. */}
-        {!collapsed && experimental && caps.joinByAddress && (
+        {/* Join-by-address launches the game with `-directconnect`. Joining a server is not
+            hosting one, so it is not hidden with the server-creation surface. Capability-
+            gated — both the argv parser offset it was found at and the default port it
+            assumes are MX Bikes', so it waits until GP's are confirmed. */}
+        {!collapsed && caps.joinByAddress && (
         <>
         <button
           onClick={() => setJoinOpen(true)}
@@ -533,9 +509,10 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
         {/* Paint sync, in one line. Both halves of it run in the background off actions the
             player didn't ask for — an apply, a launch, the game rewriting profile.ini — so
             without something like this the only place its state existed was the log file.
-            Shown only once there's an account, since before that the Servers page is where
-            the answer is. */}
-        {!collapsed && experimental && sync?.enrolled && (
+            No longer behind the experimental toggle: sync is on for everyone and works on
+            any server, so everyone needs somewhere to see it working. Waits for an account,
+            which the app claims for itself the first time sync runs. */}
+        {!collapsed && sync?.paintSyncEnabled && sync?.enrolled && (
           <div className="flex items-center gap-2 rounded-[10px] border border-white/[0.07] px-3 py-2">
             <span
               className={cn(
@@ -556,8 +533,10 @@ export default function Sidebar({ view, studioTab, onNavigate }: SidebarProps) {
                     ? t("sync.sidebarOk", { count: sync.sync.pulledRiders })
                     : t("sync.sidebarUnpublished")}
             </span>
+            {/* Where the detail is: Settings → Paint sync, which holds the publish and
+                pull state, the GUID, and any paint the sync declined to overwrite. */}
             <button
-              onClick={() => onNavigate("servers")}
+              onClick={() => onNavigate("settings")}
               title={t("sync.title")}
               className="cursor-default text-muted-foreground transition-colors hover:text-foreground"
             >

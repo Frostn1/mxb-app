@@ -38,6 +38,10 @@ pub fn start(app: &AppHandle) {
                 // Re-arm FrostMod for the new session — whether it was launched from Steam,
                 // the desktop, or the Play button.
                 crate::frostmod_manage::on_game_started(&app, &cfg);
+                // Paint sync, for the sessions the app didn't start. Most players open the
+                // game from Steam or a shortcut, and until this was here those sessions
+                // synced with nobody — the Play button was the only way in.
+                crate::sync_on_game_started(&app, &cfg);
                 session = gameproc::GameSession::open();
                 // The mods folder is read during the load screen, so a placeholder that
                 // isn't really on disk becomes a crash there. Ask now, while there is still

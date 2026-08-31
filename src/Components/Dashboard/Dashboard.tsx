@@ -5,7 +5,6 @@ import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
-import Servers from "../Servers/Servers";
 import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
@@ -221,8 +220,6 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
               riderBike={riderBike}
               onRiderPresetLoaded={clearRiderPreset}
             />
-          ) : view === "servers" ? (
-            <Servers />
           ) : view === "manage" ? (
             <Manage />
           ) : (

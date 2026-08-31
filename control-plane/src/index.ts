@@ -161,15 +161,29 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
   if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
 
-  // Everything past here needs an invite. The gate is the *position* rather than a check
-  // repeated on each route, so a route added below inherits it and one added above is a
-  // deliberate decision to open it up.
-  const gate = invitedOnly(account);
-  if (gate) return gate;
-
+  // Paint sync, open on the same terms as voice, and for the same reason: a rider only sees
+  // the grid correctly if the riders beside them are publishing too, and an invite code is
+  // exactly the thing the people beside them do not have. Publishing is bounded by the
+  // account itself — a loadout is a fixed set of slots, a paint is size-capped and
+  // content-addressed — so an uninvited publisher costs one more row and no more objects
+  // than the paints they actually wear.
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
   if (method === "GET" && path === "/v1/roster") return roster(url, env);
+
+  const openPaint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
+  if (openPaint) {
+    if (method === "PUT") return putPaint(request, openPaint[1], env);
+    if (method === "GET") return getPaint(openPaint[1], env);
+  }
+
+  // Everything past here needs an invite. The gate is the *position* rather than a check
+  // repeated on each route, so a route added below inherits it and one added above is a
+  // deliberate decision to open it up. What is left below is the estate: registering a
+  // server, provisioning one, and the fleet it bills for.
+  const gate = invitedOnly(account);
+  if (gate) return gate;
+
   if (method === "POST" && path === "/v1/servers") return registerServer(request, account, env);
   if (method === "GET" && path === "/v1/servers/mine") return myServers(account, env);
   if (method === "GET" && path === "/v1/fleet") return fleetState(account, env);
@@ -179,12 +193,6 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   const owned = /^\/v1\/servers\/([A-Za-z0-9._-]{1,64})$/.exec(path);
   if (owned && method === "DELETE") return deleteServer(owned[1], account, env);
-
-  const paint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
-  if (paint) {
-    if (method === "PUT") return putPaint(request, paint[1], env);
-    if (method === "GET") return getPaint(paint[1], env);
-  }
 
   return json(404, { error: "no such endpoint" });
 }
@@ -269,9 +277,10 @@ async function enroll(request: Request, env: Env): Promise<Response> {
 /**
  * Refuse anything a self-serve account has no business doing.
  *
- * Voice is open to everyone with the app; publishing paints, registering a server and
- * provisioning one are not, and none of them was ever written with an anonymous caller in
- * mind. Called once, at the point in the route table where the open endpoints end.
+ * Voice and paint sync are open to everyone with the app — both are worthless unless the
+ * riders beside you can use them too. Registering a server and provisioning one are not:
+ * they spend real money and are tied to a person we have vouched for. Called once, at the
+ * point in the route table where the open endpoints end.
  */
 function invitedOnly(account: Account): Response | null {
   if (account.kind === "invited") return null;

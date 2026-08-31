@@ -701,6 +701,9 @@ export const ptBR: Translation = {
   "settings.instantRefresh": "Atualização instantânea de presets",
   "settings.instantRefreshDesc":
     "Quando você aplica um preset com o {{game}} aberto, atualiza o visual no jogo na hora — sem reiniciar nem reselecionar o perfil. Se não der, você será avisado para selecionar o perfil de novo.",
+  "settings.paintSync": "Sincronização de pinturas",
+  "settings.paintSyncDesc":
+    "Compartilha as pinturas que você está usando com os outros pilotos do seu servidor e instala as deles, para o grid ficar do jeito que todo mundo quis. Funciona sozinho em qualquer servidor — nada para você ou para o host configurar.",
   "settings.instantRefreshWindowsOnly":
     "Atualizar o visual no jogo sem reiniciar significa mexer no jogo em execução, e só a versão de Windows consegue fazer isso — em vez disso você será avisado para selecionar o perfil de novo.",
   "settings.autoRunFrostmod": "Iniciar o FrostMod automaticamente",
@@ -1089,6 +1092,9 @@ export const ptBR: Translation = {
   "sync.lastPulled": "Última verificação {{ago}}. Ela roda sozinha quando você aperta Jogar.",
   "sync.neverPulled": "Você ainda não baixou as pinturas dos outros",
   "sync.neverPulledWhy": "Até fazer isso, os outros pilotos aparecem com motos padrão mesmo tendo publicado as deles.",
+  "sync.notStartedTitle": "Ainda não começou",
+  "sync.notStartedWhy":
+    "A sincronização de pinturas se configura sozinha na primeira vez que você anda online — não há nada para preencher. Abra o MX Bikes, entre em um servidor, e o resto aparece aqui sozinho.",
   "sync.oversized_one": "{{count}} pintura é grande demais para compartilhar, então os outros pilotos não vão vê-la.",
   "sync.oversized_other": "{{count}} pinturas são grandes demais para compartilhar, então os outros pilotos não vão vê-las.",
   "sync.skippedBikes_one": "{{count}} moto não foi publicada — você tem mais do que conseguimos guardar.",

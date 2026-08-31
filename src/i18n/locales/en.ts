@@ -693,6 +693,9 @@ export const en = {
   "settings.instantRefresh": "Instant preset refresh",
   "settings.instantRefreshDesc":
     "When you apply a preset while {{game}} is running, refresh the look in-game instantly — no restart or profile reselect. If it can't, you'll be told to reselect your profile.",
+  "settings.paintSync": "Paint sync",
+  "settings.paintSyncDesc":
+    "Share the paints you're wearing with the other riders on your server, and install theirs, so the grid looks the way everyone meant it to. Runs by itself on any server — nothing for you or the host to set up.",
   "settings.instantRefreshWindowsOnly":
     "Refreshing the look in-game without a restart means reaching into the running game, which only the Windows build can do — you'll be told to reselect your profile instead.",
   "settings.autoRunFrostmod": "Run FrostMod automatically",
@@ -1073,6 +1076,9 @@ export const en = {
   "sync.lastPulled": "Last checked {{ago}}. It runs again by itself when you press Play.",
   "sync.neverPulled": "You haven't fetched anyone else's paints yet",
   "sync.neverPulledWhy": "Until you do, other riders show up on default bikes even if they've published theirs.",
+  "sync.notStartedTitle": "Not started yet",
+  "sync.notStartedWhy":
+    "Paint sync sets itself up the first time you ride online — there's nothing to fill in. Start MX Bikes and join a server, and this fills in on its own.",
   "sync.oversized_one": "{{count}} paint is too large to share, so other riders won't see it.",
   "sync.oversized_other": "{{count}} paints are too large to share, so other riders won't see them.",
   "sync.skippedBikes_one": "{{count}} bike wasn't published — you have more than we can hold.",

@@ -5801,12 +5801,10 @@ fn launch_game(app: tauri::AppHandle) -> Result<gameproc::LaunchOutcome, String>
     let outcome = gameproc::launch(&cfg).map_err(|e| format!("{e:#}"))?;
     if matches!(outcome, gameproc::LaunchOutcome::Launched) {
         // Both directions, because Play is the last moment before either one matters: the
-        // grid needs everyone else's paints on disk, and everyone else needs ours.
-        publish_paints_soon(&app, &cfg, None);
-        live_sync_session(&app, None);
-        // No address to aim at — they'll pick from the in-game browser — so this covers
-        // the whole registry.
-        sync_paints_soon(&app, None);
+        // grid needs everyone else's paints on disk, and everyone else needs ours. No
+        // address to aim at — they'll pick from the in-game browser — so the pre-pull
+        // covers the whole registry until the game says which server it really landed on.
+        sync_on_game_started(&app, &cfg);
     }
     Ok(outcome)
 }
@@ -5837,23 +5835,27 @@ fn pick_release_version(tag: Option<&str>, packaged: String) -> String {
         .unwrap_or(packaged)
 }
 
-/// Whether the unfinished multiplayer features should be shown, and whether this build is
-/// a pre-release. The frontend gates the Servers tab and the paint-sync UI on the first and
-/// badges the version with the second.
+/// Paint sync's state, and whether this build is a pre-release.
+///
+/// Named for a toggle that no longer exists: it used to answer "should the unfinished
+/// multiplayer surface be shown". Server creation is out of the app for now, so what is
+/// left is what paint sync has published and pulled, plus the version the About page
+/// badges. Kept under the old name because six call sites read it and none of them cares
+/// what it is called.
 #[tauri::command]
 fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let version = release_version(app.package_info().version.to_string());
     serde_json::json!({
-        "enabled": cfg.experimental_enabled(),
-        // Set by the env var rather than the setting, so the UI can explain why the toggle
-        // looks stuck on.
-        "forcedByEnv": std::env::var(config::EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false),
         "version": version,
         // A semver pre-release suffix (`0.8.0-beta.1`) is what the release workflow uses to
         // mark a build as a pre-release, so it is also what makes this build a beta.
         "prerelease": version.contains('-'),
+        // An account, however it was come by. Since paint sync claims one on its own the
+        // first time it runs, this stopped meaning "typed in an invite code" and now means
+        // "the control plane knows who this is" — which is what every caller wanted.
         "enrolled": !cfg.cp_token.trim().is_empty(),
+        "paintSyncEnabled": cfg.paint_sync_enabled,
         "riderName": cfg.cp_rider_name,
         "guid": cfg.cp_guid,
         // What paint sync last managed, so the panel can say so on a cold start rather than
@@ -5863,31 +5865,6 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
         // on disk publishes nothing, silently, and that is worth saying out loud.
         "profile": sync_profile(&cfg),
     })
-}
-
-/// Turn the experimental features on or off.
-#[tauri::command]
-fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
-    cfg.experimental = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-
-    // Bring paint sync up — or take it down — with the switch that owns it.
-    //
-    // Both of these are otherwise only decided in `.setup`, so turning the feature on left
-    // the profile watcher stopped until the next restart: the app would keep publishing on
-    // an apply or a launch, but a look changed in the game's garage went unnoticed for the
-    // whole session. That is the session a player has just enrolled in, which makes it the
-    // worst one to be quietly missing.
-    let watcher = app.state::<ProfileWatcher>();
-    if watches_looks(&cfg) {
-        profilewatch::start(&app, &watcher, &cfg.profiles_dir());
-        // And publish once now, since nothing has been watching until this moment.
-        publish_paints_soon(&app, &cfg, None);
-    } else {
-        profilewatch::stop(&watcher);
-    }
-    Ok(())
 }
 
 /// Trade an invite code for a control-plane account, and remember the token.
@@ -6150,7 +6127,7 @@ pub fn publish_look_now(app: &tauri::AppHandle) {
 /// Is a look change worth noticing? Paint sync publishes them, and the look watcher rebuilds
 /// on them — either one is reason enough to watch `profile.ini`.
 fn watches_looks(cfg: &AppConfig) -> bool {
-    cfg.experimental_enabled() || can_refresh_live_look()
+    cfg.paint_sync_enabled || can_refresh_live_look()
 }
 
 /// The rider is wearing something different: re-point the look watcher at the new files, and
@@ -6182,7 +6159,7 @@ fn emit_sync(app: &tauri::AppHandle, event: SyncEvent) {
 /// succeeded on disk, so a failure here logs and is dropped rather than surfacing as an
 /// error on the apply the player actually asked for.
 fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<&str>) {
-    if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+    if !cfg.paint_sync_enabled {
         return;
     }
     let generation = PUBLISH_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -6197,15 +6174,24 @@ fn publish_paints_soon(app: &tauri::AppHandle, cfg: &AppConfig, profile: Option<
         // Re-read rather than reusing the captured config: the debounce is long enough for
         // the player to have enrolled, or re-enrolled, since the change that queued this.
         let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+        if !cfg.paint_sync_enabled {
             return;
         }
         let Some(profile) = profile.or_else(|| sync_profile(&cfg)) else {
             return;
         };
+        // Claimed here rather than required: a rider with no invite still has to be able to
+        // publish, or the grid beside them stays default no matter what they wear.
+        let token = match voice::signal::account(&app, &cfg).await {
+            Ok(token) => token,
+            Err(e) => {
+                log::warn!("[sync] no account to publish with: {e}");
+                return;
+            }
+        };
         let known = cfg.sync.published_digest.clone();
         emit_sync(&app, SyncEvent::phase("publishing"));
-        match paintsync::publish_all(&cfg, &cfg.cp_token, &profile, Some(known.as_str())).await {
+        match paintsync::publish_all(&cfg, &token, &profile, Some(known.as_str())).await {
             Ok(o) => {
                 if o.unchanged {
                     log::debug!("[sync] {profile} is already published as {}", o.digest);
@@ -6242,7 +6228,7 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let cfg = config::load_or_detect(&app).unwrap_or_default();
-        if !cfg.experimental_enabled() {
+        if !cfg.paint_sync_enabled {
             return;
         }
         emit_sync(&app, SyncEvent::phase("pulling"));
@@ -6282,6 +6268,34 @@ const LIVE_SYNC_EVERY: std::time::Duration = std::time::Duration::from_secs(45);
 /// already run.
 const LIVE_SYNC_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
 
+/// Paint sync for a session that has just begun, whoever started it.
+///
+/// The Play button knows the moment it launches the game, but Steam and the desktop
+/// shortcut don't tell us anything — and a rider who starts the game the way they always
+/// have is exactly the rider this feature is for. So the session watcher calls this too,
+/// and the pieces are written to be asked twice: publishing is deduplicated by digest, the
+/// pull installs only what is missing, and the live loop refuses to start a second copy of
+/// itself.
+pub(crate) fn sync_on_game_started(app: &tauri::AppHandle, cfg: &AppConfig) {
+    publish_paints_soon(app, cfg, None);
+    live_sync_session(app, None);
+    sync_paints_soon(app, None);
+}
+
+/// Whether a live sync loop is already running, so the paths that all want one — the Play
+/// button, a join by address, and the watcher that notices a game started from Steam — get
+/// exactly one between them rather than one each.
+static LIVE_SYNC_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Clears [`LIVE_SYNC_RUNNING`] when dropped, however the loop it guards ended.
+struct LiveSyncGuard;
+
+impl Drop for LiveSyncGuard {
+    fn drop(&mut self) {
+        LIVE_SYNC_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// A session's worth of syncing, so a rider who arrives after you do still renders.
 ///
 /// The pull used to happen once, at launch. That made the whole thing lopsided: whoever
@@ -6291,15 +6305,21 @@ const LIVE_SYNC_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_s
 /// Runs until the game exits. Each pass also re-reports presence, which is what keeps this
 /// rider in other people's rosters; the control plane forgets anyone who goes quiet.
 fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
+    if LIVE_SYNC_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        // Cleared however the loop ends, or the first session would be the last one this
+        // run of the app ever syncs.
+        let _running = LiveSyncGuard;
         let started = std::time::Instant::now();
         let mut seen_running = false;
         loop {
             tokio::time::sleep(LIVE_SYNC_EVERY).await;
 
             let cfg = config::load_or_detect(&app).unwrap_or_default();
-            if !cfg.experimental_enabled() || cfg.cp_token.trim().is_empty() {
+            if !cfg.paint_sync_enabled {
                 return;
             }
             // The game is the session. Once it has been seen and then gone, so are we.
@@ -6329,32 +6349,63 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
     });
 }
 
+/// The server the game is on right now, as the key every rider on it computes.
+///
+/// The roster has to be scoped to one grid, and for most of the game's life we had no way to
+/// name that grid: an address only reaches the riders whose app launched the game with
+/// `-directconnect`, and anyone who picked the server from the in-game browser never has
+/// one. So paint sync fell back to the registry — our own servers — and a rider on a
+/// community server synced with nobody.
+///
+/// FrostMod is inside the process and `EventInit` hands it the server *name*, which every
+/// rider on that server sees identically. Voice already rooms on it. Sharing the key is what
+/// makes both features work on servers whose operator has installed nothing and knows
+/// nothing about us.
+///
+/// `None` when FrostMod isn't running, the game isn't up, or the rider is in the menus, in a
+/// replay, or testing alone — none of which is a grid to sync with.
+fn live_server_key() -> Option<String> {
+    static GAME: std::sync::OnceLock<voice::gamesession::Reader> = std::sync::OnceLock::new();
+    let session = GAME.get_or_init(voice::gamesession::Reader::default).read()?;
+    session
+        .on_a_server()
+        .then(|| voice::session::room_key(&session.server_name))
+}
+
 /// Pull the rosters for wherever the player is, or could be, riding.
 ///
-/// `address` narrows this to a single server when we know where they're headed. Without
-/// one it covers the whole registry, which is the best available answer when the server is
-/// chosen from the in-game browser and never passes through us.
+/// Once the game is on a server, that server is the answer and `address` is ignored — see
+/// [`live_server_key`]. Before then there is nothing to read, so `address` narrows this to
+/// where they're headed when we launched them at one, and to the whole registry when they
+/// pressed Play and will pick from the game's own browser.
 async fn pull_rosters(
     app: &tauri::AppHandle,
     address: Option<String>,
 ) -> Result<paintsync::PullOutcome, String> {
     let cfg = config::load_or_detect(app).unwrap_or_default();
-    if cfg.cp_token.trim().is_empty() {
-        return Err("Enroll with an invite code first.".into());
-    }
-    // An unreachable registry doesn't have to sink a targeted sync — the address is a
-    // usable key on its own — but with no address there's nothing left to aim at.
-    let registry = match paintsync::registry(Some(&cfg.cp_token)).await {
-        Ok(list) => list,
-        Err(e) => {
-            log::warn!("[sync] couldn't read the server registry: {e:#}");
-            Vec::new()
-        }
-    };
+    let token = voice::signal::account(app, &cfg).await?;
 
-    let keys: Vec<String> = match &address {
-        Some(addr) => vec![paintsync::server_key_for(&registry, addr)],
-        None => registry.iter().map(|s| s.id.clone()).collect(),
+    // Where the rider actually is beats everything else we could guess. The name FrostMod
+    // reads out of the running game is the one key every rider on that server can compute,
+    // so it is the only one that works on a server we have nothing to do with — which is
+    // most of them.
+    let keys: Vec<String> = if let Some(key) = live_server_key() {
+        vec![key]
+    } else {
+        // Not on a server yet. An unreachable registry doesn't have to sink a targeted sync
+        // — the address is a usable key on its own — but with no address there's nothing
+        // left to aim at.
+        let registry = match paintsync::registry(Some(&token)).await {
+            Ok(list) => list,
+            Err(e) => {
+                log::warn!("[sync] couldn't read the server registry: {e:#}");
+                Vec::new()
+            }
+        };
+        match &address {
+            Some(addr) => vec![paintsync::server_key_for(&registry, addr)],
+            None => registry.iter().map(|s| s.id.clone()).collect(),
+        }
     };
     if keys.is_empty() {
         return Err("No servers to sync with yet.".into());
@@ -6363,14 +6414,12 @@ async fn pull_rosters(
     // Say where we are before asking who else is here: the roster is scoped by presence, so
     // reporting first is what puts this rider into everyone else's grid too.
     for key in &keys {
-        if let Err(e) = paintsync::report_presence(&cfg.cp_token, key).await {
+        if let Err(e) = paintsync::report_presence(&token, key).await {
             log::debug!("[sync] couldn't report presence on {key}: {e:#}");
         }
     }
 
-    let outcome = paintsync::pull(&cfg, &cfg.cp_token, &keys)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
+    let outcome = paintsync::pull(&cfg, &token, &keys).await.map_err(|e| format!("{e:#}"))?;
     // Re-read immediately before writing: the pull took a round trip, and `config::save`
     // rewrites the whole file.
     let mut cfg = config::load_or_detect(app).unwrap_or_default();
@@ -7052,6 +7101,24 @@ fn set_voice_enabled(
         session.leave();
     }
     overlay::register(&app, &cfg)
+}
+
+/// Turn paint sync on or off.
+///
+/// Off stops both halves at once — nothing of this rider's look goes up, and nothing anyone
+/// else published comes down. Paints already installed stay installed: they are files the
+/// player now owns, and deleting a grid's worth of liveries because a switch moved would be
+/// a worse surprise than leaving them.
+#[tauri::command]
+fn set_paint_sync_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.paint_sync_enabled = enabled;
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
+    // Turning it back on shouldn't wait for the next thing that happens to change a look.
+    if enabled {
+        publish_paints_soon(&app, &cfg, None);
+    }
+    Ok(())
 }
 
 /// Pick the tyre pack the 3D previews fit. A blank name means "whatever the bike names".
@@ -8837,12 +8904,10 @@ fn main() {
                 //  * publish, because the look may have changed in the game's garage while
                 //    the app was shut, and nothing would ever have noticed;
                 //  * watch, so the same change during this session is noticed as it happens.
-                // The publish no-ops unless the experimental features are on and an account
-                // exists; the watching is also what keeps the look watcher pointed at the
-                // right files, which has nothing to do with sync.
-                if cfg.experimental_enabled() {
-                    publish_paints_soon(handle, &cfg, None);
-                }
+                // The publish no-ops when paint sync is turned off; the watching is also
+                // what keeps the look watcher pointed at the right files, which has nothing
+                // to do with sync.
+                publish_paints_soon(handle, &cfg, None);
                 if watches_looks(&cfg) {
                     let profiles = handle.state::<ProfileWatcher>();
                     profilewatch::start(handle, &profiles, &cfg.profiles_dir());
@@ -9047,6 +9112,7 @@ fn main() {
             voice_status,
             voice_mute,
             set_voice_enabled,
+            set_paint_sync_enabled,
             set_preview_tyres,
             set_voice_input_device,
             set_voice_output_device,
@@ -9084,7 +9150,6 @@ fn main() {
             launch_game,
             join_server,
             experimental_state,
-            set_experimental,
             enroll_account,
             set_guid,
             publish_paints,
