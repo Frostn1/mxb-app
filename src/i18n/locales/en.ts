@@ -732,6 +732,8 @@ export const en = {
     "Next key",
   "settings.rcamActionSave":
     "Save path",
+  "settings.rcamActionClean":
+    "Hide overlay",
   "settings.rcamActionLoad":
     "Load path",
   "settings.watchModsReload": "Auto-reload on folder changes",

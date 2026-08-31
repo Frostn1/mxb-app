@@ -742,6 +742,8 @@ export const fr: Translation = {
     "Point suivant",
   "settings.rcamActionSave":
     "Enregistrer le trajet",
+  "settings.rcamActionClean":
+    "Masquer la surcouche",
   "settings.rcamActionLoad":
     "Charger le trajet",
   "settings.watchModsReload":

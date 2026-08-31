@@ -740,6 +740,8 @@ export const ptBR: Translation = {
     "Próximo ponto",
   "settings.rcamActionSave":
     "Salvar trajeto",
+  "settings.rcamActionClean":
+    "Ocultar sobreposição",
   "settings.rcamActionLoad":
     "Carregar trajeto",
   "settings.watchModsReload": "Recarregar automaticamente ao mudar a pasta",

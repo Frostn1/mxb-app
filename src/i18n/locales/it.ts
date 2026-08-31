@@ -737,6 +737,8 @@ export const it: Translation = {
     "Punto successivo",
   "settings.rcamActionSave":
     "Salva percorso",
+  "settings.rcamActionClean":
+    "Nascondi overlay",
   "settings.rcamActionLoad":
     "Carica percorso",
   "settings.watchModsReload": "Ricarica automatica alle modifiche",
