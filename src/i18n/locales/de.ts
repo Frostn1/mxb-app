@@ -2190,4 +2190,13 @@ export const de: Translation = {
   "track.kind.whoops": "Whoops",
   "track.kind.stepUp": "Step-up",
   "track.kind.berm": "Anlieger",
+  "track.straight": "Gerade",
+  "track.turnLeft": "Linkskurve",
+  "track.turnRight": "Rechtskurve",
+  "track.radius": "Radius",
+  "track.gap": "Lücke",
+  "track.deep": "tief",
+  "track.over": "über",
+  "track.kind.rut": "Rille",
+  "track.sequenceHint": "Du kannst die Runde der Reihe nach beschreiben — „eine lange Gerade, eine linke Haarnadel, dann ein Double und eine Rhythmus-Sektion“ — und genau so wird sie gebaut.",
 };

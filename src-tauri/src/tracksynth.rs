@@ -31,7 +31,7 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 
-use crate::trackprog::{Feature, Segment, Station, TrackProgram};
+use crate::trackprog::{Feature, Segment, Station, Surface, TrackProgram};
 
 /// Metres of centreline between stations. Finer than the grid, so every cell finds a station
 /// nearer than its own width.
@@ -59,6 +59,36 @@ const FEATURE_EDGE: f32 = 1.75;
 /// Metres between the bumps of the riding surface's own texture.
 const TEXTURE_WAVELENGTH_M: f32 = 3.5;
 
+/// How much the riding line's width wanders, as a fraction. A track of exactly constant
+/// width reads as machine-made from the first glance — real ones pinch into corners and open
+/// out on the straights.
+const WIDTH_WANDER: f32 = 0.14;
+
+/// Metres of lap between one pinch and the next.
+const WIDTH_WAVELENGTH_M: f32 = 70.0;
+
+/// Corner radius at which ruts start to form, and the one where they are at full depth.
+/// Everyone takes the same line through a tight corner, and that is what digs a rut.
+const RUT_RADIUS_M: (f32, f32) = (45.0, 14.0);
+
+/// How deep a corner's own rut gets, metres.
+const RUT_DEPTH_M: f32 = 0.16;
+
+/// A rut's width across the track, metres — about a tyre and the berm of dirt each side.
+const RUT_WIDTH_M: f32 = 0.55;
+
+/// Metres before a corner that riders brake in, and so where the ground gets chopped up.
+const BRAKING_M: f32 = 18.0;
+
+/// Metres between braking bumps.
+const BRAKING_WAVELENGTH_M: f32 = 2.2;
+
+/// How much rougher the surface gets in and around a corner, as a multiplier on the texture.
+const CORNER_ROUGHNESS: f32 = 1.8;
+
+/// How tall a braking bump is against the surface texture.
+const BRAKING_GAIN: f32 = 2.5;
+
 /// The short back face of a double's takeoff, and the short front face of its landing. This
 /// is the lip itself — steep, but a face rather than a step.
 const DOUBLE_BACK_M: f32 = 2.5;
@@ -74,6 +104,10 @@ const PROFILE_STEP: f32 = 0.1;
 
 /// Masks are stretched over the terrain, so they cost nothing to keep coarser than it.
 const MASK_DIM: usize = 1024;
+
+/// The UI pictures' edge, in pixels. Square and modest — they are shown at a few hundred
+/// pixels and stored uncompressed.
+const UI_IMAGE_DIM: usize = 512;
 
 /// Coverage masks inside a `.trh`, which published tracks keep at half the grid — 2048
 /// against 2049. It is also the resolution anything reading the file will measure it at.
@@ -164,9 +198,11 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     );
     let feat = feature_profile(&prog.features, lap);
     let berms = berm_profile(&prog.features, &turn, lap);
+    let ruts = rut_profile(&prog.features, &turn, lap, r.seed);
+    let widths = width_profile(prog.width * 0.5, lap, r.seed);
+    let (rough, braking) = roughness_profile(&turn, lap);
 
     // 3. Bench the corridor in, then build on it.
-    let half = prog.width * 0.5;
     let mut corridor = vec![false; gw * gh];
     let mut arc = vec![0.0f32; gw * gh];
     for i in 0..gw * gh {
@@ -179,6 +215,7 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
 
         dist[i] = d;
         arc[i] = s;
+        let half = widths.at(s);
 
         let w = bench_weight(d, half, SHOULDER_M);
         if w > 0.0 {
@@ -197,15 +234,34 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             heights[i] += b.abs() * (t.abs() / half).powi(2);
         }
 
-        // Ridden ground, last of all: strongest on the line and gone by the shoulder.
+        // Ruts: a groove worn into the line, offset towards the inside of the corner because
+        // that is the line everybody takes.
+        let (depth, side) = (ruts.at(s), turn.at(s));
+        if depth > 0.0 {
+            let centre = side.signum() * half * 0.35;
+            let g = (t - centre) / RUT_WIDTH_M;
+            heights[i] -= depth * (-g * g).exp();
+        }
+
+        // Ridden ground, last of all: strongest on the line and gone by the shoulder, and
+        // rougher through the corners than down the straights.
         if r.texture > 0.0 && w > 0.0 {
             let (wx, wz) = ((i % gw) as f32 * mps_x, (i / gw) as f32 * mps_z);
+            let gain = rough.at(s);
             heights[i] += fbm(
                 wx / TEXTURE_WAVELENGTH_M,
                 wz / TEXTURE_WAVELENGTH_M,
                 r.seed ^ 0x5EED,
             ) * r.texture
+                * gain
                 * w;
+            // Braking bumps: a washboard across the track on the way into a corner, which is
+            // the direction they actually form in.
+            let brake = braking.at(s);
+            if brake > 0.0 {
+                let ripple = (s / BRAKING_WAVELENGTH_M * std::f32::consts::TAU).sin();
+                heights[i] += ripple * r.texture * BRAKING_GAIN * brake * w;
+            }
         }
     }
 
@@ -422,6 +478,96 @@ fn lateral(d: f32, half: f32) -> f32 {
     }
 }
 
+/// How wide the riding line is, along the lap.
+///
+/// Not a constant. A track of exactly one width for its whole length reads as machine-made
+/// before you have looked at anything else — real ones pinch into corners and open onto the
+/// straights, and a tenth of the width is enough to break the tell.
+fn width_profile(half: f32, lap: f32, seed: u32) -> Profile {
+    let mut out = Profile::blank(lap);
+    for i in 0..out.v.len() {
+        let s = i as f32 * PROFILE_STEP;
+        out.v[i] = half * (1.0 + WIDTH_WANDER * fbm(s / WIDTH_WAVELENGTH_M, 0.5, seed ^ 0x1D77));
+    }
+    out
+}
+
+/// How deep the rut is, along the lap.
+///
+/// Corners grow their own: everyone takes the same line through a tight one, and that is
+/// what digs the groove. A `Rut` feature adds to whatever the corner already had, so asking
+/// for one in a hairpin deepens it rather than replacing it.
+fn rut_profile(features: &[Feature], turn: &Profile, lap: f32, seed: u32) -> Profile {
+    let mut out = Profile::blank(lap);
+    let (start_r, full_r) = RUT_RADIUS_M;
+    for i in 0..out.v.len() {
+        let s = i as f32 * PROFILE_STEP;
+        let k = turn.at(s).abs();
+        if k > 0.0 {
+            let radius = 1.0 / k;
+            if radius < start_r {
+                let t = ((start_r - radius) / (start_r - full_r)).clamp(0.0, 1.0);
+                // Not evenly: a rut wanders in depth down the length of a corner.
+                let vary = 0.75 + 0.25 * fbm(s / 9.0, 3.5, seed ^ 0x2117);
+                out.v[i] = RUT_DEPTH_M * smoothstep(t) * vary;
+            }
+        }
+    }
+    for f in features {
+        let Feature::Rut { at, length, depth } = *f else {
+            continue;
+        };
+        let lo = (at / PROFILE_STEP).floor().max(0.0) as usize;
+        let hi = (((at + length) / PROFILE_STEP).ceil() as usize).min(out.v.len() - 1);
+        for i in lo..=hi {
+            let u = i as f32 * PROFILE_STEP - at;
+            if u < 0.0 || u > length {
+                continue;
+            }
+            let ramp = smoothstep((u / length * 3.0).min(3.0 - u / length * 3.0).clamp(0.0, 1.0));
+            out.v[i] += depth * ramp;
+        }
+    }
+    out
+}
+
+/// How chopped-up the ground is, along the lap — one on a straight, more through a corner
+/// and on the way into it. Braking is where a track gets rough, and it is rough in a place
+/// rather than everywhere.
+fn roughness_profile(turn: &Profile, lap: f32) -> (Profile, Profile) {
+    let mut rough = Profile::blank(lap);
+    let mut braking = Profile::blank(lap);
+    for i in 0..rough.v.len() {
+        rough.v[i] = 1.0;
+    }
+    let n = rough.v.len();
+    let back = (BRAKING_M / PROFILE_STEP) as usize;
+    for i in 0..n {
+        let s = i as f32 * PROFILE_STEP;
+        let k = turn.at(s).abs();
+        if k <= 0.0 {
+            continue;
+        }
+        let radius = 1.0 / k;
+        if radius >= RUT_RADIUS_M.0 {
+            continue;
+        }
+        let corner = smoothstep((RUT_RADIUS_M.0 - radius) / (RUT_RADIUS_M.0 - RUT_RADIUS_M.1));
+        // Inside the corner the ground is chopped up, but not in ridges: that is the rut's
+        // job, and noise's.
+        rough.v[i] = rough.v[i].max(1.0 + (CORNER_ROUGHNESS - 1.0) * corner);
+        // Braking bumps only on the way in, growing towards the turn-in point.
+        for j in i.saturating_sub(back)..i {
+            if turn.at(j as f32 * PROFILE_STEP) != 0.0 {
+                continue; // already in a corner — this is another corner's exit, not an approach
+            }
+            let near = (j as f32 - (i as f32 - back as f32)) / back as f32;
+            braking.v[j] = braking.v[j].max(corner * smoothstep(near));
+        }
+    }
+    (rough, braking)
+}
+
 /// A quantity that varies along the lap, on an even ruler.
 struct Profile {
     v: Vec<f32>,
@@ -580,7 +726,9 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
             let phase = (u / spacing).fract();
             height * (0.5 - 0.5 * (phase * std::f32::consts::TAU).cos())
         }
-        Feature::StepUp { .. } | Feature::Berm { .. } => 0.0,
+        // Both are applied elsewhere: a step-up moves the elevation profile, and a berm
+        // and a rut are shaped across the track rather than along it.
+        Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. } => 0.0,
     }
 }
 
@@ -706,6 +854,10 @@ pub fn write_source(prog: &TrackProgram, syn: &Synth, dir: &Path) -> Result<Vec<
         track_ini(prog).into_bytes(),
         &mut wrote,
     )?;
+    put(&format!("{slug}/{slug}.amb"), AMB.into(), &mut wrote)?;
+    let (map_img, shot) = ui_images(syn, UI_IMAGE_DIM);
+    put(&format!("{slug}/{slug}_map.tga"), map_img, &mut wrote)?;
+    put(&format!("{slug}/{slug}.tga"), shot, &mut wrote)?;
 
     put(
         "_map.bat",
@@ -761,11 +913,23 @@ pub fn trh(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     // Hard edges, unlike the `.tga` masks: those are blended into a texture, while these say
     // which surface a cell *is*. A soft edge here reads as a wider track — a metre of fade
     // each side put the riding line two metres over what it was built as.
-    let masks: [(u32, Vec<u8>); 2] = [
+    //
+    // Three bands rather than two. A track painted as line-and-grass reads as a brown
+    // ribbon on a green field and nothing else; the graded shoulder either side is a
+    // different material from both, and it is most of what you see from the seat.
+    let (shoulder_id, shoulder_scale) = ground(prog.terrain.surface);
+    let shoulder = SHOULDER_M * shoulder_scale;
+    let masks: [(u32, Vec<u8>); 3] = [
         // 10 is the riding line — the id published tracks paint their ribbon with.
         (10, mask_from(syn, TRH_MASK_DIM, |d, _| u8::from(d <= half) * 255)),
+        (
+            shoulder_id,
+            mask_from(syn, TRH_MASK_DIM, |d, _| {
+                u8::from(d > half && d <= half + shoulder) * 255
+            }),
+        ),
         (1, mask_from(syn, TRH_MASK_DIM, |d, _| {
-            u8::from(d > half + SHOULDER_M) * 255
+            u8::from(d > half + shoulder) * 255
         })),
     ];
     out.extend_from_slice(&(masks.len() as u32).to_le_bytes());
@@ -791,6 +955,22 @@ pub fn trh(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     }
     out.extend_from_slice(b"EXT\0");
     out
+}
+
+/// The surface either side of the riding line, and how far it reaches.
+///
+/// The ids are the ones every published track's material table carries, in its order:
+/// asphalt, grass, sand, kerb, soil, concrete. So a shoulder painted 4 comes out the colour
+/// the app already draws worked dirt, with no new palette to agree on.
+fn ground(s: Surface) -> (u32, f32) {
+    match s {
+        // Worked dirt, a normal shoulder wide.
+        Surface::Soil => (4, 1.0),
+        // Sand aprons are wide — most of what you see on a sand national isn't the line.
+        Surface::Sand => (2, 2.2),
+        // Grass to the edge of the line, which is what an early-season circuit looks like.
+        Surface::Grass => (1, 0.35),
+    }
 }
 
 /// The preview as a `.pkz` the app can open: a plain zip, which is what the reader falls back
@@ -847,9 +1027,71 @@ fn soft_edge(edge: f32, fade: f32, d: f32) -> u8 {
     }
 }
 
+/// Lighting and weather. Three conditions, because the game asks for all three and a track
+/// missing one falls back to nothing rather than to a default.
+///
+/// The sun direction has to agree with `params.ini` — TerrainEd bakes shadows from that one
+/// and the game lights from this one, so a mismatch is a track lit from one side with its
+/// shadows falling the other.
+const AMB: &str = "\
+sun_position\n{\n\tx = 2\n\ty = 10\n\tz = -7\n}\n\
+clear\n{\n\tambient\n\t{\n\t\tred = 0.40\n\t\tgreen = 0.45\n\t\tblue = 0.55\n\t}\n\
+\tsun_color\n\t{\n\t\tred = 1.10\n\t\tgreen = 0.95\n\t\tblue = 0.7\n\t}\n\
+\tfog\n\t{\n\t\tdensity = 0.0008\n\t\tred = 0.7\n\t\tgreen = 0.7\n\t\tblue = 0.85\n\t}\n\
+\tsky = *clearsky.edf\n\tsky_rot = 0\n}\n\
+cloudy\n{\n\tambient\n\t{\n\t\tred = 0.65\n\t\tgreen = 0.65\n\t\tblue = 0.7\n\t}\n\
+\tsun_color\n\t{\n\t\tred = 0.255\n\t\tgreen = 0.255\n\t\tblue = 0.3\n\t}\n\
+\tfog\n\t{\n\t\tdensity = 0.0005\n\t\tred = 0.7\n\t\tgreen = 0.7\n\t\tblue = 0.85\n\t}\n\
+\tsky = *cloudysky.edf\n\tsky_rot = 0\n}\n\
+rainy\n{\n\tambient\n\t{\n\t\tred = 0.6\n\t\tgreen = 0.6\n\t\tblue = 0.85\n\t}\n\
+\tsun_color\n\t{\n\t\tred = 0.3\n\t\tgreen = 0.3\n\t\tblue = 0.4\n\t}\n\
+\tfog\n\t{\n\t\tdensity = 0.004\n\t\tred = 0.5\n\t\tgreen = 0.5\n\t\tblue = 0.55\n\t}\n\
+\tsky = *rainysky.edf\n\tsky_rot = 0\n}\n";
+
+/// The two pictures the game's UI wants: an overhead of the lap, and something to show
+/// beside the track's name. Neither is optional — a track without them lists as a blank.
+fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
+    let mut map = vec![0u8; dim * dim * 4];
+    let mut shot = vec![0u8; dim * dim * 4];
+    let base = crate::trackstats::box_blur(&syn.heights, syn.gw, syn.gh, 6);
+    for y in 0..dim {
+        // TGA's origin is bottom-left, so the picture is written from the far edge back.
+        let gy = ((dim - 1 - y) * syn.gh / dim).min(syn.gh - 1);
+        for x in 0..dim {
+            let gx = (x * syn.gw / dim).min(syn.gw - 1);
+            let i = gy * syn.gw + gx;
+            let at = (y * dim + x) * 4;
+
+            // The map: the lap as a shape, on paper.
+            let on = syn.corridor[i];
+            let c: [u8; 3] = if on { [60, 70, 150] } else { [232, 232, 236] };
+            map[at..at + 4].copy_from_slice(&[c[2], c[1], c[0], 255]);
+
+            // The picture: the terrain's own relief, with the line picked out.
+            let relief = ((syn.heights[i] - base[i]) * 90.0 + 128.0).clamp(0.0, 255.0) as u8;
+            let s: [u8; 3] = if on {
+                [relief.saturating_add(40), relief / 2, relief / 3]
+            } else {
+                [relief / 2, (relief as f32 * 0.62) as u8, relief / 3]
+            };
+            shot[at..at + 4].copy_from_slice(&[s[2], s[1], s[0], 255]);
+        }
+    }
+    (tga_bgra(dim, dim, &map), tga_bgra(dim, dim, &shot))
+}
+
 /// Uncompressed 32-bit BGRA, the mask in the alpha channel — the shape the official example's
 /// own masks are in, down to the descriptor byte and the file footer.
 fn tga_alpha(w: usize, h: usize, alpha: &[u8]) -> Vec<u8> {
+    let mut px = Vec::with_capacity(w * h * 4);
+    for a in alpha {
+        px.extend_from_slice(&[255, 255, 255, *a]);
+    }
+    tga_bgra(w, h, &px)
+}
+
+/// The same container, given the pixels directly.
+fn tga_bgra(w: usize, h: usize, px: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(18 + w * h * 4 + 26);
     out.extend_from_slice(&[0, 0, 2, 0, 0, 0, 0, 0]);
     out.extend_from_slice(&0u16.to_le_bytes());
@@ -859,9 +1101,7 @@ fn tga_alpha(w: usize, h: usize, alpha: &[u8]) -> Vec<u8> {
     // 32 bits a pixel, eight of them alpha, origin bottom-left — row zero is the bottom of
     // the picture, which is where the heightmap's row zero is too.
     out.extend_from_slice(&[32, 0x08]);
-    for a in alpha {
-        out.extend_from_slice(&[255, 255, 255, *a]);
-    }
+    out.extend_from_slice(px);
     out.extend_from_slice(&0u32.to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
     out.extend_from_slice(b"TRUEVISION-XFILE.\0");
@@ -977,9 +1217,12 @@ fn readme(prog: &TrackProgram, syn: &Synth, slug: &str) -> String {
          1. _map.bat        graphics, writes {slug}/{slug}.map\n\
          2. _trh.bat        collision, writes {slug}/{slug}.trh\n\
          3. _centerline.bat merges track.tcl into the .trh\n\n\
-         Then open the .trh in TrackEd for the start gate, pit lane and cameras, add\n\
-         {slug}.tga and {slug}_map.tga for the UI, zip the {slug} folder and rename it\n\
-         {slug}.pkz.\n",
+         Two files are still missing after that, and neither is ours to write:\n\
+         \n\
+           {slug}.rdf   start gate, pit lane, finish line, cameras — TrackEd writes it\n\
+           gate.edf     the starting gate model — copy one from another track\n\
+         \n\
+         With those in the folder, zip it and rename the zip {slug}.pkz.\n",
         name = prog.name,
         gw = syn.gw,
         gh = syn.gh,
@@ -1030,6 +1273,7 @@ mod tests {
                     seed: 3,
                     texture: 0.06,
                 },
+                surface: crate::trackprog::Surface::Soil,
             },
             start: Start {
                 x: 140.0,

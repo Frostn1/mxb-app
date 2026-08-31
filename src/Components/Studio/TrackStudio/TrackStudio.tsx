@@ -10,11 +10,12 @@ import { cn } from "@/lib/utils";
 import {
   checkTrack,
   exportTrackSource,
-  featureSpan,
   generateTrack,
   installTrackPreview,
   lapLength,
+  lapSteps,
   previewTrack,
+  type LapStep,
   type TrackFeature,
   type TrackPreview,
   type TrackProgram,
@@ -152,6 +153,12 @@ export default function TrackStudio() {
         </Button>
       </div>
 
+      {!program && busy === null && (
+        <p className="flex-none text-[12.5px] leading-snug text-muted-foreground">
+          {t("track.sequenceHint")}
+        </p>
+      )}
+
       {busy === "generate" && (
         <p className="flex-none text-[12.5px] text-muted-foreground">{t("track.generatingHint")}</p>
       )}
@@ -240,47 +247,46 @@ export default function TrackStudio() {
             </div>
           </div>
 
-          {/* Right: the lap, feature by feature, in the order you ride them. */}
+          {/* Right: the lap in the order you ride it — a straight, a left turn, a double.
+              Corners and jumps live in different lists in the program, but nobody rides them
+              that way, so here they are one sequence. */}
           <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-input">
-            <table className="w-full text-[12.5px]">
-              <thead className="sticky top-0 bg-background/95 backdrop-blur">
-                <tr className="text-left text-muted-foreground">
-                  <th className="px-3 py-2 font-medium">{t("track.at")}</th>
-                  <th className="px-3 py-2 font-medium">{t("track.kind")}</th>
-                  <th className="px-3 py-2 font-medium">{t("track.height")}</th>
-                  <th className="px-3 py-2 font-medium">{t("track.length")}</th>
-                  <th className="w-8" />
-                </tr>
-              </thead>
-              <tbody>
-                {[...program.features]
-                  .map((f, i) => ({ f, i }))
-                  .sort((a, b) => a.f.at - b.f.at)
-                  .map(({ f, i }) => (
-                    <tr key={i} className="border-t border-input/60">
-                      <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
-                        {f.at.toFixed(0)} m
-                      </td>
-                      <td className="px-3 py-1.5">{t(`track.kind.${f.kind}`)}</td>
-                      <td className="px-3 py-1.5">
-                        <Num value={f.height} step={0.1} onChange={(v) => editFeature(i, { height: v } as Partial<TrackFeature>)} />
-                      </td>
-                      <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
-                        {featureSpan(f).length.toFixed(0)} m
-                      </td>
-                      <td className="pr-2">
-                        <button
-                          onClick={() => removeFeature(i)}
-                          className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
-                          aria-label={t("common.delete")}
-                        >
-                          ×
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+            <ol className="divide-y divide-input/60">
+              {lapSteps(program).map((step, row) => (
+                <li key={row} className="flex items-center gap-3 px-3.5 py-2 text-[12.5px]">
+                  <span className="w-14 flex-none tabular-nums text-right text-muted-foreground">
+                    {step.at.toFixed(0)} m
+                  </span>
+                  <span className="flex-1">{describe(step, t)}</span>
+                  {step.kind === "feature" && (
+                    <>
+                      <Num
+                        value={
+                          step.feature.kind === "rut" ? step.feature.depth : step.feature.height
+                        }
+                        step={0.1}
+                        onChange={(v) =>
+                          editFeature(
+                            step.index,
+                            (step.feature.kind === "rut"
+                              ? { depth: v }
+                              : { height: v }) as Partial<TrackFeature>,
+                          )
+                        }
+                      />
+                      <button
+                        onClick={() => removeFeature(step.index)}
+                        className="rounded px-1.5 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+                        aria-label={t("common.delete")}
+                      >
+                        ×
+                      </button>
+                    </>
+                  )}
+                  {step.kind !== "feature" && <span className="w-[92px] flex-none" />}
+                </li>
+              ))}
+            </ol>
           </div>
         </div>
       )}
@@ -295,6 +301,52 @@ export default function TrackStudio() {
       )}
     </div>
   );
+}
+
+/**
+ * One step of the lap, in words.
+ *
+ * Numbers carry their own units and need no translating, so only the noun is a key. The
+ * shape is deliberately flat — "Left turn · 18 m radius, 75°" reads at a glance, and reads
+ * the same way a brief is written.
+ */
+const KIND_KEY = {
+  tabletop: "track.kind.tabletop",
+  double: "track.kind.double",
+  roller: "track.kind.roller",
+  whoops: "track.kind.whoops",
+  stepUp: "track.kind.stepUp",
+  berm: "track.kind.berm",
+  rut: "track.kind.rut",
+} as const;
+
+function describe(step: LapStep, t: ReturnType<typeof useT>): string {
+  const m = (v: number, digits = 0) => `${v.toFixed(digits)} m`;
+  switch (step.kind) {
+    case "straight":
+      return `${t("track.straight")} · ${m(step.length)}`;
+    case "left":
+    case "right":
+      return `${t(step.kind === "left" ? "track.turnLeft" : "track.turnRight")} · ${m(
+        step.radius,
+      )} ${t("track.radius")}, ${step.angle.toFixed(0)}°`;
+    case "feature": {
+      const f = step.feature;
+      const name = t(KIND_KEY[f.kind]);
+      switch (f.kind) {
+        case "double":
+          return `${name} · ${m(f.height, 1)}, ${m(f.gap)} ${t("track.gap")}`;
+        case "whoops":
+          return `${name} · ${f.count} × ${m(f.spacing, 1)}`;
+        case "rut":
+          return `${name} · ${m(f.depth, 2)} ${t("track.deep")}`;
+        case "stepUp":
+          return `${name} · ${m(f.height, 1)}`;
+        default:
+          return `${name} · ${m(f.height, 1)} ${t("track.over")} ${m(f.length)}`;
+      }
+    }
+  }
 }
 
 function Row({ label, value }: { label: string; value: string }) {

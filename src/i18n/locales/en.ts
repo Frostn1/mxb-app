@@ -2108,7 +2108,7 @@ export const en = {
   // ── Track Studio ───────────────────────────────────────────────────────────
   "nav.track": "Track",
   "track.help": "Describe a track and Claude writes the lap — the corners, the straights and every jump on them. The app builds it, measures it against real published tracks, and asks again for anything that doesn't measure up. Preview it in 3D, edit any jump, then export the folder MX Bikes' own TerrainEd compiles.",
-  "track.briefPlaceholder": "A sandy national with a long rhythm section and two big step-ups",
+  "track.briefPlaceholder": "A long straight into a left hairpin, then a double and a rhythm section",
   "track.generate": "Generate",
   "track.generating": "Writing…",
   "track.generatingHint": "Laying out a lap that closes, then building and measuring it. A minute or two, and longer if the first attempt needs fixing.",
@@ -2146,4 +2146,13 @@ export const en = {
   "track.kind.whoops": "Whoops",
   "track.kind.stepUp": "Step-up",
   "track.kind.berm": "Berm",
+  "track.straight": "Straight",
+  "track.turnLeft": "Left turn",
+  "track.turnRight": "Right turn",
+  "track.radius": "radius",
+  "track.gap": "gap",
+  "track.deep": "deep",
+  "track.over": "over",
+  "track.kind.rut": "Rut",
+  "track.sequenceHint": "You can describe the lap in order — “a long straight, a left hairpin, then a double and a rhythm section” — and it will be built that way.",
 } as const;

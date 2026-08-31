@@ -2169,4 +2169,13 @@ export const it: Translation = {
   "track.kind.whoops": "Whoops",
   "track.kind.stepUp": "Step-up",
   "track.kind.berm": "Paraboliche",
+  "track.straight": "Rettilineo",
+  "track.turnLeft": "Curva a sinistra",
+  "track.turnRight": "Curva a destra",
+  "track.radius": "di raggio",
+  "track.gap": "di vuoto",
+  "track.deep": "di profondità",
+  "track.over": "su",
+  "track.kind.rut": "Solco",
+  "track.sequenceHint": "Puoi descrivere il giro in ordine — «un lungo rettilineo, un tornante a sinistra, poi un doppio e una sezione ritmica» — e sarà costruito così.",
 };

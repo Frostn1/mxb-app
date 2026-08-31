@@ -78,6 +78,12 @@ const Feature = z.discriminatedUnion("kind", [
     length: z.number(),
     height: z.number(),
   }),
+  z.object({
+    kind: z.literal("rut"),
+    at: z.number(),
+    length: z.number(),
+    depth: z.number().describe("metres; corners grow their own, this is for elsewhere"),
+  }),
 ]);
 
 const TrackProgram = z.object({
@@ -100,6 +106,9 @@ const TrackProgram = z.object({
       seed: z.number().int(),
       texture: z.number().describe("ridden-surface roughness, metres; 0.06 is normal"),
     }),
+    surface: z
+      .enum(["soil", "sand", "grass"])
+      .describe("what the ground is, either side of the riding line"),
   }),
   start: z.object({
     x: z.number(),
@@ -122,11 +131,24 @@ A lap is a start pose plus a list of segments, each either a straight of some le
 of a signed radius through some angle. Positive radius turns right, negative left. Features —
 jumps, whoops, berms — are placed by how far round the lap they are, in metres.
 
+IF THE BRIEF DESCRIBES THE LAP IN ORDER, FOLLOW IT LITERALLY. "A long straight into a left
+hairpin, then a double and a rhythm section" is a specification, not a mood: emit a straight,
+then an arc with a negative radius, then a double, then a run of jumps — in that order, and
+with nothing inserted between them that was not asked for. Add segments only where they are
+needed to bring the lap back to the start. A brief that describes an atmosphere instead ("a
+sandy national") leaves the layout to you.
+
 THE LAP MUST CLOSE. The signed turn angles have to sum to exactly ±360° (or a multiple), and
 the straights have to bring it home. The reliable way to guarantee this is point symmetry:
 write half a lap whose signed angles sum to ±180°, then repeat that same half with every
 feature offset by the half-lap's length. A lap that misses itself is the single most common
 failure and it is always caught.
+
+Corners grow their own ruts and braking bumps — do not ask for a rut in a corner, it is
+already there. A rut feature is for putting one somewhere a corner would not.
+
+Set terrain.surface from the brief: sand for a sand track, grass for an early-season or
+grasstrack circuit, soil for everything else.
 
 Berms bank the OUTSIDE of a corner, so only place one where an arc segment is — a berm on a
 straight does nothing. Jumps go on straights.

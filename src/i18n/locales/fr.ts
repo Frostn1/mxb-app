@@ -2181,4 +2181,13 @@ export const fr: Translation = {
   "track.kind.whoops": "Whoops",
   "track.kind.stepUp": "Step-up",
   "track.kind.berm": "Berme",
+  "track.straight": "Ligne droite",
+  "track.turnLeft": "Virage à gauche",
+  "track.turnRight": "Virage à droite",
+  "track.radius": "de rayon",
+  "track.gap": "d'écart",
+  "track.deep": "de profondeur",
+  "track.over": "sur",
+  "track.kind.rut": "Ornière",
+  "track.sequenceHint": "Tu peux décrire le tour dans l'ordre — « une longue ligne droite, une épingle à gauche, puis un double et une section rythmique » — et il sera construit ainsi.",
 };

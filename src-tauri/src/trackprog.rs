@@ -65,6 +65,23 @@ pub struct Terrain {
     pub scale: f32,
     #[serde(default)]
     pub relief: Relief,
+    /// What the ground is. Decides the surfaces painted either side of the riding line, and
+    /// with them what the track looks like.
+    #[serde(default)]
+    pub surface: Surface,
+}
+
+/// The ground a track is cut into.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Surface {
+    /// Worked dirt with grass beyond it. The default, and most of the corpus.
+    #[default]
+    Soil,
+    /// A sand track: the shoulder is sand rather than soil, and there is more of it.
+    Sand,
+    /// Grass right up to the riding line — a grasstrack or an early-season circuit.
+    Grass,
 }
 
 fn default_samples() -> u32 {
@@ -166,6 +183,9 @@ pub enum Feature {
     StepUp { at: f32, length: f32, height: f32 },
     /// A banked wall on the outside of a corner. Which side that is comes from the corner.
     Berm { at: f32, length: f32, height: f32 },
+    /// A groove worn into the line by everyone riding it. Corners grow their own — this is
+    /// for putting one somewhere a corner wouldn't.
+    Rut { at: f32, length: f32, depth: f32 },
 }
 
 fn default_lip() -> f32 {
@@ -180,7 +200,8 @@ impl Feature {
             | Feature::Roller { at, .. }
             | Feature::Whoops { at, .. }
             | Feature::StepUp { at, .. }
-            | Feature::Berm { at, .. } => *at,
+            | Feature::Berm { at, .. }
+            | Feature::Rut { at, .. } => *at,
         }
     }
 
@@ -190,7 +211,8 @@ impl Feature {
             Feature::Tabletop { length, .. }
             | Feature::Roller { length, .. }
             | Feature::StepUp { length, .. }
-            | Feature::Berm { length, .. } => *length,
+            | Feature::Berm { length, .. }
+            | Feature::Rut { length, .. } => *length,
             // Two faces up and two back down, with the gap between them.
             Feature::Double { gap, lip, .. } => (lip + lip.min(5.0)) * 2.0 + gap,
             Feature::Whoops {
@@ -207,6 +229,8 @@ impl Feature {
             | Feature::Whoops { height, .. }
             | Feature::StepUp { height, .. }
             | Feature::Berm { height, .. } => *height,
+            // A rut goes down rather than up, and its depth is the figure that matters.
+            Feature::Rut { depth, .. } => -*depth,
         }
     }
 }
@@ -487,6 +511,7 @@ mod tests {
                 samples: 2049,
                 scale: 20.0,
                 relief: Relief::default(),
+                surface: Surface::default(),
             },
             start: Start {
                 x: 200.0,

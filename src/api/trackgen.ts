@@ -22,6 +22,8 @@ export interface TrackProgram {
     /** The whole height budget, metres — everything is quantised against it. */
     scale: number;
     relief: { amplitude: number; wavelength: number; seed: number; texture: number };
+    /** What the ground is, which decides the surfaces either side of the line. */
+    surface: "soil" | "sand" | "grass";
   };
   /** Degrees: 0 looks down +z, increasing clockwise towards +x. */
   start: { x: number; z: number; angle: number };
@@ -40,7 +42,8 @@ export type TrackFeature =
   | { kind: "roller"; at: number; length: number; height: number }
   | { kind: "whoops"; at: number; count: number; spacing: number; height: number }
   | { kind: "stepUp"; at: number; length: number; height: number }
-  | { kind: "berm"; at: number; length: number; height: number };
+  | { kind: "berm"; at: number; length: number; height: number }
+  | { kind: "rut"; at: number; length: number; depth: number };
 
 export type TrackFeatureKind = TrackFeature["kind"];
 
@@ -93,6 +96,47 @@ export function installTrackPreview(program: TrackProgram): Promise<string> {
 /** Write the folder TerrainEd compiles. Returns the file names written. */
 export function exportTrackSource(program: TrackProgram, dir: string): Promise<string[]> {
   return invoke<string[]>("export_track_source", { program, dir });
+}
+
+/**
+ * The lap as a list you can read in order: a straight, a left turn, a double.
+ *
+ * The program stores corners and jumps separately — one is the shape of the lap, the other
+ * is what is built on it — but nobody describes a track that way. Riding it, they are one
+ * sequence, so this is the sequence, and it is what the studio shows and what a brief can be
+ * written in.
+ */
+export type LapStep =
+  | { at: number; kind: "straight"; length: number }
+  | { at: number; kind: "left" | "right"; radius: number; angle: number }
+  | { at: number; kind: "feature"; index: number; feature: TrackFeature };
+
+export function lapSteps(program: TrackProgram): LapStep[] {
+  const steps: LapStep[] = [];
+  let at = 0;
+  for (const seg of program.segments) {
+    if (seg.kind === "straight") {
+      steps.push({ at, kind: "straight", length: seg.length });
+      at += seg.length;
+    } else {
+      const length = (Math.abs(seg.radius) * Math.abs(seg.angle) * Math.PI) / 180;
+      steps.push({
+        at,
+        // Signed radius: positive turns right. Which way it goes is the thing a person
+        // reads, so it is the thing the row says.
+        kind: seg.radius >= 0 ? "right" : "left",
+        radius: Math.abs(seg.radius),
+        angle: Math.abs(seg.angle),
+      });
+      at += length;
+    }
+  }
+  program.features.forEach((feature, index) =>
+    steps.push({ at: feature.at, kind: "feature", index, feature }),
+  );
+  // Stable by distance round the lap; where a jump starts exactly at a corner, the corner
+  // comes first because that is the order you meet them.
+  return steps.sort((a, b) => a.at - b.at || (a.kind === "feature" ? 1 : -1));
 }
 
 /** How long the lap is. An arc states its radius and angle, so its length falls out. */

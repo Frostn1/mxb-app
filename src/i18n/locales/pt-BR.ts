@@ -2166,4 +2166,13 @@ export const ptBR: Translation = {
   "track.kind.whoops": "Whoops",
   "track.kind.stepUp": "Step-up",
   "track.kind.berm": "Berma",
+  "track.straight": "Reta",
+  "track.turnLeft": "Curva à esquerda",
+  "track.turnRight": "Curva à direita",
+  "track.radius": "de raio",
+  "track.gap": "de vão",
+  "track.deep": "de profundidade",
+  "track.over": "sobre",
+  "track.kind.rut": "Sulco",
+  "track.sequenceHint": "Você pode descrever a volta em ordem — “uma reta longa, uma curva fechada à esquerda, depois um duplo e uma seção de ritmo” — e será construída assim.",
 };

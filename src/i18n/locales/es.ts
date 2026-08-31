@@ -2176,4 +2176,13 @@ export const es: Translation = {
   "track.kind.whoops": "Whoops",
   "track.kind.stepUp": "Step-up",
   "track.kind.berm": "Peralte",
+  "track.straight": "Recta",
+  "track.turnLeft": "Curva a izquierda",
+  "track.turnRight": "Curva a derecha",
+  "track.radius": "de radio",
+  "track.gap": "de hueco",
+  "track.deep": "de profundidad",
+  "track.over": "sobre",
+  "track.kind.rut": "Rodada",
+  "track.sequenceHint": "Puedes describir la vuelta en orden — «una recta larga, una horquilla a izquierda, luego un doble y una sección de ritmo» — y se construirá así.",
 };
