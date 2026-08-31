@@ -25,6 +25,12 @@ declare global {
      *  carries on. Spend is capped by the endpoint itself: one Opus call per request, at
      *  most 16k output tokens, and only ever a motocross track. */
     ANTHROPIC_API_KEY?: string;
+    /** Ed25519 private key (PKCS#8 DER, base64url) that signs plugin entitlements. The app
+     *  holds only the public half, so a leak of the app cannot mint licences. Without it
+     *  every licensing endpoint answers 503 rather than issuing something unsigned - an
+     *  unsigned entitlement is not a degraded one, it is a forgery with our name on it.
+     *  Generate with `bun scripts/plugin-keypair.ts`. */
+    PLUGIN_SIGNING_KEY?: string;
     /** Keys the daily digest of a signup's IP address. Without it the digest is a plain
      *  hash, which is reversible for IPv4 — set it before open signup carries real load. */
     IP_HASH_SECRET?: string;

@@ -19,6 +19,7 @@ import {
   terminateInstance,
 } from "./aws";
 import { bmacWebhook } from "./bmac";
+import { listPlugins, myPlugins, pluginBundle, redeemKey } from "./plugins";
 import { generateTrack } from "./trackgen";
 import { bootstrapScript, imageBootstrapScript } from "./bootstrap";
 import { bearer, hashToken, newToken, tokenMatches } from "./auth";
@@ -150,6 +151,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   // credential is the HMAC signature over the body, checked before the body is parsed.
   if (method === "POST" && path === "/v1/bmac/webhook") return bmacWebhook(request, env);
 
+  // The plugin catalogue, before there is anyone to authenticate. What is on offer is not a
+  // secret and the app lists it on a first run, with no account and nothing enrolled.
+  if (method === "GET" && path === "/v1/plugins") return listPlugins(env);
+
   const account = await authenticate(request, env);
   if (!account) return json(401, { error: "unauthorized" });
 
@@ -159,6 +164,13 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "PUT" && path === "/v1/me/guid") return putGuid(request, account, env);
   if (method === "PUT" && path === "/v1/presence") return putPresence(request, account, env);
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
+
+  // Paid plugins. Open to every account on the same terms as voice and paint sync: holding
+  // a licence is what gates the bundle, not holding an invite.
+  if (method === "GET" && path === "/v1/me/plugins") return myPlugins(account, env);
+  if (method === "POST" && path === "/v1/plugins/redeem") return redeemKey(request, account, env);
+  const bundle = /^\/v1\/plugins\/([a-z0-9-]{1,32})\/bundle$/.exec(path);
+  if (bundle && method === "GET") return pluginBundle(bundle[1], account, env);
   if (method === "GET" && path === "/v1/voice/room") return voiceRoom(request, url, account, env);
 
   // Paint sync, open on the same terms as voice, and for the same reason: a rider only sees
