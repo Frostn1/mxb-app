@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import {
+  Activity,
+  ChevronsUp,
+  CornerUpLeft,
+  CornerUpRight,
+  Minus,
+  MoveRight,
+  Spline,
+  Square,
+  TrendingDown,
+  TrendingUp,
+  Waves,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "../../ui/button";
@@ -24,6 +38,7 @@ import {
   type TrackFeature,
   type TrackPreview,
   type TrackProgram,
+  type TrackSegment,
   type TrackToolsStatus,
 } from "../../../api/trackgen";
 
@@ -154,6 +169,14 @@ export default function TrackStudio() {
       i === index ? ({ ...f, ...patch } as TrackFeature) : f,
     );
     void settle({ ...program, features });
+  }
+
+  function editSegment(index: number, patch: Partial<TrackSegment>) {
+    if (!program) return;
+    const segments = program.segments.map((seg, i) =>
+      i === index ? ({ ...seg, ...patch } as TrackSegment) : seg,
+    );
+    void settle({ ...program, segments });
   }
 
   function removeFeature(index: number) {
@@ -354,40 +377,56 @@ export default function TrackStudio() {
               that way, so here they are one sequence. */}
           <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-input">
             <ol className="divide-y divide-input/60">
-              {lapSteps(program).map((step, row) => (
-                <li key={row} className="flex items-center gap-3 px-3.5 py-2 text-[12.5px]">
-                  <span className="w-14 flex-none tabular-nums text-right text-muted-foreground">
-                    {step.at.toFixed(0)} m
-                  </span>
-                  <span className="flex-1">{describe(step, t)}</span>
-                  {step.kind === "feature" && (
-                    <>
-                      <Num
-                        value={
-                          step.feature.kind === "rut" ? step.feature.depth : step.feature.height
-                        }
-                        step={0.1}
-                        onChange={(v) =>
-                          editFeature(
-                            step.index,
-                            (step.feature.kind === "rut"
-                              ? { depth: v }
-                              : { height: v }) as Partial<TrackFeature>,
-                          )
-                        }
-                      />
-                      <button
-                        onClick={() => removeFeature(step.index)}
-                        className="rounded px-1.5 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
-                        aria-label={t("common.delete")}
-                      >
-                        ×
-                      </button>
-                    </>
-                  )}
-                  {step.kind !== "feature" && <span className="w-[92px] flex-none" />}
-                </li>
-              ))}
+              {lapSteps(program).map((step, row) => {
+                const Icon = stepIcon(step);
+                return (
+                  <li key={row} className="flex items-center gap-2.5 px-3 py-1.5 text-[12.5px]">
+                    <span className="w-12 flex-none tabular-nums text-right text-muted-foreground">
+                      {step.at.toFixed(0)}
+                    </span>
+                    <Icon
+                      className={cn(
+                        "size-4 flex-none",
+                        step.kind === "feature" ? "text-primary" : "text-muted-foreground",
+                      )}
+                    />
+                    <span className="w-[104px] flex-none truncate">{stepName(step, t)}</span>
+
+                    <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                      {fieldsOf(step).map((f) => (
+                        <Field
+                          key={f.label}
+                          label={f.label}
+                          value={f.value}
+                          step={f.step}
+                          onChange={(v) =>
+                            step.kind === "feature"
+                              ? editFeature(step.index, { [f.key]: v } as Partial<TrackFeature>)
+                              : editSegment(step.index, {
+                                  [f.key]:
+                                    f.key === "radius" ? (step.kind === "left" ? -v : v) : v,
+                                } as Partial<TrackSegment>)
+                          }
+                        />
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => step.kind === "feature" && removeFeature(step.index)}
+                      disabled={step.kind !== "feature"}
+                      className={cn(
+                        "rounded px-1.5 text-muted-foreground transition-colors",
+                        step.kind === "feature"
+                          ? "hover:bg-foreground/[0.06] hover:text-foreground"
+                          : "invisible",
+                      )}
+                      aria-label={t("common.delete")}
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
             </ol>
           </div>
         </div>
@@ -405,13 +444,6 @@ export default function TrackStudio() {
   );
 }
 
-/**
- * One step of the lap, in words.
- *
- * Numbers carry their own units and need no translating, so only the noun is a key. The
- * shape is deliberately flat — "Left turn · 18 m radius, 75°" reads at a glance, and reads
- * the same way a brief is written.
- */
 const KIND_KEY = {
   tabletop: "track.kind.tabletop",
   double: "track.kind.double",
@@ -422,33 +454,101 @@ const KIND_KEY = {
   rut: "track.kind.rut",
 } as const;
 
-function describe(step: LapStep, t: ReturnType<typeof useT>): string {
-  const m = (v: number, digits = 0) => `${v.toFixed(digits)} m`;
-  switch (step.kind) {
-    case "straight":
-      return `${t("track.straight")} · ${m(step.length)}`;
-    case "left":
-    case "right":
-      return `${t(step.kind === "left" ? "track.turnLeft" : "track.turnRight")} · ${m(
-        step.radius,
-      )} ${t("track.radius")}, ${step.angle.toFixed(0)}°`;
-    case "feature": {
-      const f = step.feature;
-      const name = t(KIND_KEY[f.kind]);
-      switch (f.kind) {
-        case "double":
-          return `${name} · ${m(f.height, 1)}, ${m(f.gap)} ${t("track.gap")}`;
-        case "whoops":
-          return `${name} · ${f.count} × ${m(f.spacing, 1)}`;
-        case "rut":
-          return `${name} · ${m(f.depth, 2)} ${t("track.deep")}`;
-        case "stepUp":
-          return `${name} · ${m(f.height, 1)}`;
-        default:
-          return `${name} · ${m(f.height, 1)} ${t("track.over")} ${m(f.length)}`;
-      }
-    }
+const FEATURE_ICON: Record<TrackFeature["kind"], LucideIcon> = {
+  tabletop: Square,
+  double: ChevronsUp,
+  roller: Waves,
+  whoops: Activity,
+  stepUp: TrendingUp,
+  berm: Spline,
+  rut: Minus,
+};
+
+/** What the row is, at a glance. A list of thirty steps is scanned, not read. */
+function stepIcon(step: LapStep): LucideIcon {
+  if (step.kind === "straight") return MoveRight;
+  if (step.kind === "left") return CornerUpLeft;
+  if (step.kind === "right") return CornerUpRight;
+  // A step-down is a step-up with a negative height, and drawing both the same way hides
+  // the one thing that tells them apart.
+  if (step.feature.kind === "stepUp" && step.feature.height < 0) return TrendingDown;
+  return FEATURE_ICON[step.feature.kind];
+}
+
+function stepName(step: LapStep, t: ReturnType<typeof useT>): string {
+  if (step.kind === "straight") return t("track.straight");
+  if (step.kind === "left") return t("track.turnLeft");
+  if (step.kind === "right") return t("track.turnRight");
+  return t(KIND_KEY[step.feature.kind]);
+}
+
+/**
+ * The numbers that define a step, and which key on it each one writes.
+ *
+ * Every step is a handful of measurements and nothing else, so the row *is* the editor —
+ * there is no dialog to open and nothing to remember about which field belongs to which
+ * kind. `rise` is on every segment because "does this bit go up or down" is a question you
+ * ask of a straight as often as of a corner.
+ */
+function fieldsOf(step: LapStep): { key: string; label: string; value: number; step: number }[] {
+  const len = (v: number) => ({ key: "length", label: "m", value: v, step: 1 });
+  const rise = (v: number) => ({ key: "rise", label: "↕", value: v, step: 0.5 });
+  if (step.kind === "straight") {
+    const seg = step.segment as { length: number; rise: number };
+    return [len(seg.length), rise(seg.rise ?? 0)];
   }
+  if (step.kind === "left" || step.kind === "right") {
+    const seg = step.segment as { radius: number; angle: number; rise: number };
+    return [
+      // Signed on the wire — positive turns right — but shown as the radius you would
+      // measure, because the arrow already says which way it goes.
+      { key: "radius", label: "r", value: Math.abs(seg.radius), step: 1 },
+      { key: "angle", label: "°", value: seg.angle, step: 5 },
+      rise(seg.rise ?? 0),
+    ];
+  }
+  const f = step.feature;
+  switch (f.kind) {
+    case "double":
+      return [
+        { key: "height", label: "h", value: f.height, step: 0.1 },
+        { key: "gap", label: "gap", value: f.gap, step: 1 },
+        { key: "lip", label: "lip", value: f.lip, step: 0.5 },
+      ];
+    case "whoops":
+      return [
+        { key: "height", label: "h", value: f.height, step: 0.05 },
+        { key: "count", label: "×", value: f.count, step: 1 },
+        { key: "spacing", label: "gap", value: f.spacing, step: 0.5 },
+      ];
+    case "rut":
+      return [
+        { key: "depth", label: "deep", value: f.depth, step: 0.05 },
+        len(f.length),
+      ];
+    default:
+      return [{ key: "height", label: "h", value: f.height, step: 0.1 }, len(f.length)];
+  }
+}
+
+/** A labelled number, small enough that several fit on a row. */
+function Field({
+  label,
+  value,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex items-center gap-1">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <Num value={value} step={step} onChange={onChange} />
+    </label>
+  );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -483,7 +583,7 @@ function Num({
         setDraft(null);
       }}
       className={cn(
-        "w-[68px] rounded-md border border-input bg-transparent px-1.5 py-0.5 tabular-nums",
+        "w-[58px] rounded-md border border-input bg-transparent px-1.5 py-0.5 tabular-nums",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
       )}
     />

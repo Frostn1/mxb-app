@@ -137,20 +137,34 @@ pub struct Start {
 pub enum Segment {
     Straight {
         length: f32,
+        /// Metres the ground climbs over this segment; negative drops. Zero follows the
+        /// landscape, which is what a track does unless someone cut into it.
+        #[serde(default)]
+        rise: f32,
     },
     /// Signed radius — positive turns right, negative left — through `angle` degrees. Arc
     /// length falls out as `|radius| * angle`, which is exactly how a `.tcl` states it.
     Arc {
         radius: f32,
         angle: f32,
+        #[serde(default)]
+        rise: f32,
     },
+}
+
+impl Segment {
+    pub fn rise(&self) -> f32 {
+        match self {
+            Segment::Straight { rise, .. } | Segment::Arc { rise, .. } => *rise,
+        }
+    }
 }
 
 impl Segment {
     pub fn length(&self) -> f32 {
         match self {
-            Segment::Straight { length } => *length,
-            Segment::Arc { radius, angle } => radius.abs() * angle.abs().to_radians(),
+            Segment::Straight { length, .. } => *length,
+            Segment::Arc { radius, angle, .. } => radius.abs() * angle.abs().to_radians(),
         }
     }
 }
@@ -384,7 +398,7 @@ impl TrackProgram {
                     x += dx * len;
                     z += dz * len;
                 }
-                Segment::Arc { radius, angle } => {
+                Segment::Arc { radius, angle, .. } => {
                     let sweep = angle.abs().to_radians();
                     let turn = radius.signum();
                     let r = radius.abs().max(0.01);
@@ -528,24 +542,21 @@ mod tests {
     fn an_arc_states_its_own_length() {
         // The example track's second segment: radius 4.974413 through 179.492554°, which its
         // own file calls 15.583522 m long.
-        let seg = Segment::Arc {
-            radius: 4.974413,
-            angle: 179.492554,
-        };
+        let seg = Segment::Arc { radius: 4.974413, angle: 179.492554, rise: 0.0 };
         assert!((seg.length() - 15.583522).abs() < 1e-3, "{}", seg.length());
     }
 
     #[test]
     fn four_right_angles_close_a_square() {
         let p = prog(vec![
-            Segment::Straight { length: 50.0 },
-            Segment::Arc { radius: 20.0, angle: 90.0 },
-            Segment::Straight { length: 50.0 },
-            Segment::Arc { radius: 20.0, angle: 90.0 },
-            Segment::Straight { length: 50.0 },
-            Segment::Arc { radius: 20.0, angle: 90.0 },
-            Segment::Straight { length: 50.0 },
-            Segment::Arc { radius: 20.0, angle: 90.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
+            Segment::Straight { length: 50.0, rise: 0.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0, rise: 0.0 },
         ]);
         assert!(p.closure_error() < 0.05, "{} m", p.closure_error());
         assert!((p.lap_length() - (200.0 + 4.0 * 20.0 * std::f32::consts::FRAC_PI_2)).abs() < 0.01);
@@ -553,8 +564,8 @@ mod tests {
 
     #[test]
     fn a_left_turn_goes_the_other_way() {
-        let right = prog(vec![Segment::Arc { radius: 30.0, angle: 90.0 }]);
-        let left = prog(vec![Segment::Arc { radius: -30.0, angle: 90.0 }]);
+        let right = prog(vec![Segment::Arc { radius: 30.0, angle: 90.0, rise: 0.0 }]);
+        let left = prog(vec![Segment::Arc { radius: -30.0, angle: 90.0, rise: 0.0 }]);
         let (r, l) = (
             *right.stations(1.0).last().unwrap(),
             *left.stations(1.0).last().unwrap(),
@@ -566,23 +577,23 @@ mod tests {
 
     #[test]
     fn curvature_points_into_the_corner() {
-        let p = prog(vec![Segment::Arc { radius: 25.0, angle: 45.0 }]);
+        let p = prog(vec![Segment::Arc { radius: 25.0, angle: 45.0, rise: 0.0 }]);
         let st = p.stations(1.0);
         assert!((st[0].curvature - 1.0 / 25.0).abs() < 1e-4);
-        let straight = prog(vec![Segment::Straight { length: 10.0 }]);
+        let straight = prog(vec![Segment::Straight { length: 10.0, rise: 0.0 }]);
         assert_eq!(straight.stations(1.0)[0].curvature, 0.0);
     }
 
     #[test]
     fn a_lap_that_leaves_the_ground_says_so() {
-        let p = prog(vec![Segment::Straight { length: 500.0 }]);
+        let p = prog(vec![Segment::Straight { length: 500.0, rise: 0.0 }]);
         let err = p.check().unwrap_err().to_string();
         assert!(err.contains("leaves the terrain"), "{err}");
     }
 
     #[test]
     fn a_feature_past_the_finish_says_so() {
-        let mut p = prog(vec![Segment::Straight { length: 100.0 }]);
+        let mut p = prog(vec![Segment::Straight { length: 100.0, rise: 0.0 }]);
         p.features.push(Feature::Tabletop {
             at: 90.0,
             length: 20.0,
@@ -594,7 +605,7 @@ mod tests {
 
     #[test]
     fn samples_must_be_a_power_of_two_plus_one() {
-        let mut p = prog(vec![Segment::Straight { length: 50.0 }]);
+        let mut p = prog(vec![Segment::Straight { length: 50.0, rise: 0.0 }]);
         p.terrain.samples = 2048;
         assert!(p.check().is_err());
         p.terrain.samples = 2049;

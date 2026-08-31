@@ -32,9 +32,10 @@ export interface TrackProgram {
 }
 
 export type TrackSegment =
-  | { kind: "straight"; length: number }
+  /** `rise` is metres climbed over the segment; negative drops, zero follows the ground. */
+  | { kind: "straight"; length: number; rise: number }
   /** Signed radius — positive turns right. */
-  | { kind: "arc"; radius: number; angle: number };
+  | { kind: "arc"; radius: number; angle: number; rise: number };
 
 export type TrackFeature =
   | { kind: "tabletop"; at: number; length: number; height: number }
@@ -112,30 +113,27 @@ export function exportTrackSource(program: TrackProgram, dir: string): Promise<s
  * written in.
  */
 export type LapStep =
-  | { at: number; kind: "straight"; length: number }
-  | { at: number; kind: "left" | "right"; radius: number; angle: number }
+  | { at: number; kind: "straight"; index: number; segment: TrackSegment }
+  // Split rather than `kind: "left" | "right"`: a discriminant that is itself a union
+  // doesn't narrow, and every reader of this then has to cast.
+  | { at: number; kind: "left"; index: number; segment: TrackSegment }
+  | { at: number; kind: "right"; index: number; segment: TrackSegment }
   | { at: number; kind: "feature"; index: number; feature: TrackFeature };
 
 export function lapSteps(program: TrackProgram): LapStep[] {
   const steps: LapStep[] = [];
   let at = 0;
-  for (const seg of program.segments) {
-    if (seg.kind === "straight") {
-      steps.push({ at, kind: "straight", length: seg.length });
-      at += seg.length;
+  program.segments.forEach((segment, index) => {
+    if (segment.kind === "straight") {
+      steps.push({ at, kind: "straight", index, segment });
+      at += segment.length;
     } else {
-      const length = (Math.abs(seg.radius) * Math.abs(seg.angle) * Math.PI) / 180;
-      steps.push({
-        at,
-        // Signed radius: positive turns right. Which way it goes is the thing a person
-        // reads, so it is the thing the row says.
-        kind: seg.radius >= 0 ? "right" : "left",
-        radius: Math.abs(seg.radius),
-        angle: Math.abs(seg.angle),
-      });
-      at += length;
+      // Signed radius: positive turns right. Which way it goes is the thing a person reads,
+      // so it is the thing the row says.
+      steps.push({ at, kind: segment.radius >= 0 ? "right" : "left", index, segment });
+      at += (Math.abs(segment.radius) * Math.abs(segment.angle) * Math.PI) / 180;
     }
-  }
+  });
   program.features.forEach((feature, index) =>
     steps.push({ at: feature.at, kind: "feature", index, feature }),
   );
@@ -148,7 +146,10 @@ export function lapSteps(program: TrackProgram): LapStep[] {
 export function lapLength(program: TrackProgram): number {
   return program.segments.reduce(
     (sum, s) =>
-      sum + (s.kind === "straight" ? s.length : Math.abs(s.radius) * (Math.abs(s.angle) * Math.PI) / 180),
+      sum +
+      (s.kind === "straight"
+        ? s.length
+        : (Math.abs(s.radius) * Math.abs(s.angle) * Math.PI) / 180),
     0,
   );
 }
