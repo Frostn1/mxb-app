@@ -20,6 +20,11 @@ declare global {
     /** Discord webhook the supporter announcements are posted to. A credential in itself:
      *  anyone holding the URL can post to that channel. */
     DISCORD_DONATION_WEBHOOK_URL?: string;
+    /** Anthropic API key, for writing track programs. Without it `/v1/track/generate`
+     *  answers 503 — the app says track generation isn't available and everything else
+     *  carries on. Spend is capped by the endpoint itself: one Opus call per request, at
+     *  most 16k output tokens, and only ever a motocross track. */
+    ANTHROPIC_API_KEY?: string;
     /** Keys the daily digest of a signup's IP address. Without it the digest is a plain
      *  hash, which is reversible for IPv4 — set it before open signup carries real load. */
     IP_HASH_SECRET?: string;
