@@ -102,12 +102,24 @@ function handlesOf(s: Scoped): Handle[] {
         return [
           { at: s.at + f.length / 2, height: -f.depth, x: { key: "length", from: f.length }, y: { key: "depth", from: f.depth }, label: "rut" },
         ];
-      default: {
-        const g = f as { length: number; height: number };
+      case "custom": {
+        // A drawn shape has no height of its own — it has points, and they are dragged in
+        // shape mode. What is left to pull here is how much lap it covers.
+        const tallest = f.shape.reduce((a, p) => (Math.abs(p.h) > Math.abs(a) ? p.h : a), 0);
         return [
-          { at: s.at + g.length / 2, height: g.height, x: { key: "length", from: g.length }, y: { key: "height", from: g.height }, label: "top" },
+          { at: s.at + f.length, height: tallest, x: { key: "length", from: f.length }, label: "end" },
         ];
       }
+      // Tabletop, roller, step-up and berm: the four that really are a length and a height.
+      // Named rather than left to `default`, because the cast that arm needed is exactly
+      // what let a shape — which has neither — reach it and read `undefined`.
+      case "tabletop":
+      case "roller":
+      case "stepUp":
+      case "berm":
+        return [
+          { at: s.at + f.length / 2, height: f.height, x: { key: "length", from: f.length }, y: { key: "height", from: f.height }, label: "top" },
+        ];
     }
   }
   const seg = s.segment;
@@ -155,6 +167,11 @@ export function silhouette(s: Scoped): { at: number; height: number }[] {
       { at: at(0.65), height: -f.depth },
       { at: s.at + L, height: 0 },
     ];
+  }
+  if (f.kind === "custom") {
+    return [...f.shape]
+      .sort((a, b) => a.u - b.u)
+      .map((p) => ({ at: s.at + p.u * L, height: p.h }));
   }
   const h = (f as { height: number }).height;
   if (f.kind === "roller") {
