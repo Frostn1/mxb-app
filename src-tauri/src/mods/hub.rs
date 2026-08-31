@@ -284,6 +284,27 @@ pub fn challenged(resp: &Response) -> bool {
     resp.status().as_u16() == 202 && html
 }
 
+/// A refusal, as something the command layer can act on.
+///
+/// A 403 from this store is the same problem as its robot challenge wearing a different
+/// status: a clearance that has gone stale, or a client the filter has decided against. Both
+/// are fixed by earning a new one in a browser — so it is raised as [`Blocked`], which is
+/// what [`crate::with_hub_clearance`] watches for.
+///
+/// It used to be a plain string for every status. The catalog would answer 403, the error
+/// would carry no marker, the handshake would never run, and the Retry button on screen could
+/// only ever fail the same way again.
+fn refused(status: reqwest::StatusCode, what: &str) -> anyhow::Error {
+    if status.as_u16() == 403 {
+        return Blocked::new(
+            Some(403),
+            format!("MXB Hub refused the {what}. It wants the app to prove it isn't a robot."),
+        )
+        .into();
+    }
+    anyhow::anyhow!("MXB Hub answered {status} for the {what}")
+}
+
 /// The challenge as an error the command layer knows to run the handshake for.
 ///
 /// `None` for the status, which is what [`Blocked::clearable`] reads as "a browser could fix
@@ -343,7 +364,7 @@ pub async fn search(
         });
     }
     if !status.is_success() {
-        anyhow::bail!("MXB Hub answered {status} for the catalog");
+        return Err(refused(status, "catalog"));
     }
 
     let total = header_u32(&resp, "x-wp-total").unwrap_or(0);
@@ -381,7 +402,7 @@ pub async fn detail(id: u64) -> anyhow::Result<HubModDetail> {
         return Err(blocked());
     }
     if !resp.status().is_success() {
-        anyhow::bail!("MXB Hub answered {} for product {id}", resp.status());
+        return Err(refused(resp.status(), &format!("product {id}")));
     }
     let product: ApiProduct = resp.json().await?;
 
@@ -431,7 +452,7 @@ pub async fn by_slugs(slugs: &[String]) -> anyhow::Result<Vec<HubMod>> {
         return Err(blocked());
     }
     if !resp.status().is_success() {
-        anyhow::bail!("MXB Hub answered {} for a product lookup", resp.status());
+        return Err(refused(resp.status(), "product lookup"));
     }
     let products: Vec<ApiProduct> = resp.json().await?;
     let mut items: Vec<HubMod> = products.iter().map(map_product).collect();
@@ -462,7 +483,7 @@ pub async fn categories() -> anyhow::Result<Vec<HubCategory>> {
         return Err(blocked());
     }
     if !resp.status().is_success() {
-        anyhow::bail!("MXB Hub answered {} for the categories", resp.status());
+        return Err(refused(resp.status(), "categories"));
     }
     let raw: Vec<ApiCategory> = resp.json().await?;
     let tree = flatten(&raw);
@@ -683,6 +704,37 @@ fn safe_hub_url(raw: &str) -> Option<String> {
 /// WordPress publishes titles pre-escaped — `Gear PSD&#8217;s`, `Yamaha &amp; Honda`.
 fn decode(raw: &str) -> String {
     html_escape::decode_html_entities(raw.trim()).into_owned()
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::refused;
+    use crate::mods::Blocked;
+
+    #[test]
+    fn a_403_is_something_a_browser_can_fix() {
+        let err = refused(reqwest::StatusCode::FORBIDDEN, "catalog");
+        let blocked = err
+            .downcast_ref::<Blocked>()
+            .expect("a 403 has to arrive as a Blocked, or the handshake never runs");
+        assert!(blocked.clearable());
+        assert_eq!(blocked.status, Some(403));
+    }
+
+    #[test]
+    fn anything_else_is_just_an_error() {
+        // A 500 or a 429 is not a challenge, and sending someone through a browser handshake
+        // to be refused again is worse than telling them what happened.
+        for code in [429u16, 500, 503] {
+            let status = reqwest::StatusCode::from_u16(code).unwrap();
+            let err = refused(status, "catalog");
+            assert!(
+                err.downcast_ref::<Blocked>().is_none(),
+                "{code} should not ask for a clearance"
+            );
+            assert!(err.to_string().contains(&code.to_string()));
+        }
+    }
 }
 
 #[cfg(test)]
