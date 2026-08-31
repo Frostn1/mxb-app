@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  ENTITLEMENT_VERSION,
+  LICENSE_VERSION,
   GRACE_DAYS,
   extendBy,
   myPlugins,
   normaliseCode,
   pluginBundle,
   redeemKey,
-  signEntitlement,
-  verifyEntitlement,
-  type Entitlement,
+  signLicense,
+  verifyLicense,
+  type License,
 } from "../src/plugins";
 
 const DAY = 86400;
@@ -38,22 +38,22 @@ async function keypair() {
 
 /**
  * A D1 stand-in that behaves like the real thing on the two points this code leans on:
- * `RETURNING` yields a row only when the UPDATE matched, and the licence upsert replaces.
+ * `RETURNING` yields a row only when the UPDATE matched, and the license upsert replaces.
  */
 function stubDb(opts: {
   keys?: Record<string, { plugin_id: string; months: number; redeemed_by: string | null }>;
-  licences?: Record<string, number>; // `${account}:${plugin}` -> expires_at
+  licenses?: Record<string, number>; // `${account}:${plugin}` -> expires_at
   plugins?: Record<string, { name: string; version: string | null; bundle_sha256: string | null; bundle_key: string | null }>;
 } = {}) {
   const keys = opts.keys ?? {};
-  const licences = opts.licences ?? {};
+  const licenses = opts.licenses ?? {};
   const plugins = opts.plugins ?? {
     replaycam: { name: "Frost's Replay Mod", version: "1.0.0", bundle_sha256: "abc123", bundle_key: "plugins/replaycam-1.0.0.zip" },
   };
 
   return {
     keys,
-    licences,
+    licenses,
     prepare(sql: string) {
       return {
         bind(...args: unknown[]) {
@@ -73,7 +73,7 @@ function stubDb(opts: {
               }
               if (sql.startsWith("SELECT expires_at")) {
                 const [account, plugin] = args as [string, string];
-                const e = licences[`${account}:${plugin}`];
+                const e = licenses[`${account}:${plugin}`];
                 return e ? { expires_at: e } : null;
               }
               if (sql.startsWith("SELECT bundle_sha256")) {
@@ -87,15 +87,15 @@ function stubDb(opts: {
                 return {
                   bundle_key: p.bundle_key,
                   bundle_sha256: p.bundle_sha256,
-                  expires_at: licences[`${account}:${plugin}`] ?? null,
+                  expires_at: licenses[`${account}:${plugin}`] ?? null,
                 };
               }
               return null;
             },
             async all() {
-              if (sql.includes("FROM plugin_licences l JOIN plugins p")) {
+              if (sql.includes("FROM plugin_licenses l JOIN plugins p")) {
                 const account = String(args[0]);
-                const results = Object.entries(licences)
+                const results = Object.entries(licenses)
                   .filter(([k]) => k.startsWith(`${account}:`))
                   .map(([k, expires]) => {
                     const plugin = k.split(":")[1];
@@ -113,9 +113,9 @@ function stubDb(opts: {
               return { results: [] };
             },
             async run() {
-              if (sql.startsWith("INSERT INTO plugin_licences")) {
+              if (sql.startsWith("INSERT INTO plugin_licenses")) {
                 const [account, plugin, expires] = args as [string, string, number];
-                licences[`${account}:${plugin}`] = expires;
+                licenses[`${account}:${plugin}`] = expires;
               }
               return { success: true };
             },
@@ -141,11 +141,11 @@ function post(body: unknown): Request {
 
 // ---------------------------------------------------------------------------
 
-describe("entitlement signing", () => {
+describe("license signing", () => {
   it("round-trips through a real Ed25519 signature", async () => {
     const { pair } = await keypair();
-    const e: Entitlement = {
-      v: ENTITLEMENT_VERSION,
+    const e: License = {
+      v: LICENSE_VERSION,
       account: "acc_1",
       plugin: "replaycam",
       expires: 1_800_000_000,
@@ -153,13 +153,13 @@ describe("entitlement signing", () => {
       bundleSha256: "abc123",
       issued: 1_699_000_000,
     };
-    const token = await signEntitlement(e, pair.privateKey);
-    expect(await verifyEntitlement(token, pair.publicKey)).toEqual(e);
+    const token = await signLicense(e, pair.privateKey);
+    expect(await verifyLicense(token, pair.publicKey)).toEqual(e);
   });
 
   it("refuses a payload that was edited after signing", async () => {
     const { pair } = await keypair();
-    const token = await signEntitlement(
+    const token = await signLicense(
       {
         v: 1,
         account: "acc_1",
@@ -177,29 +177,29 @@ describe("entitlement signing", () => {
     const decoded = JSON.parse(new TextDecoder().decode(unb64url(payload)));
     decoded.expires = 9_999_999_999;
     const forged = `${b64url(new TextEncoder().encode(JSON.stringify(decoded)))}.${sig}`;
-    expect(await verifyEntitlement(forged, pair.publicKey)).toBeNull();
+    expect(await verifyLicense(forged, pair.publicKey)).toBeNull();
   });
 
   it("refuses a signature from a different key", async () => {
     const a = await keypair();
     const b = await keypair();
-    const token = await signEntitlement(
+    const token = await signLicense(
       { v: 1, account: "x", plugin: "replaycam", expires: 1, refreshAfter: 1, bundleSha256: null, issued: 0 },
       b.pair.privateKey,
     );
-    expect(await verifyEntitlement(token, a.pair.publicKey)).toBeNull();
+    expect(await verifyLicense(token, a.pair.publicKey)).toBeNull();
   });
 
   it("refuses a token that is not a token", async () => {
     const { pair } = await keypair();
-    expect(await verifyEntitlement("nonsense", pair.publicKey)).toBeNull();
+    expect(await verifyLicense("nonsense", pair.publicKey)).toBeNull();
   });
 });
 
 describe("extendBy", () => {
   const now = Math.floor(Date.UTC(2026, 0, 15) / 1000); // 15 Jan 2026
 
-  it("runs from today when there is no licence", () => {
+  it("runs from today when there is no license", () => {
     const out = extendBy(null, 1, now);
     expect(new Date(out * 1000).toISOString().slice(0, 10)).toBe("2026-02-15");
   });
@@ -226,16 +226,16 @@ describe("extendBy", () => {
 });
 
 describe("redeemKey", () => {
-  it("grants a month and returns a verifiable entitlement", async () => {
+  it("grants a month and returns a verifiable license", async () => {
     const { pair, pkcs8B64 } = await keypair();
     const db = stubDb({ keys: { "FRST-AAAA": { plugin_id: "replaycam", months: 1, redeemed_by: null } } });
     const res = await redeemKey(post({ code: "frst-aaaa" }), ACCOUNT, envWith(db, pkcs8B64));
     expect(res.status).toBe(200);
 
-    const body = (await res.json()) as { plugin: string; expires: number; entitlement: string };
+    const body = (await res.json()) as { plugin: string; expires: number; license: string };
     expect(body.plugin).toBe("replaycam");
 
-    const e = await verifyEntitlement(body.entitlement, pair.publicKey);
+    const e = await verifyLicense(body.license, pair.publicKey);
     expect(e).not.toBeNull();
     expect(e!.account).toBe("acc_1");
     expect(e!.plugin).toBe("replaycam");
@@ -248,12 +248,12 @@ describe("redeemKey", () => {
 
   it("never lets refreshAfter outlive the subscription", async () => {
     const { pair, pkcs8B64 } = await keypair();
-    // A licence with a day left must not hand out a seven-day grace.
+    // A license with a day left must not hand out a seven-day grace.
     const nearly = Math.floor(Date.now() / 1000) + DAY;
-    const db = stubDb({ licences: { "acc_1:replaycam": nearly } });
+    const db = stubDb({ licenses: { "acc_1:replaycam": nearly } });
     const res = await myPlugins(ACCOUNT, envWith(db, pkcs8B64));
-    const body = (await res.json()) as { licences: { entitlement: string }[] };
-    const e = await verifyEntitlement(body.licences[0].entitlement, pair.publicKey);
+    const body = (await res.json()) as { licenses: { license: string }[] };
+    const e = await verifyLicense(body.licenses[0].license, pair.publicKey);
     expect(e!.refreshAfter).toBeLessThanOrEqual(e!.expires);
   });
 
@@ -264,12 +264,12 @@ describe("redeemKey", () => {
 
     const first = await redeemKey(post({ code: "FRST-AAAA" }), ACCOUNT, env);
     expect(first.status).toBe(200);
-    const granted = db.licences["acc_1:replaycam"];
+    const granted = db.licenses["acc_1:replaycam"];
 
     const second = await redeemKey(post({ code: "FRST-AAAA" }), ACCOUNT, env);
     expect(second.status).toBe(409);
-    // And crucially the licence did not move.
-    expect(db.licences["acc_1:replaycam"]).toBe(granted);
+    // And crucially the license did not move.
+    expect(db.licenses["acc_1:replaycam"]).toBe(granted);
   });
 
   it("tells an unknown code apart from a used one", async () => {
@@ -284,7 +284,7 @@ describe("redeemKey", () => {
     const db = stubDb({ keys: { "FRST-AAAA": { plugin_id: "replaycam", months: 1, redeemed_by: null } } });
     const res = await redeemKey(post({ code: "FRST-AAAA" }), ACCOUNT, envWith(db, undefined));
     expect(res.status).toBe(503);
-    // An unsigned entitlement is not a degraded one, so nothing may be granted either.
+    // An unsigned license is not a degraded one, so nothing may be granted either.
     expect(db.keys["FRST-AAAA"].redeemed_by).toBeNull();
   });
 
@@ -298,40 +298,40 @@ describe("redeemKey", () => {
 });
 
 describe("myPlugins", () => {
-  it("gives an expired licence no entitlement at all", async () => {
+  it("gives an expired license no license at all", async () => {
     const { pkcs8B64 } = await keypair();
     const past = Math.floor(Date.now() / 1000) - DAY;
-    const db = stubDb({ licences: { "acc_1:replaycam": past } });
+    const db = stubDb({ licenses: { "acc_1:replaycam": past } });
     const res = await myPlugins(ACCOUNT, envWith(db, pkcs8B64));
-    const body = (await res.json()) as { licences: { active: boolean; entitlement: string | null }[] };
-    expect(body.licences[0].active).toBe(false);
-    expect(body.licences[0].entitlement).toBeNull();
+    const body = (await res.json()) as { licenses: { active: boolean; license: string | null }[] };
+    expect(body.licenses[0].active).toBe(false);
+    expect(body.licenses[0].license).toBeNull();
   });
 });
 
 describe("pluginBundle", () => {
   const r2 = { async get(key: string) { return key ? { body: "BUNDLE" } : null; } };
 
-  it("serves the bundle to a live licence", async () => {
-    const db = stubDb({ licences: { "acc_1:replaycam": Math.floor(Date.now() / 1000) + DAY } });
+  it("serves the bundle to a live license", async () => {
+    const db = stubDb({ licenses: { "acc_1:replaycam": Math.floor(Date.now() / 1000) + DAY } });
     const res = await pluginBundle("replaycam", ACCOUNT, envWith(db, undefined, r2));
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toContain("no-store");
   });
 
-  it("refuses an expired licence", async () => {
-    const db = stubDb({ licences: { "acc_1:replaycam": Math.floor(Date.now() / 1000) - DAY } });
+  it("refuses an expired license", async () => {
+    const db = stubDb({ licenses: { "acc_1:replaycam": Math.floor(Date.now() / 1000) - DAY } });
     expect((await pluginBundle("replaycam", ACCOUNT, envWith(db, undefined, r2))).status).toBe(403);
   });
 
-  it("refuses an account with no licence", async () => {
+  it("refuses an account with no license", async () => {
     const db = stubDb();
     expect((await pluginBundle("replaycam", ACCOUNT, envWith(db, undefined, r2))).status).toBe(403);
   });
 
   it("404s a plugin that has no build published", async () => {
     const db = stubDb({
-      licences: { "acc_1:replaycam": Math.floor(Date.now() / 1000) + DAY },
+      licenses: { "acc_1:replaycam": Math.floor(Date.now() / 1000) + DAY },
       plugins: { replaycam: { name: "x", version: null, bundle_sha256: null, bundle_key: null } },
     });
     expect((await pluginBundle("replaycam", ACCOUNT, envWith(db, undefined, r2))).status).toBe(404);

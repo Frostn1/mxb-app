@@ -9,7 +9,7 @@
  *
  *   wrangler d1 execute mxb-control-plane --remote --file=/tmp/keys.sql
  *
- * A key is one-shot and grants months on a licence. Renewing is another key — until there
+ * A key is one-shot and grants months on a license. Renewing is another key — until there
  * is a billing webhook, at which point it inserts these same rows and nothing downstream
  * has to know the difference.
  */

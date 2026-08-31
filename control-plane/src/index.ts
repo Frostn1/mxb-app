@@ -197,7 +197,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (method === "GET" && path === "/v1/voice/ice") return iceServers();
 
   // Paid plugins. Open to every account on the same terms as voice and paint sync: holding
-  // a licence is what gates the bundle, not holding an invite.
+  // a license is what gates the bundle, not holding an invite.
   if (method === "GET" && path === "/v1/me/plugins") return myPlugins(account, env);
   if (method === "POST" && path === "/v1/plugins/redeem") return redeemKey(request, account, env);
   const bundle = /^\/v1\/plugins\/([a-z0-9-]{1,32})\/bundle$/.exec(path);
