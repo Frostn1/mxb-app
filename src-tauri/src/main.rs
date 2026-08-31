@@ -38,6 +38,7 @@ mod mods;
 mod modstate;
 mod modwatch;
 mod profilewatch;
+mod replaycam;
 mod mxb_fetch;
 mod mxb_session;
 mod overlay;
@@ -5634,6 +5635,73 @@ fn frostmod_default_keybinds() -> Vec<frostmod_manage::Keybind> {
     frostmod_manage::default_rcam_keybinds()
 }
 
+// ---- replay camera paths ---------------------------------------------------
+// FrostMod's editor is a text panel over a running game — good for setting a key while you
+// scrub, no use at all for looking at what you saved last week. These back the app's own
+// panel: nine slots you can see into, retime, re-style, and pass around.
+
+/// Every slot, and enough about each to draw the list without opening them again.
+#[tauri::command]
+fn replaycam_list(app: tauri::AppHandle) -> Vec<replaycam::Summary> {
+    let cfg = config::load(&app).unwrap_or_default();
+    replaycam::list(&app, &cfg)
+}
+
+#[tauri::command]
+fn replaycam_read(app: tauri::AppHandle, slot: u8) -> Result<replaycam::CamPath, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    replaycam::read(&app, &cfg, slot)
+}
+
+/// Save a slot back. Returns the file it landed in, which is worth showing: it may be the
+/// game's own plugins folder rather than the app's copy of FrostMod.
+#[tauri::command]
+fn replaycam_write(
+    app: tauri::AppHandle,
+    slot: u8,
+    path: replaycam::CamPath,
+) -> Result<String, String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    replaycam::write(&app, &cfg, slot, &path).map(|p| p.display().to_string())
+}
+
+#[tauri::command]
+fn replaycam_delete(app: tauri::AppHandle, slot: u8) -> Result<(), String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    replaycam::delete(&app, &cfg, slot)
+}
+
+/// Respace the keys by distance — the constant-speed dolly. Pure, so the UI can offer it as
+/// a preview and only write if it is kept.
+#[tauri::command]
+fn replaycam_retime(path: replaycam::CamPath) -> Result<replaycam::CamPath, String> {
+    let mut out = path;
+    replaycam::retime_by_distance(&mut out.keys)?;
+    Ok(out)
+}
+
+/// Load someone else's `.fcam` into a slot. Parsed before it is copied, so a file that
+/// FrostMod would refuse never reaches a slot.
+#[tauri::command]
+fn replaycam_import(
+    app: tauri::AppHandle,
+    slot: u8,
+    src: String,
+) -> Result<replaycam::CamPath, String> {
+    let text = std::fs::read_to_string(&src).map_err(|e| format!("{src}: {e}"))?;
+    let parsed = replaycam::parse(&text)?;
+    let cfg = config::load(&app).unwrap_or_default();
+    replaycam::write(&app, &cfg, slot, &parsed)?;
+    Ok(parsed)
+}
+
+#[tauri::command]
+fn replaycam_export(app: tauri::AppHandle, slot: u8, dst: String) -> Result<(), String> {
+    let cfg = config::load(&app).unwrap_or_default();
+    let p = replaycam::read(&app, &cfg, slot)?;
+    std::fs::write(&dst, replaycam::serialize(&p)).map_err(|e| format!("{dst}: {e}"))
+}
+
 /// Whether FrostMod actually got into the running game — and what to do when it didn't.
 ///
 /// `frostmod_running` only says the launcher is up, which is what made an elevated game so
@@ -8910,6 +8978,13 @@ fn main() {
             frostmod_keybinds,
             frostmod_set_keybinds,
             frostmod_default_keybinds,
+            replaycam_list,
+            replaycam_read,
+            replaycam_write,
+            replaycam_delete,
+            replaycam_retime,
+            replaycam_import,
+            replaycam_export,
             frostmod_running,
             frostmod_attachment,
             garage_scan_bikes,
