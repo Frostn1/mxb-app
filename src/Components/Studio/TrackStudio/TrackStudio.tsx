@@ -919,7 +919,22 @@ export default function TrackStudio() {
                   setTouched(true);
                   void settle({ ...program, elevation });
                 }}
-                className="h-[92px]"
+                onFeature={editFeature}
+                onHover={(i) =>
+                  setHover(
+                    i === null
+                      ? null
+                      : {
+                          path: pathAlong(
+                            program,
+                            program.features[i].at,
+                            featureSpan(program.features[i]).length,
+                          ),
+                          width: program.width * 1.6,
+                        },
+                  )
+                }
+                className="h-[104px]"
               />
             </div>
           </div>
