@@ -22,6 +22,7 @@ const ACTION_LABELS: Record<string, TKey> = {
   next: "settings.rcamActionNext",
   save: "settings.rcamActionSave",
   load: "settings.rcamActionLoad",
+  clean: "settings.rcamActionClean",
 };
 
 /** `KeyboardEvent.code` -> the name FrostMod parses. Physical codes on purpose: the game

@@ -746,6 +746,8 @@ export const de: Translation = {
     "Nächster Punkt",
   "settings.rcamActionSave":
     "Pfad speichern",
+  "settings.rcamActionClean":
+    "Overlay ausblenden",
   "settings.rcamActionLoad":
     "Pfad laden",
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",

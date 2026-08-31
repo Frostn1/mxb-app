@@ -738,6 +738,8 @@ export const es: Translation = {
     "Punto siguiente",
   "settings.rcamActionSave":
     "Guardar trayecto",
+  "settings.rcamActionClean":
+    "Ocultar superposición",
   "settings.rcamActionLoad":
     "Cargar trayecto",
   "settings.watchModsReload": "Recarga automática al cambiar la carpeta",

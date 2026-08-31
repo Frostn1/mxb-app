@@ -1222,7 +1222,7 @@ pub struct Keybind {
 
 /// Mirrors `kb::Actions()` in FrostMod's `src/keybinds.h`, in the same order. The ids are
 /// the config keys (`rcam_<id>`); the UI labels them itself, translated.
-const RCAM_ACTIONS: [(&str, &str); 8] = [
+const RCAM_ACTIONS: [(&str, &str); 9] = [
     ("setkey", "K"),
     ("delete", "X"),
     ("clear", "C"),
@@ -1231,6 +1231,9 @@ const RCAM_ACTIONS: [(&str, &str); 8] = [
     ("next", "Period"),
     ("save", "S"),
     ("load", "L"),
+    // Hiding the overlay defaults to a function key, not a letter: it is pressed while
+    // recording, so a key the game might have bound would be the wrong default.
+    ("clean", "F7"),
 ];
 
 /// Key names FrostMod can parse, beyond the plain letters and digits. Mirrors the table in
@@ -1413,10 +1416,12 @@ mod rcam_tests {
     fn defaults_match_frostmods() {
         // If FrostMod's defaults move, this is the reminder to move ours with them.
         let d = default_rcam_keybinds();
-        assert_eq!(d.len(), 8);
+        assert_eq!(d.len(), 9);
         assert_eq!(d[0].id, "setkey");
         assert_eq!(d[0].key, "K");
         assert_eq!(d[6].key, "S");
+        assert_eq!(d[8].id, "clean");
+        assert_eq!(d[8].key, "F7");
         for b in &d {
             assert!(valid_bind(&b.key), "default {} is not valid", b.key);
         }
