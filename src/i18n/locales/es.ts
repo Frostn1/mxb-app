@@ -2369,4 +2369,7 @@ export const es: Translation = {
   "track.stillNeeded": "Aún necesita un .rdf de TrackEd (parrilla, boxes, cámaras) y un gate.edf copiado de otra pista.",
   "track.base": "Pista base",
   "track.baseLoaded": "Se cargó «{{name}}»",
+  "track.name": "Nombre de la pista",
+  "track.author": "Autor",
+  "track.previewHint": "Pulsa Previsualizar para construirla y verla aquí.",
 };

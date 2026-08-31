@@ -11,6 +11,7 @@ import {
   Square,
   TrendingDown,
   TrendingUp,
+  Plus,
   Waves,
   type LucideIcon,
 } from "lucide-react";
@@ -18,7 +19,9 @@ import { toast } from "sonner";
 
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
-import { TrackViewerDialog } from "../../Viewer/TrackViewerDialog";
+import { TrackViewer } from "../../Viewer/TrackViewer";
+import { loadTrackOverview, loadTrackTerrain } from "../../../api/tracks";
+import type { TrackOverview, TrackTerrain } from "../../../types";
 import { useT } from "../../../i18n/context";
 import { cn } from "@/lib/utils";
 import {
@@ -29,13 +32,17 @@ import {
   generateTrack,
   installTrackPreview,
   lapLength,
+  featureSpan,
   lapSteps,
+  newFeature,
   previewTrack,
+  roomiestGap,
   setTrackTools,
   trackToolsStatus,
   type BuildStep,
   type LapStep,
   type TrackFeature,
+  type TrackFeatureKind,
   type TrackPreview,
   type TrackProgram,
   type TrackSegment,
@@ -62,7 +69,8 @@ export default function TrackStudio() {
   const [program, setProgram] = useState<TrackProgram | null>(null);
   const [preview, setPreview] = useState<TrackPreview | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
-  const [viewing, setViewing] = useState(false);
+  const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
+  const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
   const [steps, setSteps] = useState<BuildStep[]>([]);
 
@@ -127,7 +135,11 @@ export default function TrackStudio() {
     try {
       const p = await previewTrack(program);
       setPreview(p);
-      setViewing(true);
+      // Terrain first so something is on screen, then the surfaces that colour the features
+      // — the second is the slower half and the view is useful before it lands.
+      const t3 = await loadTrackTerrain(p.path, 1024);
+      setTerrain(t3);
+      setOverview(await loadTrackOverview(p.path, 2048).catch(() => null));
     } catch (e) {
       toast.error(t("track.buildFailed"), { description: String(e) });
     } finally {
@@ -182,6 +194,20 @@ export default function TrackStudio() {
   function removeFeature(index: number) {
     if (!program) return;
     void settle({ ...program, features: program.features.filter((_, i) => i !== index) });
+  }
+
+  /// A corner or a straight can go too — the lap stops closing, and the validator says so
+  /// in metres, which is a better teacher than a disabled button.
+  function removeSegment(index: number) {
+    if (!program || program.segments.length <= 2) return;
+    void settle({ ...program, segments: program.segments.filter((_, i) => i !== index) });
+  }
+
+  function addFeature(kind: TrackFeatureKind) {
+    if (!program) return;
+    const probe = newFeature(kind, 0);
+    const at = roomiestGap(program, featureSpan(probe).length);
+    void settle({ ...program, features: [...program.features, newFeature(kind, at)] });
   }
 
   async function onPointAtTools() {
@@ -278,7 +304,21 @@ export default function TrackStudio() {
           {/* Left: what the lap is, and what it measures. */}
           <div className="flex w-[300px] flex-none flex-col gap-3">
             <div className="rounded-xl border border-input p-3.5">
-              <h2 className="text-[15px] font-bold tracking-[-0.2px]">{program.name}</h2>
+              {/* The name is the folder, the .pkz and what the game lists it as, so it is
+                  worth being able to change before any of those are written. */}
+              <input
+                value={program.name}
+                onChange={(e) => void settle({ ...program, name: e.target.value })}
+                className="w-full rounded-md bg-transparent text-[15px] font-bold tracking-[-0.2px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                aria-label={t("track.name")}
+              />
+              <input
+                value={program.author}
+                onChange={(e) => void settle({ ...program, author: e.target.value })}
+                placeholder={t("track.author")}
+                className="mt-0.5 w-full rounded-md bg-transparent text-[12px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                aria-label={t("track.author")}
+              />
               <dl className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12.5px]">
                 <Row label={t("track.lap")} value={`${lapLength(program).toFixed(0)} m`} />
                 <Row label={t("track.width")} value={`${program.width.toFixed(1)} m`} />
@@ -372,11 +412,26 @@ export default function TrackStudio() {
             </div>
           </div>
 
-          {/* Right: the lap in the order you ride it — a straight, a left turn, a double.
+          {/* Middle: the lap in the order you ride it — a straight, a left turn, a double.
               Corners and jumps live in different lists in the program, but nobody rides them
               that way, so here they are one sequence. */}
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-input">
-            <ol className="divide-y divide-input/60">
+          <div className="flex min-h-0 w-[420px] flex-none flex-col rounded-xl border border-input">
+            {/* Adding one is picking what it is; where it goes is the emptiest stretch of
+                lap, because dropping it at the finish usually lands it on something. */}
+            <div className="flex flex-none flex-wrap items-center gap-1 border-b border-input px-2 py-1.5">
+              <Plus className="size-3.5 flex-none text-muted-foreground" />
+              {(Object.keys(FEATURE_ICON) as TrackFeatureKind[]).map((kind) => (
+                <button
+                  key={kind}
+                  onClick={() => addFeature(kind)}
+                  disabled={busy !== null}
+                  className="cursor-default rounded px-1.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-40"
+                >
+                  {t(KIND_KEY[kind])}
+                </button>
+              ))}
+            </div>
+            <ol className="min-h-0 flex-1 divide-y divide-input/60 overflow-y-auto">
               {lapSteps(program).map((step, row) => {
                 const Icon = stepIcon(step);
                 return (
@@ -412,14 +467,12 @@ export default function TrackStudio() {
                     </div>
 
                     <button
-                      onClick={() => step.kind === "feature" && removeFeature(step.index)}
-                      disabled={step.kind !== "feature"}
-                      className={cn(
-                        "rounded px-1.5 text-muted-foreground transition-colors",
+                      onClick={() =>
                         step.kind === "feature"
-                          ? "hover:bg-foreground/[0.06] hover:text-foreground"
-                          : "invisible",
-                      )}
+                          ? removeFeature(step.index)
+                          : removeSegment(step.index)
+                      }
+                      className="rounded px-1.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
                       aria-label={t("common.delete")}
                     >
                       ×
@@ -429,17 +482,31 @@ export default function TrackStudio() {
               })}
             </ol>
           </div>
+
+          {/* Right: the track itself. Features are painted with a colour each, so a row in
+              the list and a lump on the ground can be matched up by eye. */}
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-input bg-black/20">
+            {terrain ? (
+              <TrackViewer
+                terrain={terrain}
+                overview={overview}
+                scenery={null}
+                surfaces={[]}
+                backdrop={null}
+                ground={null}
+                placements={[]}
+                showObjects={false}
+                className="absolute inset-0"
+              />
+            ) : (
+              <div className="absolute inset-0 grid place-items-center px-6 text-center text-[12.5px] text-muted-foreground">
+                {busy === "preview" ? t("track.building") : t("track.previewHint")}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {preview && (
-        <TrackViewerDialog
-          open={viewing}
-          onOpenChange={setViewing}
-          path={preview.path}
-          title={preview.name}
-        />
-      )}
     </div>
   );
 }

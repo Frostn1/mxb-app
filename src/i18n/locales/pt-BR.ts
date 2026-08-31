@@ -2359,4 +2359,7 @@ export const ptBR: Translation = {
   "track.stillNeeded": "Ainda precisa de um .rdf do TrackEd (portão, boxes, câmeras) e um gate.edf copiado de outra pista.",
   "track.base": "Pista base",
   "track.baseLoaded": "“{{name}}” carregada",
+  "track.name": "Nome da pista",
+  "track.author": "Autor",
+  "track.previewHint": "Toque em Prévia para construir e ver aqui.",
 };

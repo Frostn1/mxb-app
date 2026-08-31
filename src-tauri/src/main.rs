@@ -1227,7 +1227,7 @@ async fn preview_track(
         // One file, overwritten. A studio session generates many tracks and none of them are
         // worth keeping until someone installs one.
         let path = dir.join("preview.pkz");
-        tracksynth::write_pkz(&prog, &syn, &path).map_err(|e| format!("{e:#}"))?;
+        tracksynth::write_pkz(&prog, &syn, &path, true).map_err(|e| format!("{e:#}"))?;
 
         let c = trackstats::measure("synth", &syn.corridor, &syn.heights, syn.gw, syn.gh, syn.mps);
         Ok(TrackPreview {
@@ -1275,7 +1275,7 @@ async fn install_track_preview(
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect();
         let path = dir.join(format!("{}.pkz", name.trim_matches('_')));
-        tracksynth::write_pkz(&prog, &syn, &path).map_err(|e| format!("{e:#}"))?;
+        tracksynth::write_pkz(&prog, &syn, &path, false).map_err(|e| format!("{e:#}"))?;
         Ok(path.to_string_lossy().into_owned())
     })
     .await

@@ -2362,4 +2362,7 @@ export const it: Translation = {
   "track.stillNeeded": "Servono ancora un .rdf da TrackEd (cancelletto, box, telecamere) e un gate.edf copiato da un'altra pista.",
   "track.base": "Pista base",
   "track.baseLoaded": "Caricata «{{name}}»",
+  "track.name": "Nome pista",
+  "track.author": "Autore",
+  "track.previewHint": "Premi Anteprima per costruirla e vederla qui.",
 };

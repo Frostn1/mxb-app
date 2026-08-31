@@ -2339,4 +2339,7 @@ export const en = {
   "track.stillNeeded": "Still needs a .rdf from TrackEd (start gate, pits, cameras) and a gate.edf copied from another track.",
   "track.base": "Base track",
   "track.baseLoaded": "Loaded “{{name}}”",
+  "track.name": "Track name",
+  "track.author": "Author",
+  "track.previewHint": "Press Preview to build it and look at it here.",
 } as const;
