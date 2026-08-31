@@ -57,6 +57,7 @@ export const es: Translation = {
   "nav.studio": "Studio",
   "nav.servers": "Servidores",
   "nav.manage": "Modo carrera",
+  "nav.secure": "Proteger",
   "nav.settings": "Ajustes",
 
   "sidebar.installing": "Instalando «{{name}}»",
@@ -704,6 +705,37 @@ export const es: Translation = {
   "settings.instantRefresh": "Actualización instantánea de presets",
   "settings.instantRefreshDesc":
     "Cuando aplicas un preset con {{game}} en marcha, actualiza el look en el juego al instante — sin reiniciar ni volver a seleccionar el perfil. Si no puede, se te pedirá que vuelvas a seleccionar tu perfil.",
+  "settings.mxbsecure": "Bloqueo de contenido (mxbsecure)",
+  "settings.mxbsecureDesc":
+    "Experimental. Añade una pestaña Proteger que bloquea un archivo para que tenerlo no baste para usarlo. Solo lo necesitan los creadores que empaquetan contenido de pago.",
+  "secure.help":
+    "Bloquea un archivo en un blob .mxbsecure. El texto plano nunca se distribuye — solo el blob cifrado, y es inútil sin una clave que el servidor entrega a los jugadores con derecho.",
+  "secure.experimental": "Experimental",
+  "secure.intro":
+    "Elige un archivo, bloquéalo y luego verifica que se desbloquea. Verificar descifra el blob aquí mismo y lo compara con el original, byte a byte — la prueba de que va y vuelve en esta máquina.",
+  "secure.step1": "Bloquear un archivo",
+  "secure.pick": "Elegir archivo",
+  "secure.lock": "Bloquear",
+  "secure.locked": "Bloqueado.",
+  "secure.lockFailed": "No se pudo bloquear ese archivo",
+  "secure.result": "Bloqueado",
+  "secure.blob": "Blob",
+  "secure.size": "Tamaño",
+  "secure.sizeValue": "{{plain}} en claro → {{blob}} bloqueado",
+  "secure.assetId": "ID del asset",
+  "secure.key": "Clave",
+  "secure.copyKey": "Copiar clave",
+  "secure.keyNote":
+    "Guarda esta clave — se muestra una vez y no está en el blob. En producción el servidor la guarda y solo la entrega a jugadores con derecho.",
+  "secure.step2": "Comprobar que se desbloquea",
+  "secure.step2Desc":
+    "Descifrar el blob con la clave y compararlo con el archivo que bloqueaste.",
+  "secure.verify": "Verificar desbloqueo",
+  "secure.verifiedOk": "Desbloqueado y coincide con el original.",
+  "secure.verifiedBad": "Desbloqueado, pero no coincide.",
+  "secure.verifyFailed": "No se pudo verificar",
+  "secure.unlockedMatches": "Desbloqueado — coincide con el original",
+  "secure.unlockedMismatch": "No coincide",
   "settings.paintSync": "Sincronización de pinturas",
   "settings.paintSyncDesc":
     "Comparte las pinturas que llevas con los demás pilotos de tu servidor, e instala las suyas, para que la parrilla se vea como todos querían. Funciona solo en cualquier servidor — nada que configurar, ni para ti ni para el anfitrión.",

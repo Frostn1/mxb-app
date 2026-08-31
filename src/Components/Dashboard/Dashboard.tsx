@@ -7,6 +7,7 @@ import Downloads from "../Downloads/Downloads";
 import Locker from "../Locker/Locker";
 import Presets from "../Presets/Presets";
 import Manage from "../Manage/Manage";
+import Secure from "../Secure/Secure";
 import Studio, { type StudioTab } from "../Studio/Studio";
 import Browse from "../Browse/Browse";
 import Shop from "../Shop/Shop";
@@ -262,6 +263,8 @@ const Dashboard = ({ welcomeActive = false }: DashboardProps) => {
             />
           ) : view === "manage" ? (
             <Manage />
+          ) : view === "secure" ? (
+            <Secure />
           ) : (
             <Settings
               initialSection={settingsSection}

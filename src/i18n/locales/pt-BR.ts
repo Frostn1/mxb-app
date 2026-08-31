@@ -60,6 +60,7 @@ export const ptBR: Translation = {
   "nav.studio": "Studio",
   "nav.servers": "Servidores",
   "nav.manage": "Modo corrida",
+  "nav.secure": "Proteger",
   "nav.settings": "Configurações",
 
   "sidebar.installing": "Instalando “{{name}}”",
@@ -706,6 +707,37 @@ export const ptBR: Translation = {
   "settings.instantRefresh": "Atualização instantânea de presets",
   "settings.instantRefreshDesc":
     "Quando você aplica um preset com o {{game}} aberto, atualiza o visual no jogo na hora — sem reiniciar nem reselecionar o perfil. Se não der, você será avisado para selecionar o perfil de novo.",
+  "settings.mxbsecure": "Bloqueio de conteúdo (mxbsecure)",
+  "settings.mxbsecureDesc":
+    "Experimental. Adiciona uma aba Proteger que bloqueia um arquivo para que tê-lo não baste para usá-lo. Só criadores que empacotam conteúdo pago precisam disso.",
+  "secure.help":
+    "Bloqueia um arquivo em um blob .mxbsecure. O texto puro nunca é distribuído — só o blob cifrado, e ele é inútil sem uma chave que o servidor libera a jogadores com direito.",
+  "secure.experimental": "Experimental",
+  "secure.intro":
+    "Escolha um arquivo, bloqueie e depois verifique que ele desbloqueia. Verificar decifra o blob aqui mesmo e compara com o original, byte a byte — a prova de que ele vai e volta nesta máquina.",
+  "secure.step1": "Bloquear um arquivo",
+  "secure.pick": "Escolher arquivo",
+  "secure.lock": "Bloquear",
+  "secure.locked": "Bloqueado.",
+  "secure.lockFailed": "Não foi possível bloquear o arquivo",
+  "secure.result": "Bloqueado",
+  "secure.blob": "Blob",
+  "secure.size": "Tamanho",
+  "secure.sizeValue": "{{plain}} em texto puro → {{blob}} bloqueado",
+  "secure.assetId": "ID do asset",
+  "secure.key": "Chave",
+  "secure.copyKey": "Copiar chave",
+  "secure.keyNote":
+    "Guarde esta chave — ela aparece uma vez e não está no blob. Em produção o servidor a mantém e só a libera a jogadores com direito.",
+  "secure.step2": "Conferir o desbloqueio",
+  "secure.step2Desc":
+    "Decifrar o blob com a chave e comparar com o arquivo que você bloqueou.",
+  "secure.verify": "Verificar desbloqueio",
+  "secure.verifiedOk": "Desbloqueado e igual ao original.",
+  "secure.verifiedBad": "Desbloqueado, mas não confere.",
+  "secure.verifyFailed": "Não foi possível verificar",
+  "secure.unlockedMatches": "Desbloqueado — igual ao original",
+  "secure.unlockedMismatch": "Não confere",
   "settings.paintSync": "Sincronização de pinturas",
   "settings.paintSyncDesc":
     "Compartilha as pinturas que você está usando com os outros pilotos do seu servidor e instala as deles, para o grid ficar do jeito que todo mundo quis. Funciona sozinho em qualquer servidor — nada para você ou para o host configurar.",

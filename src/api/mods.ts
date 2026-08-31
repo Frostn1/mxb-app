@@ -313,6 +313,36 @@ export function contentLockAvailable(): Promise<boolean> {
   return invoke<boolean>("content_lock_available");
 }
 
+/** Whether this build can lock content with mxbsecure (the packer is a local-only module). */
+export function contentSecureAvailable(): Promise<boolean> {
+  return invoke<boolean>("content_secure_available");
+}
+
+/** Turn the experimental mxbsecure tab on or off. */
+export function setMxbsecureEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_mxbsecure_enabled", { enabled });
+}
+
+/** What locking a file produced: where the blob is, and the key to keep once. */
+export interface SecureLockOutcome {
+  blobPath: string;
+  assetId: string;
+  keyId: string;
+  key: string;
+  plainBytes: number;
+  blobBytes: number;
+}
+
+/** Lock a file into a `.mxbsecure` blob. The source is only read. */
+export function mxbsecureLock(src: string, outDir?: string): Promise<SecureLockOutcome> {
+  return invoke<SecureLockOutcome>("mxbsecure_lock", { src, outDir: outDir ?? null });
+}
+
+/** Decrypt the blob with the key and check it matches the original, byte for byte. */
+export function mxbsecureVerify(blobPath: string, key: string, original: string): Promise<boolean> {
+  return invoke<boolean>("mxbsecure_verify", { blobPath, key, original });
+}
+
 /** What a run would touch — folders walked, files taken as themselves, skips flagged. */
 export function contentLockPlan(paths: string[]): Promise<LockItem[]> {
   return invoke<LockItem[]>("content_lock_plan", { paths });

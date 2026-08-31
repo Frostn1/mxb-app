@@ -57,6 +57,7 @@ export const it: Translation = {
   "nav.studio": "Studio",
   "nav.servers": "Server",
   "nav.manage": "Modalità gara",
+  "nav.secure": "Proteggi",
   "nav.settings": "Impostazioni",
 
   "sidebar.installing": "Installazione di “{{name}}”",
@@ -703,6 +704,37 @@ export const it: Translation = {
   "settings.instantRefresh": "Aggiornamento preset istantaneo",
   "settings.instantRefreshDesc":
     "Quando applichi un preset mentre {{game}} è in esecuzione, aggiorna il look in gioco all'istante — senza riavvio né riselezione del profilo. Se non ci riesce, ti verrà chiesto di riselezionare il profilo.",
+  "settings.mxbsecure": "Blocco dei contenuti (mxbsecure)",
+  "settings.mxbsecureDesc":
+    "Sperimentale. Aggiunge una scheda Proteggi che blocca un file in modo che possederlo non basti a usarlo. Serve solo ai creatori che impacchettano contenuti a pagamento.",
+  "secure.help":
+    "Blocca un file in un blob .mxbsecure. Il testo in chiaro non viene mai distribuito — solo il blob cifrato, inutile senza una chiave che il server rilascia ai giocatori autorizzati.",
+  "secure.experimental": "Sperimentale",
+  "secure.intro":
+    "Scegli un file, bloccalo, poi verifica che si sblocchi. La verifica decifra il blob qui e lo confronta con l'originale, byte per byte — la prova che fa il giro su questa macchina.",
+  "secure.step1": "Blocca un file",
+  "secure.pick": "Scegli file",
+  "secure.lock": "Blocca",
+  "secure.locked": "Bloccato.",
+  "secure.lockFailed": "Impossibile bloccare quel file",
+  "secure.result": "Bloccato",
+  "secure.blob": "Blob",
+  "secure.size": "Dimensione",
+  "secure.sizeValue": "{{plain}} in chiaro → {{blob}} bloccato",
+  "secure.assetId": "ID asset",
+  "secure.key": "Chiave",
+  "secure.copyKey": "Copia la chiave",
+  "secure.keyNote":
+    "Conserva questa chiave — è mostrata una volta e non è nel blob. In produzione la tiene il server e la rilascia solo ai giocatori autorizzati.",
+  "secure.step2": "Verifica lo sblocco",
+  "secure.step2Desc":
+    "Decifra il blob con la chiave e confrontalo con il file bloccato.",
+  "secure.verify": "Verifica sblocco",
+  "secure.verifiedOk": "Sbloccato e corrisponde all'originale.",
+  "secure.verifiedBad": "Sbloccato, ma non corrisponde.",
+  "secure.verifyFailed": "Verifica non riuscita",
+  "secure.unlockedMatches": "Sbloccato — corrisponde all'originale",
+  "secure.unlockedMismatch": "Non corrisponde",
   "settings.paintSync": "Sincronizzazione livree",
   "settings.paintSyncDesc":
     "Condivide le livree che indossi con gli altri piloti del tuo server e installa le loro, così la griglia appare come tutti volevano. Funziona da sé su qualsiasi server — niente da configurare, né per te né per l'host.",

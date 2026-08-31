@@ -60,6 +60,8 @@ import {
   voiceStatus,
   setVoiceEnabled,
   setPaintSyncEnabled,
+  setMxbsecureEnabled,
+  contentSecureAvailable,
   setVoiceInputDevice,
   setVoiceOutputDevice,
   setVoicePttHotkey,
@@ -469,6 +471,8 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const voiceEnabled = config.voiceEnabled ?? false;
   // Off unless it was turned on, matching the backend's default.
   const paintSyncEnabled = config.paintSyncEnabled ?? false;
+  const mxbsecureEnabled = config.mxbsecureEnabled ?? false;
+  const [secureAvailable, setSecureAvailable] = useState(false);
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
@@ -706,6 +710,16 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     }
   };
 
+  const toggleMxbsecure = async (v: boolean) => {
+    try {
+      await setMxbsecureEnabled(v);
+      await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+      await reloadConfig();
+    }
+  };
+
   const toggleInstantRefresh = async (v: boolean) => {
     try {
       await setInstantRefresh(v);
@@ -763,6 +777,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(""));
     experimentalStateApi().then(setExperimentalState).catch(() => {});
+    contentSecureAvailable().then(setSecureAvailable).catch(() => {});
     // Re-check FrostMod against GitHub whenever Settings opens — the provider
     // only fetches once at launch, so this catches releases cut since then.
     void refreshStatus();
@@ -1225,6 +1240,19 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={analyticsEnabled}
               onChange={toggleAnalytics}
             />
+            {secureAvailable && (
+              <>
+                <div className="h-px bg-border" />
+                {/* Experimental content locking. Only shown when the local packer module is
+                    present, since without it the tab it reveals could do nothing. */}
+                <ToggleRow
+                  label={t("settings.mxbsecure")}
+                  desc={t("settings.mxbsecureDesc")}
+                  checked={mxbsecureEnabled}
+                  onChange={toggleMxbsecure}
+                />
+              </>
+            )}
           </Section>
           )}
 
