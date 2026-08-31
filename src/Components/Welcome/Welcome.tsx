@@ -89,6 +89,12 @@ export default function Welcome({ onDone }: WelcomeProps) {
             </Button>
           </div>
         )}
+
+        {/* Said here rather than only in Settings: a stats toggle somebody finds later is a
+            toggle they were never offered. */}
+        <p className="text-center text-xs text-muted-foreground">
+          {t("welcome.analyticsNote")}
+        </p>
       </div>
     </div>
   );

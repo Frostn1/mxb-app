@@ -151,6 +151,19 @@ pub struct AppConfig {
     /// What paint sync last did, so the UI can say so instead of the player having to guess
     /// from an empty grid. Written by the background tasks; never edited by hand.
     pub sync: SyncState,
+    /// Send anonymous usage counts — see [`crate::usage`].
+    ///
+    /// On by default, and off with one switch in Settings. What it sends is a random id,
+    /// a version, an OS and a set of counters; what it cannot send is anything about who
+    /// or where you are. Without it there is no way to tell a feature nobody uses from
+    /// one nobody has mentioned.
+    pub analytics_enabled: bool,
+    /// This install's id for those counts: a random UUID, minted on first run and tied to
+    /// nothing else. Blank until then, and blank forever if the setting is off.
+    ///
+    /// Deliberately not the account id or the GUID — an anonymous count that could be
+    /// joined back to a person is not one.
+    pub install_id: String,
 }
 
 /// The record of the last publish and the last pull.
@@ -245,6 +258,8 @@ impl Default for AppConfig {
             cp_rider_name: String::new(),
             cp_guid: String::new(),
             sync: SyncState::default(),
+            analytics_enabled: true,
+            install_id: String::new(),
         }
     }
 }

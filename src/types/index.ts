@@ -90,6 +90,8 @@ export interface Config {
   wineRunner?: string;
   /** Hide to the tray on close and keep running (default true). */
   runInBackground?: boolean;
+  /** Share anonymous usage counts (default true). */
+  analyticsEnabled?: boolean;
   /** Launch on login (default true). */
   launchAtStartup?: boolean;
   /** Auto-run FrostMod when the app opens (default true). */

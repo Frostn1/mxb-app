@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Anonymous usage counts, so which pages and features actually get used is knowable. The
+  app sends a random install id, its version, the OS, the title, a session count and
+  counters for named pages and features — never your name, your files or your address.
+- A switch in Settings → General turns it off, and the welcome slideshow says it is there.
+- The control plane serves the numbers at `/admin/usage` behind an admin key: active
+  installs by day, week and month, version and OS spread, and every page and feature
+  ranked by how many installs touched it — including the ones nothing touched.
+
 ## 2026-08-31 — v0.12.4 — Paint sync, on every server
 
 ### Added
