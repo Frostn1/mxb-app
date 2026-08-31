@@ -135,13 +135,6 @@ pub struct AppConfig {
     /// token. Stored here in clear, like the rest of the config — worth knowing before
     /// adding a server whose token protects anything beyond the game process it runs.
     pub servers: Vec<crate::servers::ServerRef>,
-    /// Show the unfinished multiplayer features — the Servers tab and paint sync.
-    ///
-    /// Off by default even in a beta build: these talk to a live control plane and write
-    /// files other players uploaded, so they're opt-in rather than something a player finds
-    /// by accident. Also settable with `MXB_EXPERIMENTAL=1` for a run that doesn't touch
-    /// the saved config (see [`AppConfig::experimental_enabled`]).
-    pub experimental: bool,
     /// Bearer token for this player's control-plane account, from enrolling with an invite
     /// code. Empty until they enroll.
     pub cp_token: String,
@@ -182,23 +175,6 @@ pub struct SyncState {
     pub kept_yours: usize,
     /// Destinations two riders disagreed about, so neither was installed.
     pub conflicted: usize,
-}
-
-/// Set to `1` to force the experimental features on for one run.
-pub const EXPERIMENTAL_ENV: &str = "MXB_EXPERIMENTAL";
-
-impl AppConfig {
-    /// Whether the experimental features should be visible.
-    ///
-    /// The environment variable wins so a build can be handed to a tester with a flag
-    /// rather than a settings walkthrough, and so turning it on for one run leaves no
-    /// trace in their saved config.
-    pub fn experimental_enabled(&self) -> bool {
-        if std::env::var(EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false) {
-            return true;
-        }
-        self.experimental
-    }
 }
 
 /// Toggle combo used until the player picks another one.
@@ -264,7 +240,6 @@ impl Default for AppConfig {
             voice_output_volume: 1.0,
             seen_version: String::new(),
             servers: Vec::new(),
-            experimental: false,
             cp_token: String::new(),
             track_tools_path: String::new(),
             cp_rider_name: String::new(),

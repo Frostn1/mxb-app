@@ -1099,6 +1099,9 @@ export const de: Translation = {
   "sync.lastPulled": "Zuletzt geprüft {{ago}}. Läuft von selbst wieder, wenn du auf Spielen drückst.",
   "sync.neverPulled": "Du hast noch keine Lackierungen der anderen geholt",
   "sync.neverPulledWhy": "Bis dahin erscheinen andere Fahrer mit Standard-Bikes, auch wenn sie ihre veröffentlicht haben.",
+  "sync.notStartedTitle": "Noch nicht gestartet",
+  "sync.notStartedWhy":
+    "Die Lackierungs-Synchronisation richtet sich beim ersten Online-Rennen selbst ein — es gibt nichts auszufüllen. Starte MX Bikes, tritt einem Server bei, und hier steht der Rest von allein.",
   "sync.oversized_one": "{{count}} Lackierung ist zu groß zum Teilen, andere Fahrer sehen sie nicht.",
   "sync.oversized_other": "{{count}} Lackierungen sind zu groß zum Teilen, andere Fahrer sehen sie nicht.",
   "sync.skippedBikes_one": "{{count}} Bike wurde nicht veröffentlicht — du hast mehr, als wir speichern können.",

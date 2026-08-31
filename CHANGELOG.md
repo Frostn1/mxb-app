@@ -12,6 +12,13 @@
 
 ### Changed
 - The sync line in the sidebar is no longer behind the experimental toggle.
+- Paint sync has its own Settings page — what it published, what it pulled, your GUID, and
+  any paint it declined to overwrite. It used to live on the Servers tab.
+
+### Removed
+- The Servers tab, and the experimental toggle that revealed it. Creating and hosting
+  servers is out of the app for now. Joining one by address is unaffected and no longer
+  hidden.
 
 ### Added
 - Settings → FrostMod lists the nine replay camera slots. Open one to see where its keys

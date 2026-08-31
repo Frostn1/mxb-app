@@ -20,6 +20,7 @@ import { open as pickFolder, save as pickSavePath } from "@tauri-apps/plugin-dia
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
+import PaintSync from "./PaintSync";
 import {
   countProfilesIn,
   detectGamePath,
@@ -51,7 +52,6 @@ import {
   type WineHostInfo,
   type OverlayState,
   experimentalState as experimentalStateApi,
-  setExperimental,
   type ExperimentalState,
   voiceDevices,
   voiceMute,
@@ -117,7 +117,7 @@ export type SectionId =
   | "frostmod"
   | "reshade"
   | "logs"
-  | "experimental"
+  | "paintsync"
   | "supporters"
   | "about";
 
@@ -149,6 +149,7 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
       { id: "appearance", label: "settings.appearance" },
       { id: "overlay", label: "overlay.section" },
       { id: "voice", label: "voice.section" },
+      { id: "paintsync", label: "settings.paintSync" },
     ],
   },
   {
@@ -157,7 +158,6 @@ const GROUPS: { label: TKey; sections: { id: SectionId; label: TKey }[] }[] = [
       { id: "logs", label: "settings.logs" },
       // Had no nav entry at all before this, and rendered in the middle of the scroll
       // with nothing pointing at it.
-      { id: "experimental", label: "settings.experimental" },
     ],
   },
   {
@@ -1210,6 +1210,15 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           </Section>
           )}
 
+          {/* Paint sync's own state. The General toggle turns it on and off; this says what
+              it has actually managed — both halves run in the background off things the
+              player didn't ask for, so without this the only record was a log file. */}
+          {active === "paintsync" && (
+          <Section title={t("settings.paintSync")} desc={t("settings.paintSyncDesc")}>
+            <PaintSync />
+          </Section>
+          )}
+
           {/* in-game overlay */}
           {active === "overlay" && (
           <Section title={t("overlay.section")}>
@@ -1826,33 +1835,6 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
           {active === "reshade" && (
           <Section title={t("settings.reshade")} desc={t("settings.reshadeDesc")}>
             <ReshadeCard />
-          </Section>
-          )}
-
-          {/* experimental */}
-          {active === "experimental" && (
-          <Section title={t("settings.experimental")}>
-            <ToggleRow
-              label={t("settings.experimentalServers")}
-              desc={
-                experimental?.forcedByEnv
-                  ? t("settings.experimentalForced")
-                  : t("settings.experimentalServersDesc")
-              }
-              checked={experimental?.enabled ?? false}
-              onChange={(v) => {
-                // The env override wins in the backend, so flipping the switch would look
-                // like it did nothing. Say so instead of pretending.
-                if (experimental?.forcedByEnv) {
-                  toast.info(t("settings.experimentalForced"));
-                  return;
-                }
-                setExperimental(v)
-                  .then(() => experimentalStateApi())
-                  .then(setExperimentalState)
-                  .catch((e) => toast.error(String(e)));
-              }}
-            />
           </Section>
           )}
 

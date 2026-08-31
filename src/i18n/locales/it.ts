@@ -1090,6 +1090,9 @@ export const it: Translation = {
   "sync.lastPulled": "Ultimo controllo {{ago}}. Riparte da solo quando premi Gioca.",
   "sync.neverPulled": "Non hai ancora scaricato le grafiche degli altri",
   "sync.neverPulledWhy": "Finché non lo fai, gli altri piloti appaiono con moto predefinite anche se hanno pubblicato le loro.",
+  "sync.notStartedTitle": "Non ancora avviata",
+  "sync.notStartedWhy":
+    "La sincronizzazione delle livree si configura da sé la prima volta che giri online — non c'è nulla da compilare. Avvia MX Bikes, entra in un server, e il resto comparirà qui da solo.",
   "sync.oversized_one": "{{count}} grafica è troppo grande da condividere, quindi gli altri piloti non la vedranno.",
   "sync.oversized_other": "{{count}} grafiche sono troppo grandi da condividere, quindi gli altri piloti non le vedranno.",
   "sync.skippedBikes_one": "{{count}} moto non è stata pubblicata — ne hai più di quante possiamo tenerne.",

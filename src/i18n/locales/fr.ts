@@ -1097,6 +1097,9 @@ export const fr: Translation = {
   "sync.lastPulled": "Dernière vérification {{ago}}. Elle repart seule quand vous appuyez sur Jouer.",
   "sync.neverPulled": "Vous n'avez pas encore récupéré les peintures des autres",
   "sync.neverPulledWhy": "Tant que ce n'est pas fait, les autres pilotes apparaissent avec des motos par défaut même s'ils ont publié les leurs.",
+  "sync.notStartedTitle": "Pas encore démarrée",
+  "sync.notStartedWhy":
+    "La synchro des peintures se met en place toute seule à votre première course en ligne — rien à remplir. Lancez MX Bikes, rejoignez un serveur, et le reste s'affichera ici.",
   "sync.oversized_one": "{{count}} peinture est trop lourde à partager, les autres pilotes ne la verront pas.",
   "sync.oversized_other": "{{count}} peintures sont trop lourdes à partager, les autres pilotes ne les verront pas.",
   "sync.skippedBikes_one": "{{count}} moto n'a pas été publiée — vous en avez plus que ce que nous pouvons stocker.",

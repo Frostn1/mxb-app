@@ -2721,10 +2721,6 @@ export function appPlatform(): Promise<string> {
 export interface ExperimentalState {
   /** The MX Bikes GUID this account has claimed, if any. */
   guid?: string;
-  /** Whether the unfinished multiplayer features should be shown at all. */
-  enabled: boolean;
-  /** On because `MXB_EXPERIMENTAL=1` was set, so the toggle can explain itself. */
-  forcedByEnv: boolean;
   version: string;
   /** A semver pre-release suffix (`0.8.0-beta.1`) — what makes this build a beta. */
   prerelease: boolean;
@@ -2809,10 +2805,6 @@ export function onSyncEvent(cb: (event: SyncEvent) => void): Promise<UnlistenFn>
 
 export function experimentalState(): Promise<ExperimentalState> {
   return invoke<ExperimentalState>("experimental_state");
-}
-
-export function setExperimental(enabled: boolean): Promise<void> {
-  return invoke<void>("set_experimental", { enabled });
 }
 
 /** Trade an invite code for an account. The token is stored by the backend, never here. */

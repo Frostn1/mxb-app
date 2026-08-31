@@ -5767,18 +5767,18 @@ fn pick_release_version(tag: Option<&str>, packaged: String) -> String {
         .unwrap_or(packaged)
 }
 
-/// Whether the unfinished multiplayer features should be shown, and whether this build is
-/// a pre-release. The frontend gates the Servers tab and the paint-sync UI on the first and
-/// badges the version with the second.
+/// Paint sync's state, and whether this build is a pre-release.
+///
+/// Named for a toggle that no longer exists: it used to answer "should the unfinished
+/// multiplayer surface be shown". Server creation is out of the app for now, so what is
+/// left is what paint sync has published and pulled, plus the version the About page
+/// badges. Kept under the old name because six call sites read it and none of them cares
+/// what it is called.
 #[tauri::command]
 fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
     let cfg = config::load_or_detect(&app).unwrap_or_default();
     let version = release_version(app.package_info().version.to_string());
     serde_json::json!({
-        "enabled": cfg.experimental_enabled(),
-        // Set by the env var rather than the setting, so the UI can explain why the toggle
-        // looks stuck on.
-        "forcedByEnv": std::env::var(config::EXPERIMENTAL_ENV).map(|v| v == "1").unwrap_or(false),
         "version": version,
         // A semver pre-release suffix (`0.8.0-beta.1`) is what the release workflow uses to
         // mark a build as a pre-release, so it is also what makes this build a beta.
@@ -5797,31 +5797,6 @@ fn experimental_state(app: tauri::AppHandle) -> serde_json::Value {
         // on disk publishes nothing, silently, and that is worth saying out loud.
         "profile": sync_profile(&cfg),
     })
-}
-
-/// Turn the experimental features on or off.
-#[tauri::command]
-fn set_experimental(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let mut cfg = config::load_or_detect(&app).unwrap_or_default();
-    cfg.experimental = enabled;
-    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))?;
-
-    // Bring paint sync up — or take it down — with the switch that owns it.
-    //
-    // Both of these are otherwise only decided in `.setup`, so turning the feature on left
-    // the profile watcher stopped until the next restart: the app would keep publishing on
-    // an apply or a launch, but a look changed in the game's garage went unnoticed for the
-    // whole session. That is the session a player has just enrolled in, which makes it the
-    // worst one to be quietly missing.
-    let watcher = app.state::<ProfileWatcher>();
-    if watches_looks(&cfg) {
-        profilewatch::start(&app, &watcher, &cfg.profiles_dir());
-        // And publish once now, since nothing has been watching until this moment.
-        publish_paints_soon(&app, &cfg, None);
-    } else {
-        profilewatch::stop(&watcher);
-    }
-    Ok(())
 }
 
 /// Trade an invite code for a control-plane account, and remember the token.
@@ -9104,7 +9079,6 @@ fn main() {
             launch_game,
             join_server,
             experimental_state,
-            set_experimental,
             enroll_account,
             set_guid,
             publish_paints,

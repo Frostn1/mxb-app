@@ -1076,6 +1076,9 @@ export const en = {
   "sync.lastPulled": "Last checked {{ago}}. It runs again by itself when you press Play.",
   "sync.neverPulled": "You haven't fetched anyone else's paints yet",
   "sync.neverPulledWhy": "Until you do, other riders show up on default bikes even if they've published theirs.",
+  "sync.notStartedTitle": "Not started yet",
+  "sync.notStartedWhy":
+    "Paint sync sets itself up the first time you ride online — there's nothing to fill in. Start MX Bikes and join a server, and this fills in on its own.",
   "sync.oversized_one": "{{count}} paint is too large to share, so other riders won't see it.",
   "sync.oversized_other": "{{count}} paints are too large to share, so other riders won't see them.",
   "sync.skippedBikes_one": "{{count}} bike wasn't published — you have more than we can hold.",
