@@ -1,0 +1,489 @@
+//! The document a track is generated from.
+//!
+//! Not a heightmap. A model asked for a track emits *this* — a start point, a run of straights
+//! and arcs, and the features laid along them by distance — and the synthesiser turns it into
+//! terrain. Keeping the two apart is what makes the output editable: "tighten the rhythm
+//! section" is an edit to a list of numbers, not to four million samples.
+//!
+//! The vocabulary isn't invented. MX Bikes' own centreline file, the `.tcl` that
+//! `tracked -merge` reads, is a start position and a list of segments that are each either a
+//! straight of some length or an arc of some radius through some angle. That is already how
+//! track builders and riders describe a lap, so a program written in it converts to a `.tcl`
+//! with nothing lost, and a corner is "radius 12 through 90°" rather than a row of control
+//! points that only mean something once they're drawn.
+
+#![allow(dead_code)]
+
+use anyhow::{bail, Result};
+
+/// Samples on the longest edge. Power of two plus one, as MX Bikes requires.
+pub const DEFAULT_SAMPLES: u32 = 2049;
+
+/// Which way `angle` faces: zero looks down +z, and it increases clockwise towards +x.
+///
+/// Chosen, not discovered — a `.tcl` states an angle without saying what it means. The
+/// terrain and the `.tcl` are both written from this same convention, so if the game
+/// disagrees the centreline lands beside the track rather than on it, and the fix is the sign
+/// here. Nothing else in the pipeline depends on it.
+pub fn heading_vector(theta: f32) -> (f32, f32) {
+    (theta.sin(), theta.cos())
+}
+
+/// The rider's right, at a heading.
+pub fn right_vector(theta: f32) -> (f32, f32) {
+    (theta.cos(), -theta.sin())
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackProgram {
+    pub name: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub location: String,
+    pub terrain: Terrain,
+    pub start: Start,
+    pub segments: Vec<Segment>,
+    /// Width of the riding line, metres. Published tracks measure 10–17 m.
+    pub width: f32,
+    #[serde(default)]
+    pub features: Vec<Feature>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Terrain {
+    pub size_x: f32,
+    pub size_z: f32,
+    #[serde(default = "default_samples")]
+    pub samples: u32,
+    /// The whole height budget, metres. Every sample is quantised against this, so it is the
+    /// resolution of the terrain as much as its range: at 2.2 m — what the official example
+    /// track uses — a step is 34 microns, and at 200 m it is 3 mm and jump faces start to
+    /// stair-step. Keep it just above the tallest thing on the track.
+    pub scale: f32,
+    #[serde(default)]
+    pub relief: Relief,
+}
+
+fn default_samples() -> u32 {
+    DEFAULT_SAMPLES
+}
+
+/// The landscape the track is cut into, before anything is built on it.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Relief {
+    /// Peak-to-trough, metres.
+    pub amplitude: f32,
+    /// Metres between hills.
+    pub wavelength: f32,
+    pub seed: u32,
+    /// Fine texture on the riding surface, metres peak-to-trough — braking bumps, ruts, the
+    /// unevenness of ground that has been ridden on.
+    ///
+    /// Small, but not optional. A synthesised track is otherwise perfectly smooth, and
+    /// perfectly smooth is a thing no real track is: a tabletop's top comes out flat to the
+    /// millimetre across its whole width, which rides like glass and measures like nothing
+    /// else in the corpus.
+    #[serde(default = "default_texture")]
+    pub texture: f32,
+}
+
+fn default_texture() -> f32 {
+    0.06
+}
+
+impl Default for Relief {
+    fn default() -> Self {
+        Relief {
+            amplitude: 8.0,
+            wavelength: 180.0,
+            seed: 1,
+            texture: default_texture(),
+        }
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Start {
+    pub x: f32,
+    pub z: f32,
+    /// Degrees, per [`heading_vector`].
+    pub angle: f32,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Segment {
+    Straight {
+        length: f32,
+    },
+    /// Signed radius — positive turns right, negative left — through `angle` degrees. Arc
+    /// length falls out as `|radius| * angle`, which is exactly how a `.tcl` states it.
+    Arc {
+        radius: f32,
+        angle: f32,
+    },
+}
+
+impl Segment {
+    pub fn length(&self) -> f32 {
+        match self {
+            Segment::Straight { length } => *length,
+            Segment::Arc { radius, angle } => radius.abs() * angle.abs().to_radians(),
+        }
+    }
+}
+
+/// Something built on the riding line, placed by how far round the lap it is.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Feature {
+    /// Up, along, down. The safe jump, and the commonest thing on a track.
+    Tabletop { at: f32, length: f32, height: f32 },
+    /// Two lips with air between them. `gap` is ground the rider must clear.
+    Double {
+        at: f32,
+        height: f32,
+        gap: f32,
+        #[serde(default = "default_lip")]
+        lip: f32,
+    },
+    /// One smooth rise, small enough to roll.
+    Roller { at: f32, length: f32, height: f32 },
+    /// A run of them, `spacing` apart.
+    Whoops {
+        at: f32,
+        count: u32,
+        spacing: f32,
+        height: f32,
+    },
+    /// Ground that is higher after than before. Part of the landscape rather than built on
+    /// it, so it moves the elevation profile instead of adding to it.
+    StepUp { at: f32, length: f32, height: f32 },
+    /// A banked wall on the outside of a corner. Which side that is comes from the corner.
+    Berm { at: f32, length: f32, height: f32 },
+}
+
+fn default_lip() -> f32 {
+    6.0
+}
+
+impl Feature {
+    pub fn at(&self) -> f32 {
+        match self {
+            Feature::Tabletop { at, .. }
+            | Feature::Double { at, .. }
+            | Feature::Roller { at, .. }
+            | Feature::Whoops { at, .. }
+            | Feature::StepUp { at, .. }
+            | Feature::Berm { at, .. } => *at,
+        }
+    }
+
+    /// How much of the lap it occupies.
+    pub fn length(&self) -> f32 {
+        match self {
+            Feature::Tabletop { length, .. }
+            | Feature::Roller { length, .. }
+            | Feature::StepUp { length, .. }
+            | Feature::Berm { length, .. } => *length,
+            // Two faces up and two back down, with the gap between them.
+            Feature::Double { gap, lip, .. } => (lip + lip.min(5.0)) * 2.0 + gap,
+            Feature::Whoops {
+                count, spacing, ..
+            } => *count as f32 * spacing,
+        }
+    }
+
+    pub fn height(&self) -> f32 {
+        match self {
+            Feature::Tabletop { height, .. }
+            | Feature::Double { height, .. }
+            | Feature::Roller { height, .. }
+            | Feature::Whoops { height, .. }
+            | Feature::StepUp { height, .. }
+            | Feature::Berm { height, .. } => *height,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Walking the centreline
+// ---------------------------------------------------------------------------
+
+/// One point on the riding line, and which way it faces there.
+#[derive(Clone, Copy, Debug)]
+pub struct Station {
+    pub x: f32,
+    pub z: f32,
+    /// Radians.
+    pub heading: f32,
+    /// Metres from the start.
+    pub s: f32,
+    /// Signed curvature, 1/metres — positive turning right. Zero on a straight. This is what
+    /// tells a berm which side of the track to stand on.
+    pub curvature: f32,
+}
+
+impl TrackProgram {
+    pub fn lap_length(&self) -> f32 {
+        self.segments.iter().map(|s| s.length()).sum()
+    }
+
+    /// The centreline, sampled every `step` metres.
+    ///
+    /// Arcs are evaluated from their centre rather than integrated a step at a time, so a
+    /// long sweeping corner ends exactly where its radius and angle say it does and a lap
+    /// closes on itself to the millimetre.
+    pub fn stations(&self, step: f32) -> Vec<Station> {
+        let step = step.max(0.01);
+        let mut out = Vec::new();
+        let mut x = self.start.x;
+        let mut z = self.start.z;
+        let mut theta = self.start.angle.to_radians();
+        let mut s = 0.0f32;
+
+        for seg in &self.segments {
+            let len = seg.length();
+            if len <= 0.0 {
+                continue;
+            }
+            let n = (len / step).ceil().max(1.0) as usize;
+            match *seg {
+                Segment::Straight { .. } => {
+                    let (dx, dz) = heading_vector(theta);
+                    for i in 0..n {
+                        let u = len * i as f32 / n as f32;
+                        out.push(Station {
+                            x: x + dx * u,
+                            z: z + dz * u,
+                            heading: theta,
+                            s: s + u,
+                            curvature: 0.0,
+                        });
+                    }
+                    x += dx * len;
+                    z += dz * len;
+                }
+                Segment::Arc { radius, angle } => {
+                    let sweep = angle.abs().to_radians();
+                    let turn = radius.signum();
+                    let r = radius.abs().max(0.01);
+                    let (rx, rz) = right_vector(theta);
+                    let (cx, cz) = (x + rx * r * turn, z + rz * r * turn);
+                    let curvature = turn / r;
+                    for i in 0..n {
+                        let phi = sweep * i as f32 / n as f32;
+                        let th = theta + turn * phi;
+                        let (rx, rz) = right_vector(th);
+                        out.push(Station {
+                            x: cx - rx * r * turn,
+                            z: cz - rz * r * turn,
+                            heading: th,
+                            s: s + r * phi,
+                            curvature,
+                        });
+                    }
+                    theta += turn * sweep;
+                    let (rx, rz) = right_vector(theta);
+                    x = cx - rx * r * turn;
+                    z = cz - rz * r * turn;
+                }
+            }
+            s += len;
+        }
+        // Segments emit their start but not their end, so the last one leaves the finish
+        // itself unsampled — up to a step short. Close it, or a lap reads as not quite
+        // meeting itself and the corridor stops just before the line.
+        if let Some(last) = out.last().copied() {
+            out.push(Station {
+                x,
+                z,
+                heading: theta,
+                s,
+                curvature: last.curvature,
+            });
+        }
+        out
+    }
+
+    /// Everything that would make the synthesiser produce nonsense, said before it does.
+    pub fn check(&self) -> Result<()> {
+        let t = &self.terrain;
+        if t.samples < 129 || (t.samples - 1) & (t.samples - 2) != 0 {
+            bail!(
+                "samples must be a power of two plus one (2049 is the usual), not {}",
+                t.samples
+            );
+        }
+        if !(t.size_x > 0.0 && t.size_z > 0.0) {
+            bail!("terrain size must be positive");
+        }
+        if t.scale <= 0.0 {
+            bail!("height budget must be positive");
+        }
+        if self.width <= 0.0 {
+            bail!("track width must be positive");
+        }
+        if self.segments.is_empty() {
+            bail!("a track needs at least one segment");
+        }
+
+        // A feature hanging off the end of the lap is silently dropped by the synthesiser,
+        // which looks like the model forgot to write it.
+        let lap = self.lap_length();
+        for f in &self.features {
+            if f.at() < 0.0 || f.at() + f.length() > lap {
+                bail!(
+                    "a {:?} runs from {:.0} m to {:.0} m, past the {:.0} m lap",
+                    f,
+                    f.at(),
+                    f.at() + f.length(),
+                    lap
+                );
+            }
+        }
+
+        // The lap has to fit on the ground it's drawn on, with room for the track's width.
+        let margin = self.width;
+        for st in self.stations(2.0) {
+            if st.x < margin
+                || st.z < margin
+                || st.x > t.size_x - margin
+                || st.z > t.size_z - margin
+            {
+                bail!(
+                    "the lap leaves the terrain at {:.0} m round ({:.0}, {:.0}) — the ground is \
+                     {:.0} x {:.0} m",
+                    st.s,
+                    st.x,
+                    st.z,
+                    t.size_x,
+                    t.size_z
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// How far the finish is from the start. A lap that doesn't close is a dead end, and the
+    /// error is easier to read as a distance than as a drawing.
+    pub fn closure_error(&self) -> f32 {
+        let st = self.stations(1.0);
+        match st.last() {
+            Some(l) => ((l.x - self.start.x).powi(2) + (l.z - self.start.z).powi(2)).sqrt(),
+            None => 0.0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prog(segments: Vec<Segment>) -> TrackProgram {
+        TrackProgram {
+            name: "t".into(),
+            author: String::new(),
+            location: String::new(),
+            terrain: Terrain {
+                size_x: 400.0,
+                size_z: 400.0,
+                samples: 2049,
+                scale: 20.0,
+                relief: Relief::default(),
+            },
+            start: Start {
+                x: 200.0,
+                z: 200.0,
+                angle: 0.0,
+            },
+            segments,
+            width: 12.0,
+            features: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_arc_states_its_own_length() {
+        // The example track's second segment: radius 4.974413 through 179.492554°, which its
+        // own file calls 15.583522 m long.
+        let seg = Segment::Arc {
+            radius: 4.974413,
+            angle: 179.492554,
+        };
+        assert!((seg.length() - 15.583522).abs() < 1e-3, "{}", seg.length());
+    }
+
+    #[test]
+    fn four_right_angles_close_a_square() {
+        let p = prog(vec![
+            Segment::Straight { length: 50.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0 },
+            Segment::Straight { length: 50.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0 },
+            Segment::Straight { length: 50.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0 },
+            Segment::Straight { length: 50.0 },
+            Segment::Arc { radius: 20.0, angle: 90.0 },
+        ]);
+        assert!(p.closure_error() < 0.05, "{} m", p.closure_error());
+        assert!((p.lap_length() - (200.0 + 4.0 * 20.0 * std::f32::consts::FRAC_PI_2)).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_left_turn_goes_the_other_way() {
+        let right = prog(vec![Segment::Arc { radius: 30.0, angle: 90.0 }]);
+        let left = prog(vec![Segment::Arc { radius: -30.0, angle: 90.0 }]);
+        let (r, l) = (
+            *right.stations(1.0).last().unwrap(),
+            *left.stations(1.0).last().unwrap(),
+        );
+        // Both start heading +z from the same point, so they end either side of it.
+        assert!(r.x > 200.0 && l.x < 200.0, "right {} left {}", r.x, l.x);
+        assert!((r.z - l.z).abs() < 0.1);
+    }
+
+    #[test]
+    fn curvature_points_into_the_corner() {
+        let p = prog(vec![Segment::Arc { radius: 25.0, angle: 45.0 }]);
+        let st = p.stations(1.0);
+        assert!((st[0].curvature - 1.0 / 25.0).abs() < 1e-4);
+        let straight = prog(vec![Segment::Straight { length: 10.0 }]);
+        assert_eq!(straight.stations(1.0)[0].curvature, 0.0);
+    }
+
+    #[test]
+    fn a_lap_that_leaves_the_ground_says_so() {
+        let p = prog(vec![Segment::Straight { length: 500.0 }]);
+        let err = p.check().unwrap_err().to_string();
+        assert!(err.contains("leaves the terrain"), "{err}");
+    }
+
+    #[test]
+    fn a_feature_past_the_finish_says_so() {
+        let mut p = prog(vec![Segment::Straight { length: 100.0 }]);
+        p.features.push(Feature::Tabletop {
+            at: 90.0,
+            length: 20.0,
+            height: 2.0,
+        });
+        let err = p.check().unwrap_err().to_string();
+        assert!(err.contains("past the"), "{err}");
+    }
+
+    #[test]
+    fn samples_must_be_a_power_of_two_plus_one() {
+        let mut p = prog(vec![Segment::Straight { length: 50.0 }]);
+        p.terrain.samples = 2048;
+        assert!(p.check().is_err());
+        p.terrain.samples = 2049;
+        assert!(p.check().is_ok());
+        p.terrain.samples = 1025;
+        assert!(p.check().is_ok());
+    }
+}
