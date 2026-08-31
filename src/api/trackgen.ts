@@ -142,6 +142,46 @@ export function lapSteps(program: TrackProgram): LapStep[] {
   return steps.sort((a, b) => a.at - b.at || (a.kind === "feature" ? 1 : -1));
 }
 
+/**
+ * Where a point on the lap is, in world metres.
+ *
+ * The same walk the synthesiser does — heading 0 looks down +z and increases clockwise
+ * towards +x, and an arc is evaluated from its centre rather than integrated — so a point
+ * this returns is the point the terrain was built around. Keep the two in step: if one
+ * changes convention the camera flies to the wrong side of the track.
+ */
+export function positionAt(program: TrackProgram, s: number): { x: number; z: number } {
+  let { x, z } = program.start;
+  let th = (program.start.angle * Math.PI) / 180;
+  let left = s;
+  for (const seg of program.segments) {
+    const len =
+      seg.kind === "straight"
+        ? seg.length
+        : (Math.abs(seg.radius) * Math.abs(seg.angle) * Math.PI) / 180;
+    const part = Math.min(Math.max(left, 0), len);
+    if (seg.kind === "straight") {
+      x += Math.sin(th) * part;
+      z += Math.cos(th) * part;
+      if (left <= len) return { x, z };
+      th += 0;
+    } else {
+      const turn = seg.radius >= 0 ? 1 : -1;
+      const r = Math.max(Math.abs(seg.radius), 0.01);
+      const cx = x + Math.cos(th) * r * turn;
+      const cz = z - Math.sin(th) * r * turn;
+      const phi = part / r;
+      const th2 = th + turn * phi;
+      x = cx - Math.cos(th2) * r * turn;
+      z = cz + Math.sin(th2) * r * turn;
+      if (left <= len) return { x, z };
+      th = th2;
+    }
+    left -= len;
+  }
+  return { x, z };
+}
+
 /** A feature of each kind, with sizes that sit inside what published tracks measure. */
 export function newFeature(kind: TrackFeatureKind, at: number): TrackFeature {
   switch (kind) {

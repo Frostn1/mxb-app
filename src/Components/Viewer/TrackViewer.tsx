@@ -278,6 +278,44 @@ function viewFrame(terrain: TrackTerrain) {
 }
 
 /**
+ * Bring the camera to a point on the track.
+ *
+ * Sets the orbit target and pulls the camera back along the direction it was already
+ * looking, so flying to a jump keeps whatever angle you had rather than snapping to a
+ * canned one. Close enough to read a single face — the point of going there at all.
+ */
+function FocusCamera({
+  terrain,
+  focus,
+}: {
+  terrain: TrackTerrain;
+  focus: { x: number; z: number } | null;
+}) {
+  const { camera, controls, invalidate } = useThree();
+  useEffect(() => {
+    if (!focus) return;
+    const frame = viewFrame(terrain);
+    const [x, , z] = toView(frame, focus.x, terrain.minHeight, focus.z);
+    // The ground's own height at that point isn't known here, so aim at the middle of the
+    // terrain's range: a jump is a metre of relief on ground that spans tens.
+    const y = 0;
+    const orbit = controls as unknown as {
+      target?: { set: (x: number, y: number, z: number) => void };
+      update?: () => void;
+    } | null;
+    const from = camera.position.clone().sub(new THREE.Vector3(x, y, z));
+    // Whatever direction the camera was at, five view-units away — about a jump and a half.
+    const back = from.lengthSq() > 1e-6 ? from.normalize() : new THREE.Vector3(0.6, 0.5, 0.6).normalize();
+    camera.position.set(x + back.x * 5, y + Math.max(back.y * 5, 1.6), z + back.z * 5);
+    orbit?.target?.set(x, y, z);
+    camera.lookAt(x, y, z);
+    orbit?.update?.();
+    invalidate();
+  }, [focus, terrain, camera, controls, invalidate]);
+  return null;
+}
+
+/**
  * Put one world-metre point where the terrain would put it.
  *
  * X is negated, the same conversion every model in the app goes through
@@ -1119,6 +1157,14 @@ interface TrackViewerProps {
   ground?: TrackGround | null;
   /** Told what a click on the scenery landed on, and when the selection clears. */
   onPick?: (piece: PickedPiece | null) => void;
+  /**
+   * A point in world metres to bring the camera to, or null to leave it alone.
+   *
+   * The identity matters as much as the value: passing a fresh object with the same
+   * coordinates moves the camera again, which is what makes clicking the same row twice
+   * bring you back to it after you have panned away.
+   */
+  focus?: { x: number; z: number } | null;
   className?: string;
 }
 
@@ -1132,6 +1178,7 @@ export function TrackViewer({
   backdrop = null,
   ground = null,
   onPick,
+  focus = null,
   className,
 }: TrackViewerProps) {
   return (
@@ -1226,6 +1273,7 @@ export function TrackViewer({
           {terrain && showObjects && placements.length > 0 && (
             <PlacementMarkers placements={placements} terrain={terrain} />
           )}
+          {terrain && <FocusCamera terrain={terrain} focus={focus} />}
           <OrbitControls
             makeDefault
             enablePan

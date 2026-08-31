@@ -35,6 +35,7 @@ import {
   featureSpan,
   lapSteps,
   newFeature,
+  positionAt,
   previewTrack,
   roomiestGap,
   setTrackTools,
@@ -71,6 +72,8 @@ export default function TrackStudio() {
   const [problems, setProblems] = useState<string[]>([]);
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
+  const [focus, setFocus] = useState<{ x: number; z: number } | null>(null);
+  const [dragging, setDragging] = useState<number | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
   const [steps, setSteps] = useState<BuildStep[]>([]);
 
@@ -201,6 +204,38 @@ export default function TrackStudio() {
   function removeSegment(index: number) {
     if (!program || program.segments.length <= 2) return;
     void settle({ ...program, segments: program.segments.filter((_, i) => i !== index) });
+  }
+
+  /**
+   * Move a row to where it was dropped.
+   *
+   * The two halves of a lap are stored differently — corners and straights are an ordered
+   * list, features are placed by how far round they are — so a drop means two different
+   * things depending on what was dragged. Reordering segments changes the shape of the lap;
+   * moving a feature only changes where on it the jump sits.
+   */
+  function reorder(steps: LapStep[], from: number, to: number) {
+    if (!program || from === to) return;
+    const moved = steps[from];
+    const target = steps[to];
+    if (moved.kind === "feature") {
+      const at = target.kind === "feature" ? target.at : target.at + (to > from ? 1 : 0);
+      const features = program.features.map((f, i) =>
+        i === moved.index ? { ...f, at: Math.max(0, at) } : f,
+      );
+      void settle({ ...program, features });
+      return;
+    }
+    // A segment lands where the row it was dropped on sits. Dropped on a feature, that is
+    // the segment the feature is on — the last one that starts at or before it.
+    const landing =
+      target.kind === "feature"
+        ? steps.filter((x) => x.kind !== "feature" && x.at <= target.at).length - 1
+        : target.index;
+    const next = [...program.segments];
+    const [seg] = next.splice(moved.index, 1);
+    next.splice(Math.min(Math.max(landing, 0), next.length), 0, seg);
+    void settle({ ...program, segments: next });
   }
 
   function addFeature(kind: TrackFeatureKind) {
@@ -434,8 +469,25 @@ export default function TrackStudio() {
             <ol className="min-h-0 flex-1 divide-y divide-input/60 overflow-y-auto">
               {lapSteps(program).map((step, row) => {
                 const Icon = stepIcon(step);
+                const steps = lapSteps(program);
                 return (
-                  <li key={row} className="flex items-center gap-2.5 px-3 py-1.5 text-[12.5px]">
+                  <li
+                    key={row}
+                    draggable
+                    onDragStart={() => setDragging(row)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (dragging !== null) reorder(steps, dragging, row);
+                      setDragging(null);
+                    }}
+                    onDragEnd={() => setDragging(null)}
+                    onClick={() => setFocus(positionAt(program, step.at))}
+                    className={cn(
+                      "flex items-center gap-2.5 px-3 py-1.5 text-[12.5px] transition-colors",
+                      terrain && "cursor-default hover:bg-foreground/[0.04]",
+                      dragging === row && "opacity-40",
+                    )}
+                  >
                     <span className="w-12 flex-none tabular-nums text-right text-muted-foreground">
                       {step.at.toFixed(0)}
                     </span>
@@ -496,6 +548,7 @@ export default function TrackStudio() {
                 ground={null}
                 placements={[]}
                 showObjects={false}
+                focus={focus}
                 className="absolute inset-0"
               />
             ) : (
@@ -611,7 +664,7 @@ function Field({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center gap-1">
+    <label className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
       <span className="text-[11px] text-muted-foreground">{label}</span>
       <Num value={value} step={step} onChange={onChange} />
     </label>
