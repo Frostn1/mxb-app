@@ -189,7 +189,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   // than the paints they actually wear.
   if (method === "PUT" && path === "/v1/loadout") return putLoadout(request, account, env);
   if (method === "PUT" && path === "/v1/loadouts") return putLoadouts(request, account, env);
-  if (method === "GET" && path === "/v1/roster") return roster(url, env);
+  if (method === "GET" && path === "/v1/roster") return roster(url, account, env);
 
   const openPaint = /^\/v1\/paints\/([0-9a-f]{64})$/.exec(path);
   if (openPaint) {
@@ -1393,14 +1393,19 @@ async function putPresence(request: Request, account: Account, env: Env): Promis
   const { serverId } = body as { serverId?: unknown };
   if (!isServerKey(serverId)) return json(400, { error: "that isn't a server" });
 
+  await markPresent(account.id, (serverId as string).trim(), env);
+  return json(200, { ok: true });
+}
+
+/** Record that an account is on a server. One writer, so the two callers cannot drift. */
+async function markPresent(accountId: string, serverId: string, env: Env): Promise<void> {
   await env.DB.prepare(
     "INSERT INTO presence (account_id, server_id, updated_at) VALUES (?, ?, ?)" +
       " ON CONFLICT(account_id) DO UPDATE SET server_id = excluded.server_id," +
       " updated_at = excluded.updated_at",
   )
-    .bind(account.id, (serverId as string).trim(), Date.now())
+    .bind(accountId, serverId, Date.now())
     .run();
-  return json(200, { ok: true });
 }
 
 /**
@@ -1415,9 +1420,32 @@ async function putPresence(request: Request, account: Account, env: Env): Promis
  * who is genuinely there — the next heartbeat brings them back within a minute — than to
  * accumulate a grid of people who left hours ago.
  */
-async function roster(url: URL, env: Env): Promise<Response> {
+/**
+ * Who is on a server, and what they are wearing.
+ *
+ * `?here=1` also records that the caller is on that server, which is what lets a client in a
+ * session do the whole loop in one request instead of a presence write followed by this
+ * read. That halving is not a micro-optimisation: every app in a session ran both every 45
+ * seconds, and on 2026-08-31 the pair took the worker past its daily request ceiling within
+ * hours of paint sync being turned on for everyone.
+ *
+ * Absent, nothing is written — a client sweeping the registry is asking about servers it is
+ * *not* on, and claiming presence on all of them would be both untrue and the thing that
+ * made every rider download every other rider's paints.
+ */
+async function roster(url: URL, account: Account, env: Env): Promise<Response> {
   const serverId = url.searchParams.get("server");
   if (!serverId) return json(400, { error: "a server id is required" });
+
+  if (url.searchParams.get("here") === "1") {
+    // Held to the same rule as the standalone report: this one writes a row other clients
+    // read, so it cannot be looser about what a server key is just because it arrived in a
+    // query string.
+    if (!isServerKey(serverId)) return json(400, { error: "that isn't a server" });
+    // Before the read, not after: the roster is scoped by presence, and a rider should
+    // appear in the same answer they are asking for.
+    await markPresent(account.id, serverId.trim(), env);
+  }
 
   // DISTINCT on the destination: loadouts are per bike, and gear repeats across every bike a
   // rider owns, so the raw join returns the same helmet paint many times over. The receiver

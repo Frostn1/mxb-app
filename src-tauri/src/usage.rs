@@ -36,20 +36,41 @@ pub const DISABLE_ENV: &str = "MXB_NO_ANALYTICS";
 /// times a day would otherwise be the most active user it has.
 pub const DEV_ENV: &str = "MXB_ANALYTICS_DEV";
 
-/// How often the buffer is emptied. Long enough that a session is a handful of requests,
-/// short enough that a crash loses minutes rather than an evening.
-const FLUSH_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How often the buffer is emptied.
+///
+/// Half-hourly, not the five minutes this shipped with. The app defaults to launching at
+/// login and living in the tray, so the interval is not "per session" — it is per waking
+/// hour of every machine that has the app. At five minutes that is ~288 requests a day from
+/// an install nobody is even using, and on 2026-08-31 the control plane hit its daily
+/// ceiling with a few hundred installs on it. Counters are counters: nothing here is worth
+/// a request every five minutes, and a report that is late is worth exactly as much as one
+/// that is prompt.
+const FLUSH_EVERY: Duration = Duration::from_secs(30 * 60);
 
 /// ...but the first report goes out a minute in.
 ///
 /// Otherwise the app would only ever count sessions that lasted longer than a flush, and
 /// "opened it, looked at one thing, closed it" — which is a great many of them — would be
-/// invisible. The daily active number is exactly the number that bias would ruin.
+/// invisible. The daily active number is exactly the number that bias would ruin. This is
+/// what makes the long interval above affordable: the day's active install is recorded a
+/// minute in, and everything after it is detail.
 const FIRST_FLUSH: Duration = Duration::from_secs(60);
 
 /// How long a quit waits for the last report. Short: nobody's shutdown should be held up by
 /// a counter, and the next launch would carry the loss anyway.
 const EXIT_GRACE: Duration = Duration::from_secs(3);
+
+/// What a report got back, so the loop knows whether to keep trying.
+#[derive(Debug, PartialEq)]
+enum Outcome {
+    /// Sent, or there was nothing to send.
+    Done,
+    /// Kept, and worth trying again on the next tick.
+    Retry,
+    /// The endpoint is turning callers away. Every install would be hearing this at once,
+    /// so the answer is to stop for the run rather than to knock again in half an hour.
+    RateLimited,
+}
 
 /// Distinct names held at once — the same cap the endpoint enforces. Reaching it means a
 /// call site is generating names rather than naming things, which is a bug on this side.
@@ -243,43 +264,62 @@ pub fn set_enabled(app: &AppHandle, on: bool, cfg: &AppConfig) {
 /// low number for one day, and a spool file would be a record of somebody's activity sitting
 /// on their machine for the sake of that.
 pub async fn flush(app: &AppHandle) {
+    if report(app).await == Outcome::RateLimited {
+        // Not a pause: reporting is done for this run. A counter is not worth being part of
+        // the reason a service stays over its limit, and tomorrow's launch counts this
+        // install again anyway.
+        log::warn!("[usage] the endpoint is rate limiting — not reporting again this run");
+        ENABLED.store(false, Ordering::Relaxed);
+        BUFFER.lock().unwrap().events.clear();
+    }
+}
+
+async fn report(app: &AppHandle) -> Outcome {
     if !ENABLED.load(Ordering::Relaxed) {
-        return;
+        return Outcome::Done;
     }
     let cfg = config::load(app).unwrap_or_default();
     // Re-read rather than trust the flag: the config can be edited by hand, and this is the
     // last point before anything leaves.
     if !allowed(&cfg) || cfg.install_id.trim().is_empty() {
         ENABLED.store(false, Ordering::Relaxed);
-        return;
+        return Outcome::Done;
     }
 
-    let Some(report) = take(&cfg, &app.package_info().version.to_string()) else {
-        return;
+    let Some(payload) = take(&cfg, &app.package_info().version.to_string()) else {
+        return Outcome::Done;
     };
     let url = format!("{}/v1/usage", control_plane());
     let sent = match client() {
-        Ok(client) => client.post(&url).json(&report).send().await,
+        Ok(client) => client.post(&url).json(&payload).send().await,
         Err(e) => {
             log::debug!("[usage] no HTTP client: {e}");
-            restore(report);
-            return;
+            restore(payload);
+            return Outcome::Retry;
         }
     };
     match sent {
-        Ok(res) if res.status().is_success() => {}
+        Ok(res) if res.status().is_success() => Outcome::Done,
+        Ok(res) if res.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => {
+            // Either the endpoint's own per-address cap or the platform's daily one. Both
+            // mean the same thing to a client: stop asking.
+            Outcome::RateLimited
+        }
         Ok(res) => {
-            // A 4xx means this build is sending something the endpoint won't take; retrying
-            // it forever would never work, so drop it and leave the reason in the log.
+            // Any other 4xx means this build is sending something the endpoint won't take;
+            // retrying it forever would never work, so drop it and leave the reason.
             if res.status().is_client_error() {
                 log::warn!("[usage] report refused ({}) — dropped", res.status());
+                Outcome::Done
             } else {
-                restore(report);
+                restore(payload);
+                Outcome::Retry
             }
         }
         Err(e) => {
             log::debug!("[usage] report didn't send ({e}) — keeping it for the next try");
-            restore(report);
+            restore(payload);
+            Outcome::Retry
         }
     }
 }
