@@ -12,6 +12,9 @@
 - FrostMod's eleven new replay camera actions are in the key list.
 - The camera itself learned to aim at a rider, cut between shots and fly with a handheld or
   drone rig, in FrostMod 0.15.3 — which the app installs and updates for you.
+- The track editor shows the 3D preview beside the lap instead of over it, and paints every
+  feature kind its own colour so a row in the list and a lump on the ground match up.
+- Features can be added and removed in the editor, and a track's name and author edited.
 
 ## 2026-08-31 — v0.12.1
 
