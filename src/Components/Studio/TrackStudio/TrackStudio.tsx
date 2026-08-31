@@ -11,6 +11,8 @@ import {
   Square,
   TrendingDown,
   TrendingUp,
+  ChevronDown,
+  ChevronRight,
   GripVertical,
   Plus,
   Waves,
@@ -83,6 +85,11 @@ export default function TrackStudio() {
   const listRef = useRef<HTMLOListElement>(null);
   const [dragging, setDragging] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
+  // Collapsed by segment index. A lap is a run of corners and straights with jumps on them,
+  // so the segment is the section — no new field, and it is the grouping people already
+  // have in their heads.
+  const [shut, setShut] = useState<Set<number>>(new Set());
+  const [flash, setFlash] = useState<number | null>(null);
   const [tools, setTools] = useState<TrackToolsStatus | null>(null);
   const [steps, setSteps] = useState<BuildStep[]>([]);
 
@@ -251,13 +258,24 @@ export default function TrackStudio() {
   }
 
   /** Which gap between rows the pointer is over. */
-  function gapUnder(clientY: number): number {
-    const rows = Array.from(listRef.current?.children ?? []) as HTMLElement[];
-    for (let i = 0; i < rows.length; i++) {
-      const box = rows[i].getBoundingClientRect();
-      if (clientY < box.top + box.height / 2) return i;
+  // Bring a newly added feature into view once the list has it.
+  useEffect(() => {
+    if (flash === null || !listRef.current) return;
+    const row = listRef.current.querySelector<HTMLElement>(`[data-at="${flash}"]`);
+    row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const id = setTimeout(() => setFlash(null), 1400);
+    return () => clearTimeout(id);
+  }, [flash, program]);
+
+  function gapUnder(clientY: number, total: number): number {
+    const rows = Array.from(
+      listRef.current?.querySelectorAll<HTMLElement>("[data-step]") ?? [],
+    );
+    for (const row of rows) {
+      const box = row.getBoundingClientRect();
+      if (clientY < box.top + box.height / 2) return Number(row.dataset.step);
     }
-    return rows.length;
+    return total;
   }
 
   function onGripDown(e: React.PointerEvent, row: number) {
@@ -268,9 +286,9 @@ export default function TrackStudio() {
     setDropAt(row);
   }
 
-  function onGripMove(e: React.PointerEvent) {
+  function onGripMove(e: React.PointerEvent, total: number) {
     if (dragging === null) return;
-    setDropAt(gapUnder(e.clientY));
+    setDropAt(gapUnder(e.clientY, total));
   }
 
   function onGripUp(steps: LapStep[]) {
@@ -288,6 +306,10 @@ export default function TrackStudio() {
     const probe = newFeature(kind, 0);
     const at = roomiestGap(program, featureSpan(probe).length);
     void settle({ ...program, features: [...program.features, newFeature(kind, at)] });
+    // Put it on screen. It lands in the emptiest stretch of lap, which is rarely the part
+    // you are looking at — a new row appearing somewhere off-screen reads as nothing
+    // happening at all.
+    setFlash(at);
   }
 
   async function onPointAtTools() {
@@ -386,19 +408,31 @@ export default function TrackStudio() {
             <div className="rounded-xl border border-input p-3.5">
               {/* The name is the folder, the .pkz and what the game lists it as, so it is
                   worth being able to change before any of those are written. */}
+              {/* Bordered, because a field that looks like a heading doesn't get typed in.
+                  All three end up in the track's `.ini` and in what the game lists. */}
               <input
                 value={program.name}
                 onChange={(e) => void settle({ ...program, name: e.target.value })}
-                className="w-full rounded-md bg-transparent text-[15px] font-bold tracking-[-0.2px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                className="w-full rounded-md border border-input bg-transparent px-2 py-1 text-[14px] font-bold tracking-[-0.2px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                 aria-label={t("track.name")}
+                placeholder={t("track.name")}
               />
-              <input
-                value={program.author}
-                onChange={(e) => void settle({ ...program, author: e.target.value })}
-                placeholder={t("track.author")}
-                className="mt-0.5 w-full rounded-md bg-transparent text-[12px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                aria-label={t("track.author")}
-              />
+              <div className="mt-1.5 flex gap-1.5">
+                <input
+                  value={program.author}
+                  onChange={(e) => void settle({ ...program, author: e.target.value })}
+                  placeholder={t("track.author")}
+                  className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 py-1 text-[12px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  aria-label={t("track.author")}
+                />
+                <input
+                  value={program.location}
+                  onChange={(e) => void settle({ ...program, location: e.target.value })}
+                  placeholder={t("track.location")}
+                  className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 py-1 text-[12px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  aria-label={t("track.location")}
+                />
+              </div>
               <dl className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12.5px]">
                 <Row label={t("track.lap")} value={`${lapLength(program).toFixed(0)} m`} />
                 <Row label={t("track.width")} value={`${program.width.toFixed(1)} m`} />
@@ -515,9 +549,30 @@ export default function TrackStudio() {
               {lapSteps(program).map((step, row) => {
                 const Icon = stepIcon(step);
                 const steps = lapSteps(program);
+                // Which section this row belongs to: the last segment at or before it.
+                let section = -1;
+                for (let i = row; i >= 0; i--) {
+                  if (steps[i].kind !== "feature") {
+                    section = steps[i].index;
+                    break;
+                  }
+                }
+                const collapsed = shut.has(section);
+                if (step.kind === "feature" && collapsed) return null;
+                const inSection =
+                  step.kind !== "feature"
+                    ? steps.filter((x, i) => {
+                        if (x.kind !== "feature") return false;
+                        for (let j = i; j >= 0; j--)
+                          if (steps[j].kind !== "feature") return steps[j].index === step.index;
+                        return false;
+                      }).length
+                    : 0;
                 return (
                   <li
                     key={row}
+                    data-step={row}
+                    data-at={step.at}
                     onClick={() => setFocus(positionAt(program, step.at))}
                     onPointerEnter={() =>
                       setHover({
@@ -543,6 +598,7 @@ export default function TrackStudio() {
                       dropAt === steps.length &&
                         row === steps.length - 1 &&
                         "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-primary",
+                      flash !== null && step.at === flash && "bg-primary/15",
                     )}
                     style={
                       step.kind === "feature"
@@ -550,9 +606,32 @@ export default function TrackStudio() {
                         : undefined
                     }
                   >
+                    {step.kind !== "feature" ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShut((prev) => {
+                            const next = new Set(prev);
+                            if (!next.delete(step.index)) next.add(step.index);
+                            return next;
+                          });
+                        }}
+                        className="flex-none rounded text-muted-foreground hover:text-foreground"
+                        aria-expanded={!collapsed}
+                        aria-label={stepName(step, t)}
+                      >
+                        {collapsed ? (
+                          <ChevronRight className="size-3.5" />
+                        ) : (
+                          <ChevronDown className="size-3.5" />
+                        )}
+                      </button>
+                    ) : (
+                      <span className="w-3.5 flex-none" />
+                    )}
                     <GripVertical
                       onPointerDown={(e) => onGripDown(e, row)}
-                      onPointerMove={onGripMove}
+                      onPointerMove={(e) => onGripMove(e, steps.length)}
                       onPointerUp={() => onGripUp(steps)}
                       className="size-3.5 flex-none cursor-default text-faint hover:text-foreground"
                     />
@@ -570,7 +649,12 @@ export default function TrackStudio() {
                           : undefined
                       }
                     />
-                    <span className="w-[104px] flex-none truncate">{stepName(step, t)}</span>
+                    <span className="w-[96px] flex-none truncate">{stepName(step, t)}</span>
+                    {step.kind !== "feature" && collapsed && inSection > 0 && (
+                      <span className="flex-none rounded bg-foreground/[0.08] px-1.5 text-[11px] text-muted-foreground">
+                        {inSection}
+                      </span>
+                    )}
 
                     <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
                       {fieldsOf(step).map((f) => (

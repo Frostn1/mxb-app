@@ -2372,4 +2372,5 @@ export const ptBR: Translation = {
   "track.name": "Nome da pista",
   "track.author": "Autor",
   "track.previewHint": "Toque em Prévia para construir e ver aqui.",
+  "track.location": "Local",
 };

@@ -2387,4 +2387,5 @@ export const fr: Translation = {
   "track.name": "Nom du circuit",
   "track.author": "Auteur",
   "track.previewHint": "Appuie sur Aperçu pour le construire et le voir ici.",
+  "track.location": "Lieu",
 };

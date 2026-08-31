@@ -2382,4 +2382,5 @@ export const es: Translation = {
   "track.name": "Nombre de la pista",
   "track.author": "Autor",
   "track.previewHint": "Pulsa Previsualizar para construirla y verla aquí.",
+  "track.location": "Ubicación",
 };
