@@ -11,6 +11,15 @@ export interface Knot {
 interface Props {
   /** Metres round the lap. */
   lap: number;
+  /**
+   * The stretch of lap on screen, in metres. Defaults to all of it.
+   *
+   * Scoping this to one corner or one straight is the difference between a curve you can
+   * shape and a curve you can only wave at: on a 1500 m lap, a 40 m berm is three pixels
+   * wide and every point you place lands on top of the last.
+   */
+  from?: number;
+  to?: number;
   knots: Knot[];
   /**
    * Drawn along the bottom, and draggable there: a feature's position is the one thing about
@@ -31,6 +40,27 @@ const EDGE_PX = 7;
 /** The bar row's share of the strip. */
 const BAR_TOP = 88;
 
+/**
+ * The curve's height at a point, easing between neighbours and wrapping round the lap.
+ *
+ * The same shape `apply_elevation` builds in the synthesiser and `elevationAt` reads in the
+ * api — three copies of one curve, which is two more than anybody wants, but drawing it here
+ * from the same rule is what stops the picture disagreeing with the ground.
+ */
+function heightAt(sorted: Knot[], s: number, lap: number): number {
+  if (sorted.length === 0) return 0;
+  if (sorted.length === 1) return sorted[0].height;
+  let i = sorted.findIndex((p) => p.at > s);
+  i = i <= 0 ? sorted.length - 1 : i - 1;
+  const a = sorted[i];
+  const b = sorted[(i + 1) % sorted.length];
+  const span = b.at > a.at ? b.at - a.at : lap - a.at + b.at;
+  if (span <= 1e-3) return b.height;
+  const along = s >= a.at ? s - a.at : lap - a.at + s;
+  const u = Math.min(Math.max(along / span, 0), 1);
+  return a.height + (b.height - a.height) * (u * u * (3 - 2 * u));
+}
+
 /** Metres shown above and below zero when the curve is flat or nearly so. */
 const MIN_RANGE = 6;
 
@@ -49,6 +79,8 @@ const GRAB_PX = 14;
  */
 export default function ElevationCurve({
   lap,
+  from = 0,
+  to,
   knots,
   features,
   onChange,
@@ -61,6 +93,8 @@ export default function ElevationCurve({
   // a hundred events, each of which would otherwise rebuild and re-measure the whole track.
   // The line follows the pointer from this; the program hears about it once, on release.
   const [drag, setDrag] = useState<{ index: number; knot: Knot } | null>(null);
+  const end = to ?? lap;
+  const width = Math.max(end - from, 1);
   // A feature being moved or stretched. Held here for the same reason the curve point is:
   // a drag is a hundred events and only the last is worth building.
   const [bar, setBar] = useState<{
@@ -79,7 +113,7 @@ export default function ElevationCurve({
   // neighbour doesn't renumber the thing under the pointer and swap which one you are moving.
   const sorted = [...live].sort((a, b) => a.at - b.at);
 
-  const toX = (at: number) => (lap > 0 ? (at / lap) * 100 : 0);
+  const toX = (at: number) => ((at - from) / width) * 100;
   const toY = (h: number) => 50 - (h / span) * 45;
 
   /** Where in the lap, and at what height, a pointer is. */
@@ -88,7 +122,7 @@ export default function ElevationCurve({
     if (!r) return null;
     const fx = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1);
     const fy = Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1);
-    return { at: fx * lap, height: ((0.5 - fy) / 0.45) * span };
+    return { at: from + fx * width, height: ((0.5 - fy) / 0.45) * span };
   }
 
   /** The size a bar's right edge controls, which is not `length` for every kind. */
@@ -107,8 +141,8 @@ export default function ElevationCurve({
     // is far more likely to be aimed at a jump than at the line.
     if ((e.clientY - r.top) / r.height > BAR_TOP / 100) {
       const hit = features.findIndex((f) => {
-        const x0 = (f.at / lap) * r.width;
-        const x1 = ((f.at + featureSpan(f).length) / lap) * r.width;
+        const x0 = ((f.at - from) / width) * r.width;
+        const x1 = ((f.at + featureSpan(f).length - from) / width) * r.width;
         const x = e.clientX - r.left;
         return x >= x0 - 2 && x <= x1 + 2;
       });
@@ -226,11 +260,13 @@ export default function ElevationCurve({
         {sorted.length > 0 && (
           <polyline
             points={[
-              // Closed round the lap, because that is how it is read: the last point eases
-              // into the first.
-              `0,${toY(sorted[sorted.length - 1].height)}`,
-              ...sorted.map((k) => `${toX(k.at)},${toY(k.height)}`),
-              `100,${toY(sorted[0].height)}`,
+              // Sampled across the view rather than drawn point to point, so the line shows
+              // the easing the terrain actually takes — and so a view holding no points at
+              // all still shows the height it inherits from its neighbours.
+              ...Array.from({ length: 65 }, (_, i) => {
+                const at = from + (width * i) / 64;
+                return `${(i / 64) * 100},${toY(heightAt(sorted, at, lap))}`;
+              }),
             ].join(" ")}
             fill="none"
             className="stroke-primary"
@@ -243,6 +279,7 @@ export default function ElevationCurve({
       {/* Handles as real elements rather than SVG circles: the viewBox is stretched, which
           would make them ovals. */}
       {live.map((k, i) => (
+        k.at < from - 0.5 || k.at > end + 0.5 ? null : (
         <button
           key={i}
           onDoubleClick={(e) => {
@@ -256,6 +293,7 @@ export default function ElevationCurve({
           )}
           title={`${k.at.toFixed(0)} m · ${k.height.toFixed(1)} m`}
         />
+        )
       ))}
     </div>
   );

@@ -2376,4 +2376,5 @@ export const en = {
   "track.smoothing": "blend",
   "track.live": "Live",
   "track.rebuild": "Rebuild the preview",
+  "track.wholeLap": "whole lap",
 } as const;

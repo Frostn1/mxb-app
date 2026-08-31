@@ -2399,4 +2399,5 @@ export const it: Translation = {
   "track.smoothing": "raccordo",
   "track.live": "Dal vivo",
   "track.rebuild": "Ricostruisci l'anteprima",
+  "track.wholeLap": "giro intero",
 };

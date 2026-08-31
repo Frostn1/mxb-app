@@ -2420,4 +2420,5 @@ export const de: Translation = {
   "track.smoothing": "Übergang",
   "track.live": "Live",
   "track.rebuild": "Vorschau neu bauen",
+  "track.wholeLap": "ganze Runde",
 };

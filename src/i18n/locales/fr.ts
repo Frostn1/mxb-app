@@ -2411,4 +2411,5 @@ export const fr: Translation = {
   "track.smoothing": "fondu",
   "track.live": "Direct",
   "track.rebuild": "Reconstruire l'aperçu",
+  "track.wholeLap": "tour entier",
 };
