@@ -5695,6 +5695,15 @@ fn replaycam_import(
     Ok(parsed)
 }
 
+/// What FrostMod's log says about the replay camera on the build it last attached to —
+/// including the reason it is unavailable, which until now only existed in a file next to a
+/// DLL.
+#[tauri::command]
+fn replaycam_status(app: tauri::AppHandle) -> replaycam::Status {
+    let cfg = config::load(&app).unwrap_or_default();
+    replaycam::status(&app, &cfg)
+}
+
 #[tauri::command]
 fn replaycam_export(app: tauri::AppHandle, slot: u8, dst: String) -> Result<(), String> {
     let cfg = config::load(&app).unwrap_or_default();
@@ -8985,6 +8994,7 @@ fn main() {
             replaycam_retime,
             replaycam_import,
             replaycam_export,
+            replaycam_status,
             frostmod_running,
             frostmod_attachment,
             garage_scan_bikes,

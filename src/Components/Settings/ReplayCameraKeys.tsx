@@ -23,6 +23,17 @@ const ACTION_LABELS: Record<string, TKey> = {
   save: "settings.rcamActionSave",
   load: "settings.rcamActionLoad",
   clean: "settings.rcamActionClean",
+  ease: "settings.rcamActionEase",
+  target: "settings.rcamActionTarget",
+  nudgeback: "settings.rcamActionNudgeback",
+  nudgefwd: "settings.rcamActionNudgefwd",
+  undo: "settings.rcamActionUndo",
+  rig: "settings.rcamActionRig",
+  retime: "settings.rcamActionRetime",
+  preview: "settings.rcamActionPreview",
+  curve: "settings.rcamActionCurve",
+  anchor: "settings.rcamActionAnchor",
+  autofov: "settings.rcamActionAutofov",
 };
 
 /** `KeyboardEvent.code` -> the name FrostMod parses. Physical codes on purpose: the game

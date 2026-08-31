@@ -540,6 +540,82 @@ pub fn list(app: &AppHandle, cfg: &crate::config::AppConfig) -> Vec<Summary> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// is the feature even available on this game build?
+// ---------------------------------------------------------------------------
+
+/// What FrostMod's log says about the replay camera on the build it last attached to.
+///
+/// Every camera global is resolved by signature at runtime and MX Bikes moves them between
+/// builds, so "the editor opens and does nothing" is a state that really happens — and until
+/// now it was only visible in a log file next to a DLL. The reason is in there; this is
+/// just the reading of it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Status {
+    /// False when FrostMod has never run, or its log has nothing to say about the camera.
+    pub known: bool,
+    pub ready: bool,
+    /// Why it is unavailable, in FrostMod's own words.
+    pub reason: Option<String>,
+    /// Whether it has worked out how this build's camera angles count, which aiming needs.
+    pub calibrated: bool,
+    pub log: String,
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        Self { known: false, ready: false, reason: None, calibrated: false, log: String::new() }
+    }
+}
+
+/// Read at most the last megabyte — the log grows all session and only its tail is current.
+fn log_tail(file: &Path) -> Option<String> {
+    let bytes = fs::read(file).ok()?;
+    let from = bytes.len().saturating_sub(1_000_000);
+    Some(String::from_utf8_lossy(&bytes[from..]).into_owned())
+}
+
+pub fn status(app: &AppHandle, cfg: &crate::config::AppConfig) -> Status {
+    // Beside each copy of FrostMod, newest wins: someone with both an app install and a
+    // dropped-in plugin cares about whichever one they actually ran.
+    let mut logs: Vec<PathBuf> = Vec::new();
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        logs.push(dir.join("frostmod").join("frostmod.log"));
+    }
+    let game = cfg.install_dir();
+    if !game.trim().is_empty() {
+        logs.push(Path::new(game.trim()).join("plugins").join("frostmod.log"));
+    }
+    logs.retain(|p| p.is_file());
+    logs.sort_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
+
+    let Some(file) = logs.last() else { return Status::default() };
+    let Some(text) = log_tail(file) else { return Status::default() };
+
+    let mut out = Status { log: file.display().to_string(), ..Default::default() };
+    for line in text.lines() {
+        let Some(rest) = line.split("[rcam]").nth(1) else { continue };
+        let rest = rest.trim();
+        if rest.starts_with("replay keyframe camera ready") {
+            out.known = true;
+            out.ready = true;
+            out.reason = None;
+        } else if let Some(why) = rest.strip_prefix("unavailable:") {
+            out.known = true;
+            out.ready = false;
+            out.reason = Some(why.trim().to_string());
+        } else if rest.starts_with("FAULT while") {
+            out.known = true;
+            out.ready = false;
+            out.reason = Some(rest.to_string());
+        } else if rest.starts_with("angle convention solved") {
+            out.calibrated = true;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -636,6 +712,33 @@ mod tests {
         // A cut on the last key ends nothing: there is no shot after it.
         keys[2].ease = "cut".into();
         assert_eq!(shot_count(&keys), 2);
+    }
+
+    #[test]
+    fn status_reads_the_last_word_in_the_log() {
+        // The reader is the part worth testing; `status` itself needs an AppHandle.
+        let mut out = Status::default();
+        let text = "[rcam] unavailable: the game's camera globals did not resolve in this build\n\
+                    [rcam] camera yaw -> RVA 0x4c9190 (1 match)\n\
+                    [rcam] replay keyframe camera ready.\n\
+                    [rcam] angle convention solved: yaw = +1*global +0, pitch = -1*global\n";
+        for line in text.lines() {
+            let Some(rest) = line.split("[rcam]").nth(1) else { continue };
+            let rest = rest.trim();
+            if rest.starts_with("replay keyframe camera ready") {
+                out.known = true;
+                out.ready = true;
+                out.reason = None;
+            } else if let Some(why) = rest.strip_prefix("unavailable:") {
+                out.known = true;
+                out.ready = false;
+                out.reason = Some(why.trim().to_string());
+            } else if rest.starts_with("angle convention solved") {
+                out.calibrated = true;
+            }
+        }
+        assert!(out.known && out.ready && out.calibrated);
+        assert!(out.reason.is_none(), "a later ready line must clear an earlier reason");
     }
 
     #[test]

@@ -744,6 +744,132 @@ export const ptBR: Translation = {
     "Ocultar sobreposição",
   "settings.rcamActionLoad":
     "Carregar trajeto",
+  "settings.rcamActionEase":
+    "Interpolacao",
+  "settings.rcamActionTarget":
+    "Mirar no piloto",
+  "settings.rcamActionNudgeback":
+    "Mover para tras",
+  "settings.rcamActionNudgefwd":
+    "Mover para frente",
+  "settings.rcamActionUndo":
+    "Desfazer",
+  "settings.rcamActionRig":
+    "Suporte de camera",
+  "settings.rcamActionRetime":
+    "Redistribuir por distancia",
+  "settings.rcamActionPreview":
+    "Mostrar o caminho",
+  "settings.rcamActionCurve":
+    "Estilo da curva",
+  "settings.rcamActionAnchor":
+    "Eixo do caminho",
+  "settings.rcamActionAutofov":
+    "FOV automatico",
+  "settings.rcamPaths":
+    "Caminhos da camera de replay",
+  "settings.rcamPathsDesc":
+    "Os nove slots em que o FrostMod salva os caminhos. Abra um para ver onde caem as chaves, mudar como ele voa ou passar adiante.",
+  "settings.rcamPathsEmpty":
+    "Nada salvo ainda. Marque chaves no jogo com o editor de camera e salve.",
+  "settings.rcamUnavailable":
+    "A camera de replay nao funciona nesta versao do jogo: {{reason}}",
+  "settings.rcamNotCalibrated":
+    "A mira ainda nao esta calibrada. Abra o editor no jogo e gire a camera uma vez.",
+  "settings.rcamRefresh":
+    "Atualizar",
+  "settings.rcamSlot":
+    "Slot {{n}}",
+  "settings.rcamSlotEmpty":
+    "Vazio",
+  "settings.rcamKeyCount_one":
+    "{{count}} chave",
+  "settings.rcamKeyCount_other":
+    "{{count}} chaves",
+  "settings.rcamShotCount_one":
+    "{{count}} plano",
+  "settings.rcamShotCount_other":
+    "{{count}} planos",
+  "settings.rcamTimelineHint":
+    "Arraste uma chave para move-la. Os tempos se alinham a grade de 30 ms e uma chave nao passa da vizinha.",
+  "settings.rcamKeyAt":
+    "Chave em {{time}}",
+  "settings.rcamNoKeySelected":
+    "Escolha uma chave na linha do tempo para mudar o que ela faz.",
+  "settings.rcamAim":
+    "Mirar em",
+  "settings.rcamAimNone":
+    "ninguem",
+  "settings.rcamEaseSmooth":
+    "Suave",
+  "settings.rcamEaseHold":
+    "Pausa",
+  "settings.rcamEaseCut":
+    "Corte",
+  "settings.rcamCurve":
+    "Curva",
+  "settings.rcamCurveCentripetal":
+    "Centripeta",
+  "settings.rcamCurveUniform":
+    "Uniforme",
+  "settings.rcamAxis":
+    "Eixo",
+  "settings.rcamAxisClock":
+    "Relogio do replay",
+  "settings.rcamAxisTrack":
+    "Volta do piloto",
+  "settings.rcamAxisHint":
+    "Preso a volta de um piloto, o caminho funciona em qualquer volta, piloto e replay. Cada chave precisa de um piloto mirado e de uma posicao na volta.",
+  "settings.rcamRig":
+    "Suporte",
+  "settings.rcamRigLocked":
+    "Fixo",
+  "settings.rcamRigHandheld":
+    "Na mao",
+  "settings.rcamRigDrone":
+    "Drone",
+  "settings.rcamRigCrane":
+    "Grua",
+  "settings.rcamRigAmount":
+    "Intensidade",
+  "settings.rcamAutoFov":
+    "Manter o tamanho do sujeito",
+  "settings.rcamAutoFovHint":
+    "O FOV segue o piloto mirado para ele ficar sempre do mesmo tamanho na tela.",
+  "settings.rcamSave":
+    "Salvar",
+  "settings.rcamRevert":
+    "Reverter",
+  "settings.rcamRetime":
+    "Redistribuir por distancia",
+  "settings.rcamExport":
+    "Exportar",
+  "settings.rcamImport":
+    "Importar",
+  "settings.rcamDelete":
+    "Excluir",
+  "settings.rcamSaved":
+    "Caminho salvo",
+  "settings.rcamWriteFailed":
+    "Nao foi possivel salvar o caminho",
+  "settings.rcamReadFailed":
+    "Nao foi possivel ler o caminho",
+  "settings.rcamRetimeDone":
+    "Chaves redistribuidas. Salve para manter.",
+  "settings.rcamRetimeFailed":
+    "Nao foi possivel redistribuir as chaves",
+  "settings.rcamDeleted":
+    "Slot {{n}} excluido",
+  "settings.rcamDeleteFailed":
+    "Nao foi possivel excluir o caminho",
+  "settings.rcamImported":
+    "Importado no slot {{n}}",
+  "settings.rcamImportFailed":
+    "Nao foi possivel importar esse caminho",
+  "settings.rcamExported":
+    "Caminho exportado",
+  "settings.rcamExportFailed":
+    "Nao foi possivel exportar o caminho",
   "settings.watchModsReload": "Recarregar automaticamente ao mudar a pasta",
   "settings.watchModsReloadDesc":
     "Recarregar o jogo automaticamente quando pistas ou motos forem adicionadas à sua pasta de mods — mesmo baixadas manualmente fora do MXB App.",

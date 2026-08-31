@@ -736,6 +736,132 @@ export const en = {
     "Hide overlay",
   "settings.rcamActionLoad":
     "Load path",
+  "settings.rcamActionEase":
+    "Key ease",
+  "settings.rcamActionTarget":
+    "Aim at rider",
+  "settings.rcamActionNudgeback":
+    "Nudge key back",
+  "settings.rcamActionNudgefwd":
+    "Nudge key forward",
+  "settings.rcamActionUndo":
+    "Undo",
+  "settings.rcamActionRig":
+    "Camera rig",
+  "settings.rcamActionRetime":
+    "Respace by distance",
+  "settings.rcamActionPreview":
+    "Show path",
+  "settings.rcamActionCurve":
+    "Curve style",
+  "settings.rcamActionAnchor":
+    "Path axis",
+  "settings.rcamActionAutofov":
+    "Auto FOV",
+  "settings.rcamPaths":
+    "Replay camera paths",
+  "settings.rcamPathsDesc":
+    "The nine slots FrostMod saves camera paths to. Open one to see where its keys fall, change how it flies, or pass it on.",
+  "settings.rcamPathsEmpty":
+    "Nothing saved yet. Set keys in game with the replay camera editor, then press save.",
+  "settings.rcamUnavailable":
+    "The replay camera can't run on this game build: {{reason}}",
+  "settings.rcamNotCalibrated":
+    "Aiming isn't calibrated yet. Open the editor in game and swing the camera round once.",
+  "settings.rcamRefresh":
+    "Refresh",
+  "settings.rcamSlot":
+    "Slot {{n}}",
+  "settings.rcamSlotEmpty":
+    "Empty",
+  "settings.rcamKeyCount_one":
+    "{{count}} key",
+  "settings.rcamKeyCount_other":
+    "{{count}} keys",
+  "settings.rcamShotCount_one":
+    "{{count}} shot",
+  "settings.rcamShotCount_other":
+    "{{count}} shots",
+  "settings.rcamTimelineHint":
+    "Drag a key to move it. Times snap to the replay's 30 ms grid, and a key can't cross its neighbour.",
+  "settings.rcamKeyAt":
+    "Key at {{time}}",
+  "settings.rcamNoKeySelected":
+    "Pick a key on the timeline to change what it does.",
+  "settings.rcamAim":
+    "Aim at",
+  "settings.rcamAimNone":
+    "nobody",
+  "settings.rcamEaseSmooth":
+    "Smooth",
+  "settings.rcamEaseHold":
+    "Hold",
+  "settings.rcamEaseCut":
+    "Cut",
+  "settings.rcamCurve":
+    "Curve",
+  "settings.rcamCurveCentripetal":
+    "Centripetal",
+  "settings.rcamCurveUniform":
+    "Uniform",
+  "settings.rcamAxis":
+    "Axis",
+  "settings.rcamAxisClock":
+    "Replay clock",
+  "settings.rcamAxisTrack":
+    "Rider's lap",
+  "settings.rcamAxisHint":
+    "Keyed to a rider's lap, the path plays on any lap, any rider, any replay. Every key needs an aimed rider and a lap position.",
+  "settings.rcamRig":
+    "Rig",
+  "settings.rcamRigLocked":
+    "Locked",
+  "settings.rcamRigHandheld":
+    "Handheld",
+  "settings.rcamRigDrone":
+    "Drone",
+  "settings.rcamRigCrane":
+    "Crane",
+  "settings.rcamRigAmount":
+    "Amount",
+  "settings.rcamAutoFov":
+    "Hold the subject's size",
+  "settings.rcamAutoFovHint":
+    "FOV follows the aimed rider so they stay the same size on screen.",
+  "settings.rcamSave":
+    "Save",
+  "settings.rcamRevert":
+    "Revert",
+  "settings.rcamRetime":
+    "Respace by distance",
+  "settings.rcamExport":
+    "Export",
+  "settings.rcamImport":
+    "Import",
+  "settings.rcamDelete":
+    "Delete",
+  "settings.rcamSaved":
+    "Path saved",
+  "settings.rcamWriteFailed":
+    "Could not save the path",
+  "settings.rcamReadFailed":
+    "Could not read the path",
+  "settings.rcamRetimeDone":
+    "Keys respaced. Save to keep it.",
+  "settings.rcamRetimeFailed":
+    "Could not respace the keys",
+  "settings.rcamDeleted":
+    "Slot {{n}} deleted",
+  "settings.rcamDeleteFailed":
+    "Could not delete the path",
+  "settings.rcamImported":
+    "Imported into slot {{n}}",
+  "settings.rcamImportFailed":
+    "Could not import that path",
+  "settings.rcamExported":
+    "Path exported",
+  "settings.rcamExportFailed":
+    "Could not export the path",
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App.",
