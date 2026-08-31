@@ -1,17 +1,13 @@
 # Changelog
 
-## 2026-08-31
-
-### Added
-- The replay camera's new hide-overlay key (`F7` by default) can be rebound in
-  Settings → FrostMod alongside the rest.
-
-## 2026-08-31
+## 2026-08-31 — v0.12.1
 
 ### Added
 - Settings → FrostMod now lets you rebind the replay camera editor's keys. The game reads
   the same key at the same moment, so `S` for save also moved the camera for anyone with
   `S` bound to move-backwards; now you can put the action on a key the game doesn't use.
+- The hide-overlay key (`F7` by default), which hides everything FrostMod draws for
+  recording a replay, is rebindable there too.
 - Keys are written into FrostMod's own config, including a plugin-folder install, and take
   effect the next time the editor opens.
 

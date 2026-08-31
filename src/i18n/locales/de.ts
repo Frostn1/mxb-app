@@ -1461,6 +1461,16 @@ export const de: Translation = {
   "showcase.supporters.title_one": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.title_other": "Ermöglicht durch {{count}} Unterstützer",
   "showcase.supporters.more": "+{{count}} weitere",
+  "showcase.v0121.hero.title":
+    "Deine Replay-Kamera-Tasten, deine Tastatur",
+  "showcase.v0121.hero.body":
+    "FrostMods Replay-Kamera liest die Tastatur direkt — und das Spiel im selben Moment ebenso. Wenn S deine Kamera rückwärts bewegt, hat S zum Speichern eines Pfads auch die Kamera bewegt. Jede Taste des Editors lässt sich jetzt dorthin legen, wo das Spiel nicht hinfasst.",
+  "showcase.v0121.rebind":
+    "Belege jede Editor-Taste neu unter Einstellungen → FrostMod: Aktion anklicken, Taste drücken.",
+  "showcase.v0121.clash":
+    "Wähle eine Taste, die deine Kamerasteuerung nicht nutzt. Funktionstasten und der Ziffernblock sind meist frei; ein Modifier hilft nicht, das Spiel sieht die Taste darunter trotzdem.",
+  "showcase.v0121.clean":
+    "F7 blendet alles aus, was FrostMod zeichnet — Panel, Radar, Umrisse — für saubere Aufnahmen.",
   "showcase.v0113.hero.title":
     "Jede Strecke \u00f6ffnet sich als der Ort, der sie ist",
   "showcase.v0113.hero.body":

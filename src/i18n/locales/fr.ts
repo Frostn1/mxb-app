@@ -1452,6 +1452,16 @@ export const fr: Translation = {
   "showcase.supporters.title_one": "Rendu possible par {{count}} soutien",
   "showcase.supporters.title_other": "Rendu possible par {{count}} soutiens",
   "showcase.supporters.more": "+{{count}} autres",
+  "showcase.v0121.hero.title":
+    "Tes touches de caméra replay, ton clavier",
+  "showcase.v0121.hero.body":
+    "La caméra replay de FrostMod lit le clavier directement, et le jeu aussi, au même instant. Si S recule ta caméra, appuyer sur S pour enregistrer un trajet la faisait reculer aussi. Chaque touche de l'éditeur peut désormais aller là où le jeu ne va pas.",
+  "showcase.v0121.rebind":
+    "Réattribue n'importe quelle touche de l'éditeur dans Paramètres → FrostMod : clique une action, appuie sur la touche.",
+  "showcase.v0121.clash":
+    "Choisis une touche que tes commandes de caméra n'utilisent pas. Les touches de fonction et le pavé numérique sont souvent libres ; un modificateur n'y change rien, le jeu voit toujours la touche en dessous.",
+  "showcase.v0121.clean":
+    "F7 masque tout ce que FrostMod dessine — panneau, radar, contours — pour un enregistrement propre.",
   "showcase.v0113.hero.title":
     "Chaque piste s\u2019ouvre comme le lieu qu\u2019elle est",
   "showcase.v0113.hero.body":

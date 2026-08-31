@@ -1422,6 +1422,16 @@ export const en = {
   "showcase.supporters.title_one": "Made possible by {{count}} supporter",
   "showcase.supporters.title_other": "Made possible by {{count}} supporters",
   "showcase.supporters.more": "+{{count}} more",
+  "showcase.v0121.hero.title":
+    "Your replay camera keys, your keyboard",
+  "showcase.v0121.hero.body":
+    "FrostMod's replay camera reads the keyboard directly, and so does the game — at the same moment. If S moves your camera backwards, pressing S to save a path moved the camera too. Every key the editor uses can now be moved somewhere the game leaves alone.",
+  "showcase.v0121.rebind":
+    "Rebind any of the editor's keys in Settings → FrostMod: click an action, press the key.",
+  "showcase.v0121.clash":
+    "Pick a key your camera controls don't use. Function keys and the numpad are usually free; a modifier won't help, because the game still sees the key underneath.",
+  "showcase.v0121.clean":
+    "F7 hides everything FrostMod draws — panel, radar, outlines — so a recorded pass is clean.",
   "showcase.v0113.hero.title":
     "Every track opens as the place it is",
   "showcase.v0113.hero.body":
