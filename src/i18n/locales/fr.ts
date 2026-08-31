@@ -1599,6 +1599,10 @@ export const fr: Translation = {
     "Vous verrez tout pilote qui a aussi MXB App. Plus votre lobby en compte, plus la grille est correcte.",
   "showcase.v0124.settings":
     "Paramètres → Synchro des peintures montre ce qui est parti, ce qui est arrivé, et toute peinture qu'elle a refusé d'écraser. L'interrupteur est dans Général.",
+  "showcase.v0124.shape":
+    "Les sauts se façonnent en tirant leur contour. Attrapez le haut d'un tabletop pour sa hauteur, l'extrémité pour sa longueur, l'autre côté d'un double pour son écart — ou dessinez-en un point par point.",
+  "showcase.v0124.stats":
+    "MXB App compte désormais anonymement quelles pages et fonctions sont utilisées — un identifiant aléatoire et rien sur vous. Paramètres → Général le désactive.",
   "showcase.v0122.hero.title":
     "La caméra replay peut suivre le pilote",
   "showcase.v0122.hero.body":

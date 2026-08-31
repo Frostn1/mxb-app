@@ -1,16 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Added
-- Anonymous usage counts, so which pages and features actually get used is knowable. The
-  app sends a random install id, its version, the OS, the title, a session count and
-  counters for named pages and features — never your name, your files or your address.
-- A switch in Settings → General turns it off, and the welcome slideshow says it is there.
-- The control plane serves the numbers at `/admin/usage` behind an admin key: active
-  installs by day, week and month, version and OS spread, and every page and feature
-  ranked by how many installs touched it — including the ones nothing touched.
-
 ## 2026-08-31 — v0.12.4 — Paint sync, on every server
 
 ### Added
@@ -23,8 +12,24 @@
 - A rider joining after you triggers a sync straight away. The app watches the entry list
   and pulls within a few seconds of a new name appearing, instead of waiting out the
   45-second heartbeat.
-- A feature's ground height is set on its own row in the track editor.
-- Features can be dragged along the height strip.
+- A feature's ground height is set on its own row in the track editor, and features can be
+  dragged along the height strip.
+- A Height/Shape pill on that strip. Height shapes the ground the track runs on; Shape
+  shapes the thing built on it. A straight only gets Height — it has ground, not a shape.
+- In Shape mode a jump's outline is the jump: drag the top of a tabletop to set its height,
+  its far end to set its length, the far side of a double's gap to set the gap, a whoop's
+  first crest for spacing and height, its far corner for how many crests. Corners with
+  nothing behind them sit there as anchors rather than pretending to be adjustable.
+- Handles ride the height curve, so a jump on a hill is grabbed on the hill rather than at
+  zero.
+- Jumps can be drawn point by point: click to add a point, drag to move it, double-click to
+  take it away. A jump drawn this way keeps its points; nothing turns a tabletop into one
+  behind your back.
+- Anonymous usage counts, so which pages and features actually get used is knowable. The
+  app sends a random install id, its version, the OS, the title, a session count and
+  counters for named pages and features — never your name, your files or your address.
+- A switch in Settings → General turns those off, and the welcome slideshow says it is
+  there.
 
 ### Changed
 - The sync line in the sidebar is no longer behind the experimental toggle.

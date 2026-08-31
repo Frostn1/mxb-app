@@ -1590,6 +1590,10 @@ export const it: Translation = {
     "Vedrai ogni pilota che ha anch'esso MXB App. Più ce ne sono nella tua lobby, più la griglia appare giusta.",
   "showcase.v0124.settings":
     "Impostazioni → Sincronizzazione livree mostra cosa è uscito, cosa è arrivato e ogni livrea che ha rifiutato di sovrascrivere. L'interruttore è in Generali.",
+  "showcase.v0124.shape":
+    "I salti si modellano trascinando il loro profilo. Prendi la cima di un tabletop per l'altezza, l'estremità per la lunghezza, il lato opposto di un doppio per il vuoto — o disegnane uno punto per punto.",
+  "showcase.v0124.stats":
+    "MXB App ora conta in modo anonimo quali pagine e funzioni vengono usate — un ID casuale e nulla su di te. Impostazioni → Generali lo disattiva.",
   "showcase.v0122.hero.title":
     "La telecamera replay può seguire il pilota",
   "showcase.v0122.hero.body":

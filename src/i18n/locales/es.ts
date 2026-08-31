@@ -1595,6 +1595,10 @@ export const es: Translation = {
     "Verás a cualquier piloto que también tenga MXB App. Cuantos más haya en tu sala, más parrilla se ve como debe.",
   "showcase.v0124.settings":
     "Ajustes → Sincronización de pinturas muestra qué salió, qué llegó y cualquier pintura que se negó a sobrescribir. El interruptor está en General.",
+  "showcase.v0124.shape":
+    "Los saltos se moldean arrastrando su contorno. Agarra la parte alta de un tabletop para su altura, el extremo para su longitud, el lado opuesto de un doble para su hueco — o dibuja uno punto a punto.",
+  "showcase.v0124.stats":
+    "MXB App ahora cuenta de forma anónima qué páginas y funciones se usan — un ID aleatorio y nada sobre ti. Ajustes → General lo desactiva.",
   "showcase.v0122.hero.title":
     "La cámara de repetición puede seguir al piloto",
   "showcase.v0122.hero.body":

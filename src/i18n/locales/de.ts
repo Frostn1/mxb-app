@@ -1608,6 +1608,10 @@ export const de: Translation = {
     "Du siehst jeden Fahrer, der ebenfalls MXB App hat. Je mehr in deiner Lobby, desto mehr vom Feld sieht richtig aus.",
   "showcase.v0124.settings":
     "Einstellungen → Lackierungs-Sync zeigt, was rausging, was ankam und welche Lackierung nicht überschrieben wurde. Der Schalter zum Abschalten sitzt unter Allgemein.",
+  "showcase.v0124.shape":
+    "Sprünge werden über ihre Kontur geformt. Zieh die Oberkante eines Tabletops für die Höhe, das hintere Ende für die Länge, die Gegenseite eines Doubles für die Lücke — oder zeichne einen Punkt für Punkt.",
+  "showcase.v0124.stats":
+    "MXB App zählt jetzt anonym, welche Seiten und Funktionen genutzt werden — eine zufällige ID und nichts über dich. Einstellungen → Allgemein schaltet es ab.",
   "showcase.v0122.hero.title":
     "Die Replay-Kamera kann dem Fahrer folgen",
   "showcase.v0122.hero.body":
