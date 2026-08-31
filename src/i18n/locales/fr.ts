@@ -1594,7 +1594,7 @@ export const fr: Translation = {
   "showcase.v0124.anyserver":
     "N'importe quel serveur, pas seulement les nôtres. L'app lit le serveur depuis le jeu en cours, donc un lobby public fonctionne comme un lobby privé.",
   "showcase.v0124.nosetup":
-    "Rien à configurer. Pas de code d'invitation, pas d'inscription, rien à installer côté serveur — lancez le jeu et c'est parti.",
+    "Rien à configurer. Pas de code d'invitation, pas d'inscription, rien à installer côté serveur — activez-la dans les Paramètres, elle fait le reste toute seule.",
   "showcase.v0124.everyone":
     "Vous verrez tout pilote qui a aussi MXB App. Plus votre lobby en compte, plus la grille est correcte.",
   "showcase.v0124.settings":

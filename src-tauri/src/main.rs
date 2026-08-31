@@ -6544,8 +6544,14 @@ async fn pull_rosters(
         log::warn!("[sync] couldn't record the pull: {e:#}");
     }
     // Anything newly on disk is invisible to a running game until the loader re-reads the
-    // mods folder.
-    let _ = frostmod::signal_reload();
+    // mods folder — but only *newly*. This used to fire on every pull, and a pull that
+    // installed nothing is the overwhelmingly common one: the grid is unchanged, everyone's
+    // paints are already here, and there is nothing for the game to re-read. Asking it to
+    // rescan the mods folder anyway, every time a rider joined, is work done to a process
+    // that is mid-race.
+    if outcome.installed > 0 {
+        let _ = frostmod::signal_reload();
+    }
     Ok(outcome)
 }
 

@@ -17,6 +17,12 @@
   which took paint sync, voice and the server list down with it. The changes above cut
   what the app asks for by roughly four fifths.
 
+## 2026-08-31 — v0.12.5
+
+### Changed
+- Paint sync is off by default. Turn it on in Settings → General.
+- A sync only reaches into the running game when it has actually installed something.
+
 ## 2026-08-31 — v0.12.4 — Paint sync, on every server
 
 ### Added

@@ -1564,7 +1564,7 @@ export const en = {
   "showcase.v0124.anyserver":
     "Any server, not just ours. The app reads the server from the running game, so a public lobby works exactly like a private one.",
   "showcase.v0124.nosetup":
-    "Nothing to set up. No invite code, no sign-up, no server-side install — start the game and it goes.",
+    "Nothing to set up. No invite code, no sign-up, no server-side install — switch it on in Settings and it runs by itself.",
   "showcase.v0124.everyone":
     "You'll see any rider who also has MXB App. The more of your lobby that does, the more of the grid looks right.",
   "showcase.v0124.settings":

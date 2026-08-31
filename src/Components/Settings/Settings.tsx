@@ -466,9 +466,8 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   // Same shape as the overlay pair above: the config's fields are optional (an install
   // predating voice has none), so every read is defaulted here rather than at each use.
   const voiceEnabled = config.voiceEnabled ?? false;
-  // On unless it was turned off — an older config has no field and means "on", same as the
-  // backend's default.
-  const paintSyncEnabled = config.paintSyncEnabled ?? true;
+  // Off unless it was turned on, matching the backend's default.
+  const paintSyncEnabled = config.paintSyncEnabled ?? false;
   const voiceInput = config.voiceInputDevice ?? "";
   const voiceOutput = config.voiceOutputDevice ?? "";
   const voicePtt = config.voicePttHotkey || FALLBACK_PTT_HOTKEY;
