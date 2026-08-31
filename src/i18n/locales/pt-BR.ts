@@ -2396,4 +2396,5 @@ export const ptBR: Translation = {
   "track.smoothing": "suavização",
   "track.live": "Ao vivo",
   "track.rebuild": "Reconstruir a prévia",
+  "track.wholeLap": "volta inteira",
 };

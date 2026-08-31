@@ -118,6 +118,9 @@ export default function TrackStudio() {
   // have in their heads.
   const [shut, setShut] = useState<Set<number>>(new Set());
   const [flash, setFlash] = useState<number | null>(null);
+  // Which row the height strip is showing. A corner or a straight at a time, because on a
+  // 1500 m lap a 40 m berm is three pixels wide and every point lands on the last one.
+  const [scope, setScope] = useState<number | null>(null);
   // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
   // rather than the default. With it on, an edit settles and then the view catches up.
   const [live, setLive] = useState(false);
@@ -780,7 +783,10 @@ export default function TrackStudio() {
                     key={row}
                     data-step={row}
                     data-at={step.at}
-                    onClick={() => setFocus(positionAt(program, step.at))}
+                    onClick={() => {
+                      setScope(row);
+                      setFocus(positionAt(program, step.at));
+                    }}
                     onPointerEnter={() =>
                       setHover({
                         // The whole of it, not where it starts: a straight is two hundred
@@ -802,6 +808,7 @@ export default function TrackStudio() {
                       dragging === row && "opacity-40",
                       // The line lands above this row when it is the drop target, and below
                       // the last one when the drop is past the end.
+                      scope === row && "bg-foreground/[0.06]",
                       dropAt === row && "before:absolute before:inset-x-2 before:top-0 before:h-0.5 before:bg-primary",
                       dropAt === steps.length &&
                         row === steps.length - 1 &&
@@ -908,11 +915,36 @@ export default function TrackStudio() {
             {/* The lap's own height, as a line you can pull about — the same shape the
                 segment rises describe, in the form you can take hold of. */}
             <div className="flex-none border-t border-input px-2 pb-1 pt-1.5">
-              <div className="px-1 text-[10.5px] uppercase tracking-wide text-muted-foreground">
-                {t("track.height")}
+              <div className="flex items-center gap-2 px-1 text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                <span>{t("track.height")}</span>
+                {(() => {
+                  const steps = lapSteps(program);
+                  const on = scope !== null ? steps[scope] : undefined;
+                  return on ? (
+                    <button
+                      onClick={() => setScope(null)}
+                      className="cursor-default rounded px-1 normal-case tracking-normal text-foreground hover:bg-foreground/[0.06]"
+                      title={t("track.wholeLap")}
+                    >
+                      {stepName(on, t)} · {on.at.toFixed(0)}–
+                      {(on.at + stepLength(on)).toFixed(0)} m ×
+                    </button>
+                  ) : (
+                    <span className="normal-case tracking-normal">{t("track.wholeLap")}</span>
+                  );
+                })()}
               </div>
               <ElevationCurve
                 lap={lapLength(program)}
+                {...(() => {
+                  const steps = lapSteps(program);
+                  const on = scope !== null ? steps[scope] : undefined;
+                  if (!on) return {};
+                  // A little either side, so the ends of the stretch can be shaped against
+                  // what they run into rather than against the edge of the picture.
+                  const pad = Math.max(stepLength(on) * 0.15, 5);
+                  return { from: Math.max(0, on.at - pad), to: on.at + stepLength(on) + pad };
+                })()}
                 knots={program.elevation ?? []}
                 features={program.features}
                 onChange={(elevation) => {
