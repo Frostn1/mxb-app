@@ -1441,6 +1441,16 @@ export const ptBR: Translation = {
   "showcase.supporters.title_one": "Possível graças a {{count}} apoiador",
   "showcase.supporters.title_other": "Possível graças a {{count}} apoiadores",
   "showcase.supporters.more": "+{{count}} outros",
+  "showcase.v0121.hero.title":
+    "As teclas da câmera de replay são suas",
+  "showcase.v0121.hero.body":
+    "A câmera de replay do FrostMod lê o teclado direto, e o jogo lê a mesma tecla no mesmo instante. Se S move sua câmera para trás, apertar S para salvar um trajeto movia a câmera também. Agora cada tecla do editor pode ir para onde o jogo não mexe.",
+  "showcase.v0121.rebind":
+    "Reconfigure qualquer tecla do editor em Configurações → FrostMod: clique numa ação e pressione a tecla.",
+  "showcase.v0121.clash":
+    "Escolha uma tecla que seus controles de câmera não usem. Teclas de função e o teclado numérico costumam estar livres; um modificador não resolve, porque o jogo continua vendo a tecla embaixo.",
+  "showcase.v0121.clean":
+    "F7 esconde tudo o que o FrostMod desenha — painel, radar, contornos — para gravar limpo.",
   "showcase.v0113.hero.title":
     "Cada pista abre como o lugar que ela \u00e9",
   "showcase.v0113.hero.body":

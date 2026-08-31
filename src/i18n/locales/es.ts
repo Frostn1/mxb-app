@@ -1448,6 +1448,16 @@ export const es: Translation = {
   "showcase.supporters.title_one": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.title_other": "Posible gracias a {{count}} mecenas",
   "showcase.supporters.more": "+{{count}} más",
+  "showcase.v0121.hero.title":
+    "Tus teclas de la cámara de repetición, tu teclado",
+  "showcase.v0121.hero.body":
+    "La cámara de repetición de FrostMod lee el teclado directamente, y el juego hace lo mismo en el mismo instante. Si S mueve tu cámara hacia atrás, pulsar S para guardar un trayecto también movía la cámara. Ahora cada tecla del editor puede ir a donde el juego no llega.",
+  "showcase.v0121.rebind":
+    "Reasigna cualquier tecla del editor en Ajustes → FrostMod: pulsa una acción y luego la tecla.",
+  "showcase.v0121.clash":
+    "Elige una tecla que tus controles de cámara no usen. Las teclas de función y el teclado numérico suelen estar libres; un modificador no sirve, porque el juego sigue viendo la tecla de debajo.",
+  "showcase.v0121.clean":
+    "F7 oculta todo lo que dibuja FrostMod — panel, radar, contornos — para grabar limpio.",
   "showcase.v0113.hero.title":
     "Cada pista se abre como el lugar que es",
   "showcase.v0113.hero.body":

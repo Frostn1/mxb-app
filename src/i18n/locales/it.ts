@@ -1443,6 +1443,16 @@ export const it: Translation = {
   "showcase.supporters.title_one": "Reso possibile da {{count}} sostenitore",
   "showcase.supporters.title_other": "Reso possibile da {{count}} sostenitori",
   "showcase.supporters.more": "+{{count}} altri",
+  "showcase.v0121.hero.title":
+    "I tasti della telecamera replay, sulla tua tastiera",
+  "showcase.v0121.hero.body":
+    "La telecamera replay di FrostMod legge la tastiera direttamente, e il gioco fa lo stesso nello stesso istante. Se S sposta la telecamera indietro, premere S per salvare un percorso la spostava comunque. Ora ogni tasto dell'editor può stare dove il gioco non arriva.",
+  "showcase.v0121.rebind":
+    "Riassegna qualsiasi tasto dell'editor in Impostazioni → FrostMod: clicca un'azione, premi il tasto.",
+  "showcase.v0121.clash":
+    "Scegli un tasto che i tuoi comandi telecamera non usano. I tasti funzione e il tastierino numerico di solito sono liberi; un modificatore non aiuta, perché il gioco vede comunque il tasto sotto.",
+  "showcase.v0121.clean":
+    "F7 nasconde tutto ciò che FrostMod disegna — pannello, radar, contorni — per registrare pulito.",
   "showcase.v0113.hero.title":
     "Ogni pista si apre come il luogo che \u00e8",
   "showcase.v0113.hero.body":
