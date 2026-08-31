@@ -20,6 +20,9 @@ BASE="http://127.0.0.1:${PORT}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG="$(mktemp -t mxb-ent-e2e)"
 STEAM_ID="76561198000000042"
+# A fixed master key and content key so the grant can be checked byte-for-byte.
+MASTER="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="   # base64 of 0x00..0x1f
+CEK_HEX="1111111111111111111111111111111111111111111111111111111111111111"
 FAIL=0
 
 cd "$HERE"
@@ -44,7 +47,7 @@ for m in migrations/*.sql; do
 done
 
 say "start the control plane on :${PORT}"
-npx wrangler dev --port "$PORT" --local >"$LOG" 2>&1 &
+npx wrangler dev --port "$PORT" --local --var "MXB_ASSET_MASTER_KEY:${MASTER}" >"$LOG" 2>&1 &
 trap 'kill %1 2>/dev/null || true' EXIT
 for _ in $(seq 1 60); do curl -fsS "${BASE}/v1/servers" >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS "${BASE}/v1/servers" >/dev/null || { echo "worker never came up:"; cat "$LOG"; exit 1; }
@@ -100,6 +103,44 @@ DENIES=$(npx wrangler d1 execute mxb-control-plane --local --json \
 # browsed.
 want "every decision is recorded"              "7" "$GRANTS"
 want "including the refusals"                  "6" "$DENIES"
+
+say "releasing the content key to an entitled session"
+# Relink the entitled identity (the earlier tests moved it away), and give trk_pinehill a
+# real wrapped key. A second asset is entitled but never packed, to prove the keyless case.
+d1 "UPDATE accounts SET steam_id = '${STEAM_ID}' WHERE id = '${ACCOUNT}'"
+d1 "UPDATE entitlements SET revoked_at = NULL WHERE steam_id = '${STEAM_ID}' AND asset_id = 'trk_pinehill'"
+d1 "INSERT INTO assets (id, creator_id, title, created_at) VALUES ('trk_nokey', '${ACCOUNT}', 'Never packed', 1)"
+d1 "INSERT INTO entitlements (steam_id, asset_id, source, granted_at) VALUES ('${STEAM_ID}', 'trk_nokey', 'purchase', 1)"
+
+WRAP="$(mktemp -t mxb-wrap).js"
+cat > "$WRAP" <<'JS'
+const { webcrypto } = require("crypto");
+const { subtle } = webcrypto;
+(async () => {
+  const master = Buffer.from(process.argv[2], "base64");
+  const cek = Buffer.from(process.argv[3], "hex");
+  const key = await subtle.importKey("raw", master, { name: "AES-GCM" }, false, ["encrypt"]);
+  const iv = webcrypto.getRandomValues(new Uint8Array(12));
+  const ct = Buffer.from(await subtle.encrypt({ name: "AES-GCM", iv }, key, cek));
+  process.stdout.write(Buffer.concat([Buffer.from(iv), ct]).toString("base64"));
+})();
+JS
+WRAPPED="$(node "$WRAP" "$MASTER" "$CEK_HEX")"
+d1 "UPDATE assets SET wrapped_key = '${WRAPPED}', key_id = 'k1' WHERE id = 'trk_pinehill'"
+
+grant() { curl -s -X POST "${BASE}/v1/keys/grant" -H "authorization: Bearer ${TOKEN}"   -H 'content-type: application/json' -d "{\"assetId\":\"$1\",\"sessionId\":\"s2\"}"; }
+grant_code() { curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/v1/keys/grant"   -H "authorization: Bearer ${TOKEN}" -H 'content-type: application/json'   -d "{\"assetId\":\"$1\",\"sessionId\":\"s2\"}"; }
+
+want "an entitled session is granted the key" "200" "$(grant_code trk_pinehill)"
+GOT_HEX="$(grant trk_pinehill | python3 -c 'import json,sys,base64; print(base64.b64decode(json.load(sys.stdin)["contentKey"]).hex())')"
+want "and it is the real content key"          "$CEK_HEX" "$GOT_HEX"
+
+want "an entitled asset with no key is a 409"  "409" "$(grant_code trk_nokey)"
+
+d1 "UPDATE entitlements SET revoked_at = 99 WHERE steam_id = '${STEAM_ID}' AND asset_id = 'trk_pinehill'"
+want "a revoked entitlement is denied the key" "403" "$(grant_code trk_pinehill)"
+
+rm -f "$WRAP"
 
 printf '\n'
 [ "$FAIL" = 0 ] && echo "PASS" || { echo "FAILURES ABOVE"; exit 1; }
