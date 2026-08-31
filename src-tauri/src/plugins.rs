@@ -220,11 +220,6 @@ impl PluginState {
             },
         }
     }
-
-    pub fn forget(&mut self, plugin: &str) {
-        self.entitlements.remove(plugin);
-        self.installed.remove(plugin);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -898,10 +893,7 @@ pub async fn plugin_install(app: tauri::AppHandle, id: String) -> Result<String,
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
 
     let dir = plugins_dir(&app).map_err(|e| e.to_string())?;
-    let app_version = {
-        use tauri::Manager;
-        app.package_info().version.to_string()
-    };
+    let app_version = app.package_info().version.to_string();
     let manifest = install_bundle(
         &dir,
         &id,

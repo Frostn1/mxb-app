@@ -38,7 +38,6 @@ mod mods;
 mod modstate;
 mod modwatch;
 mod profilewatch;
-mod replaycam;
 mod mxb_fetch;
 mod mxb_session;
 mod overlay;
@@ -5684,106 +5683,6 @@ fn frostmod_running() -> bool {
     frostmod::is_running()
 }
 
-/// The replay camera editor's key bindings, as FrostMod would read them.
-#[tauri::command]
-fn frostmod_keybinds(app: tauri::AppHandle) -> Vec<frostmod_manage::Keybind> {
-    let cfg = config::load(&app).unwrap_or_default();
-    frostmod_manage::rcam_keybinds(&app, &cfg.game_path)
-}
-
-/// Rebind the replay camera editor. Written into FrostMod's own config, which it re-reads
-/// each time the editor opens — so this applies without restarting the game.
-#[tauri::command]
-fn frostmod_set_keybinds(
-    app: tauri::AppHandle,
-    binds: Vec<frostmod_manage::Keybind>,
-) -> Result<(), String> {
-    let cfg = config::load(&app).unwrap_or_default();
-    frostmod_manage::set_rcam_keybinds(&app, &cfg.game_path, &binds)
-}
-
-/// What FrostMod ships with, for the reset button.
-#[tauri::command]
-fn frostmod_default_keybinds() -> Vec<frostmod_manage::Keybind> {
-    frostmod_manage::default_rcam_keybinds()
-}
-
-// ---- replay camera paths ---------------------------------------------------
-// FrostMod's editor is a text panel over a running game — good for setting a key while you
-// scrub, no use at all for looking at what you saved last week. These back the app's own
-// panel: nine slots you can see into, retime, re-style, and pass around.
-
-/// Every slot, and enough about each to draw the list without opening them again.
-#[tauri::command]
-fn replaycam_list(app: tauri::AppHandle) -> Vec<replaycam::Summary> {
-    let cfg = config::load(&app).unwrap_or_default();
-    replaycam::list(&app, &cfg)
-}
-
-#[tauri::command]
-fn replaycam_read(app: tauri::AppHandle, slot: u8) -> Result<replaycam::CamPath, String> {
-    let cfg = config::load(&app).unwrap_or_default();
-    replaycam::read(&app, &cfg, slot)
-}
-
-/// Save a slot back. Returns the file it landed in, which is worth showing: it may be the
-/// game's own plugins folder rather than the app's copy of FrostMod.
-#[tauri::command]
-fn replaycam_write(
-    app: tauri::AppHandle,
-    slot: u8,
-    path: replaycam::CamPath,
-) -> Result<String, String> {
-    let cfg = config::load(&app).unwrap_or_default();
-    replaycam::write(&app, &cfg, slot, &path).map(|p| p.display().to_string())
-}
-
-#[tauri::command]
-fn replaycam_delete(app: tauri::AppHandle, slot: u8) -> Result<(), String> {
-    let cfg = config::load(&app).unwrap_or_default();
-    replaycam::delete(&app, &cfg, slot)
-}
-
-/// Respace the keys by distance — the constant-speed dolly. Pure, so the UI can offer it as
-/// a preview and only write if it is kept.
-#[tauri::command]
-fn replaycam_retime(path: replaycam::CamPath) -> Result<replaycam::CamPath, String> {
-    let mut out = path;
-    replaycam::retime_by_distance(&mut out.keys)?;
-    Ok(out)
-}
-
-/// Load someone else's `.fcam` into a slot. Parsed before it is copied, so a file that
-/// FrostMod would refuse never reaches a slot.
-#[tauri::command]
-fn replaycam_import(
-    app: tauri::AppHandle,
-    slot: u8,
-    src: String,
-) -> Result<replaycam::CamPath, String> {
-    let text = std::fs::read_to_string(&src).map_err(|e| format!("{src}: {e}"))?;
-    let parsed = replaycam::parse(&text)?;
-    let cfg = config::load(&app).unwrap_or_default();
-    replaycam::write(&app, &cfg, slot, &parsed)?;
-    Ok(parsed)
-}
-
-/// What FrostMod's log says about the replay camera on the build it last attached to —
-/// including the reason it is unavailable, which until now only existed in a file next to a
-/// DLL.
-#[tauri::command]
-fn replaycam_status(app: tauri::AppHandle) -> replaycam::Status {
-    let cfg = config::load(&app).unwrap_or_default();
-    replaycam::status(&app, &cfg)
-}
-
-#[tauri::command]
-fn replaycam_export(app: tauri::AppHandle, slot: u8, dst: String) -> Result<(), String> {
-    let cfg = config::load(&app).unwrap_or_default();
-    let p = replaycam::read(&app, &cfg, slot)?;
-    std::fs::write(&dst, replaycam::serialize(&p)).map_err(|e| format!("{dst}: {e}"))
-}
-
 /// Whether FrostMod actually got into the running game — and what to do when it didn't.
 ///
 /// `frostmod_running` only says the launcher is up, which is what made an elevated game so
@@ -9126,17 +9025,6 @@ fn main() {
             voice_test_output,
             set_watch_mods_reload,
             frostmod_reload,
-            frostmod_keybinds,
-            frostmod_set_keybinds,
-            frostmod_default_keybinds,
-            replaycam_list,
-            replaycam_read,
-            replaycam_write,
-            replaycam_delete,
-            replaycam_retime,
-            replaycam_import,
-            replaycam_export,
-            replaycam_status,
             frostmod_running,
             frostmod_attachment,
             garage_scan_bikes,
