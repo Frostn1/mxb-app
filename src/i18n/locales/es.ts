@@ -1358,18 +1358,16 @@ export const es: Translation = {
     "Vuelve a seleccionar tu perfil en MX Bikes para cargar el cambio.",
   "locker.loadsNextTime":
     "Se cargará la próxima vez que abras el juego.",
-  "locker.modelRefreshing":
-    "Actualizando en el juego — si es la moto que tienes seleccionada, cambia ahora.",
   "locker.modelFrostmodNotRunning":
-    "Ejecuta FrostMod para ver los cambios de modelo en directo — por ahora, vuelve a seleccionar la moto en el juego.",
-  "locker.modelReselectBike":
-    "Modelo cambiado — vuelve a seleccionar la moto en MX Bikes para verlo.",
+    "FrostMod no está en ejecución — en MX Bikes cambia de categoría de moto y vuelve para ver el modelo.",
+  "locker.modelSwitchCategory":
+    "Modelo cambiado — en MX Bikes cambia de categoría de moto y vuelve para verlo.",
   "locker.modelFrostmodUnreachable":
-    "No se pudo contactar con FrostMod — vuelve a seleccionar la moto en el juego para cargarla.",
+    "No se pudo contactar con FrostMod — en el juego cambia de categoría de moto y vuelve para cargar el modelo.",
   "locker.modelRefreshWindowsOnly":
-    "La actualización del modelo en directo es solo para Windows — vuelve a seleccionar la moto en el juego.",
+    "Modelo cambiado — en el juego cambia de categoría de moto y vuelve para verlo.",
   "locker.modelInstantRefreshOff":
-    "Vuelve a seleccionar la moto en MX Bikes para cargarla (la actualización instantánea está desactivada).",
+    "En MX Bikes cambia de categoría de moto y vuelve para cargar el modelo.",
 
   // ── Registro de sets sueltos ───────────────────────────────────────────────
   "swaps.model": "modelo",

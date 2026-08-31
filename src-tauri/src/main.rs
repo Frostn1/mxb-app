@@ -491,9 +491,9 @@ struct SwapApplyOutcome {
     content_reload: ReloadOutcome,
     game_running: bool,
     live_refresh: gameproc::LiveRefresh,
-    /// Model swaps only (`None` for sound). `live_refresh` re-runs the *customization*
-    /// loader, which reloads paints/gear but never the mesh — the model needs FrostMod
-    /// to re-apply the bike. See `frostmod::signal_refresh_model`.
+    /// Model swaps only (`None` for sound). Nothing here makes the mesh appear live —
+    /// `live_refresh` re-runs the *customization* loader (paints/gear, never the mesh)
+    /// and the verb below is only a notice. See `frostmod::signal_refresh_model`.
     model_refresh: Option<frostmod::CommandOutcome>,
     /// Liveries the swap couldn't move into or out of `paints/`, because MX Bikes holds
     /// bike files open while it runs. Zero on every other path. See
@@ -638,9 +638,14 @@ fn watch_worn_paints(app: &tauri::AppHandle) {
     );
 }
 
-/// Ask FrostMod to re-apply `bike` so a just-swapped model shows live. `None` when
+/// Tell FrostMod that `bike`'s model changed, so it can say so in-game. `None` when
 /// instant refresh is off — the same switch that gates `live_refresh`, since both
 /// reach into the running game.
+///
+/// It does not make the model appear: FrostMod v0.9.11 removed the live re-apply (it
+/// crashed the game), so the player still switches bike category away and back — that
+/// is what re-reads the model; reselecting the same bike does not. All this buys is
+/// the in-game notice.
 ///
 /// The tag our installer recorded decides whether the command goes out at all. It used
 /// to be sent unconditionally and only the *wording* adjusted afterwards, because the
@@ -750,9 +755,7 @@ fn apply_model_swap_blocking(
         eprintln!("sound reconcile after model swap failed: {e:#}");
     }
     let content_reload = frostmod::signal_reload();
-    // Ask FrostMod to re-apply the bike so the new model shows in the garage without a
-    // class switch away-and-back. Only acts if `bike` is the selected one (decided
-    // inside FrostMod, which is the only side that knows). Gated on the same
+    // Tell FrostMod the model changed so it prompts the player in-game. Gated on the same
     // instant-refresh setting as the look refresh — both poke the live game.
     let model_refresh = model_refresh_cmd(&app, cfg.instant_refresh, &bike);
     // A different model can resolve a slot to a different file, so the look watcher has to

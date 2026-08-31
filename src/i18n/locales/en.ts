@@ -1334,18 +1334,16 @@ export const en = {
     "Instant refresh failed — reselect your profile in-game to load it.",
   "locker.reselectProfile": "Reselect your profile in MX Bikes to load the swap.",
   "locker.loadsNextTime": "Loads next time the game opens.",
-  "locker.modelRefreshing":
-    "Refreshing in-game — if it's your selected bike, it changes now.",
   "locker.modelFrostmodNotRunning":
-    "Run FrostMod to see model swaps live — for now, reselect the bike in-game.",
-  "locker.modelReselectBike":
-    "Model swapped — reselect the bike in MX Bikes to see it.",
+    "FrostMod isn't running — switch bike category away and back in MX Bikes to see the model.",
+  "locker.modelSwitchCategory":
+    "Model swapped — switch bike category away and back in MX Bikes to see it.",
   "locker.modelFrostmodUnreachable":
-    "Couldn't reach FrostMod — reselect the bike in-game to load it.",
+    "Couldn't reach FrostMod — switch bike category away and back in-game to load the model.",
   "locker.modelRefreshWindowsOnly":
-    "Live model refresh is Windows-only — reselect the bike in-game.",
+    "Model swapped — switch bike category away and back in-game to see it.",
   "locker.modelInstantRefreshOff":
-    "Reselect the bike in MX Bikes to load it (instant refresh is off).",
+    "Switch bike category away and back in MX Bikes to load the model.",
 
   // ── Loose model/sound swap registration ────────────────────────────────────
   "swaps.model": "model",

@@ -1369,18 +1369,16 @@ export const de: Translation = {
     "Wähle dein Profil in MX Bikes neu aus, um den Tausch zu laden.",
   "locker.loadsNextTime":
     "Wird beim nächsten Start des Spiels geladen.",
-  "locker.modelRefreshing":
-    "Wird im Spiel aktualisiert — wenn es dein ausgewähltes Motorrad ist, ändert es sich jetzt.",
   "locker.modelFrostmodNotRunning":
-    "Starte FrostMod, um Modellwechsel live zu sehen — wähle das Motorrad vorerst im Spiel neu aus.",
-  "locker.modelReselectBike":
-    "Modell gewechselt — wähle das Motorrad in MX Bikes neu aus, um es zu sehen.",
+    "FrostMod läuft nicht — wechsle in MX Bikes die Motorradkategorie weg und zurück, um das Modell zu sehen.",
+  "locker.modelSwitchCategory":
+    "Modell gewechselt — wechsle in MX Bikes die Motorradkategorie weg und zurück, um es zu sehen.",
   "locker.modelFrostmodUnreachable":
-    "FrostMod war nicht erreichbar — wähle das Motorrad im Spiel neu aus, um es zu laden.",
+    "FrostMod nicht erreichbar — wechsle im Spiel die Motorradkategorie weg und zurück, um das Modell zu laden.",
   "locker.modelRefreshWindowsOnly":
-    "Die Live-Modellaktualisierung gibt es nur unter Windows — wähle das Motorrad im Spiel neu aus.",
+    "Modell gewechselt — wechsle im Spiel die Motorradkategorie weg und zurück, um es zu sehen.",
   "locker.modelInstantRefreshOff":
-    "Wähle das Motorrad in MX Bikes neu aus, um es zu laden (die sofortige Aktualisierung ist aus).",
+    "Wechsle in MX Bikes die Motorradkategorie weg und zurück, um das Modell zu laden.",
 
   // ── Registrierung loser Sets ───────────────────────────────────────────────
   "swaps.model": "Modell",

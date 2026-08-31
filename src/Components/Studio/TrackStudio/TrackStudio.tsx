@@ -33,6 +33,7 @@ import {
   generateTrack,
   installTrackPreview,
   lapLength,
+  FEATURE_COLOUR,
   featureSpan,
   fitFeatures,
   lapSteps,
@@ -75,6 +76,7 @@ export default function TrackStudio() {
   const [terrain, setTerrain] = useState<TrackTerrain | null>(null);
   const [overview, setOverview] = useState<TrackOverview | null>(null);
   const [focus, setFocus] = useState<{ x: number; z: number } | null>(null);
+  const [hover, setHover] = useState<{ x: number; z: number; width: number } | null>(null);
   // Reordering is done with pointer events, not HTML5 drag-and-drop. Tauri's
   // `dragDropEnabled` hands drags to the OS so the webview never sees a dragstart — which is
   // also why the whole-window file dropzone was catching every attempt.
@@ -517,6 +519,20 @@ export default function TrackStudio() {
                   <li
                     key={row}
                     onClick={() => setFocus(positionAt(program, step.at))}
+                    onPointerEnter={() =>
+                      setHover({
+                        // The middle of the feature, not its start — a 40 m berm marked at
+                        // its entry looks like it belongs to the corner before it.
+                        ...positionAt(
+                          program,
+                          step.kind === "feature"
+                            ? step.at + featureSpan(step.feature).length / 2
+                            : step.at,
+                        ),
+                        width: program.width * 1.6,
+                      })
+                    }
+                    onPointerLeave={() => setHover(null)}
                     className={cn(
                       "relative flex items-center gap-1.5 px-2 py-1.5 text-[12.5px] transition-colors",
                       terrain && "cursor-default hover:bg-foreground/[0.04]",
@@ -528,6 +544,11 @@ export default function TrackStudio() {
                         row === steps.length - 1 &&
                         "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-primary",
                     )}
+                    style={
+                      step.kind === "feature"
+                        ? { boxShadow: `inset 3px 0 0 ${FEATURE_COLOUR[step.feature.kind]}` }
+                        : undefined
+                    }
                   >
                     <GripVertical
                       onPointerDown={(e) => onGripDown(e, row)}
@@ -541,8 +562,13 @@ export default function TrackStudio() {
                     <Icon
                       className={cn(
                         "size-4 flex-none",
-                        step.kind === "feature" ? "text-primary" : "text-muted-foreground",
+                        step.kind !== "feature" && "text-muted-foreground",
                       )}
+                      style={
+                        step.kind === "feature"
+                          ? { color: FEATURE_COLOUR[step.feature.kind] }
+                          : undefined
+                      }
                     />
                     <span className="w-[104px] flex-none truncate">{stepName(step, t)}</span>
 
@@ -596,6 +622,7 @@ export default function TrackStudio() {
                 placements={[]}
                 showObjects={false}
                 focus={focus}
+                highlight={hover}
                 className="absolute inset-0"
               />
             ) : (
