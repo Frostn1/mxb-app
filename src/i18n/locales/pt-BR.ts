@@ -2373,4 +2373,8 @@ export const ptBR: Translation = {
   "track.author": "Autor",
   "track.previewHint": "Toque em Prévia para construir e ver aqui.",
   "track.location": "Local",
+  "track.blank": "Em branco",
+  "track.closeLap": "Fechar a volta",
+  "track.lapClosed": "A volta agora fecha",
+  "track.closeFailed": "Não foi possível fechar",
 };

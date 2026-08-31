@@ -2388,4 +2388,8 @@ export const fr: Translation = {
   "track.author": "Auteur",
   "track.previewHint": "Appuie sur Aperçu pour le construire et le voir ici.",
   "track.location": "Lieu",
+  "track.blank": "Vierge",
+  "track.closeLap": "Fermer le tour",
+  "track.lapClosed": "Le tour se referme",
+  "track.closeFailed": "Fermeture impossible",
 };

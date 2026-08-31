@@ -29,7 +29,9 @@ import { useT } from "../../../i18n/context";
 import { cn } from "@/lib/utils";
 import {
   baseTrackProgram,
+  blankTrackProgram,
   buildTrack,
+  closeTrackLap,
   checkTrack,
   exportTrackSource,
   generateTrack,
@@ -132,20 +134,41 @@ export default function TrackStudio() {
     }
   }
 
-  async function onBase() {
+  /** Load a starting point and put it on screen — a track you can't see isn't a start. */
+  async function onLoad(load: () => Promise<TrackProgram>) {
     if (busy) return;
     setBusy("generate");
     setPreview(null);
     setProblems([]);
     try {
-      const next = await baseTrackProgram();
-      await settle(next);
+      const next = await load();
+      const found = await settle(next);
       toast.success(t("track.baseLoaded", { name: next.name }));
+      if (found.length === 0) await showIn3d(next);
     } catch (e) {
       toast.error(t("track.generateFailed"), { description: String(e) });
     } finally {
       setBusy(null);
     }
+  }
+
+  async function onClose() {
+    if (!program || busy) return;
+    try {
+      const next = await closeTrackLap(program);
+      await settle(next);
+      toast.success(t("track.lapClosed"));
+    } catch (e) {
+      toast.error(t("track.closeFailed"), { description: String(e) });
+    }
+  }
+
+  async function showIn3d(prog: TrackProgram) {
+    const p = await previewTrack(prog);
+    setPreview(p);
+    const t3 = await loadTrackTerrain(p.path, 1024);
+    setTerrain(t3);
+    setOverview(await loadTrackOverview(p.path, 2048).catch(() => null));
   }
 
   async function onPreview() {
@@ -375,11 +398,19 @@ export default function TrackStudio() {
             from nothing. */}
         <Button
           variant="outline"
-          onClick={() => void onBase()}
+          onClick={() => void onLoad(baseTrackProgram)}
           disabled={busy !== null}
           className="h-10 flex-none"
         >
           {t("track.base")}
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={() => void onLoad(blankTrackProgram)}
+          disabled={busy !== null}
+          className="h-10 flex-none"
+        >
+          {t("track.blank")}
         </Button>
       </div>
 
@@ -472,6 +503,16 @@ export default function TrackStudio() {
                     <li key={i}>{p}</li>
                   ))}
                 </ul>
+                {problems.some((p) => p.includes("doesn't close")) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2.5 w-full"
+                    onClick={() => void onClose()}
+                  >
+                    {t("track.closeLap")}
+                  </Button>
+                )}
               </div>
             )}
 
@@ -520,9 +561,11 @@ export default function TrackStudio() {
                   ))}
                 </ul>
               )}
-              <p className="text-[11.5px] leading-snug text-muted-foreground">
-                {tools?.found ? t("track.stillNeeded") : t("track.previewOnly")}
-              </p>
+              {tools?.found && (
+                <p className="text-[11.5px] leading-snug text-muted-foreground">
+                  {t("track.stillNeeded")}
+                </p>
+              )}
             </div>
           </div>
 

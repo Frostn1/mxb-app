@@ -84,6 +84,16 @@ export function baseTrackProgram(): Promise<TrackProgram> {
   return invoke<TrackProgram>("base_track_program");
 }
 
+/** A lap with nothing on it, to start from scratch. */
+export function blankTrackProgram(): Promise<TrackProgram> {
+  return invoke<TrackProgram>("blank_track_program");
+}
+
+/** Bring an open lap back to its start: a turn, a straight and a turn. */
+export function closeTrackLap(program: TrackProgram): Promise<TrackProgram> {
+  return invoke<TrackProgram>("close_track_lap", { program });
+}
+
 /** Everything wrong with a program, held to the same corpus a generated one is. */
 export function checkTrack(program: TrackProgram): Promise<string[]> {
   return invoke<string[]>("check_track", { program });
