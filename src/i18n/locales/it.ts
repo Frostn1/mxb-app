@@ -2390,4 +2390,5 @@ export const it: Translation = {
   "track.soil": "Terra",
   "track.sand": "Sabbia",
   "track.grass": "Erba",
+  "track.smoothing": "raccordo",
 };

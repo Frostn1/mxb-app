@@ -553,6 +553,15 @@ export default function TrackStudio() {
                     })
                   }
                 />
+                <Field
+                  label={t("track.smoothing")}
+                  value={program.blend}
+                  step={0.5}
+                  onChange={(v) => {
+                    setTouched(true);
+                    void settle({ ...program, blend: Math.max(0, v) });
+                  }}
+                />
                 <label className="flex items-center gap-1">
                   <span className="text-[11px] text-muted-foreground">{t("track.surface")}</span>
                   <select

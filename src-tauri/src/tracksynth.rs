@@ -215,12 +215,19 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
     // Everything that varies along the lap, resampled onto one even ruler so a cell can ask
     // for the value at *its* distance round rather than at the nearest station's.
     let bench = resample(&stations, &along, lap);
-    let turn = resample(
+    let mut turn = resample(
         &stations,
         &stations.iter().map(|s| s.curvature).collect::<Vec<_>>(),
         lap,
     );
-    let feat = feature_profile(&prog.features, lap);
+    // Curvature steps from nothing to 1/r the instant a corner starts, and everything that
+    // reads it — the ruts, the roughness, which side a berm stands on — stepped with it. Eased
+    // over the blend distance, a corner arrives instead of appearing.
+    smooth_along(
+        &mut turn.v,
+        (prog.blend.max(0.0) / PROFILE_STEP).round() as usize,
+    );
+    let feat = feature_profile(&prog.features, lap, prog.blend.max(0.0));
     let berms = berm_profile(&prog.features, &turn, lap);
     let ruts = rut_profile(&prog.features, &turn, lap, r.seed);
     let widths = width_profile(prog.width * 0.5, lap, r.seed);
@@ -671,7 +678,7 @@ fn resample(st: &[Station], vals: &[f32], lap: f32) -> Profile {
 }
 
 /// Height added by everything built on the line, along the lap.
-fn feature_profile(features: &[Feature], lap: f32) -> Profile {
+fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
     let mut out = Profile::blank(lap);
     for f in features {
         if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. }) {
@@ -685,9 +692,16 @@ fn feature_profile(features: &[Feature], lap: f32) -> Profile {
             if u < 0.0 || u > len {
                 continue;
             }
-            out.v[i] += longitudinal(f, u / len, u);
+            // The larger of the two, not the sum. Two jumps a metre apart used to add, so
+            // the ground between them rose to their combined height and a rhythm section came
+            // out as one tall lump with notches in it.
+            out.v[i] = out.v[i].max(longitudinal(f, u / len, u));
         }
     }
+    // Then round the whole thing off over the blend distance. That is what turns two jumps
+    // that merely touch into one shape, and it is the same control that decides how long a
+    // single jump's ramps are — they are the same question asked twice.
+    smooth_along(&mut out.v, (blend / PROFILE_STEP).round() as usize);
     out
 }
 
@@ -1694,6 +1708,7 @@ mod tests {
                 Segment::Arc { radius: 60.0, angle: 180.0, rise: 0.0 },
             ],
             width: 12.0,
+            blend: crate::trackprog::default_blend(),
             features: vec![
                 Feature::Tabletop { at: 30.0, length: 22.0, height: 2.4 },
                 Feature::Double { at: 70.0, height: 2.0, gap: 9.0, lip: 6.0 },
@@ -1755,6 +1770,34 @@ mod tests {
         // Area over length is the width, give or take the ends of the lap.
         let width = area / p.lap_length();
         assert!((width - p.width).abs() < 1.0, "measured {width:.2} m");
+    }
+
+    /// Two jumps close together must not add up. Before, the ground between a pair of
+    /// tabletops rose to their combined height and a rhythm section came out as one tall
+    /// lump; each should keep its own height and the pair should read as one shape.
+    #[test]
+    fn jumps_that_touch_keep_their_own_height() {
+        let mut p = oval();
+        // Overlapping where both are at full height, which is the only place summing shows
+        // itself — two jumps that meet ramp-to-ramp barely overlap at all.
+        // Flat ground, so the only thing in the measurement is the jumps.
+        p.terrain.relief.amplitude = 0.0;
+        // Overlapping where both are at full height, which is the only place summing shows
+        // itself — two jumps that meet ramp-to-ramp barely overlap at all.
+        p.features = vec![
+            Feature::Tabletop { at: 30.0, length: 24.0, height: 2.0 },
+            Feature::Tabletop { at: 33.0, length: 24.0, height: 2.0 },
+        ];
+        let s = synthesise(&p).unwrap();
+        let base = height_at_arc(&s, 10.0);
+        let peak = (300..=700)
+            .map(|i| height_at_arc(&s, i as f32 / 10.0) - base)
+            .fold(f32::MIN, f32::max);
+        assert!(
+            peak < 2.4,
+            "two 2 m jumps a hair apart came out {peak:.2} m tall"
+        );
+        assert!(peak > 1.4, "and they should still be jumps: {peak:.2} m");
     }
 
     #[test]

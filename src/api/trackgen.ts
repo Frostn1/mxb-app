@@ -29,6 +29,12 @@ export interface TrackProgram {
   start: { x: number; z: number; angle: number };
   segments: TrackSegment[];
   features: TrackFeature[];
+  /**
+   * Metres things ease into each other over: where two jumps meet, where a straight becomes
+   * a corner, and how long a jump's own ramps are. One control, because those are the same
+   * question asked three times.
+   */
+  blend: number;
 }
 
 export type TrackSegment =

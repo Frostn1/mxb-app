@@ -2387,4 +2387,5 @@ export const ptBR: Translation = {
   "track.soil": "Terra",
   "track.sand": "Areia",
   "track.grass": "Grama",
+  "track.smoothing": "suavização",
 };

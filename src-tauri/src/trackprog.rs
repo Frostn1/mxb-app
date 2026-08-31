@@ -58,6 +58,20 @@ pub struct TrackProgram {
     pub width: f32,
     #[serde(default)]
     pub features: Vec<Feature>,
+    /// How far things ease into each other, in metres.
+    ///
+    /// One number for the whole track, because the three places it matters are the same
+    /// question asked three times: where two jumps meet, where a straight becomes a corner,
+    /// and how long a jump's own ramps are. Zero is every edge as sharp as the grid allows;
+    /// a few metres is a track a machine shaped.
+    #[serde(default = "default_blend")]
+    pub blend: f32,
+}
+
+pub(crate) fn default_blend() -> f32 {
+    // Enough to join two jumps that touch, little enough to leave a takeoff face crisp:
+    // at 2.5 the demo track lost four degrees off its steepest ground.
+    1.2
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
@@ -637,6 +651,7 @@ mod tests {
             segments,
             width: 12.0,
             features: Vec::new(),
+            blend: default_blend(),
         }
     }
 
