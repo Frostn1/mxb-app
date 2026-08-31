@@ -2412,4 +2412,7 @@ export const it: Translation = {
   "track.live": "Dal vivo",
   "track.rebuild": "Ricostruisci l'anteprima",
   "track.wholeLap": "giro intero",
+  "track.kind.custom": "Forma",
+  "track.mode.height": "Altezza",
+  "track.mode.shape": "Forma",
 };

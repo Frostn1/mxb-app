@@ -449,6 +449,7 @@ fn surface_colour(id: u32) -> [u8; 3] {
         204 => [110, 180, 130], // step-up
         205 => [150, 110, 200], // berm
         206 => [90, 90, 110],   // rut
+        207 => [200, 200, 210], // a shape drawn by hand
         12 => [124, 126, 102], // olive, so it parts from both grass and soil
         _ => [138, 126, 106],
     }
@@ -1197,7 +1198,7 @@ mod tests {
         // The whole point of them is telling one lump from another in the preview, so two
         // sharing a colour is the one thing that must not happen.
         let mut seen = std::collections::HashSet::new();
-        for id in 200..=206 {
+        for id in 200..=207 {
             assert!(seen.insert(surface_colour(id)), "id {id} repeats a colour");
         }
         // And none of them collides with a surface a real track paints.

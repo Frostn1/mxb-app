@@ -211,7 +211,7 @@ impl Segment {
 }
 
 /// Something built on the riding line, placed by how far round the lap it is.
-#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Feature {
     /// Up, along, down. The safe jump, and the commonest thing on a track.
@@ -241,6 +241,25 @@ pub enum Feature {
     /// A groove worn into the line by everyone riding it. Corners grow their own — this is
     /// for putting one somewhere a corner wouldn't.
     Rut { at: f32, length: f32, depth: f32 },
+    /// A shape drawn by hand: heights along the feature, from its start to its end.
+    ///
+    /// Its own kind rather than a field on the others, because once a jump has been shaped
+    /// point by point it is no longer a tabletop with a taller top — it is a shape, and the
+    /// parameters a tabletop has stop meaning anything about it.
+    Custom {
+        at: f32,
+        length: f32,
+        shape: Vec<ShapePoint>,
+    },
+}
+
+/// One point of a hand-drawn feature: how far along it, and how high.
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ShapePoint {
+    /// 0 at the feature's start, 1 at its end.
+    pub u: f32,
+    pub h: f32,
 }
 
 fn default_lip() -> f32 {
@@ -256,7 +275,8 @@ impl Feature {
             | Feature::Whoops { at, .. }
             | Feature::StepUp { at, .. }
             | Feature::Berm { at, .. }
-            | Feature::Rut { at, .. } => *at,
+            | Feature::Rut { at, .. }
+            | Feature::Custom { at, .. } => *at,
         }
     }
 
@@ -267,7 +287,8 @@ impl Feature {
             | Feature::Roller { length, .. }
             | Feature::StepUp { length, .. }
             | Feature::Berm { length, .. }
-            | Feature::Rut { length, .. } => *length,
+            | Feature::Rut { length, .. }
+            | Feature::Custom { length, .. } => *length,
             // Two faces up and two back down, with the gap between them.
             Feature::Double { gap, lip, .. } => (lip + lip.min(5.0)) * 2.0 + gap,
             Feature::Whoops {
@@ -286,6 +307,7 @@ impl Feature {
             Feature::StepUp { .. } => "step-up",
             Feature::Berm { .. } => "berm",
             Feature::Rut { .. } => "rut",
+            Feature::Custom { .. } => "shape",
         }
     }
 
@@ -299,6 +321,11 @@ impl Feature {
             | Feature::Berm { height, .. } => *height,
             // A rut goes down rather than up, and its depth is the figure that matters.
             Feature::Rut { depth, .. } => -*depth,
+            // The tallest point it was drawn with.
+            Feature::Custom { shape, .. } => shape
+                .iter()
+                .map(|p| p.h)
+                .fold(0.0f32, |a, b| if b.abs() > a.abs() { b } else { a }),
         }
     }
 }
@@ -796,7 +823,7 @@ mod tests {
         let last = p.features.len() - 1;
         let length = p.features[last].length() as f64;
         let at = (lap64 - length) as f32;
-        p.features[last] = match p.features[last] {
+        p.features[last] = match p.features[last].clone() {
             Feature::Berm { length, height, .. } => Feature::Berm { at, length, height },
             other => other,
         };

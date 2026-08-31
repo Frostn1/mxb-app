@@ -62,6 +62,13 @@ interface Props {
   scoped?: Scoped | null;
   /** One of the scoped step's numbers, changed. Called once, on release. */
   onScoped?: (patch: Record<string, number>) => void;
+  /**
+   * `height` shapes the ground the track runs on; `shape` shapes the thing built on it.
+   * They share a strip because they share an axis — both are metres above the same line.
+   */
+  mode?: "height" | "shape";
+  /** The scoped feature's points, replaced. Only meaningful in shape mode. */
+  onShape?: (shape: { u: number; h: number }[]) => void;
   className?: string;
 }
 
@@ -117,7 +124,7 @@ function handlesOf(s: Scoped): Handle[] {
 }
 
 /** The shape a feature cuts, roughly — a picture of its numbers, not of the terrain. */
-function silhouette(s: Scoped): { at: number; height: number }[] {
+export function silhouette(s: Scoped): { at: number; height: number }[] {
   const f = s.feature;
   if (!f) return [];
   const L = featureSpan(f).length;
@@ -213,6 +220,8 @@ export default function ElevationCurve({
   onHover,
   scoped = null,
   onScoped,
+  mode = "height",
+  onShape,
   className,
 }: Props) {
   const box = useRef<HTMLDivElement>(null);
@@ -265,6 +274,36 @@ export default function ElevationCurve({
     const r = box.current?.getBoundingClientRect();
     const here = fromPointer(e);
     if (!r || !here) return;
+
+    // In shape mode the points are the feature's own, and a click on empty space adds one.
+    if (mode === "shape" && scoped?.feature) {
+      const f = scoped.feature;
+      const L = featureSpan(f).length;
+      const pts = f.kind === "custom" ? f.shape : [];
+      let near = -1;
+      let best = GRAB_PX;
+      pts.forEach((q, i) => {
+        const d = Math.hypot(
+          ((scoped.at + q.u * L - from) / width) * r.width - (e.clientX - r.left),
+          (toY(q.h) / 100) * r.height - (e.clientY - r.top),
+        );
+        if (d < best) {
+          best = d;
+          near = i;
+        }
+      });
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      const u = Math.min(Math.max((here.at - scoped.at) / Math.max(L, 1e-6), 0), 1);
+      if (near >= 0) {
+        setGrip({ index: near, at: here.at, height: pts[near].h });
+      } else {
+        // A new point where the line was clicked, and the drag continues from it.
+        const next = [...pts, { u, h: here.height }];
+        onShape?.(next);
+        setGrip({ index: next.length - 1, at: here.at, height: here.height });
+      }
+      return;
+    }
 
     // The scoped step's own numbers come first: they are what the strip is showing.
     const hs = scoped ? handlesOf(scoped) : [];
@@ -365,6 +404,22 @@ export default function ElevationCurve({
   }
 
   function onUp() {
+    if (grip && mode === "shape" && scoped?.feature && onShape) {
+      const f = scoped.feature;
+      const L = featureSpan(f).length;
+      const pts = f.kind === "custom" ? [...f.shape] : [];
+      if (pts[grip.index]) {
+        pts[grip.index] = {
+          u: Math.min(Math.max((grip.at - scoped.at) / Math.max(L, 1e-6), 0), 1),
+          h: grip.height,
+        };
+        onShape(pts);
+      }
+      setGrip(null);
+      setBar(null);
+      setDrag(null);
+      return;
+    }
     if (grip && scoped && onScoped) {
       const h = handlesOf(scoped)[grip.index];
       const patch: Record<string, number> = {};
@@ -460,7 +515,32 @@ export default function ElevationCurve({
 
       {/* Handles as real elements rather than SVG circles: the viewBox is stretched, which
           would make them ovals. */}
-      {scoped &&
+      {mode === "shape" && scoped?.feature?.kind === "custom" &&
+        scoped.feature.shape.map((q, i) => {
+          const L = featureSpan(scoped.feature!).length;
+          const at = grip?.index === i ? grip.at : scoped.at + q.u * L;
+          const height = grip?.index === i ? grip.height : q.h;
+          if (at < from - 0.5 || at > end + 0.5) return null;
+          return (
+            <button
+              key={`s${i}`}
+              onDoubleClick={(ev) => {
+                ev.stopPropagation();
+                onShape?.(scoped.feature!.kind === "custom"
+                  ? scoped.feature!.shape.filter((_, j) => j !== i)
+                  : []);
+              }}
+              style={{ left: `${toX(at)}%`, top: `${toY(height)}%` }}
+              className={cn(
+                "absolute size-2.5 -translate-x-1/2 -translate-y-1/2 cursor-default rounded-full border border-background",
+                grip?.index === i ? "bg-foreground ring-2 ring-primary/50" : "bg-foreground/80",
+              )}
+              title={`${(q.u * 100).toFixed(0)}% · ${height.toFixed(2)} m`}
+            />
+          );
+        })}
+
+      {mode === "height" && scoped &&
         handlesOf(scoped).map((h, i) => {
           const at = grip?.index === i ? grip.at : h.at;
           const height = grip?.index === i ? grip.height : h.height;
@@ -478,7 +558,7 @@ export default function ElevationCurve({
           );
         })}
 
-      {live.map((k, i) => (
+      {mode === "height" && live.map((k, i) => (
         k.at < from - 0.5 || k.at > end + 0.5 ? null : (
         <button
           key={i}

@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ChevronRight,
   GripVertical,
+  PenLine,
   Plus,
   RefreshCw,
   Waves,
@@ -34,8 +35,9 @@ import {
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { TrackViewer } from "../../Viewer/TrackViewer";
-import ElevationCurve from "./ElevationCurve";
+import ElevationCurve, { silhouette } from "./ElevationCurve";
 import { Switch } from "../../ui/switch";
+import { Segmented } from "../../ui/segmented";
 import { loadTrackOverview, loadTrackTerrain } from "../../../api/tracks";
 import type { TrackOverview, TrackTerrain } from "../../../types";
 import { useT } from "../../../i18n/context";
@@ -61,6 +63,7 @@ import {
   pathAlong,
   positionAt,
   setElevationAt,
+  toCustom,
   previewTrack,
   roomiestGap,
   setTrackTools,
@@ -121,6 +124,7 @@ export default function TrackStudio() {
   // Which row the height strip is showing. A corner or a straight at a time, because on a
   // 1500 m lap a 40 m berm is three pixels wide and every point lands on the last one.
   const [scope, setScope] = useState<number | null>(null);
+  const [stripMode, setStripMode] = useState<"height" | "shape">("height");
   // Rebuilding a two-thousand-square terrain on every drag is real work, so this is a choice
   // rather than the default. With it on, an edit settles and then the view catches up.
   const [live, setLive] = useState(false);
@@ -933,6 +937,19 @@ export default function TrackStudio() {
                     <span className="normal-case tracking-normal">{t("track.wholeLap")}</span>
                   );
                 })()}
+                {/* Only where there is a shape to edit: a straight has ground, not a shape. */}
+                {scope !== null && lapSteps(program)[scope]?.kind === "feature" && (
+                  <div className="ml-auto">
+                    <Segmented
+                      value={stripMode}
+                      onChange={(v) => setStripMode(v as "height" | "shape")}
+                      options={[
+                        { value: "height", label: t("track.mode.height") },
+                        { value: "shape", label: t("track.mode.shape") },
+                      ]}
+                    />
+                  </div>
+                )}
               </div>
               <ElevationCurve
                 lap={lapLength(program)}
@@ -965,6 +982,25 @@ export default function TrackStudio() {
                       on.kind === "feature"
                         ? editFeature(on.index, patch as Partial<TrackFeature>)
                         : editSegment(on.index, patch as Partial<TrackSegment>),
+                    mode: on.kind === "feature" ? stripMode : "height",
+                    onShape: (shape: { u: number; h: number }[]) => {
+                      if (on.kind !== "feature") return;
+                      setTouched(true);
+                      // The first point drawn on a jump turns it into a shape, keeping the
+                      // shape it already had as its starting points.
+                      const base =
+                        on.feature.kind === "custom"
+                          ? on.feature
+                          : toCustom(on.feature, silhouette({ at: on.feature.at, feature: on.feature }));
+                      void settle({
+                        ...program,
+                        features: program.features.map((f, i) =>
+                          i === on.index
+                            ? ({ ...base, shape } as TrackFeature)
+                            : f,
+                        ),
+                      });
+                    },
                   };
                 })()}
                 onHover={(i) =>
@@ -1044,6 +1080,7 @@ const KIND_KEY = {
   stepUp: "track.kind.stepUp",
   berm: "track.kind.berm",
   rut: "track.kind.rut",
+  custom: "track.kind.custom",
 } as const;
 
 const FEATURE_ICON: Record<TrackFeature["kind"], LucideIcon> = {
@@ -1054,6 +1091,7 @@ const FEATURE_ICON: Record<TrackFeature["kind"], LucideIcon> = {
   stepUp: TrendingUp,
   berm: Spline,
   rut: Minus,
+  custom: PenLine,
 };
 
 /** What the row is, at a glance. A list of thirty steps is scanned, not read. */
@@ -1133,6 +1171,9 @@ function fieldsOf(
       ];
     case "rut":
       return [{ key: "depth", label: "deep", value: f.depth, step: 0.05 }, len(f.length), up];
+    case "custom":
+      // A shape has no height or length to type at — it has points, and they are dragged.
+      return [len(f.length), up];
     default:
       return [
         { key: "height", label: "h", value: f.height, step: 0.1 },

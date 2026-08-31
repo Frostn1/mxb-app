@@ -2409,4 +2409,7 @@ export const ptBR: Translation = {
   "track.live": "Ao vivo",
   "track.rebuild": "Reconstruir a prévia",
   "track.wholeLap": "volta inteira",
+  "track.kind.custom": "Forma",
+  "track.mode.height": "Altura",
+  "track.mode.shape": "Forma",
 };

@@ -2389,4 +2389,7 @@ export const en = {
   "track.live": "Live",
   "track.rebuild": "Rebuild the preview",
   "track.wholeLap": "whole lap",
+  "track.kind.custom": "Shape",
+  "track.mode.height": "Height",
+  "track.mode.shape": "Shape",
 } as const;

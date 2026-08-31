@@ -85,6 +85,14 @@ const Feature = z.discriminatedUnion("kind", [
     height: z.number(),
   }),
   z.object({
+    kind: z.literal("custom"),
+    at: z.number(),
+    length: z.number(),
+    shape: z
+      .array(z.object({ u: z.number(), h: z.number() }))
+      .describe('heights along the feature; u runs 0 at its start to 1 at its end'),
+  }),
+  z.object({
     kind: z.literal("rut"),
     at: z.number(),
     length: z.number(),
