@@ -1583,7 +1583,7 @@ export const ptBR: Translation = {
   "showcase.v0124.anyserver":
     "Qualquer servidor, não só os nossos. O app lê o servidor do jogo em execução, então uma sala pública funciona igual a uma privada.",
   "showcase.v0124.nosetup":
-    "Nada para configurar. Sem código de convite, sem cadastro, sem instalar nada no servidor — abra o jogo e pronto.",
+    "Nada para configurar. Sem código de convite, sem cadastro, sem instalar nada no servidor — ative nas Configurações e ela roda sozinha.",
   "showcase.v0124.everyone":
     "Você verá qualquer piloto que também tenha o MXB App. Quanto mais gente na sua sala tiver, mais o grid fica certo.",
   "showcase.v0124.settings":
