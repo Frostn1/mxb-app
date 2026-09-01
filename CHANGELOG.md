@@ -2,6 +2,10 @@
 
 ## 2026-09-01
 
+### Changed
+- Paint Studio and the Designer open on the KTM 250 SX-F when it is installed, rather than on
+  whichever bike sorts first alphabetically.
+
 ### Fixed
 - Designer: the sheet list no longer offers a name that another paint misspelt — the KTM
   250 SX-F's normal map is `plastics_n`, and a paint beside it calls its own `plastics-n`,
