@@ -3,6 +3,12 @@
 ## 2026-09-01
 
 ### Fixed
+- Installed tracks hard-crashed the game at the track graphics stage. The material records in
+  the track's graphics file were the wrong shape.
+
+## 2026-09-01
+
+### Fixed
 - Designer: the sheet list no longer offers a name that another paint misspelt — the KTM
   250 SX-F's normal map is `plastics_n`, and a paint beside it calls its own `plastics-n`,
   which the bike asks for on no part of itself.
