@@ -130,6 +130,7 @@ mod soundmods;
 mod texstore;
 mod track;
 mod trackbuild;
+mod trackline;
 mod trackllm;
 mod trackprog;
 mod trackstats;
