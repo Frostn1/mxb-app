@@ -112,9 +112,12 @@ fn source_dll(app: &AppHandle) -> Option<PathBuf> {
         }
     }
     if let Ok(res) = app.path().resource_dir() {
-        let p = res.join("mxbsecure.dll");
-        if p.exists() {
-            return Some(p);
+        // The bundler places `resources/*.dll` under `<resource_dir>/resources/`; also accept
+        // it at the root, in case a build stages it there.
+        for p in [res.join("resources").join("mxbsecure.dll"), res.join("mxbsecure.dll")] {
+            if p.exists() {
+                return Some(p);
+            }
         }
     }
     let exe = std::env::current_exe().ok()?;

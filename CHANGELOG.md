@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-08-31 — Secure tracks
+## 2026-08-31 — v0.13.0 — Secure tracks
 
 ### Added
 - Secure tab: pick one or more tracks and type a buyer's Steam ID, and the app writes an

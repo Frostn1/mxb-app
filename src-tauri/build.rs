@@ -32,21 +32,32 @@ fn main() {
     tauri_build::build()
 }
 
-/// Copy `src/mxbsecure.dll` (if present) to the target dir beside the exe.
+/// Stage `src/mxbsecure.dll` (if present) so both a dev build and the installer can find it.
+///
+/// Two destinations: beside the built exe (a dev build reads it there), and into `resources/`,
+/// which `tauri.conf.json` globs into the packaged app — the beside-the-exe copy isn't in the
+/// installer, so a released build needs this to ship the DLL at all. Both are no-ops in a
+/// public build, where the gitignored file is absent.
 fn stage_secure_dll() {
     println!("cargo::rerun-if-changed=src/mxbsecure.dll");
     let src = Path::new("src/mxbsecure.dll");
     if !src.exists() {
         return;
     }
-    // OUT_DIR is `<target>/<profile>/build/<crate>-<hash>/out`; the exe is three levels up.
+    // (1) Beside the exe. OUT_DIR is `<target>/<profile>/build/<crate>-<hash>/out`; up three.
     let out_dir = std::env::var("OUT_DIR").unwrap_or_default();
-    let Some(target_dir) = Path::new(&out_dir).ancestors().nth(3) else {
-        return;
-    };
-    let dst = target_dir.join("mxbsecure.dll");
-    if let Err(e) = std::fs::copy(src, &dst) {
-        println!("cargo::warning=could not stage mxbsecure.dll: {e}");
+    if let Some(target_dir) = Path::new(&out_dir).ancestors().nth(3) {
+        if let Err(e) = std::fs::copy(src, target_dir.join("mxbsecure.dll")) {
+            println!("cargo::warning=could not stage mxbsecure.dll beside the exe: {e}");
+        }
+    }
+    // (2) Into resources/, bundled into the installer by the `resources` glob.
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+    let res_dir = Path::new(&manifest_dir).join("resources");
+    if std::fs::create_dir_all(&res_dir).is_ok() {
+        if let Err(e) = std::fs::copy(src, res_dir.join("mxbsecure.dll")) {
+            println!("cargo::warning=could not stage mxbsecure.dll into resources: {e}");
+        }
     }
 }
 
