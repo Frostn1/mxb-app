@@ -343,6 +343,27 @@ export function mxbsecureVerify(blobPath: string, key: string, original: string)
   return invoke<boolean>("mxbsecure_verify", { blobPath, key, original });
 }
 
+/** The Steam account signed in on this machine, or null if it can't be read. */
+export function secureSteamId(): Promise<string | null> {
+  return invoke<string | null>("secure_steam_id");
+}
+
+/** What provisioning a key produced: where the .mxbkey landed, and the Steam ID it's bound to. */
+export interface SecureProvisionOutcome {
+  mxbkeyPath: string;
+  steamId: string;
+}
+
+/** Bind a content key to the live Steam account and store it as a .mxbkey for offline play. */
+export function mxbsecureProvision(blobPath: string, key: string): Promise<SecureProvisionOutcome> {
+  return invoke<SecureProvisionOutcome>("mxbsecure_provision", { blobPath, key });
+}
+
+/** Open the blob offline from its .mxbkey (no server), and check it matches the original. */
+export function mxbsecureOpenOffline(blobPath: string, original: string): Promise<boolean> {
+  return invoke<boolean>("mxbsecure_open_offline", { blobPath, original });
+}
+
 /** What a run would touch — folders walked, files taken as themselves, skips flagged. */
 export function contentLockPlan(paths: string[]): Promise<LockItem[]> {
   return invoke<LockItem[]>("content_lock_plan", { paths });

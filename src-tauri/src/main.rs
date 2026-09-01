@@ -56,6 +56,62 @@ mod sidecar;
 mod sidecar_lock;
 #[cfg(mxbsecure)]
 mod mxbsecure;
+mod steamid;
+
+#[cfg(all(test, mxbsecure))]
+mod offline_flow_test {
+    // The whole offline story on a real file: lock, provision (seal to a Steam ID), then
+    // open offline with that identity — and prove a different Steam account gets nothing.
+    #[test]
+    fn provision_then_open_offline_binds_to_the_steam_id() {
+        let dir = std::env::temp_dir().join(format!("mxb-offline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A fake Steam loginusers.vdf, pointed at by the env override the reader honours.
+        let vdf = dir.join("loginusers.vdf");
+        let write_vdf = |id: &str| {
+            std::fs::write(
+                &vdf,
+                format!("\"users\"\n{{\n\t\"{id}\"\n\t{{\n\t\t\"MostRecent\" \"1\"\n\t}}\n}}\n"),
+            )
+            .unwrap();
+        };
+        std::env::set_var("MXB_STEAM_LOGINUSERS", &vdf);
+
+        // Lock a real file.
+        let plaintext = vec![9u8; 130_000];
+        let src = dir.join("track.pkz");
+        std::fs::write(&src, &plaintext).unwrap();
+        let locked = crate::mxbsecure::lock(&plaintext, "trk_x", "k1");
+        let blob_path = dir.join("track.pkz.mxbsecure");
+        std::fs::write(&blob_path, &locked.blob).unwrap();
+
+        // Provision: seal the key to the (fake) live Steam ID, store the .mxbkey.
+        write_vdf("76561198000000001");
+        let steam = crate::steamid::current_steam_id64().expect("steam id");
+        assert_eq!(steam, "76561198000000001");
+        let sealed = crate::mxbsecure::seal_key_to_identity(&locked.content_key, &steam, "");
+        std::fs::write(dir.join("track.pkz.mxbsecure.mxbkey"), &sealed).unwrap();
+
+        // Open offline as the same account: unseal, decrypt, compare.
+        let key = crate::mxbsecure::unseal_key(&sealed, &crate::steamid::current_steam_id64().unwrap(), "")
+            .expect("unseals for the same account");
+        let opened = crate::mxbsecure::open(&locked.blob, &key).unwrap();
+        assert_eq!(opened, plaintext, "offline open matches the original");
+
+        // A different Steam account (a copy on a friend's machine) gets nothing.
+        write_vdf("76561198000000999");
+        let other = crate::steamid::current_steam_id64().unwrap();
+        assert_eq!(other, "76561198000000999");
+        assert!(
+            crate::mxbsecure::unseal_key(&sealed, &other, "").is_none(),
+            "another account must not unseal it"
+        );
+
+        std::env::remove_var("MXB_STEAM_LOGINUSERS");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
 mod presets;
 mod paintsync;
 mod reshade;
@@ -5647,6 +5703,76 @@ async fn mxbsecure_verify(
     }
 }
 
+/// The Steam account currently signed in on this machine, for binding a key to.
+#[tauri::command]
+fn secure_steam_id() -> Option<String> {
+    steamid::current_steam_id64()
+}
+
+/// What provisioning a key produced.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecureProvisionOutcome {
+    mxbkey_path: String,
+    steam_id: String,
+}
+
+/// Provision a content key for offline play: seal it to the live Steam ID and store it as a
+/// `.mxbkey` beside the blob. Called once, after the server has released the key (here the
+/// Lock tab supplies it). From then on the key opens offline for this account only.
+#[tauri::command]
+async fn mxbsecure_provision(
+    blob_path: String,
+    key: String,
+) -> Result<SecureProvisionOutcome, String> {
+    #[cfg(mxbsecure)]
+    {
+        let steam_id = steamid::current_steam_id64()
+            .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
+        let content_key = mxbsecure::key_from_hex(&key).ok_or("the key isn't 32 bytes of hex")?;
+        let sealed = mxbsecure::seal_key_to_identity(&content_key, &steam_id, "");
+        let out = std::path::PathBuf::from(format!("{blob_path}.mxbkey"));
+        tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
+        Ok(SecureProvisionOutcome {
+            mxbkey_path: out.to_string_lossy().to_string(),
+            steam_id,
+        })
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (blob_path, key);
+        Err("this build can't provision mxbsecure content".into())
+    }
+}
+
+/// Open a blob offline using its provisioned `.mxbkey`: read the live Steam ID, unseal the
+/// key, decrypt, and confirm it matches `original`. This is the offline "does it still
+/// unlock for me, with no server" proof — a different account gets nothing.
+#[tauri::command]
+async fn mxbsecure_open_offline(
+    blob_path: String,
+    original: String,
+) -> Result<bool, String> {
+    #[cfg(mxbsecure)]
+    {
+        let steam_id = steamid::current_steam_id64()
+            .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
+        let mxbkey_path = format!("{blob_path}.mxbkey");
+        let sealed = tokio::fs::read(&mxbkey_path).await.map_err(|e| format!("read .mxbkey: {e}"))?;
+        let key = mxbsecure::unseal_key(&sealed, &steam_id, "")
+            .ok_or("this key isn't sealed to your Steam account")?;
+        let blob = tokio::fs::read(&blob_path).await.map_err(|e| format!("read blob: {e}"))?;
+        let opened = mxbsecure::open(&blob, &key).map_err(|e| format!("{e}"))?;
+        let original = tokio::fs::read(&original).await.map_err(|e| format!("read original: {e}"))?;
+        Ok(opened == original)
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (blob_path, original);
+        Err("this build can't open mxbsecure content".into())
+    }
+}
+
 /// Keep an asset id to the characters a header and a URL are both happy with.
 #[cfg(mxbsecure)]
 fn sanitize_asset_id(name: &str) -> String {
@@ -9185,6 +9311,9 @@ fn main() {
             set_mxbsecure_enabled,
             mxbsecure_lock,
             mxbsecure_verify,
+            secure_steam_id,
+            mxbsecure_provision,
+            mxbsecure_open_offline,
             local_guid,
             load_bike_model,
             preview_model_swap,
