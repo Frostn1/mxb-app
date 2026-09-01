@@ -2,6 +2,12 @@
 
 ## 2026-09-01
 
+### Fixed
+- Installing a generated track no longer crashes the game. It ships without graphics rather
+  than with graphics the game cannot read, and the Studio says so.
+
+## 2026-09-01
+
 ### Added
 - Track generation reads a published track's own centreline out of its height file, so a real
   lap's corners, their radii and its straights can be measured directly rather than guessed at.
@@ -9,6 +15,9 @@
   published one.
 
 ### Changed
+- Paint sync only asks about the server you are actually on. Starting the game no longer
+  fetches every rider's paints from every server on the registry — the paints for your grid
+  arrive when you join it. The Sync button still checks everywhere if you ask it to.
 - Instant refresh looks before it leaps. Applying a look to a running game re-runs one of the
   game's own routines, at an address that is only right for the build it was read from. The
   app now asks the game what is actually mapped there and does nothing if it isn't the game's
@@ -40,6 +49,8 @@
 - Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
 - The ground either side of the track no longer carries fine streaks fanning off every corner.
 - The starting track is a lap that folds through its own middle instead of a regular star.
+- A step-up no longer leaves a cliff across the track at the start line. A lap that steps up
+  somewhere now falls the same amount over the rest of it.
 - Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
   Settings follows it.
 - More of the crash at track graphics: the ground sheets in a track's graphics file were
