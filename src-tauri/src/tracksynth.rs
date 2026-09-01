@@ -104,9 +104,6 @@ const RUT_RADIUS_M: (f32, f32) = (40.0, 14.0);
 const RUT_DEPTH_M: f32 = 0.68;
 const RUT_DEPTH_STRAIGHT_M: f32 = 0.17;
 
-/// A rut's width across the track, metres — about a tyre and the ridge of dirt each side.
-const RUT_WIDTH_M: f32 = 0.55;
-
 /// Ruts do not come one at a time.
 ///
 /// Everyone takes roughly the same line through a corner, but nobody takes exactly the same
@@ -115,14 +112,18 @@ const RUT_WIDTH_M: f32 = 0.55;
 /// neighbour. It is the single most recognisable thing in a real track's collision terrain:
 /// Indiana's corners are combs, and one groove down the middle of a corner is the clearest
 /// sign the turn was drawn rather than ridden.
-/// Five, not nine, and two metres apart rather than one. Counted off ten published tracks:
-/// they carry one to three grooves deep enough to find at a time, 1.75–4.0 m apart, spanning
-/// six or seven metres of an eleven-metre line. Nine at 1.15 m is corduroy, and it measures
-/// as corduroy.
-const RUT_LINES: usize = 5;
-
-/// Metres between one rut and the next — a tyre, plus the ridge that gets pushed up beside it.
+/// Metres between one rut and the next — a tyre, plus the ridge pushed up beside it. It is the
+/// field's width across the track, so the grooves it leaves come out about this far apart.
+///
+/// Two metres, counted off ten published tracks: they carry one to three grooves deep enough
+/// to find at a time, 1.75–4.0 m apart, spanning six or seven metres of an eleven-metre line.
 const RUT_SPACING_M: f32 = 2.05;
+
+/// How much of the field is cut, and how hard. A higher power leaves narrower grooves with
+/// more untouched ground between them; the gain puts the deepest of them back at full depth
+/// after the sharpening has taken the top off.
+const RUT_SHARP: f32 = 1.35;
+const RUT_GAIN: f32 = 2.9;
 
 /// How much of the half-width the bundle covers, at the loosest corner that ruts at all and
 /// at the tightest.
@@ -146,13 +147,14 @@ const RUT_CARRY_ENTRY_M: f32 = 22.0;
 /// all. Riders take every line through a corner, and what they leave is spread across it.
 const RUT_INSIDE: f32 = -0.022;
 
-/// How far a single rut wanders across the track down its own length, metres, and over what
-/// distance. Perfectly concentric grooves are a machine's idea of a corner.
-/// Ten metres, from Indiana: a cross-section still matches the one two metres behind it four
-/// fifths of the way, half of it at five metres, and by twenty it is different ground. A
-/// groove that holds its line for a whole corner was never ridden down.
-const RUT_WANDER_M: f32 = 0.8;
-const RUT_WANDER_WAVELENGTH_M: f32 = 10.0;
+/// Metres of lap over which the rut field changes — how long a groove runs before it is a
+/// different groove.
+///
+/// This against [`RUT_SPACING_M`] is what makes the field anisotropic, and the ratio is the
+/// whole thing: twenty to one is a rut, one to one is gravel. Indiana's own figure is about
+/// ten metres — a cross-section still matches the one two metres behind it four fifths of the
+/// way, half of it at five metres, and by twenty it is different ground.
+const RUT_ALONG_M: f32 = 34.0;
 
 /// Metres before a corner that riders brake in, and so where the ground gets chopped up.
 const BRAKING_M: f32 = 22.0;
@@ -487,40 +489,31 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             heights[i] += SPOIL_HEIGHT_M * along.max(0.0) * cut * shape;
         }
 
-        // Ruts: not one groove but the bundle of them a corner actually wears, lying across
-        // as much of the track as riders found a line on, deepest near the middle of the
-        // bundle and shallowing out to either side.
+        // Ruts: the ground a day of practice leaves, as a field rather than as a row of
+        // grooves.
+        //
+        // Drawing N gaussians at a fixed spacing is the obvious way and it is wrong. Each
+        // groove then runs the whole length of the corner at its own constant depth, and five
+        // of them come out as five parallel tramlines — regular enough to read as machine-made
+        // from directly above, which is what it did. What riders actually leave is one surface:
+        // grooves that merge, split, fade out and pick up again, because nobody takes the same
+        // line twice. So it is one noise field, stretched along the direction of travel — a
+        // couple of metres across, tens of metres long — and every one of those properties
+        // falls out of it instead of being arranged.
         let depth = ruts.depth.at(s);
         if depth > 0.0 {
             let spread = ruts.spread.at(s);
             let mid = ruts.centre.at(s) * half;
-            let reach = (half * spread).max(RUT_SPACING_M * 0.5);
-            // As many lines as fit the bundle, always an odd count so one of them is the line.
-            let lines = ((2.0 * reach / RUT_SPACING_M).round() as usize | 1).min(RUT_LINES);
-            let mid_line = (lines / 2) as f32;
-            for n in 0..lines {
-                let off = (n as f32 - mid_line) * RUT_SPACING_M;
-                // Each groove wanders across the track down its own length. Perfectly
-                // concentric grooves are a machine's idea of a corner.
-                let wander = RUT_WANDER_M
-                    * fbm(
-                        s / RUT_WANDER_WAVELENGTH_M,
-                        n as f32 * 4.7,
-                        r.seed ^ 0x2117,
-                    );
-                let centre = mid + off + wander;
-                if centre.abs() > half + RUT_WIDTH_M {
-                    continue;
-                }
-                // Deepest in the middle of the bundle: that is where most of the field went.
-                // And no two of them the same depth — a comb of identical grooves is a
-                // machine's idea of a corner just as much as a single groove is.
-                let fade = 1.0 - (off.abs() / reach.max(1e-3)).min(1.0).powi(2);
-                // No two the same depth, and the spread is wide: a real comb has one groove
-                // half a metre deep beside one you would not notice.
-                let own = 0.42 + 0.58 * (hash2(n as i32, 7, r.seed ^ 0x2117) * 0.5 + 0.5);
-                let g = (t - centre) / RUT_WIDTH_M;
-                heights[i] -= depth * fade * own * (-g * g).exp();
+            let reach = (half * spread).max(RUT_SPACING_M) + RUT_SPACING_M;
+            let off = t - mid;
+            if off.abs() <= reach {
+                let v = fbm(off / RUT_SPACING_M, s / RUT_ALONG_M, r.seed ^ 0x2117);
+                // Cut down, not up: a rut is a trough and the ground between two of them is
+                // only what was pushed aside. Taking the positive half and sharpening it
+                // leaves narrow grooves with wide ground between, which is the shape of it.
+                let cut = v.max(0.0).powf(RUT_SHARP);
+                let fade = 1.0 - (off.abs() / reach).min(1.0).powi(2);
+                heights[i] -= depth * cut * fade * RUT_GAIN;
             }
         }
 
