@@ -2,6 +2,18 @@
 
 ## 2026-09-01
 
+### Fixed
+- The terrain in a track's graphics file is cut into tiles, so no single piece of it is too
+  large for the game to build a buffer for.
+
+## 2026-09-01
+
+### Fixed
+- More of the crash at track graphics: the ground sheets in a track's graphics file were
+  written in a shape the game cannot read past.
+
+## 2026-09-01
+
 ### Added
 - Track generation reads a published track's own centreline out of its height file, so a real
   lap's corners, their radii and its straights can be measured directly rather than guessed at.
@@ -16,12 +28,18 @@
   repeated down the lap.
 - Ruts, berms and banking are built to numbers measured off ten published tracks.
 - Straights carry worn ground rather than being smooth between the corners.
+- MXB App stays off at login unless you ask for it. Launch at startup is off by default, and
+  the toggle is in Settings for anyone who wants the app waiting for them.
 
 ### Fixed
 - A corner banks the outside of the turn.
 - Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
 - The ground either side of the track no longer carries fine streaks fanning off every corner.
 - The starting track is a lap that folds through its own middle instead of a regular star.
+- Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
+  Settings follows it.
+- More of the crash at track graphics: the ground sheets in a track's graphics file were
+  written in a shape the game cannot read past.
 
 ## 2026-09-01 — v0.13.2 — Tracks that load
 

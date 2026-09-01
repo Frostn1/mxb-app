@@ -460,7 +460,7 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
 
   const runInBackground = config.runInBackground ?? true;
   const analyticsEnabled = config.analyticsEnabled ?? true;
-  const launchAtStartup = config.launchAtStartup ?? true;
+  const launchAtStartup = config.launchAtStartup ?? false;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
   // Typed flags are edited freely and saved on blur, so the field holds a draft until then —
   // saving per keystroke would write the config on every letter and fight the cursor.

@@ -6061,6 +6061,9 @@ enum Autostart {
     /// It is there, but it was written for a binary this build no longer has.
     Rebind,
     Disable,
+    /// Windows' own Startup list has the app switched off. Take that as the answer and
+    /// turn the setting off to match, instead of writing over it.
+    Adopt,
 }
 
 /// Reconcile the login item with the setting.
@@ -6069,13 +6072,88 @@ enum Autostart {
 /// renaming the binary leaves every existing one pointing at a file that is gone — while
 /// `is_enabled` still answers yes, because all it looks for is the entry. Left alone, the app
 /// simply stops starting at login and nothing ever says why.
-fn autostart_action(wanted: bool, enabled: bool, stale: bool) -> Autostart {
+///
+/// `vetoed` is the other one, and it outranks everything: see [`startup_vetoed`].
+fn autostart_action(wanted: bool, enabled: bool, vetoed: bool, stale: bool) -> Autostart {
     match (wanted, enabled) {
+        (true, _) if vetoed => Autostart::Adopt,
         (true, false) => Autostart::Enable,
         (true, true) if stale => Autostart::Rebind,
         (false, true) => Autostart::Disable,
         _ => Autostart::Leave,
     }
+}
+
+/// Has the player switched the app off in Windows' own list of startup apps?
+///
+/// Task Manager → Startup apps (and Settings → Apps → Startup) does not remove the `Run`
+/// entry. It leaves it where it is and stamps a flag beside it under `StartupApproved\Run`:
+/// twelve bytes whose tail is all zeros for on, and carries the time it was switched off for
+/// off. `auto-launch` folds that flag into `is_enabled()`, so a veto there reads back exactly
+/// like "there is no entry" — and the reconcile above answered that by calling `enable()`,
+/// which rewrites both the entry *and* the flag. Every launch quietly undid the choice, and
+/// an update, which restarts the app, is where people noticed.
+///
+/// The value name is the app's own name, which is what `tauri-plugin-autostart` passes
+/// `auto-launch` as the entry name.
+#[cfg(windows)]
+fn startup_vetoed(app_name: &str) -> bool {
+    use std::os::raw::c_void;
+
+    const HKEY_CURRENT_USER: isize = -2147483647; // 0x80000001
+    const RRF_RT_REG_BINARY: u32 = 0x0000_0008;
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegGetValueW(
+            hkey: isize,
+            subkey: *const u16,
+            value: *const u16,
+            flags: u32,
+            typ: *mut u32,
+            data: *mut c_void,
+            data_len: *mut u32,
+        ) -> i32;
+    }
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    let subkey =
+        wide("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run");
+    let value = wide(app_name);
+    let mut buf = [0u8; 32];
+    let mut len = buf.len() as u32;
+    // SAFETY: a read-only registry query into a fixed stack buffer, length passed in bytes.
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_BINARY,
+            std::ptr::null_mut(),
+            buf.as_mut_ptr() as *mut c_void,
+            &mut len,
+        )
+    };
+    // No flag at all is the normal case — nobody has been through that screen.
+    if rc != 0 {
+        return false;
+    }
+    startup_flag_is_veto(&buf[..(len as usize).min(buf.len())])
+}
+
+#[cfg(not(windows))]
+fn startup_vetoed(_app_name: &str) -> bool {
+    false
+}
+
+/// Read one `StartupApproved\Run` flag: enabled carries a zero tail, disabled carries the
+/// FILETIME it was switched off. Anything too short to hold one is not a veto.
+#[cfg_attr(not(windows), allow(dead_code))] // read only on Windows; the tests run anywhere
+fn startup_flag_is_veto(bytes: &[u8]) -> bool {
+    bytes.len() >= 8 && !bytes.iter().rev().take(8).all(|b| *b == 0)
 }
 
 /// The frontend has drawn its first frame — see [`firstpaint`].
@@ -9289,9 +9367,11 @@ fn main() {
                 }
                 let manager = handle.autolaunch();
                 let stale = cfg.autostart_binding_rev < config::AUTOSTART_BINDING_REV;
+                let mut cfg_dirty = false;
                 match autostart_action(
                     cfg.launch_at_startup,
                     manager.is_enabled().unwrap_or(false),
+                    startup_vetoed(&handle.package_info().name),
                     stale,
                 ) {
                     Autostart::Enable => {
@@ -9305,10 +9385,21 @@ fn main() {
                     Autostart::Disable => {
                         let _ = manager.disable();
                     }
+                    Autostart::Adopt => {
+                        log::info!(
+                            "Windows' startup list has the app switched off — turning \
+                             Launch at startup off to match"
+                        );
+                        cfg.launch_at_startup = false;
+                        cfg_dirty = true;
+                    }
                     Autostart::Leave => {}
                 }
                 if stale {
                     cfg.autostart_binding_rev = config::AUTOSTART_BINDING_REV;
+                    cfg_dirty = true;
+                }
+                if cfg_dirty {
                     let _ = config::save(handle, &cfg);
                 }
                 if cfg.auto_run_frostmod && frostmod_manage::is_installed(handle) {
@@ -9875,25 +9966,55 @@ mod autostart_tests {
 
     #[test]
     fn the_setting_is_honoured_when_the_binding_is_current() {
-        assert_eq!(autostart_action(true, false, false), Autostart::Enable);
-        assert_eq!(autostart_action(true, true, false), Autostart::Leave);
-        assert_eq!(autostart_action(false, true, false), Autostart::Disable);
-        assert_eq!(autostart_action(false, false, false), Autostart::Leave);
+        assert_eq!(autostart_action(true, false, false, false), Autostart::Enable);
+        assert_eq!(autostart_action(true, true, false, false), Autostart::Leave);
+        assert_eq!(autostart_action(false, true, false, false), Autostart::Disable);
+        assert_eq!(autostart_action(false, false, false, false), Autostart::Leave);
     }
 
     /// The rename bug: the entry exists, so nothing looks wrong, but it names a binary that
     /// is gone. Without this the app quietly stops starting at login for everyone upgrading.
     #[test]
     fn an_entry_written_for_the_old_binary_is_rewritten() {
-        assert_eq!(autostart_action(true, true, true), Autostart::Rebind);
+        assert_eq!(autostart_action(true, true, false, true), Autostart::Rebind);
     }
 
     /// Whoever turned it off gets it off, however old their entry is — a stale binding is a
     /// reason to rewrite the entry, never to bring one back.
     #[test]
     fn a_stale_binding_never_revives_a_disabled_login_item() {
-        assert_eq!(autostart_action(false, true, true), Autostart::Disable);
-        assert_eq!(autostart_action(false, false, true), Autostart::Leave);
+        assert_eq!(autostart_action(false, true, false, true), Autostart::Disable);
+        assert_eq!(autostart_action(false, false, false, true), Autostart::Leave);
+    }
+
+    /// The report: turned off in Task Manager, back on after the next update. A veto there
+    /// reads as "not enabled", so every one of these used to come out `Enable` — and
+    /// `enable()` rewrites the very flag that was the player saying no.
+    #[test]
+    fn windows_own_startup_list_wins_over_the_setting() {
+        assert_eq!(autostart_action(true, false, true, false), Autostart::Adopt);
+        assert_eq!(autostart_action(true, false, true, true), Autostart::Adopt);
+        // Belt and braces: a veto standing next to an entry that still reads as enabled.
+        assert_eq!(autostart_action(true, true, true, false), Autostart::Adopt);
+    }
+
+    /// A veto is a reason to stop turning it on, never a reason to turn it on. With the
+    /// setting already off there is nothing left to reconcile.
+    #[test]
+    fn a_veto_leaves_an_already_off_setting_alone() {
+        assert_eq!(autostart_action(false, false, true, false), Autostart::Leave);
+        assert_eq!(autostart_action(false, false, true, true), Autostart::Leave);
+    }
+
+    /// The twelve bytes Windows writes: `02 00…` while the app is allowed to start, `03 00`
+    /// plus the FILETIME it was switched off once it isn't.
+    #[test]
+    fn the_startup_flag_is_read_off_its_tail() {
+        assert!(!startup_flag_is_veto(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(startup_flag_is_veto(&[3, 0, 0, 0, 0x1e, 0x2b, 0x9c, 0x5f, 0x7a, 0x0d, 0xdc, 0x01]));
+        // Too short to carry a timestamp, so there is nothing there that says "off".
+        assert!(!startup_flag_is_veto(&[]));
+        assert!(!startup_flag_is_veto(&[3, 0, 0, 0]));
     }
 }
 
