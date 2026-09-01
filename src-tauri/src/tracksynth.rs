@@ -256,22 +256,13 @@ const BERM_REACH_M: f32 = 4.5;
 const FIELD_DETAIL_M: f32 = 4.5;
 const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 
-/// The short back face of a double's takeoff, and the short front face of its landing. This
-/// is the lip itself — steep, but a face rather than a step.
-///
-/// Four metres, not two and a half. At 2.5 m a two-metre jump drops at 39°, and measured
-/// against Indiana that is what "abrupt" is: its landing faces run 12.7° at the median and
-/// 19° at the ninetieth, against ours at 21.3° and 36.3°.
-const DOUBLE_BACK_M: f32 = 4.0;
-
 /// The hollow a jump is dug out of, as a fraction of its height, and how far past its ends
 /// that hollow reaches.
 ///
 /// Every cubic metre standing in a jump came out of the ground beside it, and on a real track
 /// you can see where. Indiana's average jump profile, normalised against its own height, sits
 /// at −0.26 twenty metres before the crest and −0.32 twenty metres after, with the lip itself
-/// at +0.97: the jump is a hump between two scoops. Ours had flat ground either side and
-/// nothing to say where the dirt came from.
+/// at +0.97: the jump is a hump between two scoops.
 const JUMP_HOLLOW: f32 = 0.30;
 const JUMP_HOLLOW_M: f32 = 22.0;
 
@@ -1396,7 +1387,9 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         Feature::Double {
             height, gap, lip, ..
         } => {
-            let back = DOUBLE_BACK_M.min(lip * 0.6);
+            // Both faces from one definition, shared with `Feature::length` so the two
+            // cannot disagree about where the shape ends.
+            let (lip, back) = crate::trackprog::double_faces(height, lip);
             let takeoff = lip + back;
             if u <= lip {
                 height * smoothstep(u / lip)
