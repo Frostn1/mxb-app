@@ -2044,9 +2044,19 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
                     let uv = 12 * vc + v * 8;
                     block[uv..uv + 4].copy_from_slice(&(x / tile).to_le_bytes());
                     block[uv + 4..uv + 8].copy_from_slice(&(z / tile).to_le_bytes());
-                    let pair = 44 * vc + v * 8;
-                    block[pair..pair + 4].copy_from_slice(&1.0f32.to_le_bytes());
-                    block[pair + 4..pair + 8].copy_from_slice(&1.0f32.to_le_bytes());
+                    // Sixteen bytes a vertex starting at 36 x count, and every one of the
+                    // four floats is 1.0 on every vertex of a published map.
+                    //
+                    // This used to write two floats at `44 * vc + v * 8`, which is not this
+                    // vertex's slot — it is halfway into the block and eight bytes a vertex,
+                    // so it landed in some other vertex's. It read back correct because
+                    // *every* value in the region is 1.0 on the map I measured against, so
+                    // any offset into it looks right. Ours came out with two of four zeroed.
+                    let quad = 36 * vc + v * 16;
+                    for c in 0..4 {
+                        block[quad + c * 4..quad + c * 4 + 4]
+                            .copy_from_slice(&1.0f32.to_le_bytes());
+                    }
                     let gx = ((i + dx) * (syn.gw - 1) / q).min(syn.gw - 1);
                     let gy = ((j + dz) * (syn.gh - 1) / q).min(syn.gh - 1);
                     let dhx = (at(gx + 1, gy) - at(gx.saturating_sub(1), gy)) / (2.0 * syn.mps);
@@ -3578,6 +3588,41 @@ mod tests {
         }
         assert_eq!((tri as usize, vert as usize), (tc, vc), "every triangle in a group");
         assert!(groups > 1, "one group over the whole terrain is what this test exists for");
+    }
+
+    /// Every vertex attribute has to be what a published map puts there.
+    ///
+    /// Three of these were wrong at some point and each was invisible: a zero-length tangent
+    /// (a divide by zero in anything that shades it), a zero-length normal, and four floats
+    /// written into the wrong vertex's slot. That last one read back correct against the
+    /// reference because *every* value in that region is 1.0 on a real map, so any offset
+    /// into it looks right — only checking our own file, per vertex, catches it.
+    #[test]
+    fn every_vertex_carries_what_the_format_expects() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let m = map(&p, &s);
+        let n = u32::from_le_bytes(m[8..12].try_into().unwrap()) as usize;
+        let at = 12 + n * 56;
+        let vc = u32::from_le_bytes(m[at..at + 4].try_into().unwrap()) as usize;
+        let block = &m[at + 4..at + 4 + vc * 80];
+        let f = |o: usize| f32::from_le_bytes(block[o..o + 4].try_into().unwrap());
+        for v in 0..vc {
+            let nm = 52 * vc + v * 12;
+            let len = (f(nm).powi(2) + f(nm + 4).powi(2) + f(nm + 8).powi(2)).sqrt();
+            assert!((len - 1.0).abs() < 1e-3, "vertex {v}: normal is {len}, not a unit vector");
+
+            let tg = 64 * vc + v * 16;
+            let tl = (f(tg).powi(2) + f(tg + 4).powi(2) + f(tg + 8).powi(2)).sqrt();
+            assert!((tl - 1.0).abs() < 1e-3, "vertex {v}: tangent is {tl}, not a unit vector");
+            assert_eq!(f(tg + 12).abs(), 1.0, "vertex {v}: handedness is {}", f(tg + 12));
+
+            // Sixteen bytes a vertex at 36 x count, all four floats 1.0 on a published map.
+            let q = 36 * vc + v * 16;
+            for c in 0..4 {
+                assert_eq!(f(q + c * 4), 1.0, "vertex {v}: float {c} of its own slot");
+            }
+        }
     }
 
     #[test]
