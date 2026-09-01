@@ -70,6 +70,53 @@ pub trait Ask {
         -> impl std::future::Future<Output = Result<String>>;
 }
 
+/// Where the lap runs over its own ground, if it does.
+///
+/// Returns the two distances round the lap and how close they come. Nothing else caught this:
+/// the lap closed, it fitted the plot, every feature measured, and the track still crossed
+/// itself twice — because "does this shape overlap itself" is not a question any of the other
+/// checks ask.
+///
+/// It matters more here than it would on a drawing. The synthesiser has no concept of a
+/// bridge: it benches whatever the centreline passes over, so where a lap crosses, both
+/// passes are graded into the same cells and what comes out is a scar — one pass cutting
+/// through the other's jumps, with the ground fighting over which height it should be.
+///
+/// Not repairable, so it goes to the model rather than to `repair`. Uncrossing a lap means
+/// re-routing it, which is the layout itself and the one thing here that is genuinely a
+/// design decision.
+fn self_crossing(prog: &TrackProgram) -> Option<(f32, f32, f32)> {
+    let st = prog.stations(2.0);
+    if st.len() < 8 {
+        return None;
+    }
+    let lap = prog.lap_length().max(1.0);
+    // Touching, not merely near: two ribbons this far apart centre-to-centre are already
+    // sharing dirt.
+    let near = prog.width * 1.1;
+    // How far apart along the lap two points must be before their nearness means anything.
+    // Consecutive stations are always close together, and so are the two sides of a hairpin,
+    // which is a real shape and not a fault — it takes a corner's own length to come back on
+    // yourself, so the bar is a few of them.
+    let apart = (prog.width * 6.0).max(60.0);
+    let mut worst: Option<(f32, f32, f32)> = None;
+    for (i, a) in st.iter().enumerate() {
+        for b in st.iter().skip(i + 1) {
+            // Round the lap, not along it — the finish line is not a discontinuity, and
+            // measuring it as one makes every track "cross itself" at the start.
+            let along = (b.s - a.s).abs();
+            if along.min(lap - along) < apart {
+                continue;
+            }
+            let gap = ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt();
+            if gap < near && worst.map(|(.., w)| gap < w).unwrap_or(true) {
+                worst = Some((a.s, b.s, gap));
+            }
+        }
+    }
+    worst
+}
+
 /// Whether a berm at this distance round the lap is on a corner.
 ///
 /// One definition, used by both the check and the repair. They had one each, they disagreed,
@@ -364,6 +411,14 @@ pub fn review(prog: &TrackProgram) -> Review {
             "the lap doesn't close: the finish is {closure:.0} m from the start. The turns have \
              to add up to a whole number of full circles — check that the signed angles sum to \
              ±360°."
+        ));
+    }
+    if let Some((a, b, gap)) = self_crossing(prog) {
+        out.push(format!(
+            "the lap crosses itself: {a:.0} m round comes within {gap:.0} m of {b:.0} m \
+             round, and the track is {:.0} m wide. Two parts of a lap cannot share the same \
+             ground — route one of them around the other, or turn earlier so they miss.",
+            prog.width
         ));
     }
     between("the riding line", prog.width, corpus::WIDTH_M, " m", &mut notes);
@@ -676,6 +731,29 @@ mod tests {
         assert!(
             problems.iter().any(|s| s.contains("doesn't close")),
             "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn a_lap_that_runs_over_itself_is_caught() {
+        // Out, round more than half a circle, and back across where it came from. Tested on
+        // the geometry rather than through `validate`, which returns early on a lap that
+        // doesn't close — and a shape built to cross is easier to write than one built to
+        // cross *and* close *and* fit its plot.
+        let p = tweaked(|p| {
+            p.segments = vec![
+                crate::trackprog::Segment::Straight { length: 220.0, rise: 0.0 },
+                crate::trackprog::Segment::Arc { radius: 30.0, angle: 200.0, rise: 0.0 },
+                crate::trackprog::Segment::Straight { length: 220.0, rise: 0.0 },
+            ];
+        });
+        let found = self_crossing(&p);
+        assert!(found.is_some(), "a lap that doubles back over itself wasn't seen");
+        let (a, b, gap) = found.unwrap();
+        assert!(gap < p.width * 1.1, "reported a gap of {gap:.1} m as a crossing");
+        assert!(
+            (a - b).abs() > 60.0,
+            "the two points are {a:.0} m and {b:.0} m round — that is the same place twice"
         );
     }
 
