@@ -1,142 +1,74 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
-import { Lock, ShieldCheck, FileUp, Loader2, Copy, Check, UserCheck, WifiOff } from "lucide-react";
+import { Lock, Loader2, FileUp, Check, X } from "lucide-react";
 import { Button } from "../ui/button";
 import HelpHint from "@/Components/ui/help-hint";
 import { cn } from "@/lib/utils";
-import { formatBytes } from "../../lib/mods";
-import {
-  mxbsecureLock,
-  mxbsecureVerify,
-  secureSteamId,
-  mxbsecureProvision,
-  mxbsecureOpenOffline,
-  mxbsecureProtect,
-  type SecureLockOutcome,
-} from "../../api/mods";
+import { mxbsecureGenerate, type SecureGenerateOutcome } from "../../api/mods";
 import { useT } from "../../i18n/context";
 
 /**
- * The mxbsecure Lock tab — experimental.
+ * The mxbsecure tab — protect tracks for a buyer.
  *
- * Three steps: lock a file into a `.mxbsecure` blob, verify it unlocks with the key, then
- * bind it to your Steam account and open it *offline* — the app seals the key to the live
- * Steam ID, then decrypts with no server and confirms it still matches. A copy on another
- * account gets nothing. The in-game DLL is a separate, deeper test.
+ * Pick one or more tracks and type the buyer's Steam ID. For each track the app writes two
+ * files beside it: `<track>.mxbsecure` (the encrypted copy) and `<track>.mxbsecure.mxbkey`
+ * (the key sealed to that Steam ID). The original is never touched. The buyer drops both files
+ * into their tracks folder — the injected client lists the track and decrypts it on load, only
+ * on the machine signed into that Steam account, offline.
  */
 const Secure = () => {
   const t = useT();
-  const [src, setSrc] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"locking" | "verifying" | null>(null);
-  const [locked, setLocked] = useState<SecureLockOutcome | null>(null);
-  const [verified, setVerified] = useState<boolean | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [steamId, setSteamId] = useState<string | null | undefined>(undefined);
-  const [provisioning, setProvisioning] = useState(false);
-  const [provisioned, setProvisioned] = useState(false);
-  const [offlineOk, setOfflineOk] = useState<boolean | null>(null);
-  const [openingOffline, setOpeningOffline] = useState(false);
-  const [protecting, setProtecting] = useState(false);
-  const [protectedPath, setProtectedPath] = useState<string | null>(null);
+  const [steamId, setSteamId] = useState("");
+  const [files, setFiles] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<SecureGenerateOutcome[]>([]);
 
-  const protect = async () => {
-    const chosen = await openDialog({ multiple: false, directory: false });
-    if (typeof chosen !== "string") return;
-    setProtecting(true);
-    setProtectedPath(null);
-    try {
-      const out = await mxbsecureProtect(chosen);
-      setProtectedPath(out.protectedPath);
-      toast.success(t("secure.protectedOk", { id: out.steamId }));
-    } catch (e) {
-      toast.error(t("secure.protectFailed"), { description: String(e) });
-    }
-    setProtecting(false);
-  };
-
-  useEffect(() => {
-    secureSteamId().then(setSteamId).catch(() => setSteamId(null));
-  }, []);
-
-  const provision = async () => {
-    if (!locked) return;
-    setProvisioning(true);
-    setOfflineOk(null);
-    try {
-      const out = await mxbsecureProvision(locked.blobPath, locked.key);
-      setProvisioned(true);
-      setSteamId(out.steamId);
-      toast.success(t("secure.provisioned", { id: out.steamId }));
-    } catch (e) {
-      toast.error(t("secure.provisionFailed"), { description: String(e) });
-    }
-    setProvisioning(false);
-  };
-
-  const openOffline = async () => {
-    if (!locked || !src) return;
-    setOpeningOffline(true);
-    try {
-      const ok = await mxbsecureOpenOffline(locked.blobPath, src);
-      setOfflineOk(ok);
-      if (ok) toast.success(t("secure.offlineOk"));
-      else toast.error(t("secure.offlineBad"));
-    } catch (e) {
-      setOfflineOk(false);
-      toast.error(t("secure.offlineFailed"), { description: String(e) });
-    }
-    setOpeningOffline(false);
-  };
+  const steamIdOk = /^\d{17}$/.test(steamId.trim());
 
   const pick = async () => {
-    const chosen = await openDialog({ multiple: false, directory: false });
-    if (typeof chosen === "string") {
-      setSrc(chosen);
-      setLocked(null);
-      setVerified(null);
+    const chosen = await openDialog({ multiple: true, directory: false });
+    if (!chosen) return;
+    const list = (Array.isArray(chosen) ? chosen : [chosen]).filter(
+      (p): p is string => typeof p === "string",
+    );
+    if (list.length) {
+      setFiles(list);
+      setResults([]);
     }
   };
 
-  const lock = async () => {
-    if (!src) return;
-    setBusy("locking");
-    setVerified(null);
-    try {
-      const outcome = await mxbsecureLock(src);
-      setLocked(outcome);
-      setProvisioned(false);
-      setOfflineOk(null);
-      toast.success(t("secure.locked"));
-    } catch (e) {
-      toast.error(t("secure.lockFailed"), { description: String(e) });
+  const removeFile = (path: string) => {
+    setFiles((f) => f.filter((p) => p !== path));
+    setResults([]);
+  };
+
+  const generate = async () => {
+    if (!steamIdOk) {
+      toast.error(t("secure.badSteamId"));
+      return;
     }
-    setBusy(null);
-  };
-
-  const verify = async () => {
-    if (!locked || !src) return;
-    setBusy("verifying");
-    try {
-      const ok = await mxbsecureVerify(locked.blobPath, locked.key, src);
-      setVerified(ok);
-      if (ok) toast.success(t("secure.verifiedOk"));
-      else toast.error(t("secure.verifiedBad"));
-    } catch (e) {
-      setVerified(false);
-      toast.error(t("secure.verifyFailed"), { description: String(e) });
+    if (!files.length) return;
+    setBusy(true);
+    setResults([]);
+    const done: SecureGenerateOutcome[] = [];
+    for (const path of files) {
+      try {
+        done.push(await mxbsecureGenerate(path, steamId.trim()));
+      } catch (e) {
+        toast.error(t("secure.genFail", { name: path.split(/[\\/]/).pop() ?? path }), {
+          description: String(e),
+        });
+      }
     }
-    setBusy(null);
+    setResults(done);
+    if (done.length) {
+      toast.success(
+        t("secure.genOk", { ok: done.length, total: files.length, id: steamId.trim() }),
+      );
+    }
+    setBusy(false);
   };
-
-  const copyKey = async () => {
-    if (!locked) return;
-    await navigator.clipboard.writeText(locked.key);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  const fileName = src?.split(/[\\/]/).pop() ?? "";
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -149,238 +81,110 @@ const Secure = () => {
       </header>
 
       <div className="mx-auto w-full max-w-2xl px-7 pb-10">
-        <p className="mb-5 text-[13px] leading-relaxed text-muted-foreground">
-          {t("secure.intro")}
-        </p>
-
-        {/* The real action — protect a track in place. Encrypts the file under its own name,
-            binds it to the Steam account, and records it so the game auto-loads it. */}
-        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
+        <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-5">
           <div className="flex items-center gap-2">
             <Lock className="size-4 text-primary" />
-            <h2 className="text-[13.5px] font-semibold">{t("secure.protectTitle")}</h2>
+            <h2 className="text-[14px] font-semibold">{t("secure.genTitle")}</h2>
           </div>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
-            {t("secure.protectDesc")}
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
+            {t("secure.genDesc")}
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Button size="sm" disabled={protecting || steamId === undefined} onClick={() => void protect()}>
-              {protecting ? <Loader2 className="size-3.5 animate-spin" /> : <Lock className="size-3.5" />}
-              {t("secure.protectAction")}
+
+          {/* Buyer's Steam ID */}
+          <label className="mt-4 block text-[12px] font-medium text-foreground/90">
+            {t("secure.steamIdLabel")}
+          </label>
+          <input
+            value={steamId}
+            onChange={(e) => setSteamId(e.target.value.replace(/[^\d]/g, "").slice(0, 17))}
+            inputMode="numeric"
+            placeholder={t("secure.steamIdPlaceholder")}
+            className={cn(
+              "mt-1.5 w-full rounded-lg border bg-background/60 px-3 py-2 font-mono text-[13px] outline-none transition-colors",
+              steamId.length === 0
+                ? "border-white/[0.1] focus:border-primary/50"
+                : steamIdOk
+                  ? "border-success/50"
+                  : "border-destructive/50",
+            )}
+          />
+          <p className="mt-1.5 text-[11px] text-muted-foreground">{t("secure.steamIdHint")}</p>
+
+          {/* Track selection */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => void pick()} disabled={busy}>
+              <FileUp className="size-3.5" /> {t("secure.pickTracks")}
             </Button>
-            {protectedPath && (
-              <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-success">
-                <Check className="size-4" /> {t("secure.protectedInPlace")}
+            {files.length > 0 && (
+              <span className="text-[12px] text-muted-foreground">
+                {t("secure.selected", { count: files.length })}
               </span>
             )}
           </div>
-          {protectedPath && (
-            <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground" title={protectedPath}>
-              {protectedPath}
-            </p>
+
+          {files.length > 0 && (
+            <ul className="mt-3 space-y-1">
+              {files.map((path) => (
+                <li
+                  key={path}
+                  className="flex items-center gap-2 rounded-md bg-white/[0.03] px-2.5 py-1.5"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[12px]" title={path}>
+                    {path.split(/[\\/]/).pop()}
+                  </span>
+                  {!busy && (
+                    <button
+                      onClick={() => removeFile(path)}
+                      className="flex-none text-muted-foreground hover:text-foreground"
+                      title={t("common.delete")}
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
-          {steamId === null && (
-            <p className="mt-2 text-[11.5px] text-warning">{t("secure.noSteam")}</p>
-          )}
-        </div>
-
-        <p className="mb-3 text-[11.5px] font-medium uppercase tracking-wide text-muted-foreground/70">
-          {t("secure.testHeading")}
-        </p>
-
-        {/* Step 1 — pick and lock */}
-        <div className="rounded-xl border border-white/[0.07] p-4">
-          <div className="flex items-center gap-2">
-            <span className="flex size-5 items-center justify-center rounded-full bg-white/[0.06] text-[11px] font-semibold">
-              1
-            </span>
-            <h2 className="text-[13.5px] font-semibold">{t("secure.step1")}</h2>
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => void pick()} disabled={busy !== null}>
-              <FileUp className="size-3.5" /> {t("secure.pick")}
-            </Button>
-            {src && (
-              <span className="truncate text-[12.5px] text-muted-foreground" title={src}>
-                {fileName}
-              </span>
-            )}
-          </div>
 
           <Button
-            className="mt-3"
+            className="mt-4"
             size="sm"
-            disabled={!src || busy !== null}
-            onClick={() => void lock()}
+            disabled={busy || !steamIdOk || files.length === 0}
+            onClick={() => void generate()}
           >
-            {busy === "locking" ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Lock className="size-3.5" />
-            )}
-            {t("secure.lock")}
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Lock className="size-3.5" />}
+            {t("secure.generate")}
           </Button>
         </div>
 
-        {/* The result: blob + the key, shown once */}
-        {locked && (
-          <div className="mt-4 rounded-xl border border-white/[0.07] p-4">
-            <h2 className="text-[13.5px] font-semibold">{t("secure.result")}</h2>
-            <dl className="mt-2 space-y-1.5 text-[12.5px]">
-              <Row label={t("secure.blob")} value={locked.blobPath} mono />
-              <Row
-                label={t("secure.size")}
-                value={t("secure.sizeValue", {
-                  plain: formatBytes(locked.plainBytes),
-                  blob: formatBytes(locked.blobBytes),
-                })}
-              />
-              <Row label={t("secure.assetId")} value={locked.assetId} mono />
-              <div className="flex items-start gap-2 py-0.5">
-                <dt className="w-24 flex-none text-muted-foreground">{t("secure.key")}</dt>
-                <dd className="flex min-w-0 flex-1 items-center gap-1.5">
-                  <code className="truncate font-mono text-[11.5px]">{locked.key}</code>
-                  <button
-                    onClick={() => void copyKey()}
-                    title={t("secure.copyKey")}
-                    className="flex-none text-muted-foreground hover:text-foreground"
-                  >
-                    {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
-                  </button>
-                </dd>
-              </div>
-            </dl>
-            <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
-              {t("secure.keyNote")}
-            </p>
-          </div>
-        )}
-
-        {/* Step 2 — verify it unlocks */}
-        {locked && (
+        {/* Results — the two files per track, ready to send */}
+        {results.length > 0 && (
           <div className="mt-4 rounded-xl border border-white/[0.07] p-4">
             <div className="flex items-center gap-2">
-              <span className="flex size-5 items-center justify-center rounded-full bg-white/[0.06] text-[11px] font-semibold">
-                2
-              </span>
-              <h2 className="text-[13.5px] font-semibold">{t("secure.step2")}</h2>
+              <Check className="size-4 text-success" />
+              <h2 className="text-[13.5px] font-semibold">{t("secure.genResult")}</h2>
             </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              {t("secure.step2Desc")}
+            <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+              {t("secure.buyerNote")}
             </p>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void verify()}>
-                {busy === "verifying" ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <ShieldCheck className="size-3.5" />
-                )}
-                {t("secure.verify")}
-              </Button>
-              {verified !== null && (
-                <span
-                  className={cn(
-                    "flex items-center gap-1.5 text-[12.5px] font-medium",
-                    verified ? "text-success" : "text-destructive",
-                  )}
-                >
-                  {verified ? <Check className="size-4" /> : null}
-                  {verified ? t("secure.unlockedMatches") : t("secure.unlockedMismatch")}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Step 3 — bind to the Steam account and play offline */}
-        {locked && (
-          <div className="mt-4 rounded-xl border border-white/[0.07] p-4">
-            <div className="flex items-center gap-2">
-              <span className="flex size-5 items-center justify-center rounded-full bg-white/[0.06] text-[11px] font-semibold">
-                3
-              </span>
-              <h2 className="text-[13.5px] font-semibold">{t("secure.step3")}</h2>
-            </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              {t("secure.step3Desc")}
-            </p>
-
-            {steamId === null ? (
-              <p className="mt-3 text-[12px] text-warning">{t("secure.noSteam")}</p>
-            ) : (
-              <>
-                {steamId && (
-                  <p className="mt-2 text-[11.5px] text-muted-foreground">
-                    {t("secure.steamAccount")}{" "}
-                    <code className="font-mono text-foreground/80">{steamId}</code>
+            <ul className="mt-3 space-y-3">
+              {results.map((r) => (
+                <li key={r.blobPath} className="border-t border-white/[0.05] pt-3 first:border-0 first:pt-0">
+                  <p className="text-[12.5px] font-medium">{r.gameName}</p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground" title={r.blobPath}>
+                    {r.blobPath}
                   </p>
-                )}
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={provisioning || steamId === undefined}
-                    onClick={() => void provision()}
-                  >
-                    {provisioning ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <UserCheck className="size-3.5" />
-                    )}
-                    {t("secure.provision")}
-                  </Button>
-                  {provisioned && (
-                    <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-success">
-                      <Check className="size-4" /> {t("secure.provisionedOk")}
-                    </span>
-                  )}
-                </div>
-
-                {provisioned && (
-                  <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/[0.05] pt-3">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={openingOffline}
-                      onClick={() => void openOffline()}
-                    >
-                      {openingOffline ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <WifiOff className="size-3.5" />
-                      )}
-                      {t("secure.openOffline")}
-                    </Button>
-                    {offlineOk !== null && (
-                      <span
-                        className={cn(
-                          "flex items-center gap-1.5 text-[12.5px] font-medium",
-                          offlineOk ? "text-success" : "text-destructive",
-                        )}
-                      >
-                        {offlineOk ? <Check className="size-4" /> : null}
-                        {offlineOk ? t("secure.offlineMatches") : t("secure.offlineMismatch")}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
+                  <p className="break-all font-mono text-[11px] text-muted-foreground" title={r.mxbkeyPath}>
+                    {r.mxbkeyPath}
+                  </p>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>
     </div>
   );
 };
-
-const Row = ({ label, value, mono }: { label: string; value: string; mono?: boolean }) => (
-  <div className="flex items-start gap-2 py-0.5">
-    <dt className="w-24 flex-none text-muted-foreground">{label}</dt>
-    <dd className={cn("min-w-0 flex-1 break-all", mono && "font-mono text-[11.5px]")} title={value}>
-      {value}
-    </dd>
-  </div>
-);
 
 export default Secure;
