@@ -2,11 +2,27 @@
 
 ## 2026-08-31
 
+### Changed
+- Bikes wear their normal maps in the 3D preview, so a shroud has its curve and a seat its
+  grip instead of drawing as a flat colour. A paint can supply its own.
+
+### Fixed
+- Designer: a sheet whose parts are tiled — the number plates, a tiled exhaust — shows those
+  parts where the game reads them, instead of off the edge of the sheet.
+- The 3D preview shows the livery on a bike's side and front number plates, instead of the
+  blank plate the model carries there.
+
+## 2026-08-31 — v0.13.1 — Tracks that look ridden
+
 ### Added
+- A FrostMod flags box in Settings. What you type there is handed to FrostMod the next time
+  it starts, after the flags the app already sends.
 - Installed tracks carry the ground they are painted with, and a gfx.cfg so roost is the
   colour of the dirt.
 
 ### Changed
+- Track Studio installs a track into your MX Bikes mods folder, where the game reads its
+  tracks from. If no folder is set yet, it says so instead of installing.
 - A track installed from Track Studio is packed the way the game reads tracks, so it turns up
   in the in-game list.
 - The track file names the artwork it ships and states its lap length in metres.

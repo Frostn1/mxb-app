@@ -368,6 +368,47 @@ pub fn extract_edf_textures(edf: &[u8]) -> Vec<PaintTexture> {
     extract_edf_textures_where(edf, |_| true)
 }
 
+/// The `_n` normal maps a mesh embeds, for the sheets `want` accepts.
+///
+/// Separate from [`extract_edf_textures_where`], which drops every companion map, because a
+/// normal map is not a look: it can never stand in for a colour sheet, and every caller that
+/// asks "what does this model wear" would be wrong to see one. Only the viewer wants them,
+/// and only to hang off a colour sheet it has already bound. `_r` and the exporter's own
+/// companions stay out — nothing draws those.
+///
+/// `want` is given the *colour* sheet's name, not the map's, so a caller can ask for the
+/// normals belonging to the sheets it is actually going to draw.
+pub fn extract_edf_normal_maps(edf: &[u8], want: impl Fn(&str) -> bool) -> Vec<PaintTexture> {
+    crate::edf::embedded_textures(edf)
+        .iter()
+        .filter_map(|t| {
+            let n = t.name.to_ascii_lowercase();
+            let base = n.strip_suffix("_n")?;
+            want(base).then_some(t)
+        })
+        .filter_map(|t| {
+            let rgba = crate::edf::inflate_texture(edf, t)?;
+            if rgba.len() != (t.width as usize) * (t.height as usize) * 4 {
+                return None;
+            }
+            store_capped(&t.name, t.width, t.height, rgba)
+        })
+        .collect()
+}
+
+/// Store a decoded sheet, downscaled to the edge the viewer draws at if it is bigger.
+///
+/// Shared with [`extract_edf_textures_where`] so the two can't come to different views about
+/// how much memory a sheet is allowed to occupy.
+fn store_capped(name: &str, width: u32, height: u32, rgba: Vec<u8>) -> Option<PaintTexture> {
+    if width.max(height) <= MAX_EDGE {
+        return Some(store_rgba(name, width, height, rgba));
+    }
+    let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(width, height, rgba)?);
+    let scaled = img.thumbnail(MAX_EDGE, MAX_EDGE);
+    Some(store_rgba(name, scaled.width(), scaled.height(), scaled.to_rgba8().into_raw()))
+}
+
 pub fn extract_edf_textures_where(
     edf: &[u8],
     want: impl Fn(&str) -> bool,
@@ -391,19 +432,7 @@ pub fn extract_edf_textures_where(
             // this used to resample 1024² to 1024² once per sheet: 78 ms of the 120 ms a
             // bike spent on textures, for pixels that came out identical. [`into_texture`]
             // has always had this guard; this path was missing it.
-            if t.width.max(t.height) <= MAX_EDGE {
-                return Some(store_rgba(&t.name, t.width, t.height, rgba));
-            }
-            let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
-                t.width, t.height, rgba,
-            )?);
-            let scaled = img.thumbnail(MAX_EDGE, MAX_EDGE);
-            Some(store_rgba(
-                &t.name,
-                scaled.width(),
-                scaled.height(),
-                scaled.to_rgba8().into_raw(),
-            ))
+            store_capped(&t.name, t.width, t.height, rgba)
         })
         .collect()
 }

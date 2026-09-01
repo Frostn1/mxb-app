@@ -784,6 +784,9 @@ export const fr: Translation = {
   "settings.autoRunFrostmod": "Lancer FrostMod automatiquement",
   "settings.autoRunFrostmodDesc":
     "Démarrer FrostMod en arrière-plan à chaque ouverture de MXB App.",
+  "settings.frostmodArgs": "Options FrostMod",
+  "settings.frostmodArgsDesc":
+    "Ligne de commande supplémentaire pour FrostMod, saisie comme dans un terminal. Prise en compte au prochain démarrage de FrostMod. Laisse vide, sauf si on t'a donné une option à tester.",
   "settings.watchModsReload":
     "Rechargement auto lors des changements de dossier",
   "settings.watchModsReloadDesc":
