@@ -2,6 +2,10 @@
 
 ## 2026-08-31
 
+### Changed
+- Bikes wear their normal maps in the 3D preview, so a shroud has its curve and a seat its
+  grip instead of drawing as a flat colour. A paint can supply its own.
+
 ### Fixed
 - Designer: a sheet whose parts are tiled — the number plates, a tiled exhaust — shows those
   parts where the game reads them, instead of off the edge of the sheet.

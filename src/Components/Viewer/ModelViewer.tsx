@@ -56,7 +56,9 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
   const rgba = new Uint8Array(buf);
   const tex = new THREE.DataTexture(rgba, t.width, t.height, THREE.RGBAFormat);
   tex.userData.maskedAlpha = hasMaskedAlpha(rgba);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  // A normal map is three numbers per texel, not a colour — decoding it as sRGB bends every
+  // one of them toward the surface and flattens the relief it exists to describe.
+  tex.colorSpace = isNormalMap(t.name) ? THREE.NoColorSpace : THREE.SRGBColorSpace;
   // MX Bikes paints use a top-left UV origin, which is `DataTexture`'s own default.
   tex.flipY = false;
   // Wrap (not clamp): some islands run outside 0–1 (plates, tiled exhaust) and need it.
@@ -68,6 +70,11 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
   tex.anisotropy = 4;
   tex.needsUpdate = true;
   return tex;
+}
+
+/** The `_n` companion of a colour sheet — `plastics_n` beside `plastics`. */
+function isNormalMap(name: string): boolean {
+  return name.toLowerCase().endsWith("_n");
 }
 
 /**
@@ -1122,13 +1129,27 @@ function RiderComposite({
   );
 }
 
-function makeEdfMaterial(name: string | null | undefined, t: THREE.Texture | null) {
+function makeEdfMaterial(
+  name: string | null | undefined,
+  t: THREE.Texture | null,
+  tex: Map<string, THREE.Texture>,
+) {
   // The number-plate planes are the game's to draw on, not ours — see `isDecalPlane`.
   if (isDecalPlane(name)) {
     return makeHiddenMaterial();
   }
+  // The sheet's own normal map, if it has one: `plastics_n` beside `plastics`. Bikes carry
+  // them the same way riders do, and until now only the rider read them — so a bike's
+  // bodywork drew as a flat colour, with the mesh weave on a seat and the vents in a shroud
+  // in the sheet nobody looked at. A paint may supply its own, which then replaces the
+  // model's by name like any other sheet.
+  const normalMap = (name && tex.get(`${name.toLowerCase()}_n`)) || null;
   return new THREE.MeshStandardMaterial({
     map: t ?? undefined,
+    normalMap,
+    // Gentle: these sheets are authored for the game's own lighting, and at full strength
+    // the relief reads as noise under the viewer's.
+    normalScale: new THREE.Vector2(0.5, 0.5),
     color: t ? 0xffffff : 0xb7bcc4,
     metalness: 0.2,
     roughness: 0.55,
@@ -1156,10 +1177,10 @@ function useEdfMeshes(
       list.map((n) =>
         n.submeshes.length
           ? n.submeshes.map((sm) =>
-              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex)),
+              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex), tex),
             )
           : // No submesh table → whole-node binding (the model's primary body texture).
-            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex))],
+            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex), tex)],
       ),
     [list, tex],
   );
