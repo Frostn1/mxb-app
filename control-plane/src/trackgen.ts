@@ -118,7 +118,13 @@ const TrackProgram = z.object({
       amplitude: z.number().describe("the landscape's own hills, peak to trough, metres"),
       wavelength: z.number().describe("metres between those hills"),
       seed: z.number().int(),
-      texture: z.number().describe("ridden-surface roughness, metres; 0.06 is normal"),
+      texture: z.number().describe("ridden-surface roughness, metres; 0.085 is normal"),
+      tilt: z
+        .number()
+        .describe(
+          "metres the whole plot falls from one side to the other — a hillside rather than a plain. 0 for flat ground, 20-30 for a hillside national.",
+        ),
+      tiltAngle: z.number().describe("which way it falls, degrees, same convention as a heading"),
     }),
     surface: z
       .enum(["soil", "sand", "grass"])
@@ -242,8 +248,22 @@ What real tracks measure, from a survey of published ones. Land inside these unl
 explicitly asks otherwise:
 
   jumps on a lap      COUNT THEM. A 2000 m lap carries 30–45 features — not four.
-  landscape relief    amplitude 8–25 m over a 120–200 m wavelength. A flat plot measures
-                      under 18° at its steepest and is rejected for it; ground has to roll.
+  the ground it sits on  A published track is usually a HILLSIDE, not a bumpy plain, and this
+                      is the single biggest thing about how the land reads. Measured as how
+                      much the ground rises and falls over a given distance, Indiana runs
+                      0.15 m over 5 m and 9.36 m over 200 — a ratio of 62, where noise of any
+                      wavelength saturates around 25 because noise flattens out past half its
+                      wavelength and a slope does not.
+
+                      So set tilt — metres the plot falls from one side to the other. 20-30
+                      for a hillside national (Millville, Washougal, Flanders and Sardegna
+                      climb 48-66 m over a lap), 0-8 for a flat one (Lambretta Lynds climbs
+                      2.2 m). Pick from the brief. tiltAngle is which way it falls.
+
+                      amplitude is then the *bumps on top of it* and wants to be small — 5-8 m
+                      over a 200-300 m wavelength. It used to carry the whole landform and the
+                      result measured two to four times rougher than a real track at every
+                      scale, worst at the short distances a rider sees.
   how much it climbs  2–66 m from the lowest ground on the lap to the highest, and the spread
                       is the point rather than the middle of it. Lambretta Lynds climbs 2 m
                       and Millville 66; Indiana 21. A track on a hillside rides nothing like a

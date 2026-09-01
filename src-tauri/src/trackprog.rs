@@ -147,6 +147,23 @@ pub struct Relief {
     /// else in the corpus.
     #[serde(default = "default_texture")]
     pub texture: f32,
+    /// Metres the ground falls across the plot, and which way — a hillside rather than a
+    /// plain.
+    ///
+    /// Not a refinement. Measured as how much the ground rises and falls over a given
+    /// distance, Indiana runs 0.15 m over 5 m and 9.36 m over 200 — a ratio of 62 where a
+    /// noise field of any wavelength saturates around 25, because noise flattens out past
+    /// half its wavelength and a slope does not. It is 0.030 m per metre at five and 0.047 at
+    /// two hundred: near enough a constant grade. Indiana is not a bumpy plain with a track
+    /// on it, it is a hillside, and so are Millville, Washougal, Flanders and Sardegna —
+    /// their laps climb 48 to 66 m.
+    ///
+    /// Zero is a flat plot, which is also real: Lambretta Lynds climbs 2.2 m.
+    #[serde(default)]
+    pub tilt: f32,
+    /// Which way it falls, degrees, in the same convention as a heading.
+    #[serde(default)]
+    pub tilt_angle: f32,
 }
 
 /// Measured, not chosen. The surface roughness of a published track — the mean absolute
@@ -164,6 +181,8 @@ impl Default for Relief {
             wavelength: 180.0,
             seed: 1,
             texture: default_texture(),
+            tilt: 0.0,
+            tilt_angle: 0.0,
         }
     }
 }
@@ -490,8 +509,8 @@ pub const EXAMPLE: &str = r#"{
       "location": "Generated",
       "width": 12.0,
       "terrain": {
-        "sizeX": 500.0, "sizeZ": 480.0, "samples": 2049, "scale": 40.0,
-        "relief": { "amplitude": 22.0, "wavelength": 150.0, "seed": 3 }
+        "sizeX": 500.0, "sizeZ": 480.0, "samples": 2049, "scale": 62.0,
+        "relief": { "amplitude": 6.0, "wavelength": 260.0, "seed": 3, "tilt": 26.0, "tiltAngle": 35.0 }
       },
       "start": { "x": 231.10, "z": 262.90, "angle": 0.0 },
       "segments": [

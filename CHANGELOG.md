@@ -38,6 +38,9 @@
 - The racing line is chopped up at the scale of a wheel rather than a jump, and the field
   around it is smooth. It used to be nearly as rough out in the grass as it was on the line.
 - A track's edge is crisp against the field rather than fading out over a wide shelf.
+- A track can be built on a hillside. The ground falls across the plot the way a real one
+  does, instead of being a bumpy plain — which is most of why the land around a generated
+  track never looked like the land around a real one.
 - The starting track's corners are as tight as a published track's: a median 12.6 m through
   their tightest point, where Indiana's is 10.6 and ours used to be 18.2.
 - Jumps are built rather than dropped on. A takeoff ramps up over ten metres instead of five,
