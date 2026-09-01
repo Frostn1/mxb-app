@@ -3,6 +3,8 @@
 ## 2026-08-31
 
 ### Fixed
+- Designer: a sheet whose parts are tiled — the number plates, a tiled exhaust — shows those
+  parts where the game reads them, instead of off the edge of the sheet.
 - The 3D preview shows the livery on a bike's side and front number plates, instead of the
   blank plate the model carries there.
 

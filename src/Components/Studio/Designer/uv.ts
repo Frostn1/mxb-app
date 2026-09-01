@@ -198,6 +198,37 @@ export function faceAt(parts: UvPart[], u: number, v: number): Face | null {
   return codes.length ? summariseFaces(codes) : null;
 }
 
+/**
+ * Move one triangle into the tile the sheet is actually sampled in, in place.
+ *
+ * Most bodywork is unwrapped inside the unit square and this does nothing to it. The number
+ * plates are not: a side plate runs u -0.44..0.87 and every plate runs v 0.55..1.20, because
+ * the sheet is a decal each plate tiles rather than a place on the model. Left raw, those
+ * islands are drawn off the edge of the sheet and over the top of each other, so a plate sheet
+ * is painted at coordinates the game never reads.
+ *
+ * The triangle is moved whole. Wrapping each corner on its own would tear any triangle that
+ * crosses the seam into a band across the entire sheet — one corner at 0.98 and the next at
+ * 0.02 describe a hair's breadth on the model and the full width of the square here. So each
+ * corner is first pulled to the tile nearest the triangle's own centre, and only then is the
+ * whole thing shifted down to the tile around the origin. A triangle that genuinely straddles
+ * the seam still pokes out one side, which is correct — that is what it does on the bike.
+ */
+function untile(tri: Float32Array): void {
+  for (let axis = 0; axis < 2; axis += 1) {
+    const mid = (tri[axis] + tri[2 + axis] + tri[4 + axis]) / 3;
+    for (let c = 0; c < 3; c += 1) {
+      tri[c * 2 + axis] -= Math.round(tri[c * 2 + axis] - mid);
+    }
+    const shift = Math.floor(mid);
+    if (shift) {
+      tri[axis] -= shift;
+      tri[2 + axis] -= shift;
+      tri[4 + axis] -= shift;
+    }
+  }
+}
+
 /** A stable hue per mesh-group name. */
 function hueOf(label: string): number {
   let h = 0;
@@ -248,6 +279,9 @@ export function uvParts(
   const lateralByLabel = new Map<string, number[]>();
   const facesByLabel = new Map<string, number[]>();
   const nodesByLabel = new Map<string, Set<string>>();
+  // One triangle's corners, reused: a bike is a few hundred thousand of them and a fresh
+  // array each would be the only allocation in the loop.
+  const tri = new Float32Array(6);
   for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
     const node = nodes[nodeIndex];
     if (!node.uvs.length || !node.indices.length) continue;
@@ -298,10 +332,13 @@ export function uvParts(
         let ny = 0;
         for (let c = 0; c < 3; c += 1) {
           const v = node.indices[t * 3 + c];
-          flat.push(node.uvs[v * 2], node.uvs[v * 2 + 1]);
+          tri[c * 2] = node.uvs[v * 2];
+          tri[c * 2 + 1] = node.uvs[v * 2 + 1];
           if (sides) x += node.positions[v * 3];
           if (faces && hasNormals) ny += node.normals[v * 3 + 1];
         }
+        untile(tri);
+        flat.push(tri[0], tri[1], tri[2], tri[3], tri[4], tri[5]);
         // The centroid, not every corner: a triangle with one vertex over the line is still on
         // the side the rest of it is, and a panel's inner edge is full of them.
         if (sides) sides.push(x / 3);
