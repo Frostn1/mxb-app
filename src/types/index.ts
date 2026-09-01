@@ -997,7 +997,11 @@ export type LiveRefresh =
   | "failed"
   | "game_not_running"
   | "disabled"
-  | "unsupported";
+  | "unsupported"
+  /** The running `mxbikes.exe` isn't a build the loader offset is known good for, so
+   *  nothing was run in it. Reads to the player exactly like `failed` — the look didn't
+   *  change — and both fall to the same "reselect your profile" note. */
+  | "unknown_build";
 
 /** Result of a payload-carrying command sent to FrostMod (see `frostmod.rs`). */
 export type CommandOutcome =
