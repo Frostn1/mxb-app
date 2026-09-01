@@ -45,13 +45,31 @@ const Arc = z.object({
   rise: RISE,
 });
 
+/**
+ * The four features that are the same shape as each other, carried as one variant.
+ *
+ * Not a simplification of the track program — the wire format is byte-for-byte what eight
+ * separate variants produced, because each object still names its own `kind`. It is a
+ * constrained-decoding limit: the API compiles this schema into a grammar, and a union of
+ * eight object alternatives inside an array compiles to one too large to accept. Measured
+ * rather than guessed — eight is rejected and six is accepted, on every model from Haiku 4.5
+ * up to Opus 5, so this was never a question of paying for a bigger model.
+ *
+ * Collapsing the four that share `at`/`length`/`height` into a single variant tagged by an
+ * enum takes the union to five and costs nothing. If a fifth same-shaped feature is ever
+ * added, it belongs in this enum rather than beside it.
+ */
+const SimpleFeature = z.object({
+  kind: z.enum(["tabletop", "roller", "stepUp", "berm"]),
+  at: z.number().describe("metres round the lap from the start"),
+  length: z.number(),
+  height: z
+    .number()
+    .describe("metres; for stepUp, the ground gained — negative for a step down"),
+});
+
 const Feature = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("tabletop"),
-    at: z.number().describe("metres round the lap from the start"),
-    length: z.number(),
-    height: z.number(),
-  }),
+  SimpleFeature,
   z.object({
     kind: z.literal("double"),
     at: z.number(),
@@ -60,28 +78,10 @@ const Feature = z.discriminatedUnion("kind", [
     lip: z.number().describe("metres of takeoff face"),
   }),
   z.object({
-    kind: z.literal("roller"),
-    at: z.number(),
-    length: z.number(),
-    height: z.number(),
-  }),
-  z.object({
     kind: z.literal("whoops"),
     at: z.number(),
     count: z.number().int(),
     spacing: z.number().describe("metres crest to crest"),
-    height: z.number(),
-  }),
-  z.object({
-    kind: z.literal("stepUp"),
-    at: z.number(),
-    length: z.number(),
-    height: z.number().describe("metres the ground gains; negative for a step down"),
-  }),
-  z.object({
-    kind: z.literal("berm"),
-    at: z.number(),
-    length: z.number(),
     height: z.number(),
   }),
   z.object({
@@ -196,6 +196,11 @@ straight does nothing. Jumps go on straights.
 What real tracks measure, from a survey of published ones. Land inside these unless the brief
 explicitly asks otherwise:
 
+  jumps on a lap      COUNT THEM. A 1500 m lap needs 30–60 features in the list — not four.
+                      A track with eight jumps on it is a field with a path across it, and it
+                      is the single most common thing to get wrong here.
+  landscape relief    amplitude 8–20 m over a 120–200 m wavelength. A flat plot measures
+                      under 18° at its steepest and is rejected for it; ground has to roll.
   riding line width   10–17 m
   lap length          1300–1800 m
   jumps per km        29–61
@@ -212,6 +217,22 @@ jump — too small and the build is rejected, far too large and the terrain quan
 The app builds and measures whatever you send. If it comes back with problems, they carry the
 measured number and what published tracks do; edit the program you sent rather than starting
 over.`;
+
+/**
+ * The model that writes the lap.
+ *
+ * The cheapest one that can do the job, on purpose: $1/$5 per MTok against Opus 5's $5/$25.
+ * A lap is a few thousand output tokens, so an attempt costs well under a cent, and the app
+ * validates every answer by synthesising the terrain and measuring it — a weaker model that
+ * needs a second attempt is still far cheaper than a stronger one that gets it first time.
+ *
+ * The thing to watch is lap closure: the signed turn angles have to sum to ±360°, which is
+ * arithmetic rather than judgement, and it is the one part of this a small model is likely to
+ * get wrong repeatedly. The validator catches it and says so with the number, but if repairs
+ * start costing more than they save, `claude-sonnet-5` ($2/$10) is the next rung up and takes
+ * the same request shape as this one.
+ */
+const MODEL = "claude-haiku-4-5";
 
 /** Briefs longer than this are not briefs. */
 const MAX_BRIEF = 2000;
@@ -265,26 +286,36 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   try {
     const response = await client.messages.parse({
-      model: "claude-opus-5",
+      model: MODEL,
       max_tokens: 16000,
       system: SYSTEM,
       messages,
-      // Laying out a lap that closes is arithmetic the model has to actually do.
-      thinking: { type: "adaptive" },
-      output_config: {
-        effort: "high",
-        format: zodOutputFormat(TrackProgram),
-      },
+      // Laying out a lap is arithmetic the model would have to do — except most of it is
+      // done for it now, see `repair` in trackllm.rs. Haiku 4.5 predates adaptive thinking
+      // and takes a fixed budget instead, and rejects `output_config.effort` outright, so
+      // the only thing left in `output_config` is the schema.
+      thinking: { type: "enabled", budget_tokens: 4000 },
+      output_config: { format: zodOutputFormat(TrackProgram) },
     });
 
     if (response.stop_reason === "refusal") {
       return json(422, { error: "the model declined that brief" });
     }
     if (!response.parsed_output) {
-      return json(502, { error: "the model's answer didn't fit the track schema" });
+      return json(422, { error: "the model's answer didn't fit the track schema" });
     }
     return json(200, { program: response.parsed_output });
   } catch (err) {
+    // An answer that doesn't fit the schema is the model's mistake, not the service's, and
+    // it is the single most common thing a small model gets wrong here — it invents a
+    // feature kind. Reported as a 422 so the app's loop treats it as something to send back
+    // and fix; a 500 aborts the whole loop on the first stumble, which threw away two
+    // perfectly good remaining attempts.
+    if (err instanceof Error && /structured output|parse/i.test(err.message)) {
+      return json(422, {
+        error: `that didn't fit the track schema: ${err.message.slice(0, 400)}`,
+      });
+    }
     if (err instanceof Anthropic.RateLimitError) {
       return json(429, { error: "the track service is busy — try again in a minute" });
     }

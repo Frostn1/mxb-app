@@ -2277,6 +2277,8 @@ export const fr: Translation = {
   "track.budget": "Hauteur utilisée",
   "track.problems": "À corriger",
   "track.preview": "Aperçu en 3D",
+  "track.fullscreen": "Plein écran",
+  "track.exitFullscreen": "Quitter le plein écran",
   "track.building": "Construction…",
   "track.install": "Installer",
   "track.export": "Exporter la source",

@@ -2242,6 +2242,8 @@ export const en = {
   "track.budget": "Height used",
   "track.problems": "Needs fixing",
   "track.preview": "Preview in 3D",
+  "track.fullscreen": "Full screen",
+  "track.exitFullscreen": "Exit full screen",
   "track.building": "Building…",
   "track.install": "Install",
   "track.export": "Export source",

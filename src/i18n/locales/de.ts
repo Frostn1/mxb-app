@@ -2286,6 +2286,8 @@ export const de: Translation = {
   "track.budget": "Höhe genutzt",
   "track.problems": "Zu beheben",
   "track.preview": "In 3D ansehen",
+  "track.fullscreen": "Vollbild",
+  "track.exitFullscreen": "Vollbild verlassen",
   "track.building": "Baut…",
   "track.install": "Installieren",
   "track.export": "Quelle exportieren",

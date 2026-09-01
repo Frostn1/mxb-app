@@ -70,11 +70,187 @@ pub trait Ask {
         -> impl std::future::Future<Output = Result<String>>;
 }
 
+/// Whether a berm at this distance round the lap is on a corner.
+///
+/// One definition, used by both the check and the repair. They had one each, they disagreed,
+/// and the disagreement was invisible until a berm sat in the gap between them.
+fn berm_on_a_corner(turn: &[crate::trackprog::Station], at: f32) -> bool {
+    turn.iter()
+        .find(|s| s.s >= at)
+        .map(|s| s.curvature != 0.0)
+        .unwrap_or(false)
+}
+
+/// Everything wrong with a program that we can simply work out, worked out.
+///
+/// Three of the complaints the validator used to send back were not judgement at all — they
+/// were arithmetic, and we have exact code for each of them. Handing them to a language model
+/// and asking it to try again is both the slowest way to fix them and the least reliable:
+/// closing a lap means making the signed turn angles sum to a whole number of circles *and*
+/// the straights bring it home, which a small model gets wrong over and over. Pointed at
+/// Haiku 4.5, three rounds of that failed every time on lap closure alone.
+///
+/// So the loop repairs first and complains second. What reaches the model afterwards is the
+/// part it can actually act on — the track is too flat, there are not enough jumps, the
+/// corners are too tight — rather than a sum it cannot do.
+///
+/// Returns a line per repair, for the log. Nothing here can fail: each fix either applies or
+/// is not needed, and anything left over is the validator's business.
+fn repair(prog: &mut TrackProgram) -> Vec<String> {
+    let mut done = Vec::new();
+
+    // 1. Put the lap on the ground. Where the lap's corners fall is the model's business;
+    //    how big a rectangle it needs and where to sit it is not — it is the lap's own
+    //    bounding box plus a track's width of margin, which is exactly what the check
+    //    measures. The plot only ever grows, and the start pose slides so the lap is
+    //    centred on it, which leaves the shape of the track untouched.
+    {
+        let st = prog.stations(2.0);
+        if !st.is_empty() {
+            let margin = prog.width.max(1.0);
+            let (mut lo_x, mut hi_x) = (f32::MAX, f32::MIN);
+            let (mut lo_z, mut hi_z) = (f32::MAX, f32::MIN);
+            for s in &st {
+                lo_x = lo_x.min(s.x);
+                hi_x = hi_x.max(s.x);
+                lo_z = lo_z.min(s.z);
+                hi_z = hi_z.max(s.z);
+            }
+            let need_x = (hi_x - lo_x) + margin * 2.0;
+            let need_z = (hi_z - lo_z) + margin * 2.0;
+            let grow_x = prog.terrain.size_x.max(need_x * 1.05);
+            let grow_z = prog.terrain.size_z.max(need_z * 1.05);
+            // Centre it: the offset that puts the lap's own middle at the plot's middle.
+            let dx = grow_x * 0.5 - (lo_x + hi_x) * 0.5;
+            let dz = grow_z * 0.5 - (lo_z + hi_z) * 0.5;
+            let grew = grow_x > prog.terrain.size_x + 0.5 || grow_z > prog.terrain.size_z + 0.5;
+            let moved = dx.abs() > 0.5 || dz.abs() > 0.5;
+            if grew || moved {
+                let mut what = Vec::new();
+                if grew {
+                    what.push(format!(
+                        "plot {:.0}x{:.0} m grows to {grow_x:.0}x{grow_z:.0}",
+                        prog.terrain.size_x, prog.terrain.size_z
+                    ));
+                }
+                if moved {
+                    what.push(format!("start moves by ({dx:.0}, {dz:.0}) m to centre the lap"));
+                }
+                done.push(what.join("; "));
+                prog.terrain.size_x = grow_x;
+                prog.terrain.size_z = grow_z;
+                prog.start.x += dx;
+                prog.start.z += dz;
+            }
+        }
+    }
+
+    // 2. Square the cells. The synthesiser snaps the short side of the grid to a power of two
+    //    plus one, so a plot whose sides aren't near that ratio gets cells wider one way than
+    //    the other — and it refuses to build one, because a berm would come out wider across
+    //    than along. The plot is ours to nudge; the lap is not.
+    if let Some((sx, sz)) = squared_plot(prog) {
+        if (sx - prog.terrain.size_x).abs() > 0.5 || (sz - prog.terrain.size_z).abs() > 0.5 {
+            done.push(format!(
+                "squared the cells: plot {:.0}x{:.0} m becomes {sx:.0}x{sz:.0}",
+                prog.terrain.size_x, prog.terrain.size_z
+            ));
+            prog.terrain.size_x = sx;
+            prog.terrain.size_z = sz;
+        }
+    }
+
+    // 3. Close the lap, with a turn no tighter than the tightest already on it — the same
+    //    rule the studio's own "Close the lap" button uses.
+    let closure = prog.closure_error();
+    if closure > corpus::CLOSURE_M {
+        let radius = prog
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                crate::trackprog::Segment::Arc { radius, .. } => Some(radius.abs()),
+                _ => None,
+            })
+            .fold(f32::MAX, f32::min);
+        let radius = if radius.is_finite() { radius } else { 25.0 };
+        if let Some(add) = prog.closing_segments(radius) {
+            let n = add.len();
+            prog.segments.extend(add);
+            done.push(format!(
+                "closed the lap: {closure:.0} m gap shut with {n} segment(s), now {:.2} m",
+                prog.closure_error()
+            ));
+        }
+    }
+
+    // 4. Put berms on corners. A berm on a straight silently does nothing, and it is never
+    //    what was meant — a model that asks for one has decided the corner wants banking and
+    //    then got the distance round the lap wrong. Where the corners are is not a matter of
+    //    opinion, so slide it to the nearest one rather than sending the whole program back.
+    let turn = prog.stations(1.0);
+    let corner_at = |at: f32| -> Option<f32> {
+        turn.iter()
+            .filter(|st| st.curvature != 0.0)
+            .min_by(|a, b| (a.s - at).abs().total_cmp(&(b.s - at).abs()))
+            .map(|st| st.s)
+    };
+    for f in &mut prog.features {
+        let crate::trackprog::Feature::Berm { at, .. } = f else {
+            continue;
+        };
+        // `berm_on_a_corner` and nothing else. The first version of this asked whether the
+        // berm *reached* a corner anywhere along its length, which is a laxer question than
+        // the one the validator asks — so a berm starting 19 m short of a turn passed the
+        // repair and was then rejected, and the loop spent every remaining attempt on a
+        // fault it had already decided was fine.
+        if berm_on_a_corner(&turn, *at) {
+            continue;
+        }
+        if let Some(to) = corner_at(*at) {
+            done.push(format!("moved the berm at {at:.0} m onto the corner at {to:.0} m"));
+            *at = to;
+        }
+    }
+
+    // 5. Fit the height budget. It exists only because samples are quantised against it, and
+    //    it is a number the synthesiser already knows — there was never a reason to make the
+    //    model guess it and then be told off for guessing wrong.
+    if let Ok(fitted) = crate::tracksynth::with_fitted_budget(prog) {
+        if (fitted.terrain.scale - prog.terrain.scale).abs() > 0.5 {
+            done.push(format!(
+                "fitted the height budget: {:.0} m becomes {:.0}",
+                prog.terrain.scale, fitted.terrain.scale
+            ));
+            prog.terrain.scale = fitted.terrain.scale;
+        }
+    }
+
+    done
+}
+
+/// The plot the synthesiser would actually build, in metres, once it has snapped the short
+/// side of the grid to a power of two. `None` if it would not build one at all.
+fn squared_plot(prog: &TrackProgram) -> Option<(f32, f32)> {
+    let (gw, gh) = crate::tracksynth::grid_for(prog).ok()?;
+    let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+    if sx >= sz {
+        let mps = sx / (gw.max(2) - 1) as f32;
+        Some((sx, mps * (gh.max(2) - 1) as f32))
+    } else {
+        let mps = sz / (gh.max(2) - 1) as f32;
+        Some((mps * (gw.max(2) - 1) as f32, sz))
+    }
+}
+
 /// Ask for a track, and keep asking until it measures like one.
 ///
 /// `tries` counts total attempts, not retries. Two is the useful minimum: models get the
 /// shape right and the *numbers* wrong, and the numbers are exactly what a measured
 /// complaint fixes.
+/// What an answer starts with when the service is reporting the model's mistake rather than
+/// its own. Not a track, and not a failure either — a thing to send back and have fixed.
+const REJECTED: &str = "\u{0}rejected\u{0}";
+
 pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<TrackProgram> {
     let mut attempt = Attempt::default();
     let mut last: Option<String> = None;
@@ -85,8 +261,22 @@ pub async fn generate(brief: &str, ask: &impl Ask, tries: usize) -> Result<Track
             .await
             .with_context(|| format!("asking for a track (attempt {})", round + 1))?;
 
+        if let Some(why) = raw.strip_prefix(REJECTED) {
+            log::info!("[trackllm] attempt {} was rejected: {why}", round + 1);
+            attempt = Attempt {
+                previous: attempt.previous.clone(),
+                problems: vec![why.to_string()],
+            };
+            last = Some(why.to_string());
+            continue;
+        }
+
         match serde_json::from_str::<TrackProgram>(&raw) {
-            Ok(prog) => {
+            Ok(mut prog) => {
+                // Fix what arithmetic can fix before complaining about it. See `repair`.
+                for fixed in repair(&mut prog) {
+                    log::info!("[trackllm] {fixed}");
+                }
                 let problems = validate(&prog);
                 if problems.is_empty() {
                     return Ok(prog);
@@ -204,12 +394,7 @@ pub fn review(prog: &TrackProgram) -> Review {
         // A berm is a banked wall on the outside of a corner. On a straight there is no
         // outside, so it silently does nothing — which reads as the synthesiser dropping it.
         if let Feature::Berm { at, .. } = f {
-            let straight = turn
-                .iter()
-                .find(|s| s.s >= *at)
-                .map(|s| s.curvature == 0.0)
-                .unwrap_or(true);
-            if straight {
+            if !berm_on_a_corner(&turn, *at) {
                 // Say which corner, not just "a corner". This turns up after an edit moves
                 // the corners out from under a berm that was on one, and the way out is a
                 // number.
@@ -312,6 +497,14 @@ impl Ask for ControlPlane {
                 .ok()
                 .and_then(|g| g.error)
                 .unwrap_or(text);
+            // 422 means the model answered and the answer was wrong — a made-up feature
+            // kind, a refused brief. That is a thing to send back and have fixed, so it
+            // comes back as an unparseable answer and the loop spends another attempt on
+            // it. Everything else — no key, rate limited, service down — is fatal, because
+            // asking again would only fail the same way.
+            if status.as_u16() == 422 {
+                return Ok(format!("{REJECTED}{why}"));
+            }
             bail!("the track service answered {}: {why}", status.as_u16());
         }
 
@@ -529,5 +722,65 @@ mod tests {
         let problems = validate(&p);
         assert_eq!(problems.len(), 1, "structural faults stop everything else");
         assert!(problems[0].contains("leaves the terrain"), "{problems:?}");
+    }
+
+    /// The whole loop, against a real control plane and a real model.
+    ///
+    /// Every other test here runs against a stub, which is what let the request shape be
+    /// wrong for months without anyone noticing — the schema compiled to a grammar the API
+    /// rejects, and a stub cannot tell you that. This is the one that would have caught it.
+    ///
+    /// ```text
+    /// cd control-plane && npx wrangler dev --port 8787 --local     # ANTHROPIC_API_KEY in .dev.vars
+    /// FROST_CP=http://localhost:8787 cargo test -- --ignored --nocapture asks_a_real_model
+    /// ```
+    ///
+    /// Costs real money — a few tenths of a cent per attempt on the model this is pointed at.
+    #[test]
+    #[ignore = "spends money against a live control plane — set FROST_CP"]
+    fn asks_a_real_model() {
+        let base = std::env::var("FROST_CP").expect("set FROST_CP to a control plane's base URL");
+        let brief = std::env::var("FROST_BRIEF").unwrap_or_else(|_| {
+            "A long start straight into a right hairpin, then a rhythm section of three \
+             doubles, a sweeping left, and a set of whoops before the finish."
+                .into()
+        });
+        let tries: usize = std::env::var("FROST_TRIES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3);
+
+        let ask = ControlPlane {
+            base,
+            // A local `wrangler dev` has no accounts to enroll with, and the endpoint sits
+            // above the auth gate for exactly that reason.
+            token: String::new(),
+        };
+        let started = std::time::Instant::now();
+        let out = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(generate(&brief, &ask, tries));
+
+        match out {
+            Ok(prog) => {
+                println!(
+                    "{} — {:.0} m lap over {} segments, {} features, closes to {:.2} m, in {:.0}s",
+                    prog.name,
+                    prog.lap_length(),
+                    prog.segments.len(),
+                    prog.features.len(),
+                    prog.closure_error(),
+                    started.elapsed().as_secs_f32()
+                );
+                assert!(validate(&prog).is_empty(), "a returned track has no problems");
+            }
+            Err(e) => {
+                // Not an assertion failure dressed up: a small model that cannot close a lap
+                // in three goes is a real result and the numbers are the useful part.
+                panic!("gave up after {tries} attempts in {:.0}s: {e:#}", started.elapsed().as_secs_f32());
+            }
+        }
     }
 }
