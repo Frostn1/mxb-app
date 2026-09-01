@@ -47,6 +47,8 @@ mod paintwatch;
 mod pkz;
 /// Paid plugins: what this install may run, and how it proves it offline.
 mod plugins;
+/// What the running game has loaded, reported for diagnostics.
+mod procmods;
 /// Linux only: the Proton prefix the game runs in, and how to put a Windows program in it.
 #[cfg(target_os = "linux")]
 mod proton;

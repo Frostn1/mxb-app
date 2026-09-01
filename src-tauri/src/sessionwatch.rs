@@ -5,13 +5,23 @@
 //! the mods folder is really on disk before the load screen reads it. It also holds a handle
 //! on the running session, so how it ended is still readable once the process is gone (see
 //! [`crate::gameproc::GameSession`]).
+//!
+//! While a session is up it is also where [`crate::procmods`] reports what the game has
+//! loaded. That is a second job for one poll rather than a second poll: this loop is already
+//! the one thing that knows a game is running, and it knows it whether the game came from
+//! the Play button or from Steam.
 
 use crate::gameproc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 /// How often to ask whether the game has started. A process-table walk, and nothing else.
 const POLL: Duration = Duration::from_secs(15);
+
+/// How often to look at what the running game has loaded. Slower than the poll above: the
+/// answer barely moves within a session, and the report is only sent when it does. Matched
+/// to the live paint sync, which is the other thing running through a race.
+const REPORT_EVERY: Duration = Duration::from_secs(45);
 
 /// Start the standing watcher. Call once, from `setup`.
 pub fn start(app: &AppHandle) {
@@ -21,6 +31,9 @@ pub fn start(app: &AppHandle) {
         // A handle on the current session, held so how it ended is still readable once the
         // process is gone.
         let mut session: Option<gameproc::GameSession> = None;
+        // When the game's module list was last looked at. `None` until a session starts, so
+        // the first pass of every session reports rather than waiting out the interval.
+        let mut reported: Option<Instant> = None;
         loop {
             let cfg = crate::config::load_or_detect(&app).unwrap_or_default();
 
@@ -47,6 +60,19 @@ pub fn start(app: &AppHandle) {
                 // isn't really on disk becomes a crash there. Ask now, while there is still
                 // a log line to attach the answer to.
                 crate::cloudfiles::warn_if_dehydrated(&app, &cfg);
+                // A new session is a new answer, whatever the last one said.
+                crate::procmods::reset();
+                reported = None;
+            }
+
+            if running {
+                if reported.is_none_or(|at| at.elapsed() >= REPORT_EVERY) {
+                    reported = Some(Instant::now());
+                    crate::procmods::tick(&app);
+                }
+            } else if reported.take().is_some() {
+                // The session is over, so nothing that was true of it is true now.
+                crate::procmods::reset();
             }
 
             tokio::time::sleep(POLL).await;
