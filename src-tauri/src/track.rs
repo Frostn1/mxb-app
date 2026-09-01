@@ -732,15 +732,25 @@ pub fn diagnose(path: &Path) -> String {
     use std::fmt::Write;
     let mut out = String::new();
 
+    // A sealed archive's contents are the author's, and this report is text a player copies
+    // out of the app. Everything below is read through the unlock, so for a sealed track the
+    // report stays at the level of derived facts — how many entries, what shape the grid is —
+    // and never reproduces a name or a byte of what's inside.
+    let sealed = !is_dir(path) && !crate::pkz::is_plain_zip(path);
+
     let names = match entry_names(path) {
         Ok(n) => n,
         Err(e) => return format!("couldn't list {path:?}: {e:#}"),
     };
     let _ = writeln!(out, "{}\n{} entries", path.display(), names.len());
-    for n in &names {
-        let role = role_of(n);
-        if !matches!(role, "other" | "image") {
-            let _ = writeln!(out, "  [{role:<11}] {n}");
+    if sealed {
+        out.push_str("  (sealed archive — entries not listed)\n");
+    } else {
+        for n in &names {
+            let role = role_of(n);
+            if !matches!(role, "other" | "image") {
+                let _ = writeln!(out, "  [{role:<11}] {n}");
+            }
         }
     }
 
@@ -752,13 +762,21 @@ pub fn diagnose(path: &Path) -> String {
     if heightfields.is_empty() {
         out.push_str("no heightfield-looking entries — nothing for the probe to read\n");
     }
-    for entry in heightfields {
-        let _ = writeln!(out, "\n--- {entry} ---");
-        match read_entry(path, &entry) {
+    for (i, entry) in heightfields.iter().enumerate() {
+        let label = if sealed {
+            format!("heightfield {}", i + 1)
+        } else {
+            entry.clone()
+        };
+        let _ = writeln!(out, "\n--- {label} ---");
+        match read_entry(path, entry) {
             // The first bytes are worth having verbatim: if the probe found nothing, a magic
-            // string or a dimension pair in here is what tells us how to widen it.
+            // string or a dimension pair in here is what tells us how to widen it. Sealed
+            // tracks give up the probe's verdict only — that's derived, the bytes aren't.
             Ok(bytes) => {
-                let _ = writeln!(out, "first bytes: {}", hex_preview(&bytes, 64));
+                if !sealed {
+                    let _ = writeln!(out, "first bytes: {}", hex_preview(&bytes, 64));
+                }
                 let _ = writeln!(out, "{}", heightfield::report(&bytes, hint));
             }
             Err(e) => {

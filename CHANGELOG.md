@@ -3,6 +3,8 @@
 ## 2026-09-01
 
 ### Changed
+- Track diagnostics keep protected tracks protected: for a sealed track the report gives
+  the layout probe's findings without listing the files inside it or their contents.
 - Paint Studio and the Designer open on the KTM 250 SX-F when it is installed, rather than on
   whichever bike sorts first alphabetically.
 
