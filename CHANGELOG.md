@@ -2,6 +2,12 @@
 
 ## 2026-09-01
 
+### Fixed
+- Installing a generated track no longer crashes the game. It ships without graphics rather
+  than with graphics the game cannot read, and the Studio says so.
+
+## 2026-09-01
+
 ### Added
 - Track generation reads a published track's own centreline out of its height file, so a real
   lap's corners, their radii and its straights can be measured directly rather than guessed at.

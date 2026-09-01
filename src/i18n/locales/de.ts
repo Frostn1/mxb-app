@@ -2300,7 +2300,7 @@ export const de: Translation = {
   "track.buildFailed": "Konnte nicht gebaut werden",
   "track.exported": "{{count}} Dateien geschrieben",
   "track.exportFailed": "Konnte nicht exportiert werden",
-  "track.previewOnly": "Eine installierte Strecke bringt Gelände, Oberflächen, Renndaten und den Untergrund mit — keine Kulissen. Dafür TerrainEd über den exportierten Ordner laufen lassen.",
+  "track.previewOnly": "Eine installierte Strecke enthält Gelände, Oberflächen und Renndaten — sie hat keine Grafik, das Spiel kann sie also nicht fahren. Für eine fahrbare Strecke mit TerrainEd über den exportierten Ordner bauen.",
   "track.at": "Bei",
   "track.kind": "Art",
   "track.height": "Höhe",
