@@ -1944,65 +1944,96 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         }
     };
 
-    let mut quads: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
-    for j in 0..q {
-        for i in 0..q {
-            quads[band(i, j)].push((i, j));
+    // Tiles, not one big sheet.
+    //
+    // A draw group is uploaded as an index buffer, and every group in a published map is
+    // small: Indiana carries 1313 of them over a million vertices, the largest 8363 vertices
+    // and the median 224 — **not one is over 65535**. Ours was four groups over 262144
+    // vertices, one of them 182512, which is nearly three times what a 16-bit index can
+    // reach. That overflows where the buffer is built, which is the track graphics stage.
+    //
+    // So the terrain is cut into tiles, each tile a leaf node carrying one group per ground
+    // band that appears in it. That is the shape of a real map and it keeps every group two
+    // orders of magnitude inside the limit.
+    const TILE: usize = 16;
+    let tiles = q / TILE;
+    struct Group {
+        material: usize,
+        quads: Vec<(usize, usize)>,
+    }
+    struct Leaf {
+        groups: Vec<Group>,
+    }
+    let mut leaves: Vec<Leaf> = Vec::new();
+    for tj in 0..tiles {
+        for ti in 0..tiles {
+            let mut by_band: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+            for j in tj * TILE..(tj + 1) * TILE {
+                for i in ti * TILE..(ti + 1) * TILE {
+                    by_band[band(i, j)].push((i, j));
+                }
+            }
+            let groups: Vec<Group> = by_band
+                .into_iter()
+                .enumerate()
+                .filter(|(_, v)| !v.is_empty())
+                .map(|(material, quads)| Group { material, quads })
+                .collect();
+            if !groups.is_empty() {
+                leaves.push(Leaf { groups });
+            }
         }
     }
 
-    let total_quads: usize = quads.iter().map(|v| v.len()).sum();
+    let total_quads: usize = leaves
+        .iter()
+        .flat_map(|l| l.groups.iter())
+        .map(|g| g.quads.len())
+        .sum();
     let vc = total_quads * 4;
     let tc = total_quads * 2;
 
     out.extend_from_slice(&(vc as u32).to_le_bytes());
     let mut block = vec![0u8; vc * 80];
     let mut v = 0usize;
-    for (k, list) in quads.iter().enumerate() {
-        let tile = sheets[k].2.max(0.5);
-        for &(i, j) in list {
-            for (dx, dz) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)] {
-                let (x, y, z) = sample(i + dx, j + dz);
-                let o = v * 12;
-                block[o..o + 4].copy_from_slice(&x.to_le_bytes());
-                block[o + 4..o + 8].copy_from_slice(&y.to_le_bytes());
-                block[o + 8..o + 12].copy_from_slice(&z.to_le_bytes());
-
-                // Tiled by metres on the ground, so the grain is the size the sheets were
-                // drawn at whatever the mesh's own resolution is.
-                let uv = 12 * vc + v * 8;
-                block[uv..uv + 4].copy_from_slice(&(x / tile).to_le_bytes());
-                block[uv + 4..uv + 8].copy_from_slice(&(z / tile).to_le_bytes());
-
-                // The pair that is (1, 1) on every published vertex.
-                let pair = 44 * vc + v * 8;
-                block[pair..pair + 4].copy_from_slice(&1.0f32.to_le_bytes());
-                block[pair + 4..pair + 8].copy_from_slice(&1.0f32.to_le_bytes());
-
-                // Normal and tangent from the ground's own slope. A zero tangent is a divide
-                // by zero in anything that shades it, so both are unit vectors.
-                let gx = ((i + dx) * (syn.gw - 1) / q).min(syn.gw - 1);
-                let gy = ((j + dz) * (syn.gh - 1) / q).min(syn.gh - 1);
-                let dhx = (at(gx + 1, gy) - at(gx.saturating_sub(1), gy)) / (2.0 * syn.mps);
-                let dhz = (at(gx, gy + 1) - at(gx, gy.saturating_sub(1))) / (2.0 * syn.mps);
-                let inv = 1.0 / (dhx * dhx + 1.0 + dhz * dhz).sqrt();
-                let nm = 52 * vc + v * 12;
-                block[nm..nm + 4].copy_from_slice(&(-dhx * inv).to_le_bytes());
-                block[nm + 4..nm + 8].copy_from_slice(&inv.to_le_bytes());
-                block[nm + 8..nm + 12].copy_from_slice(&(-dhz * inv).to_le_bytes());
-                let tinv = 1.0 / (1.0 + dhx * dhx).sqrt();
-                let tg = 64 * vc + v * 16;
-                block[tg..tg + 4].copy_from_slice(&tinv.to_le_bytes());
-                block[tg + 4..tg + 8].copy_from_slice(&(dhx * tinv).to_le_bytes());
-                block[tg + 12..tg + 16].copy_from_slice(&1.0f32.to_le_bytes());
-                v += 1;
+    for leaf in &leaves {
+        for g in &leaf.groups {
+            let tile = sheets[g.material].2.max(0.5);
+            for &(i, j) in &g.quads {
+                for (dx, dz) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)] {
+                    let (x, y, z) = sample(i + dx, j + dz);
+                    let o = v * 12;
+                    block[o..o + 4].copy_from_slice(&x.to_le_bytes());
+                    block[o + 4..o + 8].copy_from_slice(&y.to_le_bytes());
+                    block[o + 8..o + 12].copy_from_slice(&z.to_le_bytes());
+                    let uv = 12 * vc + v * 8;
+                    block[uv..uv + 4].copy_from_slice(&(x / tile).to_le_bytes());
+                    block[uv + 4..uv + 8].copy_from_slice(&(z / tile).to_le_bytes());
+                    let pair = 44 * vc + v * 8;
+                    block[pair..pair + 4].copy_from_slice(&1.0f32.to_le_bytes());
+                    block[pair + 4..pair + 8].copy_from_slice(&1.0f32.to_le_bytes());
+                    let gx = ((i + dx) * (syn.gw - 1) / q).min(syn.gw - 1);
+                    let gy = ((j + dz) * (syn.gh - 1) / q).min(syn.gh - 1);
+                    let dhx = (at(gx + 1, gy) - at(gx.saturating_sub(1), gy)) / (2.0 * syn.mps);
+                    let dhz = (at(gx, gy + 1) - at(gx, gy.saturating_sub(1))) / (2.0 * syn.mps);
+                    let inv = 1.0 / (dhx * dhx + 1.0 + dhz * dhz).sqrt();
+                    let nm = 52 * vc + v * 12;
+                    block[nm..nm + 4].copy_from_slice(&(-dhx * inv).to_le_bytes());
+                    block[nm + 4..nm + 8].copy_from_slice(&inv.to_le_bytes());
+                    block[nm + 8..nm + 12].copy_from_slice(&(-dhz * inv).to_le_bytes());
+                    let tinv = 1.0 / (1.0 + dhx * dhx).sqrt();
+                    let tg = 64 * vc + v * 16;
+                    block[tg..tg + 4].copy_from_slice(&tinv.to_le_bytes());
+                    block[tg + 4..tg + 8].copy_from_slice(&(dhx * tinv).to_le_bytes());
+                    block[tg + 12..tg + 16].copy_from_slice(&1.0f32.to_le_bytes());
+                    v += 1;
+                }
             }
         }
     }
     out.extend_from_slice(&block);
 
-    // Indices are absolute into the whole vertex buffer — checked against a published map
-    // whose second group starts at vertex 178 and whose triangles there index 178 and up.
+    // Indices are absolute into the whole vertex buffer.
     out.extend_from_slice(&(tc as u32).to_le_bytes());
     for c in 0..total_quads {
         let b = (c * 4) as u32;
@@ -2013,39 +2044,43 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         }
     }
 
-    // One leaf node over the lot. A leaf's five words are `[0, 0, triangles in this node,
-    // first triangle, group count]`.
-    out.extend_from_slice(&1u32.to_le_bytes());
-    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
-    for h in &syn.heights {
-        lo = lo.min(*h);
-        hi = hi.max(*h);
-    }
-    let mut node = vec![0u8; 44];
-    let bounds = [
-        0.0f32,
-        lo,
-        0.0,
-        (syn.gw - 1) as f32 * syn.mps,
-        hi,
-        (syn.gh - 1) as f32 * syn.mps,
-    ];
-    for (k, val) in bounds.iter().enumerate() {
-        node[k * 4..k * 4 + 4].copy_from_slice(&val.to_le_bytes());
-    }
-    node[32..36].copy_from_slice(&(tc as u32).to_le_bytes());
-    node[40..44].copy_from_slice(&(n as u32).to_le_bytes());
-    out.extend_from_slice(&node);
+    // A leaf per tile. Its five words are `[0, 0, triangles in this node, first triangle,
+    // group count]`, and its bounds are the ground it actually covers.
+    out.extend_from_slice(&(leaves.len() as u32).to_le_bytes());
     let mut tri = 0u32;
     let mut vert = 0u32;
-    for (k, list) in quads.iter().enumerate() {
-        let qn = list.len() as u32;
-        // flag, material (zero-based), tri_start, tri_count, vert_start, vert_count
-        for w in [0u32, k as u32, tri, qn * 2, vert, qn * 4] {
-            out.extend_from_slice(&w.to_le_bytes());
+    for leaf in &leaves {
+        let first = tri;
+        let tris: u32 = leaf.groups.iter().map(|g| g.quads.len() as u32 * 2).sum();
+        let (mut lo_x, mut hi_x) = (f32::MAX, f32::MIN);
+        let (mut lo_y, mut hi_y) = (f32::MAX, f32::MIN);
+        let (mut lo_z, mut hi_z) = (f32::MAX, f32::MIN);
+        for g in &leaf.groups {
+            for &(i, j) in &g.quads {
+                for (dx, dz) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)] {
+                    let (x, y, z) = sample(i + dx, j + dz);
+                    lo_x = lo_x.min(x); hi_x = hi_x.max(x);
+                    lo_y = lo_y.min(y); hi_y = hi_y.max(y);
+                    lo_z = lo_z.min(z); hi_z = hi_z.max(z);
+                }
+            }
         }
-        tri += qn * 2;
-        vert += qn * 4;
+        let mut node = vec![0u8; 44];
+        for (k, val) in [lo_x, lo_y, lo_z, hi_x, hi_y, hi_z].iter().enumerate() {
+            node[k * 4..k * 4 + 4].copy_from_slice(&val.to_le_bytes());
+        }
+        node[32..36].copy_from_slice(&tris.to_le_bytes());
+        node[36..40].copy_from_slice(&first.to_le_bytes());
+        node[40..44].copy_from_slice(&(leaf.groups.len() as u32).to_le_bytes());
+        out.extend_from_slice(&node);
+        for g in &leaf.groups {
+            let qn = g.quads.len() as u32;
+            for w in [0u32, g.material as u32, tri, qn * 2, vert, qn * 4] {
+                out.extend_from_slice(&w.to_le_bytes());
+            }
+            tri += qn * 2;
+            vert += qn * 4;
+        }
     }
 
     // The word here is the **material** count, not the number of records that follow.
@@ -3467,6 +3502,47 @@ mod tests {
         assert_eq!((w(0), w(1), w(2)), (1, 1, 0), "the three leading words");
         assert_eq!((f(3), f(4)), (1.0, 1.0), "the two scales");
         assert_eq!(w(5), 0, "how many secondary maps follow");
+    }
+
+    /// No draw group may reach past a 16-bit index.
+    ///
+    /// Every group in a published map is small — Indiana carries 1313 of them over a million
+    /// vertices, the largest 8363 and the median 224, and not one is over 65535. Ours was
+    /// four groups over the whole terrain, one of them 182512 vertices, which is nearly three
+    /// times what a 16-bit index reaches. That overflows where the index buffer is built,
+    /// which is the stage the game was dying at.
+    #[test]
+    fn draw_groups_stay_inside_a_16_bit_index() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let m = map(&p, &s);
+        let n = u32::from_le_bytes(m[8..12].try_into().unwrap()) as usize;
+        let at = 12 + n * 56;
+        let vc = u32::from_le_bytes(m[at..at + 4].try_into().unwrap()) as usize;
+        let mut o = at + 4 + vc * 80;
+        let tc = u32::from_le_bytes(m[o..o + 4].try_into().unwrap()) as usize;
+        o += 4 + tc * 12;
+        let nodes = u32::from_le_bytes(m[o..o + 4].try_into().unwrap()) as usize;
+        o += 4;
+        let w = |m: &[u8], at: usize| u32::from_le_bytes(m[at..at + 4].try_into().unwrap());
+        let (mut tri, mut vert, mut groups) = (0u32, 0u32, 0usize);
+        for _ in 0..nodes {
+            let ng = w(&m, o + 40) as usize;
+            assert_eq!(w(&m, o + 36), tri, "a leaf's first triangle has to follow the last");
+            o += 44;
+            for g in 0..ng {
+                let at = o + g * 24;
+                let (ts, tn, vs, vn) = (w(&m, at + 8), w(&m, at + 12), w(&m, at + 16), w(&m, at + 20));
+                assert!(vn <= 65535, "a group spans {vn} vertices, past a 16-bit index");
+                assert_eq!((ts, vs), (tri, vert), "groups have to tile the buffers");
+                tri += tn;
+                vert += vn;
+                groups += 1;
+            }
+            o += ng * 24;
+        }
+        assert_eq!((tri as usize, vert as usize), (tc, vc), "every triangle in a group");
+        assert!(groups > 1, "one group over the whole terrain is what this test exists for");
     }
 
     #[test]
