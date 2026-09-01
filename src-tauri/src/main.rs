@@ -9296,6 +9296,7 @@ fn main() {
             // Notice the game starting (Steam or Play button) to re-arm FrostMod for the
             // session and check the mods folder is really on disk.
             sessionwatch::start(handle);
+            secure_launch::watch(handle);
             // Voice follows the rider onto whatever server they join, and off it again.
             // There is nothing to press: the supervisor is the whole of "joining a room".
             voice::session::start(handle);
