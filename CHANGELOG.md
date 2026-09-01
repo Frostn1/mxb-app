@@ -8,6 +8,9 @@
   none to copy starts flat rather than black.
 
 ### Changed
+- Protecting content is faster. A mod is locked for several buyers at once instead of one
+  after another, and each file is sealed in a single pass, so four buyers now cost barely
+  more than one and a folder of paints finishes in a fraction of the time.
 - Track diagnostics keep protected tracks protected: for a sealed track the report gives
   the layout probe's findings without listing the files inside it or their contents.
 - Paint Studio and the Designer open on the KTM 250 SX-F when it is installed, rather than on
