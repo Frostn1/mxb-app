@@ -56,22 +56,57 @@ pub fn record_asset(app: &AppHandle, asset: SecureAsset) -> Result<(), String> {
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
-/// Where `mxbsecure.dll` is. Beside the app's own executable, unless `MXB_SECURE_DLL` points
-/// elsewhere — the build places it next to the binary, so there is nothing to configure.
-pub fn dll_path() -> Option<PathBuf> {
+/// Where the shipped `mxbsecure.dll` is found, in priority order: an explicit override, the
+/// Tauri resource dir (a packaged build bundles it there), then beside the app's own
+/// executable (a dev build's `build.rs` copies it there). The build places it, so there is
+/// nothing to configure.
+fn source_dll(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(p) = std::env::var("MXB_SECURE_DLL") {
         let p = PathBuf::from(p);
-        return p.exists().then_some(p);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(res) = app.path().resource_dir() {
+        let p = res.join("mxbsecure.dll");
+        if p.exists() {
+            return Some(p);
+        }
     }
     let exe = std::env::current_exe().ok()?;
     let p = exe.parent()?.join("mxbsecure.dll");
     p.exists().then_some(p)
 }
 
-/// Write the manifest the DLL reads — `manifest.tsv` beside the DLL, one tab-separated line
-/// per asset: game name, blob, `.mxbkey`.
-fn write_manifest(assets: &[SecureAsset], dll: &std::path::Path) -> Result<(), String> {
-    let dir = dll.parent().ok_or("dll has no directory")?;
+/// The writable directory the DLL is run from — `<app-data>/secure/`. The shipped DLL may sit
+/// in a read-only place (a packaged app's resource dir under Program Files), and the DLL needs
+/// to read a `manifest.tsv` written beside it, so it is staged here where both can live.
+fn run_dir(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_local_data_dir().ok()?.join("secure");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+/// Stage the DLL into the run dir, copying it only when it isn't already the same bytes — so a
+/// running game holding the previous copy open doesn't block a launch, but an updated DLL does
+/// replace it.
+fn stage_dll(app: &AppHandle, run_dir: &std::path::Path) -> Result<PathBuf, String> {
+    let src = source_dll(app).ok_or("no mxbsecure.dll shipped with the app")?;
+    let dst = run_dir.join("mxbsecure.dll");
+    let same = std::fs::metadata(&dst)
+        .ok()
+        .zip(std::fs::metadata(&src).ok())
+        .map(|(a, b)| a.len() == b.len())
+        .unwrap_or(false);
+    if !same {
+        std::fs::copy(&src, &dst).map_err(|e| format!("staging the DLL: {e}"))?;
+    }
+    Ok(dst)
+}
+
+/// Write the manifest the DLL reads — `manifest.tsv` in the run dir, one tab-separated line per
+/// asset: game name, blob, `.mxbkey`.
+fn write_manifest(assets: &[SecureAsset], dir: &std::path::Path) -> Result<(), String> {
     let mut out = String::new();
     for a in assets {
         out.push_str(&format!("{}\t{}\t{}\n", a.game_name, a.blob_path, a.mxbkey_path));
@@ -79,19 +114,26 @@ fn write_manifest(assets: &[SecureAsset], dll: &std::path::Path) -> Result<(), S
     std::fs::write(dir.join("manifest.tsv"), out).map_err(|e| e.to_string())
 }
 
-/// Arm secure content for the session that just started: write the manifest and inject the
-/// DLL into the running game. Best-effort and quiet on the common "nothing to secure" — a
-/// player with no locked content should see no trace of this.
+/// Arm secure content for the session that just started: stage the DLL, write the manifest
+/// beside it, and inject. Best-effort and quiet on the common "nothing to secure" — a player
+/// with no locked content should see no trace of this.
 pub fn arm(app: &AppHandle) {
     let assets = load_assets(app);
     if assets.is_empty() {
         return;
     }
-    let Some(dll) = dll_path() else {
-        log::warn!("[secure] have {} secured asset(s) but no mxbsecure.dll to inject", assets.len());
+    let Some(dir) = run_dir(app) else {
+        log::warn!("[secure] no writable run dir for secured content");
         return;
     };
-    if let Err(e) = write_manifest(&assets, &dll) {
+    let dll = match stage_dll(app, &dir) {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("[secure] {e} (have {} secured asset(s))", assets.len());
+            return;
+        }
+    };
+    if let Err(e) = write_manifest(&assets, &dir) {
         log::warn!("[secure] couldn't write the manifest: {e}");
         return;
     }

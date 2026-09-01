@@ -21,10 +21,33 @@ fn main() {
     }
     println!("cargo::rerun-if-changed=src/mxbsecure.rs");
 
+    // Place the injected client DLL next to the built executable, so a dev build can find it
+    // beside itself with nothing to copy by hand. The file is gitignored and put here by
+    // `mxbapp-private/sync.sh`; absent in a public build, where this is a no-op.
+    stage_secure_dll();
+
     shop_credentials();
     release_tag();
 
     tauri_build::build()
+}
+
+/// Copy `src/mxbsecure.dll` (if present) to the target dir beside the exe.
+fn stage_secure_dll() {
+    println!("cargo::rerun-if-changed=src/mxbsecure.dll");
+    let src = Path::new("src/mxbsecure.dll");
+    if !src.exists() {
+        return;
+    }
+    // OUT_DIR is `<target>/<profile>/build/<crate>-<hash>/out`; the exe is three levels up.
+    let out_dir = std::env::var("OUT_DIR").unwrap_or_default();
+    let Some(target_dir) = Path::new(&out_dir).ancestors().nth(3) else {
+        return;
+    };
+    let dst = target_dir.join("mxbsecure.dll");
+    if let Err(e) = std::fs::copy(src, &dst) {
+        println!("cargo::warning=could not stage mxbsecure.dll: {e}");
+    }
 }
 
 /// Bake in the git tag this build came from, when there is one.
