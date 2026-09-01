@@ -2716,6 +2716,22 @@ fn build_bike_model(
             }
         }
     }
+    // ...and the normal map belonging to each of them, which is what gives a shroud its
+    // curve and a seat its grip in the preview. Only for sheets something actually draws:
+    // a bike embeds normals for parts it no longer uses, and each one is a megabyte of the
+    // texture store spent on pixels nothing hangs off.
+    let drawn: std::collections::HashSet<String> = nodes
+        .iter()
+        .flat_map(|n| n.texture.iter().chain(n.submeshes.iter().filter_map(|s| s.texture.as_ref())))
+        .map(|t| t.to_ascii_lowercase())
+        .collect();
+    for data in &used {
+        for tex in paint::extract_edf_normal_maps(data, |base_name| drawn.contains(base_name)) {
+            if seen.insert(tex.name.to_ascii_lowercase()) {
+                base.push(tex);
+            }
+        }
+    }
     let mut paints: Vec<(BikePaint, bool)> = pnt_jobs
         .par_iter()
         .filter_map(|(name, data, shipped, path)| {
@@ -2735,15 +2751,7 @@ fn build_bike_model(
     let base_count = base.len();
     let t_textures = t0.elapsed();
 
-    let bound: std::collections::HashSet<String> = nodes
-        .iter()
-        .flat_map(|n| {
-            n.texture
-                .iter()
-                .chain(n.submeshes.iter().filter_map(|s| s.texture.as_ref()))
-        })
-        .map(|t| t.to_ascii_lowercase())
-        .collect();
+    let bound = &drawn;
     for (p, shipped) in &mut paints {
         p.changes_preview = *shipped
             || (!bound.is_empty()
