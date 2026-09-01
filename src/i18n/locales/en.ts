@@ -774,6 +774,9 @@ export const en = {
   "settings.autoRunFrostmod": "Run FrostMod automatically",
   "settings.autoRunFrostmodDesc":
     "Start FrostMod in the background whenever MXB App opens.",
+  "settings.frostmodArgs": "FrostMod flags",
+  "settings.frostmodArgsDesc":
+    "Extra command line for FrostMod, typed as you would in a terminal. Applies the next time FrostMod starts. Leave it empty unless you've been given a flag to try.",
   "settings.watchModsReload": "Auto-reload on folder changes",
   "settings.watchModsReloadDesc":
     "Reload the game automatically when tracks or bikes are added to your mods folder — even downloaded manually outside MXB App.",

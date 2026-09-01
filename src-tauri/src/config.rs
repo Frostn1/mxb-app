@@ -67,6 +67,11 @@ pub struct AppConfig {
     pub autostart_binding_rev: u32,
     /// Launch FrostMod automatically when the app opens.
     pub auto_run_frostmod: bool,
+    /// Extra command-line flags for `frostmod.exe`, exactly as they would be typed. Empty
+    /// for everyone who hasn't been asked for one: these are FrostMod's diagnostics, and
+    /// they carry their own warnings (`--force-overjump-off` is offline-only). Appended
+    /// after the flags we always send, so a flag typed here wins a repeat.
+    pub frostmod_args: String,
     /// Re-run the game's profile loader in place after applying a preset (Windows-only).
     pub instant_refresh: bool,
     /// Watch `<mods_path>/mods` and signal FrostMod to reload when tracks/bikes are
@@ -251,6 +256,7 @@ impl Default for AppConfig {
             // its login item still names the old binary.
             autostart_binding_rev: 0,
             auto_run_frostmod: true,
+            frostmod_args: String::new(),
             instant_refresh: true,
             watch_mods_reload: true,
             welcome_seen: false,
