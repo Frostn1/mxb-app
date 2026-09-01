@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-01
+
+### Added
+- Track generation reads a published track's own centreline out of its height file, so a real
+  lap's corners, their radii and its straights can be measured directly rather than guessed at.
+- A generated track carries its centreline too, and is measured by the same code as a
+  published one.
+
+### Changed
+- Generated laps are laid out the way published tracks are built: corners made of several arcs
+  that tighten into the apex and release out of it, far more corners than straights, and a lap
+  that wanders instead of running round a rounded rectangle.
+- Jumps come in a mix — a handful of big ones and a lot of small ground — instead of one size
+  repeated down the lap.
+- Ruts, berms and banking are built to numbers measured off ten published tracks.
+- Straights carry worn ground rather than being smooth between the corners.
+
+### Fixed
+- A corner banks the outside of the turn.
+
 ## 2026-09-01 — v0.13.2 — Tracks that load
 
 ### Added

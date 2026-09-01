@@ -201,6 +201,56 @@ impl Segment {
     }
 }
 
+/// Under this many degrees an arc is a drift, not a corner — a builder nudging a straight
+/// back onto line.
+pub const CORNER_DEG: f32 = 1.0;
+
+/// A corner, as a rider meets it: a run of same-way arcs uninterrupted by anything longer
+/// than a nudge, reported as `(degrees turned, tightest radius)`.
+///
+/// Published corners are never one arc. Indiana's are three to eighteen, each a little
+/// tighter or looser than the last, and counting them singly says a track is made of 2° bends
+/// when what you actually ride is a 160° turn.
+pub fn turns(segments: &[Segment]) -> Vec<(f32, f32)> {
+    let mut out: Vec<(f32, f32)> = Vec::new();
+    let mut cur: Option<(f32, f32, f32)> = None; // way, degrees, tightest
+    for seg in segments {
+        match *seg {
+            Segment::Arc { radius, angle, .. }
+                if radius != 0.0 && angle.abs() >= CORNER_DEG =>
+            {
+                // The radius carries which way, and only the radius — `stations` sweeps
+                // `angle.abs()` and takes its direction from `radius.signum()`. Reading the
+                // sign off the product merges a left turn into the right one before it,
+                // because a program that signs both writes them the same way.
+                let way = radius.signum();
+                match cur {
+                    Some((w, deg, r)) if w == way => {
+                        cur = Some((w, deg + angle.abs(), r.min(radius.abs())))
+                    }
+                    other => {
+                        if let Some((_, deg, r)) = other {
+                            out.push((deg, r));
+                        }
+                        cur = Some((way, angle.abs(), radius.abs()));
+                    }
+                }
+            }
+            _ => {
+                if seg.length() > 8.0 {
+                    if let Some((_, deg, r)) = cur.take() {
+                        out.push((deg, r));
+                    }
+                }
+            }
+        }
+    }
+    if let Some((_, deg, r)) = cur {
+        out.push((deg, r));
+    }
+    out
+}
+
 impl Segment {
     pub fn length(&self) -> f32 {
         match self {
@@ -332,10 +382,14 @@ impl Feature {
 
 /// A worked example of a track program: what a good one looks like.
 ///
-/// Point-symmetric — the same half-lap twice, each turning 180°, so it closes on itself
-/// exactly whatever the straights are doing. Built to the corpus: 13 m wide, jumps standing
-/// about 1.2 m off the ground and spaced about 16 m apart, jumps on the straights and berms
-/// in the corners.
+/// Laid out to the grammar published tracks are actually built in, measured off their own
+/// centrelines. Sixteen corners, each a run of four arcs that tightens and releases rather
+/// than one radius held all the way round; eighty segments of which sixty-four are arcs; and
+/// 2228° of turning against a rounded rectangle's 900. Thirty-one features on a 1.7 km lap —
+/// six of them over 2.2 m and the rest small ground, which is the ratio Indiana has.
+///
+/// The straights close it. The corners fix the heading at exactly 360°, so the sixteen
+/// straight lengths are what bring the finish back to the start, and they were solved for.
 ///
 /// This is the schema's own test. It is parsed by the test suite, synthesised, and measured
 /// against published tracks, so it cannot drift away from what the code accepts.
@@ -343,81 +397,127 @@ pub const EXAMPLE: &str = r#"{
       "name": "Corpus National",
       "author": "MXB App",
       "location": "Generated",
-      "width": 13.0,
+      "width": 12.0,
       "terrain": {
-        "sizeX": 700.0, "sizeZ": 700.0, "samples": 2049, "scale": 45.0,
-        "relief": { "amplitude": 11.0, "wavelength": 210.0, "seed": 7 }
+        "sizeX": 520.0, "sizeZ": 540.0, "samples": 2049, "scale": 42.0,
+        "relief": { "amplitude": 10.0, "wavelength": 170.0, "seed": 7 }
       },
-      "start": { "x": 180.0, "z": 150.0, "angle": 0.0 },
+      "start": { "x": 218.4, "z": 381.4, "angle": 0.0 },
       "segments": [
-        { "kind": "straight", "length": 230.0 },
-        { "kind": "arc", "radius": 25.0, "angle": 90.0 },
-        { "kind": "straight", "length": 80.0 },
-        { "kind": "arc", "radius": -18.0, "angle": 75.0 },
-        { "kind": "straight", "length": 120.0 },
-        { "kind": "arc", "radius": 22.0, "angle": 100.0 },
-        { "kind": "straight", "length": 70.0 },
-        { "kind": "arc", "radius": -15.0, "angle": 65.0 },
-        { "kind": "straight", "length": 90.0 },
-        { "kind": "arc", "radius": 20.0, "angle": 130.0 },
-        { "kind": "straight", "length": 230.0 },
-        { "kind": "arc", "radius": 25.0, "angle": 90.0 },
-        { "kind": "straight", "length": 80.0 },
-        { "kind": "arc", "radius": -18.0, "angle": 75.0 },
-        { "kind": "straight", "length": 120.0 },
-        { "kind": "arc", "radius": 22.0, "angle": 100.0 },
-        { "kind": "straight", "length": 70.0 },
-        { "kind": "arc", "radius": -15.0, "angle": 65.0 },
-        { "kind": "straight", "length": 90.0 },
-        { "kind": "arc", "radius": 20.0, "angle": 130.0 }
+        { "kind": "straight", "length": 78.7 },
+        { "kind": "arc", "radius": 24.7, "angle": 30.2 },
+        { "kind": "arc", "radius": 12.8, "angle": 50.4 },
+        { "kind": "arc", "radius": 9.5, "angle": 57.1 },
+        { "kind": "arc", "radius": 18.1, "angle": 30.2 },
+        { "kind": "straight", "length": 88.3 },
+        { "kind": "arc", "radius": -33.8, "angle": 22.1 },
+        { "kind": "arc", "radius": -17.6, "angle": 36.9 },
+        { "kind": "arc", "radius": -13.0, "angle": 41.8 },
+        { "kind": "arc", "radius": -24.7, "angle": 22.1 },
+        { "kind": "straight", "length": 60.3 },
+        { "kind": "arc", "radius": 36.4, "angle": 27.4 },
+        { "kind": "arc", "radius": 18.9, "angle": 45.6 },
+        { "kind": "arc", "radius": 14.0, "angle": 51.7 },
+        { "kind": "arc", "radius": 26.6, "angle": 27.4 },
+        { "kind": "straight", "length": 75.2 },
+        { "kind": "arc", "radius": -26.0, "angle": 19.3 },
+        { "kind": "arc", "radius": -13.5, "angle": 32.1 },
+        { "kind": "arc", "radius": -10.0, "angle": 36.4 },
+        { "kind": "arc", "radius": -19.0, "angle": 19.3 },
+        { "kind": "straight", "length": 73.6 },
+        { "kind": "arc", "radius": 22.1, "angle": 31.7 },
+        { "kind": "arc", "radius": 11.5, "angle": 52.8 },
+        { "kind": "arc", "radius": 8.5, "angle": 59.8 },
+        { "kind": "arc", "radius": 16.1, "angle": 31.7 },
+        { "kind": "straight", "length": 62.0 },
+        { "kind": "arc", "radius": -41.6, "angle": 23.6 },
+        { "kind": "arc", "radius": -21.6, "angle": 39.3 },
+        { "kind": "arc", "radius": -16.0, "angle": 44.5 },
+        { "kind": "arc", "radius": -30.4, "angle": 23.6 },
+        { "kind": "straight", "length": 79.8 },
+        { "kind": "arc", "radius": 44.2, "angle": 25.4 },
+        { "kind": "arc", "radius": 23.0, "angle": 42.3 },
+        { "kind": "arc", "radius": 17.0, "angle": 47.9 },
+        { "kind": "arc", "radius": 32.3, "angle": 25.4 },
+        { "kind": "straight", "length": 75.9 },
+        { "kind": "arc", "radius": -29.9, "angle": 17.3 },
+        { "kind": "arc", "radius": -15.5, "angle": 28.8 },
+        { "kind": "arc", "radius": -11.5, "angle": 32.6 },
+        { "kind": "arc", "radius": -21.8, "angle": 17.3 },
+        { "kind": "straight", "length": 48.0 },
+        { "kind": "arc", "radius": 28.6, "angle": 28.8 },
+        { "kind": "arc", "radius": 14.9, "angle": 48.0 },
+        { "kind": "arc", "radius": 11.0, "angle": 54.4 },
+        { "kind": "arc", "radius": 20.9, "angle": 28.8 },
+        { "kind": "straight", "length": 108.7 },
+        { "kind": "arc", "radius": -24.7, "angle": 20.7 },
+        { "kind": "arc", "radius": -12.8, "angle": 34.5 },
+        { "kind": "arc", "radius": -9.5, "angle": 39.1 },
+        { "kind": "arc", "radius": -18.1, "angle": 20.7 },
+        { "kind": "straight", "length": 68.4 },
+        { "kind": "arc", "radius": 23.4, "angle": 33.3 },
+        { "kind": "arc", "radius": 12.2, "angle": 55.5 },
+        { "kind": "arc", "radius": 9.0, "angle": 62.9 },
+        { "kind": "arc", "radius": 17.1, "angle": 33.3 },
+        { "kind": "straight", "length": 57.3 },
+        { "kind": "arc", "radius": -37.7, "angle": 25.2 },
+        { "kind": "arc", "radius": -19.6, "angle": 42.0 },
+        { "kind": "arc", "radius": -14.5, "angle": 47.6 },
+        { "kind": "arc", "radius": -27.5, "angle": 25.2 },
+        { "kind": "straight", "length": 88.2 },
+        { "kind": "arc", "radius": 40.3, "angle": 26.8 },
+        { "kind": "arc", "radius": 20.9, "angle": 44.7 },
+        { "kind": "arc", "radius": 15.5, "angle": 50.7 },
+        { "kind": "arc", "radius": 29.4, "angle": 26.8 },
+        { "kind": "straight", "length": 67.0 },
+        { "kind": "arc", "radius": -27.3, "angle": 18.7 },
+        { "kind": "arc", "radius": -14.2, "angle": 31.2 },
+        { "kind": "arc", "radius": -10.5, "angle": 35.4 },
+        { "kind": "arc", "radius": -19.9, "angle": 18.7 },
+        { "kind": "straight", "length": 68.4 },
+        { "kind": "arc", "radius": 31.2, "angle": 29.3 },
+        { "kind": "arc", "radius": 16.2, "angle": 48.9 },
+        { "kind": "arc", "radius": 12.0, "angle": 55.4 },
+        { "kind": "arc", "radius": 22.8, "angle": 29.3 },
+        { "kind": "straight", "length": 78.0 },
+        { "kind": "arc", "radius": -46.8, "angle": 21.2 },
+        { "kind": "arc", "radius": -24.3, "angle": 35.4 },
+        { "kind": "arc", "radius": -18.0, "angle": 40.1 },
+        { "kind": "arc", "radius": -34.2, "angle": 21.2 }
       ],
       "features": [
-        { "kind": "tabletop", "at": 25.0, "length": 22.0, "height": 1.5 },
-        { "kind": "roller", "at": 59.0, "length": 15.0, "height": 0.85 },
-        { "kind": "tabletop", "at": 86.0, "length": 26.0, "height": 1.6 },
-        { "kind": "double", "at": 124.0, "height": 1.4, "gap": 11.0, "lip": 6.5 },
-        { "kind": "roller", "at": 170.0, "length": 13.0, "height": 0.7 },
-        { "kind": "tabletop", "at": 195.0, "length": 20.0, "height": 1.3 },
-        { "kind": "berm", "at": 232.0, "length": 37.0, "height": 1.7 },
-        { "kind": "tabletop", "at": 278.0, "length": 22.0, "height": 1.5 },
-        { "kind": "stepUp", "at": 300.0, "length": 30.0, "height": 3.0 },
-        { "kind": "roller", "at": 312.0, "length": 15.0, "height": 0.85 },
-        { "kind": "berm", "at": 351.0, "length": 21.0, "height": 1.7 },
-        { "kind": "double", "at": 382.0, "height": 1.4, "gap": 11.0, "lip": 6.5 },
-        { "kind": "roller", "at": 428.0, "length": 13.0, "height": 0.7 },
-        { "kind": "whoops", "at": 452.0, "count": 5, "spacing": 6.0, "height": 0.7 },
-        { "kind": "tabletop", "at": 453.0, "length": 20.0, "height": 1.3 },
-        { "kind": "berm", "at": 495.0, "length": 34.0, "height": 1.7 },
-        { "kind": "roller", "at": 540.0, "length": 15.0, "height": 0.85 },
-        { "kind": "tabletop", "at": 567.0, "length": 26.0, "height": 1.6 },
-        { "kind": "berm", "at": 603.0, "length": 15.0, "height": 1.7 },
-        { "kind": "double", "at": 628.0, "height": 1.4, "gap": 11.0, "lip": 6.5 },
-        { "kind": "stepUp", "at": 640.0, "length": 30.0, "height": -3.0 },
-        { "kind": "roller", "at": 674.0, "length": 13.0, "height": 0.7 },
-        { "kind": "berm", "at": 710.0, "length": 42.0, "height": 1.7 },
-        { "kind": "tabletop", "at": 778.5, "length": 22.0, "height": 1.5 },
-        { "kind": "roller", "at": 812.5, "length": 15.0, "height": 0.85 },
-        { "kind": "tabletop", "at": 839.5, "length": 26.0, "height": 1.6 },
-        { "kind": "double", "at": 877.5, "height": 1.4, "gap": 11.0, "lip": 6.5 },
-        { "kind": "roller", "at": 923.5, "length": 13.0, "height": 0.7 },
-        { "kind": "tabletop", "at": 948.5, "length": 20.0, "height": 1.3 },
-        { "kind": "berm", "at": 985.5, "length": 37.0, "height": 1.7 },
-        { "kind": "tabletop", "at": 1031.5, "length": 22.0, "height": 1.5 },
-        { "kind": "stepUp", "at": 1053.5, "length": 30.0, "height": 3.0 },
-        { "kind": "roller", "at": 1065.5, "length": 15.0, "height": 0.85 },
-        { "kind": "berm", "at": 1104.5, "length": 21.0, "height": 1.7 },
-        { "kind": "double", "at": 1135.5, "height": 1.4, "gap": 11.0, "lip": 6.5 },
-        { "kind": "roller", "at": 1181.5, "length": 13.0, "height": 0.7 },
-        { "kind": "whoops", "at": 1205.5, "count": 5, "spacing": 6.0, "height": 0.7 },
-        { "kind": "tabletop", "at": 1206.5, "length": 20.0, "height": 1.3 },
-        { "kind": "berm", "at": 1248.5, "length": 34.0, "height": 1.7 },
-        { "kind": "roller", "at": 1293.5, "length": 15.0, "height": 0.85 },
-        { "kind": "tabletop", "at": 1320.5, "length": 26.0, "height": 1.6 },
-        { "kind": "berm", "at": 1356.5, "length": 15.0, "height": 1.7 },
-        { "kind": "double", "at": 1381.5, "height": 1.4, "gap": 11.0, "lip": 6.5 },
-        { "kind": "stepUp", "at": 1393.5, "length": 30.0, "height": -3.0 },
-        { "kind": "roller", "at": 1427.5, "length": 13.0, "height": 0.7 },
-        { "kind": "berm", "at": 1463.5, "length": 42.0, "height": 1.7 }
+        { "kind": "tabletop", "at": 23.7, "length": 21.6, "height": 1.70 },
+        { "kind": "tabletop", "at": 55.0, "length": 21.1, "height": 1.50 },
+        { "kind": "tabletop", "at": 148.1, "length": 30.3, "height": 3.10 },
+        { "kind": "whoops", "at": 184.3, "count": 5, "spacing": 4.8, "height": 0.54 },
+        { "kind": "tabletop", "at": 283.9, "length": 24.9, "height": 1.50 },
+        { "kind": "double", "at": 394.6, "height": 1.50, "gap": 10.3, "lip": 5.5 },
+        { "kind": "double", "at": 424.2, "height": 1.70, "gap": 11.1, "lip": 5.5 },
+        { "kind": "double", "at": 498.4, "height": 2.50, "gap": 11.2, "lip": 6.0 },
+        { "kind": "whoops", "at": 527.2, "count": 7, "spacing": 4.2, "height": 0.64 },
+        { "kind": "berm", "at": 572.4, "length": 8.9, "height": 1.70 },
+        { "kind": "tabletop", "at": 609.8, "length": 24.4, "height": 1.40 },
+        { "kind": "double", "at": 632.8, "height": 1.60, "gap": 11.3, "lip": 5.5 },
+        { "kind": "tabletop", "at": 733.1, "length": 34.0, "height": 2.80 },
+        { "kind": "stepUp", "at": 765.0, "length": 24.7, "height": 1.90 },
+        { "kind": "roller", "at": 876.9, "length": 12.4, "height": 0.57 },
+        { "kind": "roller", "at": 906.9, "length": 15.6, "height": 0.61 },
+        { "kind": "whoops", "at": 983.8, "count": 6, "spacing": 4.3, "height": 0.51 },
+        { "kind": "double", "at": 1079.0, "height": 2.70, "gap": 16.6, "lip": 6.0 },
+        { "kind": "roller", "at": 1109.9, "length": 13.3, "height": 0.73 },
+        { "kind": "tabletop", "at": 1140.9, "length": 21.7, "height": 1.20 },
+        { "kind": "double", "at": 1215.1, "height": 1.50, "gap": 9.6, "lip": 5.5 },
+        { "kind": "roller", "at": 1241.3, "length": 13.5, "height": 0.82 },
+        { "kind": "berm", "at": 1287.8, "length": 9.9, "height": 1.70 },
+        { "kind": "roller", "at": 1336.2, "length": 15.2, "height": 0.45 },
+        { "kind": "tabletop", "at": 1446.0, "length": 30.8, "height": 3.10 },
+        { "kind": "roller", "at": 1482.1, "length": 14.1, "height": 0.84 },
+        { "kind": "whoops", "at": 1591.6, "count": 6, "spacing": 5.1, "height": 0.53 },
+        { "kind": "tabletop", "at": 1617.1, "length": 18.1, "height": 1.20 },
+        { "kind": "double", "at": 1688.6, "height": 3.50, "gap": 12.8, "lip": 6.0 },
+        { "kind": "stepUp", "at": 1714.8, "length": 19.7, "height": 1.60 },
+        { "kind": "whoops", "at": 1812.5, "count": 7, "spacing": 5.0, "height": 0.51 },
+        { "kind": "roller", "at": 1843.5, "length": 13.6, "height": 0.45 }
       ]
     }"#;
 

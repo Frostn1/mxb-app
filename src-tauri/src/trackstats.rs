@@ -153,6 +153,9 @@ pub struct TrackStats {
     /// Why there is no corridor, when there isn't one. A track that can't be measured is
     /// evidence about the corpus, not a gap in it.
     pub corridor_note: Option<String>,
+    /// What the track's own centreline says, when it carries one. Independent of the
+    /// corridor: this is the only thing that measures a track which painted no surfaces.
+    pub ridden: Option<RiddenStats>,
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +230,17 @@ pub fn analyse(path: &Path) -> Result<TrackStats> {
         })
         .collect();
 
+    // Measured at the file's own resolution rather than the masks'. A groove is a metre
+    // across and a quarter-metre sample can just hold one; halving the grid to match a
+    // 1024-cell mask erases every rut on the track.
+    let ridden = crate::trackline::read(block).and_then(|lap| {
+        let (fw, fh, v) = heightfield::read_grid(&bytes, &layout, layout.width.max(layout.height));
+        ridden(
+            &lap,
+            &Grid { w: fw as usize, h: fh as usize, size_x, size_z, v },
+        )
+    });
+
     let (corridor, corridor_note) = match corridor_mask(&covers, gw, gh, mps) {
         Ok((rule, mask)) => {
             // `FROST_SHAPES=/tmp/dir` draws what was found. Every figure below is a summary of
@@ -271,6 +285,7 @@ pub fn analyse(path: &Path) -> Result<TrackStats> {
         surfaces,
         corridor,
         corridor_note,
+        ridden,
     })
 }
 
@@ -765,6 +780,370 @@ fn material_name(names: &[String], id: u32) -> String {
         })
 }
 
+// ---------------------------------------------------------------------------
+// The riding line, read rather than found
+// ---------------------------------------------------------------------------
+
+/// Metres of centreline between the stations the profiles are taken at.
+const RIDDEN_STEP_M: f32 = 0.5;
+
+/// How far either side of the line a profile reaches, and how finely it is sampled.
+const RIDDEN_REACH_M: f32 = 12.0;
+const RIDDEN_LATERAL_M: f32 = 0.125;
+
+/// Half the riding line, for the purpose of measuring what is on it. Deliberately a constant
+/// rather than the corridor's own width: a rut is only a rut where riders go, and a corridor
+/// rule that includes the graded shoulder would count the field's texture as grooves.
+const RIDDEN_HALF_M: f32 = 5.5;
+
+/// Metres the cross-profile is smoothed over before the grooves are read off it. Wide enough
+/// that a rut is a departure from the profile rather than part of it, narrow enough not to
+/// swallow the camber.
+const RUT_DETREND_M: f32 = 6.0;
+
+/// How far a groove has to stand below the crests either side of it to be one.
+const RUT_PROMINENCE_M: f32 = 0.05;
+
+/// A corner, for the purpose of measuring what corners do to the ground.
+const RIDDEN_CORNER_R_M: f32 = 40.0;
+
+/// Metres the along-line elevation is smoothed over to separate the jumps from the land.
+const RIDDEN_BASE_M: f32 = 60.0;
+
+/// How far a lip stands above the land under it before it is one.
+const RIDDEN_LIP_M: f32 = 0.30;
+
+/// A lip of this height is a jump; below it is a roller. Indiana has both, and pooling them
+/// says the average jump on a national is knee-high.
+const RIDDEN_BIG_LIP_M: f32 = 1.0;
+
+/// What a published track's own centreline says, and what the ground either side of it looks
+/// like.
+///
+/// The corridor rule in [`corridor_mask`] measures the tracks that painted their riding line.
+/// This measures the ones that carry a centreline, which is a different and larger set — and
+/// a better one, because it knows where the line *is* rather than inferring it, so a groove
+/// can be measured across the track instead of merely as roughness.
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RiddenStats {
+    pub lap_m: f32,
+    pub segments: usize,
+    pub arcs: usize,
+    pub straights: usize,
+    pub straight_m: Spread,
+    pub arc_radius_m: Spread,
+    /// Runs of same-way arcs of 25° or more — what a rider would call a corner.
+    pub turns: usize,
+    pub turn_deg: Spread,
+    /// The tightest radius inside each turn: the bit that actually has to be made.
+    pub turn_radius_m: Spread,
+    /// Every degree the lap turns through, both ways. A lap that closes turns 360° net; this
+    /// is the gross figure, and it is what says whether a track is a shape or a scribble.
+    pub total_turn_deg: f32,
+
+    /// Grooves counted across the line, and how far apart they lie.
+    pub rut_lines: f32,
+    pub rut_spacing_m: Spread,
+    pub rut_depth_corner_m: Spread,
+    pub rut_depth_straight_m: Spread,
+
+    /// How far the outside and inside edges of a corner stand above the lowest ground on it.
+    pub berm_outside_m: f32,
+    pub berm_inside_m: f32,
+    /// Cross-slope through a corner; positive banks into it.
+    pub bank_deg: Spread,
+
+    pub lips_per_km: f32,
+    pub big_lips_per_km: f32,
+    pub lip_height_m: Spread,
+    pub big_lip_height_m: Spread,
+    /// Steepest face over three metres, either side of a lip.
+    pub lip_face_deg: Spread,
+    pub lip_spacing_m: Spread,
+}
+
+/// One station of the centreline, with the ground across it.
+struct Cross {
+    radius: f32,
+    /// Heights across the line, from `-RIDDEN_REACH_M` to `+RIDDEN_REACH_M`. Index 0 is the
+    /// rider's left.
+    p: Vec<f32>,
+}
+
+pub fn ridden(lap: &crate::trackline::Lap, g: &Grid) -> Option<RiddenStats> {
+    let n = (2.0 * RIDDEN_REACH_M / RIDDEN_LATERAL_M) as usize + 1;
+    let u_at = |i: usize| i as f32 * RIDDEN_LATERAL_M - RIDDEN_REACH_M;
+    let inside: Vec<usize> = (0..n).filter(|i| u_at(*i).abs() <= RIDDEN_HALF_M).collect();
+    if inside.len() < 8 {
+        return None;
+    }
+
+    // Walk the lap the way its own records do: each segment states where it starts, so a
+    // station is placed from its own segment rather than integrated from the one before.
+    let mut cross: Vec<Cross> = Vec::new();
+    let mut along: Vec<f32> = Vec::new();
+    for seg in &lap.segments {
+        let steps = ((seg.length / RIDDEN_STEP_M) as usize).max(1);
+        for k in 0..steps {
+            let d = k as f32 * seg.length / steps as f32;
+            let (x, z, h) = if seg.radius == 0.0 {
+                let (hx, hz) = crate::trackprog::heading_vector(seg.heading);
+                (seg.x + d * hx, seg.z + d * hz, seg.heading)
+            } else {
+                let h = seg.heading + d / seg.radius;
+                (
+                    seg.x + seg.radius * (seg.heading.cos() - h.cos()),
+                    seg.z + seg.radius * (h.sin() - seg.heading.sin()),
+                    h,
+                )
+            };
+            let (rx, rz) = crate::trackprog::right_vector(h);
+            let p: Vec<f32> = (0..n)
+                .map(|i| {
+                    let u = u_at(i);
+                    g.at(x + u * rx, z + u * rz)
+                })
+                .collect();
+            // The line's own height, taken over the middle of it so a single groove doesn't
+            // carry the whole lap's elevation.
+            let mut band: Vec<f32> = (0..n)
+                .filter(|i| u_at(*i).abs() <= 3.0)
+                .map(|i| p[i])
+                .collect();
+            band.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            along.push(band[band.len() / 2]);
+            cross.push(Cross { radius: seg.radius, p });
+        }
+    }
+    if cross.len() < 32 {
+        return None;
+    }
+
+    // ---- layout ----------------------------------------------------------
+    let mut straight_m: Vec<f32> = lap
+        .segments
+        .iter()
+        .filter(|s| !s.is_corner())
+        .map(|s| s.length)
+        .collect();
+    let mut arc_radius_m: Vec<f32> =
+        lap.segments.iter().filter(|s| s.is_corner()).map(|s| s.radius.abs()).collect();
+    let arcs = arc_radius_m.len();
+    let turns_all = lap.turns();
+    let mut turn_deg: Vec<f32> = turns_all.iter().filter(|t| t.0 >= 25.0).map(|t| t.0).collect();
+    let mut turn_radius_m: Vec<f32> =
+        turns_all.iter().filter(|t| t.0 >= 25.0).map(|t| t.1).collect();
+    let total_turn_deg = lap.segments.iter().map(|s| s.angle).sum();
+
+    // ---- ruts ------------------------------------------------------------
+    let mut lines: Vec<f32> = Vec::new();
+    let mut spacing: Vec<f32> = Vec::new();
+    let mut depth_corner: Vec<f32> = Vec::new();
+    let mut depth_straight: Vec<f32> = Vec::new();
+    let win = (RUT_DETREND_M / RIDDEN_LATERAL_M / 2.0) as usize;
+    for c in &cross {
+        let base = smooth_ring(&c.p, win, false);
+        let r: Vec<f32> = (0..n).map(|i| c.p[i] - base[i]).collect();
+        let mut found: Vec<(f32, f32)> = Vec::new();
+        for w in inside.windows(3) {
+            let (a, i, b) = (w[0], w[1], w[2]);
+            if !(r[i] <= r[a] && r[i] < r[b]) {
+                continue;
+            }
+            let mut l = i;
+            while l > inside[0] && r[l - 1] >= r[l] {
+                l -= 1;
+            }
+            let mut k = i;
+            while k < inside[inside.len() - 1] && r[k + 1] >= r[k] {
+                k += 1;
+            }
+            let prom = (r[l] - r[i]).min(r[k] - r[i]);
+            if prom >= RUT_PROMINENCE_M {
+                found.push((u_at(i), prom));
+            }
+        }
+        lines.push(found.len() as f32);
+        for pair in found.windows(2) {
+            spacing.push(pair[1].0 - pair[0].0);
+        }
+        let corner = c.radius != 0.0 && c.radius.abs() < RIDDEN_CORNER_R_M;
+        for (_, prom) in &found {
+            if corner {
+                depth_corner.push(*prom);
+            } else {
+                depth_straight.push(*prom);
+            }
+        }
+    }
+
+    // ---- berms -----------------------------------------------------------
+    // The centre of curvature lies to the rider's right of a positive-radius turn, so the
+    // outside of one is its left. Getting this backwards reads a berm as an inside bank,
+    // which is what the ground would look like if nobody had ridden it.
+    let mut out_edge: Vec<f32> = Vec::new();
+    let mut in_edge: Vec<f32> = Vec::new();
+    let mut bank_deg: Vec<f32> = Vec::new();
+    let at_u = |p: &[f32], u: f32| -> f32 {
+        let i = ((u + RIDDEN_REACH_M) / RIDDEN_LATERAL_M).round().clamp(0.0, (n - 1) as f32);
+        p[i as usize]
+    };
+    for c in &cross {
+        if c.radius == 0.0 || c.radius.abs() >= RIDDEN_CORNER_R_M {
+            continue;
+        }
+        let out = -c.radius.signum();
+        let low = inside.iter().map(|i| c.p[*i]).fold(f32::INFINITY, f32::min);
+        out_edge.push(at_u(&c.p, RIDDEN_HALF_M * out) - low);
+        in_edge.push(at_u(&c.p, -RIDDEN_HALF_M * out) - low);
+
+        let (mut sx, mut sy, mut sxy, mut sxx) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        for i in &inside {
+            let (x, y) = (u_at(*i) as f64, c.p[*i] as f64);
+            sx += x;
+            sy += y;
+            sxy += x * y;
+            sxx += x * x;
+        }
+        let m = inside.len() as f64;
+        let slope = (sxy - sx * sy / m) / (sxx - sx * sx / m);
+        bank_deg.push((slope as f32 * out).atan().to_degrees());
+    }
+
+    // ---- jumps -----------------------------------------------------------
+    let base = smooth_ring(&along, (RIDDEN_BASE_M / RIDDEN_STEP_M / 2.0) as usize, true);
+    let rel: Vec<f32> = (0..along.len()).map(|i| along[i] - base[i]).collect();
+    let m = rel.len();
+    let mut lips: Vec<(f32, f32, f32)> = Vec::new(); // at, height, steepest face
+    for i in 0..m {
+        let prev = rel[(i + m - 1) % m];
+        let next = rel[(i + 1) % m];
+        if !(rel[i] >= prev && rel[i] > next) {
+            continue;
+        }
+        let (mut l, mut k) = (0usize, 0usize);
+        while l < m / 2 && rel[(i + m - l - 1) % m] <= rel[(i + m - l) % m] {
+            l += 1;
+        }
+        while k < m / 2 && rel[(i + k + 1) % m] <= rel[(i + k) % m] {
+            k += 1;
+        }
+        let prom = (rel[i] - rel[(i + m - l) % m]).min(rel[i] - rel[(i + k) % m]);
+        if prom < RIDDEN_LIP_M {
+            continue;
+        }
+        // The steepest three metres either side, not the average over the whole face — a
+        // twenty-metre ramp with a lip on the end averages out to nothing.
+        let span = (3.0 / RIDDEN_STEP_M) as usize;
+        let mut face = 0.0f32;
+        for t in 0..(l + k) {
+            let a = (i + m - l + t) % m;
+            let b = (a + span) % m;
+            face = face.max((along[b] - along[a]).abs() / 3.0);
+        }
+        lips.push((i as f32 * RIDDEN_STEP_M, prom, face.atan().to_degrees()));
+    }
+    lips.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    // One jump, one lip: two samples four metres apart are the same takeoff seen twice.
+    let mut kept: Vec<(f32, f32, f32)> = Vec::new();
+    for l in lips {
+        match kept.last_mut() {
+            Some(p) if l.0 - p.0 < 4.0 => {
+                if l.1 > p.1 {
+                    *p = l;
+                }
+            }
+            _ => kept.push(l),
+        }
+    }
+    let km = (lap.length / 1000.0).max(1e-3);
+    let mut lip_height_m: Vec<f32> = kept.iter().map(|l| l.1).collect();
+    let mut big: Vec<f32> = lip_height_m.iter().copied().filter(|h| *h >= RIDDEN_BIG_LIP_M).collect();
+    let big_n = big.len();
+    let mut lip_face_deg: Vec<f32> = kept.iter().map(|l| l.2).collect();
+    let mut lip_spacing_m: Vec<f32> =
+        kept.windows(2).map(|w| w[1].0 - w[0].0).collect();
+
+    Some(RiddenStats {
+        lap_m: lap.length,
+        segments: lap.segments.len(),
+        arcs,
+        straights: lap.segments.len() - arcs,
+        straight_m: spread(&mut straight_m),
+        arc_radius_m: spread(&mut arc_radius_m),
+        turns: turn_deg.len(),
+        turn_deg: spread(&mut turn_deg),
+        turn_radius_m: spread(&mut turn_radius_m),
+        total_turn_deg,
+        rut_lines: lines.iter().sum::<f32>() / lines.len().max(1) as f32,
+        rut_spacing_m: spread(&mut spacing),
+        rut_depth_corner_m: spread(&mut depth_corner),
+        rut_depth_straight_m: spread(&mut depth_straight),
+        berm_outside_m: median(&mut out_edge),
+        berm_inside_m: median(&mut in_edge),
+        bank_deg: spread(&mut bank_deg),
+        lips_per_km: kept.len() as f32 / km,
+        big_lips_per_km: big_n as f32 / km,
+        lip_height_m: spread(&mut lip_height_m),
+        big_lip_height_m: spread(&mut big),
+        lip_face_deg: spread(&mut lip_face_deg),
+        lip_spacing_m: spread(&mut lip_spacing_m),
+    })
+}
+
+fn median(v: &mut Vec<f32>) -> f32 {
+    spread(v).p50
+}
+
+/// A moving average, optionally wrapping — a lap does, a cross-section doesn't.
+fn smooth_ring(v: &[f32], half: usize, wrap: bool) -> Vec<f32> {
+    let n = v.len();
+    let half = half.max(1);
+    (0..n)
+        .map(|i| {
+            let (mut sum, mut count) = (0.0f32, 0usize);
+            for d in 0..=(2 * half) {
+                let j = i as isize + d as isize - half as isize;
+                let j = if wrap {
+                    (j.rem_euclid(n as isize)) as usize
+                } else if j < 0 || j >= n as isize {
+                    continue;
+                } else {
+                    j as usize
+                };
+                sum += v[j];
+                count += 1;
+            }
+            sum / count.max(1) as f32
+        })
+        .collect()
+}
+
+/// A height grid with metres on both axes, so a point on the centreline can be asked for its
+/// ground height without the caller doing the arithmetic.
+pub struct Grid {
+    pub w: usize,
+    pub h: usize,
+    pub size_x: f32,
+    pub size_z: f32,
+    pub v: Vec<f32>,
+}
+
+impl Grid {
+    /// Bilinear, because a rut is two samples wide and nearest-neighbour would alias it into
+    /// and out of existence along its own length.
+    pub fn at(&self, x: f32, z: f32) -> f32 {
+        let c = (x / self.size_x * (self.w - 1) as f32).clamp(0.0, (self.w - 1) as f32 - 1e-3);
+        let r = (z / self.size_z * (self.h - 1) as f32).clamp(0.0, (self.h - 1) as f32 - 1e-3);
+        let (ci, ri) = (c as usize, r as usize);
+        let (fc, fr) = (c - ci as f32, r - ri as f32);
+        let g = |rr: usize, cc: usize| self.v[rr * self.w + cc];
+        (g(ri, ci) * (1.0 - fc) + g(ri, ci + 1) * fc) * (1.0 - fr)
+            + (g(ri + 1, ci) * (1.0 - fc) + g(ri + 1, ci + 1) * fc) * fr
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -877,6 +1256,31 @@ mod tests {
                             s.size_z_m,
                             s.corridor_note.as_deref().unwrap_or("")
                         ),
+                    }
+                    if let Some(r) = &s.ridden {
+                        println!(
+                            "{:<34} lap {:>5.0}m  {:>3} segs = {:>3} arcs + {:>2} straights  \
+                             {:>2} turns  turn p50 {:>4.0}°  tightest R p50 {:>4.1}m  \
+                             turning {:>5.0}°",
+                            "  centreline", r.lap_m, r.segments, r.arcs, r.straights,
+                            r.turns, r.turn_deg.p50, r.turn_radius_m.p50, r.total_turn_deg,
+                        );
+                        println!(
+                            "{:<34} ruts {:>4.1} at {:>4.2}m  depth corner p50 {:>4.2} p90 {:>4.2}  \
+                             straight p50 {:>4.2}  |  berm out {:>4.2}m in {:>4.2}m  \
+                             bank p50 {:>4.1}° p90 {:>4.1}°",
+                            "  ridden ground", r.rut_lines, r.rut_spacing_m.p50,
+                            r.rut_depth_corner_m.p50, r.rut_depth_corner_m.p90,
+                            r.rut_depth_straight_m.p50,
+                            r.berm_outside_m, r.berm_inside_m, r.bank_deg.p50, r.bank_deg.p90,
+                        );
+                        println!(
+                            "{:<34} {:>4.1} lips/km ({:>4.1} over 1m)  h p50 {:>4.2} p90 {:>4.2} max {:>4.2}  \
+                             face p50 {:>4.1}° p90 {:>4.1}°  gap p50 {:>5.1}m",
+                            "  jumps", r.lips_per_km, r.big_lips_per_km,
+                            r.lip_height_m.p50, r.lip_height_m.p90, r.lip_height_m.max,
+                            r.lip_face_deg.p50, r.lip_face_deg.p90, r.lip_spacing_m.p50,
+                        );
                     }
                     all.push(s);
                 }
