@@ -1749,95 +1749,100 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
 
     let mut out = Vec::new();
     out.extend_from_slice(b"MP2\0");
-    out.extend_from_slice(&304u32.to_le_bytes()); // header size, constant on every map measured
+    out.extend_from_slice(&304u32.to_le_bytes()); // constant on every map measured
 
-    // One material per sheet. The association between the two is **positional** — the k-th
-    // colour record belongs to material k — so a map with four sheets and no materials is
-    // four pictures with nothing to hang them on. All 56 bytes of a record are white shading
-    // terms and a one-based id; nothing in it points at a texture.
+    // A material record, copied field for field off a published map rather than guessed.
+    //
+    // Every one of Indiana's 49 is byte-identical but for one word: zero, six ones, four
+    // zeros, then a **one-based id at word eleven**, then two more zeros. The previous
+    // version here put ones across the first twelve words and the id at word thirteen, which
+    // is not this shape anywhere — a renderer reading it gets 1.0 where it expects a count
+    // or a flag, and an id of zero where it expects the material's own.
     out.extend_from_slice(&(n as u32).to_le_bytes());
     for k in 0..n {
         let mut rec = [0u8; 56];
-        // White, fully opaque, and its own id — the shape every published map's records have.
-        for c in 0..12 {
-            rec[c * 4..c * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        for w in 1..=6 {
+            rec[w * 4..w * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
-        rec[52..56].copy_from_slice(&((k + 1) as u32).to_le_bytes());
+        rec[44..48].copy_from_slice(&((k + 1) as u32).to_le_bytes());
         out.extend_from_slice(&rec);
     }
 
-    // A mesh, because the format's own walk requires one: eight vertices at the least and a
-    // triangle at the least, and everything after them is found by stepping over them. A map
-    // declaring none of each is not an empty map, it is a file that stops being readable at
-    // its fifth word — `map::parse` rejects our own, which is the tell that the game's reader
-    // would too, and "crashing at track graphics" is where that shows up.
+    // Geometry, because the format's own walk steps over it to reach everything after — a
+    // map declaring none stops being readable at its fifth word.
     //
-    // What the geometry *is* barely matters, so it is the smallest thing that satisfies the
-    // walk: a box, well below the terrain, where nothing can see it. The riding surface comes
-    // from the `.trh` and a generated track ships no scenery.
-    const VC: usize = 8;
-    const TC: usize = 12;
+    // One quad per material, each with its own vertices, because that is how a real leaf's
+    // draw groups carve up the buffers: disjoint vertex ranges and contiguous triangle
+    // ranges. Put 500 m under the terrain, where nothing can see it. The riding surface
+    // comes from the `.trh` and a generated track ships no scenery.
+    let vc = n * 4;
+    let tc = n * 2;
     let under = -500.0f32;
-    let corners: [[f32; 3]; VC] = [
-        [0.0, under, 0.0],
-        [1.0, under, 0.0],
-        [1.0, under, 1.0],
-        [0.0, under, 1.0],
-        [0.0, under - 1.0, 0.0],
-        [1.0, under - 1.0, 0.0],
-        [1.0, under - 1.0, 1.0],
-        [0.0, under - 1.0, 1.0],
-    ];
-    out.extend_from_slice(&(VC as u32).to_le_bytes());
-    // Structure of arrays, 80 bytes a vertex: positions first, texture coordinates at
-    // 12 x count, normals at 52 x count. The rest is attributes we don't write and the game
-    // doesn't need from a box nobody sees.
-    let mut block = vec![0u8; VC * 80];
-    for (i, c) in corners.iter().enumerate() {
-        for (k, v) in c.iter().enumerate() {
-            let at = i * 12 + k * 4;
-            block[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    out.extend_from_slice(&(vc as u32).to_le_bytes());
+    let mut block = vec![0u8; vc * 80];
+    for k in 0..n {
+        let x = k as f32 * 2.0;
+        let quad = [
+            [x, under, 0.0],
+            [x + 1.0, under, 0.0],
+            [x + 1.0, under, 1.0],
+            [x, under, 1.0],
+        ];
+        for (c, pos) in quad.iter().enumerate() {
+            let v = k * 4 + c;
+            for (i, p) in pos.iter().enumerate() {
+                let at = v * 12 + i * 4;
+                block[at..at + 4].copy_from_slice(&p.to_le_bytes());
+            }
+            // Texture coordinates at 12 x count, normals at 52 x count — structure of
+            // arrays, eighty bytes a vertex.
+            let uv = 12 * vc + v * 8;
+            let (u, w) = ((c == 1 || c == 2) as u32 as f32, (c >= 2) as u32 as f32);
+            block[uv..uv + 4].copy_from_slice(&u.to_le_bytes());
+            block[uv + 4..uv + 8].copy_from_slice(&w.to_le_bytes());
+            let nm = 52 * vc + v * 12;
+            block[nm + 4..nm + 8].copy_from_slice(&1.0f32.to_le_bytes()); // straight up
         }
-        let uv = 12 * VC + i * 8;
-        block[uv..uv + 4].copy_from_slice(&0.0f32.to_le_bytes());
-        block[uv + 4..uv + 8].copy_from_slice(&0.0f32.to_le_bytes());
-        let nm = 52 * VC + i * 12;
-        block[nm + 4..nm + 8].copy_from_slice(&1.0f32.to_le_bytes()); // straight up
     }
     out.extend_from_slice(&block);
 
-    let tris: [[u32; 3]; TC] = [
-        [0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6],
-        [0, 4, 5], [0, 5, 1], [1, 5, 6], [1, 6, 2],
-        [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0],
-    ];
-    out.extend_from_slice(&(TC as u32).to_le_bytes());
-    for t in &tris {
-        for i in t {
-            out.extend_from_slice(&i.to_le_bytes());
+    // Indices are **absolute** into the whole vertex buffer, not relative to a group's own
+    // range — checked against a published map, whose second group starts at vertex 178 and
+    // whose triangles there index 178 and up.
+    out.extend_from_slice(&(tc as u32).to_le_bytes());
+    for k in 0..n {
+        let v = (k * 4) as u32;
+        for t in [[v, v + 1, v + 2], [v, v + 2, v + 3]] {
+            for i in t {
+                out.extend_from_slice(&i.to_le_bytes());
+            }
         }
     }
 
-    // One leaf node carrying a draw group per material, so every sheet is bound to something
-    // and the groups tile the index buffer exactly — which is what a real map's do.
+    // One leaf node holding a draw group per material. A leaf's five words are
+    // `[0, 0, triangles in this node, first triangle, group count]` — the two counts are not
+    // decoration, they are how the reader knows what the node owns, and the previous version
+    // left both at zero while claiming four groups.
     out.extend_from_slice(&1u32.to_le_bytes());
     let mut node = vec![0u8; 44];
-    for (k, v) in [0.0f32, under - 1.0, 0.0, 1.0, under, 1.0].iter().enumerate() {
+    let hi = (n as f32 * 2.0).max(1.0);
+    for (k, v) in [0.0f32, under, 0.0, hi, under, 1.0].iter().enumerate() {
         node[k * 4..k * 4 + 4].copy_from_slice(&v.to_le_bytes());
     }
+    node[32..36].copy_from_slice(&(tc as u32).to_le_bytes());
+    node[36..40].copy_from_slice(&0u32.to_le_bytes());
     node[40..44].copy_from_slice(&(n as u32).to_le_bytes());
     out.extend_from_slice(&node);
-    let per = TC / n;
     for k in 0..n {
-        let start = (k * per) as u32;
-        let count = if k + 1 == n { TC - k * per } else { per } as u32;
-        for w in [0u32, k as u32, start, count, 0, VC as u32] {
+        // flag, material (zero-based), tri_start, tri_count, vert_start, vert_count
+        for w in [0u32, k as u32, (k * 2) as u32, 2, (k * 4) as u32, 4] {
             out.extend_from_slice(&w.to_le_bytes());
         }
     }
 
-    // The surfaces are counted before they are listed — a reader walking the file straight
-    // through lands on that word where the node tree ends.
+    // The word here is the **material** count, not the number of records that follow: a
+    // published map declares 49 and then ships 84 sheets, the extra ones being the normal and
+    // specular maps that hang off the colour ones. Ours are one apiece, so the two agree.
     out.extend_from_slice(&(n as u32).to_le_bytes());
     for (name, px) in &sheets {
         out.extend_from_slice(&texture_record(name, dim as u32, dim as u32, px));
@@ -3183,6 +3188,37 @@ mod tests {
     /// is not "a file with nothing in it", it is "a file that answers no question it is
     /// asked". Generalised past the one that was wrong, because the next one will be a
     /// different file.
+    /// A material record has to look like a published one, word for word.
+    ///
+    /// Every one of Indiana's 49 is identical but for a single field: zero, six ones, four
+    /// zeros, a **one-based id at word eleven**, two zeros. We shipped ones across the first
+    /// twelve words with the id at word thirteen — a shape no map has — and the game hard
+    /// crashed at the track graphics stage. Pinned here against the numbers read off the
+    /// file, because the only reason we know them is that somebody looked.
+    #[test]
+    fn material_records_match_a_published_maps() {
+        let p = oval();
+        let s = synthesise(&p).unwrap();
+        let m = map(&p, &s);
+        let count = u32::from_le_bytes(m[8..12].try_into().unwrap()) as usize;
+        assert_eq!(count, 4, "one material per sheet");
+        for k in 0..count {
+            let r = 12 + k * 56;
+            let w = |i: usize| u32::from_le_bytes(m[r + i * 4..r + i * 4 + 4].try_into().unwrap());
+            let f = |i: usize| f32::from_le_bytes(m[r + i * 4..r + i * 4 + 4].try_into().unwrap());
+            assert_eq!(w(0), 0, "material {k} word 0");
+            for i in 1..=6 {
+                assert_eq!(f(i), 1.0, "material {k} word {i}");
+            }
+            for i in 7..=10 {
+                assert_eq!(w(i), 0, "material {k} word {i}");
+            }
+            assert_eq!(w(11), (k + 1) as u32, "material {k}: the id is one-based, at word 11");
+            assert_eq!(w(12), 0, "material {k} word 12");
+            assert_eq!(w(13), 0, "material {k} word 13");
+        }
+    }
+
     #[test]
     fn every_file_in_a_built_track_says_something() {
         let p = oval();
