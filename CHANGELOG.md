@@ -2,23 +2,6 @@
 
 ## 2026-09-01
 
-### Fixed
-- Two of the four values every vertex of a track's graphics file carries were left at zero.
-
-## 2026-09-01
-
-### Fixed
-- The terrain in a track's graphics file is cut into tiles, so no single piece of it is too
-  large for the game to build a buffer for.
-
-## 2026-09-01
-
-### Fixed
-- More of the crash at track graphics: the ground sheets in a track's graphics file were
-  written in a shape the game cannot read past.
-
-## 2026-09-01
-
 ### Added
 - Track generation reads a published track's own centreline out of its height file, so a real
   lap's corners, their radii and its straights can be measured directly rather than guessed at.
@@ -26,6 +9,9 @@
   published one.
 
 ### Changed
+- Diagnostics say more about each file loaded in your game: its size, when it was built,
+  whether Windows trusts its signature and who signed it, and the company and product it
+  claims to be. A file can be read the first time it is seen instead of only recognised.
 - Generated laps are laid out the way published tracks are built: corners made of several arcs
   that tighten into the apex and release out of it, far more corners than straights, and a lap
   that wanders instead of running round a rounded rectangle.
@@ -37,6 +23,9 @@
   the toggle is in Settings for anyone who wants the app waiting for them.
 
 ### Fixed
+- Two of the four values every vertex of a track's graphics file carries were left at zero.
+- The terrain in a track's graphics file is cut into tiles, so no single piece of it is too
+  large for the game to build a buffer for.
 - A corner banks the outside of the turn.
 - Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
 - The ground either side of the track no longer carries fine streaks fanning off every corner.
