@@ -2,7 +2,14 @@
 
 ## 2026-08-31
 
+### Added
+- Installed tracks carry the ground they are painted with, and a gfx.cfg so roost is the
+  colour of the dirt.
+
 ### Changed
+- A track installed from Track Studio is packed the way the game reads tracks, so it turns up
+  in the in-game list.
+- The track file names the artwork it ships and states its lap length in metres.
 - Generated tracks come with real ground textures — soil with clods, grit and straw in it, at
   the size and resolution published tracks use.
 - Corners wear a bundle of ruts across the track and carry them out onto the straight, the way
