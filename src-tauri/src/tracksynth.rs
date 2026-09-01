@@ -258,7 +258,22 @@ const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 
 /// The short back face of a double's takeoff, and the short front face of its landing. This
 /// is the lip itself — steep, but a face rather than a step.
-const DOUBLE_BACK_M: f32 = 2.5;
+///
+/// Four metres, not two and a half. At 2.5 m a two-metre jump drops at 39°, and measured
+/// against Indiana that is what "abrupt" is: its landing faces run 12.7° at the median and
+/// 19° at the ninetieth, against ours at 21.3° and 36.3°.
+const DOUBLE_BACK_M: f32 = 4.0;
+
+/// The hollow a jump is dug out of, as a fraction of its height, and how far past its ends
+/// that hollow reaches.
+///
+/// Every cubic metre standing in a jump came out of the ground beside it, and on a real track
+/// you can see where. Indiana's average jump profile, normalised against its own height, sits
+/// at −0.26 twenty metres before the crest and −0.32 twenty metres after, with the lip itself
+/// at +0.97: the jump is a hump between two scoops. Ours had flat ground either side and
+/// nothing to say where the dirt came from.
+const JUMP_HOLLOW: f32 = 0.30;
+const JUMP_HOLLOW_M: f32 = 22.0;
 
 /// Metres between samples of the profiles that run along the lap.
 ///
@@ -1155,6 +1170,47 @@ fn feature_profile(features: &[Feature], lap: f32, blend: f32) -> Profile {
             out.v[i] = out.v[i].max(longitudinal(f, u / len, u));
         }
     }
+    // And the hollow each one was dug out of.
+    //
+    // Every cubic metre standing in a jump came out of the ground beside it, and on a real
+    // track you can see where. Subtracted rather than maxed, and applied after the humps are
+    // in, so a jump sitting inside another feature's hollow still stands its full height —
+    // what the hollow lowers is the ground between jumps, not the jumps.
+    let mut dig = vec![0.0f32; out.v.len()];
+    for f in features {
+        if matches!(f, Feature::StepUp { .. } | Feature::Berm { .. } | Feature::Rut { .. }) {
+            continue;
+        }
+        let h = f.height().abs();
+        if h <= 0.0 {
+            continue;
+        }
+        let (at, len) = (f.at(), f.length());
+        for (side, edge) in [(-1.0f32, at), (1.0f32, at + len)] {
+            let span = JUMP_HOLLOW_M;
+            let steps = (span / PROFILE_STEP).ceil() as usize;
+            for k in 0..=steps {
+                let d = k as f32 * PROFILE_STEP;
+                let s_at = edge + side * d;
+                if s_at < 0.0 || s_at >= lap {
+                    continue;
+                }
+                let i = (s_at / PROFILE_STEP).round() as usize;
+                if i >= dig.len() {
+                    continue;
+                }
+                // Deepest a third of the way out and back to grade by the end, so the ground
+                // dips away from the jump's foot rather than stepping down at it.
+                let x = d / span;
+                let bowl = (x * std::f32::consts::PI).sin().powf(0.8);
+                dig[i] = dig[i].max(h * JUMP_HOLLOW * bowl);
+            }
+        }
+    }
+    for i in 0..out.v.len() {
+        out.v[i] -= dig[i];
+    }
+
     // Then round the whole thing off over the blend distance. That is what turns two jumps
     // that merely touch into one shape, and it is the same control that decides how long a
     // single jump's ramps are — they are the same question asked twice.
@@ -1340,7 +1396,7 @@ fn longitudinal(f: &Feature, t: f32, u: f32) -> f32 {
         Feature::Double {
             height, gap, lip, ..
         } => {
-            let back = DOUBLE_BACK_M.min(lip * 0.5);
+            let back = DOUBLE_BACK_M.min(lip * 0.6);
             let takeoff = lip + back;
             if u <= lip {
                 height * smoothstep(u / lip)

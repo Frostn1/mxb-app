@@ -66,6 +66,9 @@
 - The racing line is chopped up at the scale of a wheel rather than a jump, and the field
   around it is smooth. It used to be nearly as rough out in the grass as it was on the line.
 - A track's edge is crisp against the field rather than fading out over a wide shelf.
+- Jumps are built rather than dropped on. A takeoff ramps up over ten metres instead of five,
+  its faces are half as steep, and the ground either side dips where the dirt for it came
+  from.
 - Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
   Settings follows it.
 - More of the crash at track graphics: the ground sheets in a track's graphics file were
