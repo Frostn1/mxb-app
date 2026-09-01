@@ -1929,6 +1929,24 @@ fn rdf(prog: &TrackProgram) -> String {
 /// a 700 m plot is under three metres a quad, which reads as ground from a bike.
 const MAP_QUADS: usize = 256;
 
+/// **Incomplete. Do not ship the result as a track.**
+///
+/// What this writes is a correct *prefix* of a `.map` — magic, materials, the terrain mesh,
+/// the node tree and the ground sheets, each matching a published map field for field. It is
+/// still not a `.map`, because a real one does not end there: it continues with a large
+/// trailing block of count-prefixed sections that the loader reads immediately afterwards,
+/// and we write none of it. The game reads past the end of our file and dies at the track
+/// graphics stage.
+///
+/// The proof is PiBoSo's own OEM drag strip, which declares **materials = 0, vertices = 0,
+/// triangles = 0 and textures = 0** — every section this function fills — and is still 120 MB.
+/// All of it is in the trailing block. An empty mesh was always valid; the mesh was never what
+/// was missing.
+///
+/// Kept because the parts that are decoded are decoded correctly and were expensive to get,
+/// and because finishing this is the only route to installing a generated track without
+/// running TerrainEd. Until then nothing calls it.
+#[allow(dead_code)]
 fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     let (field, ridden, shoulder, turf) = ground_looks(prog.terrain.surface);
     let seed = prog.terrain.relief.seed;
@@ -2257,7 +2275,8 @@ pub fn write_pkz(
     // looks for them there — flat at the archive root they are not found at all.
     for (name, bytes) in [
         (format!("{slug}/{slug}.trh"), trh(prog, syn, paint_features)),
-        (format!("{slug}/{slug}.map"), map(prog, syn)),
+        // No `.map`. See `map()` — what we can write is not one the game will load, and a
+        // wrong one is worse than none: it hard-crashed at the track graphics stage.
         (format!("{slug}/{slug}.ini"), crlf(&track_ini(prog))),
         (format!("{slug}/{slug}.rdf"), crlf(&rdf(prog))),
         (format!("{slug}/{slug}.amb"), crlf(AMB)),
@@ -3479,7 +3498,6 @@ mod tests {
         let names = crate::pkz::entry_names(&path).unwrap();
         for want in [
             format!("{slug}/{slug}.trh"),
-            format!("{slug}/{slug}.map"),
             format!("{slug}/{slug}.ini"),
             format!("{slug}/{slug}.rdf"),
             format!("{slug}/{slug}.amb"),
@@ -3488,6 +3506,12 @@ mod tests {
         ] {
             assert!(names.contains(&want), "{want} is missing from {names:?}");
         }
+        // And deliberately no `.map`. We cannot write one the game will load, and a wrong one
+        // is worse than none — it hard-crashed at the track graphics stage. See `map()`.
+        assert!(
+            !names.iter().any(|n| n.ends_with(".map")),
+            "a .map we cannot write correctly must not be shipped: {names:?}"
+        );
 
         // And the `.ini` names pictures the archive actually has — it used to name two
         // files that were never written, which is a track with no artwork at all.

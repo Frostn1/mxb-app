@@ -2291,7 +2291,7 @@ export const fr: Translation = {
   "track.buildFailed": "Construction impossible",
   "track.exported": "{{count}} fichiers écrits",
   "track.exportFailed": "Export impossible",
-  "track.previewOnly": "Un circuit installé contient le terrain, les surfaces, les données de course et le sol texturé — pas les décors. Pour ça, lance TerrainEd sur le dossier exporté.",
+  "track.previewOnly": "Une piste installée contient le terrain, les surfaces et les données de course — elle n'a pas de graphismes, le jeu ne peut donc pas la rouler. Compilez avec TerrainEd sur le dossier exporté pour une piste jouable.",
   "track.at": "À",
   "track.kind": "Type",
   "track.height": "Hauteur",

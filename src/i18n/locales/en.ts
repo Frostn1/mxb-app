@@ -2256,7 +2256,7 @@ export const en = {
   "track.buildFailed": "Couldn't build it",
   "track.exported": "Wrote {{count}} files",
   "track.exportFailed": "Couldn't export it",
-  "track.previewOnly": "An installed track carries terrain, surfaces, race data and the ground it's painted with — no scenery. Run TerrainEd over the exported folder for that.",
+  "track.previewOnly": "An installed track carries terrain, surfaces and race data — it has no graphics, so the game will not ride it. Build with TerrainEd over the exported folder for a track you can ride.",
   "track.at": "At",
   "track.kind": "Kind",
   "track.height": "Height",
