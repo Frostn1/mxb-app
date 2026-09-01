@@ -192,14 +192,39 @@ The other way to cross is a straight that simply overshoots — long enough to r
 a part of the lap you drew earlier. Long straights are good, but a straight that would carry
 you past the middle of the infield is too long.
 
-WRITE A LAP, NOT A SHAPE. A published circuit is twenty to forty segments: short straights,
-corners in runs, and no two turns the same radius. Six long straights joined by four identical
-arcs closes perfectly and looks like a running track from above. Vary the radii across the
-whole 12–60 m range in one lap, put two or three corners back to back, and keep most straights
-under 120 m.
+WRITE A LAP, NOT A SHAPE. This is the thing generated tracks get most wrong, and it is not a
+matter of taste — a `.trh` carries the centreline its builder typed, so we can read exactly
+what ten published circuits are made of:
 
-Corners grow their own ruts and braking bumps — do not ask for a rut in a corner, it is
-already there. A rut feature is for putting one somewhere a corner would not.
+  segments in a lap   52-150. Not twenty.
+  arcs vs straights   61-91% ARCS. Indiana is 109 arcs against 11 straights; Millville 132
+                      against 18. A circuit is a chain of corners with a few straights let
+                      into it, NOT straights joined by corners.
+  total turning       1726-2960°, adding up every degree turned either way. A rounded
+                      rectangle comes to 900. Nothing published is under 1700.
+  corners             13-25 of them, counting a run of same-way arcs as one corner.
+  a corner            103-170° at the median, and never one arc. A published corner is three
+                      to eighteen arcs whose radius tightens into the apex and releases out
+                      of it: 28 m through 30°, then 13 m through 50°, then 9 m through 57°,
+                      then 18 m through 30° is ONE corner. Writing it as a single 165° arc of
+                      constant radius is the clearest sign a lap was drawn rather than built.
+  tightest radius     10.6-18.5 m at the median corner, down to 6.4 m at the hairpins.
+  straights           short. Indiana's run 21 m at the median and its longest is 62 m.
+  lap length          1800-2500 m.
+
+So: build each corner as a run of arcs, keep the straights short, and let the lap wander.
+Count the arcs before you send it — if straights outnumber corners you have written a shape.
+
+THE LAP MUST STILL CLOSE, and a lap like this closes the same way: the signed angles sum to
+±360° and the straights bring it home. A serpentine that turns 2400° in total and 360° net is
+exactly what the published tracks do — they alternate a big turn one way with a slightly
+smaller one back, which advances round the clock face by the difference. A 165° right followed
+by a 120° left advances 45°; eight of those pairs is 360° and a lap.
+
+Corners grow their own ruts, braking bumps and berms — do not ask for any of those in a
+corner, they are already there and measured off published ground. A rut feature is for putting
+one somewhere a corner would not, and a berm feature is for a wall taller than the half-metre
+a corner banks itself.
 
 Set terrain.surface from the brief: sand for a sand track, grass for an early-season or
 grasstrack circuit, soil for everything else.
@@ -214,18 +239,23 @@ straight does nothing. Jumps go on straights.
 What real tracks measure, from a survey of published ones. Land inside these unless the brief
 explicitly asks otherwise:
 
-  jumps on a lap      COUNT THEM. A 1500 m lap needs 30–60 features in the list — not four.
-                      A track with eight jumps on it is a field with a path across it, and it
-                      is the single most common thing to get wrong here.
+  jumps on a lap      COUNT THEM. A 2000 m lap carries 30–45 features — not four.
   landscape relief    amplitude 8–20 m over a 120–200 m wavelength. A flat plot measures
                       under 18° at its steepest and is rejected for it; ground has to roll.
   riding line width   10–17 m
-  lap length          1300–1800 m
-  jumps per km        29–61
-  a jump's height     1.2–2.2 m (it measures about 0.75x that against the landscape)
-  jump spacing        13–20 m between takeoffs
+  jumps per km        12–25, measured along the centrelines of published tracks
+  the SIZE MIX        this is what makes a lap read as a national rather than a rhythm
+                      section. Published laps carry 3–11 jumps per km over a metre and
+                      everything else UNDER one: Indiana has forty features and only fourteen
+                      stand over a metre. Six or eight big ones of 2.5–4 m, and the rest
+                      rollers of 0.4–0.9 m. A lap of thirty identical 1.5 m tabletops is
+                      wrong in both directions at once.
+  a jump's height     0.4–0.9 m for a roller, 1.0–2.0 m for an ordinary jump, 2.5–4.0 m for
+                      the handful that matter (it measures about 0.75x that against the
+                      landscape). Published lips top out at 3.0–5.9 m.
+  jump spacing        20–50 m between takeoffs
   whoop spacing       4–6 m crest to crest
-  corner radius       12–60 m; tighter than 12 is a hairpin, over 100 is barely a corner
+  corner radius       7–30 m at the tightest point of a corner; 40 m and up barely turns
   steepest ground     27–41°
 
 Keep the lap inside the terrain with at least a track's width of margin on every side, and set

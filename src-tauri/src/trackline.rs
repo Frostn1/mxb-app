@@ -17,10 +17,6 @@ use crate::trackprog::Segment;
 /// Bytes per segment record.
 const RECORD: usize = 60;
 
-/// Under this many degrees an arc is a drift, not a corner — a 0.4° bend over 28 m is how a
-/// builder nudges a straight back onto line.
-const CORNER_DEG: f32 = 1.0;
-
 /// One entry of the centreline, as the file states it.
 #[derive(Clone, Copy, Debug)]
 pub struct LineSegment {
@@ -43,7 +39,7 @@ pub struct LineSegment {
 
 impl LineSegment {
     pub fn is_corner(&self) -> bool {
-        self.radius != 0.0 && self.angle >= CORNER_DEG
+        self.radius != 0.0 && self.angle >= crate::trackprog::CORNER_DEG
     }
 }
 
@@ -77,39 +73,9 @@ impl Lap {
             .collect()
     }
 
-    /// Runs of same-way arcs, uninterrupted by anything longer than a nudge: `(angle turned,
-    /// tightest radius)` per turn.
-    ///
-    /// A published corner is never one arc. Indiana's are three to eighteen, each a little
-    /// tighter or looser than the last, and reading them singly says a track is made of 2°
-    /// bends when what a rider meets is a 160° turn.
+    /// The lap's corners, by the one definition of what a corner is.
     pub fn turns(&self) -> Vec<(f32, f32)> {
-        let mut out: Vec<(f32, f32)> = Vec::new();
-        let mut cur: Option<(f32, f32, f32)> = None; // sign, angle, tightest
-        for s in &self.segments {
-            if s.is_corner() {
-                let sign = s.radius.signum();
-                match cur {
-                    Some((sg, ang, r)) if sg == sign => {
-                        cur = Some((sg, ang + s.angle, r.min(s.radius.abs())))
-                    }
-                    other => {
-                        if let Some((_, ang, r)) = other {
-                            out.push((ang, r));
-                        }
-                        cur = Some((sign, s.angle, s.radius.abs()));
-                    }
-                }
-            } else if s.length > 8.0 {
-                if let Some((_, ang, r)) = cur.take() {
-                    out.push((ang, r));
-                }
-            }
-        }
-        if let Some((_, ang, r)) = cur {
-            out.push((ang, r));
-        }
-        out
+        crate::trackprog::turns(&self.program_segments())
     }
 }
 

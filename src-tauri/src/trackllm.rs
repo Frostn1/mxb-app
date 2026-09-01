@@ -19,7 +19,7 @@
 
 use anyhow::{bail, Context, Result};
 
-use crate::trackprog::{Feature, TrackProgram};
+use crate::trackprog::{Feature, Segment, TrackProgram};
 use crate::tracksynth;
 
 /// Samples a check builds at. A power of two plus one, like every other grid here.
@@ -41,16 +41,47 @@ pub mod corpus {
     pub const RELIEF_M: (f32, f32) = (0.5, 2.0);
     /// The steepest ground on the riding line. Measured p99 27.0–40.9°.
     pub const SLOPE_P99_DEG: (f32, f32) = (18.0, 50.0);
-    /// Jumps per kilometre of lap. Measured 29–61.
-    pub const LIPS_PER_KM: (f32, f32) = (12.0, 80.0);
+    /// Jumps per kilometre of lap.
+    ///
+    /// Ten to twenty-five, counted along ten published tracks' own centrelines — not the
+    /// 29–61 the corridor rule reports, which counts every roughness peak on the ground as a
+    /// takeoff. A national is not a washboard: Indiana has forty features on a 2.2 km lap and
+    /// only fourteen of them stand over a metre.
+    pub const LIPS_PER_KM: (f32, f32) = (12.0, 45.0);
     /// One jump's height above the ground it sits on, as the program states it.
-    pub const FEATURE_HEIGHT_M: (f32, f32) = (0.3, 4.0);
+    ///
+    /// Up to five metres because published ones are: measured lips top out at 3.0–5.9 m per
+    /// track, and a lap whose biggest jump is 1.6 m has no big jump on it.
+    pub const FEATURE_HEIGHT_M: (f32, f32) = (0.3, 5.0);
     /// Between the crests of a whoop section.
     pub const WHOOP_SPACING_M: (f32, f32) = (2.5, 8.0);
     /// A corner tight enough to need a berm, and one loose enough not to be a corner.
     pub const CORNER_RADIUS_M: (f32, f32) = (8.0, 200.0);
     /// How far the finish may miss the start before the lap isn't one.
     pub const CLOSURE_M: f32 = 20.0;
+
+    // The layout, read out of published tracks' own centrelines. A `.trh` carries the `.tcl`
+    // that built it, so these are not inferred from the ground — they are the segments the
+    // builder typed. See `trackline`.
+
+    /// Segments in a lap. Measured 52–150.
+    pub const SEGMENTS: (f32, f32) = (30.0, 200.0);
+    /// How much of a lap is arcs rather than straights. Measured 0.61–0.91.
+    ///
+    /// This is the single biggest thing a generated lap gets wrong. A published track is a
+    /// chain of arcs with a few straights in it — Indiana runs 109 arcs against 11 straights
+    /// — and a lap of long straights joined by corners is a shape, not a circuit.
+    pub const ARC_FRACTION: (f32, f32) = (0.5, 1.0);
+    /// Every degree a lap turns through, both ways added up. Measured 1726–2960°.
+    ///
+    /// Not the signed sum, which is ±360 on anything that closes. This is what says a lap
+    /// wanders: at 900° it is a rounded rectangle, and no published track is under 1700.
+    pub const TOTAL_TURN_DEG: (f32, f32) = (1400.0, 3600.0);
+    /// Corners of 25° or more — runs of same-way arcs, which is what a rider meets. Measured
+    /// 13–25 per lap.
+    pub const TURNS: (f32, f32) = (10.0, 30.0);
+    /// The tightest radius inside a turn, at the median. Measured 10.6–18.5 m.
+    pub const TURN_RADIUS_M: (f32, f32) = (7.0, 30.0);
 }
 
 /// One round trip: what the model was last told, and what was wrong with what it sent.
@@ -457,6 +488,50 @@ pub fn review(prog: &TrackProgram) -> Review {
     between("the lap", prog.lap_length(), corpus::LAP_M, " m", &mut notes);
 
     // Only worth saying once there is something to count. A lap with nothing built on it is
+    // The layout, against what published tracks' own centrelines say. Notes rather than
+    // problems: a lap of six straights and four corners builds and rides, it just isn't
+    // shaped like anything anybody has released.
+    let arcs = prog
+        .segments
+        .iter()
+        .filter(|s| matches!(s, Segment::Arc { radius, angle, .. }
+            if *radius != 0.0 && angle.abs() >= crate::trackprog::CORNER_DEG))
+        .count();
+    let turning: f32 = prog
+        .segments
+        .iter()
+        .map(|s| match s {
+            Segment::Arc { angle, .. } => angle.abs(),
+            _ => 0.0,
+        })
+        .sum();
+    let corners = crate::trackprog::turns(&prog.segments);
+    let real: Vec<&(f32, f32)> = corners.iter().filter(|t| t.0 >= 25.0).collect();
+    between("the lap", prog.segments.len() as f32, corpus::SEGMENTS, " segments", &mut notes);
+    if !prog.segments.is_empty() {
+        let fraction = arcs as f32 / prog.segments.len() as f32;
+        if fraction < corpus::ARC_FRACTION.0 {
+            notes.push(format!(
+                "the lap is {arcs} arcs and {} straights — {:.0}% arcs, where published tracks                  run 61–91%. A circuit is a chain of corners with a few straights in it, not                  straights joined by corners: Indiana is 109 arcs against 11 straights.",
+                prog.segments.len() - arcs,
+                fraction * 100.0
+            ));
+        }
+    }
+    between("the lap's total turning", turning, corpus::TOTAL_TURN_DEG, "°", &mut notes);
+    between("the lap", real.len() as f32, corpus::TURNS, " corners", &mut notes);
+    if !real.is_empty() {
+        let mut r: Vec<f32> = real.iter().map(|t| t.1).collect();
+        r.sort_by(f32::total_cmp);
+        between(
+            "the median corner's tightest radius",
+            r[r.len() / 2],
+            corpus::TURN_RADIUS_M,
+            " m",
+            &mut notes,
+        );
+    }
+
     // a starting point, and "0 features per km" is not news to whoever just asked for one.
     if !prog.features.is_empty() {
         let per_km = prog.features.len() as f32 * 1000.0 / prog.lap_length().max(1.0);
@@ -722,7 +797,7 @@ mod tests {
         let wide = serde_json::to_string(&tweaked(|p| p.width = 31.0)).unwrap();
         let ask = Canned::new(&[&wide, EXAMPLE]);
         let got = block_on(generate("a national", &ask, 3)).unwrap();
-        assert_eq!(got.width, 13.0);
+        assert_eq!(got.width, 12.0);
 
         let seen = ask.seen.borrow();
         assert_eq!(seen.len(), 2, "it should have asked twice");
@@ -755,9 +830,13 @@ mod tests {
 
     #[test]
     fn a_lap_that_doesnt_close_is_caught() {
+        // Two thirds of the lap: the corners no longer add up to a full circle and the
+        // finish lands a long way from the start. Everything built past the new finish goes
+        // with it, so the complaint that comes back is about the lap and not about a jump.
         let p = tweaked(|p| {
-            p.segments.truncate(12);
-            p.features.retain(|f| f.at() < 400.0);
+            p.segments.truncate(52);
+            let lap: f32 = p.segments.iter().map(|s| s.length()).sum();
+            p.features.retain(|f| f.at() < lap - 60.0);
         });
         let problems = validate(&p);
         assert!(
