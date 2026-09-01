@@ -1737,17 +1737,6 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     let seed = prog.terrain.relief.seed;
     let dim = GROUND_TEXTURE_DIM;
 
-    let mut out = Vec::new();
-    out.extend_from_slice(b"MP2\0");
-    out.extend_from_slice(&304u32.to_le_bytes()); // header size, constant on every map measured
-    out.extend_from_slice(&0u32.to_le_bytes()); // materials
-    out.extend_from_slice(&0u32.to_le_bytes()); // vertices
-    out.extend_from_slice(&0u32.to_le_bytes()); // triangles
-    out.extend_from_slice(&0u32.to_le_bytes()); // nodes
-
-    // The surfaces are counted before they are listed — `map::texture_table` reads that word
-    // where the node tree ends, and a reader walking the file straight through lands on it
-    // here. Without it the first record is read as the count and the table is empty.
     let sheets = [
         // `_c` is PiBoSo's own mark for a colour sheet, and the ground words are what a
         // reader looking for a track's dirt matches on — ours say both.
@@ -1756,7 +1745,100 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         ("dirt_line_c", ground_pixels(dim, &ridden, seed ^ 0x11E5)),
         ("grass_c", ground_pixels(dim, &turf, seed ^ 0x6A55)),
     ];
-    out.extend_from_slice(&(sheets.len() as u32).to_le_bytes());
+    let n = sheets.len();
+
+    let mut out = Vec::new();
+    out.extend_from_slice(b"MP2\0");
+    out.extend_from_slice(&304u32.to_le_bytes()); // header size, constant on every map measured
+
+    // One material per sheet. The association between the two is **positional** — the k-th
+    // colour record belongs to material k — so a map with four sheets and no materials is
+    // four pictures with nothing to hang them on. All 56 bytes of a record are white shading
+    // terms and a one-based id; nothing in it points at a texture.
+    out.extend_from_slice(&(n as u32).to_le_bytes());
+    for k in 0..n {
+        let mut rec = [0u8; 56];
+        // White, fully opaque, and its own id — the shape every published map's records have.
+        for c in 0..12 {
+            rec[c * 4..c * 4 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        rec[52..56].copy_from_slice(&((k + 1) as u32).to_le_bytes());
+        out.extend_from_slice(&rec);
+    }
+
+    // A mesh, because the format's own walk requires one: eight vertices at the least and a
+    // triangle at the least, and everything after them is found by stepping over them. A map
+    // declaring none of each is not an empty map, it is a file that stops being readable at
+    // its fifth word — `map::parse` rejects our own, which is the tell that the game's reader
+    // would too, and "crashing at track graphics" is where that shows up.
+    //
+    // What the geometry *is* barely matters, so it is the smallest thing that satisfies the
+    // walk: a box, well below the terrain, where nothing can see it. The riding surface comes
+    // from the `.trh` and a generated track ships no scenery.
+    const VC: usize = 8;
+    const TC: usize = 12;
+    let under = -500.0f32;
+    let corners: [[f32; 3]; VC] = [
+        [0.0, under, 0.0],
+        [1.0, under, 0.0],
+        [1.0, under, 1.0],
+        [0.0, under, 1.0],
+        [0.0, under - 1.0, 0.0],
+        [1.0, under - 1.0, 0.0],
+        [1.0, under - 1.0, 1.0],
+        [0.0, under - 1.0, 1.0],
+    ];
+    out.extend_from_slice(&(VC as u32).to_le_bytes());
+    // Structure of arrays, 80 bytes a vertex: positions first, texture coordinates at
+    // 12 x count, normals at 52 x count. The rest is attributes we don't write and the game
+    // doesn't need from a box nobody sees.
+    let mut block = vec![0u8; VC * 80];
+    for (i, c) in corners.iter().enumerate() {
+        for (k, v) in c.iter().enumerate() {
+            let at = i * 12 + k * 4;
+            block[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        let uv = 12 * VC + i * 8;
+        block[uv..uv + 4].copy_from_slice(&0.0f32.to_le_bytes());
+        block[uv + 4..uv + 8].copy_from_slice(&0.0f32.to_le_bytes());
+        let nm = 52 * VC + i * 12;
+        block[nm + 4..nm + 8].copy_from_slice(&1.0f32.to_le_bytes()); // straight up
+    }
+    out.extend_from_slice(&block);
+
+    let tris: [[u32; 3]; TC] = [
+        [0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6],
+        [0, 4, 5], [0, 5, 1], [1, 5, 6], [1, 6, 2],
+        [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0],
+    ];
+    out.extend_from_slice(&(TC as u32).to_le_bytes());
+    for t in &tris {
+        for i in t {
+            out.extend_from_slice(&i.to_le_bytes());
+        }
+    }
+
+    // One leaf node carrying a draw group per material, so every sheet is bound to something
+    // and the groups tile the index buffer exactly — which is what a real map's do.
+    out.extend_from_slice(&1u32.to_le_bytes());
+    let mut node = vec![0u8; 44];
+    for (k, v) in [0.0f32, under - 1.0, 0.0, 1.0, under, 1.0].iter().enumerate() {
+        node[k * 4..k * 4 + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    node[40..44].copy_from_slice(&(n as u32).to_le_bytes());
+    out.extend_from_slice(&node);
+    let per = TC / n;
+    for k in 0..n {
+        let start = (k * per) as u32;
+        let count = if k + 1 == n { TC - k * per } else { per } as u32;
+        for w in [0u32, k as u32, start, count, 0, VC as u32] {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+    }
+
+    // The surfaces are counted before they are listed — a reader walking the file straight
+    // through lands on that word where the node tree ends.
+    out.extend_from_slice(&(n as u32).to_le_bytes());
     for (name, px) in &sheets {
         out.extend_from_slice(&texture_record(name, dim as u32, dim as u32, px));
     }
@@ -2968,12 +3050,35 @@ mod tests {
         let m = map(&p, &s);
         assert_eq!(&m[..4], b"MP2\0");
         assert_eq!(u32::from_le_bytes(m[4..8].try_into().unwrap()), 304);
-        assert_eq!(u32::from_le_bytes(m[8..12].try_into().unwrap()), 0, "materials");
-        // `map::parse` builds a *mesh*, so it rightly declines one with no geometry — that
-        // is the drag strip's shape and it is deliberate. What has to hold is that the file
-        // is recognised as a map, and that its sheets read back.
+        // One material per sheet: the two are matched positionally, so the counts have to
+        // agree or every picture is hung on the wrong thing — or on nothing.
+        assert_eq!(u32::from_le_bytes(m[8..12].try_into().unwrap()), 4, "materials");
         assert!(crate::map::is_map(&m), "not recognised as a map");
-        assert!(crate::map::parse(&m).is_none(), "there is no mesh in it to find");
+
+        // The check that matters, and the one that was missing. `embedded_textures` *scans*
+        // for records; the game walks the file — material records, then the vertex block,
+        // then the indices, then the node tree, and only then the sheets. A map that can only
+        // be scanned is one whose textures a walker never reaches, and the previous version
+        // declared no mesh at all, so the walk stopped at its fifth word. It asserted that
+        // outright: "there is no mesh in it to find".
+        let mesh = crate::map::parse(&m).expect("a walker has to find the mesh");
+        assert!(mesh.vertex_count() >= 8, "{} vertices", mesh.vertex_count());
+        assert!(mesh.triangle_count() >= 1, "{} triangles", mesh.triangle_count());
+
+        // And the sheets have to be where the walk ends up, not merely somewhere in the file.
+        let walked = crate::map::declared(&m);
+        assert_eq!(
+            walked.iter().map(|(n, ..)| n.as_str()).collect::<Vec<_>>(),
+            ["ground_c", "shoulder_c", "dirt_line_c", "grass_c"],
+            "walked to {walked:?}"
+        );
+        for (n, w, h) in &walked {
+            assert_eq!(
+                (*w, *h),
+                (GROUND_TEXTURE_DIM as u32, GROUND_TEXTURE_DIM as u32),
+                "{n} is {w}x{h}"
+            );
+        }
 
         // The scanner that reads published tracks' textures has to find ours, and they have
         // to inflate to the pixel count they claim — a record the game would skip is a
@@ -2986,19 +3091,6 @@ mod tests {
             "found {names:?}"
         );
 
-        // A reader walking the file rather than scanning it lands on the count where the
-        // node tree ends — six words in, since nothing before it has any entries.
-        let after_tree = 24;
-        assert_eq!(
-            u32::from_le_bytes(m[after_tree..after_tree + 4].try_into().unwrap()),
-            texs.len() as u32,
-            "the surfaces have to be counted before they are listed"
-        );
-        assert_eq!(
-            &m[after_tree + 4..after_tree + 4 + 8],
-            b"ground_c",
-            "the first record starts straight after the count"
-        );
         for t in &texs {
             assert_eq!(t.width, GROUND_TEXTURE_DIM as u32);
             let px = crate::edf::inflate_texture(&m, t).expect("the sheet inflates");

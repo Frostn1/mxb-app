@@ -25,6 +25,11 @@ declare global {
      *  carries on. Spend is capped by the endpoint itself: one Opus call per request, at
      *  most 16k output tokens, and only ever a motocross track. */
     ANTHROPIC_API_KEY?: string;
+    /**
+     * Which model writes the track, overriding the default in `trackgen.ts`. A running-cost
+     * decision rather than a code one — see the note there on what the cheap one cannot do.
+     */
+    TRACK_MODEL?: string;
     /** Ed25519 private key (PKCS#8 DER, base64url) that signs plugin entitlements. The app
      *  holds only the public half, so a leak of the app cannot mint licenses. Without it
      *  every licensing endpoint answers 503 rather than issuing something unsigned - an
