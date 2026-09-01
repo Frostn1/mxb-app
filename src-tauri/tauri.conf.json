@@ -43,7 +43,6 @@
   },
   "bundle": {
     "active": true,
-    "resources": ["resources/*.dll"],
     "targets": ["nsis", "app", "dmg", "appimage", "deb", "rpm"],
     "category": "Game",
     "createUpdaterArtifacts": true,

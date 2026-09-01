@@ -108,6 +108,19 @@ jobs:
         shell: bash
         run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
 
+      # Ask the bundler for the DLL only on the leg that has one. Tauri's `resources` glob
+      # is a hard error when it matches nothing, so keeping it in the committed config
+      # broke every build without the private module — CI on both platforms, and the
+      # macOS and Linux release legs. The file must be there by now: sync.sh put it in
+      # src/, build.rs copies it into resources/ before the bundler looks.
+      - name: Bundle the secure-content DLL
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
+        shell: bash
+        run: |
+          test -f src-tauri/src/mxbsecure.dll || { echo "::error::mxbsecure.dll missing after sync.sh"; exit 1; }
+          jq '.bundle.resources = ["resources/*.dll"]' src-tauri/tauri.conf.json > tauri.conf.patched
+          mv tauri.conf.patched src-tauri/tauri.conf.json
+
       # The release page should say what shipped, not only which file to download — so
       # the body is composed from this tag's CHANGELOG section. Same section the Discord
       # announcement reads, so the two can't drift apart.
