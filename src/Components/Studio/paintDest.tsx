@@ -184,6 +184,30 @@ export interface PaintDestState {
 }
 
 /**
+ * The bike the pickers open on, when nothing has been chosen yet and it is installed.
+ *
+ * The fallback is the first name on the list, which for a real mods folder is whatever
+ * happens to sort first — `2007_H85R` on mine, out of sixty-one. That is nobody's bike; it
+ * is just the top of an alphabetical list, and it made opening the Designer to paint start
+ * with picking something else first.
+ *
+ * Matched on letters and digits alone, because a bike's folder name is whatever the pack
+ * that installed it chose. The token is narrow enough to be exact: it takes the 250 SX-F
+ * and not the two-stroke `KTM_250_SX` beside it, nor the 350.
+ */
+const PREFERRED_MODEL = "ktm250sxf";
+
+/** A model name reduced to what is stable about it — pack prefixes and punctuation vary. */
+function squash(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** The model to open on: the preferred one if it is installed, else the first on the list. */
+function defaultModel(models: string[]): string {
+  return models.find((m) => squash(m).includes(PREFERRED_MODEL)) ?? models[0] ?? "";
+}
+
+/**
  * The destination state, with `onChange` fired whenever the answer moves.
  *
  * Callers use that to drop anything they'd computed from the old destination — Paint Studio
@@ -237,7 +261,7 @@ export function usePaintDest(onChange?: () => void): PaintDestState {
   // Keep the picked model on the list the kind offers — switching from a helmet to a bike
   // must not leave a helmet's name sitting in a bike destination.
   useEffect(() => {
-    setModelState((m) => (models.includes(m) ? m : models[0] ?? ""));
+    setModelState((m) => (models.includes(m) ? m : defaultModel(models)));
   }, [models]);
 
   const dest = useMemo<PaintDest | null>(
