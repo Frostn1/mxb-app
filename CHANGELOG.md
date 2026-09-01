@@ -2,6 +2,11 @@
 
 ## 2026-09-01
 
+### Changed
+- Paint sync only asks about the server you are actually on. Starting the game no longer
+  fetches every rider's paints from every server on the registry — the paints for your grid
+  arrive when you join it. The Sync button still checks everywhere if you ask it to.
+
 ### Added
 - Track generation reads a published track's own centreline out of its height file, so a real
   lap's corners, their radii and its straights can be measured directly rather than guessed at.
