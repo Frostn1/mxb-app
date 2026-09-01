@@ -56,6 +56,8 @@
 - The starting track is built on a hillside. It climbs 22 m round the lap, which is what
   Indiana does — half of the published tracks climb more than 20 m, and a flat plot rides
   like a car park.
+- The racing line is chopped up at the scale of a wheel rather than a jump, and the field
+  around it is smooth. It used to be nearly as rough out in the grass as it was on the line.
 - Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
   Settings follows it.
 - More of the crash at track graphics: the ground sheets in a track's graphics file were
