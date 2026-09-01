@@ -39,8 +39,8 @@
   around it is smooth. It used to be nearly as rough out in the grass as it was on the line.
 - A track's edge is crisp against the field rather than fading out over a wide shelf.
 - Jumps are built rather than dropped on. A takeoff ramps up over ten metres instead of five,
-  its faces are half as steep, and the ground either side dips where the dirt for it came
-  from.
+  the ground either side dips where the dirt for it came from, and no face is steeper than
+  dirt will stand — a big double's lip was a 65° wall and is now a 30° face.
 
 ### Fixed
 - Cloud sync tidying up behind you no longer asks the game to reload its mods. OneDrive,

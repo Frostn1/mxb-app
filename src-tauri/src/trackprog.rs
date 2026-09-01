@@ -205,6 +205,37 @@ impl Segment {
     }
 }
 
+/// The steepest face a jump is allowed, degrees.
+///
+/// Thirty because that is the ceiling across every published track measured, not a judgement:
+/// their steepest faces run 19.2–29.6° at the ninetieth percentile and Millville, the steepest
+/// of the ten, does not reach 30. A dirt lip pushed up by a machine cannot stand steeper than
+/// the material holds.
+pub const JUMP_FACE_DEG: f32 = 30.0;
+
+/// The shortest a face may be however small the jump.
+///
+/// The angle alone makes a small jump *worse*: at 30° a 1.2 m double would get a two-metre
+/// face where a flat four gives it twenty-four degrees. The angle is a ceiling on the tall
+/// ones, not a target for all of them.
+pub const JUMP_FACE_MIN_M: f32 = 4.0;
+
+/// How long a double's ramp and its lip's back face are, in metres, for a given height.
+///
+/// One definition, used by both the shape and by [`Feature::length`], because they have to
+/// agree about where the feature ends.
+///
+/// The 1.5 is not a fudge, and leaving it out is why this was still a wall after being fixed
+/// once: a smoothstep's steepest point is half again as steep as its average, so a face sized
+/// to *average* 30° peaks at 45. A 3.6 m double dropped at 53.5° at a flat four metres, 40.9°
+/// sized by the average, and 30.0° sized by the peak.
+pub fn double_faces(height: f32, lip: f32) -> (f32, f32) {
+    let face = 1.5 * height.abs() / JUMP_FACE_DEG.to_radians().tan();
+    let back = face.max(JUMP_FACE_MIN_M);
+    // A short lip on a tall jump is a wall whichever side of it you are on.
+    (lip.max(back), back)
+}
+
 /// Under this many degrees an arc is a drift, not a corner — a builder nudging a straight
 /// back onto line.
 pub const CORNER_DEG: f32 = 1.0;
@@ -347,8 +378,17 @@ impl Feature {
             | Feature::Berm { length, .. }
             | Feature::Rut { length, .. }
             | Feature::Custom { length, .. } => *length,
-            // Two faces up and two back down, with the gap between them.
-            Feature::Double { gap, lip, .. } => (lip + lip.min(5.0)) * 2.0 + gap,
+            // Two faces up and two back down, with the gap between them. The two lengths
+            // come from `double_faces` rather than being written out again here: they used
+            // to be, and when the faces were lengthened this went on reporting the old
+            // figure, so the profile was written up to a point eight metres short of where
+            // the shape actually ended and the last ramp was cut off into a step.
+            Feature::Double {
+                height, gap, lip, ..
+            } => {
+                let (lip, back) = double_faces(*height, *lip);
+                (lip + back) * 2.0 + gap
+            }
             Feature::Whoops {
                 count, spacing, ..
             } => *count as f32 * spacing,
