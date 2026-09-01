@@ -449,7 +449,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         if b != 0.0 && t * -b.signum() > 0.0 {
             let a = t.abs();
             if a <= half {
-                heights[i] += b.abs() * (a / half).powi(2);
+                // Not a quadratic. Squaring keeps the whole rise in the last metre and leaves
+                // the track flat under it, which measures as a kerb: published corners bank
+                // 3.5–10.5° across the riding line at the ninetieth, and a quadratic berm of
+                // the right height reads 2.4°. The outer half of the track is tilted, and
+                // that is what a rider leans on.
+                heights[i] += b.abs() * (a / half).powf(1.4);
             } else if a < half + BERM_REACH_M {
                 let u = (a - half) / BERM_REACH_M;
                 heights[i] += b.abs() * (1.0 - u * u);

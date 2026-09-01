@@ -2,13 +2,22 @@
 
 ## 2026-09-01
 
+### Added
+- Track generation reads a published track's own centreline out of its `.trh`, so a real lap's corners, radii and straights can be measured directly
+- Generated tracks carry their centreline too, and are measured by the same code as published ones
+
 ### Changed
+- Generated laps are laid out the way published tracks are built: compound corners that tighten and release, far more arcs than straights, and a lap that turns 2200° rather than 900°
+- Jumps come in a mix — a handful of big ones and a lot of small ground — instead of one size repeated
+- Corner berms, ruts and banking are built to numbers measured off ten published tracks
+- Straights carry worn ground rather than being smooth
 - Track diagnostics keep protected tracks protected: for a sealed track the report gives
   the layout probe's findings without listing the files inside it or their contents.
 - Paint Studio and the Designer open on the KTM 250 SX-F when it is installed, rather than on
   whichever bike sorts first alphabetically.
 
 ### Fixed
+- A corner's berm now banks the outside of the turn
 - Installed tracks hard-crashed the game at the track graphics stage. The material records in
   the track's graphics file were the wrong shape.
 
