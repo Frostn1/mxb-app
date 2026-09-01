@@ -2091,15 +2091,38 @@ fn gfx_cfg(prog: &TrackProgram) -> String {
 /// One embedded texture, in the record shape [`crate::edf::embedded_textures`] reads.
 fn texture_record(name: &str, w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
     let payload = deflate_raw(rgba);
-    // 100 bytes of name field, dimensions, then the header the scanner keys on.
-    let mut rec = vec![0u8; 140];
+    // A **primary** record's header, measured on a published map: 104 bytes of name field,
+    // the dimensions, the payload length at +132, eight zero bytes, and the pixels at +144.
+    //
+    // Ours used the 104-byte-earlier variant, and our own scanner accepts either — it tries
+    // both. That is how this went unnoticed: the two layouts do both occur in a real map, but
+    // not interchangeably. Every *colour* sheet in Indiana is at +104 and every *secondary*
+    // — the `_n_s` normal maps hanging off them — is at +100. We write colour sheets, so
+    // ours belong at +104.
+    let mut rec = vec![0u8; 144];
     let n = name.len().min(39);
     rec[..n].copy_from_slice(&name.as_bytes()[..n]);
-    rec[100..104].copy_from_slice(&w.to_le_bytes());
-    rec[104..108].copy_from_slice(&h.to_le_bytes());
-    // The length at +128 counts the eight zero bytes that follow it, which stay zero.
-    rec[128..132].copy_from_slice(&((payload.len() + 8) as u32).to_le_bytes());
+    rec[104..108].copy_from_slice(&w.to_le_bytes());
+    rec[108..112].copy_from_slice(&h.to_le_bytes());
+    // The length at +132 counts the eight zero bytes that follow it, which stay zero.
+    rec[132..136].copy_from_slice(&((payload.len() + 8) as u32).to_le_bytes());
     rec.extend_from_slice(&payload);
+
+    // Every colour record in a published map is followed by a descriptor, and ours were
+    // followed by the next record's name. A reader that *walks* — which is what the game
+    // does, whatever our own scanner gets away with — then takes eleven bytes of "grass_c"
+    // as five words and a count, and everything after it is wherever those bytes point.
+    //
+    // Read off Indiana: `1, 1, 0, 1.0f, 1.0f, N`, where N is how many secondary maps hang
+    // off this one. `pitlane_c` says 1 and is followed inline by `pitlane_n_s`; that is how
+    // 49 materials come to ship 84 sheets. We generate colour and nothing else, so ours say
+    // none. The five leading words are the same on every sample.
+    for w in [1u32, 1, 0] {
+        rec.extend_from_slice(&w.to_le_bytes());
+    }
+    rec.extend_from_slice(&1.0f32.to_le_bytes());
+    rec.extend_from_slice(&1.0f32.to_le_bytes());
+    rec.extend_from_slice(&0u32.to_le_bytes()); // no secondary maps
     rec
 }
 
@@ -3427,6 +3450,23 @@ mod tests {
             assert_eq!(w(12), 0, "material {k} word 12");
             assert_eq!(w(13), 0, "material {k} word 13");
         }
+    }
+
+    /// A texture record ends with the descriptor a published map puts there.
+    ///
+    /// Without it a reader walking the table runs the next record's *name* through the
+    /// descriptor's fields. Ours declare no secondary maps, which is true — we generate
+    /// colour sheets and nothing else.
+    #[test]
+    fn texture_records_carry_their_descriptor() {
+        let px = vec![0u8; 64 * 64 * 4];
+        let rec = texture_record("ground_c", 64, 64, &px);
+        let tail = &rec[rec.len() - 24..];
+        let w = |i: usize| u32::from_le_bytes(tail[i * 4..i * 4 + 4].try_into().unwrap());
+        let f = |i: usize| f32::from_le_bytes(tail[i * 4..i * 4 + 4].try_into().unwrap());
+        assert_eq!((w(0), w(1), w(2)), (1, 1, 0), "the three leading words");
+        assert_eq!((f(3), f(4)), (1.0, 1.0), "the two scales");
+        assert_eq!(w(5), 0, "how many secondary maps follow");
     }
 
     #[test]
