@@ -313,6 +313,12 @@ fn find_game_pid() -> Option<u32> {
     find_pid(crate::game::active().exe)
 }
 
+/// The running game's PID, for another module (e.g. secure-content injection) to act on it.
+#[cfg(windows)]
+pub fn game_pid() -> Option<u32> {
+    find_game_pid()
+}
+
 /// Runtime base address of `mxbikes.exe` in `pid` (retries transient snapshot failures).
 #[cfg(windows)]
 fn module_base(pid: u32) -> Option<*mut u8> {

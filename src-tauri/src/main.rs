@@ -57,6 +57,7 @@ mod sidecar_lock;
 #[cfg(mxbsecure)]
 mod mxbsecure;
 mod steamid;
+mod secure_launch;
 
 #[cfg(all(test, mxbsecure))]
 mod offline_flow_test {
@@ -5722,6 +5723,7 @@ struct SecureProvisionOutcome {
 /// Lock tab supplies it). From then on the key opens offline for this account only.
 #[tauri::command]
 async fn mxbsecure_provision(
+    app: tauri::AppHandle,
     blob_path: String,
     key: String,
 ) -> Result<SecureProvisionOutcome, String> {
@@ -5733,6 +5735,26 @@ async fn mxbsecure_provision(
         let sealed = mxbsecure::seal_key_to_identity(&content_key, &steam_id, "");
         let out = std::path::PathBuf::from(format!("{blob_path}.mxbkey"));
         tokio::fs::write(&out, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
+
+        // Remember the mapping so the app can arm this asset — write the manifest and inject
+        // the DLL — the next time the game starts. The game name is the blob's own name with
+        // the `.mxbsecure` suffix removed: the file the engine will ask for.
+        let game_name = std::path::Path::new(&blob_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .map(|n| n.strip_suffix(".mxbsecure").unwrap_or(&n).to_string())
+            .unwrap_or_default();
+        if let Err(e) = secure_launch::record_asset(
+            &app,
+            secure_launch::SecureAsset {
+                game_name,
+                blob_path: blob_path.clone(),
+                mxbkey_path: out.to_string_lossy().to_string(),
+            },
+        ) {
+            log::warn!("[secure] couldn't record the provisioned asset: {e}");
+        }
+
         Ok(SecureProvisionOutcome {
             mxbkey_path: out.to_string_lossy().to_string(),
             steam_id,
@@ -5740,7 +5762,7 @@ async fn mxbsecure_provision(
     }
     #[cfg(not(mxbsecure))]
     {
-        let _ = (blob_path, key);
+        let _ = (app, blob_path, key);
         Err("this build can't provision mxbsecure content".into())
     }
 }
