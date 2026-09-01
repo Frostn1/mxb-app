@@ -75,9 +75,11 @@ async function loadTexture(t: PaintTexture): Promise<THREE.DataTexture | null> {
  *
  * A wheel's brake discs and its sprocket are flat quads wearing a masked square — two thirds
  * of `fdisc` is fully transparent — so drawn without a mask each one is a square sitting on
- * the wheel. A naive "does it have alpha" test can't be used, though: a bike's `w_plate` is
- * alpha-0 on *every* pixel, an unused channel, and masking on that erases the number plates
- * outright. So the channel only counts as a mask when it varies.
+ * the wheel. A naive "does it have alpha" test can't be used, though: plenty of sheets are
+ * alpha-0 on *every* pixel simply because nobody filled the channel in — a mod's `airbox` or
+ * `lens`, and most `_n`/`_r`/`_s` maps — and cutting those out erases the part. So the
+ * channel only counts as a mask when it varies. The decal planes, which are alpha-0 for a
+ * reason rather than by neglect, are hidden by name instead — see {@link isDecalPlane}.
  *
  * Sampled, not scanned: a 4096² sheet is 16M pixels and this runs per texture per load,
  * while a real mask covers a third of the image or more and turns up in the first few
@@ -656,11 +658,36 @@ function useNodeGeometries(nodes: EdfNode[], skin?: Skin | null) {
   return geoms;
 }
 
+/**
+ * Whether a texture name belongs to one of the planes the game writes on itself.
+ *
+ * `w_plate`, `w_number` and `w_name` are flat quads the game composites the rider's number
+ * and name onto at run time — on a bike they are the side and front number plates, declared
+ * by its `gfx.cfg` as `plate { texture = w_plate }`. Nothing is meant to be visible there
+ * until the game draws on it, and the sheet behind them says so: every bike ships it alpha-0
+ * on every pixel, with whatever RGB the modeller happened to leave — half white and half
+ * black, or all white, or all black, or 512x256. That is only consistent if the plane is
+ * meant to be invisible, and drawn it puts that placeholder over the number plates instead
+ * of the livery.
+ *
+ * By name rather than by alpha, because the alpha channel can't tell this apart from a sheet
+ * nobody filled in (see {@link hasMaskedAlpha}). The rider's side has always read these by
+ * name too — `body_slot` maps any `w_` texture to the `hide` slot.
+ */
+function isDecalPlane(name: string | null | undefined): boolean {
+  return !!name && name.toLowerCase().startsWith("w_");
+}
+
+/** Renders nothing and occludes nothing — for a plane that is not ours to draw. */
+function makeHiddenMaterial() {
+  return new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+}
+
 function makeBodyMaterial(name: string | null | undefined, tex: Map<string, THREE.Texture>) {
   const key = name?.toLowerCase();
   // Decal planes: render nothing rather than smear the suit over a flat quad.
   if (key === "hide") {
-    return new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+    return makeHiddenMaterial();
   }
   // Head/neck: bare skin so the kit doesn't wrap onto it.
   if (key === "face") {
@@ -1095,7 +1122,11 @@ function RiderComposite({
   );
 }
 
-function makeEdfMaterial(t: THREE.Texture | null) {
+function makeEdfMaterial(name: string | null | undefined, t: THREE.Texture | null) {
+  // The number-plate planes are the game's to draw on, not ours — see `isDecalPlane`.
+  if (isDecalPlane(name)) {
+    return makeHiddenMaterial();
+  }
   return new THREE.MeshStandardMaterial({
     map: t ?? undefined,
     color: t ? 0xffffff : 0xb7bcc4,
@@ -1124,9 +1155,11 @@ function useEdfMeshes(
     () =>
       list.map((n) =>
         n.submeshes.length
-          ? n.submeshes.map((sm) => makeEdfMaterial(submeshTexture(sm.texture, tex)))
+          ? n.submeshes.map((sm) =>
+              makeEdfMaterial(sm.texture, submeshTexture(sm.texture, tex)),
+            )
           : // No submesh table → whole-node binding (the model's primary body texture).
-            [makeEdfMaterial(submeshTexture(n.texture, tex))],
+            [makeEdfMaterial(n.texture, submeshTexture(n.texture, tex))],
       ),
     [list, tex],
   );

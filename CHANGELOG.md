@@ -2,6 +2,10 @@
 
 ## 2026-08-31 — v0.13.1 — Tracks that look ridden
 
+### Fixed
+- The 3D preview shows the livery on a bike's side and front number plates, instead of the
+  blank plate the model carries there.
+
 ### Added
 - A FrostMod flags box in Settings. What you type there is handed to FrostMod the next time
   it starts, after the flags the app already sends.
