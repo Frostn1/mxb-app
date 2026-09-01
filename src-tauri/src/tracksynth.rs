@@ -43,6 +43,12 @@ const SHOULDER_M: f32 = 9.0;
 
 /// Metres of lap the track's own elevation is smoothed over. Short enough to follow a hill,
 /// long enough not to follow a bush.
+///
+/// Not what sets how steep the lap gets, which is worth writing down because it looks like it
+/// should be: taking it from 45 m to 24 m moved the steepest grade along the riding line from
+/// 12.9° to 13.8° and made the track follow every hummock. The grade comes from the landscape
+/// — its amplitude against its wavelength — and that is a choice per track rather than a
+/// constant here. Published tracks run 9.1–22.5° at the ninetieth and the spread is real.
 const BENCH_SMOOTH_M: f32 = 45.0;
 
 /// Where a feature stops being full height, as a fraction of the half-width, and where it has
@@ -77,7 +83,12 @@ const PASS_SPACING_M: f32 = 2.6;
 const PASS_DEPTH_M: f32 = 0.022;
 
 /// Metres between the bumps of the riding surface's own texture.
-const TEXTURE_WAVELENGTH_M: f32 = 3.5;
+///
+/// Under two, and measured rather than chosen. At 3.5 m it is too coarse to register at the
+/// half-metre scale a rider feels: the surface read 1.26 cm two metres off the line where
+/// Indiana reads 2.51. Ground that has been ridden is chopped up at the scale of a wheel, not
+/// at the scale of a jump.
+const TEXTURE_WAVELENGTH_M: f32 = 1.8;
 
 /// How much the riding line's width wanders, as a fraction. A track of exactly constant
 /// width reads as machine-made from the first glance — real ones pinch into corners and open
@@ -232,8 +243,11 @@ const BERM_REACH_M: f32 = 4.5;
 /// Four octaves over a hundred-metre wavelength put the smallest hummock twelve metres
 /// across, and a field of those reads as a blur rather than as ground. Real land has
 /// metre-scale texture everywhere, not only where it has been ridden.
+/// And the field is not ridden. Seven and a half centimetres of detail everywhere left the
+/// field nearly as rough as the racing line — 1.07 cm against 1.26 — where a published track's
+/// field is a quarter of its line.
 const FIELD_DETAIL_M: f32 = 4.5;
-const FIELD_DETAIL_HEIGHT_M: f32 = 0.075;
+const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 
 /// The short back face of a double's takeoff, and the short front face of its landing. This
 /// is the lip itself — steep, but a face rather than a step.
@@ -526,6 +540,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         // seams between one station's territory and the next. Out at the centre of a corner's
         // arc those seams are metres wide and the jump draws a crease across the infield.
         let w = bench_weight(d, half, SPOIL_WIDTH_M);
+        // Worn hardest where the wheels are. Riders use the middle of a track and the edges
+        // barely at all, so the ridden texture tapers across it rather than covering the
+        // corridor evenly — which is what it did, and it is measurable: Indiana's surface
+        // roughness halves between two metres off the line and six, while ours barely moved.
+        // The braking chop below already tapers this way; the surface it sits on did not.
+        let across = (1.0 - (d / half.max(1e-3)).min(1.0).powi(2)) * w;
         if r.texture > 0.0 && w > 0.0 {
             let (wx, wz) = ((i % gw) as f32 * mps_x, (i / gw) as f32 * mps_z);
             let gain = chop.rough.at(s);
@@ -535,15 +555,12 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
                 r.seed ^ 0x5EED,
             ) * r.texture
                 * gain
-                * w;
+                * (0.25 * w + 0.75 * across);
             // The seams between the machine's passes, running the way it drove.
             heights[i] -= ((t / PASS_SPACING_M) * std::f32::consts::TAU).sin().abs()
                 * PASS_DEPTH_M
                 * w;
 
-            // A washboard is strongest where the wheels are and gone at the edge of the
-            // track, where nobody brakes.
-            let across = (1.0 - (t.abs() / half).min(1.0).powi(2)) * w;
             // Braking bumps on the way into a corner, which is the direction they form in.
             // The phase drifts, because bumps that are a perfect sine read as corrugated iron.
             let brake = chop.braking.at(s);
@@ -4095,6 +4112,52 @@ mod tests {
             worst.2,
             worst.1,
             worst.0
+        );
+    }
+
+    /// A track is worn and a field is not.
+    ///
+    /// Measured as the mean absolute second difference along the direction of travel, which
+    /// is the scale a rider feels. Indiana reads 2.51 cm two metres off the riding line and
+    /// 0.67 cm twelve metres out in the field — the field is a quarter of the track. Ours read
+    /// 1.26 against 1.07, which is to say the field was very nearly as chopped up as the
+    /// racing line, because the landscape carried 7.5 cm of detail everywhere and the ridden
+    /// texture was too coarse to register at half a metre.
+    #[test]
+    fn the_field_is_smoother_than_the_track() {
+        let p: TrackProgram = serde_json::from_str(DEMO).unwrap();
+        let s = synthesise(&p).unwrap();
+        let rough = |off: f32| -> f32 {
+            let mut v: Vec<f32> = Vec::new();
+            for st in s.stations.iter().step_by(37) {
+                let (rx, rz) = crate::trackprog::right_vector(st.heading);
+                let (hx, hz) = crate::trackprog::heading_vector(st.heading);
+                let (px, pz) = (st.x + rx * off, st.z + rz * off);
+                // Bilinear, not `sample`'s nearest cell: half-metre steps on a quarter-metre
+                // grid snap to alternating cells, and that aliasing is larger than the
+                // texture being measured.
+                let at = |d: f32| {
+                    let (fx, fy) = ((px + hx * d) / s.mps, (pz + hz * d) / s.mps);
+                    let x0 = (fx.floor() as isize).clamp(0, s.gw as isize - 2) as usize;
+                    let y0 = (fy.floor() as isize).clamp(0, s.gh as isize - 2) as usize;
+                    let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+                    let g = |r: usize, c: usize| s.heights[r * s.gw + c];
+                    (g(y0, x0) * (1.0 - tx) + g(y0, x0 + 1) * tx) * (1.0 - ty)
+                        + (g(y0 + 1, x0) * (1.0 - tx) + g(y0 + 1, x0 + 1) * tx) * ty
+                };
+                let h: Vec<f32> = (-2..=2).map(|k| at(k as f32 * 0.5)).collect();
+                v.push((h[0] - 2.0 * h[1] + h[2]).abs() + (h[2] - 2.0 * h[3] + h[4]).abs());
+            }
+            v.sort_by(f32::total_cmp);
+            v[v.len() / 2]
+        };
+        let (track, field) = (rough(2.0), rough(12.0));
+        assert!(
+            field < track * 0.60,
+            "the track reads {:.2} cm and the field {:.2} cm — a published track's field is a \
+             quarter of its racing line",
+            track * 100.0,
+            field * 100.0
         );
     }
 

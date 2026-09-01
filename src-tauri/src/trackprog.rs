@@ -149,8 +149,12 @@ pub struct Relief {
     pub texture: f32,
 }
 
+/// Measured, not chosen. The surface roughness of a published track — the mean absolute
+/// second difference along the direction of travel — runs 2.56 cm on the riding line and
+/// 2.51 cm two metres off it on Indiana. At 0.06 a generated track read 1.93 and 1.82: a
+/// quarter smoother than real ground everywhere a rider actually is.
 fn default_texture() -> f32 {
-    0.06
+    0.085
 }
 
 impl Default for Relief {
