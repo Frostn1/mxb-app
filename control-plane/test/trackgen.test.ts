@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { generateTrack } from "../src/trackgen";
+import { SYSTEM, generateTrack } from "../src/trackgen";
 
 /** A request the endpoint would accept, so each test can spoil one thing about it. */
 function post(body: unknown): Request {
@@ -55,5 +55,17 @@ describe("the no-key check comes first", () => {
       withoutKey,
     );
     expect(res.status).toBe(503);
+  });
+});
+
+describe("the system prompt", () => {
+  it("is one string, not a tagged template", () => {
+    // It is a backtick literal, so a stray backtick in the prose ends it and turns the next
+    // line into a tag call — `a \`.trh\` carries` parses fine and throws `.trh is not a
+    // function` the moment the module is evaluated. It shipped that way once: `tsc` catches
+    // it, and `esbuild` and a bundle check both do not.
+    expect(typeof SYSTEM).toBe("string");
+    expect(SYSTEM.length).toBeGreaterThan(1000);
+    expect(SYSTEM).not.toContain("`");
   });
 });
