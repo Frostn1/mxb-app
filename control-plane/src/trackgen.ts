@@ -174,6 +174,19 @@ Close it by doing the arithmetic. Point symmetry — half a lap whose signed ang
 there as a fallback, but a track built that way is symmetrical about its own centre and reads
 as one on the map. Use it only if the layout you want will not close.
 
+KEEP THE LAP WINDING ONE WAY. This is the practical way to avoid crossing yourself, and it
+is arithmetic you can check as you write. Add up the *signed* angles: they must come to ±360.
+Now add up the *absolute* angles, ignoring sign: a clean lap comes to somewhere around 900,
+and much past that means it has wound back on itself and will probably cross. A track that turns mostly one
+way, with a few gentle counter-turns, closes cleanly; one that alternates hard left and hard
+right wanders back over its own ground.
+
+THE LAP MUST NOT CROSS ITSELF. It is a closed loop drawn on flat ground, and no part of it
+may run over another part — there are no bridges. A lap that goes out, loops, and comes back
+through where it has already been is rejected. When you have written the segments, walk the
+path in your head and check that it does not return to ground it has covered: the usual cause
+is a straight long enough to reach back across an earlier one.
+
 WRITE A LAP, NOT A SHAPE. A published circuit is twenty to forty segments: short straights,
 corners in runs, and no two turns the same radius. Six long straights joined by four identical
 arcs closes perfectly and looks like a running track from above. Vary the radii across the
@@ -234,6 +247,31 @@ over.`;
  */
 const MODEL = "claude-haiku-4-5";
 
+/**
+ * Which model, and how it wants to be asked.
+ *
+ * `TRACK_MODEL` overrides the default, because which model this wants is a running cost
+ * decision rather than a code one — put it in `.dev.vars` locally or set it as a var on the
+ * deployment. The two families take different parameters and the mismatch is a 400 rather
+ * than something ignored: Haiku 4.5 predates adaptive thinking, takes a fixed thinking
+ * budget, and rejects `output_config.effort` outright.
+ *
+ * Worth knowing before turning the cheap one on: Haiku writes laps that cross over themselves
+ * and cannot reliably fix one when told. It is the one thing here that is genuinely spatial
+ * reasoning, there is nothing to compute on its behalf, and it is where the price difference
+ * actually shows up.
+ */
+function ask(model: string) {
+  const adaptive = !/^claude-haiku/.test(model);
+  return {
+    model,
+    thinking: adaptive
+      ? ({ type: "adaptive" } as const)
+      : ({ type: "enabled", budget_tokens: 4000 } as const),
+    effort: adaptive ? ("low" as const) : undefined,
+  };
+}
+
 /** Briefs longer than this are not briefs. */
 const MAX_BRIEF = 2000;
 
@@ -285,17 +323,19 @@ export async function generateTrack(request: Request, env: Env): Promise<Respons
 
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   try {
+    const chosen = ask(env.TRACK_MODEL?.trim() || MODEL);
     const response = await client.messages.parse({
-      model: MODEL,
+      model: chosen.model,
       max_tokens: 16000,
       system: SYSTEM,
       messages,
       // Laying out a lap is arithmetic the model would have to do — except most of it is
-      // done for it now, see `repair` in trackllm.rs. Haiku 4.5 predates adaptive thinking
-      // and takes a fixed budget instead, and rejects `output_config.effort` outright, so
-      // the only thing left in `output_config` is the schema.
-      thinking: { type: "enabled", budget_tokens: 4000 },
-      output_config: { format: zodOutputFormat(TrackProgram) },
+      // done for it now, see `repair` in trackllm.rs.
+      thinking: chosen.thinking,
+      output_config: {
+        format: zodOutputFormat(TrackProgram),
+        ...(chosen.effort ? { effort: chosen.effort } : {}),
+      },
     });
 
     if (response.stop_reason === "refusal") {
