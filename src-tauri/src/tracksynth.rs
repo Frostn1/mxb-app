@@ -1863,19 +1863,24 @@ fn rdf(prog: &TrackProgram) -> String {
 /// The record layout is `edf.rs`'s, which is the scanner that reads real ones: a
 /// null-terminated name, its dimensions a hundred bytes in, the payload's length at +128,
 /// eight zero bytes, then the pixels as raw DEFLATE over RGBA8.
+/// How many quads across the terrain the graphics mesh is built at.
+///
+/// Not the heightfield's own resolution — that would be four million vertices and a third of
+/// a gigabyte. A published map carries about a million; this is a preview, and 256 quads over
+/// a 700 m plot is under three metres a quad, which reads as ground from a bike.
+const MAP_QUADS: usize = 256;
+
 fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
-    let _ = syn;
     let (field, ridden, shoulder, turf) = ground_looks(prog.terrain.surface);
     let seed = prog.terrain.relief.seed;
     let dim = GROUND_TEXTURE_DIM;
 
+    // Material order is the sheet order, and the sheets are bound to materials positionally.
     let sheets = [
-        // `_c` is PiBoSo's own mark for a colour sheet, and the ground words are what a
-        // reader looking for a track's dirt matches on — ours say both.
-        ("ground_c", ground_pixels(dim, &field, seed ^ 0x9A0D)),
-        ("shoulder_c", ground_pixels(dim, &shoulder, seed ^ 0x30D2)),
-        ("dirt_line_c", ground_pixels(dim, &ridden, seed ^ 0x11E5)),
-        ("grass_c", ground_pixels(dim, &turf, seed ^ 0x6A55)),
+        ("ground_c", ground_pixels(dim, &field, seed ^ 0x9A0D), TILE_FIELD_M),
+        ("shoulder_c", ground_pixels(dim, &shoulder, seed ^ 0x30D2), TILE_SHOULDER_M),
+        ("dirt_line_c", ground_pixels(dim, &ridden, seed ^ 0x11E5), TILE_LINE_M),
+        ("grass_c", ground_pixels(dim, &turf, seed ^ 0x6A55), TILE_GRASS_M),
     ];
     let n = sheets.len();
 
@@ -1884,12 +1889,7 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
     out.extend_from_slice(&304u32.to_le_bytes()); // constant on every map measured
 
     // A material record, copied field for field off a published map rather than guessed.
-    //
-    // Every one of Indiana's 49 is byte-identical but for one word: zero, six ones, four
-    // zeros, then a **one-based id at word eleven**, then two more zeros. The previous
-    // version here put ones across the first twelve words and the id at word thirteen, which
-    // is not this shape anywhere — a renderer reading it gets 1.0 where it expects a count
-    // or a flag, and an id of zero where it expects the material's own.
+    // Every one of Indiana's 49 is byte-identical but for the one-based id at word eleven.
     out.extend_from_slice(&(n as u32).to_le_bytes());
     for k in 0..n {
         let mut rec = [0u8; 56];
@@ -1900,83 +1900,157 @@ fn map(prog: &TrackProgram, syn: &Synth) -> Vec<u8> {
         out.extend_from_slice(&rec);
     }
 
-    // Geometry, because the format's own walk steps over it to reach everything after — a
-    // map declaring none stops being readable at its fifth word.
+    // ---------------------------------------------------------------------
+    // The terrain, as graphics.
     //
-    // One quad per material, each with its own vertices, because that is how a real leaf's
-    // draw groups carve up the buffers: disjoint vertex ranges and contiguous triangle
-    // ranges. Put 500 m under the terrain, where nothing can see it. The riding surface
-    // comes from the `.trh` and a generated track ships no scenery.
-    let vc = n * 4;
-    let tc = n * 2;
-    let under = -500.0f32;
+    // This file is not scenery with the ground somewhere else. 83% of a published map's
+    // vertices lie inside its terrain square, and its bounds run a kilometre past it for the
+    // landscape around — the `.map` *is* what the game draws the ground with, which is why
+    // "track graphics" is the stage it dies at when the file hasn't got one. Every earlier
+    // attempt here shipped a placeholder: no mesh at all, then a box under the terrain. Both
+    // were files the reader could walk and neither was a track.
+    //
+    // Built per material, because a draw group owns a contiguous run of triangles and a
+    // disjoint run of vertices — so each band's quads are emitted together with their own
+    // corners rather than sharing a lattice. Corners are duplicated at the seams between
+    // bands, which is what the published maps do too.
+    // ---------------------------------------------------------------------
+    let q = MAP_QUADS;
+    let half = prog.width * 0.5;
+    let (_, shoulder_scale) = ground(prog.terrain.surface);
+    let shoulder_to = half + SHOULDER_M * shoulder_scale;
+    let at = |gx: usize, gy: usize| -> f32 {
+        syn.heights[gy.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1)]
+    };
+    let sample = |i: usize, j: usize| -> (f32, f32, f32) {
+        let gx = i * (syn.gw - 1) / q;
+        let gy = j * (syn.gh - 1) / q;
+        (gx as f32 * syn.mps, at(gx, gy), gy as f32 * syn.mps)
+    };
+    // Which band a quad belongs to, by the distance off the line at its middle.
+    let band = |i: usize, j: usize| -> usize {
+        let gx = (i * (syn.gw - 1) / q + (i + 1) * (syn.gw - 1) / q) / 2;
+        let gy = (j * (syn.gh - 1) / q + (j + 1) * (syn.gh - 1) / q) / 2;
+        let d = syn.dist[gy.min(syn.gh - 1) * syn.gw + gx.min(syn.gw - 1)];
+        if d <= half {
+            2 // the riding line
+        } else if d <= shoulder_to {
+            1 // the graded shoulder
+        } else if prog.terrain.surface == Surface::Grass {
+            3
+        } else {
+            // Field, with grass over the part of it furthest from the track.
+            if d > shoulder_to * 1.6 { 3 } else { 0 }
+        }
+    };
+
+    let mut quads: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+    for j in 0..q {
+        for i in 0..q {
+            quads[band(i, j)].push((i, j));
+        }
+    }
+
+    let total_quads: usize = quads.iter().map(|v| v.len()).sum();
+    let vc = total_quads * 4;
+    let tc = total_quads * 2;
+
     out.extend_from_slice(&(vc as u32).to_le_bytes());
     let mut block = vec![0u8; vc * 80];
-    for k in 0..n {
-        let x = k as f32 * 2.0;
-        let quad = [
-            [x, under, 0.0],
-            [x + 1.0, under, 0.0],
-            [x + 1.0, under, 1.0],
-            [x, under, 1.0],
-        ];
-        for (c, pos) in quad.iter().enumerate() {
-            let v = k * 4 + c;
-            for (i, p) in pos.iter().enumerate() {
-                let at = v * 12 + i * 4;
-                block[at..at + 4].copy_from_slice(&p.to_le_bytes());
+    let mut v = 0usize;
+    for (k, list) in quads.iter().enumerate() {
+        let tile = sheets[k].2.max(0.5);
+        for &(i, j) in list {
+            for (dx, dz) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)] {
+                let (x, y, z) = sample(i + dx, j + dz);
+                let o = v * 12;
+                block[o..o + 4].copy_from_slice(&x.to_le_bytes());
+                block[o + 4..o + 8].copy_from_slice(&y.to_le_bytes());
+                block[o + 8..o + 12].copy_from_slice(&z.to_le_bytes());
+
+                // Tiled by metres on the ground, so the grain is the size the sheets were
+                // drawn at whatever the mesh's own resolution is.
+                let uv = 12 * vc + v * 8;
+                block[uv..uv + 4].copy_from_slice(&(x / tile).to_le_bytes());
+                block[uv + 4..uv + 8].copy_from_slice(&(z / tile).to_le_bytes());
+
+                // The pair that is (1, 1) on every published vertex.
+                let pair = 44 * vc + v * 8;
+                block[pair..pair + 4].copy_from_slice(&1.0f32.to_le_bytes());
+                block[pair + 4..pair + 8].copy_from_slice(&1.0f32.to_le_bytes());
+
+                // Normal and tangent from the ground's own slope. A zero tangent is a divide
+                // by zero in anything that shades it, so both are unit vectors.
+                let gx = ((i + dx) * (syn.gw - 1) / q).min(syn.gw - 1);
+                let gy = ((j + dz) * (syn.gh - 1) / q).min(syn.gh - 1);
+                let dhx = (at(gx + 1, gy) - at(gx.saturating_sub(1), gy)) / (2.0 * syn.mps);
+                let dhz = (at(gx, gy + 1) - at(gx, gy.saturating_sub(1))) / (2.0 * syn.mps);
+                let inv = 1.0 / (dhx * dhx + 1.0 + dhz * dhz).sqrt();
+                let nm = 52 * vc + v * 12;
+                block[nm..nm + 4].copy_from_slice(&(-dhx * inv).to_le_bytes());
+                block[nm + 4..nm + 8].copy_from_slice(&inv.to_le_bytes());
+                block[nm + 8..nm + 12].copy_from_slice(&(-dhz * inv).to_le_bytes());
+                let tinv = 1.0 / (1.0 + dhx * dhx).sqrt();
+                let tg = 64 * vc + v * 16;
+                block[tg..tg + 4].copy_from_slice(&tinv.to_le_bytes());
+                block[tg + 4..tg + 8].copy_from_slice(&(dhx * tinv).to_le_bytes());
+                block[tg + 12..tg + 16].copy_from_slice(&1.0f32.to_le_bytes());
+                v += 1;
             }
-            // Texture coordinates at 12 x count, normals at 52 x count — structure of
-            // arrays, eighty bytes a vertex.
-            let uv = 12 * vc + v * 8;
-            let (u, w) = ((c == 1 || c == 2) as u32 as f32, (c >= 2) as u32 as f32);
-            block[uv..uv + 4].copy_from_slice(&u.to_le_bytes());
-            block[uv + 4..uv + 8].copy_from_slice(&w.to_le_bytes());
-            let nm = 52 * vc + v * 12;
-            block[nm + 4..nm + 8].copy_from_slice(&1.0f32.to_le_bytes()); // straight up
         }
     }
     out.extend_from_slice(&block);
 
-    // Indices are **absolute** into the whole vertex buffer, not relative to a group's own
-    // range — checked against a published map, whose second group starts at vertex 178 and
-    // whose triangles there index 178 and up.
+    // Indices are absolute into the whole vertex buffer — checked against a published map
+    // whose second group starts at vertex 178 and whose triangles there index 178 and up.
     out.extend_from_slice(&(tc as u32).to_le_bytes());
-    for k in 0..n {
-        let v = (k * 4) as u32;
-        for t in [[v, v + 1, v + 2], [v, v + 2, v + 3]] {
+    for c in 0..total_quads {
+        let b = (c * 4) as u32;
+        for t in [[b, b + 1, b + 2], [b, b + 2, b + 3]] {
             for i in t {
                 out.extend_from_slice(&i.to_le_bytes());
             }
         }
     }
 
-    // One leaf node holding a draw group per material. A leaf's five words are
-    // `[0, 0, triangles in this node, first triangle, group count]` — the two counts are not
-    // decoration, they are how the reader knows what the node owns, and the previous version
-    // left both at zero while claiming four groups.
+    // One leaf node over the lot. A leaf's five words are `[0, 0, triangles in this node,
+    // first triangle, group count]`.
     out.extend_from_slice(&1u32.to_le_bytes());
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    for h in &syn.heights {
+        lo = lo.min(*h);
+        hi = hi.max(*h);
+    }
     let mut node = vec![0u8; 44];
-    let hi = (n as f32 * 2.0).max(1.0);
-    for (k, v) in [0.0f32, under, 0.0, hi, under, 1.0].iter().enumerate() {
-        node[k * 4..k * 4 + 4].copy_from_slice(&v.to_le_bytes());
+    let bounds = [
+        0.0f32,
+        lo,
+        0.0,
+        (syn.gw - 1) as f32 * syn.mps,
+        hi,
+        (syn.gh - 1) as f32 * syn.mps,
+    ];
+    for (k, val) in bounds.iter().enumerate() {
+        node[k * 4..k * 4 + 4].copy_from_slice(&val.to_le_bytes());
     }
     node[32..36].copy_from_slice(&(tc as u32).to_le_bytes());
-    node[36..40].copy_from_slice(&0u32.to_le_bytes());
     node[40..44].copy_from_slice(&(n as u32).to_le_bytes());
     out.extend_from_slice(&node);
-    for k in 0..n {
+    let mut tri = 0u32;
+    let mut vert = 0u32;
+    for (k, list) in quads.iter().enumerate() {
+        let qn = list.len() as u32;
         // flag, material (zero-based), tri_start, tri_count, vert_start, vert_count
-        for w in [0u32, k as u32, (k * 2) as u32, 2, (k * 4) as u32, 4] {
+        for w in [0u32, k as u32, tri, qn * 2, vert, qn * 4] {
             out.extend_from_slice(&w.to_le_bytes());
         }
+        tri += qn * 2;
+        vert += qn * 4;
     }
 
-    // The word here is the **material** count, not the number of records that follow: a
-    // published map declares 49 and then ships 84 sheets, the extra ones being the normal and
-    // specular maps that hang off the colour ones. Ours are one apiece, so the two agree.
+    // The word here is the **material** count, not the number of records that follow.
     out.extend_from_slice(&(n as u32).to_le_bytes());
-    for (name, px) in &sheets {
+    for (name, px, _) in &sheets {
         out.extend_from_slice(&texture_record(name, dim as u32, dim as u32, px));
     }
     out
@@ -2647,8 +2721,12 @@ fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
         .collect();
     let base_small = crate::trackstats::box_blur(&small, dim, dim, 3);
     for y in 0..dim {
-        // TGA's origin is bottom-left, so the picture is written from the far edge back.
-        let gy = ((dim - 1 - y) * syn.gh / dim).min(syn.gh - 1);
+        // One orientation for the whole picture. The corridor used to be read from the far
+        // edge back while the relief was read straight through, so the shading and the line
+        // it was shading disagreed by a flip — and the lap came out mirrored against the
+        // route the game draws over it.
+        let row = dim - 1 - y;
+        let gy = (row * syn.gh / dim).min(syn.gh - 1);
         for x in 0..dim {
             let gx = (x * syn.gw / dim).min(syn.gw - 1);
             let i = gy * syn.gw + gx;
@@ -2660,7 +2738,7 @@ fn ui_images(syn: &Synth, dim: usize) -> (Vec<u8>, Vec<u8>) {
             map[at..at + 4].copy_from_slice(&[c[2], c[1], c[0], 255]);
 
             // The picture: the terrain's own relief, with the line picked out.
-            let here = y * dim + x;
+            let here = row * dim + x;
             let relief =
                 ((small[here] - base_small[here]) * 90.0 + 128.0).clamp(0.0, 255.0) as u8;
             let s: [u8; 3] = if on {

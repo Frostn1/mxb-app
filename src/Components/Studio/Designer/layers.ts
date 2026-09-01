@@ -517,3 +517,23 @@ export function isCompanionMap(name: string): boolean {
   const n = name.trim().toLowerCase();
   return COMPANION_SUFFIXES.some((s) => n.endsWith(s));
 }
+
+/** The companion suffixes that mean a tangent-space normal map specifically. */
+const NORMAL_SUFFIXES = ["_n", "_normal", "_nrm"];
+
+/**
+ * Whether a texture name is a normal map, as opposed to some other companion.
+ *
+ * Worth separating from {@link isCompanionMap} because a normal map is the one companion with
+ * a *neutral* value: (128, 128, 255) is "this surface is exactly as flat as the mesh says",
+ * which is a correct sheet rather than a missing one. There is no such value for a roughness
+ * or an occlusion map — whatever constant you pick is a claim about the material, and the
+ * model's own sheet is the only honest starting point.
+ */
+export function isNormalMap(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  return NORMAL_SUFFIXES.some((s) => n.endsWith(s));
+}
+
+/** The flat value of a tangent-space normal map: straight out of the surface. */
+export const FLAT_NORMAL = "#8080ff";

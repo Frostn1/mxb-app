@@ -66,6 +66,8 @@ import {
   groupOf,
   imageLayer,
   isCompanionMap,
+  isNormalMap,
+  FLAT_NORMAL,
   layerExtent,
   newId,
   paintLayer,
@@ -130,6 +132,22 @@ function stockBitmap(tex: PaintTexture): Promise<ImageBitmap | null> {
   return textureBytes(tex.token)
     .then((buf) => bitmapFromRgba(buf, tex.width, tex.height))
     .catch(() => null);
+}
+
+/** A sheet of flat normal — the value that says "no relief of my own", drawn once. */
+async function flatNormalBitmap(size: number): Promise<ImageBitmap | null> {
+  try {
+    const c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    const ctx = c.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = FLAT_NORMAL;
+    ctx.fillRect(0, 0, size, size);
+    return await createImageBitmap(c);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1678,6 +1696,60 @@ export default function Designer({ incoming, onIncomingLoaded }: DesignerProps) 
     },
     [stockTextures],
   );
+
+  /**
+   * Give a companion sheet something correct to start from.
+   *
+   * A colour sheet starts blank because blank is where a livery starts. A companion map is the
+   * opposite: a paint replaces the model's textures *by name*, so saving an empty `plastics_n`
+   * does not add a normal map — it throws the bike's real one away and puts black in its
+   * place, which decodes to a surface pointing back into itself. That is why these are kept
+   * off the suggestion list, and it left anyone who did want to author one starting from the
+   * worst possible sheet.
+   *
+   * So: the model's own map if it has one — the actual base, the vents and the seat weave
+   * already in it, ready to be drawn over. Failing that, and only for a normal map, flat
+   * (128, 128, 255), which is the one companion with an honest neutral value. Other companions
+   * are left alone rather than given a constant that would be a claim about the material.
+   *
+   * Only ever onto a pristine sheet, and once per name, so this cannot land on someone's work
+   * or fight a template they loaded themselves.
+   */
+  const seeded = useRef(new Set<string>());
+  useEffect(() => {
+    const sheet = sheets.find(
+      (s) =>
+        !s.base &&
+        !s.layers.length &&
+        isCompanionMap(s.name) &&
+        !seeded.current.has(`${s.id}:${s.name.trim().toLowerCase()}`),
+    );
+    if (!sheet) return;
+    const key = `${sheet.id}:${sheet.name.trim().toLowerCase()}`;
+    seeded.current.add(key);
+    let alive = true;
+    void (async () => {
+      const stock = stockFor(sheet.name);
+      const base = stock
+        ? await stockBitmap(stock)
+        : isNormalMap(sheet.name)
+          ? await flatNormalBitmap(sheet.width)
+          : null;
+      if (!alive || !base) return;
+      patchSheet(
+        sheet.id,
+        (sh) =>
+          sh.base || sh.layers.length
+            ? sh
+            : { ...sh, base, width: base.width, height: base.height },
+        false,
+      );
+      bump();
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [bump, patchSheet, sheets, stockFor]);
 
   /**
    * Fetch the model's own texture for the active sheet, the same way and for the same reasons.
