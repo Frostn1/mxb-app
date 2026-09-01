@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-31 — v0.13.0 — Secure tracks
+
+### Added
+- Secure tab: pick one or more tracks and type a buyer's Steam ID, and the app writes an
+  encrypted copy plus a key locked to that account beside each track. Your original is left
+  untouched — you send the buyer the two generated files.
+
+### Changed
+- A protected track now appears in the in-game track browser from its secure files alone: the
+  injected client feeds it into the folder scan and decrypts it on load, on the machine signed
+  into the account it was made for. No original and no plaintext left on disk.
+- The app builds what it loads from the secure files present in your tracks folder, so a buyer
+  only has to drop the two files in.
+
 ## 2026-08-31 — v0.12.6
 
 ### Changed

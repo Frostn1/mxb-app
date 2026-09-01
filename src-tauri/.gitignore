@@ -12,3 +12,4 @@
 /src/fixtures/test_sidecar.pkz
 /src/mxbsecure.rs
 /src/mxbsecure.dll
+/resources/*.dll
