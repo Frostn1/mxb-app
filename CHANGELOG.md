@@ -38,6 +38,8 @@
 - The racing line is chopped up at the scale of a wheel rather than a jump, and the field
   around it is smooth. It used to be nearly as rough out in the grass as it was on the line.
 - A track's edge is crisp against the field rather than fading out over a wide shelf.
+- The starting track's corners are as tight as a published track's: a median 12.6 m through
+  their tightest point, where Indiana's is 10.6 and ours used to be 18.2.
 - Jumps are built rather than dropped on. A takeoff ramps up over ten metres instead of five,
   the ground either side dips where the dirt for it came from, and no face is steeper than
   dirt will stand — a big double's lip was a 65° wall and is now a 30° face.
