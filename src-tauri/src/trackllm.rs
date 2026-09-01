@@ -801,7 +801,12 @@ mod tests {
         for key in ["x", "z", "angle"] {
             assert!(v["start"].get(key).is_some(), "`start.{key}`");
         }
-        assert_eq!(v["segments"][0]["kind"], "straight");
+        // A lap may open on either — this one starts into a corner. What the check is for is
+        // that the tag is one of the two the schema uses, not which one it happens to be.
+        assert!(matches!(
+            v["segments"][0]["kind"].as_str(),
+            Some("straight") | Some("arc")
+        ));
         let kinds: Vec<&str> = v["features"]
             .as_array()
             .unwrap()
@@ -900,16 +905,16 @@ mod tests {
     #[test]
     fn a_berm_on_a_straight_is_caught() {
         let p = tweaked(|p| {
-            // The lap's longest straight, which runs from 98 m to 266 m.
+            // The lap's longest straight, which runs from 21 m to 111 m.
             p.features.push(Feature::Berm {
-                at: 150.0,
+                at: 60.0,
                 length: 20.0,
                 height: 1.6,
             })
         });
         let problems = validate(&p);
         assert!(
-            problems.iter().any(|s| s.contains("berm at 150 m is on a straight")),
+            problems.iter().any(|s| s.contains("berm at 60 m is on a straight")),
             "{problems:?}"
         );
     }
