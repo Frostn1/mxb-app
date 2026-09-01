@@ -9,6 +9,9 @@
   published one.
 
 ### Changed
+- Paint sync only asks about the server you are actually on. Starting the game no longer
+  fetches every rider's paints from every server on the registry — the paints for your grid
+  arrive when you join it. The Sync button still checks everywhere if you ask it to.
 - Diagnostics say more about each file loaded in your game: its size, when it was built,
   whether Windows trusts its signature and who signed it, and the company and product it
   claims to be. A file can be read the first time it is seen instead of only recognised.

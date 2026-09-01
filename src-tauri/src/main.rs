@@ -6637,7 +6637,9 @@ fn sync_paints_soon(app: &tauri::AppHandle, address: Option<String>) {
             return;
         }
         emit_sync(&app, SyncEvent::phase("pulling"));
-        match pull_rosters(&app, address).await {
+        // Nobody asked for this one — it fires when the game starts, before the rider has
+        // joined anything. With no server to aim at there is nothing worth reading.
+        match pull_rosters(&app, address, Sweep::Never).await {
             Ok(o) => {
                 log::info!(
                     "[sync] {} riders, {} paints installed, {} already held, {} kept as yours, \
@@ -6772,7 +6774,7 @@ fn live_sync_session(app: &tauri::AppHandle, address: Option<String>) {
             }
             last_pull = std::time::Instant::now();
 
-            match pull_rosters(&app, address.clone()).await {
+            match pull_rosters(&app, address.clone(), Sweep::Never).await {
                 // Only say so when something actually arrived: an unchanged grid is the
                 // common case and does not need announcing every 45 seconds.
                 Ok(o) if o.installed > 0 => {
@@ -6862,9 +6864,43 @@ impl GridWatch {
 /// [`live_server_key`]. Before then there is nothing to read, so `address` narrows this to
 /// where they're headed when we launched them at one, and to the whole registry when they
 /// pressed Play and will pick from the game's own browser.
+/// Whether a pull with nowhere to aim may fall back to every server on the registry.
+///
+/// It is a whole-platform sweep — one roster read per registered server, each one returning
+/// the paints of everybody on it — so it is only ever right when a person asked for it. On
+/// 2026-09-01 the automatic paths doing this took the account past D1's daily row ceiling and
+/// every endpoint that reads the database answered 500 for the rest of the day.
+///
+/// The same reasoning already applies to the write half: reporting presence for every key was
+/// removed from this function for being untrue. Reading every roster is the other half of the
+/// same mistake, and it is the expensive half.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Sweep {
+    /// A person pressed something. One sweep, now.
+    Allowed,
+    /// Nobody asked. With no server and no address there is nothing to sync *for* — the
+    /// grid this feature exists to render does not exist yet.
+    Never,
+}
+
+/// Which servers to ask about, once it is settled that the rider is not on one.
+///
+/// An address is a server, whoever gave it to us. Without one, the registry is every server
+/// there is, and asking all of them is a thing only a person may set off.
+fn sync_targets(address_key: Option<String>, registry_ids: &[String], sweep: Sweep) -> Vec<String> {
+    match address_key {
+        Some(key) => vec![key],
+        None => match sweep {
+            Sweep::Allowed => registry_ids.to_vec(),
+            Sweep::Never => Vec::new(),
+        },
+    }
+}
+
 async fn pull_rosters(
     app: &tauri::AppHandle,
     address: Option<String>,
+    sweep: Sweep,
 ) -> Result<paintsync::PullOutcome, String> {
     let cfg = config::load_or_detect(app).unwrap_or_default();
     let token = voice::signal::account(app, &cfg).await?;
@@ -6873,7 +6909,14 @@ async fn pull_rosters(
     // reads out of the running game is the one key every rider on that server can compute,
     // so it is the only one that works on a server we have nothing to do with — which is
     // most of them.
-    let keys: Vec<String> = if let Some(key) = live_server_key() {
+    let live = live_server_key();
+    // Nothing to aim at and no sweep allowed: stop before the registry is even fetched. That
+    // read is not free either — it was 20,869 calls the day the database hit its ceiling, and
+    // every one of them was a prelude to reading a roster we had no business reading.
+    if live.is_none() && address.is_none() && sweep == Sweep::Never {
+        return Err("No servers to sync with yet.".into());
+    }
+    let keys: Vec<String> = if let Some(key) = live {
         vec![key]
     } else {
         // Not on a server yet. An unreachable registry doesn't have to sink a targeted sync
@@ -6886,10 +6929,8 @@ async fn pull_rosters(
                 Vec::new()
             }
         };
-        match &address {
-            Some(addr) => vec![paintsync::server_key_for(&registry, addr)],
-            None => registry.iter().map(|s| s.id.clone()).collect(),
-        }
+        let ids: Vec<String> = registry.iter().map(|s| s.id.clone()).collect();
+        sync_targets(address.as_deref().map(|a| paintsync::server_key_for(&registry, a)), &ids, sweep)
     };
     if keys.is_empty() {
         return Err("No servers to sync with yet.".into());
@@ -6934,7 +6975,9 @@ async fn pull_rosters(
 #[tauri::command]
 async fn sync_paints(app: tauri::AppHandle) -> Result<paintsync::PullOutcome, String> {
     emit_sync(&app, SyncEvent::phase("pulling"));
-    match pull_rosters(&app, None).await {
+    // The one place a sweep is right: a person pressed Sync, and if they are not on a server
+    // the whole registry is the only answer to "whose paints do you mean".
+    match pull_rosters(&app, None, Sweep::Allowed).await {
         Ok(o) => {
             emit_sync(&app, SyncEvent::pulled(&o));
             Ok(o)
@@ -9958,6 +10001,46 @@ mod release_version_tests {
     fn the_tags_v_prefix_is_optional() {
         assert_eq!(pick_release_version(Some("0.9.0"), "0.8.0".into()), "0.9.0");
         assert_eq!(pick_release_version(Some("v0.9.0"), "0.8.0".into()), "0.9.0");
+    }
+}
+
+#[cfg(test)]
+mod sync_target_tests {
+    use super::*;
+
+    fn registry() -> Vec<String> {
+        vec!["alpha".to_string(), "bravo".to_string(), "charlie".to_string()]
+    }
+
+    /// The bug that emptied the database: every automatic pull that ran before the rider had
+    /// joined anything asked every server on the platform for its full roster — and each of
+    /// those answers is the paints of everyone on that server.
+    #[test]
+    fn an_automatic_pull_with_nowhere_to_aim_asks_nobody() {
+        assert!(sync_targets(None, &registry(), Sweep::Never).is_empty());
+    }
+
+    /// The manual button still works the way it reads: a person asked whose paints they are
+    /// missing, and with no server of their own the registry is the only answer there is.
+    #[test]
+    fn a_person_pressing_sync_may_still_ask_everyone() {
+        assert_eq!(sync_targets(None, &registry(), Sweep::Allowed), registry());
+    }
+
+    /// An address is a server. Whoever supplied it, and whatever the sweep rule says, that is
+    /// the one to ask — a targeted sync is never the expensive case.
+    #[test]
+    fn an_address_is_asked_about_whatever_the_sweep_rule_says() {
+        let one = vec!["bravo".to_string()];
+        assert_eq!(sync_targets(Some("bravo".into()), &registry(), Sweep::Never), one);
+        assert_eq!(sync_targets(Some("bravo".into()), &registry(), Sweep::Allowed), one);
+    }
+
+    /// An empty registry is not a reason to sweep something else — it is simply nothing.
+    #[test]
+    fn an_empty_registry_asks_nobody_either_way() {
+        assert!(sync_targets(None, &[], Sweep::Allowed).is_empty());
+        assert!(sync_targets(None, &[], Sweep::Never).is_empty());
     }
 }
 
