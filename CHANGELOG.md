@@ -33,6 +33,9 @@
 
 ### Fixed
 - A corner banks the outside of the turn.
+- Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
+- The ground either side of the track no longer carries fine streaks fanning off every corner.
+- The starting track is a lap that folds through its own middle instead of a regular star.
 - Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
   Settings follows it.
 - More of the crash at track graphics: the ground sheets in a track's graphics file were

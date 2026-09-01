@@ -174,19 +174,20 @@ Close it by doing the arithmetic. Point symmetry — half a lap whose signed ang
 there as a fallback, but a track built that way is symmetrical about its own centre and reads
 as one on the map. Use it only if the layout you want will not close.
 
-WORK ROUND A CENTRE, ONCE. This is how to build a lap that cannot cross itself, and it is a
-construction rather than a thing to check afterwards. Picture the infield as a clock face and
-go round it exactly once: every segment should leave you further round the clock than the one
-before, and you arrive back at twelve where you started. A lap laid out this way is physically
-incapable of running over its own ground, because it never comes back to an hour it has
-already passed.
+DO NOT WORK ROUND A CENTRE ONCE. That advice guarantees a lap cannot cross itself, and it
+also guarantees a STAR: if every part of the lap faces outwards from one middle, the result is
+a starfish with a big empty infield, and it reads as machine-made from the first glance. No
+published track is shaped that way. Indiana folds back across its own infield four times.
 
-Corners are what carry you round the clock; straights are what carry you outward and along.
-Counter-turns — turning the other way for character — are allowed and good, but they must be
-gentler than the turns either side of them, or you stop advancing round the clock, double back,
-and cross. Check as you write: add the signed angles and they must reach ±360 exactly; add the
-absolute angles and a clean lap comes to somewhere around 900. Much past that and you have
-gone round twice, which means you have crossed.
+Build it as a lane that folds instead. Think of the plot as a field you are laying a ribbon
+across: run out, turn back, run alongside what you just laid about twenty-five metres away,
+turn again, and work your way over the ground. That is what the switchbacks on a real national
+are. The lap ends up weaving through the middle of the plot rather than ringing it.
+
+The rule that keeps it from crossing is simpler than going round once: NEVER TURN BACK ONTO
+GROUND YOU HAVE ALREADY LAID. Two parts of the lap may run beside each other — Indiana's
+closest pass is 21 m — but they must run BESIDE, not through. Before every long straight, ask
+which way the ribbon already runs there; if you would cut across it, turn earlier.
 
 The other way to cross is a straight that simply overshoots — long enough to reach back across
 a part of the lap you drew earlier. Long straights are good, but a straight that would carry

@@ -884,15 +884,16 @@ mod tests {
     #[test]
     fn a_berm_on_a_straight_is_caught() {
         let p = tweaked(|p| {
+            // The lap's longest straight, which runs from 98 m to 266 m.
             p.features.push(Feature::Berm {
-                at: 60.0,
+                at: 150.0,
                 length: 20.0,
                 height: 1.6,
             })
         });
         let problems = validate(&p);
         assert!(
-            problems.iter().any(|s| s.contains("berm at 60 m is on a straight")),
+            problems.iter().any(|s| s.contains("berm at 150 m is on a straight")),
             "{problems:?}"
         );
     }
