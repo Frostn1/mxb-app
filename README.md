@@ -21,6 +21,13 @@ Tracks, bikes, rider gear, paints, sounds, model swaps and riding-style
 animations are all recognised — and anything can be installed by dropping it on
 the window, sorted by what the archive holds rather than by what its title says.
 
+[GP Bikes](https://gp-bikes.com/) is a second title in the same app, switched from
+the sidebar. Installing, the library, presets and paint building all work there.
+What doesn't is per-title and gated on a capability rather than hidden: the 3D
+previews need part bindings GP Bikes hasn't got yet, and the stores and Race mode
+sell and manage MX Bikes content, so those rows don't appear. The UI speaks six
+languages (Settings → Appearance).
+
 ## Download
 
 Grab the latest installer from the
@@ -38,35 +45,75 @@ first launch — choose _Run anyway_ / right-click _Open_.
 You only install once: the app checks for new releases on launch (and every 6
 hours), then downloads and installs them on restart.
 
-## How it works
+## What's in it
 
-- **Catalog** comes from [mxb-mods.com](https://mxb-mods.com) via its public
-  WordPress REST API (search, listings, images), behind a swappable `ModSource`
-  trait in the Rust backend.
-- **Downloads** are resolved per host — MediaFire, Google Drive and MEGA, direct
-  links as-is. MEGA *folder* links are the exception (open the page to grab
-  those manually).
-- **Archives**: `.zip`, `.7z` and `.rar` are extracted natively; already-packaged
-  `.pkz` / `.pnt` files are placed as-is.
-- **Live reload**: a debounced watcher on `<modsPath>/mods` signals FrostMod to
+Each of these is a tab in the app.
+
+- **Browse** — the catalog, from [mxb-mods.com](https://mxb-mods.com) via its
+  public WordPress REST API (search, listings, images), behind a swappable
+  `ModSource` trait in the Rust backend. GP Bikes browses its own site.
+- **Shop** and **MXB Hub** — the two paid storefronts,
+  [mxbikes-shop.com](https://mxbikes-shop.com) and
+  [shop.mxb-hub.com](https://shop.mxb-hub.com). Both sign in with the user's own
+  account and install what it already owns, free items included; buying still
+  happens on the store's own site. See [below](#the-shop-catalog-credential) for
+  the one half of Shop that needs a build-time credential.
+- **Library**, with **Downloads** under it — what's installed, and what arrived
+  (or failed to) recently.
+- **Locker** — swap each bike's model and engine sound between the sets you have
+  installed, with the 3D preview beside it.
+- **Presets** — save a full rider look and load it onto a bike on command.
+- **Studio** — six tools over the same files:
+  - **Designer** draws the livery itself. Image and text layers, a brush,
+    gradient, fill and shapes, every stroke landing on the 2D sheet and on the 3D
+    model at the same time. A reference underlay shows the paint you started from
+    and the model's own UV islands, hovering the sheet names the piece of bodywork
+    under the cursor, and a layer can be fitted to a part and clipped to its
+    outline. Photoshop files open and export with their layers intact.
+  - **Paints** builds a `.pnt` from `.tga`/`.png` sheets, and unpacks an existing
+    paint back into editable sheets that keep the texture names the model binds.
+  - **Rider** and **Pose** preview the rider and stand them in a position.
+  - **Track** writes a lap from a description — corners, straights and the jumps
+    on them — measures it against real published tracks, previews it in 3D and
+    lets you edit any feature. Install writes the `.trh`, `.map`, `.ini`, `.amb`
+    and both UI images; the `.rdf` (start gate, pits, cameras) still needs
+    TerrainEd.
+  - **Protect** locks files you made to the GUIDs allowed to load them, a folder
+    per buyer. Official builds only — see [Optional modules](#optional-modules).
+- **Race mode** — MX Bikes loads every mod in the folder at startup, so a preset
+  names the track it races on and everything else steps aside into a holding
+  folder until you bring it back.
+- **Settings** — the game path, appearance and language, FrostMod (including its
+  replay-camera key bindings and camera paths), paint sync, plugins, and
+  Supporters.
+
+Running through all of it:
+
+- **Paint sync.** MX Bikes transmits no custom content, so a grid of strangers is
+  a grid of default liveries. The app publishes what your rider is wearing and
+  pulls back what everyone else published, on any server — it reads the server's
+  name out of the running game, so a public server syncs like a private one and
+  the host installs nothing. Content-addressed by SHA-256, so twenty riders
+  sharing a paint is one stored object. Off by default; Settings → General turns
+  it on, and Settings → Paint sync shows what it published and pulled.
+- **Live reload.** A debounced watcher on `<modsPath>/mods` signals FrostMod to
   reload the game when mods are added — including ones installed outside the app.
   Off Windows that means the game's own Wine prefix — Proton's
   `steamapps/compatdata/<appid>` on Linux, your CrossOver/Whisky bottle on macOS.
   FrostMod is a Windows program and so is the game it injects into, so the app
   starts it in there rather than beside itself, and reaches it with a command file
   instead of a Windows event (nothing outside a Wine prefix can pulse one). Needs
-  FrostMod v0.13.0 or newer, which is what reads that file.
-- **Paint studio**: builds a `.pnt` from `.tga`/`.png` sheets, and unpacks an
-  existing paint back into editable sheets that keep the texture names the model
-  binds — so a livery made anywhere can be packed, installed and previewed here.
-- **Designer**: draws the livery itself. Image and text layers, a brush, gradient,
-  fill and shapes, every stroke landing on the 2D sheet and on the 3D model at the
-  same time. Because the model is right there, the editor knows the geometry it is
-  painting for: a reference underlay shows the paint you started from and the
-  model's own UV islands beneath your work, hovering the sheet names the piece of
-  bodywork under the cursor, and a layer can be fitted to a part and clipped to its
-  outline — so an image covers the shroud and stops at the seam. Save writes the
-  packed `.pnt` the game reads.
+  FrostMod v0.13.0 or newer, which is what reads that file; GP Bikes needs
+  v0.11.0.
+- **Plugins.** Paid add-ons load at runtime and contribute their own nav rows. A
+  license is an Ed25519-signed statement the app checks locally, so a plugin keeps
+  working offline for a week between checks.
+- **Downloads** are resolved per host — MediaFire and Google Drive (folder links
+  included), MEGA single-file links fetched and decrypted, everything else taken
+  as a direct link. MEGA *folder* links and Proton Drive shares are the
+  exceptions: both are told to download by hand and install with _Choose file_.
+- **Archives**: `.zip`, `.7z` and `.rar` are extracted natively; already-packaged
+  `.pkz` / `.pnt` files are placed as-is.
 - **Self-update**: `tauri-plugin-updater` against the `latest.json` published with
   each release; signature-verified, installs on restart.
 - **Supporters**: Settings → Supporters credits the people who bought a coffee on
@@ -85,14 +132,28 @@ hours), then downloads and installs them on restart.
   [Sonner](https://sonner.emilkowal.ski/) toasts, and
   [Swiper](https://swiperjs.com/) for galleries
 - [three.js](https://threejs.org/) via
-  [React Three Fiber](https://r3f.docs.pmnd.rs/) + drei for the 3D rider and bike
-  previews
+  [React Three Fiber](https://r3f.docs.pmnd.rs/) + drei for the 3D rider, bike
+  and track previews
+
+## Repo layout
+
+| Path | What it is |
+| --- | --- |
+| [`src/`](src/) | The React frontend — one folder per tab under `src/Components`. |
+| [`src-tauri/`](src-tauri/) | The Rust backend: install, extraction, the game's own file formats, FrostMod, paint sync. |
+| [`control-plane/`](control-plane/) | The Cloudflare Worker paint sync, plugin licensing and server registration talk to. |
+| [`server-agent/`](server-agent/) | The Rust agent that runs on a dedicated-server box. |
+| [`scripts/`](scripts/) | Release plumbing — changelog sections, Discord notes, the Linux AppImage fix-up. |
+| [`site/`](site/) | The landing page published by [`pages.yml`](.github/workflows/pages.yml). |
 
 ## Development
 
-Prerequisites: [Node.js](https://nodejs.org/) 18+ and the
+Prerequisites: [Node.js](https://nodejs.org/) 20+ (CI builds on 20; the
+control-plane Worker needs 22) and the
 [Rust toolchain](https://www.rust-lang.org/tools/install), plus the
 [Tauri system dependencies](https://tauri.app/start/prerequisites/) for your OS.
+On Linux that includes `libasound2-dev` — see
+[`ci.yml`](.github/workflows/ci.yml) for the full apt list.
 
 ```sh
 npm install          # install frontend dependencies
@@ -113,21 +174,29 @@ Rust backend (from `src-tauri/`):
 
 ```sh
 cargo check          # typecheck the Rust
-cargo test           # unit tests (REST/HTML parsing, download resolution)
+cargo test           # unit tests — catalog parsing, download resolution, install
+                     # routing, the game's file formats. Tests needing a real MX
+                     # Bikes asset are #[ignore]d.
 ```
+
+[`ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and every PR:
+the frontend typecheck/lint/build, `cargo test` on Linux *and* Windows, the
+control plane, the server agent, and a PowerShell parse of the generated
+server-bootstrap scripts.
 
 > MX Bikes is a Windows game, so a real install is a Windows one — but the app
 > launches it on macOS through a CrossOver, Whisky or Wine bottle, and on Linux
 > under Proton. The cross-platform logic builds and tests on any OS.
 
-### MXB Hub
+### Optional modules
 
-The **MXB Hub** tab browses [shop.mxb-hub.com](https://shop.mxb-hub.com) — the community
-marketplace `mxbhub.com` redirects to — and installs what the signed-in account owns, free
-mods included. Neither half needs a build-time credential: the store publishes a public
-WooCommerce Store API, and installing needs nothing but the user's own sign-in.
+Two features come from local-only modules that are not in the public tree:
+content locking (Studio → **Protect**) and secure content (the **Secure** tab).
+Their absence is the normal case — [`build.rs`](src-tauri/build.rs) sets a `cfg`
+when the file is present, and without it the app simply doesn't show those rows.
+A fork builds and runs with everything else intact.
 
-### Building with the shop catalog
+### The shop catalog credential
 
 The **Shop** tab has two halves. **My purchases** signs in to
 [mxbikes-shop.com](https://mxbikes-shop.com) with the user's own account and installs what
@@ -156,6 +225,8 @@ The catalog is browse-only: it shows what the store sells and links out to the p
 Buying happens on the store's own site. Installing something already bought goes through My
 purchases, which downloads the file and hands it to the same review sheet a drag-and-drop
 uses, so it lands by what the archive contains rather than by what its title suggests.
+MXB Hub works the same way and needs no credential at all — its catalog is a public
+WooCommerce Store API.
 
 ## Releases
 
@@ -173,15 +244,15 @@ Then make sure `package.json`, `src-tauri/tauri.conf.json` and
 `src-tauri/Cargo.toml` all carry the version, and push a matching tag:
 
 ```sh
-git tag -a v0.9.1 -m "v0.9.1 — what it's called"
-git push origin v0.9.1
+git tag -a v0.13.0 -m "v0.13.0 — what it's called"
+git push origin v0.13.0
 ```
 
-A **suffixed** tag — `v0.9.1-beta.3`, `v0.9.1-rc.2` — builds the same three
+A **suffixed** tag — `v0.13.0-beta.3`, `v0.13.0-rc.2` — builds the same three
 platforms but publishes as a **pre-release**: GitHub keeps it off
 `releases/latest`, which is the endpoint the in-app updater reads, so existing
 installs are never offered it, and it's announced in the beta Discord channel
-rather than the release one. Tagging the plain `v0.9.1` afterwards is what ships
+rather than the release one. Tagging the plain `v0.13.0` afterwards is what ships
 it to everyone. The workflow decides both of those purely from the `-` in the tag,
 so neither is set by hand.
 
@@ -197,7 +268,7 @@ says why, and needs only `squashfs-tools`. It works on an AppImage that has alre
 downloaded too, which is how to hand a Linux tester a fixed build without cutting a tag:
 
 ```sh
-scripts/appimage-drop-bundled-wayland.sh MXB-App-0.9.2-amd64.AppImage
+scripts/appimage-drop-bundled-wayland.sh MXB-App-0.13.0-amd64.AppImage
 ```
 
 A tag can also be created from the GitHub web UI — **Releases → Draft a new
@@ -210,15 +281,14 @@ skips the announcement. It's for testing that a build compiles, not for shipping
 
 Features coming next:
 
-- **Servers, with paint sync.** Creating and running a dedicated server from the
-  app, and everyone on it seeing everyone else's paint. Both are built and both
-  need an account on the control plane, which is invite-only for now — opening
-  that up is the remaining work.
-- **A map viewer.** Look at a track before you ride it. The 3D viewer already
-  renders bikes and riders straight from the game's own meshes; a track is the
-  one thing it doesn't read yet.
 - **A 3D preview for GP Bikes.** Building a `.pnt` is title-agnostic and already
   works there; only the preview needs part bindings GP Bikes hasn't got yet, so
   the Studio says so plainly rather than showing an empty stage.
 - **Your in-game track list, through FrostMod** (which already handles the live
   reload) — to one-click-install the tracks you're missing.
+- **A server browser.** Joining by address works today; reading the game's own
+  list is what's missing, and an empty list behind a button is worse than no
+  button.
+- **Hosting a server from the app.** Built once and taken back out — creating and
+  running a dedicated server needs an account on the control plane, and opening
+  that up is the remaining work.
