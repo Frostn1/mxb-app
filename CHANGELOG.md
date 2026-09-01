@@ -2,6 +2,13 @@
 
 ## 2026-09-01
 
+### Fixed
+- Installed tracks crashed the game at the track graphics stage because the track's graphics
+  file carried no ground. It carries the terrain now.
+- The track's picture in the game menu was mirrored against the route drawn over it.
+
+## 2026-09-01
+
 ### Added
 - Designer: naming a sheet as a normal or roughness map starts it from the model's own — the
   vents and the seat weave already in it — instead of from a blank canvas. A normal map with
