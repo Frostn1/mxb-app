@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-01
+
+### Fixed
+- Settings carried over from an older build are written down the first time they are read,
+  so the app settles them once at startup instead of re-deciding them on every check.
+
 ## 2026-08-31
 
 ### Added
