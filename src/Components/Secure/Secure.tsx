@@ -12,6 +12,7 @@ import {
   secureSteamId,
   mxbsecureProvision,
   mxbsecureOpenOffline,
+  mxbsecureProtect,
   type SecureLockOutcome,
 } from "../../api/mods";
 import { useT } from "../../i18n/context";
@@ -36,6 +37,23 @@ const Secure = () => {
   const [provisioned, setProvisioned] = useState(false);
   const [offlineOk, setOfflineOk] = useState<boolean | null>(null);
   const [openingOffline, setOpeningOffline] = useState(false);
+  const [protecting, setProtecting] = useState(false);
+  const [protectedPath, setProtectedPath] = useState<string | null>(null);
+
+  const protect = async () => {
+    const chosen = await openDialog({ multiple: false, directory: false });
+    if (typeof chosen !== "string") return;
+    setProtecting(true);
+    setProtectedPath(null);
+    try {
+      const out = await mxbsecureProtect(chosen);
+      setProtectedPath(out.protectedPath);
+      toast.success(t("secure.protectedOk", { id: out.steamId }));
+    } catch (e) {
+      toast.error(t("secure.protectFailed"), { description: String(e) });
+    }
+    setProtecting(false);
+  };
 
   useEffect(() => {
     secureSteamId().then(setSteamId).catch(() => setSteamId(null));
@@ -133,6 +151,41 @@ const Secure = () => {
       <div className="mx-auto w-full max-w-2xl px-7 pb-10">
         <p className="mb-5 text-[13px] leading-relaxed text-muted-foreground">
           {t("secure.intro")}
+        </p>
+
+        {/* The real action — protect a track in place. Encrypts the file under its own name,
+            binds it to the Steam account, and records it so the game auto-loads it. */}
+        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
+          <div className="flex items-center gap-2">
+            <Lock className="size-4 text-primary" />
+            <h2 className="text-[13.5px] font-semibold">{t("secure.protectTitle")}</h2>
+          </div>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+            {t("secure.protectDesc")}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button size="sm" disabled={protecting || steamId === undefined} onClick={() => void protect()}>
+              {protecting ? <Loader2 className="size-3.5 animate-spin" /> : <Lock className="size-3.5" />}
+              {t("secure.protectAction")}
+            </Button>
+            {protectedPath && (
+              <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-success">
+                <Check className="size-4" /> {t("secure.protectedInPlace")}
+              </span>
+            )}
+          </div>
+          {protectedPath && (
+            <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground" title={protectedPath}>
+              {protectedPath}
+            </p>
+          )}
+          {steamId === null && (
+            <p className="mt-2 text-[11.5px] text-warning">{t("secure.noSteam")}</p>
+          )}
+        </div>
+
+        <p className="mb-3 text-[11.5px] font-medium uppercase tracking-wide text-muted-foreground/70">
+          {t("secure.testHeading")}
         </p>
 
         {/* Step 1 — pick and lock */}

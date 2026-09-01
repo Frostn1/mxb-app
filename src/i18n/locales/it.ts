@@ -712,6 +712,14 @@ export const it: Translation = {
   "secure.experimental": "Sperimentale",
   "secure.intro":
     "Scegli un file, bloccalo, poi verifica che si sblocchi. La verifica decifra il blob qui e lo confronta con l'originale, byte per byte — la prova che fa il giro su questa macchina.",
+  "secure.protectTitle": "Proteggi una pista",
+  "secure.protectDesc":
+    "Cifra un file di pista sul posto — mantiene il nome, il gioco continua a elencarla, ma solo tu puoi guidarla, offline. Sovrascrive il file, quindi tieni una tua copia master. Poi basta avviare il gioco.",
+  "secure.protectAction": "Scegli una pista e proteggi",
+  "secure.protectedOk": "Protetta, vincolata a {{id}}.",
+  "secure.protectedInPlace": "Protetta — cifrata sul posto",
+  "secure.protectFailed": "Impossibile proteggere il file",
+  "secure.testHeading": "Prova il formato (facoltativo)",
   "secure.step3": "Vincola al tuo account Steam e gioca offline",
   "secure.step3Desc":
     "Sigilla la chiave al tuo account Steam e la salva in locale. Da quel momento si apre senza server — offline, in LAN, ovunque — ma solo sul tuo account. Una copia su un altro account non ottiene nulla.",

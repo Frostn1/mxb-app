@@ -717,6 +717,14 @@ export const fr: Translation = {
   "secure.experimental": "Expérimental",
   "secure.intro":
     "Choisissez un fichier, verrouillez-le, puis vérifiez qu'il se déverrouille. La vérification déchiffre le blob ici même et le compare à l'original, octet par octet — la preuve qu'il fait l'aller-retour sur cette machine.",
+  "secure.protectTitle": "Protéger un circuit",
+  "secure.protectDesc":
+    "Chiffre un fichier de circuit sur place — il garde son nom, le jeu le liste toujours, mais vous seul pouvez le rouler, hors ligne. Écrase le fichier, gardez donc votre propre copie maître. Ensuite, lancez simplement le jeu.",
+  "secure.protectAction": "Choisir un circuit & protéger",
+  "secure.protectedOk": "Protégé, lié à {{id}}.",
+  "secure.protectedInPlace": "Protégé — chiffré sur place",
+  "secure.protectFailed": "Impossible de protéger ce fichier",
+  "secure.testHeading": "Tester le format (facultatif)",
   "secure.step3": "Lier à votre compte Steam & jouer hors ligne",
   "secure.step3Desc":
     "Scelle la clé à votre compte Steam et la stocke localement. Ensuite elle s'ouvre sans serveur — hors ligne, en LAN, partout — mais seulement sur votre compte. Une copie sur un autre compte n'obtient rien.",

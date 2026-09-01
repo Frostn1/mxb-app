@@ -721,6 +721,14 @@ export const de: Translation = {
   "secure.experimental": "Experimentell",
   "secure.intro":
     "Datei wählen, sperren, dann das Entsperren prüfen. Beim Prüfen wird das Blob hier entschlüsselt und Byte für Byte mit dem Original verglichen — der Beleg, dass es auf diesem Rechner zurückkommt.",
+  "secure.protectTitle": "Eine Strecke schützen",
+  "secure.protectDesc":
+    "Verschlüsselt eine Streckendatei an Ort und Stelle — sie behält ihren Namen, das Spiel listet sie weiter, aber nur du kannst sie fahren, offline. Überschreibt die Datei, also behalte eine eigene Masterkopie. Dann einfach das Spiel starten.",
+  "secure.protectAction": "Strecke wählen & schützen",
+  "secure.protectedOk": "Geschützt, an {{id}} gebunden.",
+  "secure.protectedInPlace": "Geschützt — an Ort und Stelle verschlüsselt",
+  "secure.protectFailed": "Datei konnte nicht geschützt werden",
+  "secure.testHeading": "Format testen (optional)",
   "secure.step3": "An dein Steam-Konto binden & offline spielen",
   "secure.step3Desc":
     "Versiegelt den Schlüssel an dein Steam-Konto und speichert ihn lokal. Danach öffnet er ohne Server — offline, im LAN, überall — aber nur auf deinem Konto. Eine Kopie auf einem anderen Konto bekommt nichts.",

@@ -707,6 +707,14 @@ export const en = {
   "secure.experimental": "Experimental",
   "secure.intro":
     "Pick a file, lock it, then verify it unlocks. Verifying decrypts the blob right here and checks it matches the original, byte for byte — the proof it round-trips on this machine.",
+  "secure.protectTitle": "Protect a track",
+  "secure.protectDesc":
+    "Encrypts a track file in place — it keeps its name so the game still lists it, but only you can ride it, offline. Overwrites the file, so keep your own master copy. Then just start the game.",
+  "secure.protectAction": "Choose a track & protect",
+  "secure.protectedOk": "Protected, bound to {{id}}.",
+  "secure.protectedInPlace": "Protected — encrypted in place",
+  "secure.protectFailed": "Couldn't protect that file",
+  "secure.testHeading": "Test the format (optional)",
   "secure.step3": "Bind to your Steam account & play offline",
   "secure.step3Desc":
     "Seal the key to your Steam account and store it locally. From then on it opens with no server — offline, on a LAN, anywhere — but only on your account. A copy on someone else's account gets nothing.",

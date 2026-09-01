@@ -5710,6 +5710,85 @@ fn secure_steam_id() -> Option<String> {
     steamid::current_steam_id64()
 }
 
+/// What protecting a track in place produced.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecureProtectOutcome {
+    /// The now-encrypted file, keeping its original name.
+    protected_path: String,
+    mxbkey_path: String,
+    steam_id: String,
+    plain_bytes: u64,
+}
+
+/// Protect a track file **in place**: replace it with its encrypted blob under the same name,
+/// seal the key to the buyer's Steam ID beside it, and record it for auto-injection.
+///
+/// This is the shipping shape. The file keeps its `.pkz` name, so MX Bikes' folder scan still
+/// finds it and lists the track; the injected client decrypts it on read. There is no separate
+/// `.mxbsecure` file and no plaintext left on disk — **the creator must keep their own master
+/// copy**, because this overwrites the original.
+#[tauri::command]
+async fn mxbsecure_protect(
+    app: tauri::AppHandle,
+    track_path: String,
+) -> Result<SecureProtectOutcome, String> {
+    #[cfg(mxbsecure)]
+    {
+        use std::path::Path;
+        let steam_id = steamid::current_steam_id64()
+            .ok_or("couldn't read your Steam ID — is Steam installed and signed in?")?;
+
+        let plaintext = tokio::fs::read(&track_path).await.map_err(|e| format!("read {track_path}: {e}"))?;
+        // Refuse a file that is already one of ours, so a double-protect can't seal ciphertext.
+        if plaintext.starts_with(b"MXBSEC") {
+            return Err("that file is already protected".into());
+        }
+        let name = Path::new(&track_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .ok_or("not a file")?;
+        let mut rnd = [0u8; 6];
+        getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+        let suffix: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
+        let asset_id = format!("{}-{suffix}", sanitize_asset_id(&name));
+
+        let locked = mxbsecure::lock(&plaintext, &asset_id, "k1");
+        let sealed = mxbsecure::seal_key_to_identity(&locked.content_key, &steam_id, "");
+        let mxbkey = format!("{track_path}.mxbkey");
+        tokio::fs::write(&mxbkey, &sealed).await.map_err(|e| format!("write .mxbkey: {e}"))?;
+
+        // Overwrite the original with the encrypted blob, same name. Written to a temp beside
+        // it and renamed, so a crash mid-write can't leave a half-encrypted track.
+        let tmp = format!("{track_path}.mxbsecuring");
+        tokio::fs::write(&tmp, &locked.blob).await.map_err(|e| format!("write blob: {e}"))?;
+        tokio::fs::rename(&tmp, &track_path).await.map_err(|e| format!("replace track: {e}"))?;
+
+        if let Err(e) = secure_launch::record_asset(
+            &app,
+            secure_launch::SecureAsset {
+                game_name: name,
+                blob_path: track_path.clone(),
+                mxbkey_path: mxbkey.clone(),
+            },
+        ) {
+            log::warn!("[secure] couldn't record the protected asset: {e}");
+        }
+
+        Ok(SecureProtectOutcome {
+            protected_path: track_path,
+            mxbkey_path: mxbkey,
+            steam_id,
+            plain_bytes: plaintext.len() as u64,
+        })
+    }
+    #[cfg(not(mxbsecure))]
+    {
+        let _ = (app, track_path);
+        Err("this build can't protect content".into())
+    }
+}
+
 /// What provisioning a key produced.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -9336,6 +9415,7 @@ fn main() {
             secure_steam_id,
             mxbsecure_provision,
             mxbsecure_open_offline,
+            mxbsecure_protect,
             local_guid,
             load_bike_model,
             preview_model_swap,

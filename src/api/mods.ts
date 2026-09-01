@@ -364,6 +364,20 @@ export function mxbsecureOpenOffline(blobPath: string, original: string): Promis
   return invoke<boolean>("mxbsecure_open_offline", { blobPath, original });
 }
 
+/** What protecting a track in place produced. */
+export interface SecureProtectOutcome {
+  protectedPath: string;
+  mxbkeyPath: string;
+  steamId: string;
+  plainBytes: number;
+}
+
+/** Protect a track file in place: encrypt it under its own name, bound to your Steam account,
+ *  and record it for auto-injection. Overwrites the original — keep your master copy. */
+export function mxbsecureProtect(trackPath: string): Promise<SecureProtectOutcome> {
+  return invoke<SecureProtectOutcome>("mxbsecure_protect", { trackPath });
+}
+
 /** What a run would touch — folders walked, files taken as themselves, skips flagged. */
 export function contentLockPlan(paths: string[]): Promise<LockItem[]> {
   return invoke<LockItem[]>("content_lock_plan", { paths });
