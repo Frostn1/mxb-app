@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-31
+
+### Changed
+- Generated tracks come with real ground textures — soil with clods, grit and straw in it, at
+  the size and resolution published tracks use.
+- Corners wear a bundle of ruts across the track and carry them out onto the straight, the way
+  a ridden corner does.
+- Braking bumps on the way into a corner and chop on the way out.
+- The edge of the riding line wanders, with a ridge of spoil along it.
+- Four painted bands instead of three — field, graded shoulder, riding line, grass — and every
+  boundary between them is torn rather than drawn.
+- The ground away from the track has metre-scale relief in it.
+- Ground sheets tile at a fixed size on the ground, so a long track and a short one get soil of
+  the same grain.
+- Generated laps have more corners, and more variety in them.
+
 ## 2026-08-31 — v0.12.6
 
 ### Changed

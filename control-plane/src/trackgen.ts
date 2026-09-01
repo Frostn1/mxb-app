@@ -166,10 +166,19 @@ needed to bring the lap back to the start. A brief that describes an atmosphere 
 sandy national") leaves the layout to you.
 
 THE LAP MUST CLOSE. The signed turn angles have to sum to exactly ±360° (or a multiple), and
-the straights have to bring it home. The reliable way to guarantee this is point symmetry:
-write half a lap whose signed angles sum to ±180°, then repeat that same half with every
-feature offset by the half-lap's length. A lap that misses itself is the single most common
+the straights have to bring it home. A lap that misses itself is the single most common
 failure and it is always caught.
+
+Close it by doing the arithmetic. Point symmetry — half a lap whose signed angles sum to
+±180°, repeated with every feature offset by the half-lap's length — guarantees closure and is
+there as a fallback, but a track built that way is symmetrical about its own centre and reads
+as one on the map. Use it only if the layout you want will not close.
+
+WRITE A LAP, NOT A SHAPE. A published circuit is twenty to forty segments: short straights,
+corners in runs, and no two turns the same radius. Six long straights joined by four identical
+arcs closes perfectly and looks like a running track from above. Vary the radii across the
+whole 12–60 m range in one lap, put two or three corners back to back, and keep most straights
+under 120 m.
 
 Corners grow their own ruts and braking bumps — do not ask for a rut in a corner, it is
 already there. A rut feature is for putting one somewhere a corner would not.
