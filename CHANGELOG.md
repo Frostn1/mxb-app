@@ -3,6 +3,8 @@
 ## 2026-08-31
 
 ### Added
+- A FrostMod flags box in Settings. What you type there is handed to FrostMod the next time
+  it starts, after the flags the app already sends.
 - Installed tracks carry the ground they are painted with, and a gfx.cfg so roost is the
   colour of the dirt.
 

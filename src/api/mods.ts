@@ -2311,6 +2311,11 @@ export function setAutoRunFrostmod(enabled: boolean): Promise<void> {
   return invoke<void>("set_auto_run_frostmod", { enabled });
 }
 
+/** Extra command-line flags handed to `frostmod.exe`, exactly as typed. */
+export function setFrostmodArgs(args: string): Promise<void> {
+  return invoke<void>("set_frostmod_args", { args });
+}
+
 export function setInstantRefresh(enabled: boolean): Promise<void> {
   return invoke<void>("set_instant_refresh", { enabled });
 }

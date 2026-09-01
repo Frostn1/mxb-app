@@ -7407,6 +7407,16 @@ fn set_auto_run_frostmod(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
     config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
 }
 
+/// Extra flags for `frostmod.exe`, stored as typed. Not validated here: FrostMod ignores a
+/// flag it doesn't know, so an unknown one costs nothing, while checking against a list this
+/// app carries would reject flags a newer FrostMod does understand.
+#[tauri::command]
+fn set_frostmod_args(app: tauri::AppHandle, args: String) -> Result<(), String> {
+    let mut cfg = config::load(&app).unwrap_or_default();
+    cfg.frostmod_args = args.trim().to_string();
+    config::save(&app, &cfg).map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn set_instant_refresh(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let mut cfg = config::load(&app).unwrap_or_default();
@@ -9505,6 +9515,7 @@ fn main() {
             track_event,
             set_launch_at_startup,
             set_auto_run_frostmod,
+            set_frostmod_args,
             set_instant_refresh,
             overlay_toggle,
             overlay_hide,

@@ -39,6 +39,7 @@ import {
   overlayToggle,
   presetsListProfiles,
   setAutoRunFrostmod,
+  setFrostmodArgs,
   setGamePath,
   setInstantRefresh,
   setLaunchAtStartup,
@@ -461,6 +462,10 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
   const analyticsEnabled = config.analyticsEnabled ?? true;
   const launchAtStartup = config.launchAtStartup ?? true;
   const autoRunFrostmod = config.autoRunFrostmod ?? true;
+  // Typed flags are edited freely and saved on blur, so the field holds a draft until then —
+  // saving per keystroke would write the config on every letter and fight the cursor.
+  const [frostmodArgsDraft, setFrostmodArgsDraft] = useState<string | null>(null);
+  const frostmodArgs = frostmodArgsDraft ?? config.frostmodArgs ?? "";
   const instantRefresh = config.instantRefresh ?? true;
   const watchModsReload = config.watchModsReload ?? true;
 
@@ -742,6 +747,19 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
     try {
       await setAutoRunFrostmod(v);
       await reloadConfig();
+    } catch (e) {
+      toast.error(t("settings.updateFailed"), { description: String(e) });
+    }
+  };
+
+  const saveFrostmodArgs = async () => {
+    if (frostmodArgsDraft === null) return;
+    try {
+      await setFrostmodArgs(frostmodArgsDraft);
+      await reloadConfig();
+      // Back to reading the config: it is the one that survives a restart, and it has the
+      // trimmed form of what was typed.
+      setFrostmodArgsDraft(null);
     } catch (e) {
       toast.error(t("settings.updateFailed"), { description: String(e) });
     }
@@ -1847,6 +1865,30 @@ export default function Settings({ initialSection, onShowWhatsNew }: SettingsPro
               checked={watchModsReload}
               onChange={toggleWatchModsReload}
             />
+
+            {/* FrostMod's own flags, typed. A plain field rather than a toggle each: these
+                are diagnostics that come and go with FrostMod's releases, and the app would
+                otherwise have to ship a new build to offer one. `--game` and `--mods` are
+                still sent by the app; anything typed here follows them. */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] text-foreground/85">
+                {t("settings.frostmodArgs")}
+              </span>
+              <input
+                value={frostmodArgs}
+                spellCheck={false}
+                placeholder="--probe-overjump"
+                onChange={(e) => setFrostmodArgsDraft(e.currentTarget.value)}
+                onBlur={saveFrostmodArgs}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-[12px] text-muted-foreground"
+              />
+              <span className="text-[11.5px] text-muted-foreground">
+                {t("settings.frostmodArgsDesc")}
+              </span>
+            </div>
 
             {/* Only once FrostMod is on disk: without an install there is no config to
                 edit, and the keys would be an offer that quietly does nothing. */}

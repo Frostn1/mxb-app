@@ -484,6 +484,34 @@ struct StartPlan {
     /// The mods *tree*, when the player has a folder set. Still a host path: anything
     /// running inside a prefix has to rewrite it as the prefix sees it before handing over.
     mods_root: Option<PathBuf>,
+    /// Whatever the player typed into the FrostMod flags box, split into arguments. Passed
+    /// through untouched and unvalidated: FrostMod ignores a flag it doesn't know, which is
+    /// what lets a diagnostic ship in a FrostMod build before the app knows about it.
+    extra: Vec<String>,
+}
+
+/// Split a typed flag line into arguments, keeping double-quoted runs together so a path
+/// with spaces survives (`--mods "C:\My Mods"`). Everything else is whitespace-separated.
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn split_args(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    for c in line.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 /// Check what has to be true before starting, and work out what to tell FrostMod.
@@ -534,7 +562,8 @@ fn plan_start(app: &AppHandle) -> anyhow::Result<Option<StartPlan>> {
     // exist — silently, since neither reports an empty root as an error.
     let mods_root = (!cfg.mods_path.trim().is_empty())
         .then(|| crate::library::mods_root(&cfg.mods_path));
-    Ok(Some(StartPlan { exe, game: cfg.active_game.id(), mods_root }))
+    let extra = split_args(&cfg.frostmod_args);
+    Ok(Some(StartPlan { exe, game: cfg.active_game.id(), mods_root, extra }))
 }
 
 /// Launch `frostmod.exe` hidden as a managed child.
@@ -549,6 +578,7 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     if let Some(mods) = &plan.mods_root {
         args.extend(["--mods".into(), mods.to_string_lossy().into_owned()]);
     }
+    args.extend(plan.extra.iter().cloned());
     // Logged on both sides, as Linux and macOS already are. FrostMod not working is the
     // single most reported thing about this app, and until now the Windows path — the one
     // nearly every report comes from — said nothing at all in the log, whether it worked
@@ -634,6 +664,7 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
         // side of the wall calls the same folder.
         args.extend(["--mods".into(), crate::proton::windows_path(&runner.prefix(), mods)]);
     }
+    args.extend(plan.extra.iter().cloned());
 
     log::info!(
         "starting FrostMod via {}: {} run {} {:?} (prefix {})",
@@ -691,6 +722,9 @@ fn mac_launch(
     exe: &Path,
     game: &str,
     mods_root: Option<&Path>,
+    // The player's own flags, already split. Appended last, so one of them can override a
+    // flag we sent — which is the point of being able to type them.
+    extra: &[String],
 ) -> anyhow::Result<(crate::winehost::Launch, String)> {
     let (prefix, runner) = crate::gameproc::game_prefix_and_runner(cfg)?;
     // Without a Z: drive nothing inside the bottle can see FrostMod's folder — not the
@@ -709,6 +743,7 @@ fn mac_launch(
         // the mods folder — inside the bottle — is `C:\users\…`.
         args.extend(["--mods".into(), crate::winehost::windows_path(&prefix, mods)]);
     }
+    args.extend(extra.iter().cloned());
     Ok((
         crate::winehost::plan(&runner, &prefix, exe, &args),
         runner.via().to_string(),
@@ -732,7 +767,7 @@ pub fn start(app: &AppHandle, state: &FrostmodProcess) -> anyhow::Result<bool> {
     needs_the_file_channel(app, "macOS", "Inside a Wine bottle")?;
 
     let cfg = crate::config::load(app).unwrap_or_default();
-    let (launch, via) = mac_launch(&cfg, &plan.exe, plan.game, plan.mods_root.as_deref())?;
+    let (launch, via) = mac_launch(&cfg, &plan.exe, plan.game, plan.mods_root.as_deref(), &plan.extra)?;
     log::info!(
         "starting FrostMod via {via}: {} {:?}",
         launch.program.display(),
@@ -920,7 +955,7 @@ mod tests {
         cfg.wine_runner = runner.to_string_lossy().into_owned();
 
         let (launch, _) =
-            mac_launch(&cfg, &exe, "mxb", Some(&mods)).expect("a stub runner is enough");
+            mac_launch(&cfg, &exe, "mxb", Some(&mods), &[]).expect("a stub runner is enough");
         let mut cmd = std::process::Command::new(&launch.program);
         cmd.args(&launch.args).current_dir(&frostmod);
         for (key, value) in &launch.env {
@@ -955,6 +990,77 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The flags box is a line of text, and a path in it has spaces. Quoted runs stay one
+    /// argument; everything else splits on whitespace.
+    #[test]
+    fn typed_flags_split_the_way_a_shell_would() {
+        assert_eq!(split_args(""), Vec::<String>::new());
+        assert_eq!(split_args("   "), Vec::<String>::new());
+        assert_eq!(
+            split_args("--probe-overjump  --force-overjump-off"),
+            ["--probe-overjump", "--force-overjump-off"]
+        );
+        assert_eq!(
+            split_args("--mods \"C:\\My Mods\" --wait 2000"),
+            ["--mods", "C:\\My Mods", "--wait", "2000"]
+        );
+    }
+
+    /// What the box is for: a flag typed there reaches FrostMod's argv, after the ones we
+    /// always send. Same stub-runner spawn as the start test, so it is the real argv.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn typed_flags_reach_frostmods_argv() {
+        let root = temp_dir("mac-extra-args");
+        let prefix = root.join("Bottles/MXB");
+        let game_dir = prefix.join("drive_c/Program Files/MX Bikes");
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        std::os::unix::fs::symlink("/", prefix.join("dosdevices/z:")).unwrap();
+        std::fs::write(game_dir.join(crate::game::MXB.exe), b"stub").unwrap();
+
+        let frostmod = root.join("data/frostmod");
+        std::fs::create_dir_all(&frostmod).unwrap();
+        let exe = frostmod.join("frostmod.exe");
+        std::fs::write(&exe, b"stub").unwrap();
+
+        let record = root.join("argv.txt");
+        let runner = root.join("fake-wine");
+        std::fs::write(
+            &runner,
+            format!(
+                "#!/bin/sh\n{{ for a in \"$@\"; do printf '%s\\n' \"$a\"; done; }} > {}\n",
+                record.display()
+            ),
+        )
+        .unwrap();
+        std::process::Command::new("chmod").arg("+x").arg(&runner).status().unwrap();
+
+        let mut cfg = crate::config::AppConfig::default();
+        cfg.game_path = game_dir.to_string_lossy().into_owned();
+        cfg.wine_runner = runner.to_string_lossy().into_owned();
+        cfg.frostmod_args = "--probe-overjump --wait 2000".into();
+
+        let (launch, _) = mac_launch(&cfg, &exe, "mxb", None, &split_args(&cfg.frostmod_args))
+            .expect("a stub runner is enough");
+        let mut cmd = std::process::Command::new(&launch.program);
+        cmd.args(&launch.args).current_dir(&frostmod);
+        for (key, value) in &launch.env {
+            cmd.env(key, value);
+        }
+        cmd.spawn().unwrap().wait().unwrap();
+
+        let written = std::fs::read_to_string(&record).unwrap();
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(
+            &lines[..],
+            [exe.to_string_lossy().as_ref(), "--game", "mxb", "--probe-overjump", "--wait", "2000"],
+            "typed flags follow the ones we always send: {written:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A bottle with no `Z:` can't see FrostMod's folder, and every button in the app would
     /// write a command file nothing ever reads. Refused, with the fix named.
     #[cfg(target_os = "macos")]
@@ -972,7 +1078,7 @@ mod tests {
         cfg.game_path = game_dir.to_string_lossy().into_owned();
         cfg.wine_runner = runner.to_string_lossy().into_owned();
 
-        let err = mac_launch(&cfg, &root.join("frostmod.exe"), "mxb", None)
+        let err = mac_launch(&cfg, &root.join("frostmod.exe"), "mxb", None, &[])
             .expect_err("no Z: drive, no way in");
         let msg = format!("{err:#}");
         assert!(msg.contains("Z:"), "names what's missing: {msg}");

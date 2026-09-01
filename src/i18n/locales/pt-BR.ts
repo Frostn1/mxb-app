@@ -782,6 +782,9 @@ export const ptBR: Translation = {
   "settings.autoRunFrostmod": "Iniciar o FrostMod automaticamente",
   "settings.autoRunFrostmodDesc":
     "Iniciar o FrostMod em segundo plano sempre que o MXB App abrir.",
+  "settings.frostmodArgs": "Flags do FrostMod",
+  "settings.frostmodArgsDesc":
+    "Linha de comando extra para o FrostMod, digitada como num terminal. Vale a partir da próxima vez que o FrostMod iniciar. Deixe vazio, a não ser que tenham te passado uma flag para testar.",
   "settings.watchModsReload": "Recarregar automaticamente ao mudar a pasta",
   "settings.watchModsReloadDesc":
     "Recarregar o jogo automaticamente quando pistas ou motos forem adicionadas à sua pasta de mods — mesmo baixadas manualmente fora do MXB App.",

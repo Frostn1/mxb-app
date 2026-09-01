@@ -788,6 +788,9 @@ export const de: Translation = {
   "settings.autoRunFrostmod": "FrostMod automatisch starten",
   "settings.autoRunFrostmodDesc":
     "FrostMod im Hintergrund starten, sobald MXB App geöffnet wird.",
+  "settings.frostmodArgs": "FrostMod-Flags",
+  "settings.frostmodArgsDesc":
+    "Zusätzliche Kommandozeile für FrostMod, so getippt wie im Terminal. Gilt ab dem nächsten Start von FrostMod. Lass das Feld leer, außer du hast ein Flag zum Ausprobieren bekommen.",
   "settings.watchModsReload": "Automatisch neu laden bei Ordneränderungen",
   "settings.watchModsReloadDesc":
     "Das Spiel automatisch neu laden, wenn Strecken oder Motorräder in deinen Mod-Ordner kommen — auch wenn sie außerhalb von MXB App manuell heruntergeladen wurden.",
