@@ -253,6 +253,10 @@ const BERM_REACH_M: f32 = 4.5;
 /// And the field is not ridden. Seven and a half centimetres of detail everywhere left the
 /// field nearly as rough as the racing line — 1.07 cm against 1.26 — where a published track's
 /// field is a quarter of its line.
+/// How many octaves the landscape carries and how fast they fall away. See [`fbm_of`].
+const LANDSCAPE_OCTAVES: u32 = 3;
+const LANDSCAPE_GAIN: f32 = 0.30;
+
 const FIELD_DETAIL_M: f32 = 4.5;
 const FIELD_DETAIL_HEIGHT_M: f32 = 0.045;
 
@@ -369,7 +373,17 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
             // Plus a metre-scale octave everywhere. Four octaves over a hundred metres put
             // the smallest hummock twelve metres across, and a field of those is a blur, not
             // ground — this is what the eye reads as land when it is nowhere near the track.
-            heights[y * gw + x] = fbm(wx / r.wavelength, wz / r.wavelength, r.seed) * r.amplitude
+            // The hillside the whole thing sits on, before anything else.
+            let (tx, tz) = crate::trackprog::heading_vector(r.tilt_angle.to_radians());
+            let along = (wx * tx + wz * tz) / (prog.terrain.size_x.max(prog.terrain.size_z)).max(1.0);
+            heights[y * gw + x] = -r.tilt * along
+                + fbm_of(
+                wx / r.wavelength,
+                wz / r.wavelength,
+                r.seed,
+                LANDSCAPE_OCTAVES,
+                LANDSCAPE_GAIN,
+            ) * r.amplitude
                 + fbm(wx / FIELD_DETAIL_M, wz / FIELD_DETAIL_M, r.seed ^ 0xF1E1D)
                     * FIELD_DETAIL_HEIGHT_M;
         }
@@ -1510,14 +1524,27 @@ fn value_noise(x: f32, y: f32, seed: u32) -> f32 {
 /// Four octaves, each half the amplitude and twice the frequency. Normalised so the result
 /// stays inside ±1 and `amplitude` means what it says.
 fn fbm(x: f32, y: f32, seed: u32) -> f32 {
+    fbm_of(x, y, seed, 4, 0.5)
+}
+
+/// Value noise summed over `octaves`, each half the wavelength of the last and `gain` times
+/// its amplitude.
+///
+/// The two are exposed because the *landscape* wants a far steeper roll-off than anything
+/// else here. Measured as how much ground rises and falls over a given distance, Indiana runs
+/// 0.15 m over 5 m and 9.36 m over 200 — one big smooth landform with almost nothing on it at
+/// small scales. Four octaves at a half gain spread the energy across every scale instead, and
+/// the terrain came out two to four times rougher than a real one everywhere, worst at the
+/// short distances a rider actually sees.
+fn fbm_of(x: f32, y: f32, seed: u32, octaves: u32, gain: f32) -> f32 {
     let mut sum = 0.0;
     let mut amp = 1.0;
     let mut norm = 0.0;
     let mut f = 1.0;
-    for o in 0..4 {
+    for o in 0..octaves {
         sum += value_noise(x * f, y * f, seed.wrapping_add(o * 7919)) * amp;
         norm += amp;
-        amp *= 0.5;
+        amp *= gain;
         f *= 2.0;
     }
     sum / norm
@@ -3201,6 +3228,8 @@ mod tests {
                     wavelength: 150.0,
                     seed: 3,
                     texture: 0.06,
+                                    tilt: 0.0,
+                    tilt_angle: 0.0,
                 },
                 surface: crate::trackprog::Surface::Soil,
             },
