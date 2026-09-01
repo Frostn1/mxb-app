@@ -35,6 +35,8 @@
 - Ruts read as ridden ground rather than as a set of parallel lines running the whole lap.
 - The ground either side of the track no longer carries fine streaks fanning off every corner.
 - The starting track is a lap that folds through its own middle instead of a regular star.
+- A step-up no longer leaves a cliff across the track at the start line. A lap that steps up
+  somewhere now falls the same amount over the rest of it.
 - Switching MXB App off in Windows' list of startup apps sticks, and Launch at startup in
   Settings follows it.
 - More of the crash at track graphics: the ground sheets in a track's graphics file were
