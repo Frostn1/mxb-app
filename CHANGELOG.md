@@ -3,6 +3,8 @@
 ## 2026-09-01
 
 ### Fixed
+- Installed tracks no longer crash the game as it loads track graphics. The `.map` declared no
+  geometry at all, so anything reading it in order stopped a few bytes in.
 - A generated lap can no longer run over its own ground. Nothing checked for it, so a track
   that crossed itself passed every test and came out with the crossing graded into the
   terrain as a scar.
