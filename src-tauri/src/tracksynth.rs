@@ -389,6 +389,84 @@ pub fn synthesise(prog: &TrackProgram) -> Result<Synth> {
         }
     }
 
+    // 1b. The landforms — the banks and spoil hills a venue has around it.
+    //
+    // This is what separates a generated plot from a real one, and it is not roughness.
+    // Height change over twenty-five metres, Indiana against a plain of noise tuned to match
+    // its median exactly:
+    //
+    //            p50     p90     p99     max
+    //   Indiana  0.71    3.70   12.18   19.83
+    //   noise    0.71    1.84    3.64    6.05
+    //
+    // The medians agree and the tail does not. Indiana has ground that climbs twelve to
+    // twenty metres in twenty-five and noise never does, because noise is the same everywhere
+    // and a venue is not. Measured by distance from the riding line, its steepest ground is
+    // 40–120 m out — not the cut and fill either side of the track, but the banks people
+    // stand on and the hills the place was built in.
+    //
+    // So they are placed rather than shaken out: a handful of long mounds, kept clear of the
+    // track, each with its own size and bearing.
+    if r.landforms > 0 {
+        let mut placed: Vec<(f32, f32, f32, f32, f32, f32)> = Vec::new();
+        let (sx, sz) = (prog.terrain.size_x, prog.terrain.size_z);
+        for n in 0..r.landforms.min(24) {
+            // Rejection sampling on a hash, so it is deterministic in the seed.
+            for k in 0..40u32 {
+                let h1 = hash2(n as i32 * 71 + k as i32, 13, r.seed ^ 0x1A2D);
+                let h2 = hash2(n as i32 * 71 + k as i32, 29, r.seed ^ 0x1A2D);
+                let (cx, cz) = ((h1 * 0.5 + 0.5) * sx, (h2 * 0.5 + 0.5) * sz);
+                let near = stations
+                    .iter()
+                    .map(|st| (st.x - cx).powi(2) + (st.z - cz).powi(2))
+                    .fold(f32::MAX, f32::min)
+                    .sqrt();
+                let long = 55.0
+                    + 90.0 * (hash2(n as i32, 5, r.seed ^ 0x1A2D) * 0.5 + 0.5);
+                let across = long * (0.35 + 0.4 * (hash2(n as i32, 9, r.seed ^ 0x1A2D) * 0.5 + 0.5));
+                // Clear of the riding line by its own width plus the shoulder, so a bank is
+                // beside the track rather than on it.
+                if near < across + 30.0 {
+                    continue;
+                }
+                let tall = r.landform_height
+                    * (0.45 + 0.55 * (hash2(n as i32, 17, r.seed ^ 0x1A2D) * 0.5 + 0.5));
+                let bearing = hash2(n as i32, 23, r.seed ^ 0x1A2D) * std::f32::consts::PI;
+                placed.push((cx, cz, long, across, tall, bearing));
+                break;
+            }
+        }
+        for y in 0..gh {
+            for x in 0..gw {
+                let (wx, wz) = (x as f32 * mps_x, y as f32 * mps_z);
+                let mut add = 0.0f32;
+                for &(cx, cz, long, across, tall, bearing) in &placed {
+                    let (dx, dz) = (wx - cx, wz - cz);
+                    let (c, s) = (bearing.cos(), bearing.sin());
+                    let (u, v) = (dx * c + dz * s, -dx * s + dz * c);
+                    // The outline is warped, not elliptical. An ellipse with a smooth falloff
+                    // reads as a flying saucer parked on the ground however you shade it —
+                    // the eye finds the regularity instantly. Pushing the boundary about with
+                    // noise, at a wavelength near the mound's own size, makes it ragged the
+                    // way a bank of pushed-up spoil is.
+                    let warp = 0.42
+                        * fbm(
+                            wx / (long * 0.55),
+                            wz / (long * 0.55),
+                            r.seed ^ 0x1A2D ^ (long as u32),
+                        );
+                    let t = ((u / long).powi(2) + (v / across).powi(2)).sqrt() + warp;
+                    if t < 1.0 {
+                        // A mound, not a dome: flat-ish on top and steep on the flanks, which
+                        // is what a bank pushed up out of spoil looks like.
+                        add += tall * (1.0 - smoothstep(t.max(0.0))).powf(0.7);
+                    }
+                }
+                heights[y * gw + x] += add;
+            }
+        }
+    }
+
     // 2. Which station each cell belongs to, and how far off the line it is.
     let (mut dist, station) = nearest_station(&stations, gw, gh, mps_x, mps_z);
 
@@ -3230,6 +3308,8 @@ mod tests {
                     texture: 0.06,
                                     tilt: 0.0,
                     tilt_angle: 0.0,
+                                    landforms: 0,
+                    landform_height: 12.0,
                 },
                 surface: crate::trackprog::Surface::Soil,
             },
