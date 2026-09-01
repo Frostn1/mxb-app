@@ -42,6 +42,9 @@ pub fn start(app: &AppHandle) {
                 // game from Steam or a shortcut, and until this was here those sessions
                 // synced with nobody — the Play button was the only way in.
                 crate::sync_on_game_started(&app, &cfg);
+                // Arm any secured content: write the manifest and inject the client DLL into
+                // the game we just saw start. No-op when nothing is locked.
+                crate::secure_launch::arm(&app);
                 session = gameproc::GameSession::open();
                 // The mods folder is read during the load screen, so a placeholder that
                 // isn't really on disk becomes a crash there. Ask now, while there is still
