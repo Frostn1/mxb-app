@@ -2,6 +2,13 @@
 
 ## 2026-09-01
 
+### Added
+- A tool that traces exactly which bytes MX Bikes reads out of a track's graphics file, by
+  emulating the game's own loader. Groundwork for generating tracks the game can ride without
+  running TerrainEd.
+
+## 2026-09-01
+
 ### Fixed
 - Installing a generated track no longer crashes the game. It ships without graphics rather
   than with graphics the game cannot read, and the Studio says so.
