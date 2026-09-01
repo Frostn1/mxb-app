@@ -841,6 +841,10 @@ pub struct RiddenStats {
     /// Every degree the lap turns through, both ways. A lap that closes turns 360° net; this
     /// is the gross figure, and it is what says whether a track is a shape or a scribble.
     pub total_turn_deg: f32,
+    /// Highest ground on the lap over lowest — how much of a hill the track is built on.
+    pub lap_climb_m: f32,
+    /// Steepest grade along the riding line, degrees.
+    pub grade_deg: Spread,
 
     /// Grooves counted across the line, and how far apart they lie.
     pub rut_lines: f32,
@@ -935,6 +939,20 @@ pub fn ridden(lap: &crate::trackline::Lap, g: &Grid) -> Option<RiddenStats> {
     let mut turn_radius_m: Vec<f32> =
         turns_all.iter().filter(|t| t.0 >= 25.0).map(|t| t.1).collect();
     let total_turn_deg = lap.segments.iter().map(|s| s.angle).sum();
+    // Taken from the segments' own elevations rather than the ground under them: this is the
+    // height the lap was *built* to, and it is what a rider climbs.
+    let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+    for s in &lap.segments {
+        lo = lo.min(s.elevation);
+        hi = hi.max(s.elevation);
+    }
+    let lap_climb_m = if lo.is_finite() { hi - lo } else { 0.0 };
+    let mut grade_deg: Vec<f32> = (0..along.len())
+        .map(|i| {
+            let j = (i + 1) % along.len();
+            ((along[j] - along[i]).abs() / RIDDEN_STEP_M).atan().to_degrees()
+        })
+        .collect();
 
     // ---- ruts ------------------------------------------------------------
     let mut lines: Vec<f32> = Vec::new();
@@ -1076,6 +1094,8 @@ pub fn ridden(lap: &crate::trackline::Lap, g: &Grid) -> Option<RiddenStats> {
         turn_deg: spread(&mut turn_deg),
         turn_radius_m: spread(&mut turn_radius_m),
         total_turn_deg,
+        lap_climb_m,
+        grade_deg: spread(&mut grade_deg),
         rut_lines: lines.iter().sum::<f32>() / lines.len().max(1) as f32,
         rut_spacing_m: spread(&mut spacing),
         rut_depth_corner_m: spread(&mut depth_corner),
@@ -1261,9 +1281,10 @@ mod tests {
                         println!(
                             "{:<34} lap {:>5.0}m  {:>3} segs = {:>3} arcs + {:>2} straights  \
                              {:>2} turns  turn p50 {:>4.0}°  tightest R p50 {:>4.1}m  \
-                             turning {:>5.0}°",
+                             turning {:>5.0}°  climbs {:>4.1}m  grade p90 {:>4.1}°",
                             "  centreline", r.lap_m, r.segments, r.arcs, r.straights,
                             r.turns, r.turn_deg.p50, r.turn_radius_m.p50, r.total_turn_deg,
+                            r.lap_climb_m, r.grade_deg.p90,
                         );
                         println!(
                             "{:<34} ruts {:>4.1} at {:>4.2}m  depth corner p50 {:>4.2} p90 {:>4.2}  \
