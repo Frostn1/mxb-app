@@ -174,18 +174,23 @@ Close it by doing the arithmetic. Point symmetry — half a lap whose signed ang
 there as a fallback, but a track built that way is symmetrical about its own centre and reads
 as one on the map. Use it only if the layout you want will not close.
 
-KEEP THE LAP WINDING ONE WAY. This is the practical way to avoid crossing yourself, and it
-is arithmetic you can check as you write. Add up the *signed* angles: they must come to ±360.
-Now add up the *absolute* angles, ignoring sign: a clean lap comes to somewhere around 900,
-and much past that means it has wound back on itself and will probably cross. A track that turns mostly one
-way, with a few gentle counter-turns, closes cleanly; one that alternates hard left and hard
-right wanders back over its own ground.
+WORK ROUND A CENTRE, ONCE. This is how to build a lap that cannot cross itself, and it is a
+construction rather than a thing to check afterwards. Picture the infield as a clock face and
+go round it exactly once: every segment should leave you further round the clock than the one
+before, and you arrive back at twelve where you started. A lap laid out this way is physically
+incapable of running over its own ground, because it never comes back to an hour it has
+already passed.
 
-THE LAP MUST NOT CROSS ITSELF. It is a closed loop drawn on flat ground, and no part of it
-may run over another part — there are no bridges. A lap that goes out, loops, and comes back
-through where it has already been is rejected. When you have written the segments, walk the
-path in your head and check that it does not return to ground it has covered: the usual cause
-is a straight long enough to reach back across an earlier one.
+Corners are what carry you round the clock; straights are what carry you outward and along.
+Counter-turns — turning the other way for character — are allowed and good, but they must be
+gentler than the turns either side of them, or you stop advancing round the clock, double back,
+and cross. Check as you write: add the signed angles and they must reach ±360 exactly; add the
+absolute angles and a clean lap comes to somewhere around 900. Much past that and you have
+gone round twice, which means you have crossed.
+
+The other way to cross is a straight that simply overshoots — long enough to reach back across
+a part of the lap you drew earlier. Long straights are good, but a straight that would carry
+you past the middle of the infield is too long.
 
 WRITE A LAP, NOT A SHAPE. A published circuit is twenty to forty segments: short straights,
 corners in runs, and no two turns the same radius. Six long straights joined by four identical
