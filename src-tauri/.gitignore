@@ -13,3 +13,4 @@
 /src/mxbsecure.rs
 /src/mxbsecure.dll
 /resources/*.dll
+/tauri.windows.conf.json

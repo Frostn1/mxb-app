@@ -108,6 +108,16 @@ jobs:
         shell: bash
         run: bash .sidecar-src/sync.sh "$GITHUB_WORKSPACE"
 
+      # Bundle the secure DLL, Windows only. tauri auto-merges tauri.windows.conf.json on the
+      # Windows target and ignores it everywhere else, so the resources glob (which errors if it
+      # matches nothing) is never seen by the macOS/Linux legs. Written only on the Frostn1 repo,
+      # where the sync step above placed the DLL — a fork's Windows build has no overlay and no
+      # glob to satisfy, so it builds the DLL-less variant instead of failing.
+      - name: Enable secure DLL bundling (Windows)
+        if: ${{ github.repository == 'Frostn1/mxb-app' && startsWith(matrix.platform, 'windows') }}
+        shell: bash
+        run: echo '{"bundle":{"resources":["resources/*.dll"]}}' > "$GITHUB_WORKSPACE/src-tauri/tauri.windows.conf.json"
+
       # The release page should say what shipped, not only which file to download — so
       # the body is composed from this tag's CHANGELOG section. Same section the Discord
       # announcement reads, so the two can't drift apart.
